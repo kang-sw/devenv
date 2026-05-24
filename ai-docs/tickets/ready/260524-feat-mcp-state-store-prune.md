@@ -57,6 +57,19 @@ stdout, stderr, transcripts, or runtime logs into SQLite.
 - Do not let automatic pruning hide useful recent diagnostics while an agent,
   exec job, or reader session may still be relevant.
 
+## Spec Impact
+
+Target spec area: `mcp-tools`, `named-agent-runtime`, and `plugin-runtime`.
+
+Expected caller-visible change: none in this foundation phase beyond preserving
+current tool behavior while making future actor setup and async state recovery
+possible. The implementation should not introduce new public MCP tools or
+change existing tool arguments in Phase 1.
+
+Contract-first spec: no. This phase establishes internal metadata storage,
+retention, pruning, and regression coverage. Follow-up actor setup or async job
+migration tickets own public contract changes.
+
 ## Phases
 
 ### Phase 1: Add metadata store and retention foundation

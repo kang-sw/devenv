@@ -161,7 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-epic-mcp-actor-setup-state` | todo | Coordinate cooperative actor setup, restart recovery, and root-aware persistent runtime state |
 | `260524-feat-mcp-actor-setup-bootstrap` | todo | Add lead actor setup bootstrap, recovery, setup-gated calls, and persistent actor metadata |
 | `260524-feat-mcp-child-actor-bootstrap` | todo | Mint child actors for delegated calls and inject setup recovery instructions into child prompts |
-| `260524-feat-mcp-state-store-prune` | todo | Add SQLite metadata storage, retention policy, pruning, and cross-platform regression coverage |
+| `260524-feat-mcp-state-store-prune` | ready | Add SQLite metadata storage, retention policy, pruning, and cross-platform regression coverage |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from the recovered JSONL run-substrate research |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
