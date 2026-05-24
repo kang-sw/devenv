@@ -138,3 +138,18 @@ Verification passed:
 - `cd ws-dashboard/frontend && npm run test:browser`
 - Manual screenshot review of `desktop-workbench.png`, `file-explorer.png`,
   `narrow-workbench.png`, and `topbar-overflow.png`
+
+#### Edition (23bf614) - 2026-05-24
+
+Softened the first hierarchy implementation after screenshot review showed the
+UI reading as too visibly skeletal. The follow-up kept the context hierarchy
+tokens and browser assertion, but reduced the split gutter from a wide dark gap
+to a subtle seam, brought nav/workbench/pane surface tones closer to the
+existing dashboard palette, and lowered Dockview/editor inset emphasis.
+
+Verification passed:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png`, `file-explorer.png`,
+  and `topbar-overflow.png`
