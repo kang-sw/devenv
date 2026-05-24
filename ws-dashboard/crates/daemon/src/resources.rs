@@ -46,13 +46,13 @@ pub fn live_dashboard_resources(opened: &OpenedWorkRoots) -> DashboardResourcesV
 pub fn live_dashboard_resources_with_sync(
     opened: &OpenedWorkRoots,
 ) -> (DashboardResourcesView, Vec<WorkRootId>) {
-    let sync = LocalDashboardResourcesProvider::with_discovered_activations(
+    let sync = LocalDashboardResourcesProvider::with_registry_activations(
         opened
             .owner_candidate_roots()
             .into_iter()
             .map(|root| LocalWorkRootCandidate::with_activation(root.path, root.activation))
             .collect(),
-        opened.discovered_activations(),
+        opened.activation_by_work_root_id(),
     )
     .dashboard_resources_with_registry_sync();
     for work_root_id in &sync.pruned_work_root_ids {

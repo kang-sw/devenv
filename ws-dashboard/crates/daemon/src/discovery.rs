@@ -41,23 +41,23 @@ pub struct LocalDashboardResourcesProvider {
     server_id: OpaqueId,
     server_label: String,
     candidates: Vec<LocalWorkRootCandidate>,
-    discovered_activations: HashMap<WorkRootId, WorkRootActivation>,
+    registry_activations: HashMap<WorkRootId, WorkRootActivation>,
 }
 
 impl LocalDashboardResourcesProvider {
     pub fn new(candidates: Vec<LocalWorkRootCandidate>) -> Self {
-        Self::with_discovered_activations(candidates, HashMap::new())
+        Self::with_registry_activations(candidates, HashMap::new())
     }
 
-    pub fn with_discovered_activations(
+    pub fn with_registry_activations(
         candidates: Vec<LocalWorkRootCandidate>,
-        discovered_activations: HashMap<WorkRootId, WorkRootActivation>,
+        registry_activations: HashMap<WorkRootId, WorkRootActivation>,
     ) -> Self {
         Self {
             server_id: OpaqueId::from("server-local"),
             server_label: "Local ws dashboard".to_owned(),
             candidates,
-            discovered_activations,
+            registry_activations,
         }
     }
 
@@ -89,7 +89,7 @@ impl LocalDashboardResourcesProvider {
                 let mut linked = discover_work_root(&linked_path);
                 linked.workspace_key = workspace_key.clone();
                 let linked_activation = self
-                    .discovered_activations
+                    .registry_activations
                     .get(&linked_id)
                     .copied()
                     .unwrap_or(WorkRootActivation::Online);

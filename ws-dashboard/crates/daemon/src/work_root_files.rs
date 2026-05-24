@@ -155,12 +155,11 @@ impl OpenedWorkRoots {
         roots
     }
 
-    pub fn discovered_activations(&self) -> HashMap<WorkRootId, WorkRootActivation> {
+    pub fn activation_by_work_root_id(&self) -> HashMap<WorkRootId, WorkRootActivation> {
         self.roots
             .read()
             .expect("opened workRoots lock poisoned")
             .iter()
-            .filter(|(_, root)| root.provenance == WorkRootProvenance::Discovered)
             .map(|(work_root_id, root)| (work_root_id.clone(), root.activation))
             .collect()
     }
