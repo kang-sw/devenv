@@ -138,13 +138,13 @@ membership with `activation: online`, preserving current restart behavior.
 Newly discovered sibling workRoots may enter the same registry with
 `activation: offline` while remaining visible in the resource tree.
 
-> [!note] Planned 🚧 {#260524-dashboard-workroot-registry-wide-activation-lookup}
-> Resource views, activation actions, and protected route gates will derive
-> activation from the same registered workRoot id regardless of whether the
-> visible row is reached as an explicitly opened root or as an automatically
-> discovered linked workRoot. If one physical workRoot is visible through both
-> paths, callers should see one activation state and the same online/offline
-> behavior across navigation, Activity, file, and terminal surfaces.
+Resource views, activation actions, and protected route gates derive activation
+from the same registered workRoot id regardless of whether the visible row is
+reached as an explicitly opened root or as an automatically discovered linked
+workRoot. If one physical workRoot is visible through both paths, callers see
+one activation state and the same online/offline behavior across navigation,
+Activity, file, and terminal surfaces.
+{#260524-dashboard-workroot-registry-wide-activation-lookup}
 
 Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots

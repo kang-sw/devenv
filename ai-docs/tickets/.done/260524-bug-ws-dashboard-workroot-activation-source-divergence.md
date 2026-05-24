@@ -5,6 +5,7 @@ related:
   260523-feat-ws-dashboard-linked-worktree-discovery: discovered linked workRoot projection
 spec:
   - 260524-dashboard-workroot-registry-wide-activation-lookup
+completed: 2026-05-24
 ---
 
 # Unify dashboard workRoot activation lookup across opened and discovered roots
@@ -45,3 +46,18 @@ Preserve the current ownership boundary:
 Add a regression test where both primary and linked workRoots are opened, one is
 offline, and the live resource projection agrees with backend route gating
 regardless of path ordering.
+
+### Result (dde3db22) - 2026-05-24
+
+Implemented registry-wide activation lookup for live dashboard resource
+projection. `OpenedWorkRoots` now exposes activation by registered `WorkRootId`,
+and linked-worktree discovery uses that snapshot instead of a discovered-only
+activation map. This preserves the existing ownership boundary: opened roots are
+still the only persisted owner roots, while discovered child roots remain
+in-memory discovery rows.
+
+Added a route regression test that opens both a Git primary and linked
+worktree, takes the linked workRoot offline, refreshes resources through the
+primary-discovered path, and verifies the visible row still exposes offline
+activation plus the online action while the Activity route returns the same
+offline gate.
