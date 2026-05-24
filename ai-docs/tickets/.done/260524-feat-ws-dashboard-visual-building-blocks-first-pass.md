@@ -10,6 +10,7 @@ spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Add dashboard visual building blocks first pass
@@ -114,3 +115,26 @@ Verification should include:
   toolbar/tabs, Activity Console, and read-only pane after the first pass.
 - Existing browser acceptance coverage must still pass or any failure must be
   explained with a concrete visual-only limitation.
+
+### Result (2944653a) - 2026-05-24
+
+Implemented the first dashboard visual building-block pass. `DESIGN.md` now
+defines the local vocabulary for frames, panels, panes, toolbars, rows, chips,
+badges, state surfaces, document surfaces, and code blocks. The frontend uses
+those primitives across the left navigation, open-workRoot chrome, workbench
+toolbar, Dockview tab chrome, Activity Console, transcript blocks, read-only
+text pane, and common state surfaces.
+
+The implementation preserved dashboard behavior: React Aria, Dockview, xterm,
+command ids, daemon routes, resource ids, Activity data flow, terminal
+lifecycle, and layout persistence were left unchanged. Browser acceptance kept
+the existing Activity ribbon width invariant after an initial narrower visual
+attempt failed the gate.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build` passed.
+- `cd ws-dashboard/frontend && npm run test:browser` passed.
+- Browser evidence was recorded under `ws-dashboard/frontend/e2e/.artifacts/`,
+  including `desktop-workbench.png`, `narrow-workbench.png`,
+  `file-explorer.png`, and `evidence.txt`.

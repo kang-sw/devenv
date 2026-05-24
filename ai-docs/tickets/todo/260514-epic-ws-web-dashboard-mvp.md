@@ -164,7 +164,7 @@ The MVP should cover:
 - `260524-feat-ws-dashboard-react-aria-root-picker-pilot` - done; rework the
   local root picker modal into a React Aria explorer-style folder picker while
   preserving the dashboard command and open-workRoot contracts.
-- `260524-feat-ws-dashboard-visual-building-blocks-first-pass` - ready; define
+- `260524-feat-ws-dashboard-visual-building-blocks-first-pass` - done; define
   reusable dashboard-local visual building blocks and apply a first pass to the
   left nav, workbench chrome, Activity Console, and read-only/document pane
   without changing behavior.
