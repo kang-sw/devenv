@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.29.0`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.29.0`).
+Active plugin package: `agents-plugin/` (`ws@0.29.1`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.29.1`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -176,6 +176,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
 | `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
+| `260524-bug-wsstore-ci-sqlite-busy` | idea | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 
 ## Ticket Focus

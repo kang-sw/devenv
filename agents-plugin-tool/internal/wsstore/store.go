@@ -37,13 +37,18 @@ type Manager struct {
 }
 
 type Store struct {
-	db     *sql.DB
-	path   string
-	layout wsstate.Layout
-	now    Clock
+	db      *sql.DB
+	path    string
+	layout  wsstate.Layout
+	now     Clock
+	writeMu *sync.Mutex
 }
 
-var openMu sync.Mutex
+var (
+	openMu       sync.Mutex
+	writeLocksMu sync.Mutex
+	writeLocks   = map[string]*sync.Mutex{}
+)
 
 type Actor struct {
 	ActorID       string
@@ -107,15 +112,16 @@ func (m Manager) Open(root string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
+	newDB := !fileExists(path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db, path: path, layout: layout, now: m.now}
+	store := &Store{db: db, path: path, layout: layout, now: m.now, writeMu: writeLock(path)}
 	openMu.Lock()
 	defer openMu.Unlock()
-	if err := store.configure(context.Background()); err != nil {
+	if err := store.configure(context.Background(), newDB); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -141,15 +147,16 @@ func (m Manager) OpenWorktreeKey(worktreeKey string) (*Store, error) {
 		return nil, err
 	}
 	path := filepath.Join(layout.WorktreeDir, "state.sqlite")
+	newDB := !fileExists(path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db, path: path, layout: layout, now: m.now}
+	store := &Store{db: db, path: path, layout: layout, now: m.now, writeMu: writeLock(path)}
 	openMu.Lock()
 	defer openMu.Unlock()
-	if err := store.configure(context.Background()); err != nil {
+	if err := store.configure(context.Background(), newDB); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -173,12 +180,17 @@ func (s *Store) Path() string { return s.path }
 
 func (s *Store) Layout() wsstate.Layout { return s.layout }
 
-func (s *Store) configure(ctx context.Context) error {
-	for _, stmt := range []string{
-		`PRAGMA journal_mode=WAL`,
+func (s *Store) configure(ctx context.Context, setJournalMode bool) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	statements := []string{
 		`PRAGMA busy_timeout=5000`,
 		`PRAGMA foreign_keys=ON`,
-	} {
+	}
+	if setJournalMode {
+		statements = append([]string{`PRAGMA journal_mode=WAL`}, statements...)
+	}
+	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("configure sqlite %s: %w", stmt, err)
 		}
@@ -187,6 +199,8 @@ func (s *Store) configure(ctx context.Context) error {
 }
 
 func (s *Store) Migrate(ctx context.Context) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -209,7 +223,7 @@ func (s *Store) UpsertActor(ctx context.Context, actor Actor) error {
 		return errors.New("actor_id is required")
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execWrite(ctx, `
 INSERT INTO actors(actor_id, authority, root_path, worktree_key, parent_actor_id, status, pinned, created_at, last_seen_at)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(actor_id) DO UPDATE SET
@@ -252,7 +266,7 @@ func (s *Store) UpsertArtifact(ctx context.Context, artifact Artifact) error {
 	if lastAccessed == "" {
 		lastAccessed = now.Format(time.RFC3339Nano)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execWrite(ctx, `
 INSERT INTO artifacts(artifact_id, kind, path, owner_actor_id, state, byte_count, pinned, expires_at, last_accessed_at, created_at, updated_at)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(artifact_id) DO UPDATE SET
@@ -273,7 +287,7 @@ func (s *Store) UpsertRetentionPolicy(ctx context.Context, policy RetentionPolic
 	if policy.Scope == "" {
 		return errors.New("retention policy scope is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execWrite(ctx, `
 INSERT INTO retention_policies(scope, ttl_seconds, max_rows, max_bytes, updated_at)
 VALUES(?, ?, ?, ?, ?)
 ON CONFLICT(scope) DO UPDATE SET
@@ -351,7 +365,7 @@ LIMIT ?`,
 			}
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM artifacts WHERE artifact_id = ?`, c.id); err != nil {
+		if _, err := s.execWrite(ctx, `DELETE FROM artifacts WHERE artifact_id = ?`, c.id); err != nil {
 			_ = s.finishPruneRun(ctx, runID, result, err)
 			return result, err
 		}
@@ -376,7 +390,7 @@ func (s *Store) Count(ctx context.Context, table string) (int, error) {
 }
 
 func (s *Store) beginPruneRun(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO prune_runs(started_at, status) VALUES(?, ?)`, now.Format(time.RFC3339Nano), "running")
+	res, err := s.execWrite(ctx, `INSERT INTO prune_runs(started_at, status) VALUES(?, ?)`, now.Format(time.RFC3339Nano), "running")
 	if err != nil {
 		return 0, err
 	}
@@ -390,7 +404,7 @@ func (s *Store) finishPruneRun(ctx context.Context, id int64, result PruneResult
 		status = "failed"
 		errText = runErr.Error()
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE prune_runs SET finished_at = ?, status = ?, scanned = ?, deleted = ?, tombstoned = ?, retried = ?, retry_succeeded = ?, error = ? WHERE run_id = ?`,
+	_, err := s.execWrite(ctx, `UPDATE prune_runs SET finished_at = ?, status = ?, scanned = ?, deleted = ?, tombstoned = ?, retried = ?, retry_succeeded = ?, error = ? WHERE run_id = ?`,
 		s.now().UTC().Format(time.RFC3339Nano), status, result.Scanned, result.Deleted, result.Tombstoned, result.Retried, result.RetrySucceeded, errText, id)
 	if err != nil {
 		return err
@@ -400,7 +414,7 @@ func (s *Store) finishPruneRun(ctx context.Context, id int64, result PruneResult
 
 func (s *Store) recordTombstone(ctx context.Context, artifactID, path, reason string, cleanupErr error) error {
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execWrite(ctx, `
 INSERT INTO artifact_tombstones(artifact_id, path, reason, attempts, next_retry_at, last_error, created_at, updated_at)
 VALUES(?, ?, ?, 1, ?, ?, ?, ?)
 ON CONFLICT(artifact_id) DO UPDATE SET
@@ -411,7 +425,7 @@ ON CONFLICT(artifact_id) DO UPDATE SET
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE artifacts SET state = ?, updated_at = ? WHERE artifact_id = ?`, ArtifactStateCleanupFailed, now, artifactID)
+	_, err = s.execWrite(ctx, `UPDATE artifacts SET state = ?, updated_at = ? WHERE artifact_id = ?`, ArtifactStateCleanupFailed, now, artifactID)
 	return err
 }
 
@@ -441,10 +455,10 @@ func (s *Store) retryTombstones(ctx context.Context, result *PruneResult, limit 
 			}
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM artifact_tombstones WHERE artifact_id = ?`, r.id); err != nil {
+		if _, err := s.execWrite(ctx, `DELETE FROM artifact_tombstones WHERE artifact_id = ?`, r.id); err != nil {
 			return err
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM artifacts WHERE artifact_id = ?`, r.id); err != nil {
+		if _, err := s.execWrite(ctx, `DELETE FROM artifacts WHERE artifact_id = ?`, r.id); err != nil {
 			return err
 		}
 		result.RetrySucceeded++
@@ -463,11 +477,33 @@ func removeArtifactPath(path string) error {
 	return err
 }
 
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func boolInt(v bool) int {
 	if v {
 		return 1
 	}
 	return 0
+}
+
+func writeLock(path string) *sync.Mutex {
+	writeLocksMu.Lock()
+	defer writeLocksMu.Unlock()
+	if mu, ok := writeLocks[path]; ok {
+		return mu
+	}
+	mu := &sync.Mutex{}
+	writeLocks[path] = mu
+	return mu
+}
+
+func (s *Store) execWrite(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.db.ExecContext(ctx, query, args...)
 }
 
 func blankDefault(v, fallback string) string {

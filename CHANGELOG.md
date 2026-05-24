@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.29.1 - 2026-05-24
+
+### Fixed
+- Avoid same-process SQLite write contention in `wsstore` when multiple handles
+  open one state database, including CI release runners that hit `SQLITE_BUSY`
+  during concurrent actor setup metadata writes.
+
 ## v0.29.0 - 2026-05-24
 
 ### Added
