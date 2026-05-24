@@ -191,7 +191,10 @@ func (s *Store) configure(ctx context.Context, setJournalMode bool) error {
 		statements = append([]string{`PRAGMA journal_mode=WAL`}, statements...)
 	}
 	for _, stmt := range statements {
-		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+		if err := withSQLiteRetry(ctx, func() error {
+			_, err := s.db.ExecContext(ctx, stmt)
+			return err
+		}); err != nil {
 			return fmt.Errorf("configure sqlite %s: %w", stmt, err)
 		}
 	}
@@ -201,21 +204,23 @@ func (s *Store) configure(ctx context.Context, setJournalMode bool) error {
 func (s *Store) Migrate(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, stmt := range schemaStatements {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("migrate state store: %w", err)
+	return withSQLiteRetry(ctx, func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
 		}
-	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)`, schemaVersion, now); err != nil {
-		return err
-	}
-	return tx.Commit()
+		defer tx.Rollback()
+		for _, stmt := range schemaStatements {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("migrate state store: %w", err)
+			}
+		}
+		now := s.now().UTC().Format(time.RFC3339Nano)
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)`, schemaVersion, now); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
 
 func (s *Store) UpsertActor(ctx context.Context, actor Actor) error {
@@ -503,7 +508,9 @@ func writeLock(path string) *sync.Mutex {
 func (s *Store) execWrite(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	return s.db.ExecContext(ctx, query, args...)
+	return withSQLiteResultRetry(ctx, func() (sql.Result, error) {
+		return s.db.ExecContext(ctx, query, args...)
+	})
 }
 
 func blankDefault(v, fallback string) string {

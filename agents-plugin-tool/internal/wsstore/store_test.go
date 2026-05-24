@@ -2,10 +2,12 @@ package wsstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -275,5 +277,198 @@ func mustRun(t *testing.T, dir, name string, args ...string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, string(out))
+	}
+}
+
+func TestSQLiteRetryRetriesBusyAndLockedErrors(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+	err := withSQLiteRetry(ctx, func() error {
+		attempts++
+		if attempts < 3 {
+			return fmt.Errorf("synthetic SQLITE_BUSY")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retry returned error: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+
+	attempts = 0
+	err = withSQLiteRetry(ctx, func() error {
+		attempts++
+		if attempts < 2 {
+			return fmt.Errorf("synthetic SQLITE_LOCKED")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("locked retry returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("locked attempts = %d, want 2", attempts)
+	}
+}
+
+func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+
+	holder, err := sql.Open("sqlite", store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	if _, err := holder.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.UpsertActor(ctx, Actor{ActorID: "contended", Authority: "lead", RootPath: root, WorktreeKey: store.Layout().WorktreeKey, Status: "active"})
+	}()
+	time.Sleep(60 * time.Millisecond)
+	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("contended write did not recover: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("contended write timed out")
+	}
+	if _, ok, err := store.Actor(ctx, "contended"); err != nil || !ok {
+		t.Fatalf("actor after contended write ok=%t err=%v", ok, err)
+	}
+}
+
+func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
+	if err := ValidateRuntimeMetadataInventory(); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		source RuntimeStateSource
+		field  string
+		want   RuntimeFieldStorage
+	}{
+		{RuntimeSourceAgentJSON, "backend", RuntimeFieldSQLiteMetadata},
+		{RuntimeSourceAgentJSON, "system_prompt_path", RuntimeFieldFileBackedPayload},
+		{RuntimeSourceAgentJSON, "agent_json_compatibility", RuntimeFieldTemporaryCompatOnly},
+		{RuntimeSourceAgentCurrentJSON, "execution_id", RuntimeFieldSQLiteMetadata},
+		{RuntimeSourceAgentCurrentJSON, "stdout_path", RuntimeFieldFileBackedPayload},
+		{RuntimeSourceExecJobJSON, "exec_key", RuntimeFieldSQLiteMetadata},
+		{RuntimeSourceExecJobJSON, "stdout", RuntimeFieldFileBackedPayload},
+		{RuntimeSourceExecJobJSON, "combined_bytes", RuntimeFieldSQLiteMetadata},
+	}
+	for _, tc := range cases {
+		got, ok := RuntimeField(tc.source, tc.field)
+		if !ok {
+			t.Fatalf("missing classification for %s %s", tc.source, tc.field)
+		}
+		if got.Storage != tc.want {
+			t.Fatalf("%s %s storage = %s, want %s", tc.source, tc.field, got.Storage, tc.want)
+		}
+	}
+}
+
+func TestRuntimeMetadataInventoryKeepsAppendHeavyPayloadsFileBacked(t *testing.T) {
+	payloads := []struct {
+		source RuntimeStateSource
+		field  string
+	}{
+		{RuntimeSourceAgentJSON, "system_prompt_path"},
+		{RuntimeSourceAgentJSON, "last_output_path"},
+		{RuntimeSourceAgentCurrentJSON, "prompt_path"},
+		{RuntimeSourceAgentCurrentJSON, "stdout_path"},
+		{RuntimeSourceAgentCurrentJSON, "stderr_path"},
+		{RuntimeSourceExecJobJSON, "stdout"},
+		{RuntimeSourceExecJobJSON, "stderr"},
+		{RuntimeSourceExecJobJSON, "combined"},
+	}
+	for _, payload := range payloads {
+		got, ok := RuntimeField(payload.source, payload.field)
+		if !ok {
+			t.Fatalf("missing payload classification for %s %s", payload.source, payload.field)
+		}
+		if got.Storage != RuntimeFieldFileBackedPayload || got.WriteAuthority != RuntimeAuthorityFile {
+			t.Fatalf("%s %s = %#v, want file-backed payload", payload.source, payload.field, got)
+		}
+	}
+}
+
+func TestAgentInternalKeyScopesPublicNamesByActor(t *testing.T) {
+	first, err := AgentInternalKey("actor-a", "implementer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := AgentInternalKey("actor-b", "implementer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("actor-scoped keys collided: %q", first)
+	}
+	if !strings.Contains(first, "implementer") || !strings.Contains(second, "implementer") {
+		t.Fatalf("public name missing from keys: %q %q", first, second)
+	}
+	global, err := AgentInternalKey("", "implementer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if global == first || !strings.HasPrefix(global, "global:") {
+		t.Fatalf("global compatibility key = %q, actor key = %q", global, first)
+	}
+}
+
+func TestMissingFileBackedPayloadIsRecoverableConsistencyState(t *testing.T) {
+	root := initRepo(t)
+	store := openStore(t, root)
+	defer store.Close()
+	path := filepath.Join(t.TempDir(), "missing-output.md")
+	if err := store.UpsertArtifact(context.Background(), Artifact{ArtifactID: "missing-output", Kind: "agent.output", Path: path, State: ArtifactStateCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	row, ok, err := store.Artifact(context.Background(), "missing-output")
+	if err != nil || !ok {
+		t.Fatalf("artifact row ok=%t err=%v", ok, err)
+	}
+	if got := ClassifyFileBackedPayload(row.Path); got != PayloadConsistencyMissingPayload {
+		t.Fatalf("missing payload consistency = %s, want %s", got, PayloadConsistencyMissingPayload)
+	}
+	present := writeArtifactFile(t, "present-output")
+	if got := ClassifyFileBackedPayload(present); got != PayloadConsistencyPresent {
+		t.Fatalf("present payload consistency = %s, want %s", got, PayloadConsistencyPresent)
+	}
+}
+
+func TestAgentJSONCompatibilityIsNotWriteAuthority(t *testing.T) {
+	compat, ok := RuntimeField(RuntimeSourceAgentJSON, "agent_json_compatibility")
+	if !ok {
+		t.Fatal("missing agent.json compatibility classification")
+	}
+	if compat.Storage != RuntimeFieldTemporaryCompatOnly || compat.WriteAuthority != RuntimeAuthorityNone {
+		t.Fatalf("compatibility classification = %#v, want temporary read-only", compat)
+	}
+	for _, item := range RuntimeMetadataInventory() {
+		if item.Source == RuntimeSourceAgentJSON && item.Storage == RuntimeFieldSQLiteMetadata && item.WriteAuthority != RuntimeAuthoritySQLite {
+			t.Fatalf("agent.json metadata field %s authority = %s, want sqlite", item.Field, item.WriteAuthority)
+		}
 	}
 }
