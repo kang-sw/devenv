@@ -202,3 +202,21 @@ Verification:
 - `cd ws-dashboard/frontend && npm run test:browser`
 - Browser gate now asserts the workspace remove button has a transparent
   default border before the dashboard-only removal action is confirmed.
+
+#### Edition (b653163) - 2026-05-24
+
+Simplified left navigation glyphs after screenshot feedback. Expanded
+workspace rows continue to use the workspace icon, while compact workRoot rows
+now use a single blue folder icon instead of rendering two adjacent icons.
+
+Strengthened selected resource emphasis by applying the action-hover color to
+the selected row's icon, title, and workRoot-kind glyph while preserving the
+existing selected background, left rail, command ids, and one-line row density.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png` confirmed compact rows
+  use one blue folder icon and the selected workRoot text/icon color is more
+  visible.
