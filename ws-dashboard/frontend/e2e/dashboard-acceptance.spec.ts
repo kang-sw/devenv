@@ -344,18 +344,46 @@ async function visibleWorkbenchGroupIds(page: Page): Promise<string[]> {
 }
 
 async function openWorkRootInBrowser(page: Page, rootPath: string) {
-  await page.locator('[data-command-id="rootPicker.open"]').click();
-  const modal = page.locator(".root-picker-modal");
+  const opener = page.locator('[data-command-id="rootPicker.open"]');
+  await opener.click();
+  let modal = page.locator(".root-picker-modal");
   await expect(modal).toBeVisible();
   await expect(modal.locator(".root-picker-title")).toHaveText("Open workRoot");
+  await modal
+    .locator('[data-command-id="rootPicker.close"]')
+    .filter({ hasText: "Cancel" })
+    .click();
+  await expect(opener).toBeFocused();
+
+  await opener.click();
+  modal = page.locator(".root-picker-modal");
+  await expect(modal).toBeVisible();
+  const parentPath = path.dirname(rootPath);
+  await modal.locator(".root-picker-address").fill(parentPath);
+  await modal.locator(".root-picker-address").press("Enter");
+  const targetRow = modal
+    .locator(".root-picker-row", { hasText: workRootDisplayName(rootPath) })
+    .first();
+  await expect(targetRow).toBeVisible();
+  await targetRow.focus();
+  await page.keyboard.press(" ");
+  await expect(modal.locator(".root-picker-selection")).toContainText(
+    workRootDisplayName(rootPath),
+  );
+  await page.keyboard.press("Enter");
+  await expect(modal.locator(".root-picker-current")).toContainText(
+    workRootDisplayName(rootPath),
+  );
   await modal.locator("#root-picker-exact-path").fill(rootPath);
-  await modal.locator('[data-command-id="workRoot.open"]').filter({ hasText: "Open path" }).click();
+  await modal.locator('[data-command-id="workRoot.open"]').filter({ hasText: "Open" }).click();
   await expect(page.locator(".file-explorer-title")).toContainText(
     workRootDisplayName(rootPath),
   );
   await expect(modal).toHaveCount(0);
   await expectDockviewWorkbench(page);
-  note("open workRoot: modal exact-path fallback opened the daemon-selected workRoot");
+  note(
+    "open workRoot: React Aria picker restored opener focus, navigated by address, selected/actioned a row by keyboard, and opened exact typed path",
+  );
 }
 
 async function selectWorkRootInBrowser(page: Page, rootPath: string) {

@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, Key, ReactNode, SetStateAction } from "react";
+import {
+  Dialog,
+  GridList,
+  GridListItem,
+  Heading,
+  Modal,
+  ModalOverlay,
+} from "react-aria-components";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -117,9 +125,16 @@ import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   createRootPickerDirectory,
   fetchRootPicker,
+  rootPickerHistoryBack,
+  rootPickerHistoryForward,
+  rootPickerHistoryInitial,
+  rootPickerHistoryPush,
   rootPickerEntryLabel,
   rootPickerInsertEntry,
-  type RootPickerEntry,
+  rootPickerModifiedTimeLabel,
+  rootPickerVisibleEntries,
+  rootPickerVisiblePlaces,
+  type RootPickerNavigationHistory,
   type RootPickerView,
 } from "./rootPicker";
 import { ActivityConsole } from "./ActivityConsole";
@@ -724,28 +739,40 @@ function OpenWorkRootControl({
   const [open, setOpen] = useState(false);
   const [pickerView, setPickerView] = useState<RootPickerView | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [addressPath, setAddressPath] = useState("");
   const [exactPath, setExactPath] = useState("");
   const [createName, setCreateName] = useState("");
+  const [history, setHistory] = useState<RootPickerNavigationHistory>(() =>
+    rootPickerHistoryInitial(),
+  );
   const [loading, setLoading] = useState(false);
   const [pendingOpen, setPendingOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const exactPathInputRef = useRef<HTMLInputElement | null>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const wasOpenRef = useRef(false);
 
-  const loadPicker = useCallback(async (path: string | null) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const view = await fetchRootPicker(path);
-      setPickerView(view);
-      setSelectedPath(view.currentPath);
-      setExactPath(view.currentPath);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "picker load failed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadPicker = useCallback(
+    async (path: string | null, historyMode: "push" | "replace" = "push") => {
+      setLoading(true);
+      setError(null);
+      try {
+        const view = await fetchRootPicker(path);
+        setPickerView(view);
+        setSelectedPath(view.currentPath);
+        setAddressPath(view.currentPath);
+        setExactPath(view.currentPath);
+        if (historyMode === "push") {
+          setHistory((current) => rootPickerHistoryPush(current, view.currentPath));
+        }
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : "picker load failed");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!open || pickerView || loading) {
@@ -755,9 +782,10 @@ function OpenWorkRootControl({
   }, [loadPicker, loading, open, pickerView]);
 
   useEffect(() => {
-    if (open) {
-      exactPathInputRef.current?.focus();
+    if (wasOpenRef.current && !open) {
+      openerRef.current?.focus();
     }
+    wasOpenRef.current = open;
   }, [open]);
 
   const closePicker = () => {
@@ -777,10 +805,10 @@ function OpenWorkRootControl({
     });
   };
 
-  const navigateTo = (path: string) => {
+  const navigateTo = (path: string, historyMode: "push" | "replace" = "push") => {
     onCommand(buildRootPickerNavigateCommand(path), {
       "rootPicker.navigate": () => {
-        void loadPicker(path);
+        void loadPicker(path, historyMode);
       },
     });
   };
@@ -792,6 +820,34 @@ function OpenWorkRootControl({
         setExactPath(path);
       },
     });
+  };
+
+  const navigateBack = () => {
+    const transition = rootPickerHistoryBack(history);
+    if (!transition.targetPath) {
+      return;
+    }
+    setHistory(transition.history);
+    navigateTo(transition.targetPath, "replace");
+  };
+
+  const navigateForward = () => {
+    const transition = rootPickerHistoryForward(history);
+    if (!transition.targetPath) {
+      return;
+    }
+    setHistory(transition.history);
+    navigateTo(transition.targetPath, "replace");
+  };
+
+  const handleGridSelection = (keys: "all" | Set<Key>) => {
+    if (keys === "all") {
+      return;
+    }
+    const nextPath = Array.from(keys).at(0);
+    if (typeof nextPath === "string") {
+      selectDirectory(nextPath);
+    }
   };
 
   const submitPath = (submittedPath: string) => {
@@ -811,8 +867,10 @@ function OpenWorkRootControl({
               setOpen(false);
               setPickerView(null);
               setSelectedPath(null);
+              setAddressPath("");
               setExactPath("");
               setCreateName("");
+              setHistory(rootPickerHistoryInitial());
               onOpened(result.view, result.openedWorkRootId ?? undefined);
             })
             .catch((nextError) => {
@@ -862,6 +920,8 @@ function OpenWorkRootControl({
 
   const selectedLabel = selectedPath ? rootPickerEntryLabel(selectedPath) : "None";
   const selectedEntry = pickerView?.entries.find((entry) => entry.path === selectedPath);
+  const visibleEntries = rootPickerVisibleEntries(pickerView?.entries ?? []);
+  const visiblePlaces = rootPickerVisiblePlaces(pickerView);
 
   return (
     <div className="open-work-root" aria-label="Open workRoot">
@@ -871,6 +931,7 @@ function OpenWorkRootControl({
           <div className="open-work-root-summary">Choose a directory from this host</div>
         </div>
         <button
+          ref={openerRef}
           className="action-button action-button-primary"
           data-command-id="rootPicker.open"
           type="button"
@@ -879,30 +940,23 @@ function OpenWorkRootControl({
           Open...
         </button>
       </div>
-      {open ? (
-        <div
-          className="root-picker-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closePicker();
-            }
-          }}
-        >
-          <section
-            aria-label="Root picker"
-            aria-modal="true"
-            className="root-picker-modal"
-            role="dialog"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                closePicker();
-              }
-            }}
-          >
+      <ModalOverlay
+        className="root-picker-backdrop"
+        isDismissable
+        isOpen={open}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && open) {
+            closePicker();
+          }
+        }}
+      >
+        <Modal className="root-picker-modal">
+          <Dialog aria-label="Open workRoot" className="root-picker-dialog">
             <div className="root-picker-header">
               <div className="root-picker-title-block">
-                <div className="root-picker-title">Open workRoot</div>
+                <Heading className="root-picker-title" slot="title">
+                  Open workRoot
+                </Heading>
                 <div className="root-picker-current" title={pickerView?.currentPath ?? ""}>
                   {pickerView?.currentPath ?? "Loading host directories"}
                 </div>
@@ -917,95 +971,151 @@ function OpenWorkRootControl({
               </button>
             </div>
 
-            <div className="root-picker-toolbar">
-              <button
-                className="action-button"
-                data-command-id="rootPicker.navigate"
-                disabled={!pickerView?.parentPath || loading}
-                type="button"
-                onClick={() => {
-                  if (pickerView?.parentPath) {
-                    navigateTo(pickerView.parentPath);
-                  }
-                }}
-              >
-                Up
-              </button>
-              <button
-                className="action-button"
-                data-command-id="rootPicker.navigate"
-                disabled={!pickerView || loading}
-                type="button"
-                onClick={() => {
-                  if (pickerView) {
-                    navigateTo(pickerView.currentPath);
-                  }
-                }}
-              >
-                Refresh
-              </button>
-            </div>
-
-            <div className="root-picker-body" role="listbox" aria-label="Directories">
-              {loading && !pickerView ? (
-                <div className="root-picker-state">Loading directories</div>
-              ) : pickerView && pickerView.entries.length === 0 ? (
-                <div className="root-picker-state">No child directories</div>
-              ) : (
-                pickerView?.entries.map((entry) => (
-                  <RootPickerDirectoryRow
-                    entry={entry}
-                    key={entry.path}
-                    selected={entry.path === selectedPath}
-                    onNavigate={navigateTo}
-                    onSelect={selectDirectory}
-                  />
-                ))
-              )}
-            </div>
-
-            {error ? <InlineNotice tone="error" title="Root picker" detail={error} /> : null}
-
-            <div className="root-picker-exact">
-              <label className="section-label" htmlFor="root-picker-exact-path">
-                Exact path
-              </label>
-              <form
-                className="root-picker-exact-row"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  submitPath(exactPath);
-                }}
-              >
-                <input
-                  id="root-picker-exact-path"
-                  ref={exactPathInputRef}
-                  className="root-picker-input"
-                  type="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={exactPath}
-                  onChange={(event) => setExactPath(event.target.value)}
-                />
+            <form
+              className="root-picker-toolbar"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (addressPath.trim().length > 0) {
+                  navigateTo(addressPath.trim());
+                }
+              }}
+            >
+              <div className="root-picker-toolbar-buttons">
                 <button
                   className="action-button"
                   data-command-id="rootPicker.navigate"
-                  disabled={exactPath.trim().length === 0 || loading}
+                  disabled={history.backStack.length === 0 || loading}
                   type="button"
-                  onClick={() => navigateTo(exactPath.trim())}
+                  onClick={navigateBack}
                 >
-                  Browse path
+                  Back
                 </button>
                 <button
-                  className="action-button action-button-primary"
-                  data-command-id="workRoot.open"
-                  disabled={exactPath.trim().length === 0 || pendingOpen}
-                  type="submit"
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={history.forwardStack.length === 0 || loading}
+                  type="button"
+                  onClick={navigateForward}
                 >
-                  {pendingOpen ? "Opening" : "Open path"}
+                  Forward
                 </button>
-              </form>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!pickerView?.parentPath || loading}
+                  type="button"
+                  onClick={() => {
+                    if (pickerView?.parentPath) {
+                      navigateTo(pickerView.parentPath);
+                    }
+                  }}
+                >
+                  Up
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!pickerView || loading}
+                  type="button"
+                  onClick={() => {
+                    if (pickerView) {
+                      navigateTo(pickerView.currentPath, "replace");
+                    }
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+              <input
+                aria-label="Address"
+                className="root-picker-input root-picker-address"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={addressPath}
+                onChange={(event) => setAddressPath(event.target.value)}
+              />
+            </form>
+
+            <div className="root-picker-content">
+              <aside className="root-picker-places" aria-label="Known places">
+                <div className="root-picker-column-label">Places</div>
+                {visiblePlaces.length === 0 ? (
+                  <div className="root-picker-state root-picker-state-compact">
+                    No known places
+                  </div>
+                ) : (
+                  visiblePlaces.map((place) => (
+                    <button
+                      className="root-picker-place"
+                      data-command-id="rootPicker.navigate"
+                      data-root-picker-place-kind={place.kind}
+                      key={place.id}
+                      title={place.path}
+                      type="button"
+                      onClick={() => navigateTo(place.path)}
+                    >
+                      <span className="root-picker-place-label">{place.label}</span>
+                      <span className="root-picker-place-path">{place.path}</span>
+                    </button>
+                  ))
+                )}
+              </aside>
+
+              <section className="root-picker-list-region" aria-label="Current folder">
+                <div className="root-picker-list-heading" aria-hidden="true">
+                  <span>Name</span>
+                  <span>Kind</span>
+                  <span>Modified</span>
+                </div>
+                {loading && !pickerView ? (
+                  <div className="root-picker-state">Loading directories</div>
+                ) : visibleEntries.length === 0 ? (
+                  <div className="root-picker-state">No child directories</div>
+                ) : (
+                  <GridList
+                    aria-label="Directories"
+                    className="root-picker-grid-list"
+                    disabledKeys={visibleEntries
+                      .filter((entry) => !entry.selectable)
+                      .map((entry) => entry.path)}
+                    keyboardNavigationBehavior="arrow"
+                    layout="stack"
+                    onAction={(key) => navigateTo(String(key))}
+                    onSelectionChange={handleGridSelection}
+                    selectedKeys={selectedPath ? new Set([selectedPath]) : new Set()}
+                    selectionBehavior="replace"
+                    selectionMode="single"
+                  >
+                    {visibleEntries.map((entry) => (
+                      <GridListItem
+                        className="root-picker-row"
+                        data-command-id="rootPicker.selectDirectory"
+                        id={entry.path}
+                        key={entry.path}
+                        textValue={entry.name}
+                        onDoubleClick={() => navigateTo(entry.path)}
+                      >
+                        <span className="root-picker-row-icon" aria-hidden="true">
+                          /
+                        </span>
+                        <span className="root-picker-row-name" title={entry.path}>
+                          {entry.name}
+                        </span>
+                        <span className="root-picker-row-kind">
+                          {entry.kindLabel ?? "Directory"}
+                        </span>
+                        <span className="root-picker-row-modified">
+                          {rootPickerModifiedTimeLabel(entry.modifiedTime)}
+                        </span>
+                      </GridListItem>
+                    ))}
+                  </GridList>
+                )}
+              </section>
             </div>
+
+            {error ? <InlineNotice tone="error" title="Root picker" detail={error} /> : null}
 
             <div className="root-picker-create">
               <label className="section-label" htmlFor="root-picker-create-name">
@@ -1034,10 +1144,25 @@ function OpenWorkRootControl({
               </div>
             </div>
 
-            <div className="root-picker-footer">
-              <div className="root-picker-selection" title={selectedPath ?? ""}>
+            <form
+              className="root-picker-footer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitPath(exactPath);
+              }}
+            >
+              <label className="root-picker-selection" htmlFor="root-picker-exact-path">
                 Selected: {selectedLabel}
-              </div>
+              </label>
+              <input
+                id="root-picker-exact-path"
+                className="root-picker-input"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={exactPath}
+                onChange={(event) => setExactPath(event.target.value)}
+              />
               <div className="root-picker-footer-actions">
                 <button
                   className="action-button"
@@ -1055,53 +1180,25 @@ function OpenWorkRootControl({
                 <button
                   className="action-button action-button-primary"
                   data-command-id="workRoot.open"
-                  disabled={!selectedPath || pendingOpen}
-                  type="button"
-                  onClick={() => {
-                    if (selectedPath) {
-                      submitPath(selectedPath);
-                    }
-                  }}
+                  disabled={exactPath.trim().length === 0 || pendingOpen}
+                  type="submit"
                 >
-                  {pendingOpen ? "Opening" : "Open workRoot"}
+                  {pendingOpen ? "Opening" : "Open"}
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.close"
+                  type="button"
+                  onClick={closePicker}
+                >
+                  Cancel
                 </button>
               </div>
-            </div>
-          </section>
-        </div>
-      ) : null}
+            </form>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
     </div>
-  );
-}
-
-function RootPickerDirectoryRow({
-  entry,
-  selected,
-  onNavigate,
-  onSelect,
-}: {
-  entry: RootPickerEntry;
-  selected: boolean;
-  onNavigate: (path: string) => void;
-  onSelect: (path: string) => void;
-}) {
-  return (
-    <button
-      aria-selected={selected}
-      className={`root-picker-row ${selected ? "root-picker-row-selected" : ""}`}
-      data-command-id="rootPicker.selectDirectory"
-      role="option"
-      title={entry.path}
-      type="button"
-      onClick={() => onSelect(entry.path)}
-      onDoubleClick={() => onNavigate(entry.path)}
-    >
-      <span className="root-picker-row-icon" aria-hidden="true">
-        ▸
-      </span>
-      <span className="root-picker-row-name">{entry.name}/</span>
-      <span className="root-picker-row-path">{entry.path}</span>
-    </button>
   );
 }
 

@@ -1,10 +1,17 @@
 import {
   createRootPickerDirectory,
   fetchRootPicker,
+  rootPickerHistoryBack,
+  rootPickerHistoryForward,
+  rootPickerHistoryInitial,
+  rootPickerHistoryPush,
   rootPickerCreateDirectoryEndpoint,
   rootPickerEntryLabel,
   rootPickerInsertEntry,
   rootPickerListEndpoint,
+  rootPickerModifiedTimeLabel,
+  rootPickerVisibleEntries,
+  rootPickerVisiblePlaces,
   type RootPickerEntry,
   type RootPickerView,
 } from "./rootPicker.js";
@@ -28,6 +35,7 @@ const alpha: RootPickerEntry = {
   path: "/tmp/root/alpha",
   entryType: "directory",
   selectable: true,
+  kindLabel: "Folder",
 };
 const zeta: RootPickerEntry = {
   name: "zeta",
@@ -68,7 +76,54 @@ const pickerView: RootPickerView = {
   currentPath: "/tmp/root",
   parentPath: "/tmp",
   entries: [alpha, zeta],
+  places: [
+    {
+      id: "home",
+      label: "Home",
+      path: "/home/tester",
+      kind: "home",
+      available: true,
+    },
+    {
+      id: "mnt",
+      label: "Mounts",
+      path: "/mnt",
+      kind: "mount",
+      available: false,
+    },
+  ],
 };
+
+assertDeepEqual(
+  rootPickerVisibleEntries([{ ...alpha, entryType: "directory" }]).map((entry) => entry.path),
+  ["/tmp/root/alpha"],
+  "folder-only picker filter keeps directory rows",
+);
+assertDeepEqual(
+  rootPickerVisiblePlaces(pickerView).map((place) => place.label),
+  ["Home"],
+  "known places hide unavailable daemon-derived locations",
+);
+assertEqual(
+  rootPickerModifiedTimeLabel(null),
+  "",
+  "missing modified time renders as an empty metadata cell",
+);
+assertEqual(
+  rootPickerModifiedTimeLabel("not-a-timestamp"),
+  "not-a-timestamp",
+  "preformatted modified time labels pass through",
+);
+
+const history = rootPickerHistoryPush(
+  rootPickerHistoryPush(rootPickerHistoryInitial("/tmp/root"), "/tmp/root/alpha"),
+  "/tmp/root/zeta",
+);
+const back = rootPickerHistoryBack(history);
+assertEqual(back.targetPath, "/tmp/root/alpha", "back history targets previous folder");
+const forward = rootPickerHistoryForward(back.history);
+assertEqual(forward.targetPath, "/tmp/root/zeta", "forward history restores next folder");
+
 const originalFetch = globalThis.fetch;
 let capturedUrl = "";
 let capturedBody = "";

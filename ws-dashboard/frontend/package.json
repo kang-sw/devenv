@@ -24,6 +24,7 @@
     "@xterm/xterm": "^5.5.0",
     "dockview": "^6.2.2",
     "react": "19.2.6",
+    "react-aria-components": "^1.17.0",
     "react-dom": "19.2.6"
   },
   "devDependencies": {

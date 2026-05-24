@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -22,6 +23,7 @@ pub struct RootPickerView {
     pub current_path: String,
     pub parent_path: Option<String>,
     pub entries: Vec<RootPickerEntry>,
+    pub places: Vec<RootPickerPlace>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -31,12 +33,34 @@ pub struct RootPickerEntry {
     pub path: String,
     pub entry_type: RootPickerEntryType,
     pub selectable: bool,
+    pub kind_label: Option<String>,
+    pub modified_time: Option<String>,
+    pub size: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RootPickerEntryType {
     Directory,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootPickerPlace {
+    pub id: String,
+    pub label: String,
+    pub path: String,
+    pub kind: RootPickerPlaceKind,
+    pub available: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RootPickerPlaceKind {
+    Home,
+    Root,
+    Mount,
+    Drive,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -270,11 +294,13 @@ fn root_picker_view(path: &Path) -> Result<RootPickerView, String> {
     Ok(RootPickerView {
         current_path: path.display().to_string(),
         parent_path: path.parent().map(|parent| parent.display().to_string()),
+        places: known_picker_places(),
         entries,
     })
 }
 
 fn entry_for_directory(path: &Path) -> RootPickerEntry {
+    let metadata = fs::metadata(path).ok();
     RootPickerEntry {
         name: path
             .file_name()
@@ -284,7 +310,147 @@ fn entry_for_directory(path: &Path) -> RootPickerEntry {
         path: path.display().to_string(),
         entry_type: RootPickerEntryType::Directory,
         selectable: true,
+        kind_label: Some("Folder".to_owned()),
+        modified_time: metadata
+            .as_ref()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs().to_string()),
+        size: None,
     }
+}
+
+fn known_picker_places() -> Vec<RootPickerPlace> {
+    let mut places = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    if let Some(home) = home_directory() {
+        push_place(
+            &mut places,
+            &mut seen,
+            "home",
+            "Home",
+            home,
+            RootPickerPlaceKind::Home,
+        );
+    }
+
+    for root in filesystem_roots() {
+        let label = if cfg!(windows) {
+            root.display().to_string()
+        } else {
+            "File system".to_owned()
+        };
+        let id = format!("root-{}", place_id_fragment(&root));
+        push_place(
+            &mut places,
+            &mut seen,
+            &id,
+            &label,
+            root,
+            RootPickerPlaceKind::Root,
+        );
+    }
+
+    for mount in common_mount_roots() {
+        let label = mount
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Mounts")
+            .to_owned();
+        let id = format!("mount-{}", place_id_fragment(&mount));
+        push_place(
+            &mut places,
+            &mut seen,
+            &id,
+            &label,
+            mount,
+            RootPickerPlaceKind::Mount,
+        );
+    }
+
+    places
+}
+
+fn push_place(
+    places: &mut Vec<RootPickerPlace>,
+    seen: &mut BTreeSet<String>,
+    id: &str,
+    label: &str,
+    path: PathBuf,
+    kind: RootPickerPlaceKind,
+) {
+    let Ok(canonical) = path.canonicalize() else {
+        return;
+    };
+    if !canonical.is_dir() {
+        return;
+    }
+    let display_path = canonical.display().to_string();
+    if !seen.insert(display_path.clone()) {
+        return;
+    }
+    places.push(RootPickerPlace {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        path: display_path,
+        kind,
+        available: true,
+    });
+}
+
+fn home_directory() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE")?;
+            let path = std::env::var_os("HOMEPATH")?;
+            Some(PathBuf::from(format!(
+                "{}{}",
+                drive.to_string_lossy(),
+                path.to_string_lossy()
+            )))
+        })
+}
+
+fn filesystem_roots() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ('A'..='Z')
+            .map(|letter| PathBuf::from(format!("{letter}:\\")))
+            .filter(|path| path.is_dir())
+            .collect()
+    } else {
+        vec![PathBuf::from("/")]
+    }
+}
+
+fn common_mount_roots() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        Vec::new()
+    } else {
+        ["/mnt", "/media", "/Volumes"]
+            .into_iter()
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .collect()
+    }
+}
+
+fn place_id_fragment(path: &Path) -> String {
+    path.display()
+        .to_string()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned()
 }
 
 fn safe_child_name(name: &str) -> Option<&str> {

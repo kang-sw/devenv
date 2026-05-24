@@ -1575,7 +1575,25 @@ async fn root_picker_lists_directory_candidates_with_owner_cookie() {
     assert_eq!(entries[0]["name"], "alpha");
     assert_eq!(entries[0]["entryType"], "directory");
     assert_eq!(entries[0]["selectable"], true);
+    assert_eq!(entries[0]["kindLabel"], "Folder");
+    assert!(entries[0]["modifiedTime"].as_str().is_some());
+    assert!(entries[0]["size"].is_null());
     assert_eq!(entries[1]["name"], "zeta");
+    let places = value["places"].as_array().expect("known places array");
+    assert!(
+        !places.is_empty(),
+        "daemon-derived picker places are exposed"
+    );
+    assert!(
+        places.iter().all(|place| place["available"] == true),
+        "unavailable picker places are filtered by the daemon"
+    );
+    assert!(
+        places
+            .iter()
+            .any(|place| place["kind"] == "home" || place["kind"] == "root"),
+        "known places include a platform root or home directory"
+    );
 
     remove_static_fixture(&root);
 }
