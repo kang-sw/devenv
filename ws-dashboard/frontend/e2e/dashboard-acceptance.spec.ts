@@ -1434,6 +1434,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "data-workbench-tab-category-presentation",
       /dockview-category-chip|pinned-left-badge-fallback/,
     );
+    await expect
+      .poll(() =>
+        previewTab
+          .locator(".workbench-tab-title")
+          .evaluate((node) => getComputedStyle(node).fontStyle),
+      )
+      .toBe("italic");
+    await expect
+      .poll(() =>
+        previewTab
+          .locator("xpath=ancestor::*[contains(@class, 'dv-tab')][1]")
+          .evaluate((node) => getComputedStyle(node).boxShadow),
+      )
+      .toBe("none");
     const previewClose = previewTab.locator(
       '[data-command-id="workbench.tab.close"]',
     );
@@ -1490,6 +1504,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "data-workbench-tab-category-presentation",
       "pinned-left-badge-fallback",
     );
+    await expect
+      .poll(() =>
+        pinnedTab
+          .locator(".workbench-tab-title")
+          .evaluate((node) => getComputedStyle(node).fontStyle),
+      )
+      .toBe("normal");
     note(
       "read-only file: single click opened a replaceable preview, hover-only close immediately removed it, and double click pinned the file in the opened file group",
     );

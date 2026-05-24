@@ -1110,9 +1110,13 @@ button {
    It reuses the `.meta-chip` base (max-width, ellipsis, nowrap) so it stays a
    bounded single-line summary chip. */
 .workbench-activity-badge {
-  flex: 0 1 260px;
-  max-width: 300px;
-  min-width: 132px;
+  flex: 0 0 auto;
+  max-width: min(260px, 100%);
+  min-width: 0;
+  border-color: transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ws-color-panel-raised) 80%, transparent);
+  padding-inline: var(--ws-space-05);
 }
 
 .workbench-activity-badge-dot {
@@ -1147,7 +1151,8 @@ button {
 
 .workbench-activity-badge-active,
 .workbench-activity-badge-loading {
-  border-color: var(--ws-color-state-info);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ws-color-state-info) 14%, var(--ws-color-panel-raised));
 }
 
 .workbench-activity-badge-active .workbench-activity-badge-dot,
@@ -1156,7 +1161,9 @@ button {
 }
 
 .workbench-activity-badge-attention {
-  border-color: var(--ws-color-state-warning);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ws-color-state-warning) 16%, var(--ws-color-panel-raised));
+  color: var(--ws-color-text-primary);
 }
 
 .workbench-activity-badge-attention .workbench-activity-badge-dot {
@@ -1164,7 +1171,9 @@ button {
 }
 
 .workbench-activity-badge-error {
-  border-color: var(--ws-color-state-error-strong);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ws-color-state-error-strong) 18%, var(--ws-color-panel-raised));
+  color: var(--ws-color-state-error-text);
 }
 
 .workbench-activity-badge-error .workbench-activity-badge-dot {
@@ -1486,8 +1495,8 @@ button {
 }
 
 .dockview-workbench-layout .dv-tab:has(.dockview-workbench-tab-active) {
-  background: var(--ws-color-panel);
-  box-shadow: inset 0 -2px 0 var(--ws-color-action);
+  background: transparent;
+  box-shadow: none;
 }
 
 .dockview-workbench-tab {
@@ -1496,7 +1505,7 @@ button {
   height: 100%;
   align-items: center;
   gap: 4px;
-  color: var(--ws-color-text-secondary);
+  color: var(--ws-color-text-tertiary);
   padding: 0 var(--ws-space-06);
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-02);
@@ -1504,6 +1513,11 @@ button {
 
 .dockview-workbench-tab-active {
   color: var(--ws-color-text-primary);
+}
+
+.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]
+  .workbench-tab-title {
+  font-style: italic;
 }
 
 
@@ -1835,11 +1849,6 @@ button {
   color: var(--ws-color-state-error-text);
   padding: var(--ws-space-06);
 }
-
-.dockview-workbench-tab[data-workbench-tab-category-presentation="pinned-left-badge-fallback"] {
-  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-action);
-}
-
 
 .dockview-workbench-tab-active {
   background: transparent;
@@ -2532,6 +2541,10 @@ button {
 .workbench-toolbar-meta > .state-badge {
   flex: 0 0 auto;
   max-width: none;
+  border-color: transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ws-color-state-success) 14%, var(--ws-color-panel-raised));
+  padding-inline: var(--ws-space-05);
 }
 
 .workbench-toolbar-actions {
