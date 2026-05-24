@@ -47,6 +47,22 @@ explicit actor id recovery path that does not rely on launch metadata.
 - Windows behavior is in scope for regression testing because child setup
   instructions must survive nested process launch and MCP restart flows.
 
+## Spec Impact
+
+Target spec areas: `ai-docs/spec/mcp-tools.md ## Named-Agent MCP Tools` and
+`ai-docs/spec/named-agent-runtime.md ## Async Single-Call Lifecycle` /
+`## Async Subquery Ephemeral Agents`.
+
+Expected caller-visible change: named-agent calls and subqueries launched from
+an actor-bound lead session should receive a child setup recovery instruction in
+their runtime prompt context, while delegate/subquery prompts should not expose
+the lead bootstrap method.
+
+Contract-first spec: no. The exact prompt placement and persistence fields
+should follow the existing named-agent prompt composition and state layout
+during implementation, then the implemented behavior should be reflected in the
+spec.
+
 ## Phases
 
 ### Phase 1: Inject child actor setup instructions
