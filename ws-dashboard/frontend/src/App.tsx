@@ -193,6 +193,7 @@ import {
 import {
   fetchGitWorktreeAddOptions,
   previewGitWorktreeAdd,
+  GitWorktreeAddSubmitError,
   submitGitWorktreeAdd,
   type GitWorktreeAddOptions,
   type GitWorktreeAddPreview,
@@ -1475,6 +1476,8 @@ function GitWorktreeAddModal({
   const [pathMode, setPathMode] = useState<"auto" | "custom">("auto");
   const [customPath, setCustomPath] = useState("");
   const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null);
+  const previewSequenceRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1483,6 +1486,7 @@ function GitWorktreeAddModal({
     if (!workspaceId) {
       setOptions(null);
       setPreview(null);
+      setPreviewRequestKey(null);
       setError(null);
       return;
     }
@@ -1492,6 +1496,7 @@ function GitWorktreeAddModal({
     setPathMode("auto");
     setCustomPath("");
     setPreview(null);
+    setPreviewRequestKey(null);
     setError(null);
     setLoading(true);
     void fetchGitWorktreeAddOptions(workspaceId)
@@ -1511,18 +1516,36 @@ function GitWorktreeAddModal({
     };
   }, [branchMode, customPath, manualBranch, pathMode, worktreeName, workspaceId]);
 
+  const requestKey = request ? JSON.stringify(request) : null;
+
   useEffect(() => {
-    if (!workspaceId || !request || worktreeName.trim().length === 0) {
+    if (!workspaceId || !request || !requestKey || worktreeName.trim().length === 0) {
       setPreview(null);
+      setPreviewRequestKey(null);
       return;
     }
+    const sequence = previewSequenceRef.current + 1;
+    previewSequenceRef.current = sequence;
+    setPreview(null);
+    setPreviewRequestKey(null);
     const timer = window.setTimeout(() => {
       void previewGitWorktreeAdd(workspaceId, request)
-        .then(setPreview)
-        .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree preview failed"));
+        .then((nextPreview) => {
+          if (previewSequenceRef.current !== sequence) {
+            return;
+          }
+          setPreview(nextPreview);
+          setPreviewRequestKey(requestKey);
+        })
+        .catch((nextError) => {
+          if (previewSequenceRef.current !== sequence) {
+            return;
+          }
+          setError(nextError instanceof Error ? nextError.message : "worktree preview failed");
+        });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [request, worktreeName, workspaceId]);
+  }, [request, requestKey, worktreeName, workspaceId]);
 
   if (!workspaceId) {
     return null;
@@ -1540,6 +1563,7 @@ function GitWorktreeAddModal({
     (branchMode === "manual" && manualBranch.trim().length === 0) ||
     (pathMode === "custom" && customPath.trim().length === 0) ||
     !preview ||
+    previewRequestKey !== requestKey ||
     preview.status === "blocked" ||
     options?.git.available === false;
 
@@ -1554,7 +1578,15 @@ function GitWorktreeAddModal({
         setError(null);
         void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
           .then(onCreated)
-          .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree add failed"))
+          .catch((nextError) => {
+            if (nextError instanceof GitWorktreeAddSubmitError && nextError.preview) {
+              setPreview(nextError.preview);
+              setPreviewRequestKey(requestKey);
+              setError("Submit blocked by current server validation");
+              return;
+            }
+            setError(nextError instanceof Error ? nextError.message : "worktree add failed");
+          })
           .finally(() => setSubmitting(false));
       },
     });

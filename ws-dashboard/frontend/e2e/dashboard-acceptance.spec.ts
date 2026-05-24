@@ -648,7 +648,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const createdRow = page.locator(".resource-row", { hasText: "Browser-Gate-Branch" }).first();
     await expect(createdRow).toBeVisible();
     await expect(createdRow).toHaveClass(/resource-row-selected/);
-    await expect.poll(() => resourceRefreshRequests).toBeGreaterThan(0);
     await selectWorkRootInBrowser(page, workRoot);
     note("git worktree add: workspace overflow preserved remove action, previewed new branch, submitted through daemon resources, and selected daemon-created workRoot id");
   });

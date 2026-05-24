@@ -49,11 +49,52 @@ export type AddGitWorktreeResponse = {
 const base = (workspaceId: string) =>
   `/api/dashboard/workspaces/${encodeURIComponent(workspaceId)}/git-worktree-add`;
 
+export class GitWorktreeAddSubmitError extends Error {
+  readonly status: number;
+  readonly preview: GitWorktreeAddPreview | null;
+
+  constructor(status: number, fallback: string, preview: GitWorktreeAddPreview | null) {
+    super(`HTTP ${status}: ${preview?.message ?? fallback}`);
+    this.name = "GitWorktreeAddSubmitError";
+    this.status = status;
+    this.preview = preview;
+  }
+}
+
 async function readJsonResponse<T>(response: Response, fallback: string): Promise<T> {
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${fallback}`);
   }
   return (await response.json()) as T;
+}
+
+function isGitWorktreeAddPreview(value: unknown): value is GitWorktreeAddPreview {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<GitWorktreeAddPreview>;
+  return (
+    typeof candidate.branchName === "string" &&
+    typeof candidate.filesystemName === "string" &&
+    typeof candidate.targetPathLabel === "string" &&
+    (candidate.status === "willCreateBranch" ||
+      candidate.status === "willCheckoutExisting" ||
+      candidate.status === "blocked") &&
+    typeof candidate.message === "string" &&
+    Array.isArray(candidate.blockers)
+  );
+}
+
+async function readSubmitResponse(response: Response): Promise<AddGitWorktreeResponse> {
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    throw new GitWorktreeAddSubmitError(
+      response.status,
+      "worktree add failed",
+      isGitWorktreeAddPreview(body) ? body : null,
+    );
+  }
+  return body as AddGitWorktreeResponse;
 }
 
 export async function fetchGitWorktreeAddOptions(
@@ -86,5 +127,5 @@ export async function submitGitWorktreeAdd(
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(request),
   });
-  return readJsonResponse<AddGitWorktreeResponse>(response, "worktree add failed");
+  return readSubmitResponse(response);
 }

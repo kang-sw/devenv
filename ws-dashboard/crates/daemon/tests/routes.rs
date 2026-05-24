@@ -2113,6 +2113,7 @@ async fn git_worktree_add_existing_branch_is_yellow_and_submit_checks_out_branch
     )
     .await;
     assert!(target.join("README.md").is_file());
+    assert_eq!(current_git_branch(&target), "existing-topic");
     assert!(submit["createdWorkRootId"]
         .as_str()
         .expect("created id")
@@ -2216,6 +2217,26 @@ async fn git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs
     .await;
     assert_eq!(target_conflict["status"], "blocked");
     assert!(blocker_codes(&target_conflict).contains(&"targetExists".to_owned()));
+    let blocked_submit_target = base.join("blocked-submit-main-copy");
+    let blocked_submit = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "Blocked Main Copy",
+            "branch": { "mode": "manual", "name": current_git_branch(&primary) },
+            "path": { "mode": "custom", "targetPath": blocked_submit_target.display().to_string() },
+            "activate": true
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(blocked_submit["status"], "blocked");
+    assert!(blocker_codes(&blocked_submit).contains(&"branchAlreadyCheckedOut".to_owned()));
+    assert!(
+        !blocked_submit_target.exists(),
+        "blocked submit must not create the target worktree"
+    );
 
     let missing_parent = git_worktree_preview_json(app.clone(), cookie.as_str(), &git_workspace_id, serde_json::json!({
         "worktreeName": "Missing Parent",
