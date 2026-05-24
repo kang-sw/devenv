@@ -148,3 +148,23 @@ Verification:
   `narrow-workbench.png`; the overflow menu is visibly rendered, ready rows are
   one-line, compact glyphs no longer overlap, topbar text remains readable, and
   icon chrome is quieter by default.
+
+#### Edition (985c975) - 2026-05-24
+
+Adjusted the compact workspace/workRoot glyph after screenshot feedback so the
+two icons render at normal size in a wider fixed icon column instead of
+shrinking the pair. This intentionally shifts the row label to the right to
+keep both symbols legible.
+
+Disabled left-navigation chip rendering entirely for `ResourceRow`, including
+offline rows, while preserving row tone, rails, command ids, accessible labels,
+and tooltip metadata. The workspace remove control remains a fixed-size shared
+icon button with the same hover/focus chrome as the other icon controls.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png` confirmed the compact
+  glyphs are no longer miniaturized, row labels shift right, and the row trash
+  control uses the shared icon-button presentation.
