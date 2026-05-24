@@ -27,7 +27,7 @@ description, abstract it further.
 - Do not put ticket references in the marker. Before implementation, readiness traceability lives in ticket `spec:`, `spec-remove:`, or `## Spec Impact`; after implementation, commits carry `## Spec` sections referencing spec-stems.
 - No `🚧` means implemented — verify each such feature actually exists before committing.
 - `🚧` entries are contract-first planned spec text: use them only when planned behavior must be visible and stable before implementation begins.
-- `🚧` entries for implementation behavior require a non-`epic`, non-`research` `ready/` ticket. Epic or research tickets may only back `🚧` text that documents planned decomposition or investigation outputs, not implementation-ready behavior.
+- `🚧` entries for implementation behavior require a non-`epic`, non-`research`, non-`workset` `ready/` ticket. Epic, research, or workset tickets may only back `🚧` text that documents planned decomposition, investigation outputs, or operating context, not implementation-ready behavior.
 - Do not write a `🚧` entry merely because a ticket enters `ready/`; ticket-local `## Spec Impact` is the default ready addressing path when implementation should determine exact spec text.
 
 ## Implementation Gap Callout
@@ -40,7 +40,7 @@ Use `> [!note] Implementation Gap · YYYY-MM-DD` for a known-but-unscheduled gap
 The callout body text identifies which form applies.
 
 - The date records when the gap was first noted; use today's date when first authoring.
-- No ticket required — this distinguishes it from `🚧` entries, which require contract-first planned behavior backed by a non-`epic`, non-`research` `ready/` ticket for implementation behavior; epic/research tickets may back only planned decomposition or investigation text.
+- No ticket required — this distinguishes it from `🚧` entries, which require contract-first planned behavior backed by a non-`epic`, non-`research`, non-`workset` `ready/` ticket for implementation behavior; epic/research/workset tickets may back only planned decomposition, investigation text, or operating context.
 - Resolution path: at the next spec review, either create a qualifying ticket and convert to `🚧` only when the gap is contract-first planned behavior, or accept the current state and absorb into body prose.
 - Discuss sessions surface a staleness warning for entries older than 90 days.
 

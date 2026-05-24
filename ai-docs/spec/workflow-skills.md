@@ -180,9 +180,10 @@ index, and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
 accepted backlog and `ready/` as the spec-addressed implementation queue. The
-spec-address gate runs only when a non-`epic`, non-`research` action creates or
-moves a ticket into `ready/`; `todo/` tickets may carry optional `spec:` links as
-recovery hints. For `ready/` creation or promotion, `lead-write-ticket` accepts
+spec-address gate runs only when a non-`epic`, non-`research`, non-`workset`
+action creates or moves a ticket into `ready/`; `todo/` tickets may carry
+optional `spec:` links as recovery hints. For `ready/` creation or promotion,
+`lead-write-ticket` accepts
 confirmed `spec:` or `spec-remove:` stems, or a ticket-local `## Spec Impact`
 section naming the target spec area, expected caller-visible change, and whether
 a contract-first planned spec is required. It invokes `lead-write-spec`
@@ -207,6 +208,20 @@ actionable phase states what behavior is complete, what remains deferred, and
 what verification proves the phase complete.
 {#260508-write-ticket-epic-child-boundary}
 
+`lead-write-ticket` preserves worksets as non-hierarchical operating-context
+boards. A workset lists tickets gathered for a session, goal, sprint, or
+temporary focus area by stem or path with status and role; planned-but-not-created
+items go under `## Planned References` with provisional labels and creation
+conditions, not status or path. Inclusion never changes `parent:` relationships
+and does not let the workset own decomposition, cross-child invariants,
+implementation phases, or spec-ready behavior. When implementation detail or
+settled constraints arise while editing a workset, the skill moves them into
+the relevant included actionable ticket or phase. Worksets normally stay in
+`idea/` or `todo/` rather than the `ready/` implementation queue.
+`lead-proceed` stops on workset paths and asks the user to choose, create,
+promote, or proceed an included actionable ticket instead of treating the
+workset as an implementation target. {#260524-workset-workflow-skill-routing}
+
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
 constraints, rationale, rejected alternatives, forward-compatibility guardrails,
@@ -221,19 +236,20 @@ materially different caller-visible, workflow, API, or verification result
 without contradiction and captures the missing settled decision when it does.
 
 `lead-write-ticket` reviews related-ticket decisions by default when
-creating or editing a non-epic actionable ticket. It inspects the target's
-parent, containing epic, child board, explicitly related tickets, and available
-active siblings only far enough to find settled decisions that constrain the
-current implementation slice. It records only binding decisions in the target
-as scope, constraints, forward-compatibility guardrails, rejected alternatives,
-verification expectations, or phase dependencies, and avoids copying unrelated
-future-phase detail. Explicit "cascade" requests, board organization, or parent
-and child edits broaden this into a multi-ticket propagation pass: the skill
-identifies the impacted graph, selects only affected edit targets, keeps epic
-edits board-level, updates active inventory when needed, and commits the
-propagation as one logical documentation unit. It does not promote propagated
-tickets to `ready/` unless the user explicitly requests ready promotion or
-routes through `lead-proceed`.
+creating or editing an actionable ticket. It inspects the target's parent,
+containing epic, containing workset, child board, explicitly related tickets,
+and available active siblings only far enough to find settled decisions that
+constrain the current implementation slice. It records only binding decisions
+in the target as scope, constraints, forward-compatibility guardrails, rejected
+alternatives, verification expectations, or phase dependencies, and avoids
+copying unrelated future-phase detail. Explicit "cascade" requests, board
+organization, or parent and child edits broaden this into a multi-ticket
+propagation pass: the skill identifies the impacted graph, selects only affected
+edit targets, keeps epic edits board-level and workset edits operating-context
+only, updates active inventory when needed, and commits the propagation as one
+logical documentation unit. It does not promote propagated tickets to `ready/`
+unless the user explicitly requests ready promotion or routes through
+`lead-proceed`.
 {#260516-write-ticket-related-ticket-propagation}
 
 Skill-authoring guidance treats local shorthand as trigger examples for a
@@ -407,7 +423,7 @@ When handoff stages are needed, their order is fixed:
 ticket readiness -> implementation
 ```
 
-Existing non-epic `ready/` ticket paths skip ticket creation and become
+Existing actionable `ready/` ticket paths skip ticket creation and become
 implementation targets after `lead-proceed` resolves implementation scope.
 Targets without phase sections use the whole target. When the user names one
 phase, that explicit request is honored exactly. When the user does not name a
@@ -424,8 +440,13 @@ phase-selection policy.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
-child ready promotion, or proceeding a ready child ticket. Existing `idea/` and
-`todo/` ticket paths are treated as implementation intent: `lead-proceed`
+child ready promotion, or proceeding a ready child ticket. Workset ticket paths
+are operating-context artifacts, not implementation targets; `lead-proceed`
+stops on worksets and routes the user toward choosing, creating, promoting, or
+proceeding an included actionable ticket. Container stops use an explicit
+`container-ticket` scope blocker instead of selecting a phase or whole-ticket
+implementation slice. Existing `idea/` and `todo/` ticket paths are treated as
+implementation intent: `lead-proceed`
 continues through `lead-write-ticket` for ticket triage, refresh, or autonomous
 `todo/` -> `ready/` promotion before scope resolution, and escalates to
 `lead-discuss` only when promotion or implementation scope exposes unresolved

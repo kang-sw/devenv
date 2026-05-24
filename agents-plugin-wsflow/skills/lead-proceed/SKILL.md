@@ -51,7 +51,7 @@ Routing
 2. Set `target-kind`: `ticket-path` or `inline`.
 3. If `target-kind=ticket-path` and the path does not exist, set `ticket-missing=yes`.
 4. Set `has-ticket=yes` for an existing ticket path or captured `Ticket:` path.
-5. If `has-ticket=yes`: read ticket; extract status, explicit category, scope, phases, phase results, open questions, and `plans:`.
+5. If `has-ticket=yes`: read ticket; extract status, explicit category, scope, phases, phase results, open questions, `plans:`, and for worksets included ticket references/paths plus explicit readiness/actionability labels present in the workset.
 6. If `has-ticket=yes` and status cannot be determined from the ticket path, set `status=unknown`.
 7. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs or tests.
 8. If `target-kind=ticket-path`: set `actionable=yes`.
@@ -60,8 +60,10 @@ Routing
 11. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
 12. If `has-ticket=yes`: set `freshness=missing-settled-decisions` when active conversation has settled decisions, constraints, rejected alternatives, or scope boundaries absent from the ticket; otherwise set `freshness=current`.
 13. If freshness is uncertain because a decision may still be unsettled or missing, set `freshness=uncertain` and `discussion-needed=yes`.
-14. Treat a ticket as `category=epic` only when frontmatter or an explicit ticket heading labels it as an epic.
-15. Resolve implementation scope for ready tickets:
+14. Set `category=workset` only when the ticket itself is declared as a workset by filename/stem category, frontmatter `category`/`type`, title/heading, or a top-level workset membership section.
+15. Set `category=epic` when the filename/stem category, frontmatter `category`/`type`, title, heading, or explicit epic section labels it as an epic.
+16. If `category=epic` or `category=workset`, skip implementation-scope resolution; set `slice=blocked` and `scope-blocked=container-ticket`.
+17. Resolve implementation scope for ready tickets:
    - No phase sections -> whole target.
    - Multiple explicit phases -> set `scope-blocked=multiple-explicit-phases`.
    - One explicit phase with a `Result` section -> set `scope-blocked=phase-already-complete` unless the user explicitly asked to revise or redo that phase.
@@ -80,6 +82,7 @@ Routing
 | `has-ticket=yes` and status is `.dropped/` | Stop; report that the ticket was dropped and needs explicit revival or replacement. |
 | `has-ticket=yes` and status is `unknown` | Stop; report that ticket status could not be determined from its path. |
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
+| `has-ticket=yes` and category is `workset` | Stop; report that worksets are containers, list included actionable ticket paths grouped as `ready`, `not-ready`, and `unknown` from explicit path/status labels or already-loaded artifacts, and suggest one safe next request. |
 | `discussion-needed=yes` | Continue through `wsflow:lead-discuss`; stop. |
 | `has-ticket=yes` and status is `idea/` | Continue through `wsflow:lead-write-ticket`; capture `Ticket:` and re-route. |
 | `scope-blocked=multiple-explicit-phases` | Stop; ask the user to choose one phase or create/slice tickets. |
@@ -103,15 +106,18 @@ NEXT: <wsflow:lead-discuss | wsflow:lead-write-ticket | wsflow:lead-implement | 
 - **Route**: <first matching route row>
 - **Reason**: <decisive facts only>
 - **Ticket Status**: <absent | idea | todo | ready | done | dropped | unknown | n/a>
-- **Ticket Category**: <epic | other | n/a>
+- **Ticket Category**: <epic | workset | other | n/a>
 - **Freshness**: <current | missing-settled-decisions | uncertain | n/a>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target | blocked>
-- **Scope Blocker**: <none | multiple-explicit-phases | too-broad | no-unfinished-phase | phase-already-complete>
+- **Scope Blocker**: <none | container-ticket | multiple-explicit-phases | too-broad | no-unfinished-phase | phase-already-complete>
+- **Included Tickets**: <ready | not-ready | unknown groups, or none found>
+- **Safe Next Request**: <Proceed on one ready included ticket path | required user action | n/a>
 
 Proceed is routing-only. It must not inspect source, edit files, plan implementation, or substitute for `NEXT`.
 If `NEXT` names a skill: `Proceeding through <NEXT>.`
 If `NEXT: stop`: `Stopping here: <blocking condition>.`
+For workset stops, the safe next request must be `Proceed on <single ready included ticket path>` or a user action to create/promote one included actionable ticket; do not invoke implementation or continue automatically.
 ```
 
 Emit exactly one `NEXT:` value: one allowed skill name, or `stop`.

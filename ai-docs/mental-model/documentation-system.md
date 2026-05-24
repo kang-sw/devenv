@@ -27,6 +27,7 @@ related:
 - Ticket phase plan text freezes after the first Result, but later implementation tweaks append `#### Edition` entries under the Result area; existing Result and Edition text remains frozen. {#260513-ticket-result-editions}
 - Ready-ticket convention keeps spec addressing mandatory through `spec:`, `spec-remove:`, or `## Spec Impact`; `lead-write-ticket` invokes `lead-write-spec` only for contract-first planned spec entries before finalizing the queue entry. {#260505-documentation-authoring-workflows}
 - Epic tickets are lightweight milestone boards for scope, child-ticket decomposition, cross-child decisions, and completion criteria; child tickets carry implementation detail and complete phase units. `lead-proceed` executes one selected phase without changing ticket decomposition. {#260508-lightweight-epic-ticket-conventions} {#260505-proceed-routing-pipeline}
+- Workset tickets are non-hierarchical operating-context boards for a session, goal, sprint, or temporary focus area; included tickets are listed by stem/path with status and role, planned entries stay under `## Planned References`, workset inclusion never changes `parent:`, implementation detail belongs in included actionable tickets, and worksets normally stay out of `ready/`. {#260524-workset-ticket-conventions}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
 - The root `ai-docs/mental-model.md` may carry a compact project reading map for task/topic routing; it does not own behavior, status, queue, or source-derived claims. {#260505-mental-model-document-system}
 - `### Mental Model Notes` is an optional workflow-internal commit subsection under `## AI Context`; `mental-model-updater` treats those notes as primary intent and uses diffs for verification and fallback. {#260518-mental-model-update-context-annotation}
@@ -52,7 +53,7 @@ related:
 ## Common Mistakes
 
 - Adding spec anchors manually without checking for duplicates.
-- Promoting non-epic, non-research work into `ready/` without a confirmed spec stem, `spec-remove:`, or `## Spec Impact`.
+- Promoting non-epic, non-research, non-workset work into `ready/` without a confirmed spec stem, `spec-remove:`, or `## Spec Impact`.
 - Using full YAML features in frontmatter; the parser is deliberately minimal.
 - Changing workflow semantics in the downstream workflow guide instead of the canonical plugin/runtime, bundled conventions, or bootstrap templates.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.

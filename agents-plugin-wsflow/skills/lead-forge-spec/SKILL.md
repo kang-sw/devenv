@@ -59,7 +59,7 @@ Ask the user to confirm, split, merge, drop, or reorder domains before writing.
 For each confirmed domain, run focused read-only investigation:
 
 1. Identify implemented behavior that callers can observe.
-2. Identify contract-first planned implementation behavior backed by non-epic/non-research ready tickets, plus epic/research planned decomposition or investigation text and other planned behavior for survey evidence.
+2. Identify contract-first planned implementation behavior backed by non-epic/non-research/non-workset ready tickets, plus epic/research/workset planned decomposition, investigation text, or operating context and other planned behavior for survey evidence.
 3. Identify behavior that looks documented but unimplemented.
 4. Identify tickets in `ready/` whose phases belong to the domain.
 5. Identify spec anchors that should be reused, renamed, added, or removed.
@@ -113,10 +113,10 @@ candidates.
 
 Write implemented behavior without `🚧` only when source or committed history
 confirms it exists. Write planned implementation behavior with `🚧` only when it
-is contract-first and backed by a non-`epic`, non-`research` ready ticket.
-Epic or research tickets may back `🚧` text only for planned decomposition or
-investigation outputs. Otherwise record the gap in the survey report, not the
-spec body.
+is contract-first and backed by a non-`epic`, non-`research`, non-`workset`
+ready ticket. Epic, research, or workset tickets may back `🚧` text only for
+planned decomposition, investigation outputs, or operating context. Otherwise
+record the gap in the survey report, not the spec body.
 
 ## Templates
 

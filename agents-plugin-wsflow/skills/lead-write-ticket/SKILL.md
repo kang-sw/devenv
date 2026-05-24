@@ -13,6 +13,7 @@ Target: user request
 - Aside from required conventions and `ai-docs/_index.md` when the queue changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `wsflow/tickets.*`, `wsflow/references.trace`, or focused local search limited to ticket paths/metadata for graph discovery.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
+- Workset tickets stay non-hierarchical operating-context collections; never add, remove, or change `parent:` based on workset inclusion.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
 - Ready tickets require spec addressing, not mandatory planned spec text.
 - Proceed-routed actionable `todo/` tickets move to `ready/` when intent review and spec-address check pass.
@@ -25,14 +26,15 @@ Target: user request
 
 ### 2. Route
 
-1. Classify category/status; mark **judge: spec-address-gate** for any non-`epic`, non-`research` ticket entering `ready/`.
+1. Classify category/status; mark **judge: spec-address-gate** for any non-`epic`, non-`research`, non-`workset` ticket entering `ready/`.
 2. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
 3. For a proceed-routed actionable `todo/` ticket, set the requested change to ready promotion.
 
 ### 3. Load
 
 1. If `user request` references an existing ticket, read it.
-2. For non-epic actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
+2. For actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
+3. For workset creation or edits, verify each existing included ticket's path, current status directory, and stated role; convert missing tickets to planned references or stop on a blocker.
 
 ### 4. Write
 
@@ -46,7 +48,8 @@ Target: user request
 
 ### 6. Commit
 
-1. Commit edited paths with `wsflow/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed; separate child invocations own their own commits and outputs.
+1. If no file changed because the requested move was refused, skip commit.
+2. Commit edited paths with `wsflow/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed; separate follow-up invocations own their own commits and outputs.
 
 ### 7. Handoff
 
@@ -56,7 +59,7 @@ Target: user request
 
 ### 1. Classify
 
-1. Determine category from the topic.
+1. Determine category through `judge: ticket-category`.
 2. Choose the initial status directory through `judge: initial-status`.
 
 ### 2. Draft
@@ -68,13 +71,18 @@ Target: user request
 
 1. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
 2. For `epic`: reference existing/planned children; start a separate `wsflow:lead-write-ticket` invocation for child creation or child edit.
-3. For non-epic actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
-4. For each non-epic actionable phase, run **Apply Ticket Content**.
-5. Note inter-phase dependencies explicitly.
+3. For `workset`: write context, focus, existing included tickets listed by stem/path with current status and role, and exit criteria.
+4. For `workset`: list planned-but-not-created work in `## Planned References` with a provisional label, intended role, and creation condition; do not assign status/path or `parent:`.
+5. For `workset`: if the user also requested included actionable ticket creation or edits, record planned references unless explicit cascade owns those ticket edits.
+6. For `workset` cascade: create or edit actionable tickets in separate commits, then update the workset to reference final paths/statuses; never add `parent:` because of workset inclusion.
+7. For actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
+8. For each actionable phase, run **Apply Ticket Content**.
+9. For actionable tickets, note inter-phase dependencies explicitly.
 
 ### 4. Ready Guard
 
-1. For `ready/`, defer queue entry until **Spec-address Check** passes.
+1. For `workset`, choose `idea/` or `todo/`; do not create or move it into `ready/`.
+2. For `ready/`, defer queue entry until **Spec-address Check** passes.
 
 ## On: Edit Ticket
 
@@ -87,17 +95,20 @@ Target: user request
 1. Apply the requested change: phase update, content update, or status move.
 2. For `epic`, keep edits board-level.
 3. For `epic` implementation detail, stop after the epic edit and start a separate `wsflow:lead-write-ticket` invocation for the child ticket.
+4. For `workset`, keep edits to non-hierarchical operating context and included-ticket notes.
 
 ### 3. Move
 
 1. For moves, use native `git mv`.
 2. For `.done/` moves, add `completed:` date in frontmatter.
-3. For proceed-routed `todo/` -> `ready/` promotion, defer `git mv` until **Spec-address Check** passes.
+3. If the only requested change is moving a `workset` to `ready/`, make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.
+4. For `workset` moves to `ready/` with other edits, do not move status; keep only valid content edits.
+5. For proceed-routed `todo/` -> `ready/` promotion, defer `git mv` until **Spec-address Check** passes.
 
 ### 4. Shape
 
-1. For non-epic actionable shape or phase changes, apply `judge: ticket-shape`.
-2. For each changed non-epic actionable phase, run **Apply Ticket Content**.
+1. For actionable shape or phase changes, apply `judge: ticket-shape`.
+2. For each changed actionable phase, run **Apply Ticket Content**.
 
 ## On: Apply Ticket Content
 
@@ -120,14 +131,15 @@ Target: user request
 5. Check whether a fresh implementer could build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket; if yes, capture the missing settled decision.
 6. Check whether related-ticket decisions that constrain this implementation slice were captured.
 7. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
-8. Fix gaps in-place.
-9. Present a brief correction summary, or confirm nothing was missed.
+8. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases.
+9. Fix gaps in-place.
+10. Present a brief correction summary, or confirm nothing was missed.
 
 ## On: Spec-address Check
 
 ### 1. Scope
 
-1. Skip `epic` and `research`.
+1. Skip `epic`, `research`, and `workset`.
 2. Treat requested `todo/` -> `ready/` promotion as `ready/` for this check.
 3. Apply `judge: spec-address-gate` before any `ready/` queue entry or commit.
 
@@ -156,46 +168,58 @@ Target: user request
 
 1. For `epic`, do not suggest proceeding on the epic path.
 2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
-3. For non-epic tickets, suggest `wsflow:lead-proceed` unless `judge: missing-spec-address` fired.
-4. State that proceed routes to implementation readiness; `wsflow:lead-implement` resolves direct execution needs.
-5. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
-6. For `epic`, state that the path is a board artifact, not an implementation target.
-7. Preserve the final `Ticket:` line; callers such as `wsflow:lead-proceed` capture this path from prefix-stage output.
+3. For `workset`, suggest one concrete next action: proceed/promote an existing included actionable ticket, or create a planned reference as a new actionable ticket; never suggest proceeding or promoting the workset itself.
+4. For actionable tickets, suggest `wsflow:lead-proceed` unless `judge: missing-spec-address` fired.
+5. State that proceed routes to implementation readiness; `wsflow:lead-implement` resolves direct execution needs.
+6. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
+7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
+8. Preserve the final `Ticket:` line; callers such as `wsflow:lead-proceed` capture this path from prefix-stage output.
 
 ## On: Cross-ticket decision review
 
-1. Identify the target's parent, containing epic, child board, explicitly related tickets, and active siblings when those links are available.
+1. Identify the target's parent/epic relationships, any worksets that list the target, relevant co-listed workset tickets, child board entries, and explicitly related tickets when those links are available.
 2. Read only graph tickets that may contain decisions constraining the target's implementation scope.
 3. Record binding cross-ticket decisions in the target as scope, constraints, forward-compatibility guardrails, rejected alternatives, verification expectations, or phase dependencies.
 4. Do not copy unrelated future-phase detail; preserve only decisions that the current implementation could violate or block.
 5. If the same decision changes another active ticket's role, include that ticket in this logical edit; otherwise leave related tickets untouched.
 6. Keep epics board-level; move implementation constraints into the relevant child ticket or phase.
+7. Keep worksets non-hierarchical; move implementation constraints into the relevant included actionable ticket or phase.
 
 ## On: Cascade Edit
 
 ### 1. Select Targets
 
-1. Identify the impacted ticket graph: parent epic, containing epic, child tickets, related active tickets, and `_index.md` active inventory when it lists edited tickets.
+1. Identify the impacted ticket graph: parent epic, containing epic, worksets that list selected targets, child tickets, related active tickets, and `_index.md` active inventory when it lists edited tickets.
 2. Select edit targets from that graph; do not edit merely-related tickets whose role is unaffected by the propagated decision.
 3. Read each selected target before editing.
 
 ### 2. Apply Propagation
 
 1. Keep epics to scope, non-scope, child ticket board, cross-child decisions, and completion criteria.
-2. Put implementation decisions, constraints, rejected alternatives, and phases into child tickets.
-3. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `wsflow:lead-proceed`.
-4. For any selected target entering `ready/`, run Spec-address check before commit.
+2. Keep worksets to context, included tickets, focus, and exit criteria; never add child relationships from workset inclusion.
+3. Put implementation decisions, constraints, rejected alternatives, and phases into actionable tickets.
+4. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `wsflow:lead-proceed`.
+5. For any selected target entering `ready/`, run Spec-address check before commit.
 
 ### 3. Verify and Report
 
 1. Run Intent review across the edited set and commit one logical documentation unit when the edits are one decision propagation.
-2. Report edited ticket paths; if exactly one implementation child is the natural next target, emit its `Ticket:` line.
+2. Report edited ticket paths; if exactly one actionable implementation ticket is the natural next target, emit `Next Ticket: <path>` before the final artifact line.
+3. Always emit the edited/current ticket path as the final `Ticket:` line.
 
 ## Judgments
 
+### judge: ticket-category
+
+`epic`: hierarchical milestone or decomposition board whose child tickets collectively deliver one parent outcome.
+`workset`: non-hierarchical operating context grouping independent or cross-cutting tickets for coordination, sequencing, or focus.
+`research`: investigation or findings capture without phases.
+`bug`/`feat`/`refactor`/`chore`: actionable implementation unit with phases and verification.
+Default: if the user asks for a board without decomposition ownership, choose `workset`; if they ask for parent outcome breakdown, choose `epic`.
+
 ### judge: spec-address-gate
 
-Trigger: non-`epic`, non-`research` ticket creation or move into `ready/`.
+Trigger: non-`epic`, non-`research`, non-`workset` ticket creation or move into `ready/`.
 Ungated: `idea/` creation and `idea/` -> `todo/` triage.
 Find addressing: identify existing `spec:` or `spec-remove:` stems, or write a ticket-local `## Spec Impact` section.
 Contract-first: continue through `wsflow:lead-write-spec` only when `judge: contract-first-spec` is yes.
@@ -204,7 +228,7 @@ Stop: no stem or `## Spec Impact` can address the behavior, `wsflow:lead-write-s
 ### judge: initial-status
 
 `idea/`: topic is exploratory or underspecified.
-`todo/`: scope and goal are accepted actionable backlog.
+`todo/`: scope and goal are accepted actionable backlog, or the ticket is a non-actionable coordination artifact.
 `ready/`: spec-addressed implementation queue.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`.
@@ -222,11 +246,11 @@ Do not trigger: a ticket merely has `related:` links or default cross-ticket dec
 
 ### judge: ticket-shape
 
-Artifact role: keep epics board-level; put implementation detail in child tickets.
+Artifact role: keep epics board-level and worksets operating-context-only; put implementation detail in actionable tickets.
 Scope keep: decisions, constraints, and agreed API/type/event/UI sketches.
 Scope exclude: source-local edit notes unless settled constraints.
-Ticket split: only when board, ticket, and implementation-unit roles are mixed, or unrelated increments belong in separate child tickets.
-Phase default: non-epic actionable tickets use one `Phase 1`.
+Ticket split: only when board, ticket, and implementation-unit roles are mixed, or unrelated increments belong in separate actionable tickets.
+Phase default: actionable tickets use one `Phase 1`.
 Phase unit: one reviewable implementation slice a future fresh session can finish, review, verify, and hand off cleanly.
 Phase split: add phases only when review, verification, rollback, or dependency boundaries differ.
 

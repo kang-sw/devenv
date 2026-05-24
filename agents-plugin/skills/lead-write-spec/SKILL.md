@@ -49,7 +49,7 @@ Evaluate whether work introduces or modifies behavior observable outside the imp
 Yes: planned behavior must be visible and stable before implementation begins.
 Usually yes: externally consumed schemas, CLI/API contracts, file or wire formats, cross-skill routing contracts, or multi-ticket planned behavior.
 No: planned text mainly restates a ticket phase, final behavior will be refined during implementation, or a ticket-local `## Spec Impact` is enough for post-implementation closeout.
-When yes: write the marker, then emit "Session reminder: implementation `🚧` entries require a non-`epic`, non-`research` `ready/` ticket; epic or research tickets may back only planned decomposition or investigation text."
+When yes: write the marker, then emit "Session reminder: implementation `🚧` entries require a non-`epic`, non-`research`, non-`workset` `ready/` ticket; epic, research, or workset tickets may back only planned decomposition, investigation text, or operating context."
 When no: do not write `🚧`; suggest ticket-local `## Spec Impact` instead.
 
 ### judge: directory-vs-flat

@@ -5,7 +5,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ## Path & Naming
 
 - Path: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md` — `YYMMDD` is creation date, never changes on move.
-- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
+- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`, `workset`.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path.
 
 ## Status Flow
@@ -16,10 +16,11 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - Add `completed:` date on move to `.done/`.
 - `idea/` tickets may omit `spec:` entries.
 - `todo/` tickets may include optional `spec:` entries as recovery hints and promotion candidates.
-- Non-`epic`, non-`research` tickets entering `ready/` require spec addressing through `spec:`, `spec-remove:`, or a body `## Spec Impact` section; epics decompose scope and research captures findings.
+- Non-`epic`, non-`research`, non-`workset` tickets entering `ready/` require spec addressing through `spec:`, `spec-remove:`, or a body `## Spec Impact` section; epics decompose scope, research captures findings, and worksets collect operating context.
 - Epic tickets are lightweight milestone boards and remain exempt from the ready spec-address gate.
+- Workset tickets are non-hierarchical operating-context boards, remain exempt from the ready spec-address gate, and normally stay in `idea/` or `todo/` rather than `ready/`.
 - Promoting `idea/` → `todo/` is triage and does not require spec creation.
-- Promoting or creating a non-`epic`, non-`research` ticket in `ready/`: `lead-write-ticket` verifies spec addressing before the move or commit and invokes `lead-write-spec` only for contract-first planned spec entries.
+- Promoting or creating a non-`epic`, non-`research`, non-`workset` ticket in `ready/`: `lead-write-ticket` verifies spec addressing before the move or commit and invokes `lead-write-spec` only for contract-first planned spec entries.
 - Dropping a ticket with linked spec entries: route through `lead-discuss`, then `lead-write-spec` to remove orphaned `🚧` entries before moving the ticket.
 
 ## Epic Tickets
@@ -28,6 +29,13 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - Detailed discussion, implementation approaches, constraints, and phase-specific decisions belong in child tickets, not in the epic body.
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
+
+## Workset Tickets
+
+- Workset bodies preserve non-hierarchical operating context for a session, goal, sprint, or temporary focus area.
+- Worksets list included tickets without making them children; do not add, remove, or change `parent:` based on workset inclusion.
+- Worksets do not own decomposition, cross-child invariants, implementation phases, or spec-ready behavior.
+- If the grouping starts owning scope decomposition or invariant decisions, create or use an `epic` instead.
 
 ## Phases
 
@@ -126,6 +134,35 @@ Optional sections — add between `## Background` and `## Phases` when relevant:
 ```
 
 Research tickets have no phases. Sections after `## Background` are freeform topic headings.
+
+### Workset body (category = `workset`)
+
+```markdown
+# <title>
+
+## Context
+
+<why this operating set exists>
+
+## Tickets
+
+- `<stem-or-path>` - <status; role in this workset; dependency note>
+
+## Planned References
+
+- `<provisional label>` - <intended role; creation condition>
+
+## Focus
+
+<current session, goal, sprint, or temporary operating focus>
+
+## Exit Criteria
+
+- Done: <conditions for closing this workset>
+- Deferred: <what moves out of this workset>
+```
+
+Workset bodies define a non-hierarchical ticket collection, not decomposition. Included tickets do not set `parent:` to the workset; planned references do not receive status, path, or `parent:` until a real ticket exists.
 
 ### Epic body (category = `epic`)
 

@@ -91,6 +91,19 @@ done/drop/defer criteria; detailed discussion and implementation phases move
 into child tickets. Epics remain decomposition artifacts exempt from ready spec
 gating. {#260508-lightweight-epic-ticket-conventions}
 
+Workset tickets are documented as non-hierarchical operating-context boards.
+Workset bodies keep the context, included ticket list, current focus, and exit
+criteria for a session, goal, sprint, or temporary focus area. Included tickets
+are listed by stem or path with status and role; planned-but-not-created items
+go under `## Planned References` with provisional labels and creation
+conditions, not status or path. Workset inclusion never changes `parent:`,
+and worksets do not own decomposition, cross-child invariants, implementation
+phases, or spec-ready behavior. If a grouping starts owning scope decomposition
+or invariant decisions, it becomes epic-shaped instead. Worksets remain
+coordination artifacts exempt from ready spec gating and normally stay in
+`idea/` or `todo/`, not `ready/`.
+{#260524-workset-ticket-conventions}
+
 `ws/tickets.list`, `ws/tickets.find`, and `ws/tickets.status` provide structured
 ticket discovery across active and archived statuses, including phase/result
 state, snippets, relationships, spec links, plans, skeletons, and status
@@ -180,7 +193,7 @@ landed, handles removed spec stems, verifies duplicate anchors, and commits all
 spec changes together.
 
 `lead-write-ticket` creates or updates tickets. It applies the spec-address gate
-when a non-`epic`, non-`research` ticket enters `ready/`, reads ticket
+when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads ticket
 conventions, verifies existing stems or ticket-local `## Spec Impact`, invokes
 `lead-write-spec` only for contract-first planned spec entries, updates queue
 entries for `ready/` work, preserves stable ticket stems, and commits ticket
