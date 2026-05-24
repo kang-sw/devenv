@@ -92,6 +92,7 @@ import {
 } from "./terminals";
 import {
   compactWorkspaceWorkRoot,
+  compactWorkspaceWorkRootTitle,
   flattenEntities,
   reconcileSelectedId,
   type ActionHint,
@@ -3498,7 +3499,7 @@ function WorkspaceRows({
       <div className="resource-group">
         <ResourceRow
           id={compactRoot.id}
-          title={`${workspace.label} / ${compactRoot.label}`}
+          title={compactWorkspaceWorkRootTitle(workspace, compactRoot)}
           eyebrow="compact workRoot"
           state={compactRoot.state}
           depth={0}

@@ -193,6 +193,8 @@ empty, stale, and error states; compact singleton rows; and a reserved
 right-side viewer region without implementing the deferred viewer feature. Each
 workspace with one workRoot renders as one compact left-nav row selected by the
 concrete workRoot id, without depending on main/sub instance presence.
+When the workspace and workRoot labels are identical, the compact row displays
+that label once; distinct labels remain visible as a workspace/workRoot pair.
 Workspaces with multiple workRoots continue to show separate workspace and
 workRoot rows. Main/sub instances remain workbench surfaces or projections
 rather than default recursive left-nav rows.

@@ -1,5 +1,6 @@
 import {
   compactWorkspaceWorkRoot,
+  compactWorkspaceWorkRootTitle,
   flattenEntities,
   preferredSelection,
   reconcileSelectedId,
@@ -211,6 +212,19 @@ assertEqual(
   compactWorkspaceWorkRoot(singletonNoMainWorkspace)?.id,
   "root-local-abc",
   "single workspace + single workRoot compacts to the workRoot id without main instances",
+);
+assertEqual(
+  compactWorkspaceWorkRootTitle(singletonNoMainWorkspace, singletonNoMainWorkspace.workRoots[0]),
+  "devenv",
+  "compact workspace/workRoot title deduplicates matching labels",
+);
+assertEqual(
+  compactWorkspaceWorkRootTitle(
+    singletonNoMainWorkspace,
+    workRoot("root-distinct", "workspace-local", "distinct"),
+  ),
+  "devenv / distinct",
+  "compact workspace/workRoot title preserves distinct labels",
 );
 
 const multiRootWorkspace: DashboardResourcesView = {
