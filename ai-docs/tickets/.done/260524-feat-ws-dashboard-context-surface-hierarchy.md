@@ -12,6 +12,7 @@ spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Clarify dashboard context surface hierarchy
@@ -114,3 +115,26 @@ Verification should include:
 - Manual screenshot review that large context boundaries are more readable
   than local dividers and that no hierarchy fix reintroduces heavy always-on
   button borders.
+
+### Result (4afb744) - 2026-05-24
+
+Implemented the context surface hierarchy pass over the existing dashboard
+chrome. `styles.css` now exposes distinct semantic roles for region, context,
+pane, pane-body, document-chrome, local divider, context divider, structural
+divider, and split gutter surfaces. The left navigation, workRoot topbar,
+Dockview group/tab/body stack, and read-only editor pane consume those tokens
+so large working contexts read separately from local tab/body or ribbon/body
+dividers.
+
+The implementation preserved behavior and command routing: resource selection,
+topbar commands, Dockview ownership, terminal behavior, file explorer data, and
+read-only pane semantics remain unchanged. The browser gate now asserts that
+nav/workbench regions, topbar/tabbar/body surfaces, structural/local divider
+tokens, and the Dockview split gutter are visually distinct.
+
+Verification passed:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png`, `file-explorer.png`,
+  `narrow-workbench.png`, and `topbar-overflow.png`
