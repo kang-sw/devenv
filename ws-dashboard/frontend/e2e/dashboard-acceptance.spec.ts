@@ -491,6 +491,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(compactRow).toContainText(workRootDisplayName(workRoot));
     await expect(compactRow.locator(".resource-row-icon-paired")).toBeVisible();
     await expect(compactRow.locator(".state-badge")).toHaveCount(0);
+    await expect(compactRow.locator(".meta-chip")).toHaveCount(0);
     await expect(compactRow).toHaveAttribute("title", /directory/);
     await expect(compactRow).toHaveAttribute("title", /availability: available/);
     await expect(compactRow).toHaveAttribute("title", /activation: online/);
@@ -512,6 +513,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     await activationButton.click();
     await expect(metaRow).toContainText("offline");
+    await expect(
+      page.locator('.resource-row[data-command-id="resource.select"]').first().locator(".meta-chip, .state-badge"),
+    ).toHaveCount(0);
     await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
       "data-last-command-id",
       "workRoot.activation.set",

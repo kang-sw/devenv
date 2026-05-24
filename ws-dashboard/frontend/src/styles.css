@@ -2424,7 +2424,7 @@ button {
 
 .resource-row-main {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   gap: var(--ws-space-04);
 }
 
@@ -2438,9 +2438,9 @@ button {
 }
 
 .resource-row-icon-paired {
-  width: 22px;
-  gap: 1px;
-  justify-content: center;
+  width: 36px;
+  gap: 4px;
+  justify-content: flex-start;
 }
 
 .resource-row-icon-paired svg + svg {
@@ -2467,6 +2467,12 @@ button {
   min-height: 26px;
   align-self: center;
   padding: 0;
+}
+
+.resource-row-action.icon-button:hover:not(:disabled),
+.resource-row-action.icon-button:focus-visible {
+  border-color: color-mix(in srgb, var(--ws-color-state-error) 70%, transparent);
+  background: color-mix(in srgb, var(--ws-color-panel-hover) 76%, transparent);
 }
 
 .workbench-toolbar {
