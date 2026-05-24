@@ -169,25 +169,25 @@ the daemon can identify it. Checked-out branches, invalid names, unavailable
 Git roots, and path conflicts produce bounded errors without exposing private
 host paths in command payloads, logs, or browser-visible diagnostics.
 
-## 🚧 Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
+## Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
 
-The selected WorkRoot toolbar will show Git controls only for online,
-available Git workRoots. Non-Git, offline, missing, moved, or inaccessible
-workRoots will not render branch or Git status controls beyond bounded
+The selected WorkRoot toolbar shows Git controls only for online, available
+Git workRoots. Non-Git, offline, missing, moved, or inaccessible workRoots do
+not render branch or Git status controls beyond bounded
 unavailable diagnostics.
 
-The toolbar will include a branch chip for the current branch or a bounded
-detached `HEAD` label. Opening the chip will show a daemon-resolved branch list
-with checked-out branches disabled when known, plus a `+ New branch...` action
-that creates and switches to a new branch from a selected base branch. Branch
-switch and create actions will follow Git defaults and revalidate server-side
-before mutation.
+The toolbar includes a branch chip for the current branch or a bounded detached
+`HEAD` label. Opening the chip shows a daemon-resolved branch list with
+checked-out branches disabled when known, plus a `+ New branch...` action that
+creates and switches to a new branch from a selected base branch. Branch switch
+and create actions follow Git defaults and revalidate server-side before
+mutation.
 
-A compact Git status pill will summarize line/file and upstream state with the
+A compact Git status pill summarizes line/file and upstream state with the
 segment grammar `+<added-lines> -<removed-lines> *<modified-files>
-?<untracked-files> | ↑<ahead> ↓<behind>`. The pill will always expose a small
-fetch/refresh action, and upstream push/pull segments will be interactive only
-when applicable. Push will run plain `git push`; pull will run
+?<untracked-files> | ↑<ahead> ↓<behind>`. The pill always exposes a small
+fetch/refresh action, and upstream push/pull segments are interactive only when
+applicable. Push runs plain `git push`; pull runs
 `git pull --ff-only` so dashboard-triggered pulls cannot leave the workRoot in
 a merge or rebase conflict state.
 
