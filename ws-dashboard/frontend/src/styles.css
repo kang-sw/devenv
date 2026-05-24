@@ -998,10 +998,10 @@ button {
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--ws-color-action) 12%, transparent),
+      color-mix(in srgb, var(--ws-color-action) 18%, transparent),
       transparent 58%
     ),
-    var(--ws-color-panel-selected);
+    color-mix(in srgb, var(--ws-color-panel-selected) 78%, var(--ws-color-text-primary) 22%);
   box-shadow:
     inset 0 0 0 var(--ws-border-width-hairline)
       color-mix(in srgb, var(--ws-color-text-primary) 24%, transparent),
