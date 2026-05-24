@@ -998,6 +998,12 @@ button {
   background: var(--ws-color-panel-selected);
 }
 
+.resource-row-selected .resource-row-icon,
+.resource-row-selected .resource-kind-glyph,
+.resource-row-selected .row-title {
+  color: var(--ws-color-action-hover);
+}
+
 .resource-row-main,
 .resource-row-meta {
   display: flex;
@@ -2434,7 +2440,7 @@ button {
 
 .resource-row-main {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   gap: var(--ws-space-04);
 }
 
@@ -2447,13 +2453,7 @@ button {
   color: var(--ws-color-text-tertiary);
 }
 
-.resource-row-icon-paired {
-  width: 36px;
-  gap: 4px;
-  justify-content: flex-start;
-}
-
-.resource-row-icon-paired svg + svg {
+.resource-row-icon-compact {
   color: var(--ws-color-action);
 }
 

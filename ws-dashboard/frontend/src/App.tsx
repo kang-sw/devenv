@@ -741,10 +741,9 @@ function ResourceGlyph({
   if (presentation === "compactWorkRoot") {
     return (
       <span
-        className="resource-row-icon resource-row-icon-paired"
+        className="resource-row-icon resource-row-icon-compact"
         aria-hidden="true"
       >
-        <BriefcaseBusiness size={15} strokeWidth={1.8} />
         <FolderOpen size={15} strokeWidth={1.8} />
       </span>
     );

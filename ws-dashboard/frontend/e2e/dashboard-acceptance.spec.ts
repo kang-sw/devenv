@@ -489,7 +489,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(compactRow).toHaveClass(/resource-row-selected/);
     await expect(compactRow).toContainText(workRootDisplayName(workRoot));
-    await expect(compactRow.locator(".resource-row-icon-paired")).toBeVisible();
+    await expect(compactRow.locator(".resource-row-icon-compact")).toBeVisible();
+    await expect(compactRow.locator(".resource-row-icon svg")).toHaveCount(1);
     await expect(compactRow.locator(".state-badge")).toHaveCount(0);
     await expect(compactRow.locator(".meta-chip")).toHaveCount(0);
     await expect(compactRow).toHaveAttribute("title", /directory/);
