@@ -172,6 +172,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-bug-worktree-local-index-missing` | idea | Explore dashboard-managed propagation of ignored local workflow context across worktrees |
 | `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
+| `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
