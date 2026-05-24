@@ -2455,6 +2455,7 @@ button {
   grid-column: 3;
   grid-row: 1;
   gap: var(--ws-space-04);
+  overflow: visible;
 }
 
 .workbench-overflow {
