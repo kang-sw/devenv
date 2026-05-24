@@ -46,8 +46,8 @@ The workset covers:
   management slice. Replace the workspace trash affordance with an overflow
   menu, keep remove workspace in that menu, and add Git worktree creation with
   daemon-resolved auto branch/path preview.
-- `260524-feat-ws-dashboard-git-aware-workroot-toolbar` - ready; companion
-  WorkRoot toolbar slice. Add Git-aware branch/status chips for selected Git
+- `260524-feat-ws-dashboard-git-aware-workroot-toolbar` - done; companion
+  WorkRoot toolbar slice. Added Git-aware branch/status chips for selected Git
   workRoots, including fetch, plain push, and fast-forward-only pull controls.
 
 ## Cross-Ticket Decisions

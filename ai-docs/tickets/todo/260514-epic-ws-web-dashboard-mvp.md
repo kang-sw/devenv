@@ -97,8 +97,8 @@ Active or planned product tracks:
   `260524-feat-ws-dashboard-add-git-worktree-ui` is done:
   move workspace removal behind an overflow menu and add Git worktree creation
   with daemon-resolved branch/path preview.
-  `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is the ready companion
-  toolbar slice for selected-workRoot branch/status chips plus fetch, push, and
+  `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is done:
+  add selected-workRoot branch/status chips plus fetch, push, and
   fast-forward-only pull controls.
 - Agent view panel - planned child track. Promote read-only Activity Console
   foundations into a dedicated agent-oriented panel for named-agent/main-
