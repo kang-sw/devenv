@@ -4,6 +4,9 @@ import {
   buildActivitySelectItemCommand,
   buildActivityTranscriptLoadMoreCommand,
   buildDashboardRefreshCommand,
+  buildDocumentModeSetCommand,
+  buildDocumentRevertCommand,
+  buildDocumentSaveCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
@@ -68,6 +71,9 @@ const migratedCommands = [
   buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
   buildActivityRefreshCommand(workRootId),
   buildActivityDetailToggleCommand("agent:reviewer", "block:1"),
+  buildDocumentModeSetCommand(workRootId, filePath, "edit"),
+  buildDocumentSaveCommand(workRootId, filePath),
+  buildDocumentRevertCommand(workRootId, filePath),
 ] as const;
 
 assertDeepEqual(
@@ -93,6 +99,9 @@ assertDeepEqual(
     "activity.transcript.loadMore",
     "activity.refresh",
     "activity.detail.toggle",
+    "document.mode.set",
+    "document.save",
+    "document.revert",
   ],
   "real command builders preserve migrated command ids",
 );
@@ -120,6 +129,9 @@ assertDeepEqual(
     "activity.transcript.loadMore",
     "activity.refresh",
     "activity.detail.toggle",
+    "document.mode.set",
+    "document.save",
+    "document.revert",
   ],
   "real command builders emit executable payload variants",
 );
@@ -304,4 +316,25 @@ assertEqual(
   dashboardCommandLabel(buildActivityDetailToggleCommand("agent:reviewer", "block:1")),
   "Toggle detail",
   "activity detail toggle command label is stable",
+);
+
+assertEqual(
+  dashboardCommandLabel(buildDocumentModeSetCommand(workRootId, filePath, "edit")),
+  "Edit document",
+  "document edit command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildDocumentModeSetCommand(workRootId, filePath, "view")),
+  "View document",
+  "document view command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildDocumentSaveCommand(workRootId, filePath)),
+  "Save document",
+  "document save command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildDocumentRevertCommand(workRootId, filePath)),
+  "Revert document",
+  "document revert command label is stable",
 );

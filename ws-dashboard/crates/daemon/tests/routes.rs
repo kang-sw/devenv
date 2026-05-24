@@ -48,7 +48,7 @@ use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
     resolve_work_root_agents_dir, WorkRootActivityProjectionConfig, WorkRootActivityProjector,
 };
-use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
+use ws_dashboard_daemon::work_root_files::{DocumentEventHub, OpenedWorkRoots};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TestShellProfile {
@@ -142,6 +142,7 @@ fn app_state_with_opened_and_store(
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -158,6 +159,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -378,6 +380,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
@@ -2193,6 +2196,7 @@ fn app_state_with_activity_cache_and_codex_home(
         dashboard_state: DashboardStateStore::disabled(),
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
+        document_events: DocumentEventHub::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
             codex_home,
             cache_home: Some(cache_home),
@@ -5815,6 +5819,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         })),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -6108,4 +6113,271 @@ async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() 
         .expect("parse body");
     let parse_body_text = String::from_utf8_lossy(&parse_body);
     assert!(!parse_body_text.contains("RAW_PARSE_FAILURE_SENTINEL"));
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_save_and_reject_conflicts() {
+    let root = temp_fixture_path("write-file");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/read?path=doc.md",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("read request"),
+        )
+        .await
+        .expect("read response");
+    assert_eq!(read.status(), StatusCode::OK);
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
+    let read_json: serde_json::Value = serde_json::from_slice(&read_body).expect("read json");
+    let base_hash = read_json["contentHash"].as_str().expect("content hash");
+    assert!(base_hash.starts_with("sha256:"));
+
+    let stale = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:stale",
+                        "content": "# Stale\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("stale write request"),
+        )
+        .await
+        .expect("stale write response");
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+
+    let write = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": base_hash,
+                        "content": "# After\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("write request"),
+        )
+        .await
+        .expect("write response");
+    assert_eq!(write.status(), StatusCode::OK);
+    let write_body = axum::body::to_bytes(write.into_body(), 64 * 1024)
+        .await
+        .expect("write body");
+    let write_json: serde_json::Value = serde_json::from_slice(&write_body).expect("write json");
+    assert!(write_json["contentHash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(
+        fs::read_to_string(root.join("doc.md")).expect("saved doc"),
+        "# After\n"
+    );
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_are_owner_authenticated_and_reject_traversal() {
+    let root = temp_fixture_path("write-auth");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "path": "../outside.md",
+        "baseContentHash": "sha256:none",
+        "content": "bad"
+    })
+    .to_string();
+    let unauth = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .expect("unauth write"),
+        )
+        .await
+        .expect("unauth response");
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let traversal = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("traversal write"),
+        )
+        .await
+        .expect("traversal response");
+    assert_eq!(traversal.status(), StatusCode::BAD_REQUEST);
+    let traversal_body = axum::body::to_bytes(traversal.into_body(), 4096)
+        .await
+        .expect("traversal body");
+    assert!(!String::from_utf8_lossy(&traversal_body).contains(root.to_string_lossy().as_ref()));
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_document_events_deliver_save_invalidation() {
+    let root = temp_fixture_path("document-events-save");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/documents/events",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("document events request"),
+        )
+        .await
+        .expect("document events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    let mut stream = events.into_body().into_data_stream();
+
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/read?path=doc.md",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("read before write"),
+        )
+        .await
+        .expect("read before write response");
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
+    let read_json: serde_json::Value = serde_json::from_slice(&read_body).expect("read json");
+    let write_body = serde_json::json!({
+        "path": "doc.md",
+        "baseContentHash": read_json["contentHash"],
+        "content": "# After\n"
+    })
+    .to_string();
+    let write = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(write_body))
+                .expect("write request"),
+        )
+        .await
+        .expect("write response");
+    assert_eq!(write.status(), StatusCode::OK);
+    let write_body = axum::body::to_bytes(write.into_body(), 64 * 1024)
+        .await
+        .expect("write body");
+    let write_json: serde_json::Value = serde_json::from_slice(&write_body).expect("write json");
+
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "document.contentChanged"
+                && event["source"]["path"] == "doc.md"
+                && event["contentHash"] == write_json["contentHash"]
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("document SSE chunk")
+                .expect("document SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("document SSE UTF-8"));
+            drain_document_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("save invalidation event");
+
+    remove_static_fixture(&root);
+}
+
+fn drain_document_sse_events(buffer: &mut String, events: &mut Vec<serde_json::Value>) {
+    while let Some(boundary) = buffer.find("\n\n") {
+        let frame = buffer[..boundary].to_owned();
+        *buffer = buffer[(boundary + 2)..].to_owned();
+        if !frame.lines().any(|line| line == "event: document") {
+            continue;
+        }
+        let data = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("document SSE frame data field");
+        events.push(serde_json::from_str(data).expect("document SSE data JSON"));
+    }
 }

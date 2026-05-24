@@ -2904,3 +2904,48 @@ button {
   padding: var(--ws-space-04);
   white-space: pre-wrap;
 }
+
+.document-edit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-05);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-surface-editor-chrome);
+  padding: var(--ws-space-04) var(--ws-space-08);
+}
+
+.document-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-04);
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-02);
+}
+
+.document-edit-actions button {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-raised);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-02) var(--ws-space-05);
+  font: inherit;
+}
+
+.document-edit-actions button:disabled {
+  color: var(--ws-color-text-disabled);
+  cursor: not-allowed;
+}
+
+.document-raw-editor {
+  min-height: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: var(--ws-color-surface-editor-body);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-09);
+  font-family: var(--ws-font-family-mono);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
+  resize: none;
+}

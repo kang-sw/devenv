@@ -4,6 +4,7 @@ import {
   createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
+  parseWorkRootDocumentEvent,
   flattenWorkRootFileTree,
   loadReadOnlyFilePaneRestoreSnapshot,
   readOnlyFilePaneRestoreSnapshot,
@@ -12,7 +13,10 @@ import {
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
+  workRootDocumentEventsEndpoint,
   workRootFileReadEndpoint,
+  workRootFileWriteEndpoint,
+  writeWorkRootTextFile,
   workRootFilesEndpoint,
   readOnlyFilePaneId,
   readOnlyFilePaneLogicalKey,
@@ -69,6 +73,38 @@ assertEqual(
   "read endpoint encodes opaque workRootId and spaced relative path",
 );
 assertEqual(
+  workRootFileWriteEndpoint("root/local abc"),
+  "/api/dashboard/work-roots/root%2Flocal%20abc/files/write",
+  "write endpoint encodes only the opaque workRootId",
+);
+assertEqual(
+  workRootDocumentEventsEndpoint("root/local abc"),
+  "/api/dashboard/work-roots/root%2Flocal%20abc/documents/events",
+  "document events endpoint encodes only the opaque workRootId",
+);
+assertDeepEqual(
+  parseWorkRootDocumentEvent({
+    type: "document.contentChanged",
+    source: { workRootId: "root-local-abc", path: "README.md" },
+    contentHash: "sha256:abc",
+    changedAtMs: 42,
+  }),
+  {
+    type: "document.contentChanged",
+    workRootId: "root-local-abc",
+    path: "README.md",
+    contentHash: "sha256:abc",
+    source: "dashboard",
+    savedAtMs: 42,
+  },
+  "document event parser accepts daemon contentChanged events",
+);
+assertEqual(
+  parseWorkRootDocumentEvent({ type: "unknown" }),
+  null,
+  "document event parser rejects unrelated events",
+);
+assertEqual(
   readOnlyFilePaneModeForOpenGesture("singleClick"),
   "preview",
   "single-click file open selects replaceable preview mode",
@@ -119,6 +155,8 @@ const pinnedPane = applyReadOnlyFilePaneContent(
     name: "main.ts",
     status: "ok",
     readOnly: true,
+    editable: true,
+    contentHash: "sha256:test",
     content: "secret live content",
     sizeBytes: 19,
     languageHint: "typescript",
@@ -337,6 +375,8 @@ try {
         name: "README.md",
         status: "ok",
         readOnly: true,
+        editable: true,
+        contentHash: "sha256:hello",
         content: "hello\n",
         sizeBytes: 6,
         languageHint: "markdown",
@@ -363,6 +403,45 @@ try {
     () => fetchWorkRootTextFile("root-local-abc", "large.txt"),
     /HTTP 413/,
     "read helper falls back to bounded HTTP status when error JSON is unavailable",
+  );
+
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    assertEqual(init?.method, "POST", "write helper uses POST");
+    assertEqual(
+      init?.body,
+      JSON.stringify({ path: "README.md", baseContentHash: "sha256:old", content: "saved\n" }),
+      "write helper sends optimistic hash and content",
+    );
+    return new Response(
+      JSON.stringify({ contentHash: "sha256:new", sizeBytes: 6, savedAtMs: 123 }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+  const writeResponse = await writeWorkRootTextFile("root-local-abc", {
+    path: "README.md",
+    baseContentHash: "sha256:old",
+    content: "saved\n",
+  });
+  assertDeepEqual(
+    writeResponse,
+    { contentHash: "sha256:new", sizeBytes: 6, savedAtMs: 123 },
+    "write helper returns optimistic save metadata",
+  );
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "file changed on disk" }), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  await assertRejects(
+    () =>
+      writeWorkRootTextFile("root-local-abc", {
+        path: "README.md",
+        baseContentHash: "sha256:stale",
+        content: "lost",
+      }),
+    /file changed on disk/,
+    "write helper surfaces optimistic conflict errors",
   );
 } finally {
   globalThis.fetch = errorFetch;
@@ -433,6 +512,8 @@ const loadedPane = applyReadOnlyFilePaneContent(loadingPane, {
   name: "main.rs",
   status: "ok",
   readOnly: true,
+  editable: true,
+  contentHash: "sha256:test",
   content: "fn main() {}\n",
   sizeBytes: 13,
   languageHint: "rust",

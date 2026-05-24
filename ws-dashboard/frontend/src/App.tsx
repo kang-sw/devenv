@@ -43,6 +43,9 @@ import {
 } from "./documentViewer";
 import {
   buildDashboardRefreshCommand,
+  buildDocumentModeSetCommand,
+  buildDocumentRevertCommand,
+  buildDocumentSaveCommand,
   buildDocumentTranslationToggleCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
@@ -89,6 +92,7 @@ import {
 import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
+  applyReadOnlyFilePaneSavedContent,
   createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
@@ -100,6 +104,9 @@ import {
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
+  parseWorkRootDocumentEvent,
+  workRootDocumentEventsEndpoint,
+  writeWorkRootTextFile,
   type DirectoryLoadState,
   readOnlyFilePaneLogicalKey,
   readOnlyFilePaneModeForOpenGesture,
@@ -657,6 +664,27 @@ export function App() {
     [loadResources, readOnlyFilePanes, resources],
   );
 
+  const applyDocumentSaved = useCallback(
+    (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => {
+      setReadOnlyFilePanes((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([key, pane]) => [
+            key,
+            pane.workRootId === source.workRootId && pane.path === source.path
+              ? applyReadOnlyFilePaneSavedContent(
+                  pane,
+                  source.content,
+                  source.contentHash,
+                  source.sizeBytes,
+                )
+              : pane,
+          ]),
+        ),
+      );
+    },
+    [],
+  );
+
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
@@ -704,6 +732,7 @@ export function App() {
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
             onReadOnlyFilePanesChange={setReadOnlyFilePanes}
             onReadOnlyFilePaneOrderByGroupChange={setReadOnlyFilePaneOrderByGroup}
+            onDocumentSaved={applyDocumentSaved}
           />
         </section>
       </div>
@@ -1832,6 +1861,7 @@ function WorkbenchShell({
   onPaneOrderByRootChange,
   onReadOnlyFilePanesChange,
   onReadOnlyFilePaneOrderByGroupChange,
+  onDocumentSaved,
 }: {
   resources: DashboardResourcesView | null;
   selection: WorkbenchSelection | null;
@@ -1860,6 +1890,7 @@ function WorkbenchShell({
   onReadOnlyFilePaneOrderByGroupChange: Dispatch<
     SetStateAction<WorkbenchPaneOrder>
   >;
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
   const [activePaneByRoot, setActivePaneByRoot] = useState<
     Record<string, Record<string, string>>
@@ -1933,6 +1964,67 @@ function WorkbenchShell({
   const activityPaneOpenForSelected = selectedWorkRootId
     ? (activityPaneOpenByRoot[selectedWorkRootId] ?? false)
     : false;
+  const readOnlyFilePanesRef = useRef(readOnlyFilePanes);
+  readOnlyFilePanesRef.current = readOnlyFilePanes;
+
+  const refreshOpenDocument = useCallback(
+    (workRootId: string, path: string, expectedContentHash?: string) => {
+      if (
+        !readOnlyFilePanesRef.current.some(
+          (pane) =>
+            pane.workRootId === workRootId &&
+            pane.path === path &&
+            (!expectedContentHash || pane.contentHash !== expectedContentHash),
+        )
+      ) {
+        return;
+      }
+      void fetchWorkRootTextFile(workRootId, path)
+        .then((file) => {
+          onReadOnlyFilePanesChange((current) =>
+            Object.fromEntries(
+              Object.entries(current).map(([key, pane]) => [
+                key,
+                pane.workRootId === workRootId && pane.path === path
+                  ? applyReadOnlyFilePaneContent(pane, file)
+                  : pane,
+              ]),
+            ),
+          );
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "file read failed";
+          onReadOnlyFilePanesChange((current) =>
+            Object.fromEntries(
+              Object.entries(current).map(([key, pane]) => [
+                key,
+                pane.workRootId === workRootId && pane.path === path
+                  ? applyReadOnlyFilePaneError(pane, message)
+                  : pane,
+              ]),
+            ),
+          );
+        });
+    },
+    [onReadOnlyFilePanesChange],
+  );
+
+  const refreshVisibleDocuments = useCallback(() => {
+    const rootId = selectedWorkRootId;
+    if (!rootId) {
+      return;
+    }
+    const paths = [
+      ...new Set(
+        readOnlyFilePanesRef.current
+          .filter((pane) => pane.workRootId === rootId && pane.status === "loaded")
+          .map((pane) => pane.path),
+      ),
+    ];
+    for (const path of paths) {
+      refreshOpenDocument(rootId, path);
+    }
+  }, [refreshOpenDocument, selectedWorkRootId]);
 
   const setActivePaneByGroupForSelected = (
     next:
@@ -1950,6 +2042,7 @@ function WorkbenchShell({
       };
     });
   };
+
 
   const workbenchModel =
     resources && selection
@@ -1989,6 +2082,7 @@ function WorkbenchShell({
                 ? activityTranscriptRefresh
                 : null,
               onCommand,
+              onDocumentSaved,
             ),
             paneOrderByGroup,
           );
@@ -2310,6 +2404,59 @@ function WorkbenchShell({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [workbenchModel?.root.id, activityPaneOpenForSelected, activityPollFallbackRootId]);
+
+  // Document content events are source-neutral invalidations for open file panes.
+  // A save from one pane fans out by re-reading the daemon view for matching
+  // clean panes, while pane-local edit state marks dirty drafts stale when the
+  // content prop changes underneath them. Browser focus/visibility re-reads are
+  // the bounded fallback when the SSE stream is unavailable.
+  useEffect(() => {
+    const rootId = selectedWorkRootId;
+    if (!rootId) {
+      return;
+    }
+
+    let cancelled = false;
+    const source = new EventSource(workRootDocumentEventsEndpoint(rootId));
+    const handleDocumentMessage = (message: MessageEvent) => {
+      if (cancelled) {
+        return;
+      }
+      let payload: unknown;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      const event = parseWorkRootDocumentEvent(payload);
+      if (!event || event.workRootId !== rootId) {
+        return;
+      }
+      refreshOpenDocument(event.workRootId, event.path, event.contentHash);
+    };
+    source.addEventListener("document", handleDocumentMessage);
+    source.onmessage = handleDocumentMessage;
+    return () => {
+      cancelled = true;
+      source.removeEventListener("document", handleDocumentMessage);
+      source.close();
+    };
+  }, [refreshOpenDocument, selectedWorkRootId]);
+
+  useEffect(() => {
+    const onFocus = () => refreshVisibleDocuments();
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshVisibleDocuments();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshVisibleDocuments]);
 
   // The output poll reads live terminal sessions from a ref so the polling
   // interval stays stable across renders. Depending the interval on
@@ -3427,6 +3574,7 @@ function buildWorkbenchEditorGroups(
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
   activityTranscriptRefresh: ActivityTranscriptRefreshSignal | null,
   onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -3437,6 +3585,7 @@ function buildWorkbenchEditorGroups(
     readOnlyFilePaneOrderByGroup,
     dashboardGroups,
     onCommand,
+    onDocumentSaved,
   );
   const terminalPanesByGroup = terminalWorkbenchPanesByGroup(
     root,
@@ -4196,10 +4345,11 @@ function readOnlyWorkbenchPanesByGroup(
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
   groups: ReadonlyArray<{ id: string; label: string }>,
   onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
     .filter((pane) => pane.workRootId === root.id)
-    .map((pane) => readOnlyWorkbenchPane(root, pane, onCommand));
+    .map((pane) => readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
   const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
@@ -4229,6 +4379,7 @@ function readOnlyWorkbenchPane(
   root: WorkRootView,
   pane: ReadOnlyFilePane,
   onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): WorkbenchPane {
   const state: ViewState = {
     status: pane.status,
@@ -4255,7 +4406,7 @@ function readOnlyWorkbenchPane(
     meta,
     contentRevision: readOnlyFilePaneRevision(pane),
     body: isMarkdownDocumentSource(pane) ? (
-      <ReadOnlyMarkdownPane pane={pane} root={root} onCommand={onCommand} />
+      <ReadOnlyMarkdownPane pane={pane} root={root} onCommand={onCommand} onDocumentSaved={onDocumentSaved} />
     ) : (
       <ReadOnlyTextPane pane={pane} root={root} />
     ),
@@ -4266,10 +4417,12 @@ function ReadOnlyMarkdownPane({
   pane,
   root,
   onCommand,
+  onDocumentSaved,
 }: {
   pane: ReadOnlyFilePane;
   root: WorkRootView;
   onCommand: DashboardCommandDispatcher;
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationStatus, setTranslationStatus] = useState<
@@ -4277,6 +4430,77 @@ function ReadOnlyMarkdownPane({
   >("idle");
   const [translationMessage, setTranslationMessage] = useState<string | null>(null);
   const [translationOverlay, setTranslationOverlay] = useState<DocumentTranslationOverlay | undefined>();
+  const [documentMode, setDocumentMode] = useState<"view" | "edit">("view");
+  const [draft, setDraft] = useState(pane.content);
+  const [baseContentHash, setBaseContentHash] = useState(pane.contentHash);
+  const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "stale" | "conflict" | "error">("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (saveState === "dirty" || saveState === "stale") {
+      setSaveState("stale");
+      setSaveMessage("File changed while this draft has unsaved edits");
+      return;
+    }
+    setDraft(pane.content);
+    setBaseContentHash(pane.contentHash);
+    setTranslationOverlay(undefined);
+  }, [pane.content, pane.contentHash]);
+
+  const setModeCommand = (mode: "view" | "edit") => {
+    const command = buildDocumentModeSetCommand(pane.workRootId, pane.path, mode);
+    onCommand(command, { [command.commandId]: () => setDocumentMode(mode) });
+  };
+
+  const revertDraft = () => {
+    const command = buildDocumentRevertCommand(pane.workRootId, pane.path);
+    onCommand(command, {
+      [command.commandId]: () => {
+        setDraft(pane.content);
+        setBaseContentHash(pane.contentHash);
+        setSaveState("idle");
+        setSaveMessage(null);
+      },
+    });
+  };
+
+  const saveDraft = () => {
+    const command = buildDocumentSaveCommand(pane.workRootId, pane.path);
+    onCommand(command, {
+      [command.commandId]: () => {
+        if (!baseContentHash) {
+          setSaveState("error");
+          setSaveMessage("Missing base content hash");
+          return;
+        }
+        setSaveState("saving");
+        setSaveMessage("Saving");
+        void writeWorkRootTextFile(pane.workRootId, {
+          path: pane.path,
+          baseContentHash,
+          content: draft,
+        })
+          .then((response) => {
+            setBaseContentHash(response.contentHash);
+            setSaveState("saved");
+            setSaveMessage("Saved");
+            setTranslationOverlay(undefined);
+            onDocumentSaved({
+              workRootId: pane.workRootId,
+              path: pane.path,
+              content: draft,
+              contentHash: response.contentHash,
+              sizeBytes: response.sizeBytes,
+            });
+          })
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : "Save failed";
+            setSaveState(message.toLowerCase().includes("content hash") ? "conflict" : "error");
+            setSaveMessage(message);
+          });
+      },
+    });
+  };
 
   useEffect(() => {
     if (!translationEnabled || pane.status !== "loaded") {
@@ -4378,7 +4602,50 @@ function ReadOnlyMarkdownPane({
               {translationMessage ?? "Target: Korean"}
             </span>
           </div>
-          <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+          <div className="document-edit-toolbar ws-toolbar">
+            <div className="document-viewer-segmented" role="group" aria-label="Document mode">
+              <button
+                type="button"
+                className={`document-viewer-segment${documentMode === "view" ? " is-active" : ""}`}
+                data-command-id="document.mode.set"
+                onClick={() => setModeCommand("view")}
+              >
+                view
+              </button>
+              <button
+                type="button"
+                className={`document-viewer-segment${documentMode === "edit" ? " is-active" : ""}`}
+                data-command-id="document.mode.set"
+                onClick={() => setModeCommand("edit")}
+              >
+                edit
+              </button>
+            </div>
+            {documentMode === "edit" ? (
+              <div className="document-edit-actions">
+                <button type="button" data-command-id="document.save" disabled={saveState === "saving" || draft === pane.content} onClick={saveDraft}>
+                  Save
+                </button>
+                <button type="button" data-command-id="document.revert" disabled={saveState === "saving" || draft === pane.content} onClick={revertDraft}>
+                  Revert
+                </button>
+                <span data-document-save-state={saveState}>{saveMessage ?? (draft === pane.content ? "Clean" : "Unsaved changes")}</span>
+              </div>
+            ) : null}
+          </div>
+          {documentMode === "edit" ? (
+            <textarea
+              className="document-raw-editor ws-code-block"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.currentTarget.value);
+                setSaveState("dirty");
+                setSaveMessage("Unsaved changes");
+              }}
+            />
+          ) : (
+            <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+          )}
         </>
       )}
     </div>

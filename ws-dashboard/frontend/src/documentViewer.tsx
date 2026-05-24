@@ -323,17 +323,6 @@ export function DocumentViewer({
 
   return (
     <div className="document-viewer" data-content-hash={model.contentHash}>
-      <div className="document-viewer-mode ws-toolbar" aria-label="Document mode">
-        <div className="document-viewer-segmented" role="group" aria-label="Document mode">
-          <button className="document-viewer-segment is-active" type="button" aria-pressed="true">
-            view
-          </button>
-          <button className="document-viewer-segment" type="button" disabled title="Edit mode is deferred">
-            edit
-          </button>
-        </div>
-        <span className="ws-chip">Markdown</span>
-      </div>
       {selectedBlocks.length > 0 ? (
         <div className="document-viewer-action-strip" data-selected-block-count={selectedBlocks.length}>
           <span>{selectedBlocks.length} block{selectedBlocks.length === 1 ? "" : "s"} selected</span>

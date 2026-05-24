@@ -31,7 +31,10 @@ use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
     WorkRootActivityProjector,
 };
-use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
+use crate::work_root_files::{
+    document_events, list_work_root_files, read_work_root_file, write_work_root_file,
+    DocumentEventHub, OpenedWorkRoots,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -42,6 +45,7 @@ pub struct AppState {
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
+    pub document_events: DocumentEventHub,
     pub registry_persist_lock: Arc<Mutex<()>>,
 }
 
@@ -113,6 +117,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/files/read",
             get(read_work_root_file),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/files/write",
+            post(write_work_root_file),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/documents/events",
+            get(document_events),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activity",

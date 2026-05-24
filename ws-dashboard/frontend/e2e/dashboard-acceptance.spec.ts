@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
@@ -1625,7 +1625,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const pane = page.locator(".document-pane");
     await expect(pane).toBeVisible();
     await expect(pane.locator(".document-viewer-segment.is-active")).toContainText("view");
-    await expect(pane.locator(".document-viewer-segment:disabled")).toContainText("edit");
+    await expect(pane.locator('[data-command-id="document.mode.set"]', { hasText: "edit" })).toBeEnabled();
     await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
     await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
     await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
@@ -1634,6 +1634,37 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator(".document-translation-status")).toContainText(
       /No translation provider configured|Translation partial|Translated to/,
     );
+
+    if (ownsWorkRoot) {
+      await pane.locator('[data-command-id="document.mode.set"]', { hasText: "edit" }).click();
+      await expect(pane.locator(".document-raw-editor")).toBeVisible();
+      await pane.locator(".document-raw-editor").fill(
+        [
+          "# Gate Document Edited",
+          "",
+          "Markdown paragraph line",
+          "with soft continuation",
+          "",
+          "- [x] completed task",
+          "",
+          "> [!note] Browser note",
+          "> callout body",
+          "",
+          "| Kind | Value |",
+          "| --- | --- |",
+          "| table | rendered |",
+        ].join("\n") + "\n",
+      );
+      await pane.locator('[data-command-id="document.save"]').click();
+      await expect(pane.locator('[data-document-save-state="saved"]')).toContainText("Saved");
+      await pane.locator('[data-command-id="document.mode.set"]', { hasText: "view" }).click();
+      await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText(
+        "Gate Document Edited",
+      );
+      expect(readFileSync(path.join(workRoot, "gate-document.md"), "utf8")).toContain(
+        "# Gate Document Edited",
+      );
+    }
 
     const paragraphBlock = pane.locator('[data-document-block-kind="paragraph"]').first();
     await paragraphBlock.click();
@@ -1658,7 +1689,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await markdownPinnedTab.locator('[data-command-id="workbench.tab.close"]').click();
     await expect(markdownPinnedTab).toHaveCount(0);
     note(
-      "markdown document viewer: daemon-served markdown file rendered heading, task, callout, table, block action strip, and relative pathref copy while preserving preview-to-pinned tabs",
+      "markdown document viewer: daemon-served markdown file rendered heading, task, callout, table, raw edit/save, block action strip, and relative pathref copy while preserving preview-to-pinned tabs",
     );
   });
 

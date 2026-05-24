@@ -22,6 +22,9 @@ export type DashboardCommandId =
   | "activity.refresh"
   | "activity.detail.toggle"
   | "document.translation.toggle"
+  | "document.mode.set"
+  | "document.save"
+  | "document.revert"
   | `resource.action.${string}`
   | `workbench.toggle.${string}`
   | `workbench.tab.${string}`;
@@ -55,7 +58,10 @@ export type DashboardCommandPayload =
   | { type: "activity.transcript.loadMore"; activityId: string }
   | { type: "activity.refresh"; workRootId: string }
   | { type: "activity.detail.toggle"; activityId: string; detailKey: string }
-  | { type: "document.translation.toggle"; workRootId: string; path: string };
+  | { type: "document.translation.toggle"; workRootId: string; path: string }
+  | { type: "document.mode.set"; workRootId: string; path: string; mode: "view" | "edit" }
+  | { type: "document.save"; workRootId: string; path: string }
+  | { type: "document.revert"; workRootId: string; path: string };
 
 export type DashboardCommand = {
   commandId: DashboardCommandId;
@@ -248,6 +254,31 @@ export function buildDocumentTranslationToggleCommand(
   };
 }
 
+export function buildDocumentModeSetCommand(
+  workRootId: string,
+  path: string,
+  mode: "view" | "edit",
+): DashboardCommand {
+  return {
+    commandId: "document.mode.set",
+    payload: { type: "document.mode.set", workRootId, path, mode },
+  };
+}
+
+export function buildDocumentSaveCommand(workRootId: string, path: string): DashboardCommand {
+  return {
+    commandId: "document.save",
+    payload: { type: "document.save", workRootId, path },
+  };
+}
+
+export function buildDocumentRevertCommand(workRootId: string, path: string): DashboardCommand {
+  return {
+    commandId: "document.revert",
+    payload: { type: "document.revert", workRootId, path },
+  };
+}
+
 export function dispatchDashboardCommand(
   command: DashboardCommand,
   options: {
@@ -306,6 +337,12 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Toggle detail";
     case "document.translation.toggle":
       return "Toggle translation";
+    case "document.mode.set":
+      return payload.mode === "edit" ? "Edit document" : "View document";
+    case "document.save":
+      return "Save document";
+    case "document.revert":
+      return "Revert document";
     case "action":
       return payload.label;
   }
