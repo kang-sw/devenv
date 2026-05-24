@@ -812,6 +812,69 @@ top-level browser document, displacing dashboard chrome, or requiring a future
 editor replacement to prove containment.
 {#260517-ws-dashboard-readonly-text-scroll-containment}
 
+## 🚧 Document Viewer Mode {#260524-ws-dashboard-document-viewer-mode}
+
+The dashboard will present previewable documents through a reusable document
+viewer mode instead of treating every file as raw preformatted text. A document
+pane owns one workRoot-relative source attachment and a pane-local
+`view | edit` mode control. View mode is format-aware and read-only; edit mode
+is a separate raw-text editing surface. Switching modes does not create a
+second workbench tab for the same document.
+
+Markdown documents render through a real Markdown AST pipeline rather than a
+hand-rolled parser. The initial Markdown viewer supports polished GFM table and
+task-list rendering, Obsidian-style callouts such as `> [!note]`, and bounded
+footnote or footer hover affordances while keeping raw HTML disabled or safely
+ignored until a later sanitized or sandboxed HTML feature exists.
+
+The viewer exposes a block model that callers can address independently from
+rendered React nodes. Blocks include stable-in-content ids, ordinal position,
+kind, original markdown, plain text, translatability, and line ranges when
+available. Ordinary soft line breaks remain part of one prose block, list items
+are separate blocks, and non-prose blocks such as fenced code may be marked
+non-translatable. Block-level actions copy the visible text or a workRoot-
+relative path reference such as `@path/to/file.md#L12-L18`; copied path
+references never include absolute host paths.
+
+## 🚧 Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
+
+Markdown view mode will expose a pane-local translation toggle next to the
+view/edit control. When the toggle is enabled, opening or focusing the pane
+requests whole-document translation for the current immutable content hash.
+Translated blocks overlay the viewer by replacing each block's rendered
+content as results become available. Hovering a translated block temporarily
+shows the original block. Selecting one or more blocks exposes copy actions for
+the currently visible text, translated text when available, and pathrefs.
+
+Translation requests are daemon-owned operations. The frontend builds the
+document block set and sends it with full document context; the daemon owns
+provider configuration, model discovery, prompting, bounded output parsing, and
+SHA256/content-hash cache behavior. The first provider shape is an
+OpenAI-compatible LLM provider, suitable for a local Ollama endpoint, while the
+provider union leaves room for future non-LLM translation APIs.
+
+LLM translation roundtrips preserve block identity. Requests contain
+`blockId + content` pairs, and successful responses return matching
+`blockId + translatedContent` pairs. Missing, duplicate, unknown, or
+unparseable block ids become bounded block-level failure states rather than raw
+model output in the browser.
+
+## 🚧 Document Edit And Save Fan-Out {#260524-ws-dashboard-document-edit-save-fanout}
+
+The dashboard will add a raw-text edit mode for editable workRoot files while
+keeping formatted view mode read-only. Document reads return source identity,
+content hash, media or renderer hints, edit capability, size, and content.
+Document writes use optimistic concurrency through the read content hash and
+return a fresh content hash after a successful save.
+
+Open panes for the same `workRootId + path` receive save and external-change
+updates by document source identity instead of pane identity. Clean panes can
+re-read or update to the new content hash after another pane saves. Dirty edit
+panes are marked stale or conflicted without silently overwriting user edits.
+Per-workRoot document event streams publish content-change and watch-invalidated
+events; filesystem watchers are freshness hints only, with focus and visibility
+re-reads plus content-hash checks remaining the correctness fallback.
+
 ## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
 
 File-open commands from the workRoot file explorer use workbench placement
