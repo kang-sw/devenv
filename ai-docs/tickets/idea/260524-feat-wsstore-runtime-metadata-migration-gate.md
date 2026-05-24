@@ -1,0 +1,73 @@
+---
+title: wsstore runtime metadata migration gate
+related:
+  260524-feat-mcp-state-store-prune: created the SQLite metadata foundation and future schema surface
+  260524-bug-wsstore-ci-sqlite-busy: exposed same-database write contention during release CI
+  260524-epic-async-exec-job-surface: exec job metadata is a candidate migration surface
+  260524-feat-mcp-actor-setup-bootstrap: currently uses SQLite for actor setup and recovery
+related-mental-model:
+  - mcp-runtime
+  - named-agent-runtime
+---
+
+# wsstore runtime metadata migration gate
+
+## Background
+
+`internal/wsstore` already defines tables for actors, MCP sessions, named-agent
+definitions and calls, exec jobs, worker leases, retention bookkeeping,
+artifacts, prune runs, and tombstones. The current live SQLite write surface is
+much narrower: actor setup and recovery use the store, while named-agent and
+exec runtime records still rely on the existing file/JSON-backed state layouts.
+
+The release of `v0.29.0` exposed `SQLITE_BUSY` during concurrent short writes
+against the same state database. `v0.29.1` reduced same-process contention and
+avoids repeated WAL setup on already-created databases, but that hotfix is not a
+complete cross-process IPC contention strategy.
+
+## Decisions
+
+- Treat named-agent and exec metadata migration into SQLite as gated work, not a
+  mechanical follow-up to the schema foundation.
+- Keep large append-heavy payloads file-backed: stdout, stderr, combined output,
+  prompts, transcripts, runtime logs, and final result bodies should remain
+  files with SQLite storing only identity, lifecycle, paths, byte counts,
+  retention state, leases, and indexes.
+- Before wiring high-frequency named-agent or exec writes to SQLite, define and
+  test a cross-process write contention strategy for local worktree state
+  databases.
+- The contention strategy should cover database open/configuration, migrations,
+  short write transactions, and opportunistic prune/tombstone writes.
+
+## Constraints
+
+- Preserve existing JSON/file-backed compatibility reads until each runtime
+  surface has explicit migration and recovery coverage.
+- Do not hold SQLite transactions while subprocesses or model calls are running.
+- Handle `SQLITE_BUSY` and `SQLITE_LOCKED` with bounded retry/backoff or an
+  equivalent repo/worktree writer coordination strategy.
+- Include native Windows coverage because file locking and process-liveness
+  behavior are release-critical for plugin users.
+- Avoid moving stream contents into SQLite as a workaround; that increases lock
+  pressure and weakens raw reader behavior.
+
+## Phases
+
+### Phase 1: Define the SQLite contention and migration gate
+
+Turn this idea into an accepted backlog item by choosing the migration boundary:
+whether `wsstore` gets a shared retry/backoff helper, a repo/worktree file lock
+for migrations and WAL setup, a single writer-owner process model, or a
+combination.
+
+The phase should define acceptance tests that spawn independent processes or MCP
+server instances against the same worktree state database and exercise actor
+setup, child actor creation, exec job lifecycle writes, and prune/tombstone
+bookkeeping without persistent `SQLITE_BUSY` failures.
+
+### Phase 2: Migrate one runtime surface behind the gate
+
+After the gate exists, migrate either exec job metadata or named-agent metadata
+as the first real consumer. Preserve file-backed streams and existing recovery
+semantics, add compatibility reads where needed, and verify macOS/Linux plus
+native Windows behavior.
