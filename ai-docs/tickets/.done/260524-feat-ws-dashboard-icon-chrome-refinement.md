@@ -168,3 +168,23 @@ Verification:
 - Manual screenshot review of `desktop-workbench.png` confirmed the compact
   glyphs are no longer miniaturized, row labels shift right, and the row trash
   control uses the shared icon-button presentation.
+
+#### Edition (8143351) - 2026-05-24
+
+Softened the workRoot topbar status and Activity chips after screenshot
+feedback. The ready and Activity chips now render as compact rounded background
+pills with tone tinting instead of border-heavy rectangular chips, and the
+Activity badge fits its text more closely to avoid distracting empty space.
+
+Changed Dockview tab chrome so active and pinned tabs no longer rely on
+outer-line accents. Selected and unselected tabs are distinguished through text
+color, and read-only preview tabs use italic title text while pinned tabs return
+to normal title text.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png` confirmed the topbar
+  chips are compact rounded pills and the tab strip no longer shows the
+  previous active underline/left-rail border treatment.
