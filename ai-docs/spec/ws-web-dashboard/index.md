@@ -682,6 +682,18 @@ The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
 
+> [!note] Planned 🚧
+> The browser shell replaces the always-visible open-workRoot path input with
+> an owner-authenticated root picker modal. The left navigation exposes an
+> `Open...` entrypoint; the modal provides directory navigation, parent/up
+> movement, keyboard-friendly selection, loading/error/empty states, a selected
+> directory footer, and a secondary exact-path field for pasted or remote paths.
+> Opening a selected directory continues through the `workRoot.open` command
+> path, open-workRoot API, daemon-opened workRoot id reconciliation, and
+> canonical resource refresh flow. The modal may expose only the existing
+> single-segment `Create empty folder` action, not broad file-manager
+> operations. {#260524-ws-dashboard-root-picker-modal}
+
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the
 real opened workRoot instead of continuing to present mock workspace state.

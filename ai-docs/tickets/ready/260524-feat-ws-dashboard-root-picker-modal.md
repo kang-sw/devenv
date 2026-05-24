@@ -6,6 +6,7 @@ related:
 spec:
   - 260516-ws-web-dashboard-root-picker-empty-directory-creation
   - 260516-ws-web-dashboard-open-workroot-resource-refresh
+  - 260524-ws-dashboard-root-picker-modal
 related-mental-model:
   - ws-web-dashboard
 ---
