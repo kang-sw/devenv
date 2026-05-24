@@ -4,6 +4,7 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-workroot-registry-activation: durable known workRoot membership needs an explicit removal path
   260523-feat-ws-dashboard-linked-worktree-discovery: discovered linked workRoots may become stale, prunable, or intentionally unwanted
+  260524-feat-ws-dashboard-workspace-root-prune-policy: automatic empty-workspace pruning is separate from explicit owner cleanup
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -22,10 +23,19 @@ The linked-worktree discovery ticket explicitly excludes delete/remove behavior.
 This ticket captures that separate follow-up so discovery can keep degraded
 workRoots visible without also needing to solve user-driven cleanup.
 
+The workspace root prune policy separates automatic empty-workspace pruning from
+explicit owner cleanup. A workspace with no active workRoots may disappear from
+the visible resource tree automatically, while a workspace that still has an
+active child workRoot remains visible even if its root workRoot is unavailable.
+This ticket remains about deliberate owner forget/remove controls for visible
+resources that policy does not automatically prune.
+
 ## Direction
 
 - Add an explicit high-friction forget/remove action for known dashboard
   workRoots.
+- Do not make forget/remove responsible for automatic empty-workspace pruning;
+  that belongs to the workspace root policy.
 - Keep filesystem deletion out of scope unless a later ticket deliberately adds
   host file-manager behavior.
 - Forgetting a workRoot should remove daemon-local durable membership and any

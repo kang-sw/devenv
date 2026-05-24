@@ -138,10 +138,14 @@ The MVP should cover:
 - `260523-feat-ws-dashboard-terminal-tab-restore` - done; restore remembered
   terminal tabs after daemon restart by creating new terminal sessions with
   safe workRoot-relative cwd hints, without treating old PTYs as resumable.
-- `260523-feat-ws-dashboard-workroot-registry-activation` - ready; add a
+- `260523-feat-ws-dashboard-workroot-registry-activation` - done; add a
   durable workspace/workRoot registry, separate live-derived availability from
   user-controlled online/offline activation, and keep known workRoots visible
   until explicit future forget/remove semantics exist.
+- `260524-feat-ws-dashboard-workspace-root-prune-policy` - ready; define
+  owner-managed workspace roots, derived child workRoots, disabled workspace
+  recovery state, and automatic pruning when a workspace has no active
+  workRoots.
 - `260523-feat-ws-dashboard-readonly-file-pane-restore` - todo; restore
   read-only preview/pinned file pane descriptors by replaying normal file-open
   behavior through authenticated workRoot-relative file reads.
@@ -149,6 +153,10 @@ The MVP should cover:
   broader persistence backlog for selected resources, file explorer state,
   workbench layout, Activity Console acknowledgement/scroll state, command
   preferences, chrome preferences, and privacy-sensitive root-picker history.
+- `260523-feat-ws-dashboard-linked-worktree-discovery` - idea; discover linked
+  Git worktrees as child workRoots under owner-managed workspace roots.
+- `260523-feat-ws-dashboard-workroot-forget-remove-ui` - idea; add explicit
+  owner forget/remove controls separate from automatic empty-workspace pruning.
 
 ## Cross-Child Decisions
 
@@ -171,16 +179,18 @@ The MVP should cover:
   editor path because Windows PTY behavior is a known stability concern.
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
-- Model dashboard resources around one main user interaction point per
-  workRoot:
+- Model dashboard resources around one owner-managed workspace root and one main
+  user interaction point per workRoot:
   `server -> workspace -> workRoot -> mainInstance -> subInstance`. A server is
   a physical or logical host environment such as local machine, WSL distro, or
-  remote host. A workspace is a daemon-discovered project group, not a
-  user-created category. A workRoot is the concrete physical open, spawn, and
-  run directory and can be online, offline, moved, or inaccessible. A main
-  instance is the user-facing conversation or control point; sub instances are
-  delegated or auxiliary work such as ws agents, exec jobs, document viewers,
-  translation tasks, diagnostics, or subprocesses.
+  remote host. A workspace is an owner-managed root scope anchored by a root
+  workRoot. A workRoot is the concrete physical open, spawn, and run directory
+  and can be online, offline, moved, or inaccessible. Derived workRoots such as
+  linked Git worktrees belong under their owning workspace until an explicit
+  derive/promote operation creates a new workspace. A main instance is the
+  user-facing conversation or control point; sub instances are delegated or
+  auxiliary work such as ws agents, exec jobs, document viewers, translation
+  tasks, diagnostics, or subprocesses.
 - Reserve `session` for auth/browser sessions and external protocol sessions
   such as MCP or model backend sessions. Do not use `session` for dashboard
   terminal/editor/agent resources.
@@ -199,6 +209,11 @@ The MVP should cover:
   then concrete workRoot entries without hiding offline or inaccessible
   workRoots that remain useful recent context. Singleton chains may render as
   compact rows, but the API model remains fully hierarchical.
+- If a workspace's root workRoot is unavailable while at least one child
+  workRoot remains active, keep the workspace visible in a disabled or
+  recovery-needed state. Automatically prune a workspace only when it has no
+  active workRoots. This automatic empty-workspace cleanup is distinct from
+  explicit owner forget/remove UI.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen
@@ -260,10 +275,11 @@ The MVP should cover:
   availability, and user-controlled activation. Existing `WorkRootStatus`
   online/offline vocabulary is reachability-flavored and must not be reused as
   the activation layer without a public model split. Known workRoots remain
-  visible even when missing, inaccessible, prunable, or offline; there is no
-  invisible discovered-worktree state. Explicit refresh and bounded polling
-  recompute filesystem/Git availability, while future filesystem watchers may
-  only act as refresh-needed hints.
+  visible while their workspace remains visible even when missing, inaccessible,
+  prunable, or offline; there is no invisible discovered-worktree state.
+  Explicit refresh and bounded polling recompute filesystem/Git availability
+  and may trigger the automatic no-active-workRoot workspace prune policy, while
+  future filesystem watchers may only act as refresh-needed hints.
 
 ## Completion Criteria
 

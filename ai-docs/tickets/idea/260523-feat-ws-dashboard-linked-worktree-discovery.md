@@ -4,6 +4,7 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-persist-open-workroots: persisted roots and discovered sibling worktrees should share a clear source model
   260523-feat-ws-dashboard-workroot-registry-activation: prerequisite durable membership, availability, and activation model
+  260524-feat-ws-dashboard-workspace-root-prune-policy: workspace root ownership and automatic empty-workspace pruning policy
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -38,6 +39,9 @@ Agreed direction:
 - Add discovered linked worktrees as additional known workRoot rows in the same
   durable workspace registry, preserving the existing opaque `workRootId` and
   `gitLinkedWorktree` kind vocabulary.
+- Treat linked worktrees as child workRoots derived from the workspace root
+  workRoot. They should not become independent workspaces unless a later
+  explicit derive/promote operation creates a new owner-managed workspace.
 - Default discovered sibling workRoots to offline activation. Users explicitly
   bring a workRoot online before file, Activity, or terminal APIs target it.
 - Recompute current status from filesystem/Git on explicit refresh and bounded
@@ -56,9 +60,10 @@ Agreed direction:
 - Do not add dashboard-side delete/remove worktree functionality as part of this
   ticket. Future forget/delete UX must be separate from discovery and must not
   be required to keep externally deleted worktrees visible as degraded rows.
-- Do not introduce an invisible discovered-worktree state. Known workRoots are
-  visible until explicitly forgotten or until a later root-folder deletion
-  policy defines removal.
+- Do not introduce an invisible discovered-worktree state. Known child
+  workRoots are visible while their owning workspace remains visible, but the
+  workspace root policy may automatically prune a workspace when it has no
+  active workRoots.
 
 Open questions:
 
@@ -68,6 +73,5 @@ Open questions:
   Git-specific detail under a broader unavailable/missing availability?
 - How frequently should bounded polling refresh selected, online, offline, and
   large workRoot sets?
-- Should externally removed workRoots require explicit acknowledgement before a
-  future forget action is offered, or should the forget action be available
-  immediately on degraded rows?
+- How should externally removed child workRoots interact with the new root
+  policy when the workspace still has other active workRoots?
