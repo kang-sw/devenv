@@ -42,6 +42,10 @@ complete cross-process IPC contention strategy.
 - Unbound or hidden explicit-root compatibility calls may preserve the existing
   worktree-global namespace during migration, but actor-bound calls should
   resolve actor-local agent names first.
+- `agent.json` should not remain the long-term source of truth for agent
+  metadata. Metadata fields that currently behave like lifecycle state, tags,
+  flags, indexes, model-selection records, session ids, child actor bindings, or
+  retention visibility should migrate into SQLite-backed rows.
 - Agent and exec lifecycle removal should be logical removal plus retention
   eligibility, not immediate artifact deletion. Cancelled, erased, consumed
   ephemeral, or otherwise hidden runtime records should leave execution history
@@ -60,6 +64,9 @@ complete cross-process IPC contention strategy.
 
 - Preserve existing JSON/file-backed compatibility reads until each runtime
   surface has explicit migration and recovery coverage.
+- Existing file-backed agent registrations may be invalidated or discarded by
+  the named-agent metadata migration if preserving them would add compatibility
+  complexity beyond their value as volatile workflow resources.
 - SQLite-backed state should be limited to metadata such as agent definition
   rows, current call or exec job lifecycle state, actor/session binding, worker
   leases, artifact indexes, retention policies, prune runs, and tombstones.
@@ -96,6 +103,12 @@ combination.
 The selected boundary must explicitly state which named-agent and exec fields
 become SQLite metadata and which existing files remain the source of truth for
 streams, prompts, event logs, and result bodies.
+
+For named agents, the phase must include a field-by-field inventory of
+`agent.json`, `current/state.json`, and adjacent agent state files. Classify each
+field as SQLite authoritative metadata, retained file-backed payload, or
+temporary compatibility data. The intended end state is that `agent.json` is not
+required as an authoritative metadata store.
 
 It must also define the internal namespace rules for actor-bound named agents:
 public `agents.*` names remain unchanged, actor id participates in persisted
