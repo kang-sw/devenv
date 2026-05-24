@@ -20,8 +20,8 @@ The epic owns decomposition for:
 
 - durable file-backed exec job records scoped to the current ws worktree;
 - launch, lifecycle, abort, and bounded output result tools;
-- reusable text readers over persisted output files;
-- later model-backed questions over command output;
+- raw fallback text readers over persisted output files;
+- lead-facing model-backed questions over command output;
 - runtime contract, capability, CLI, and wsflow visibility alignment for each
   introduced tool surface.
 
@@ -31,15 +31,19 @@ The epic owns decomposition for:
 - Dashboard Activity Console UI or transcript projection work.
 - Remote, multi-user, or authority-bound execution semantics.
 - Treating MCP profile filters as a security boundary.
-- Model-backed output synthesis in the first implementation child.
+- Advanced reader memory, cross-job synthesis, or dashboard presentation of
+  exec answers before the basic `exec.ask` layer exists.
 
 ## Child Tickets
 
 - `260524-feat-exec-job-core-text-readers` - first implementation child for
   `exec.spawn`, `exec.shell`, `exec.status`, `exec.result`, `exec.abort`, and
-  text readers over persisted output files.
-- Planned: `exec.ask` output-question reader - add model-backed questions over
-  persisted exec output after the core text-reader surface is proven.
+  raw fallback text readers over persisted output files.
+- `260524-feat-exec-output-ask` - add lead-facing `exec.ask` questions over
+  persisted exec output.
+- `260524-chore-exec-surface-runtime-contract` - finalize runtime
+  capabilities, manifests, CLI mirror policy, and wsflow package drift after the
+  accepted `exec.*` surface is stable.
 
 ## Cross-Child Decisions
 
@@ -58,9 +62,14 @@ The epic owns decomposition for:
   foreground window before responding. That foreground wait is not a caller-set
   timeout and does not replace async job recovery.
 - Normal tool responses never return more than the fixed small-output budget.
-  Larger output is inspected through bounded text readers or later `exec.ask`.
-- Command output is untrusted input. Any model-backed reader must be designed as
-  a separate child with explicit prompt-injection and stale-context controls.
+  Larger output guidance should point to `exec.ask` first and `exec.raw.*`
+  fallback readers second.
+- Raw text readers are fallback tools, not the primary lead-facing large-output
+  UX. Name them under `exec.raw.*` so callers distinguish direct raw output
+  inspection from model-backed answering.
+- Command output is untrusted input. `exec.ask` must include explicit
+  prompt-injection boundaries and default to a fresh reader context unless the
+  caller opts into resumed context.
 - All introduced `exec.*` tools remain hidden from wsflow no-agent mode.
 
 ## Completion Criteria

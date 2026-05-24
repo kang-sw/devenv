@@ -1,5 +1,5 @@
 ---
-title: Exec job core and text readers
+title: Exec job core and raw text readers
 parent: 260524-epic-async-exec-job-surface
 related:
   260513-feat-async-exec-output-reader: original broad ticket absorbed by parent epic
@@ -10,15 +10,16 @@ related-mental-model:
   - plugin-runtime
 ---
 
-# Exec job core and text readers
+# Exec job core and raw text readers
 
 ## Background
 
 The first async-exec slice should deliver the usable non-model core: launch
 commands, preserve stdout and stderr in durable job-owned files, return small
-completed outputs inline when safe, and expose bounded text readers for larger
-outputs. This keeps context-bloat prevention useful before adding a model-backed
-`exec.ask` layer.
+completed outputs inline when safe, and expose raw fallback readers for direct
+inspection. `exec.ask` is the primary large-output UX and is owned by a separate
+child; this child provides the durable job substrate and fallback raw access it
+depends on.
 
 ## Decisions
 
@@ -35,19 +36,21 @@ outputs. This keeps context-bloat prevention useful before adding a model-backed
   inline with the `exec_key`, exit status, and metadata.
 - If the job is still running after the foreground window, or if output exceeds
   4096 bytes, the launch response returns compact metadata, stream sizes, and
-  follow-up guidance without raw output.
+  follow-up guidance without raw output. Guidance should name the future
+  `exec.ask` path as the preferred large-output UX and the `exec.raw.*` readers
+  as raw fallback tools.
 - `exec.result(exec_key)` uses the same fixed 4096-byte inline budget and has
   no `max_output_bytes` parameter. Larger results return metadata and guidance
   for text readers.
 - Keep `exec.abort` as the process/job termination verb. It is distinct from
   MCP request cancellation and from result retrieval cancellation.
-- Provide text-reader tools in this first slice:
-  - `exec.tail(exec_key, stream?, lines?)`
-  - `exec.read(exec_key, stream?, offset?, limit?)`
-  - `exec.grep(exec_key, pattern, stream?, before?, after?, max_matches?, regex?)`
-- `exec.grep` defaults to literal matching. Regex behavior requires
+- Provide raw fallback text-reader tools in this first slice:
+  - `exec.raw.tail(exec_key, stream?, lines?)`
+  - `exec.raw.read(exec_key, stream?, offset?, limit?)`
+  - `exec.raw.grep(exec_key, pattern, stream?, before?, after?, max_matches?, regex?)`
+- `exec.raw.grep` defaults to literal matching. Regex behavior requires
   `regex: true`.
-- `exec.read` is byte-offset based and returns `next_offset` so callers can
+- `exec.raw.read` is byte-offset based and returns `next_offset` so callers can
   continue without rereading large files.
 
 ## Constraints
@@ -63,8 +66,8 @@ outputs. This keeps context-bloat prevention useful before adding a model-backed
   current worktree state. Normal MCP responses expose only bounded excerpts and
   metadata.
 - Implement the file reading and searching logic as reusable internal helpers.
-  The `exec.*` tools should primarily map `exec_key` to persisted stream file
-  paths and call those helpers, so later agent logs, transcripts, or other
+  The `exec.raw.*` tools should primarily map `exec_key` to persisted stream
+  file paths and call those helpers, so later agent logs, transcripts, or other
   text-backed surfaces can reuse them.
 - Hide every introduced `exec.*` tool in wsflow no-agent mode for both
   `tools/list` and explicit `tools/call`.
@@ -84,7 +87,7 @@ outputs. This keeps context-bloat prevention useful before adding a model-backed
 
 ## Phases
 
-### Phase 1: Implement exec job core and text readers
+### Phase 1: Implement exec job core and raw text readers
 
 Add a durable exec job manager, MCP tools, optional CLI mirrors, runtime
 metadata, wsflow no-agent hiding, and tests for:
@@ -97,7 +100,7 @@ metadata, wsflow no-agent hiding, and tests for:
 - large-output metadata without inline raw output;
 - fixed 4096-byte `exec.result` budget;
 - stdout and stderr persistence;
-- `exec.tail`, `exec.read`, and literal/regex `exec.grep`;
+- `exec.raw.tail`, `exec.raw.read`, and literal/regex `exec.raw.grep`;
 - `exec.abort` preserving partial output and terminal state;
 - Unix process-group behavior and best-effort Windows behavior;
 - runtime capability and manifest drift.

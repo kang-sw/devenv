@@ -156,7 +156,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260518-feat-ws-dashboard-activity-live-ux` | todo | Adopt Activity Console live events in the frontend with merge, stale-root, transcript-refresh, and fallback behavior |
 | `260518-feat-ws-dashboard-activity-transcript-api` | todo | Expand Activity Console transcript sources and optional block-level live transcript behavior |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
-| `260524-feat-exec-job-core-text-readers` | todo | Add exec job launch/lifecycle tools plus bounded tail, read, and grep over persisted output |
+| `260524-feat-exec-job-core-text-readers` | todo | Add exec job launch/lifecycle tools plus bounded raw tail, read, and grep over persisted output |
+| `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
+| `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from the recovered JSONL run-substrate research |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
