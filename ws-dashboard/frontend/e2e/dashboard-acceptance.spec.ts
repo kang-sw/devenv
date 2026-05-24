@@ -1720,7 +1720,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     });
     await replacementRow.click();
     await expect(previewTab).toHaveCount(1);
-    await expect(pane.locator(".readonly-text-pane-title")).toContainText(
+    await expect(pane.locator(".readonly-text-pane-path")).toContainText(
       "gate-bulk-000.txt",
     );
     await expect(pane.locator(".readonly-text-content")).toContainText(
@@ -1791,8 +1791,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       throw new Error("document preview tab id missing before edit");
     }
     const previewTabCountBeforeEdit = await previewTab.count();
-    await expect(pane.locator(".document-viewer-segment.is-active")).toContainText("view");
-    await expect(pane.locator('[data-command-id="document.mode.set"]', { hasText: "edit" })).toBeEnabled();
+    await expect(pane.locator('.document-viewer-segment.is-active[data-document-mode="view"]')).toBeVisible();
+    await expect(pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]')).toBeEnabled();
     await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
     await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
     await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
@@ -1803,7 +1803,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
 
     if (ownsWorkRoot) {
-      await pane.locator('[data-command-id="document.mode.set"]', { hasText: "edit" }).click();
+      await pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]').click();
       await expect(pane.locator(".document-raw-editor")).toBeVisible();
       await pane.locator(".document-raw-editor").fill(
         [
@@ -1824,7 +1824,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       );
       await pane.locator('[data-command-id="document.save"]').click();
       await expect(pane.locator('[data-document-save-state="saved"]')).toContainText("Saved");
-      await pane.locator('[data-command-id="document.mode.set"]', { hasText: "view" }).click();
+      await pane.locator('[data-command-id="document.mode.set"][data-document-mode="view"]').click();
       await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText(
         "Gate Document Edited",
       );

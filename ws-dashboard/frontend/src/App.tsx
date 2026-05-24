@@ -16,6 +16,7 @@ import {
   ListTodo,
   MoreHorizontal,
   PanelsTopLeft,
+  Pencil,
   RefreshCw,
   SquareTerminal,
   Stethoscope,
@@ -5109,14 +5110,19 @@ function ReadOnlyDocumentPane({
     translationStatus === "ready" ||
     translationStatus === "unavailable" ||
     translationStatus === "error";
+  const documentPathLabel = pane.path;
+  const documentPathTitle = pane.path.startsWith("/") ? pane.path : `${root.label} / ${pane.path}`;
 
   return (
     <div className="readonly-text-pane document-pane ws-pane">
       <div className="readonly-text-pane-header readonly-text-pane-ribbon ws-toolbar">
-        <div className="readonly-text-pane-title-block">
-          <div className="readonly-text-pane-title">{pane.title}</div>
-          <div className="readonly-text-pane-path" title={pane.path}>
-            {root.label} / {pane.path}
+        <div className="document-ribbon-file">
+          <div className="readonly-text-pane-path" title={documentPathTitle}>
+            {documentPathLabel}
+          </div>
+          <div className="readonly-text-pane-badges">
+            <span className="meta-chip ws-chip">{pane.mode}</span>
+            <span className="meta-chip ws-chip">{documentFormatLabel}</span>
           </div>
         </div>
         <div className="document-ribbon-controls">
@@ -5125,18 +5131,24 @@ function ReadOnlyDocumentPane({
               <button
                 type="button"
                 className={`document-viewer-segment${documentMode === "view" ? " is-active" : ""}`}
+                aria-label="View document"
+                title="View"
                 data-command-id="document.mode.set"
+                data-document-mode="view"
                 onClick={() => setModeCommand("view")}
               >
-                view
+                <Eye aria-hidden="true" size={13} strokeWidth={1.8} />
               </button>
               <button
                 type="button"
                 className={`document-viewer-segment${documentMode === "edit" ? " is-active" : ""}`}
+                aria-label="Edit document"
+                title="Edit"
                 data-command-id="document.mode.set"
+                data-document-mode="edit"
                 onClick={() => setModeCommand("edit")}
               >
-                edit
+                <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
               </button>
             </div>
           ) : null}
@@ -5179,10 +5191,6 @@ function ReadOnlyDocumentPane({
               <span data-document-save-state={saveState}>{saveMessage ?? (draft === pane.content ? "Clean" : "Unsaved changes")}</span>
             </div>
           ) : null}
-          <div className="readonly-text-pane-badges">
-            <span className="meta-chip ws-chip">{pane.mode}</span>
-            <span className="meta-chip ws-chip">{documentFormatLabel}</span>
-          </div>
         </div>
       </div>
       {pane.status === "loading" ? (
