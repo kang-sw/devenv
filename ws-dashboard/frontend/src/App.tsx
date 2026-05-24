@@ -1478,6 +1478,7 @@ function GitWorktreeAddModal({
   const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
   const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null);
   const previewSequenceRef = useRef(0);
+  const currentRequestKeyRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1517,6 +1518,10 @@ function GitWorktreeAddModal({
   }, [branchMode, customPath, manualBranch, pathMode, worktreeName, workspaceId]);
 
   const requestKey = request ? JSON.stringify(request) : null;
+
+  useEffect(() => {
+    currentRequestKeyRef.current = requestKey;
+  }, [requestKey]);
 
   useEffect(() => {
     if (!workspaceId || !request || !requestKey || worktreeName.trim().length === 0) {
@@ -1574,14 +1579,18 @@ function GitWorktreeAddModal({
     }
     onCommand(buildGitWorktreeAddSubmitCommand(workspaceId), {
       "gitWorktreeAdd.submit": () => {
+        const submittedRequestKey = requestKey;
         setSubmitting(true);
         setError(null);
         void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
           .then(onCreated)
           .catch((nextError) => {
             if (nextError instanceof GitWorktreeAddSubmitError && nextError.preview) {
+              if (currentRequestKeyRef.current !== submittedRequestKey) {
+                return;
+              }
               setPreview(nextError.preview);
-              setPreviewRequestKey(requestKey);
+              setPreviewRequestKey(submittedRequestKey);
               setError("Submit blocked by current server validation");
               return;
             }
