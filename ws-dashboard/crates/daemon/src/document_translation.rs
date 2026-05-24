@@ -472,18 +472,6 @@ fn parse_translation_content(
                 });
                 continue;
             };
-            let Some(text) = entry
-                .get("translatedContent")
-                .or_else(|| entry.get("translatedMarkdown"))
-                .and_then(Value::as_str)
-            else {
-                unmatched.push(DocumentTranslationUnmatched {
-                    ordinal,
-                    text: block_id.to_owned(),
-                    reason: "missing translation".to_owned(),
-                });
-                continue;
-            };
             if !known.contains(block_id) {
                 unmatched.push(DocumentTranslationUnmatched {
                     ordinal,
@@ -492,6 +480,18 @@ fn parse_translation_content(
                 });
                 continue;
             }
+            let Some(text) = entry
+                .get("translatedContent")
+                .or_else(|| entry.get("translatedMarkdown"))
+                .and_then(Value::as_str)
+            else {
+                unmatched.push(DocumentTranslationUnmatched {
+                    ordinal,
+                    text: "omitted".to_owned(),
+                    reason: "missing translation".to_owned(),
+                });
+                continue;
+            };
             if by_block.contains_key(block_id) {
                 unmatched.push(DocumentTranslationUnmatched {
                     ordinal,

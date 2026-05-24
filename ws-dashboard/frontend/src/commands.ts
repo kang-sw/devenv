@@ -21,6 +21,7 @@ export type DashboardCommandId =
   | "activity.transcript.loadMore"
   | "activity.refresh"
   | "activity.detail.toggle"
+  | "document.translation.toggle"
   | `resource.action.${string}`
   | `workbench.toggle.${string}`
   | `workbench.tab.${string}`;
@@ -53,7 +54,8 @@ export type DashboardCommandPayload =
   | { type: "activity.selectItem"; activityId: string }
   | { type: "activity.transcript.loadMore"; activityId: string }
   | { type: "activity.refresh"; workRootId: string }
-  | { type: "activity.detail.toggle"; activityId: string; detailKey: string };
+  | { type: "activity.detail.toggle"; activityId: string; detailKey: string }
+  | { type: "document.translation.toggle"; workRootId: string; path: string };
 
 export type DashboardCommand = {
   commandId: DashboardCommandId;
@@ -236,6 +238,16 @@ export function buildActivityDetailToggleCommand(
   };
 }
 
+export function buildDocumentTranslationToggleCommand(
+  workRootId: string,
+  path: string,
+): DashboardCommand {
+  return {
+    commandId: "document.translation.toggle",
+    payload: { type: "document.translation.toggle", workRootId, path },
+  };
+}
+
 export function dispatchDashboardCommand(
   command: DashboardCommand,
   options: {
@@ -292,6 +304,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Load transcript";
     case "activity.detail.toggle":
       return "Toggle detail";
+    case "document.translation.toggle":
+      return "Toggle translation";
     case "action":
       return payload.label;
   }

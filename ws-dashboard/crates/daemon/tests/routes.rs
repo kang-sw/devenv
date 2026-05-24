@@ -6008,7 +6008,7 @@ async fn document_translation_translate_validates_blocks_and_reuses_cache() {
 #[tokio::test]
 async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() {
     let (base_url, _calls) = start_fake_openai_provider(
-        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"하나"},{"blockId":"RAW_UNKNOWN_BLOCK_ID_SENTINEL","translatedContent":"RAW_TRANSLATION_SENTINEL"},{"blockId":"paragraph-1","translatedContent":"둘"}]}"#,
+        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"하나"},{"blockId":"RAW_UNKNOWN_BLOCK_ID_SENTINEL","translatedContent":"RAW_TRANSLATION_SENTINEL"},{"blockId":"RAW_MISSING_TRANSLATION_BLOCK_ID_SENTINEL"},{"blockId":"paragraph-1","translatedContent":"둘"}]}"#,
     )
     .await;
     let state = app_state_with_translation_provider(base_url, Some("fake-model"));
@@ -6078,6 +6078,7 @@ async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() 
     let body_text = String::from_utf8_lossy(&body);
     assert!(!body_text.contains("RAW_UNKNOWN_BLOCK_ID_SENTINEL"));
     assert!(!body_text.contains("RAW_TRANSLATION_SENTINEL"));
+    assert!(!body_text.contains("RAW_MISSING_TRANSLATION_BLOCK_ID_SENTINEL"));
 
     let (parse_base_url, _parse_calls) =
         start_fake_openai_provider("RAW_PARSE_FAILURE_SENTINEL").await;

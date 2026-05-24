@@ -43,6 +43,7 @@ import {
 } from "./documentViewer";
 import {
   buildDashboardRefreshCommand,
+  buildDocumentTranslationToggleCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
@@ -3435,6 +3436,7 @@ function buildWorkbenchEditorGroups(
     readOnlyFilePanes,
     readOnlyFilePaneOrderByGroup,
     dashboardGroups,
+    onCommand,
   );
   const terminalPanesByGroup = terminalWorkbenchPanesByGroup(
     root,
@@ -4193,10 +4195,11 @@ function readOnlyWorkbenchPanesByGroup(
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
   groups: ReadonlyArray<{ id: string; label: string }>,
+  onCommand: DashboardCommandDispatcher,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
     .filter((pane) => pane.workRootId === root.id)
-    .map((pane) => readOnlyWorkbenchPane(root, pane));
+    .map((pane) => readOnlyWorkbenchPane(root, pane, onCommand));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
   const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
@@ -4225,6 +4228,7 @@ function readOnlyWorkbenchPanesByGroup(
 function readOnlyWorkbenchPane(
   root: WorkRootView,
   pane: ReadOnlyFilePane,
+  onCommand: DashboardCommandDispatcher,
 ): WorkbenchPane {
   const state: ViewState = {
     status: pane.status,
@@ -4251,7 +4255,7 @@ function readOnlyWorkbenchPane(
     meta,
     contentRevision: readOnlyFilePaneRevision(pane),
     body: isMarkdownDocumentSource(pane) ? (
-      <ReadOnlyMarkdownPane pane={pane} root={root} />
+      <ReadOnlyMarkdownPane pane={pane} root={root} onCommand={onCommand} />
     ) : (
       <ReadOnlyTextPane pane={pane} root={root} />
     ),
@@ -4261,9 +4265,11 @@ function readOnlyWorkbenchPane(
 function ReadOnlyMarkdownPane({
   pane,
   root,
+  onCommand,
 }: {
   pane: ReadOnlyFilePane;
   root: WorkRootView;
+  onCommand: DashboardCommandDispatcher;
 }) {
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationStatus, setTranslationStatus] = useState<
@@ -4353,11 +4359,17 @@ function ReadOnlyMarkdownPane({
               type="button"
               className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
               aria-pressed={translationEnabled}
+              data-command-id="document.translation.toggle"
               onClick={() => {
-                setTranslationEnabled((current) => !current);
-                setTranslationOverlay(undefined);
-                setTranslationStatus("idle");
-                setTranslationMessage(null);
+                const command = buildDocumentTranslationToggleCommand(pane.workRootId, pane.path);
+                onCommand(command, {
+                  [command.commandId]: () => {
+                    setTranslationEnabled((current) => !current);
+                    setTranslationOverlay(undefined);
+                    setTranslationStatus("idle");
+                    setTranslationMessage(null);
+                  },
+                });
               }}
             >
               Translate: {translationEnabled ? "on" : "off"}
