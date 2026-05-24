@@ -11,6 +11,8 @@ related-mental-model:
   - mcp-runtime
   - named-agent-runtime
   - plugin-runtime
+plans:
+  phase-1: 2026-05/24-260524-feat-exec-job-core-text-readers.brief
 ---
 
 # Exec job core and raw text readers
