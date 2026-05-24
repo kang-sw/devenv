@@ -554,6 +554,14 @@ geometry, hairline, and component reference rather than as a default light
 palette. Desktop and narrow viewport screenshot checks make the resulting
 shell inspectable before larger workbench surfaces depend on it.
 
+The frontend visual guide also defines a dashboard-local building-block
+vocabulary for frames, panels, panes, toolbars, rows, chips, badges, state
+surfaces, document surfaces, and code blocks. Current high-impact surfaces
+consume that vocabulary while preserving their existing commands and data:
+left navigation, open-workRoot chrome, workbench toolbar and Dockview tabs,
+Activity Console ribbon/transcript blocks, read-only text panes, and common
+empty/loading/error surfaces.
+
 ## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
 
 Dashboard frontend changes that affect visible browser behavior provide a
