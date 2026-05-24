@@ -3,6 +3,8 @@ title: Unify dashboard workRoot activation lookup across opened and discovered r
 related:
   260523-feat-ws-dashboard-workroot-registry-activation: activation source-of-truth contract
   260523-feat-ws-dashboard-linked-worktree-discovery: discovered linked workRoot projection
+spec:
+  - 260524-dashboard-workroot-registry-wide-activation-lookup
 ---
 
 # Unify dashboard workRoot activation lookup across opened and discovered roots
