@@ -15,6 +15,7 @@ related:
 - Any ws-dashboard frontend implementation that changes visible browser UI must include browser-level visual/interaction verification, preferably Playwright or equivalent screenshot/DOM automation against the daemon-served production frontend; pure TypeScript tests, Vite build, and curl/API dogfood are not sufficient to close UI-facing work.
 - User-visible dashboard controls must expose stable command identities and route their mouse/click behavior through the same dashboard command dispatch path that future tmux-like prefix keybindings will invoke; terminal raw byte input is the narrow exception and must not fork shell input semantics.
 - Dashboard terminal work must treat cross-platform behavior as part of the contract: shell selection, PTY commands, browser/harness tests, and control-key evidence must avoid POSIX-only assumptions or record explicit OS-scoped limitations.
+- After owner authentication, ws-dashboard viewers have PC-owner-level visibility for dashboard-captured command/tool output: prefer bounded faithful rendering over redacting ordinary command output, and reserve redaction for daemon-private implementation metadata such as pairing tokens, session ids, cache/transcript storage paths, and unauthenticated diagnostics.
 
 ## Entry Points
 
