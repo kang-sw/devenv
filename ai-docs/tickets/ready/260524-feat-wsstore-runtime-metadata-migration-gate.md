@@ -183,13 +183,40 @@ exhaustive against current JSON-tag fields, and avoiding reverse imports from
 `wsstore` tests into future wsstore consumers. Specs and mental models were
 updated for the implemented migration gate and path-versus-payload boundary.
 
-### Phase 2: Migrate one runtime surface behind the gate
+### Phase 2: Migrate named-agent metadata behind the gate
 
-After the gate exists, migrate either exec job metadata or named-agent metadata
-as the first real consumer. Preserve file-backed streams and existing recovery
-semantics, add compatibility reads where needed, and verify macOS/Linux plus
-native Windows behavior. If named-agent metadata is the first surface, verify
-that two actor-bound sessions can both register `implementer` without colliding
-while legacy unbound behavior remains compatible. If exec metadata is first,
-verify that cancel/result/erase-style cleanup is logical and that physical
-artifact removal happens only through prune.
+After the Phase 1 gate exists, migrate named-agent registry metadata as the
+first real SQLite-authoritative runtime surface. The first migration slice
+should prioritize agent definition and registry metadata that currently lives in
+`agent.json`: backend/model selection, prompt references, prompt materialization
+paths, session id, lifecycle status, actor binding, timestamps, capability
+flags, ephemeral visibility, and last-output path indexes.
+
+SQLite becomes the write authority for migrated named-agent metadata. If an
+existing file-backed registration is encountered, handle it through explicit
+bounded compatibility behavior: either best-effort import it once into SQLite or
+surface a bounded re-registration/recovery path. Do not keep `agent.json` as a
+parallel write authority. Any retained `agent.json` handling must be read-only
+compatibility input or a generated diagnostic snapshot with a clear removal
+condition.
+
+Preserve file-backed payload semantics for prompt bodies, materialized system
+prompts, stdout, stderr, runtime logs, event JSONL, transcripts, and final
+output bodies. SQLite should store metadata and path indexes for these payloads,
+not their bytes. Missing file-backed payload paths should be reported as
+recoverable consistency states rather than causing payload bytes to move into
+SQLite.
+
+Implement actor-scoped named-agent identity for actor-bound calls so two
+actor-bound sessions can both register the same public name, such as
+`implementer`, without colliding. Preserve legacy unbound or hidden
+explicit-root compatibility behavior through the global compatibility namespace
+defined by the Phase 1 gate.
+
+Verify fresh SQLite-backed registration, bounded handling for a pre-existing
+file-backed registration, actor-bound sessions registering the same public
+name, compatibility lookup for unbound callers, migrated metadata survival
+across MCP process restart, missing payload path reporting, and macOS/Linux plus
+native Windows file-locking and cleanup behavior. Exec job metadata migration is
+deferred to a later phase or ticket after named-agent registry migration is
+reviewed.
