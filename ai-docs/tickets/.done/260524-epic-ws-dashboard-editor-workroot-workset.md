@@ -1,5 +1,6 @@
 ---
 title: ws dashboard editor and WorkRoot management workset
+completed: 2026-05-25
 related:
   260514-epic-ws-web-dashboard-mvp: umbrella dashboard MVP board
   260524-feat-ws-dashboard-document-viewer-editor-substrate: editor and markdown viewer track
@@ -82,3 +83,11 @@ The workset covers:
 - Deferred: multi-server forwarding of Git/document operations, agent panel
   redesign, diagnostics/task panels, generalized provider configuration UI,
   and advanced Git workflows belong to later tickets.
+
+## Result
+
+Completed the workset through three child tickets: the reusable document
+viewer/editor substrate with Markdown translation overlay and save fan-out, the
+workspace menu Git worktree creation flow, and the selected WorkRoot Git-aware
+toolbar with branch/status chips plus safe fetch, push, and fast-forward-only
+pull controls.
