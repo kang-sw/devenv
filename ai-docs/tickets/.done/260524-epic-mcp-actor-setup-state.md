@@ -6,6 +6,7 @@ related-mental-model:
   - mcp-runtime
   - named-agent-runtime
   - plugin-runtime
+completed: 2026-05-24
 ---
 
 # MCP actor setup state
@@ -54,10 +55,11 @@ The epic owns decomposition for:
 - `260524-feat-mcp-state-store-prune` - introduce the SQLite metadata store,
   retention model, and pruning foundation while leaving stream output files on
   disk. Done in `e7c8868`.
-- Planned: migrate exec and named-agent async metadata to the actor-owned
-  SQLite lease model once the state store and setup model are stable.
-- Planned: align model-backed readers such as `exec.ask` with actor-scoped
-  context and visibility once the actor setup foundation exists.
+- Deferred: migrate exec and named-agent async metadata to the actor-owned
+  SQLite lease model once the async exec and agent harness follow-up scopes are
+  ready.
+- Deferred: align model-backed readers such as `exec.ask` with actor-scoped
+  context and visibility through `260524-feat-exec-output-ask`.
 
 ## Cross-Child Decisions
 
