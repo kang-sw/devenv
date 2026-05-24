@@ -158,6 +158,13 @@ The MVP should cover:
 - `260524-feat-ws-dashboard-workspace-forget-remove-ui` - todo; add explicit
   workspace owner forget/remove controls separate from automatic
   empty-workspace pruning and child workRoot projection.
+- `260524-feat-ws-dashboard-root-picker-modal` - todo; replace the temporary
+  open-workRoot path input with an explorer-like modal over the authenticated
+  root picker APIs.
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - todo; add a
+  reusable markdown document viewer substrate, translation-ready block model,
+  panel-local view/edit mode, raw-text editing boundary, and same-document save
+  fan-out contract.
 
 ## Cross-Child Decisions
 

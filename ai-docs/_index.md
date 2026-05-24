@@ -150,6 +150,8 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260524-epic-ws-dashboard-resource-continuity-sprint` | todo | Coordinate the dashboard root lifecycle, restore, linked-worktree, transcript summary, and cleanup pass |
+| `260524-feat-ws-dashboard-root-picker-modal` | todo | Replace the temporary open-workRoot path input with an explorer-like modal picker |
+| `260524-feat-ws-dashboard-document-viewer-editor-substrate` | todo | Add a reusable markdown document viewer, translation-ready block model, panel-local edit mode, and save fan-out contract |
 | `260524-feat-ws-dashboard-workspace-root-prune-policy` | ready | Add dashboard workspace root ownership and automatic no-active-workRoot pruning |
 | `260523-feat-ws-dashboard-readonly-file-pane-restore` | todo | Restore dashboard read-only file panes after refresh or daemon restart |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
