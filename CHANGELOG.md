@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.29.0 - 2026-05-24
+
+### Added
+- Add durable exec job MCP tools with persisted stdout/stderr readers and
+  lifecycle controls.
+- Add SQLite-backed ws state-store foundations for actor setup metadata and
+  future runtime metadata pruning.
+
+### Changed
+- Replace ticket queue project memory with ticket focus, add workset ticket
+  categorization, and add design verification workflow guidance.
+- Require implementation branch isolation in `lead-implement` and refine merge
+  guidance for single-commit, multi-commit, and noisy implementation branches.
+- Split static ws MCP reference ownership across specs and mental models while
+  keeping the reference document focused on operations.
+
+### Fixed
+- Fence `ws.setup` requests so batched setup-then-call sequences observe the
+  updated session and actor state.
+- Require absolute setup roots instead of the ambiguous `<cwd>` placeholder.
+- Harden exec job lifecycle edges and bounded text-reader behavior.
+
 ## v0.28.1 - 2026-05-23
 
 ### Fixed
