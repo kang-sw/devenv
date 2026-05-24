@@ -88,3 +88,35 @@ The sprint scope includes:
 - Deferred: terminal stability, broader UI persistence, main-session Activity
   freshness, and filesystem/Git deletion features remain outside this epic
   unless new child tickets are explicitly added.
+
+### Result (pending) - 2026-05-24
+
+Completed the dashboard resource continuity sprint. All five child tickets in
+this one-way epic board are done:
+
+- `260524-feat-ws-dashboard-workspace-root-prune-policy`
+- `260523-feat-ws-dashboard-readonly-file-pane-restore`
+- `260523-feat-ws-dashboard-linked-worktree-discovery`
+- `260523-feat-ws-dashboard-tool-output-safe-summary`
+- `260524-feat-ws-dashboard-workspace-forget-remove-ui`
+
+Implemented outcomes:
+
+- Workspaces with no available workRoots prune from live dashboard resources.
+- Linked Git worktrees are discovered as child workRoots under opened Git
+  workspace roots and synchronized into the in-memory registry with discovered
+  provenance.
+- Read-only file panes restore from browser-visible descriptors after reload
+  without persisting file contents or host paths.
+- Activity Console native Codex tool outputs show bounded head/tail snippets
+  instead of content-free placeholders.
+- Workspace-level owner removal is exposed through a confirmed dashboard-only
+  UI and protected route, with no child workRoot remove control.
+
+Verification:
+
+- `cargo test -p ws-dashboard-daemon --manifest-path ws-dashboard/Cargo.toml`
+- `npm run test:work-root-files`
+- `npm run test:commands`
+- `npm run build`
+- `npm run test:browser -- dashboard-acceptance.spec.ts`
