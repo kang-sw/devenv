@@ -16,8 +16,10 @@ spec:
 plans:
   phase-1: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate
   phase-2: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate-phase-2
+  phase-3: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate-phase-3
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Add dashboard document viewer and editor mode substrate
@@ -472,3 +474,34 @@ same-document clean pane refresh, dirty pane stale marking, per-workRoot event
 delivery or invalidation behavior, focus re-read fallback, and browser-level
 evidence that view/edit mode switching does not create duplicate tabs or break
 workbench placement.
+
+### Result (d655a6c) - 2026-05-24
+
+Implemented raw-text edit/save and document freshness behavior for dashboard
+document panes. The daemon now returns content hashes on reads, accepts
+owner-authenticated workRoot-relative writes with optimistic base-hash checks,
+serializes same-source writes, publishes protected document content-change
+events, and keeps write errors bounded without host-path leakage. The frontend
+now uses one same-tab document shell for Markdown and non-Markdown text panes,
+supports `view | edit`, raw draft editing, save/revert, dirty/saving/saved,
+stale/conflict/error states, source-keyed clean-pane fan-out, dirty-pane stale
+preservation, translation overlay invalidation after source changes, and
+focus/visibility re-read fallback.
+
+Review cycle follow-up `cd24d12` fixed concurrent-save serialization,
+stale-reread overwrite guards, non-Markdown text pane edit/save coverage,
+backend boundary cases, frontend fan-out/state coverage, and explicit same-tab
+browser assertions.
+
+Verification passed:
+
+- `cargo test -p ws-dashboard-daemon`
+- `npm run test:commands`
+- `npm run test:work-root-files`
+- `npm run test:document-viewer`
+- `npm run build`
+- `npm run test:browser`
+
+Deferred scope remains rich editing, collaboration, merge/overwrite UI, file
+create/rename/delete/move, broad watcher correctness, and general persistence
+of editor drafts or translation preferences.

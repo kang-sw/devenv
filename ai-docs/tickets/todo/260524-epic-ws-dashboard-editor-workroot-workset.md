@@ -38,10 +38,10 @@ The workset covers:
 
 ## Child Tickets
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; editor
-  polishing track. Phase 1 markdown viewer/block interaction and Phase 2
-  daemon-backed translation provider MVP are complete; continue with raw text
-  edit/save fan-out and document events.
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - done; editor
+  polishing track. Completed reusable Markdown/document viewing,
+  daemon-backed translation overlay, raw-text edit/save fan-out, and document
+  events.
 - `260524-feat-ws-dashboard-add-git-worktree-ui` - todo; first WorkRoot
   management slice. Replace the workspace trash affordance with an overflow
   menu, keep remove workspace in that menu, and add Git worktree creation with
