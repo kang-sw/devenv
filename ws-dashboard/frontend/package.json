@@ -23,6 +23,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "dockview": "^6.2.2",
+    "lucide-react": "^1.16.0",
     "react": "19.2.6",
     "react-aria-components": "^1.17.0",
     "react-dom": "19.2.6"
