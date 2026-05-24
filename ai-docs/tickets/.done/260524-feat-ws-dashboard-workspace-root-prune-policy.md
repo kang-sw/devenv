@@ -104,3 +104,25 @@ root-unavailable-with-active-child disabled state, activation/availability
 separation, and no host-path leakage. Frontend verification should cover
 selection reconciliation when a workspace is pruned and disabled workspace
 rendering when a child workRoot remains active.
+
+### Result (pending) - 2026-05-24
+
+Implemented the first lifecycle policy slice:
+
+- Resource refresh now automatically prunes workspaces with no available
+  workRoots from the live resource tree and in-memory registry.
+- Pruned resources are removed from opened workRoot membership; terminal
+  sessions for pruned workRoots are removed when the protected resources route
+  observes the prune.
+- Offline activation remains distinct from availability: an offline but
+  available root stays visible and continues to gate file/terminal/activity
+  routes as offline, while unavailable-only workspaces prune and reappear only
+  after an explicit open.
+- Workspace state can surface `recoveryNeeded` when the owner root is
+  unavailable but another available child workRoot keeps the workspace visible.
+- Pruned/stale workRoot ids become unknown to protected workRoot APIs without
+  leaking host paths.
+
+Verification:
+
+- `cargo test -p ws-dashboard-daemon --manifest-path ws-dashboard/Cargo.toml`

@@ -648,8 +648,68 @@ async fn dashboard_resources_api_includes_opened_work_root() {
 }
 
 #[tokio::test]
-async fn dashboard_resources_refresh_recomputes_availability_without_activation_or_membership_loss()
-{
+async fn dashboard_resources_discovers_linked_git_worktrees_from_opened_primary() {
+    if skip_without_git("dashboard_resources_discovers_linked_git_worktrees_from_opened_primary") {
+        return;
+    }
+    let base = temp_fixture_path("resources-linked-worktree");
+    let primary = base.join("primary");
+    let linked = base.join("linked");
+    fs::create_dir_all(&primary).expect("create primary workRoot");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "dashboard\n").expect("write seed file");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path utf-8"),
+        ],
+    );
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let primary_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+
+    let value = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let roots = value["workspaces"][0]["workRoots"]
+        .as_array()
+        .expect("workRoots array");
+    assert_eq!(roots.len(), 2);
+    assert!(roots
+        .iter()
+        .any(|root| root["id"] == primary_id && root["kind"] == "gitPrimaryRoot"));
+    let linked_root = roots
+        .iter()
+        .find(|root| root["kind"] == "gitLinkedWorktree")
+        .expect("linked worktree root");
+    let linked_id = linked_root["id"].as_str().expect("linked id");
+    assert!(
+        !String::from_utf8_lossy(&serde_json::to_vec(&value).expect("encode resources"))
+            .contains(linked.to_string_lossy().as_ref())
+    );
+
+    let files = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{linked_id}/files"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("linked files request"),
+        )
+        .await
+        .expect("linked files response");
+    assert_eq!(files.status(), StatusCode::OK);
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn dashboard_resources_refresh_prunes_workspace_without_available_work_roots() {
     let root = temp_fixture_path("refresh-recompute");
     fs::create_dir_all(&root).expect("create refresh root");
     let state = app_state();
@@ -686,24 +746,23 @@ async fn dashboard_resources_refresh_recomputes_availability_without_activation_
 
     fs::remove_dir_all(&root).expect("remove refresh root after registry membership");
     let missing = dashboard_resources_json(app.clone(), cookie.as_str()).await;
-    let root_view = only_work_root(&missing);
-    assert_eq!(root_view["id"], work_root_id);
-    assert_eq!(root_view["activation"], "offline");
     assert!(
-        ["missing", "moved"].contains(
-            &root_view["availability"]
-                .as_str()
-                .expect("missing availability")
-        ),
-        "missing root stays visible with degraded availability"
+        missing["workspaces"]
+            .as_array()
+            .expect("workspaces array")
+            .is_empty(),
+        "no-active-workRoot refresh prunes the unavailable workspace"
     );
 
     fs::create_dir_all(&root).expect("restore refresh root");
     let restored = dashboard_resources_json(app.clone(), cookie.as_str()).await;
-    let root_view = only_work_root(&restored);
-    assert_eq!(root_view["id"], work_root_id);
-    assert_eq!(root_view["activation"], "offline");
-    assert_eq!(root_view["availability"], "available");
+    assert!(
+        restored["workspaces"]
+            .as_array()
+            .expect("workspaces array")
+            .is_empty(),
+        "pruned workspaces reappear only after an explicit open"
+    );
 
     remove_static_fixture(&root);
 }
@@ -961,26 +1020,46 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
         .await
         .expect("resources body");
     let value: serde_json::Value = serde_json::from_slice(&resources_body).expect("resources JSON");
-    assert_eq!(value["workspaces"][0]["workRoots"][0]["id"], work_root_id);
-    assert_eq!(
-        value["workspaces"][0]["workRoots"][0]["activation"],
-        "online"
+    assert!(
+        value["workspaces"]
+            .as_array()
+            .expect("workspaces array")
+            .is_empty(),
+        "resource refresh prunes the missing root workspace"
     );
-    assert!(["missing", "moved"].contains(
-        &value["workspaces"][0]["workRoots"][0]["availability"]
-            .as_str()
-            .expect("availability")
-    ));
 
     let response = app.clone();
-    for uri in [
-        format!("/api/dashboard/work-roots/{work_root_id}/files"),
-        format!("/api/dashboard/work-roots/{work_root_id}/files/read?path=README.md"),
-        format!("/api/dashboard/work-roots/{work_root_id}/activity"),
-        format!("/api/dashboard/work-roots/{work_root_id}/activity/items/agent:test/transcript"),
-        format!("/api/dashboard/work-roots/{work_root_id}/activity/events"),
-        format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
-        format!("/api/dashboard/terminals/{terminal_id}/output"),
+    for (uri, expected_error) in [
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/files"),
+            "unknown workRoot",
+        ),
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/files/read?path=README.md"),
+            "unknown workRoot",
+        ),
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+            "unknown workRoot",
+        ),
+        (
+            format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/items/agent:test/transcript"
+            ),
+            "unknown workRoot",
+        ),
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/activity/events"),
+            "unknown workRoot",
+        ),
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            "unknown workRoot",
+        ),
+        (
+            format!("/api/dashboard/terminals/{terminal_id}/output"),
+            "unknown terminal",
+        ),
     ] {
         let response = response
             .clone()
@@ -994,12 +1073,12 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
             .await
             .expect("missing workRoot gated response");
 
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("unavailable body");
         let value: serde_json::Value = serde_json::from_slice(&body).expect("unavailable JSON");
-        assert_eq!(value["error"], "workRoot unavailable");
+        assert_eq!(value["error"], expected_error);
         assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
     }
 
@@ -1030,13 +1109,14 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
             )
             .await
             .expect("missing workRoot terminal POST response");
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("terminal unavailable body");
         let value: serde_json::Value =
             serde_json::from_slice(&body).expect("terminal unavailable JSON");
-        assert_eq!(value["error"], "workRoot unavailable");
+        assert!(["unknown workRoot", "unknown terminal"]
+            .contains(&value["error"].as_str().expect("error string")));
         assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
     }
 
@@ -1052,13 +1132,13 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
         )
         .await
         .expect("missing workRoot terminal delete response");
-    assert_eq!(delete_response.status(), StatusCode::CONFLICT);
+    assert_eq!(delete_response.status(), StatusCode::NOT_FOUND);
     let delete_body = axum::body::to_bytes(delete_response.into_body(), 4096)
         .await
         .expect("delete unavailable body");
     let value: serde_json::Value =
         serde_json::from_slice(&delete_body).expect("delete unavailable JSON");
-    assert_eq!(value["error"], "workRoot unavailable");
+    assert_eq!(value["error"], "unknown terminal");
     assert!(!String::from_utf8_lossy(&delete_body).contains(root.to_string_lossy().as_ref()));
 
     let (addr, server) = spawn_test_server(response.clone()).await;
@@ -1073,7 +1153,7 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
         .expect_err("unavailable websocket rejects");
     match error {
         tokio_tungstenite::tungstenite::Error::Http(response) => {
-            assert_eq!(response.status(), StatusCode::CONFLICT);
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
         }
         other => panic!("unexpected unavailable websocket error: {other}"),
     }
@@ -1090,7 +1170,7 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
         )
         .await
         .expect("terminal cleanup response");
-    assert_eq!(cleanup.status(), StatusCode::NO_CONTENT);
+    assert_eq!(cleanup.status(), StatusCode::NOT_FOUND);
     remove_static_fixture(&root);
 }
 

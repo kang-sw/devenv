@@ -92,3 +92,23 @@ Verification should cover primary-root discovery, linked-worktree discovery,
 external addition, external removal, no direct child forget/remove action,
 workspace prune interaction through active workRoot count, and no host-path or
 Git-metadata path leakage.
+
+### Result (pending) - 2026-05-24
+
+Implemented Phase 1 linked Git worktree discovery:
+
+- The live dashboard resource projection expands an owner-opened Git workRoot
+  through `git worktree list --porcelain` without broad filesystem crawling.
+- Discovered linked worktrees render as `gitLinkedWorktree` child workRoots
+  under the same workspace rather than independent workspaces.
+- Discovered child workRoots are synchronized into the in-memory registry with
+  `Discovered` provenance so file/terminal/activity routes can target them,
+  while persisted owner state continues to store only explicitly opened roots.
+- Removed linked worktrees fall out of the discovered projection on refresh;
+  unavailable-only workspaces then follow the no-active-workRoot prune policy.
+- Git metadata paths and host paths remain absent from browser-visible resource
+  responses.
+
+Verification:
+
+- `cargo test -p ws-dashboard-daemon --manifest-path ws-dashboard/Cargo.toml`

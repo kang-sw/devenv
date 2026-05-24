@@ -1,6 +1,6 @@
 use axum::extract::State;
 use axum::Json;
-use ws_dashboard_core::DashboardResourcesView;
+use ws_dashboard_core::{DashboardResourcesView, WorkRootId};
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
 use crate::router::AppState;
@@ -23,9 +23,15 @@ pub async fn dashboard_resources(State(state): State<AppState>) -> Json<Dashboar
     // Live discovery runs synchronous filesystem and `git` subprocess work, so
     // keep it off the async worker threads.
     let opened = state.opened_work_roots.clone();
-    let view = tokio::task::spawn_blocking(move || live_dashboard_resources(&opened))
-        .await
-        .expect("dashboard resources discovery task panicked");
+    let (view, pruned_work_root_ids) =
+        tokio::task::spawn_blocking(move || live_dashboard_resources_with_sync(&opened))
+            .await
+            .expect("dashboard resources discovery task panicked");
+    if !pruned_work_root_ids.is_empty() {
+        state
+            .terminals
+            .remove_for_work_roots(&pruned_work_root_ids.into_iter().collect());
+    }
     Json(view)
 }
 
@@ -34,12 +40,23 @@ pub async fn dashboard_resources(State(state): State<AppState>) -> Json<Dashboar
 /// Shared by the canonical resources route and the open-workRoot route so the
 /// immediately-returned open response matches later canonical refreshes.
 pub fn live_dashboard_resources(opened: &OpenedWorkRoots) -> DashboardResourcesView {
-    LocalDashboardResourcesProvider::new(
+    live_dashboard_resources_with_sync(opened).0
+}
+
+pub fn live_dashboard_resources_with_sync(
+    opened: &OpenedWorkRoots,
+) -> (DashboardResourcesView, Vec<WorkRootId>) {
+    let sync = LocalDashboardResourcesProvider::new(
         opened
-            .candidate_roots()
+            .owner_candidate_roots()
             .into_iter()
             .map(|root| LocalWorkRootCandidate::with_activation(root.path, root.activation))
             .collect(),
     )
-    .dashboard_resources()
+    .dashboard_resources_with_registry_sync();
+    for work_root_id in &sync.pruned_work_root_ids {
+        opened.unregister(work_root_id);
+    }
+    opened.sync_discovered_roots(sync.discovered_registry_roots);
+    (sync.view, sync.pruned_work_root_ids)
 }

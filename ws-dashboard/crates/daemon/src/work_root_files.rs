@@ -31,6 +31,7 @@ pub struct RegisteredWorkRoot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkRootProvenance {
     Opened,
+    Discovered,
 }
 
 impl OpenedWorkRoots {
@@ -139,6 +140,35 @@ impl OpenedWorkRoots {
             .collect();
         roots.sort_by(|left, right| left.path.cmp(&right.path));
         roots
+    }
+
+    pub fn owner_candidate_roots(&self) -> Vec<RegisteredWorkRoot> {
+        let mut roots: Vec<RegisteredWorkRoot> = self
+            .roots
+            .read()
+            .expect("opened workRoots lock poisoned")
+            .values()
+            .filter(|root| root.provenance == WorkRootProvenance::Opened)
+            .cloned()
+            .collect();
+        roots.sort_by(|left, right| left.path.cmp(&right.path));
+        roots
+    }
+
+    pub fn sync_discovered_roots(&self, discovered: Vec<RegisteredWorkRoot>) {
+        let mut roots = self.roots.write().expect("opened workRoots lock poisoned");
+        let discovered_ids: std::collections::BTreeSet<_> = discovered
+            .iter()
+            .map(|root| local_work_root_id_for_path(&root.path))
+            .collect();
+        roots.retain(|work_root_id, root| {
+            root.provenance != WorkRootProvenance::Discovered
+                || discovered_ids.contains(work_root_id)
+        });
+        for root in discovered {
+            let work_root_id = local_work_root_id_for_path(&root.path);
+            roots.entry(work_root_id).or_insert(root);
+        }
     }
 }
 

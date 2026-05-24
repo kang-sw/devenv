@@ -194,6 +194,7 @@ async fn write_work_root_registry(
         work_root_registry: deduplicate_registry_entries(
             roots
                 .into_iter()
+                .filter(|root| root.provenance == WorkRootProvenance::Opened)
                 .map(|root| PersistedRegistryWorkRoot {
                     path: root.path,
                     activation: root.activation,
@@ -228,6 +229,7 @@ impl From<WorkRootProvenance> for PersistedWorkRootProvenance {
     fn from(provenance: WorkRootProvenance) -> Self {
         match provenance {
             WorkRootProvenance::Opened => Self::Opened,
+            WorkRootProvenance::Discovered => Self::Opened,
         }
     }
 }

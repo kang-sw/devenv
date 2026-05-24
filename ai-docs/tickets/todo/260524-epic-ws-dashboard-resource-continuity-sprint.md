@@ -46,13 +46,13 @@ The sprint scope includes:
 
 ## Child Tickets
 
-- `260524-feat-ws-dashboard-workspace-root-prune-policy` - ready; implement the
+- `260524-feat-ws-dashboard-workspace-root-prune-policy` - done; implement the
   root ownership and automatic pruning policy first so later discovery and
   cleanup work has stable lifecycle semantics.
 - `260523-feat-ws-dashboard-readonly-file-pane-restore` - done; restore
   browser-visible read-only file panes after refresh or daemon restart without
   persisting file contents or absolute host paths.
-- `260523-feat-ws-dashboard-linked-worktree-discovery` - todo; add Git linked
+- `260523-feat-ws-dashboard-linked-worktree-discovery` - done; add Git linked
   worktrees as child workRoots instead of independent workspaces.
 - `260523-feat-ws-dashboard-tool-output-safe-summary` - done; show bounded
   head/tail tool-output snippets for authenticated owners.
