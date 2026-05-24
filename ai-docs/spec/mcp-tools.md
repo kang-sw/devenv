@@ -386,6 +386,22 @@ returns `next_offset`. `exec.raw.grep` searches selected streams, defaults to
 literal matching, and uses regular expressions only when the caller explicitly
 sets `regex: true`.
 
+## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
+
+The ws runtime has a SQLite metadata migration gate before named-agent or exec
+runtime metadata becomes SQLite-authoritative. The gate keeps public `agents.*`
+and `exec.*` MCP APIs stable while separating lifecycle metadata from
+file-backed payload bodies. SQLite metadata may track identities, lifecycle
+state, actor/session binding, path indexes, byte counts, retention visibility,
+leases, tombstones, and prune bookkeeping. Prompts, streams, runtime logs,
+event JSONL, transcripts, backend raw output, and final output bodies remain
+file-backed.
+
+SQLite state-store configure, migration, and short write paths use bounded
+retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
+process-local write serialization. Runtime migrations must keep transactions
+short and must not hold a transaction across subprocess or model execution.
+
 ## Tool Profile Gating {#260505-tool-profile-gating}
 
 The MCP server defaults to the `lead` tool surface. It does not derive authority

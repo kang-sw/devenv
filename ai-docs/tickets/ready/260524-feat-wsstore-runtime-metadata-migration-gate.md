@@ -163,6 +163,26 @@ updates, actor-bound sessions registering the same public name, a SQLite row
 whose file-backed payload is missing, temporary `agent.json` compatibility
 removal, and native Windows file-locking/cleanup behavior.
 
+### Result (43935812) - 2026-05-25
+
+Implemented the Phase 1 gate in `internal/wsstore` without migrating
+named-agent or exec runtime metadata into SQLite authority. The implementation
+adds bounded `SQLITE_BUSY`/`SQLITE_LOCKED` retry around short configure,
+migrate, and write paths while preserving process-local write serialization.
+
+The runtime metadata inventory now classifies current `agent.json`,
+`current/state.json`, and exec job `state.json` fields. Metadata fields,
+including path indexes and byte counts, are SQLite-authoritative candidates;
+payload bodies such as prompts, streams, logs, event JSONL, and final outputs
+remain file-backed. `agent.json` compatibility is represented as bounded
+read-only compatibility data rather than write authority.
+
+Review fixes tightened the gate by proving contention tests observe a real
+busy/locked retry before releasing a held transaction, making inventory coverage
+exhaustive against current JSON-tag fields, and avoiding reverse imports from
+`wsstore` tests into future wsstore consumers. Specs and mental models were
+updated for the implemented migration gate and path-versus-payload boundary.
+
 ### Phase 2: Migrate one runtime surface behind the gate
 
 After the gate exists, migrate either exec job metadata or named-agent metadata

@@ -22,6 +22,16 @@ when present, session id, status, prompt references, output path, capability
 flags, and whether the agent is ephemeral. Re-registering an existing agent
 replaces its directory only when it has no active current call.
 
+The runtime metadata migration gate classifies named-agent registry and current
+call fields before those fields move to SQLite authority.
+`agent.json` and `current/state.json` metadata such as backend/model selection,
+session id, lifecycle status, actor binding, timestamps, path indexes, and
+visibility flags are SQLite metadata candidates. Prompt text, system prompt
+text, stdout, stderr, runtime logs, event JSONL, and final output bodies remain
+file-backed payloads. Any `agent.json` compatibility during migration is
+bounded and read-only, not a durable write authority.
+{#260525-named-agent-runtime-metadata-inventory}
+
 ## Prompt Registration And Model Alias Resolution {#260505-agent-prompt-registration-tier-resolution}
 
 Agent registration accepts a prompt chain as logical prompt names or absolute

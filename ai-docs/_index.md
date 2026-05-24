@@ -184,7 +184,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260524-feat-wsstore-runtime-metadata-migration-gate` - ready; implement Phase 1 to define the SQLite contention and runtime metadata migration gate before moving named-agent or exec metadata.
+- `260524-feat-wsstore-runtime-metadata-migration-gate` - ready; Phase 1 completed the SQLite metadata migration gate, Phase 2 remains the next runtime-surface migration slice if work continues.
 
 ## Session Notes
 
