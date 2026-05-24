@@ -3,6 +3,7 @@ title: AGENTS bootstrap-managed root workflow context
 related:
   260429-research-host-neutral-ws-plugin: host-neutral ws plugin architecture anchor
   260502-feat-agents-plugin-codex-port-scaffold: first implementation slice for the parallel Codex plugin candidate
+completed: 2026-05-24
 ---
 
 # AGENTS bootstrap-managed root workflow context
@@ -80,3 +81,9 @@ Keep this research as the follow-up design anchor for bootstrap-managed
 `260502-feat-agents-plugin-codex-port-scaffold`, which should clarify the
 Codex plugin-local context shape before this research is promoted into a
 bootstrap-specific todo ticket.
+
+## Closeout
+
+The AGENTS canonical-context and bootstrap-management direction has been
+absorbed into the current workflow and compatibility specs, plus the completed
+bootstrap workflow guide work.

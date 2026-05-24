@@ -4,6 +4,7 @@ related:
   260429-research-host-neutral-ws-plugin: host-neutral backend architecture anchor
 related-mental-model:
   - named-agent-runtime
+completed: 2026-05-24
 ---
 
 # Gemini CLI stream-json backend contract
@@ -100,3 +101,8 @@ Gemini parsing must be more tolerant than the current Codex JSONL parser:
 This behavior differs from Codex, where non-JSON output before the final result
 is fatal. Gemini's CLI emits operational notices on stdout even in
 `stream-json` mode, so strict Codex parsing would reject valid Gemini runs.
+
+## Closeout
+
+The observed Gemini stream-json contract has been consumed by the implemented
+Gemini named-agent runner and documented in the named-agent runtime spec.
