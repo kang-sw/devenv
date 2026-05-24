@@ -244,7 +244,7 @@ Input schema:
     },
     "root": {
       "type": "string",
-      "description": "Git worktree root. For lead bootstrap, pass an absolute path or the literal \"<cwd>\"."
+      "description": "Git worktree root. For lead bootstrap, pass the repository's absolute filesystem path."
     },
     "format": {
       "type": "string",
@@ -256,10 +256,11 @@ Input schema:
 
 Behavior:
 
-- `ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or the same
-  call with an absolute root path, creates a cooperative lead actor, persists
-  the actor metadata in root/worktree SQLite state, and binds the actor root to
-  the current server process.
+- `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
+  creates a cooperative lead actor, persists the actor metadata in root/worktree
+  SQLite state, and binds the actor root to the current server process. Callers
+  must pass the repository's absolute filesystem path; the MCP server cannot
+  infer the agent's current directory from placeholders or relative paths.
 - `ws.setup(id: "<actor-id>")` restores a persisted actor and binds the current
   server process to that actor root.
 - `ws.setup(root: "<path>")` without `method` preserves compatibility root
@@ -1151,10 +1152,11 @@ Behavior:
   `--effort <value>`.
 
 Public `agents.*` schemas intentionally omit `root`; establish a lead actor with
-`ws/ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")` before normal
-root-omitted calls and recover it with `ws/ws.setup(id: "<actor-id>")` after an
-MCP restart. Explicit `root` arguments may still work as a compatibility
-override, but they are not the advertised caller surface.
+`ws/ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
+before normal root-omitted calls and recover it with
+`ws/ws.setup(id: "<actor-id>")` after an MCP restart. Explicit `root` arguments
+may still work as a compatibility override, but they are not the advertised
+caller surface.
 
 When a lead actor is bound, `agents.register`, `agents.call`, and `subquery`
 create or reuse child actor ids for launched workers. Persistent named agents

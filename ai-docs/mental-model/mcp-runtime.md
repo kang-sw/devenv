@@ -41,7 +41,7 @@ related:
 - Empty `WS_MCP_NAMESPACE` and `WS_MCP_SETUP_TOOL` values are treated as unset, preserving `ws` namespace text and the `ws.setup` advertised setup tool.
 - MCP starts with the lead tool surface; worktree locks are not an authority signal for tool visibility. {#260505-tool-profile-gating}
 - `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
-- `ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>" or absolute path)` creates a cooperative lead actor, persists actor metadata in root/worktree SQLite state, and binds the actor root to the current server process; `ws.setup(id: "<actor-id>")` restores that binding after restart. {#260524-mcp-actor-setup-bootstrap}
+- `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")` creates a cooperative lead actor, persists actor metadata in root/worktree SQLite state, and binds the actor root to the current server process; callers must pass the repository's absolute filesystem path because the MCP server cannot infer the agent cwd. `ws.setup(id: "<actor-id>")` restores that binding after restart. {#260524-mcp-actor-setup-bootstrap}
 - `ws.setup(root)` without a method remains the compatibility root-session setup surface; it stores a canonical Git worktree root in the current server instance only and does not change process cwd or write config. Hidden `session.*` dispatch can exist for compatibility but must not be advertised as canonical.
 - Root-omitted `agents.register`, `agents.call`, and `subquery` require a current actor binding, while hidden explicit-root arguments remain compatibility overrides during migration. {#260524-mcp-actor-setup-bootstrap}
 - Actor-bound `agents.register`, `agents.call`, and `subquery` mint or reuse child actors and inject `ws.setup(id: "<child-actor-id>")` recovery instructions into child system prompts; delegate/subquery prompts must not expose the lead bootstrap method.
@@ -82,7 +82,7 @@ related:
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
 - Adding API-doc async tools without updating `agents-plugin/runtime.json`; launcher compatibility checks compare the required MCP tool surface against runtime metadata.
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
-- Passing `"."` to lead actor setup is ambiguous in plugin-managed sessions; use an absolute root path or the literal `"<cwd>"` bootstrap placeholder.
+- Passing `"."` or `"<cwd>"` to lead actor setup is ambiguous in plugin-managed sessions; pass the repository's absolute filesystem path.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must ask for explicit compatibility `root` or `ws.setup(root)` instead.
 - Letting `WS_MCP_PROJECT_ROOT` shadow an explicit non-dot server startup root makes tests pass in this dogfooding repo while plugin-managed calls target the wrong project.
 - Treating namespace override as a tool rename; wsflow changes user-facing namespace text and advertised setup alias, while generic MCP tool identifiers stay stable.

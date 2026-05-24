@@ -74,9 +74,11 @@ labeled text; callers can request structured JSON for compatibility. Legacy
 `session.*` root tools may remain callable as hidden compatibility dispatch, but
 they are not advertised as canonical tools.
 
-`ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or the same call
-with an absolute root path, creates a cooperative lead actor for a workflow
-session and returns an actor id with explicit recovery guidance.
+`ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
+creates a cooperative lead actor for a workflow session and returns an actor id
+with explicit recovery guidance. Callers must pass the absolute repository path
+as a filesystem path; the MCP server cannot infer the agent's current directory
+from placeholders or relative paths.
 `ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
 and binds the current session root to the actor root. Root-omitted actor-owned
 tools such as agent registration, agent calls, and subqueries require either a
@@ -86,7 +88,8 @@ actor model is a cooperative workflow guard, not a hard security boundary.
 
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
-to pass `root` explicitly or call `ws.setup` with the current directory.
+to pass the absolute repository path explicitly or call `ws.setup` with that
+absolute path.
 
 An explicit non-dot server startup root is treated as authoritative before the
 launcher-provided project-root environment fallback. If that explicit startup

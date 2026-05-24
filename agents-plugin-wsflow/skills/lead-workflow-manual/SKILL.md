@@ -51,11 +51,13 @@ and expected output.
 
 Use `wsflow/runtime.info` for runtime compatibility checks and feature
 detection; when a package declares a required runtime version, compare the
-returned metadata against that requirement. Use `wsflow/setup(root: "<cwd>")`,
-or pass an absolute repository path as `root`, to set the current server process
-root when plugin-managed startup did not infer the intended repository; verify
-the returned `root` matches the intended repository, and rerun setup with the
-correct absolute path if it does not.
+returned metadata against that requirement. If startup did not already bind the
+server to the correct repository, call
+`wsflow/setup(root: "<absolute-working-directory>")` with the repository's
+absolute filesystem path. The MCP server cannot infer the agent's current
+directory from placeholders or relative paths. Verify the returned `root`
+matches the intended repository, and rerun setup with the correct absolute path
+if it does not.
 
 ### Project Context
 

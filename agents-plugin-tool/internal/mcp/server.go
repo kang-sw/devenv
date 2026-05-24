@@ -1157,7 +1157,7 @@ func formatSetupState(values map[string]any) string {
 
 func recoveryGuidance(actorID string) string {
 	if actorID == "" {
-		return fmt.Sprintf("Lead bootstrap requires %s(method: %q, root: \"<cwd>\" or an absolute path).", setupToolName(), leadWorkflowBootstrapMethod)
+		return fmt.Sprintf("Lead bootstrap requires %s(method: %q, root: \"<absolute-working-directory>\").", setupToolName(), leadWorkflowBootstrapMethod)
 	}
 	return fmt.Sprintf("Do not forget this actor_id. If MCP restarts, call %s(id: %q).", setupToolName(), actorID)
 }
@@ -1190,10 +1190,13 @@ func (s *Server) bootstrapLeadActor(ctx context.Context, arguments map[string]an
 	root, _ := arguments["root"].(string)
 	root = strings.TrimSpace(root)
 	if root == "" {
-		return fmt.Errorf("root is required for setup method %q; pass an absolute path or the literal \"<cwd>\"", leadWorkflowBootstrapMethod)
+		return fmt.Errorf("root is required for setup method %q; pass the repository's absolute filesystem path", leadWorkflowBootstrapMethod)
 	}
-	if root != "<cwd>" && !filepath.IsAbs(root) {
-		return fmt.Errorf("root for setup method %q must be an absolute path or the literal \"<cwd>\"", leadWorkflowBootstrapMethod)
+	if root == "<cwd>" {
+		return fmt.Errorf("root for setup method %q must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", leadWorkflowBootstrapMethod, root)
+	}
+	if !filepath.IsAbs(root) {
+		return fmt.Errorf("root for setup method %q must be an absolute repository path", leadWorkflowBootstrapMethod)
 	}
 	canonical, err := canonicalSetupRoot(root)
 	if err != nil {
@@ -1227,11 +1230,7 @@ func (s *Server) bootstrapLeadActor(ctx context.Context, arguments map[string]an
 func canonicalSetupRoot(root string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "<cwd>" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("resolve <cwd>: %w", err)
-		}
-		root = cwd
+		return "", fmt.Errorf("root must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", root)
 	}
 	return canonicalGitRoot(root)
 }
@@ -1251,7 +1250,7 @@ func (s *Server) restoreActor(ctx context.Context, actorID string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<cwd>\" or an absolute path) to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
+		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<absolute-working-directory>\") to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
 	}
 	if actor.Status != "" && actor.Status != "active" {
 		return fmt.Errorf("actor id %q is not active: %s", actorID, actor.Status)
@@ -1429,7 +1428,7 @@ func (s *Server) actorGate(name string, arguments map[string]any) error {
 	if hasActor {
 		return nil
 	}
-	return fmt.Errorf("setup required before root-omitted %s: call %s(method: %q, root: \"<cwd>\" or an absolute path) from lead-workflow-manual, or recover with %s(id: \"<actor-id>\")", name, setupToolName(), leadWorkflowBootstrapMethod, setupToolName())
+	return fmt.Errorf("setup required before root-omitted %s: call %s(method: %q, root: \"<absolute-working-directory>\") from lead-workflow-manual, or recover with %s(id: \"<actor-id>\")", name, setupToolName(), leadWorkflowBootstrapMethod, setupToolName())
 }
 
 func rootOmittedActorTool(name string) bool {
@@ -2087,7 +2086,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"method": stringProperty(`Optional setup method. Use "lead-workflow-bootstrap" to create a recoverable lead actor.`),
 					"id":     stringProperty("Recover a previously returned actor_id and bind it to this MCP server process."),
-					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass an absolute path or the literal "<cwd>".`),
+					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass the repository's absolute filesystem path.`),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},

@@ -629,7 +629,7 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
 		t.Fatalf("explicit root did not override session default: %s", byID["4"])
 	}
-	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") || !strings.Contains(toolText(t, byID["5"]), `root: "<cwd>"`) {
+	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") || !strings.Contains(toolText(t, byID["5"]), `root: "<absolute-working-directory>"`) {
 		t.Fatalf("root-omitted agents.register without actor was not setup-gated: %s", byID["5"])
 	}
 	if toolIsError(t, byID["6"]) {
@@ -735,6 +735,21 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	}
 	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "fresh-after-recovery"); err != nil {
 		t.Fatalf("recovered actor did not bind root for agent register: %v", err)
+	}
+}
+
+func TestServeStdioActorSetupRejectsCWDPlaceholder(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":"<cwd>"}}}` + "\n"
+	var out bytes.Buffer
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) || !strings.Contains(toolText(t, byID["1"]), "absolute repository path") {
+		t.Fatalf("cwd placeholder was not rejected with actionable guidance: %s", byID["1"])
 	}
 }
 
