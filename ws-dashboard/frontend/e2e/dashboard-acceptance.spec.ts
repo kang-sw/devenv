@@ -344,13 +344,18 @@ async function visibleWorkbenchGroupIds(page: Page): Promise<string[]> {
 }
 
 async function openWorkRootInBrowser(page: Page, rootPath: string) {
-  await expect(page.locator("#open-work-root-path")).toBeVisible();
-  await page.locator("#open-work-root-path").fill(rootPath);
-  await page.locator('[data-command-id="workRoot.open"]').click();
+  await page.locator('[data-command-id="rootPicker.open"]').click();
+  const modal = page.locator(".root-picker-modal");
+  await expect(modal).toBeVisible();
+  await expect(modal.locator(".root-picker-title")).toHaveText("Open workRoot");
+  await modal.locator("#root-picker-exact-path").fill(rootPath);
+  await modal.locator('[data-command-id="workRoot.open"]').filter({ hasText: "Open path" }).click();
   await expect(page.locator(".file-explorer-title")).toContainText(
     workRootDisplayName(rootPath),
   );
+  await expect(modal).toHaveCount(0);
   await expectDockviewWorkbench(page);
+  note("open workRoot: modal exact-path fallback opened the daemon-selected workRoot");
 }
 
 async function selectWorkRootInBrowser(page: Page, rootPath: string) {

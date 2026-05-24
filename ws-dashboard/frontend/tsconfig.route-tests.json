@@ -17,6 +17,8 @@
     "src/apiError.test.ts",
     "src/openWorkRoot.ts",
     "src/openWorkRoot.test.ts",
+    "src/rootPicker.ts",
+    "src/rootPicker.test.ts",
     "src/commands.ts",
     "src/commands.test.ts",
     "src/resourceModel.ts",

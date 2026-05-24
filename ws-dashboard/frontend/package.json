@@ -11,6 +11,7 @@
     "test:api-error": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/apiError.test.js",
     "test:resource-model": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourceModel.test.js && node ./node_modules/.tmp/route-tests/resourceRefresh.test.js",
     "test:commands": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/commands.test.js",
+    "test:root-picker": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/rootPicker.test.js",
     "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js",
     "test:work-root-files": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootFiles.test.js",
     "test:work-root-activity": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootActivity.test.js",
