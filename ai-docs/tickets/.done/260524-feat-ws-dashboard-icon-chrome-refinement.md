@@ -220,3 +220,18 @@ Verification:
 - Manual screenshot review of `desktop-workbench.png` confirmed compact rows
   use one blue folder icon and the selected workRoot text/icon color is more
   visible.
+
+#### Edition (7ebe5f9) - 2026-05-24
+
+Adjusted selected resource emphasis after follow-up feedback that text-color
+emphasis alone was too weak. Selected resource rows now use a row-level
+action-tinted background plus a subtle inset light border while preserving the
+existing left rail and compact one-line density.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png` confirmed the selected
+  workRoot row is more distinguishable through surface treatment rather than
+  text-color emphasis.
