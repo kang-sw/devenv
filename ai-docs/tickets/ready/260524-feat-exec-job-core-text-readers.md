@@ -1,6 +1,9 @@
 ---
 title: Exec job core and raw text readers
 parent: 260524-epic-async-exec-job-surface
+spec:
+  - 260524-exec-job-mcp-tools
+  - 260524-exec-runtime-contract-surface
 related:
   260513-feat-async-exec-output-reader: original broad ticket absorbed by parent epic
   260513-research-streamable-http-mcp-transport: adjacent daemon and reconnect lifecycle discussion
@@ -30,7 +33,7 @@ depends on.
   process, and wait up to a fixed 5-second foreground window before returning.
 - The 5-second foreground window is not caller-configurable and is not named as
   a timeout. Long-running jobs continue asynchronously and are inspected through
-  `exec.status`, `exec.result`, `exec.abort`, and text readers.
+  `exec.status`, `exec.result`, `exec.abort`, and raw readers.
 - If a job exits during the foreground window and combined stdout plus stderr is
   at most 4096 bytes, the launch response may include the completed output
   inline with the `exec_key`, exit status, and metadata.

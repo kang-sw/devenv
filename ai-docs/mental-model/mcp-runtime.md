@@ -61,6 +61,7 @@ related:
 - **Restrict a tool under a profile**: update profile tables and add tests proving allowlists cannot regain a hidden tool.
 - **Add or change a product-mode gate**: update MCP tool filtering, explicit call errors, CLI command dispatch, `runtimeCapabilityCommandNames`, and both default and mode-specific tests.
 - **Change wsflow no-agent mode**: update `agents-plugin-wsflow/runtime.json`, package tests, and launcher contract expectations in the same logical change.
+- **Add the exec job surface**: keep launch, status, result, abort, and raw fallback readers in the MCP registry together; preserve bounded default output, route omitted `working_dir` through ws root resolution instead of process cwd, and hide the entire `exec.*` family in wsflow no-agent mode. {#260524-exec-job-mcp-tools} {#260524-exec-runtime-contract-surface}
 
 ## Common Mistakes
 
