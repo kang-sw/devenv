@@ -1630,6 +1630,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
     await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
     await expect(pane.locator("table")).toContainText("rendered");
+    await pane.locator('[data-command-id="document.translation.toggle"]').click();
+    await expect(pane.locator(".document-translation-status")).toContainText(
+      /No translation provider configured|Translation partial|Translated to/,
+    );
 
     const paragraphBlock = pane.locator('[data-document-block-kind="paragraph"]').first();
     await paragraphBlock.click();

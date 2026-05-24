@@ -2,6 +2,7 @@ pub mod auth;
 pub mod cli;
 pub mod config;
 pub mod discovery;
+pub mod document_translation;
 pub mod events;
 pub mod logging;
 pub mod mock;

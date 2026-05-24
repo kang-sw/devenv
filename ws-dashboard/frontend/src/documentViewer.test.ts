@@ -1,8 +1,10 @@
 import {
+  buildDocumentTranslationRequestPayload,
   buildOverlayKey,
   deriveMarkdownDocumentModel,
   isMarkdownDocumentSource,
   localDocumentContentHash,
+  overlayFromTranslationResponse,
   safeMarkdownLinkUrl,
   translationForBlock,
   workRootRelativePathForPathref,
@@ -180,4 +182,42 @@ assertEqual(
   safeMarkdownLinkUrl("./relative.md"),
   undefined,
   "relative markdown links are inert until dashboard-safe navigation exists",
+);
+
+const requestPayload = buildDocumentTranslationRequestPayload({
+  markdown: "# Translate me\n\nHello world\n",
+  workRootId: "root-local-abc",
+  path: "docs/translate.md",
+  title: "translate.md",
+  targetLocale: "ko",
+});
+assertEqual(requestPayload.source.kind, "workRootFile", "translation payload source is a workRoot file");
+assertEqual(requestPayload.source.workRootId, "root-local-abc", "translation payload uses opaque workRoot id");
+assertEqual(requestPayload.source.path, "docs/translate.md", "translation payload uses workRoot-relative path");
+assertEqual(requestPayload.locale.target, "ko", "translation payload includes explicit target locale");
+assert(
+  requestPayload.blocks.length >= 2 && requestPayload.blocks.every((block) => block.blockId),
+  "translation payload includes whole document block context",
+);
+assert(!JSON.stringify(requestPayload).includes("/Users/"), "translation payload does not include host paths");
+
+const responseOverlay = overlayFromTranslationResponse({
+  sourceContentHash: requestPayload.source.contentHash,
+  targetLocale: "ko",
+  status: "completed",
+  cache: { hit: false, providerId: "test", providerKind: "llmOpenAICompatible", model: "fake" },
+  blocks: [
+    {
+      blockId: requestPayload.blocks[0].blockId,
+      translatedMarkdown: "번역",
+      translatedPlainText: "번역",
+      status: "ok",
+    },
+  ],
+});
+assertEqual(
+  translationForBlock(responseOverlay, requestPayload.source.contentHash, requestPayload.blocks[0].blockId)
+    ?.translatedMarkdown,
+  "번역",
+  "daemon translation response maps into content-hash overlay blocks",
 );

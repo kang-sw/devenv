@@ -63,6 +63,35 @@ export type MarkdownDocumentModel = {
   footnotes: Record<string, string>;
 };
 
+
+export type TranslationProviderStatus = {
+  id: string;
+  kind: string;
+  label: string;
+  configured: boolean;
+  reachable: boolean;
+  models: Array<{ id: string; label?: string | null }>;
+  defaultModel?: string | null;
+  error?: string | null;
+};
+
+export type DocumentTranslationApiResponse = {
+  sourceContentHash: string;
+  targetLocale: string;
+  status: "completed" | "partial" | "failed" | string;
+  cache: { hit: boolean; providerId: string; providerKind: string; model: string };
+  blocks: Array<{
+    blockId: string;
+    translatedMarkdown?: string | null;
+    translatedPlainText?: string | null;
+    status: "ok" | "omitted" | "failed" | string;
+    note?: string | null;
+  }>;
+  unmatched?: Array<{ ordinal: number; text: string; reason: string }>;
+};
+
+export type DocumentTranslationRequestPayload = ReturnType<typeof buildDocumentTranslationRequestPayload>;
+
 const parser = unified().use(remarkParse).use(remarkGfm);
 
 export function isMarkdownDocumentSource(source: {
@@ -252,6 +281,10 @@ export function DocumentViewer({
   const model = useMemo(() => deriveMarkdownDocumentModel(markdown, { path }), [markdown, path]);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const selectedBlocks = model.blocks.filter((block) => selectedBlockIds.has(block.blockId));
+  const visibleTextForBlock = (block: DocumentBlock) =>
+    translationForBlock(overlay, model.contentHash, block.blockId)?.status === "ok"
+      ? translationForBlock(overlay, model.contentHash, block.blockId)?.translatedMarkdown ?? block.plainText
+      : block.plainText;
 
   const copyText = (text: string) => {
     void navigator.clipboard?.writeText(text);
@@ -273,8 +306,8 @@ export function DocumentViewer({
       {selectedBlocks.length > 0 ? (
         <div className="document-viewer-action-strip" data-selected-block-count={selectedBlocks.length}>
           <span>{selectedBlocks.length} block{selectedBlocks.length === 1 ? "" : "s"} selected</span>
-          <button type="button" onClick={() => copyText(selectedBlocks.map((block) => block.plainText).join("\n\n"))}>
-            Copy text
+          <button type="button" onClick={() => copyText(selectedBlocks.map(visibleTextForBlock).join("\n\n"))}>
+            Copy visible
           </button>
           <button
             type="button"
@@ -313,7 +346,7 @@ export function DocumentViewer({
             >
               {translation?.status === "ok" ? (
                 <div className="document-block-translation" title={block.plainText}>
-                  {translation.translatedMarkdown}
+                  {renderTranslatedMarkdown(translation.translatedMarkdown)}
                 </div>
               ) : (
                 renderBlockNode(block, model.footnotes)
@@ -324,6 +357,12 @@ export function DocumentViewer({
       </div>
     </div>
   );
+}
+
+function renderTranslatedMarkdown(markdown: string): ReactNode {
+  const tree = parser.parse(markdown) as MarkdownNode;
+  const footnotes = footnotesForTree(tree);
+  return tree.children?.map((child, index) => renderNode(child, `translated-${index}`, footnotes));
 }
 
 function renderBlockNode(block: RenderBlock, footnotes: Record<string, string>): ReactNode {
@@ -459,4 +498,73 @@ function footnotesForTree(tree: MarkdownNode) {
     }
   }
   return footnotes;
+}
+
+
+export function buildDocumentTranslationRequestPayload(options: {
+  markdown: string;
+  workRootId: string;
+  path: string;
+  title?: string;
+  targetLocale?: string;
+  providerId?: string;
+  model?: string;
+}) {
+  const model = deriveMarkdownDocumentModel(options.markdown, { path: options.path });
+  return {
+    source: {
+      kind: "workRootFile",
+      workRootId: options.workRootId,
+      path: options.path,
+      contentHash: model.contentHash,
+      format: "markdown",
+      title: options.title,
+    },
+    provider: options.providerId ? { id: options.providerId, model: options.model } : undefined,
+    locale: { source: null, target: options.targetLocale ?? "ko" },
+    blocks: model.blocks,
+    cachePolicy: "preferCached",
+  };
+}
+
+export function overlayFromTranslationResponse(
+  response: DocumentTranslationApiResponse,
+): DocumentTranslationOverlay {
+  return {
+    contentHash: response.sourceContentHash,
+    blocks: Object.fromEntries(
+      response.blocks.map((block) => [
+        buildOverlayKey(response.sourceContentHash, block.blockId),
+        {
+          translatedMarkdown: block.translatedMarkdown ?? "",
+          status: block.status === "ok" ? "ok" : block.status === "failed" ? "failed" : "pending",
+        },
+      ]),
+    ),
+  };
+}
+
+export async function fetchTranslationProviders(): Promise<{ providers: TranslationProviderStatus[] }> {
+  const response = await fetch("/api/dashboard/document-translation/providers", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return (await response.json()) as { providers: TranslationProviderStatus[] };
+}
+
+export async function requestDocumentTranslation(
+  payload: DocumentTranslationRequestPayload,
+): Promise<DocumentTranslationApiResponse> {
+  const response = await fetch("/api/dashboard/document-translation/translate", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? "translation request failed");
+  }
+  return (await response.json()) as DocumentTranslationApiResponse;
 }

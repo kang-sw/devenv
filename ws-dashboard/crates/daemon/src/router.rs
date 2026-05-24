@@ -13,6 +13,9 @@ use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
+use crate::document_translation::{
+    translate_document, translation_providers, DocumentTranslationService,
+};
 use crate::events::instance_events;
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
@@ -36,6 +39,7 @@ pub struct AppState {
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
     pub dashboard_state: DashboardStateStore,
+    pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
     pub registry_persist_lock: Arc<Mutex<()>>,
@@ -48,6 +52,14 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route(
+            "/api/dashboard/document-translation/providers",
+            get(translation_providers),
+        )
+        .route(
+            "/api/dashboard/document-translation/translate",
+            post(translate_document),
+        )
         .route(
             "/api/dashboard/instance-events/{stream_id}",
             get(instance_events),

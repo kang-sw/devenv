@@ -74,6 +74,7 @@ where
         auth,
         opened_work_roots,
         dashboard_state,
+        document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),

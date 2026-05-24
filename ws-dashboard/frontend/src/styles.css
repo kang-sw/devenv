@@ -2864,3 +2864,43 @@ button {
 .document-block-translation {
   color: var(--ws-color-text-primary);
 }
+
+.document-translation-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-05);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-surface-editor-chrome);
+  padding: var(--ws-space-04) var(--ws-space-08);
+}
+
+.document-translation-toggle {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-raised);
+  color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-02) var(--ws-space-06);
+  font: inherit;
+  cursor: pointer;
+}
+
+.document-translation-toggle.is-active {
+  border-color: var(--ws-color-action);
+  color: var(--ws-color-text-primary);
+}
+
+.document-translation-status {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-02);
+}
+
+.document-block-translation:hover::after {
+  content: attr(title);
+  display: block;
+  margin-top: var(--ws-space-04);
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-action);
+  background: var(--ws-color-panel-inset);
+  color: var(--ws-color-text-tertiary);
+  padding: var(--ws-space-04);
+  white-space: pre-wrap;
+}

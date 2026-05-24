@@ -32,7 +32,15 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
-import { DocumentViewer, isMarkdownDocumentSource } from "./documentViewer";
+import {
+  DocumentViewer,
+  buildDocumentTranslationRequestPayload,
+  fetchTranslationProviders,
+  isMarkdownDocumentSource,
+  overlayFromTranslationResponse,
+  requestDocumentTranslation,
+  type DocumentTranslationOverlay,
+} from "./documentViewer";
 import {
   buildDashboardRefreshCommand,
   buildFileExplorerOpenFileCommand,
@@ -4257,6 +4265,66 @@ function ReadOnlyMarkdownPane({
   pane: ReadOnlyFilePane;
   root: WorkRootView;
 }) {
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [translationStatus, setTranslationStatus] = useState<
+    "idle" | "loading" | "ready" | "unavailable" | "error"
+  >("idle");
+  const [translationMessage, setTranslationMessage] = useState<string | null>(null);
+  const [translationOverlay, setTranslationOverlay] = useState<DocumentTranslationOverlay | undefined>();
+
+  useEffect(() => {
+    if (!translationEnabled || pane.status !== "loaded") {
+      return;
+    }
+    let cancelled = false;
+    setTranslationStatus("loading");
+    setTranslationMessage("Requesting document translation");
+    const payload = buildDocumentTranslationRequestPayload({
+      markdown: pane.content,
+      workRootId: pane.workRootId,
+      path: pane.path,
+      title: pane.title,
+      targetLocale: "ko",
+    });
+    void fetchTranslationProviders()
+      .then((providers) => {
+        const provider = providers.providers.find((candidate) => candidate.configured);
+        if (!provider) {
+          throw new Error("No translation provider configured");
+        }
+        return requestDocumentTranslation({
+          ...payload,
+          provider: {
+            id: provider.id,
+            model: provider.defaultModel ?? provider.models[0]?.id,
+          },
+        });
+      })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setTranslationOverlay(overlayFromTranslationResponse(response));
+        setTranslationStatus(response.status === "failed" ? "error" : "ready");
+        setTranslationMessage(
+          response.status === "completed"
+            ? `Translated to ${response.targetLocale}`
+            : `Translation ${response.status}`
+        );
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setTranslationOverlay(undefined);
+        setTranslationStatus("unavailable");
+        setTranslationMessage(error instanceof Error ? error.message : "Translation unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, translationEnabled]);
+
   return (
     <div className="readonly-text-pane document-pane ws-pane">
       <div className="readonly-text-pane-header ws-toolbar">
@@ -4279,7 +4347,28 @@ function ReadOnlyMarkdownPane({
           {pane.error ?? "file read failed"}
         </div>
       ) : (
-        <DocumentViewer markdown={pane.content} path={pane.path} />
+        <>
+          <div className="document-translation-toolbar ws-toolbar">
+            <button
+              type="button"
+              className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
+              data-command-id="document.translation.toggle"
+              aria-pressed={translationEnabled}
+              onClick={() => {
+                setTranslationEnabled((current) => !current);
+                setTranslationOverlay(undefined);
+                setTranslationStatus("idle");
+                setTranslationMessage(null);
+              }}
+            >
+              Translate: {translationEnabled ? "on" : "off"}
+            </button>
+            <span className="document-translation-status" data-translation-status={translationStatus}>
+              {translationMessage ?? "Target: Korean"}
+            </span>
+          </div>
+          <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+        </>
       )}
     </div>
   );

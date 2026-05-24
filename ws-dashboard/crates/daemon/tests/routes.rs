@@ -39,6 +39,9 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as Tungs
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
+use ws_dashboard_daemon::document_translation::{
+    DocumentTranslationService, TranslationProviderConfig,
+};
 use ws_dashboard_daemon::persistent_state::DashboardStateStore;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
@@ -136,6 +139,7 @@ fn app_state_with_opened_and_store(
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots,
         dashboard_state,
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
@@ -151,6 +155,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
@@ -370,6 +375,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
@@ -2185,6 +2191,7 @@ fn app_state_with_activity_cache_and_codex_home(
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
             codex_home,
@@ -5790,4 +5797,261 @@ async fn daemon_security_smoke_covers_auth_and_health_boundary() {
         .await
         .expect("authenticated UI response");
     assert_eq!(ui.status(), StatusCode::OK);
+}
+
+fn app_state_with_translation_provider(base_url: String, default_model: Option<&str>) -> AppState {
+    AppState {
+        config: ServeConfig::default_loopback(),
+        auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::new(Some(TranslationProviderConfig {
+            id: "test-provider".to_owned(),
+            label: "Test provider".to_owned(),
+            base_url,
+            api_key: Some("test-key-redacted".to_owned()),
+            default_model: default_model.map(str::to_owned),
+            timeout_ms: 5_000,
+        })),
+        terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
+    }
+}
+
+async fn start_fake_openai_provider(response_content: &'static str) -> (String, Arc<AtomicU64>) {
+    async fn models() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "data": [{ "id": "fake-model" }] }))
+    }
+    async fn chat(
+        axum::extract::State(state): axum::extract::State<(Arc<AtomicU64>, &'static str)>,
+        axum::Json(_request): axum::Json<serde_json::Value>,
+    ) -> axum::Json<serde_json::Value> {
+        state.0.fetch_add(1, Ordering::SeqCst);
+        axum::Json(serde_json::json!({
+            "choices": [{ "message": { "content": state.1 } }]
+        }))
+    }
+
+    let calls = Arc::new(AtomicU64::new(0));
+    let app = axum::Router::new()
+        .route("/v1/models", axum::routing::get(models))
+        .route("/v1/chat/completions", axum::routing::post(chat))
+        .with_state((calls.clone(), response_content));
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake provider");
+    let addr = listener.local_addr().expect("fake provider addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{addr}/v1"), calls)
+}
+
+fn translation_request_body() -> serde_json::Value {
+    serde_json::json!({
+        "source": {
+            "kind": "workRootFile",
+            "workRootId": "root-local-test",
+            "path": "docs/readme.md",
+            "contentHash": "fnv1a32:testhash",
+            "format": "markdown",
+            "title": "readme.md"
+        },
+        "provider": { "id": "test-provider", "model": "fake-model" },
+        "locale": { "source": null, "target": "ko" },
+        "blocks": [
+            {
+                "blockId": "paragraph-1",
+                "ordinal": 0,
+                "kind": "paragraph",
+                "markdown": "Hello",
+                "plainText": "Hello",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "pathref": "@docs/readme.md#L1",
+                "translatable": true
+            },
+            {
+                "blockId": "code-2",
+                "ordinal": 1,
+                "kind": "code",
+                "markdown": "```sh\necho hi\n```",
+                "plainText": "echo hi",
+                "lineStart": 2,
+                "lineEnd": 4,
+                "pathref": "@docs/readme.md#L2-L4",
+                "translatable": false
+            }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn document_translation_routes_require_owner_auth() {
+    let app = build_router(app_state());
+    let providers = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/document-translation/providers")
+                .body(Body::empty())
+                .expect("providers request"),
+        )
+        .await
+        .expect("providers response");
+    assert_eq!(providers.status(), StatusCode::UNAUTHORIZED);
+
+    let translate = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(translation_request_body().to_string()))
+                .expect("translate request"),
+        )
+        .await
+        .expect("translate response");
+    assert_eq!(translate.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn document_translation_provider_status_probes_models_without_secrets() {
+    let (base_url, _calls) = start_fake_openai_provider("{\"blocks\":[]}").await;
+    let state = app_state_with_translation_provider(base_url, None);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/document-translation/providers")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("providers request"),
+        )
+        .await
+        .expect("providers response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("providers body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("providers json");
+    assert_eq!(value["providers"][0]["reachable"], true);
+    assert_eq!(value["providers"][0]["models"][0]["id"], "fake-model");
+    assert!(!String::from_utf8_lossy(&body).contains("test-key-redacted"));
+}
+
+#[tokio::test]
+async fn document_translation_translate_validates_blocks_and_reuses_cache() {
+    let (base_url, calls) = start_fake_openai_provider(
+        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"안녕하세요"}]}"#,
+    )
+    .await;
+    let state = app_state_with_translation_provider(base_url, Some("fake-model"));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    for expected_hit in [false, true] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/dashboard/document-translation/translate")
+                    .header(header::COOKIE, cookie.clone())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(translation_request_body().to_string()))
+                    .expect("translate request"),
+            )
+            .await
+            .expect("translate response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("translate body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("translate json");
+        assert_eq!(value["cache"]["hit"], expected_hit);
+        assert_eq!(value["blocks"][0]["status"], "ok");
+        assert_eq!(value["blocks"][0]["translatedMarkdown"], "안녕하세요");
+        assert_eq!(value["blocks"][1]["status"], "omitted");
+        assert!(!String::from_utf8_lossy(&body).contains("translatedContent"));
+        assert!(!String::from_utf8_lossy(&body).contains("test-key-redacted"));
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() {
+    let (base_url, _calls) = start_fake_openai_provider(
+        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"하나"},{"blockId":"unknown","translatedContent":"raw"},{"blockId":"paragraph-1","translatedContent":"둘"}]}"#,
+    )
+    .await;
+    let state = app_state_with_translation_provider(base_url, Some("fake-model"));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let mut duplicate = translation_request_body();
+    duplicate["blocks"][1]["blockId"] = serde_json::json!("paragraph-1");
+    let duplicate_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(duplicate.to_string()))
+                .expect("duplicate request"),
+        )
+        .await
+        .expect("duplicate response");
+    assert_eq!(duplicate_response.status(), StatusCode::BAD_REQUEST);
+
+    let mut absolute_path = translation_request_body();
+    absolute_path["source"]["path"] = serde_json::json!("/Users/example/private.md");
+    let absolute_path_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(absolute_path.to_string()))
+                .expect("absolute path request"),
+        )
+        .await
+        .expect("absolute path response");
+    assert_eq!(absolute_path_response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(translation_request_body().to_string()))
+                .expect("translate request"),
+        )
+        .await
+        .expect("translate response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("translate body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("translate json");
+    assert_eq!(value["status"], "partial");
+    assert!(
+        value["unmatched"]
+            .as_array()
+            .expect("unmatched array")
+            .len()
+            >= 2
+    );
+    assert!(!String::from_utf8_lossy(&body).contains("raw model"));
 }
