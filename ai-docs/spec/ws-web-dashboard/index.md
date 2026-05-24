@@ -169,6 +169,35 @@ the daemon can identify it. Checked-out branches, invalid names, unavailable
 Git roots, and path conflicts produce bounded errors without exposing private
 host paths in command payloads, logs, or browser-visible diagnostics.
 
+## 🚧 Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
+
+The selected WorkRoot toolbar will show Git controls only for online,
+available Git workRoots. Non-Git, offline, missing, moved, or inaccessible
+workRoots will not render branch or Git status controls beyond bounded
+unavailable diagnostics.
+
+The toolbar will include a branch chip for the current branch or a bounded
+detached `HEAD` label. Opening the chip will show a daemon-resolved branch list
+with checked-out branches disabled when known, plus a `+ New branch...` action
+that creates and switches to a new branch from a selected base branch. Branch
+switch and create actions will follow Git defaults and revalidate server-side
+before mutation.
+
+A compact Git status pill will summarize line/file and upstream state with the
+segment grammar `+<added-lines> -<removed-lines> *<modified-files>
+?<untracked-files> | ↑<ahead> ↓<behind>`. The pill will always expose a small
+fetch/refresh action, and upstream push/pull segments will be interactive only
+when applicable. Push will run plain `git push`; pull will run
+`git pull --ff-only` so dashboard-triggered pulls cannot leave the workRoot in
+a merge or rebase conflict state.
+
+Status refresh stays host-light: the dashboard refreshes immediately on
+selected WorkRoot changes, visibility return, explicit fetch/push/pull,
+branch switch, and branch create, then polls conservatively only for the
+selected visible WorkRoot. All Git toolbar routes remain owner-authenticated,
+address workRoots by opaque `workRootId`, keep Git work off async workers, and
+avoid exposing host paths in command logs or bounded browser-visible errors.
+
 Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots
 with offline activation return a bounded offline response. Online workRoots
