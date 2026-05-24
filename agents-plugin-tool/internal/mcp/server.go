@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/execjob"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
@@ -419,6 +420,80 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		key, _ := params.Arguments["api_job_key"].(string)
 		result, err := s.cancelAPIJob(ctx, root, key)
+		return toolJSONResponse(req.ID, result, err)
+
+	case "exec.spawn":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		cmd, _ := params.Arguments["cmd"].(string)
+		workingDir, _ := params.Arguments["working_dir"].(string)
+		stdin, _ := params.Arguments["stdin"].(string)
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin})
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.shell":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		command, _ := params.Arguments["command"].(string)
+		workingDir, _ := params.Arguments["working_dir"].(string)
+		stdin, _ := params.Arguments["stdin"].(string)
+		shell, _ := params.Arguments["shell"].(string)
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true})
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.status":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		result, err := execjob.Status(root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.result":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		result, err := execjob.Result(root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.abort":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		result, err := execjob.Abort(root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.raw.tail":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		stream, _ := params.Arguments["stream"].(string)
+		result, err := execjob.Tail(root, key, stream, intFromArgument(params.Arguments["lines"], 0))
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.raw.read":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		stream, _ := params.Arguments["stream"].(string)
+		result, err := execjob.Read(root, key, stream, int64FromArgument(params.Arguments["offset"], 0), int64FromArgument(params.Arguments["limit"], 0))
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.raw.grep":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		stream, _ := params.Arguments["stream"].(string)
+		pattern, _ := params.Arguments["pattern"].(string)
+		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return toolJSONResponse(req.ID, result, err)
 	case "config.show":
 		view, err := wsconfig.Show(wsconfig.Options{})
@@ -1738,6 +1813,46 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "exec.spawn",
+			"description": "Start a durable structured command job using argv, with bounded inline output when it completes quickly.",
+			"inputSchema": execLaunchSchema(false),
+		},
+		{
+			"name":        "exec.shell",
+			"description": "Start a durable explicit shell command job, with bounded inline output when it completes quickly.",
+			"inputSchema": execLaunchSchema(true),
+		},
+		{
+			"name":        "exec.status",
+			"description": "Return lifecycle status and stream sizes for a durable exec job.",
+			"inputSchema": execKeySchema(),
+		},
+		{
+			"name":        "exec.result",
+			"description": "Return terminal exec job metadata and at most the fixed 4096-byte inline output budget.",
+			"inputSchema": execKeySchema(),
+		},
+		{
+			"name":        "exec.abort",
+			"description": "Best-effort terminate a running exec job while preserving partial output.",
+			"inputSchema": execKeySchema(),
+		},
+		{
+			"name":        "exec.raw.tail",
+			"description": "Read bounded tail text from a persisted exec stdout, stderr, or combined stream.",
+			"inputSchema": execRawTailSchema(),
+		},
+		{
+			"name":        "exec.raw.read",
+			"description": "Read bytes from a persisted exec stream with offset continuation.",
+			"inputSchema": execRawReadSchema(),
+		},
+		{
+			"name":        "exec.raw.grep",
+			"description": "Search persisted exec streams with literal matching by default and opt-in regex mode.",
+			"inputSchema": execRawGrepSchema(),
+		},
+		{
 			"name":        "config.show",
 			"description": "Return the current ws user-local configuration and resolved config path without modifying it.",
 			"inputSchema": map[string]any{
@@ -2385,6 +2500,9 @@ func namespaceValue(value any) any {
 }
 
 func noAgentHiddenTool(name string) bool {
+	if strings.HasPrefix(name, "exec.") {
+		return true
+	}
 	if strings.HasPrefix(name, "agents.") {
 		return true
 	}
@@ -2447,6 +2565,56 @@ func agentDebugSchema(linesDescription string) map[string]any {
 	}
 }
 
+func execLaunchSchema(shell bool) map[string]any {
+	props := map[string]any{
+		"working_dir": stringProperty("Command working directory. Defaults to the resolved ws worktree root; relative paths resolve beneath that root."),
+		"env":         map[string]any{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "Environment variable overlay."},
+		"stdin":       stringProperty("Text stdin for the process."),
+	}
+	required := []string{"cmd"}
+	if shell {
+		props["command"] = stringProperty("Shell command string to execute.")
+		props["shell"] = stringProperty("Optional explicit shell executable. Defaults to the platform shell.")
+		required = []string{"command"}
+	} else {
+		props["cmd"] = stringProperty("Executable argv0 to run; not a shell command line.")
+		props["args"] = stringArrayProperty("Optional argv arguments.")
+	}
+	return map[string]any{"type": "object", "properties": props, "required": required}
+}
+
+func execKeySchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{"exec_key": stringProperty("Durable exec job key.")}, "required": []string{"exec_key"}}
+}
+
+func execRawTailSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["stream"] = enumStringProperty("Stream to read. Defaults to stdout.", []string{"stdout", "stderr", "combined"})
+	props["lines"] = integerProperty("Number of tail lines. Defaults to 40 and is capped.")
+	return s
+}
+func execRawReadSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["stream"] = enumStringProperty("Stream to read. Defaults to stdout.", []string{"stdout", "stderr", "combined"})
+	props["offset"] = integerProperty("Byte offset. Defaults to 0.")
+	props["limit"] = integerProperty("Maximum bytes to read. Defaults to 4096 and is capped.")
+	return s
+}
+func execRawGrepSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["stream"] = enumStringProperty("Stream to search. Defaults to stdout.", []string{"stdout", "stderr", "combined"})
+	props["pattern"] = stringProperty("Search pattern. Literal unless regex is true.")
+	props["before"] = integerProperty("Context lines before each match.")
+	props["after"] = integerProperty("Context lines after each match.")
+	props["max_matches"] = integerProperty("Maximum matches to return.")
+	props["regex"] = boolProperty("Treat pattern as a regular expression when true.")
+	s["required"] = []string{"exec_key", "pattern"}
+	return s
+}
+
 func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 	schema := map[string]any{
 		"type": "object",
@@ -2462,6 +2630,35 @@ func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 		schema["required"] = []string{"ticket_stem"}
 	}
 	return schema
+}
+
+func stringMapArgument(value any) map[string]string {
+	items, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(items))
+	for key, value := range items {
+		if text, ok := value.(string); ok {
+			out[key] = text
+		}
+	}
+	return out
+}
+
+func int64FromArgument(value any, fallback int64) int64 {
+	switch v := value.(type) {
+	case float64:
+		return int64(v)
+	case int:
+		return int64(v)
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func stringList(value any) []string {

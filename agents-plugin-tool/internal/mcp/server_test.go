@@ -1674,3 +1674,77 @@ func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 		t.Fatalf("same-domain calls were not serialized; max active = %d", max)
 	}
 }
+
+func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	mustWrite(t, root, "sub/.keep", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"/bin/sh","args":["-c","pwd; echo err >&2; printf 'alpha\\nbeta42\\n'"],"working_dir":"sub"}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"printf shell-shape"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for _, name := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+		if !strings.Contains(byID["1"], name) {
+			t.Fatalf("tools/list missing %s: %s", name, byID["1"])
+		}
+	}
+	text := toolText(t, byID["2"])
+	if !strings.Contains(byID["9"], "shell-shape") {
+		t.Fatalf("shell response = %s", byID["9"])
+	}
+	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, filepath.Join(root, "sub")) || !strings.Contains(text, `"stderr":"err`) {
+		t.Fatalf("spawn response = %s", byID["2"])
+	}
+	var launch execToolResponse
+	if err := json.Unmarshal([]byte(text), &launch); err != nil {
+		t.Fatal(err)
+	}
+
+	input = strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":%q,"stream":"stdout","lines":1}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"exec.raw.read","arguments":{"exec_key":%q,"stream":"stderr","offset":0,"limit":20}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta42"}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta[0-9]+","regex":true}}}`, launch.ExecKey),
+	}, "\n") + "\n"
+	out.Reset()
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for id, want := range map[string]string{"3": "result_ready", "4": "beta42", "5": "beta42", "6": "err", "7": "beta42", "8": "beta42"} {
+		if !strings.Contains(byID[id], want) {
+			t.Fatalf("response %s missing %s: %s", id, want, byID[id])
+		}
+	}
+
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	out.Reset()
+	input = `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"echo"}}}` + "\n" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":"exec-1-0000000000000000"}}}` + "\n"
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], "exec.spawn") || strings.Contains(byID["1"], "exec.raw.tail") {
+		t.Fatalf("no-agent listed exec tools: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "agentless mode disables") || !strings.Contains(byID["3"], "agentless mode disables") {
+		t.Fatalf("no-agent calls not rejected: %s\n%s", byID["2"], byID["3"])
+	}
+}
+
+type execToolResponse struct {
+	ExecKey string `json:"exec_key"`
+}
