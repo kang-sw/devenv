@@ -168,7 +168,7 @@ The MVP should cover:
   reusable dashboard-local visual building blocks and apply a first pass to the
   left nav, workbench chrome, Activity Console, and read-only/document pane
   without changing behavior.
-- `260524-feat-ws-dashboard-nav-topbar-icon-polish` - ready; reduce dashboard
+- `260524-feat-ws-dashboard-nav-topbar-icon-polish` - done; reduce dashboard
   chrome clutter by applying icon-first left navigation, file explorer, and
   topbar polish while preserving command behavior and leaving main pane bodies
   alone.

@@ -13,6 +13,7 @@ spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Polish dashboard navigation and topbar with icon-first chrome
@@ -157,3 +158,35 @@ Verification should include:
 - Existing browser acceptance must continue to pass, including toolbar
   single-line metadata behavior, file explorer containment, terminal fit, and
   Activity pane behavior.
+
+### Result (a1cf23cf) - 2026-05-24
+
+Implemented the icon-first dashboard chrome polish for the selected Phase 1
+scope. The frontend now uses `lucide-react` icons for common dashboard chrome,
+compresses left navigation resource rows with icon presentation and state
+tones, replaces the workspace remove text button with an accessible icon
+action, adds generic file/folder icons to the workRoot file explorer, and
+reworks the workRoot topbar into power, breadcrumb/status, primary icon actions,
+and a visible overflow menu for placeholder workbench toggles.
+
+Command routing and backend behavior stayed stable: resource selection,
+workspace removal, activation, refresh, terminal creation, file explorer
+actions, Activity entrypoint, and workbench toggle commands continue to use
+their existing command ids and payload boundaries. Main pane bodies, terminal
+behavior, Activity transcript semantics, read-only file rendering semantics,
+root picker behavior, and daemon APIs stayed out of scope.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Browser artifacts refreshed under `ws-dashboard/frontend/e2e/.artifacts/`,
+  including `desktop-workbench.png`, `file-explorer.png`,
+  `narrow-workbench.png`, and `topbar-overflow.png`.
+
+Notes:
+
+- Screenshot review found that the overflow menu was initially present in the
+  DOM but clipped by toolbar action overflow. Follow-up commit `a1cf23cf`
+  made the menu screenshot-visible and reran the browser gate.
+  `8fb1b2ed` contains the main implementation.
