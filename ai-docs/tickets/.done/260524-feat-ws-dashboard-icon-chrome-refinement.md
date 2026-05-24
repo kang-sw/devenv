@@ -188,3 +188,17 @@ Verification:
 - Manual screenshot review of `desktop-workbench.png` confirmed the topbar
   chips are compact rounded pills and the tab strip no longer shows the
   previous active underline/left-rail border treatment.
+
+#### Edition (0f6ff8e) - 2026-05-24
+
+Removed the remaining default border from the left workspace navigation trash
+button. The `resource-row-action` base style now shares the same quiet
+transparent default chrome as other icon buttons, with border/background only
+revealed on hover or focus.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Browser gate now asserts the workspace remove button has a transparent
+  default border before the dashboard-only removal action is confirmed.
