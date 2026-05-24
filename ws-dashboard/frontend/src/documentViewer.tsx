@@ -197,11 +197,29 @@ function stableBlockId(input: {
 }
 
 function pathrefForLineRange(path: string, lineStart: number, lineEnd = lineStart) {
-  const safePath = path.replace(/^@+/, "").replace(/^\/+/, "");
+  const safePath = workRootRelativePathForPathref(path);
+  if (!safePath) {
+    return undefined;
+  }
   if (lineEnd <= lineStart) {
     return `@${safePath}#L${lineStart}`;
   }
   return `@${safePath}#L${lineStart}-L${lineEnd}`;
+}
+
+export function workRootRelativePathForPathref(path: string) {
+  const candidate = path.replace(/^@+/, "");
+  if (
+    !candidate ||
+    candidate.startsWith("/") ||
+    candidate.startsWith("~") ||
+    candidate.includes("\\") ||
+    candidate.split("/").includes("..") ||
+    /^[a-z]:/i.test(candidate)
+  ) {
+    return undefined;
+  }
+  return candidate;
 }
 
 function calloutKindForNode(node: MarkdownNode) {
@@ -362,8 +380,13 @@ function renderNode(node: MarkdownNode, key: string, footnotes: Record<string, s
       return <pre key={key} className="ws-code-block"><code>{node.value}</code></pre>;
     case "break":
       return <br key={key} />;
-    case "link":
-      return <a key={key} href={node.url} target="_blank" rel="noreferrer">{renderChildren(node, key, footnotes)}</a>;
+    case "link": {
+      const href = safeMarkdownLinkUrl(node.url);
+      if (!href) {
+        return <span key={key} className="document-link-inert">{renderChildren(node, key, footnotes)}</span>;
+      }
+      return <a key={key} href={href} target="_blank" rel="noreferrer">{renderChildren(node, key, footnotes)}</a>;
+    }
     case "listItem":
       return <div key={key} className="document-list-item">{typeof node.checked === "boolean" ? <input type="checkbox" checked={node.checked} disabled readOnly /> : null}{renderChildren(node, key, footnotes)}</div>;
     case "blockquote":
@@ -412,6 +435,20 @@ function renderTableRow(node: MarkdownNode, key: string, header: boolean, footno
 
 function renderChildren(node: MarkdownNode, key: string, footnotes: Record<string, string> = {}) {
   return node.children?.map((child, index) => renderNode(child, `${key}-${index}`, footnotes));
+}
+
+export function safeMarkdownLinkUrl(url: string | undefined) {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:"
+      ? parsed.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function footnotesForTree(tree: MarkdownNode) {

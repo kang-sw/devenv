@@ -3,7 +3,9 @@ import {
   deriveMarkdownDocumentModel,
   isMarkdownDocumentSource,
   localDocumentContentHash,
+  safeMarkdownLinkUrl,
   translationForBlock,
+  workRootRelativePathForPathref,
   type DocumentTranslationOverlay,
 } from "./documentViewer.js";
 
@@ -141,4 +143,41 @@ assertEqual(
   isMarkdownDocumentSource({ extension: "html", languageHint: "html", path: "index.html" }),
   false,
   "html hint does not select markdown viewer",
+);
+
+assertEqual(
+  workRootRelativePathForPathref("/Users/example/project/docs/readme.md"),
+  undefined,
+  "absolute host paths are rejected before pathref generation",
+);
+assertEqual(
+  workRootRelativePathForPathref("C:/Users/example/project/docs/readme.md"),
+  undefined,
+  "Windows absolute paths are rejected before pathref generation",
+);
+assertEqual(
+  workRootRelativePathForPathref("docs/readme.md"),
+  "docs/readme.md",
+  "workRoot-relative pathrefs remain available",
+);
+assertEqual(
+  deriveMarkdownDocumentModel("# Title\n", { path: "/Users/example/private.md" }).blocks[0]?.pathref,
+  undefined,
+  "absolute caller paths do not become copied pathrefs",
+);
+
+assertEqual(
+  safeMarkdownLinkUrl("https://example.com/path"),
+  "https://example.com/path",
+  "https markdown links remain active",
+);
+assertEqual(
+  safeMarkdownLinkUrl("javascript:alert(1)"),
+  undefined,
+  "active javascript markdown links are rendered inert",
+);
+assertEqual(
+  safeMarkdownLinkUrl("./relative.md"),
+  undefined,
+  "relative markdown links are inert until dashboard-safe navigation exists",
 );
