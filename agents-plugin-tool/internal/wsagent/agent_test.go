@@ -2131,6 +2131,54 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	}
 }
 
+func TestSubqueryInjectsChildActorSetupWithoutDelegateOrientation(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 2468}
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+
+	text, err := manager.Subquery(SubqueryOptions{
+		Root:                  repo,
+		Question:              "Where is workflow?",
+		ChildActorID:          "reader-12345678-abcdef",
+		ChildActorAuthority:   "reader",
+		ChildSetupInstruction: "Call MCP tool `ws.setup` with `id: \"reader-12345678-abcdef\"`.",
+	})
+	if err != nil {
+		t.Fatalf("Subquery returned error: %v", err)
+	}
+	key := extractFieldLine(t, text, "subquery_key")
+	layout, err := manager.layout(repo, key, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := string(raw)
+	if strings.Contains(system, "You are a delegated worker") {
+		t.Fatalf("subquery prompt included delegate orientation:\n%s", system)
+	}
+	if !strings.Contains(system, "reader-12345678-abcdef") || !strings.Contains(system, "ws.setup") {
+		t.Fatalf("subquery prompt missing child setup instruction:\n%s", system)
+	}
+	if strings.Count(system, childSetupStart) != 1 || strings.Count(system, childSetupEnd) != 1 {
+		t.Fatalf("subquery prompt has duplicated child setup markers:\n%s", system)
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.ChildActorID != "reader-12345678-abcdef" || agent.ChildActorAuthority != "reader" {
+		t.Fatalf("child actor metadata mismatch: id=%q authority=%q", agent.ChildActorID, agent.ChildActorAuthority)
+	}
+}
+
 func extractFieldLine(t *testing.T, text, field string) string {
 	t.Helper()
 	prefix := field + ": "

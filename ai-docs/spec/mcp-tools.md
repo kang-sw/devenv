@@ -280,6 +280,12 @@ including raw advertised schema metadata and host-visible generated metadata,
 while preserving intentional hidden explicit-root dispatch compatibility.
 {#260523-agents-root-schema-invisibility}
 
+When the parent MCP session is bound to an actor and the call targets that actor
+root, named-agent registration/calls receive a persistent delegated child actor
+id in agent metadata plus a child setup instruction in the system prompt.
+Subqueries receive ephemeral reader child actors with the same recovery
+instruction shape and do not receive the lead bootstrap method.
+
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
 aliases; concrete provider model names select a one-off backend model. The

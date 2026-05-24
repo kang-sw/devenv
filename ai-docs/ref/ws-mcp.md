@@ -1156,6 +1156,12 @@ root-omitted calls and recover it with `ws/ws.setup(id: "<actor-id>")` after an
 MCP restart. Explicit `root` arguments may still work as a compatibility
 override, but they are not the advertised caller surface.
 
+When a lead actor is bound, `agents.register`, `agents.call`, and `subquery`
+create or reuse child actor ids for launched workers. Persistent named agents
+store a delegated child actor id in agent metadata and receive a setup recovery
+instruction in `system.md`; subqueries receive ephemeral reader actors and the
+same recovery instruction without the lead bootstrap method.
+
 ### `ws/agents.register`
 
 Register or replace one task-scoped named agent.

@@ -789,11 +789,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			question, _ = params.Arguments["prompt"].(string)
 		}
 		deepResearch, _ := params.Arguments["deep_research"].(bool)
+		child, err := s.childActorSetupForSubquery(ctx, root)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
-			Root:         root,
-			Question:     question,
-			DeepResearch: deepResearch,
-			Harness:      s.currentHarness(),
+			Root:                  root,
+			Question:              question,
+			DeepResearch:          deepResearch,
+			Harness:               s.currentHarness(),
+			ChildActorID:          child.ActorID,
+			ChildActorAuthority:   child.Authority,
+			ChildSetupInstruction: child.Instruction,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
@@ -821,16 +828,23 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		tier, _ := params.Arguments["tier"].(string)
 		model, _ := params.Arguments["model"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
+		child, err := s.childActorSetupForAgent(ctx, root, name, false)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-			Root:             root,
-			Name:             name,
-			Backend:          backend,
-			Harness:          s.currentHarness(),
-			Tier:             tier,
-			Model:            model,
-			Prompts:          stringList(params.Arguments["prompts"]),
-			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
-			SystemPromptText: systemPromptText,
+			Root:                  root,
+			Name:                  name,
+			Backend:               backend,
+			Harness:               s.currentHarness(),
+			Tier:                  tier,
+			Model:                 model,
+			Prompts:               stringList(params.Arguments["prompts"]),
+			PromptRefs:            stringList(params.Arguments["prompt_refs"]),
+			SystemPromptText:      systemPromptText,
+			ChildActorID:          child.ActorID,
+			ChildActorAuthority:   child.Authority,
+			ChildSetupInstruction: child.Instruction,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
 	case "agents.call":
@@ -840,10 +854,17 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
+		child, err := s.childActorSetupForAgent(ctx, root, name, true)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
+			Root:                  root,
+			Name:                  name,
+			Prompt:                prompt,
+			ChildActorID:          child.ActorID,
+			ChildActorAuthority:   child.Authority,
+			ChildSetupInstruction: child.Instruction,
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -875,6 +896,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Name:    name,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
 			Context: ctx,
+			OnEphemeralErased: func(agent wsagent.Agent) {
+				s.markActorInactive(context.Background(), root, agent.ChildActorID)
+			},
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.status":
@@ -1231,10 +1255,10 @@ func mintActorID(authority, worktreeKey string) (string, error) {
 }
 
 func actorWorktreeKey(actorID string) (string, error) {
-	if !strings.HasPrefix(actorID, "lead-") {
+	authority, rest, ok := strings.Cut(actorID, "-")
+	if !ok || !validActorAuthority(authority) {
 		return "", fmt.Errorf("invalid actor id %q", actorID)
 	}
-	rest := strings.TrimPrefix(actorID, "lead-")
 	idx := strings.LastIndex(rest, "-")
 	if idx <= 0 || idx == len(rest)-1 {
 		return "", fmt.Errorf("invalid actor id %q", actorID)
@@ -1244,6 +1268,127 @@ func actorWorktreeKey(actorID string) (string, error) {
 		return "", fmt.Errorf("invalid actor id %q: %w", actorID, err)
 	}
 	return worktreeKey, nil
+}
+
+func validActorAuthority(value string) bool {
+	switch value {
+	case "lead", "delegate", "reader":
+		return true
+	default:
+		return false
+	}
+}
+
+func blankDefault(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+type childActorSetup struct {
+	ActorID     string
+	Authority   string
+	Instruction string
+}
+
+func (s *Server) childActorSetupForAgent(ctx context.Context, root, name string, requireExisting bool) (childActorSetup, error) {
+	if !s.actorBoundToRoot(root) {
+		return childActorSetup{}, nil
+	}
+	if agent, err := wsagent.NewManager(wsagent.Options{}).Agent(root, name); err == nil {
+		if strings.TrimSpace(agent.ChildActorID) != "" {
+			return s.ensureChildActor(ctx, root, strings.TrimSpace(agent.ChildActorID), blankDefault(agent.ChildActorAuthority, "delegate"))
+		}
+	} else if requireExisting {
+		return childActorSetup{}, err
+	}
+	return s.ensureChildActor(ctx, root, "", "delegate")
+}
+
+func (s *Server) childActorSetupForSubquery(ctx context.Context, root string) (childActorSetup, error) {
+	if !s.actorBoundToRoot(root) {
+		return childActorSetup{}, nil
+	}
+	return s.ensureChildActor(ctx, root, "", "reader")
+}
+
+func (s *Server) actorBoundToRoot(root string) bool {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	return s.sessionActorID != "" && s.sessionRoot == root
+}
+
+func (s *Server) currentActorID() string {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	return s.sessionActorID
+}
+
+func (s *Server) ensureChildActor(ctx context.Context, root, actorID, authority string) (childActorSetup, error) {
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		return childActorSetup{}, err
+	}
+	defer store.Close()
+	authority = blankDefault(authority, "delegate")
+	if actorID == "" {
+		actorID, err = mintActorID(authority, store.Layout().WorktreeKey)
+		if err != nil {
+			return childActorSetup{}, err
+		}
+	}
+	actor := wsstore.Actor{
+		ActorID:       actorID,
+		Authority:     authority,
+		RootPath:      root,
+		WorktreeKey:   store.Layout().WorktreeKey,
+		ParentActorID: s.currentActorID(),
+		Status:        "active",
+		Pinned:        authority == "delegate",
+	}
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		return childActorSetup{}, err
+	}
+	return childActorSetup{
+		ActorID:     actorID,
+		Authority:   authority,
+		Instruction: childActorInstruction(actorID),
+	}, nil
+}
+
+func childActorInstruction(actorID string) string {
+	if strings.TrimSpace(actorID) == "" {
+		return ""
+	}
+	return fmt.Sprintf("Before root-omitted ws MCP tool calls in this child process, call MCP tool `ws.setup` with `id: %q` to recover your assigned actor context.", actorID)
+}
+
+func (s *Server) markActorInactive(ctx context.Context, root, actorID string) {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		appendDebugEvent("actor.inactive.error", map[string]any{"actor_id": actorID, "error": err.Error()})
+		return
+	}
+	defer store.Close()
+	actor, ok, err := store.Actor(ctx, actorID)
+	if err != nil || !ok {
+		fields := map[string]any{"actor_id": actorID}
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		appendDebugEvent("actor.inactive.missing", fields)
+		return
+	}
+	actor.Status = "inactive"
+	actor.Pinned = false
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		appendDebugEvent("actor.inactive.error", map[string]any{"actor_id": actorID, "error": err.Error()})
+	}
 }
 
 func (s *Server) actorGate(name string, arguments map[string]any) error {

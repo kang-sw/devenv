@@ -20,6 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
@@ -734,6 +735,69 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	}
 	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "fresh-after-recovery"); err != nil {
 		t.Fatalf("recovered actor did not bind root for agent register: %v", err)
+	}
+}
+
+func TestServeStdioChildActorPromptInjection(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260524-feat-child-actor")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", root)
+	if err := server.ServeStdio(context.Background(), strings.NewReader(setupInput), &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	registerInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"child-worker","model":"light"}}}` + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(registerInput), &out); err != nil {
+		t.Fatalf("ServeStdio register returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("actor-bound agents.register failed: %s", byID["2"])
+	}
+	agent, err := wsagent.NewManager(wsagent.Options{}).Agent(root, "child-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(agent.ChildActorID, "delegate-") || agent.ChildActorAuthority != "delegate" {
+		t.Fatalf("child actor metadata mismatch: id=%q authority=%q", agent.ChildActorID, agent.ChildActorAuthority)
+	}
+	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	systemPath := filepath.Join(layout.AgentsDir, wsagent.AgentKey("child-worker"), agent.SystemPromptPath)
+	raw, err := os.ReadFile(systemPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := string(raw)
+	if !strings.Contains(system, `ws.setup`) || !strings.Contains(system, agent.ChildActorID) {
+		t.Fatalf("system prompt missing child actor setup instruction:\n%s", system)
+	}
+	if strings.Contains(system, "lead-workflow-bootstrap") {
+		t.Fatalf("child system prompt exposed lead bootstrap method:\n%s", system)
+	}
+
+	out.Reset()
+	recoverInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"id":%q,"format":"json"}}}`+"\n", agent.ChildActorID)
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(recoverInput), &out); err != nil {
+		t.Fatalf("ServeStdio child recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var recovered struct {
+		ActorID        string `json:"actor_id"`
+		ActorAuthority string `json:"actor_authority"`
+		Root           string `json:"root"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &recovered); err != nil {
+		t.Fatalf("child recovery setup is not JSON: %v\n%s", err, byID["3"])
+	}
+	if recovered.ActorID != agent.ChildActorID || recovered.ActorAuthority != "delegate" || recovered.Root != canonicalTestPath(t, root) {
+		t.Fatalf("child recovery mismatch: %s", byID["3"])
 	}
 }
 

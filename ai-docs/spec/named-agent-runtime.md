@@ -61,6 +61,12 @@ with a current-call lock, rejects concurrent active calls, writes the prompt
 snapshot to disk, starts a worker process, captures backend streams, writes the
 final output, and transitions the call to `completed`, `failed`, or `cancelled`.
 
+When a call is launched from an actor-bound lead MCP session, the agent system
+prompt includes a child actor setup instruction that tells the child process to
+recover with `ws.setup(id: "<child-actor-id>")` before root-omitted ws tool
+calls. Persistent named agents keep the child actor id in agent metadata so
+later calls reuse the same delegated actor.
+
 ## Readiness And Result Split {#260505-agent-readiness-result-split}
 
 `agents.wait` waits for one or more named agents and returns readiness metadata
@@ -83,6 +89,10 @@ Generated subquery agents are marked ephemeral and suppress delegate orientation
 because their system prompt is self-contained. Callers collect answers with
 `agents.result(name: <subquery-key>, timeout_seconds: 600)` and can use
 `agents.status`, `agents.tail`, or `agents.cancel` for diagnostics or recovery.
+When launched from an actor-bound lead MCP session, each subquery receives its
+own reader child actor setup instruction without receiving the lead bootstrap
+method. Successful result consumption erases the ephemeral agent and marks the
+reader actor inactive.
 
 ## Diagnostics, Tail, And Debug Streams {#260505-agent-diagnostics-tail-debug}
 
