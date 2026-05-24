@@ -527,6 +527,29 @@ async function selectWorkRootInBrowser(page: Page, rootPath: string) {
   await expectDockviewWorkbench(page);
 }
 
+async function workRootIdForLabel(page: Page, label: string): Promise<string | null> {
+  return page.evaluate(async (targetLabel) => {
+    const response = await fetch("/api/dashboard/resources");
+    const resources = (await response.json()) as {
+      workspaces?: Array<{
+        workRoots?: Array<{
+          id?: string;
+          label?: string;
+          resourcePath?: { workRootId?: string };
+        }>;
+      }>;
+    };
+    for (const workspace of resources.workspaces ?? []) {
+      for (const workRoot of workspace.workRoots ?? []) {
+        if (workRoot.label === targetLabel) {
+          return workRoot.resourcePath?.workRootId ?? workRoot.id ?? null;
+        }
+      }
+    }
+    return null;
+  }, label);
+}
+
 // The terminal pane footer renders `<status> · <columns>x<rows>` from the
 // daemon-confirmed session size, so it reflects forwarded PTY resizes.
 async function terminalColumns(page: Page): Promise<number> {
@@ -864,6 +887,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityPane).toHaveCount(0);
     await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
 
+    activityFixtureRootId = await workRootIdForLabel(
+      page,
+      workRootDisplayName(workRoot),
+    );
+    expect(activityFixtureRootId).toBeTruthy();
+
     await page.route(
       /\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/,
       async (route) => {
@@ -875,9 +904,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           : "browser-gate-root";
         if (new URL(route.request().url()).searchParams.has("recentLimit")) {
           activityRecentPollRequests += 1;
-        }
-        if (!activityFixtureRootId) {
-          activityFixtureRootId = requestedWorkRootId;
         }
         if (requestedWorkRootId !== activityFixtureRootId) {
           await route.fulfill({
