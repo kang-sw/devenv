@@ -404,11 +404,12 @@ commit when metadata synthesis and tree equivalence are unambiguous. Planning,
 ready-promotion, source, test, review-fix, merge, ambiguous-authorship, and
 non-documentation commits remain outside the compaction target; unsafe suffixes
 and suffixes with fewer than two eligible commits are reported as skipped
-without blocking merge readiness. At the approved merge step, branch commit
-lists may fast-forward only when every commit is workflow-owned,
-message-clean, and worth preserving directly in target history; otherwise a
-single logical commit squashes and multiple meaningful commits use a
-no-fast-forward merge.
+without blocking merge readiness. At the approved merge step, a single
+workflow-owned, message-clean commit may fast-forward into the merge target.
+Multiple-commit implementation branches use a no-fast-forward merge by default;
+fast-forward is reserved for commit lists whose entries are each independently
+deployable and independently revertible target-history units. A branch that is
+one logical change with noisy or dependent commits squashes.
 {#260523-implement-doc-closeout-compaction}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It

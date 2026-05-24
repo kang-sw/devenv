@@ -100,9 +100,10 @@ merge target.
 Merge only when the user approves. Merge `implement/<scope>` to
 `<merge-target>` with an equivalent non-interactive git sequence.
 
-Use fast-forward only when every branch commit is workflow-owned, message-clean,
-and worth preserving directly in target history. Otherwise use squash for one
-logical commit or `--no-ff` for multiple meaningful commits.
+Use fast-forward for a single workflow-owned, message-clean commit. For multiple
+commits, use `--no-ff` by default; fast-forward only when each commit is an
+independent deployable and independently revertible target-history unit. Use
+squash when the branch is one logical change with noisy or dependent commits.
 
 ## Judgments
 
