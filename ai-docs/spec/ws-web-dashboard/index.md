@@ -812,14 +812,15 @@ top-level browser document, displacing dashboard chrome, or requiring a future
 editor replacement to prove containment.
 {#260517-ws-dashboard-readonly-text-scroll-containment}
 
-## 🚧 Document Viewer Mode {#260524-ws-dashboard-document-viewer-mode}
+## Document Viewer Mode {#260524-ws-dashboard-document-viewer-mode}
 
 The dashboard will present previewable documents through a reusable document
 viewer mode instead of treating every file as raw preformatted text. A document
 pane owns one workRoot-relative source attachment and a pane-local
 `view | edit` mode control. View mode is format-aware and read-only; edit mode
-is a separate raw-text editing surface. Switching modes does not create a
-second workbench tab for the same document.
+is visibly reserved but disabled until the raw-text edit/save feature lands.
+Switching document presentation mode does not create a second workbench tab for
+the same document.
 
 Markdown documents render through a real Markdown AST pipeline rather than a
 hand-rolled parser. The initial Markdown viewer supports polished GFM table and
@@ -835,6 +836,11 @@ are separate blocks, and non-prose blocks such as fenced code may be marked
 non-translatable. Block-level actions copy the visible text or a workRoot-
 relative path reference such as `@path/to/file.md#L12-L18`; copied path
 references never include absolute host paths.
+
+The viewer accepts local translation overlay data keyed by the current content
+hash and block id so later daemon translation results can reuse the same
+rendering path. Without a real daemon translation result, translated-copy
+actions remain pending or unavailable.
 
 ## 🚧 Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
 
