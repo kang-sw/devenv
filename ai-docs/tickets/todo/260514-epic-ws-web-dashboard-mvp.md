@@ -3,7 +3,7 @@ title: ws web dashboard MVP
 related:
   260427-chore-claude-dash-windows: prior PTY dashboard surface and Windows stability motivation
   260513-research-streamable-http-mcp-transport: adjacent long-running daemon and remote transport research
-  260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
+  260524-epic-async-exec-job-surface: adjacent persisted process output and reader pattern
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
   260516-epic-ws-web-dashboard-workbench-substrate: next frontend workbench substrate milestone
@@ -113,7 +113,7 @@ The MVP should cover:
 - `260517-feat-ws-dashboard-workroot-activity` - done; add a workRoot-owned
   runtime activity projection with a compact top-bar badge and group-1
   reversible detail pane, starting with read-only named-agent state and
-  reserving running commands for the async exec output reader.
+  reserving running commands for the async exec job surface.
 - `260518-epic-ws-dashboard-activity-console` - todo; promote WorkRoot Activity
   from a named-agent list into a reusable read-only Activity Console with a
   live/latest ribbon, selected transcript blocks, cross-platform watcher-backed

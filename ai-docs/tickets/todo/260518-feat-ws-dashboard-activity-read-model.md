@@ -5,7 +5,7 @@ related:
   260517-feat-ws-dashboard-workroot-activity: source projection to generalize from named agents to feed items
   260518-feat-ws-dashboard-activity-feed-api: absorbed feed-only ticket scope into this read-model slice
   260518-feat-ws-dashboard-activity-console-ui: consumes this read model for the static console shell
-  260513-feat-async-exec-output-reader: future exec jobs should fit the feed item and transcript source model after that runtime exists
+  260524-epic-async-exec-job-surface: future exec jobs should fit the feed item and transcript source model after that runtime exists
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime

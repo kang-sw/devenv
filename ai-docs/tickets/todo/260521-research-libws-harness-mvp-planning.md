@@ -5,7 +5,7 @@ related:
   260514-research-ws-web-dashboard-direction: dashboard harness-library direction and owner-auth control-plane context
   260514-epic-ws-web-dashboard-mvp: eventual dashboard milestone that may absorb harness visibility work
   260429-research-host-neutral-ws-plugin: host-neutral plugin and backend abstraction anchor
-  260513-feat-async-exec-output-reader: adjacent activity/transcript source model for future dashboard projection
+  260524-epic-async-exec-job-surface: adjacent activity/transcript source model for future dashboard projection
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime

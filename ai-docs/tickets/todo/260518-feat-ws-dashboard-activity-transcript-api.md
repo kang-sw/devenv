@@ -5,7 +5,7 @@ related:
   260518-feat-ws-dashboard-activity-read-model: supplies the MVP transcript backfill and resolver boundary
   260518-feat-ws-dashboard-activity-watch-stream: supplies transcript invalidation events
   260518-feat-ws-dashboard-activity-live-ux: consumes transcript update behavior in the frontend
-  260513-feat-async-exec-output-reader: future exec output should become a transcript source after that runtime exists
+  260524-epic-async-exec-job-surface: future exec output should become a transcript source after that runtime exists
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -47,7 +47,7 @@ browser understand cache layout or backend-native file formats.
   status without breaking the entire selected activity detail when possible.
 - The resolver interface must not assume Codex-only semantics.
 - Exec transcript source integration remains blocked on
-  `260513-feat-async-exec-output-reader`.
+  `260524-epic-async-exec-job-surface`.
 
 ## API Sketch
 
