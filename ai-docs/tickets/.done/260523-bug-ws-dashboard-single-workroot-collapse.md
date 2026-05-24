@@ -98,3 +98,17 @@ Verification passed:
 - `npm run test:resource-model`
 - `npm run build`
 - `npm run test:browser`
+
+#### Edition (9e7059a) - 2026-05-24
+
+Follow-up dogfood found that the first implementation made compaction depend on
+the dashboard having exactly one workspace. That was too narrow: compaction is
+a per-workspace presentation rule. A workspace with exactly one workRoot should
+render as one compact workRoot row even when other workspaces are also present.
+
+Verification passed:
+
+- `ws/spec_index.verify`
+- `npm run test:resource-model`
+- `npm run build`
+- `npm run test:browser`
