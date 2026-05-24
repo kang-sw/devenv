@@ -5,6 +5,7 @@ related:
   260523-feat-ws-dashboard-persist-open-workroots: persisted roots and discovered sibling worktrees should share a clear source model
   260523-feat-ws-dashboard-workroot-registry-activation: prerequisite durable membership, availability, and activation model
   260524-feat-ws-dashboard-workspace-root-prune-policy: workspace root ownership and automatic empty-workspace pruning policy
+  260524-feat-ws-dashboard-workspace-forget-remove-ui: explicit owner cleanup is workspace-level rather than child-workRoot-level
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -27,8 +28,9 @@ reports the main worktree plus linked/prunable worktrees, while dashboard live
 resources remain bounded to daemon-opened paths.
 
 This ticket remains behind the durable workspace/workRoot registry and
-activation spine. Linked worktree discovery should add and update known
-workRoot membership; it should not create a parallel hidden-discovery model.
+activation spine. Linked worktree discovery should discover child workRoots
+from Git metadata, update their filesystem/Git-derived projection on refresh,
+and avoid creating a parallel hidden-discovery model.
 
 ## Discussion
 
@@ -36,17 +38,16 @@ Agreed direction:
 
 - When an opened workRoot is a Git repository, discover sibling linked worktrees
   through Git metadata such as `git worktree list --porcelain`.
-- Add discovered linked worktrees as additional known workRoot rows in the same
-  durable workspace registry, preserving the existing opaque `workRootId` and
+- Add discovered linked worktrees as child workRoot rows under the same
+  owner-managed workspace root, preserving the existing opaque `workRootId` and
   `gitLinkedWorktree` kind vocabulary.
 - Treat linked worktrees as child workRoots derived from the workspace root
   workRoot. They should not become independent workspaces unless a later
   explicit derive/promote operation creates a new owner-managed workspace.
-- Default discovered sibling workRoots to offline activation. Users explicitly
-  bring a workRoot online before file, Activity, or terminal APIs target it.
-- Recompute current status from filesystem/Git on explicit refresh and bounded
-  polling. Missing, prunable, moved, or inaccessible worktrees remain visible
-  as degraded rows instead of dropping silently.
+- Recompute current availability and classification from filesystem/Git on
+  explicit refresh and bounded polling. Git discovery determines the sibling
+  worktree set; filesystem access determines whether each child workRoot is
+  currently usable.
 - Use the durable registry's separated availability/activation model. Linked
   discovery should never overload `status: online/offline` to mean both
   reachability and activation.
@@ -57,9 +58,10 @@ Agreed direction:
   status, and actions, not raw Git metadata paths.
 - Avoid broad filesystem crawling. This should be Git-worktree expansion from an
   already opened repository/worktree, not an arbitrary disk scan.
-- Do not add dashboard-side delete/remove worktree functionality as part of this
-  ticket. Future forget/delete UX must be separate from discovery and must not
-  be required to keep externally deleted worktrees visible as degraded rows.
+- Do not add dashboard-side delete/remove worktree functionality or direct
+  child workRoot forget controls as part of this ticket. Explicit owner cleanup
+  belongs to workspace-level removal, while child workRoots mirror Git and
+  filesystem state.
 - Do not introduce an invisible discovered-worktree state. Known child
   workRoots are visible while their owning workspace remains visible, but the
   workspace root policy may automatically prune a workspace when it has no
@@ -67,10 +69,6 @@ Agreed direction:
 
 Open questions:
 
-- Which Git metadata states should map to which public availability labels:
-  reachable, missing, inaccessible, prunable, moved, or unknown?
-- Should `prunable` be a first-class public availability value or a degraded
-  Git-specific detail under a broader unavailable/missing availability?
 - How frequently should bounded polling refresh selected, online, offline, and
   large workRoot sets?
 - How should externally removed child workRoots interact with the new root

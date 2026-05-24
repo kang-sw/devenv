@@ -1,5 +1,5 @@
 ---
-title: Improve safe summaries for Codex tool output blocks
+title: Show bounded Codex tool output snippets
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-activity-console-tail-ribbon-polish: recent transcript density polish left tool output placeholders too generic
@@ -10,7 +10,7 @@ related-mental-model:
   - ws-web-dashboard
 ---
 
-# Improve safe summaries for Codex tool output blocks
+# Show bounded Codex tool output snippets
 
 ## Background
 
@@ -19,16 +19,26 @@ rendering only "Tool output captured". That text is not the original tool
 output; it is the dashboard transcript normalizer's conservative placeholder
 for Codex `function_call_output` and `custom_tool_call_output` records.
 
-The current behavior avoids leaking raw native payloads, but it gives too little
-information for Activity Console inspection. The block should remain safe and
-bounded while surfacing useful one-line context such as output size, structured
-status, short non-sensitive first line, or omitted-content reason.
+The current behavior is more conservative than the dashboard owner model needs.
+Activity Console is an authenticated owner viewer, so the primary constraint is
+bounded rendering rather than redacting normal command output from the owner.
+The block should show useful output context without freezing the browser or
+turning the transcript into an unbounded payload dump.
 
-## Follow-Up Questions
+## Direction
 
-- Which Codex tool-output fields are safe to summarize without exposing private
-  paths, prompts, session ids, or raw command output?
-- Should expanded detail expose bounded raw JSON for local owner-only dogfood,
-  or stay normalized-only until a redaction policy is stronger?
-- Should tool output summaries differ for MCP calls, shell commands, patch
-  applications, and generic function outputs?
+- Render bounded head/tail output snippets for authenticated owners, starting
+  with roughly the first 10 lines and last 10 lines when output is longer than
+  the inline budget.
+- Include a clear omission marker and bounded metadata such as line count or
+  byte count when middle content is omitted.
+- Keep internal storage paths, transcript file paths, session ids, and
+  daemon-private implementation identifiers out of browser-visible text.
+- Apply one generic bounded rendering policy first. Tool-type-specific polish
+  can come later only when a concrete type needs different display treatment.
+
+## Open Questions
+
+- What exact byte and line caps should apply before head/tail splitting?
+- Should expanded view keep the same head/tail policy with a larger cap, or add
+  a local owner-only raw detail mode later?

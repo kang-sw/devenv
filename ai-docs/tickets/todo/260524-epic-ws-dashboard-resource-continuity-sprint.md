@@ -5,8 +5,8 @@ related:
   260524-feat-ws-dashboard-workspace-root-prune-policy: first stabilizing implementation slice for workspace/workRoot lifecycle
   260523-feat-ws-dashboard-readonly-file-pane-restore: restore file pane continuity after browser refresh or daemon restart
   260523-feat-ws-dashboard-linked-worktree-discovery: discover linked worktrees as child workRoots under owner-managed workspace roots
-  260523-feat-ws-dashboard-tool-output-safe-summary: improve Activity Console tool-output summaries without exposing raw payloads
-  260523-feat-ws-dashboard-workroot-forget-remove-ui: add explicit owner cleanup separate from automatic pruning
+  260523-feat-ws-dashboard-tool-output-safe-summary: show bounded Activity Console tool output snippets for authenticated owners
+  260524-feat-ws-dashboard-workspace-forget-remove-ui: add explicit workspace owner cleanup separate from automatic pruning
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -31,8 +31,9 @@ The sprint scope includes:
 - Restoring read-only file pane descriptors through normal file-open behavior.
 - Discovering linked Git worktrees as child workRoots under an owner-managed
   workspace root.
-- Making Activity Console tool-output transcript summaries bounded but useful.
-- Adding explicit owner forget/remove controls for visible dashboard resources
+- Making Activity Console tool-output transcript blocks bounded but useful for
+  an authenticated owner viewer.
+- Adding explicit workspace owner forget/remove controls for dashboard roots
   that automatic pruning should not remove.
 
 ## Non-Scope
@@ -55,25 +56,28 @@ The sprint scope includes:
   ready to add Git linked worktrees as child workRoots instead of independent
   workspaces.
 - `260523-feat-ws-dashboard-tool-output-safe-summary` - idea; promote when the
-  safe summary policy is concrete enough to improve transcript inspection
-  without leaking raw native payloads.
-- `260523-feat-ws-dashboard-workroot-forget-remove-ui` - idea; promote when the
-  explicit cleanup UX can build on the root-prune policy and linked-worktree
-  discovery behavior.
+  bounded head/tail rendering policy is concrete enough to improve transcript
+  inspection without freezing the browser.
+- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - idea; promote when
+  the explicit workspace cleanup UX can build on the root-prune policy and
+  linked-worktree discovery behavior.
 
 ## Cross-Child Decisions
 
 - Preserve the public resource vocabulary as `workspace` and `workRoot`; do not
   introduce a Git-specific public identity layer for linked worktrees.
-- Keep host paths, Git metadata paths, raw tool payloads, and daemon-private ids
-  out of browser-visible text and route identities.
-- Treat automatic workspace pruning and explicit owner forget/remove as
-  separate mechanisms. Pruning handles no-active-workRoot cleanup; forget/remove
-  handles deliberate owner cleanup for visible resources.
+- Keep host paths, Git metadata paths, and daemon-private ids out of
+  browser-visible route identities. Activity Console may show bounded tool
+  output snippets to authenticated owners, but must not expose internal storage
+  paths or unbounded payloads.
+- Treat automatic workspace pruning and explicit workspace owner removal as
+  separate mechanisms. Pruning handles no-active-workRoot cleanup; owner removal
+  handles deliberate cleanup of workspace roots.
 - Discovery and cleanup must not silently promote child workRoots into new
-  workspaces. A future derive/promote operation may do that explicitly.
-- Persist descriptors and normalized summaries, not source file contents,
-  terminal buffers, raw command output, or stale API response bodies.
+  workspaces or expose direct child workRoot forget/remove controls. A future
+  derive/promote operation may create a workspace explicitly.
+- Persist descriptors and bounded display snippets, not source file contents,
+  terminal buffers, or stale API response bodies.
 - Route visible controls through stable dashboard command ids where the current
   dashboard command spine already applies.
 

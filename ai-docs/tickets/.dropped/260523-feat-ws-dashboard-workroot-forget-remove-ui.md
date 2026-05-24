@@ -5,11 +5,21 @@ related:
   260523-feat-ws-dashboard-workroot-registry-activation: durable known workRoot membership needs an explicit removal path
   260523-feat-ws-dashboard-linked-worktree-discovery: discovered linked workRoots may become stale, prunable, or intentionally unwanted
   260524-feat-ws-dashboard-workspace-root-prune-policy: automatic empty-workspace pruning is separate from explicit owner cleanup
+  260524-feat-ws-dashboard-workspace-forget-remove-ui: replacement workspace-level owner cleanup ticket
 related-mental-model:
   - ws-web-dashboard
 ---
 
 # Add dashboard workRoot forget/remove UI
+
+## Dropped
+
+This ticket is dropped because the latest dashboard resource policy keeps user
+cleanup control at the workspace level. Child workRoots, including linked Git
+worktrees, should follow filesystem and Git-derived state under their owning
+workspace rather than exposing independent workRoot forget/remove controls.
+
+Replacement: `260524-feat-ws-dashboard-workspace-forget-remove-ui`.
 
 ## Background
 

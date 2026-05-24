@@ -4,7 +4,7 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-workroot-registry-activation: durable registry and activation spine that this policy refines
   260523-feat-ws-dashboard-linked-worktree-discovery: child workRoots need clear ownership and pruning semantics
-  260523-feat-ws-dashboard-workroot-forget-remove-ui: explicit owner cleanup must remain separate from automatic empty-workspace pruning
+  260524-feat-ws-dashboard-workspace-forget-remove-ui: explicit workspace owner cleanup must remain separate from automatic empty-workspace pruning
 spec:
   - 260524-dashboard-workspace-root-prune-policy
 related-mental-model:
@@ -46,9 +46,9 @@ derive a replacement workspace.
   active, the workspace stays visible as disabled or recovery-needed. That state
   is room for reconnecting the root or deriving a new workspace from a dangling
   child; it is not a normal active workspace.
-- Explicit forget/remove UI remains separate. Automatic pruning of empty
-  workspaces must not become a broad filesystem delete operation and must not
-  replace high-friction owner cleanup controls.
+- Explicit workspace forget/remove UI remains separate. Automatic pruning of
+  empty workspaces must not become a broad filesystem delete operation and must
+  not replace high-friction owner cleanup controls for workspace roots.
 
 ## Constraints
 
@@ -82,7 +82,8 @@ activation responses should apply the settled policy:
   available workRoots.
 - linked or dangling child workRoots must not silently become independent
   workspaces without an explicit future derive/promote operation.
-- explicit forget/remove UI remains out of scope for this phase.
+- explicit workspace forget/remove UI remains out of scope for this phase, and
+  child workRoots do not receive direct owner forget/remove controls.
 
 Suggested implementation strategy: model the root workRoot relationship in the
 daemon-owned registry/resource view rather than in frontend-only row logic, then

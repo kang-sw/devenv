@@ -155,8 +155,9 @@ The MVP should cover:
   preferences, chrome preferences, and privacy-sensitive root-picker history.
 - `260523-feat-ws-dashboard-linked-worktree-discovery` - idea; discover linked
   Git worktrees as child workRoots under owner-managed workspace roots.
-- `260523-feat-ws-dashboard-workroot-forget-remove-ui` - idea; add explicit
-  owner forget/remove controls separate from automatic empty-workspace pruning.
+- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - idea; add explicit
+  workspace owner forget/remove controls separate from automatic
+  empty-workspace pruning and child workRoot projection.
 
 ## Cross-Child Decisions
 
