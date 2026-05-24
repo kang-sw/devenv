@@ -4,17 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/kang-sw/devenv/internal/execjob"
-	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
 var testNow = time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
@@ -410,9 +411,9 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 
 func TestRuntimeMetadataInventoryCoversCurrentJSONFields(t *testing.T) {
 	expected := map[RuntimeStateSource]map[string]bool{
-		RuntimeSourceAgentJSON:        jsonFieldSet(reflect.TypeOf(wsagent.Agent{}), "agent_json_compatibility"),
-		RuntimeSourceAgentCurrentJSON: jsonFieldSet(reflect.TypeOf(wsagent.CurrentCall{})),
-		RuntimeSourceExecJobJSON:      jsonFieldSet(reflect.TypeOf(execjob.Record{}), "stdout", "stderr", "combined"),
+		RuntimeSourceAgentJSON:        jsonFieldSetFromSource(t, "../wsagent/agent.go", "Agent", "agent_json_compatibility"),
+		RuntimeSourceAgentCurrentJSON: jsonFieldSetFromSource(t, "../wsagent/agent.go", "CurrentCall"),
+		RuntimeSourceExecJobJSON:      jsonFieldSetFromSource(t, "../execjob/execjob.go", "Record", "stdout", "stderr", "combined"),
 	}
 	for _, item := range RuntimeMetadataInventory() {
 		fields := expected[item.Source]
@@ -471,10 +472,44 @@ func TestRuntimeMetadataInventoryKeepsPathsInSQLiteAndPayloadsFileBacked(t *test
 	}
 }
 
-func jsonFieldSet(typ reflect.Type, extras ...string) map[string]bool {
+func jsonFieldSetFromSource(t *testing.T, path, typeName string, extras ...string) map[string]bool {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok.String() != "type" {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != typeName {
+				continue
+			}
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatalf("%s in %s is not a struct", typeName, path)
+			}
+			return jsonFieldSet(structType, extras...)
+		}
+	}
+	t.Fatalf("type %s not found in %s", typeName, path)
+	return nil
+}
+
+func jsonFieldSet(typ *ast.StructType, extras ...string) map[string]bool {
 	fields := map[string]bool{}
-	for i := 0; i < typ.NumField(); i++ {
-		tag := typ.Field(i).Tag.Get("json")
+	for _, field := range typ.Fields.List {
+		if field.Tag == nil {
+			continue
+		}
+		raw, err := strconv.Unquote(field.Tag.Value)
+		if err != nil {
+			continue
+		}
+		tag := reflect.StructTag(raw).Get("json")
 		if tag == "" || tag == "-" {
 			continue
 		}
