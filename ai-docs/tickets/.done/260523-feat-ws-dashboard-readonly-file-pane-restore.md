@@ -61,3 +61,25 @@ workRoot merely because the pane belongs to another root.
 Verification should cover pure descriptor storage, stale/missing file
 degradation, duplicate preview/pinned behavior after restore, and browser-level
 refresh/restart evidence.
+
+### Result (pending) - 2026-05-24
+
+Implemented Phase 1 read-only file pane descriptor restore:
+
+- Browser storage now persists only read-only file pane descriptors:
+  `workRootId`, relative `path`, preview/pinned `mode`, `title`, and bounded
+  pane-order hints.
+- Restored panes start as loading panes and re-read content through the normal
+  authenticated file read API, so file contents, host paths, daemon handles, and
+  stale response bodies are not persisted.
+- Preview and pinned identity remains unchanged: one replaceable preview per
+  workRoot, pinned panes keyed by workRoot-relative path, and order hints scoped
+  to existing pane ids.
+- The dashboard acceptance gate now asserts that a pinned read-only file pane
+  reconstructs after browser reload alongside daemon-owned terminal restore.
+
+Verification:
+
+- `npm run test:work-root-files`
+- `npm run build`
+- `npm run test:browser -- dashboard-acceptance.spec.ts`

@@ -49,6 +49,20 @@ export type ReadOnlyFilePane = {
   extension: string | null;
 };
 
+export type ReadOnlyFilePaneOrder = Record<string, readonly string[]>;
+
+export type ReadOnlyFilePaneRestoreSnapshot = {
+  panes: Record<string, ReadOnlyFilePane>;
+  orderByGroup: Record<string, string[]>;
+};
+
+type ReadOnlyFilePaneDescriptor = {
+  workRootId: string;
+  path: string;
+  mode: ReadOnlyFilePaneMode;
+  title: string;
+};
+
 export type DirectoryLoadState = {
   status: "idle" | "loading" | "loaded" | "error";
   entries: WorkRootFileEntryView[];
@@ -190,6 +204,102 @@ export function applyReadOnlyFilePaneError(pane: ReadOnlyFilePane, error: string
   };
 }
 
+export function readOnlyFilePaneRestoreSnapshot(
+  panes: readonly ReadOnlyFilePane[],
+  orderByGroup: ReadOnlyFilePaneOrder = {},
+): ReadOnlyFilePaneRestoreSnapshot {
+  return {
+    panes: Object.fromEntries(
+      panes.map((pane) => [
+        pane.logicalKey,
+        createRestoredReadOnlyFilePane({
+          workRootId: pane.workRootId,
+          path: pane.path,
+          mode: pane.mode,
+          title: pane.title,
+        }),
+      ]),
+    ),
+    orderByGroup: pruneReadOnlyFilePaneOrder(
+      orderByGroup,
+      new Set(panes.map((pane) => pane.id)),
+    ),
+  };
+}
+
+export function loadReadOnlyFilePaneRestoreSnapshot(
+  storage: Pick<Storage, "getItem"> | null = browserStorage(),
+): ReadOnlyFilePaneRestoreSnapshot {
+  if (!storage) {
+    return { panes: {}, orderByGroup: {} };
+  }
+  try {
+    const raw = storage.getItem(readOnlyFilePaneRestoreStorageKey);
+    if (!raw) {
+      return { panes: {}, orderByGroup: {} };
+    }
+    const parsed = JSON.parse(raw) as {
+      version?: unknown;
+      panes?: unknown;
+      orderByGroup?: unknown;
+    };
+    if (parsed.version !== 1 || !Array.isArray(parsed.panes)) {
+      return { panes: {}, orderByGroup: {} };
+    }
+    const panes = Object.fromEntries(
+      parsed.panes.flatMap((value): Array<[string, ReadOnlyFilePane]> => {
+        const descriptor = parseReadOnlyFilePaneDescriptor(value);
+        if (!descriptor) {
+          return [];
+        }
+        const pane = createRestoredReadOnlyFilePane(descriptor);
+        return [[pane.logicalKey, pane]];
+      }),
+    );
+    return {
+      panes,
+      orderByGroup: parseReadOnlyFilePaneOrder(
+        parsed.orderByGroup,
+        new Set(Object.values(panes).map((pane) => pane.id)),
+      ),
+    };
+  } catch {
+    return { panes: {}, orderByGroup: {} };
+  }
+}
+
+export function saveReadOnlyFilePaneRestoreSnapshot(
+  panes: readonly ReadOnlyFilePane[],
+  orderByGroup: ReadOnlyFilePaneOrder = {},
+  storage: Pick<Storage, "setItem" | "removeItem"> | null = browserStorage(),
+) {
+  if (!storage) {
+    return;
+  }
+  try {
+    if (panes.length === 0) {
+      storage.removeItem(readOnlyFilePaneRestoreStorageKey);
+      return;
+    }
+    const paneIds = new Set(panes.map((pane) => pane.id));
+    storage.setItem(
+      readOnlyFilePaneRestoreStorageKey,
+      JSON.stringify({
+        version: 1,
+        panes: panes.map((pane): ReadOnlyFilePaneDescriptor => ({
+          workRootId: pane.workRootId,
+          path: pane.path,
+          mode: pane.mode,
+          title: pane.title,
+        })),
+        orderByGroup: pruneReadOnlyFilePaneOrder(orderByGroup, paneIds),
+      }),
+    );
+  } catch {
+    // Browser persistence is best-effort; live pane state remains canonical.
+  }
+}
+
 export async function fetchWorkRootFiles(
   workRootId: string,
   path = "",
@@ -256,6 +366,90 @@ export function flattenWorkRootFileTree({
   return rows;
 }
 
+function createRestoredReadOnlyFilePane(
+  descriptor: ReadOnlyFilePaneDescriptor,
+): ReadOnlyFilePane {
+  return {
+    ...createLoadingReadOnlyFilePane(
+      descriptor.workRootId,
+      descriptor.path,
+      descriptor.mode,
+    ),
+    title: descriptor.title.trim() || fileNameFromPath(descriptor.path),
+  };
+}
+
+function parseReadOnlyFilePaneDescriptor(
+  value: unknown,
+): ReadOnlyFilePaneDescriptor | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.workRootId !== "string" ||
+    typeof record.path !== "string" ||
+    typeof record.title !== "string" ||
+    (record.mode !== "preview" && record.mode !== "pinned")
+  ) {
+    return null;
+  }
+  const workRootId = record.workRootId.trim();
+  const path = record.path.trim();
+  const pathSegments = path.split("/");
+  if (
+    !workRootId ||
+    !path ||
+    path.startsWith("/") ||
+    pathSegments.some((segment) => segment === "." || segment === "..")
+  ) {
+    return null;
+  }
+  return {
+    workRootId,
+    path,
+    mode: record.mode,
+    title: record.title,
+  };
+}
+
+function parseReadOnlyFilePaneOrder(
+  value: unknown,
+  paneIds: ReadonlySet<string>,
+): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const order: Record<string, string[]> = {};
+  for (const [groupId, paneOrder] of Object.entries(value)) {
+    if (!Array.isArray(paneOrder)) {
+      continue;
+    }
+    const ids = paneOrder.filter(
+      (paneId): paneId is string =>
+        typeof paneId === "string" && paneIds.has(paneId),
+    );
+    if (ids.length > 0) {
+      order[groupId] = [...new Set(ids)];
+    }
+  }
+  return order;
+}
+
+function pruneReadOnlyFilePaneOrder(
+  orderByGroup: ReadOnlyFilePaneOrder,
+  paneIds: ReadonlySet<string>,
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(orderByGroup)
+      .map(([groupId, paneOrder]) => [
+        groupId,
+        paneOrder.filter((paneId) => paneIds.has(paneId)),
+      ])
+      .filter(([, paneOrder]) => paneOrder.length > 0),
+  );
+}
+
 function fileNameFromPath(path: string) {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
@@ -304,5 +498,15 @@ function appendDirectoryRows(
     if (expanded) {
       appendDirectoryRows(rows, entry.path, depth + 1, expandedPaths, directories, selectedPath);
     }
+  }
+}
+
+const readOnlyFilePaneRestoreStorageKey = "ws-dashboard.readOnlyFilePanes.v1";
+
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
   }
 }

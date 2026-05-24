@@ -5,6 +5,9 @@ import {
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
   flattenWorkRootFileTree,
+  loadReadOnlyFilePaneRestoreSnapshot,
+  readOnlyFilePaneRestoreSnapshot,
+  saveReadOnlyFilePaneRestoreSnapshot,
   toggleExpandedPath,
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
@@ -108,6 +111,143 @@ assertEqual(
   "preview pane id is one replaceable pane per workRoot",
 );
 
+const pinnedPane = applyReadOnlyFilePaneContent(
+  createLoadingReadOnlyFilePane("root-local-abc", "src/main.ts", "pinned"),
+  {
+    workRootId: "root-local-abc",
+    path: "src/main.ts",
+    name: "main.ts",
+    status: "ok",
+    readOnly: true,
+    content: "secret live content",
+    sizeBytes: 19,
+    languageHint: "typescript",
+    extension: "ts",
+  },
+);
+const previewPane = applyReadOnlyFilePaneError(
+  createLoadingReadOnlyFilePane("root-local-abc", "README.md", "preview"),
+  "stale read failed",
+);
+const restoreSnapshot = readOnlyFilePaneRestoreSnapshot(
+  [pinnedPane, previewPane],
+  { "group-2": [pinnedPane.id, previewPane.id, "missing-pane"] },
+);
+assertDeepEqual(
+  Object.values(restoreSnapshot.panes).map((pane) => ({
+    workRootId: pane.workRootId,
+    path: pane.path,
+    mode: pane.mode,
+    status: pane.status,
+    content: pane.content,
+    error: pane.error,
+  })),
+  [
+    {
+      workRootId: "root-local-abc",
+      path: "src/main.ts",
+      mode: "pinned",
+      status: "loading",
+      content: "",
+      error: null,
+    },
+    {
+      workRootId: "root-local-abc",
+      path: "README.md",
+      mode: "preview",
+      status: "loading",
+      content: "",
+      error: null,
+    },
+  ],
+  "restore snapshot keeps descriptors but not file contents or stale errors",
+);
+assertDeepEqual(
+  restoreSnapshot.orderByGroup,
+  { "group-2": [pinnedPane.id, previewPane.id] },
+  "restore snapshot stores only live pane-order hints",
+);
+
+const fakeStorage = new Map<string, string>();
+const storage = {
+  getItem: (key: string) => fakeStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    fakeStorage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    fakeStorage.delete(key);
+  },
+};
+saveReadOnlyFilePaneRestoreSnapshot(
+  [pinnedPane, previewPane],
+  { "group-2": [pinnedPane.id, previewPane.id] },
+  storage,
+);
+const restored = loadReadOnlyFilePaneRestoreSnapshot(storage);
+assertDeepEqual(
+  Object.values(restored.panes).map((pane) => ({
+    logicalKey: pane.logicalKey,
+    id: pane.id,
+    workRootId: pane.workRootId,
+    path: pane.path,
+    mode: pane.mode,
+    title: pane.title,
+    status: pane.status,
+    content: pane.content,
+  })),
+  [
+    {
+      logicalKey: pinnedPane.logicalKey,
+      id: pinnedPane.id,
+      workRootId: "root-local-abc",
+      path: "src/main.ts",
+      mode: "pinned",
+      title: "main.ts",
+      status: "loading",
+      content: "",
+    },
+    {
+      logicalKey: previewPane.logicalKey,
+      id: previewPane.id,
+      workRootId: "root-local-abc",
+      path: "README.md",
+      mode: "preview",
+      title: "README.md",
+      status: "loading",
+      content: "",
+    },
+  ],
+  "read-only file pane descriptors round-trip through storage without contents",
+);
+assertDeepEqual(
+  restored.orderByGroup,
+  { "group-2": [pinnedPane.id, previewPane.id] },
+  "read-only pane order hints round-trip through storage",
+);
+fakeStorage.set(
+  "ws-dashboard.readOnlyFilePanes.v1",
+  JSON.stringify({
+    version: 1,
+    panes: [
+      { workRootId: "root-local-abc", path: "/abs/path", mode: "pinned", title: "bad" },
+      { workRootId: "root-local-abc", path: "../secret", mode: "pinned", title: "bad" },
+      { workRootId: "root-local-ok", path: "notes..md", mode: "pinned", title: "ok" },
+    ],
+    orderByGroup: { "group-1": ["readonly:root-local-ok:notes..md", "unknown"] },
+  }),
+);
+const sanitized = loadReadOnlyFilePaneRestoreSnapshot(storage);
+assertDeepEqual(
+  Object.values(sanitized.panes).map((pane) => pane.path),
+  ["notes..md"],
+  "restore storage accepts relative paths but drops absolute or traversal descriptors",
+);
+fakeStorage.set("ws-dashboard.readOnlyFilePanes.v1", "not json");
+assertDeepEqual(
+  loadReadOnlyFilePaneRestoreSnapshot(storage),
+  { panes: {}, orderByGroup: {} },
+  "malformed read-only pane restore storage degrades to empty",
+);
 
 const expanded = toggleExpandedPath(new Set([""]), "src");
 assertEqual(expanded.has(""), true, "toggle preserves existing expanded root");

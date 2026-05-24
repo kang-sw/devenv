@@ -48,7 +48,9 @@ import {
   fetchWorkRootTextFile,
   flattenWorkRootFileTree,
   idleDirectoryLoadState,
+  loadReadOnlyFilePaneRestoreSnapshot,
   toggleExpandedPath,
+  saveReadOnlyFilePaneRestoreSnapshot,
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
@@ -179,16 +181,19 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
+  const [initialReadOnlyFilePaneRestore] = useState(() =>
+    loadReadOnlyFilePaneRestoreSnapshot(),
+  );
   const [readOnlyFilePanes, setReadOnlyFilePanes] = useState<
     Record<string, ReadOnlyFilePane>
-  >({});
+  >(initialReadOnlyFilePaneRestore.panes);
   const [activeReadOnlyFilePaneRequest, setActiveReadOnlyFilePaneRequest] =
     useState<{
       paneId: string;
       sequence: number;
     } | null>(null);
   const [readOnlyFilePaneOrderByGroup, setReadOnlyFilePaneOrderByGroup] =
-    useState<WorkbenchPaneOrder>({});
+    useState<WorkbenchPaneOrder>(initialReadOnlyFilePaneRestore.orderByGroup);
   const [workbenchGroupsByRoot, setWorkbenchGroupsByRoot] = useState<
     Record<string, ReadonlyArray<{ id: string; label: string }>>
   >({});
@@ -197,6 +202,9 @@ export function App() {
   >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
+  const restoredReadOnlyPaneKeys = useRef(
+    new Set(Object.keys(initialReadOnlyFilePaneRestore.panes)),
+  );
   const resourceRefreshCoordinatorRef =
     useRef<ResourceRefreshCoordinator | null>(null);
 
@@ -276,6 +284,63 @@ export function App() {
       setSelectedId(nextSelectedId);
     }
   }, [entities, selectedId]);
+
+  useEffect(() => {
+    saveReadOnlyFilePaneRestoreSnapshot(
+      Object.values(readOnlyFilePanes),
+      readOnlyFilePaneOrderByGroup,
+    );
+  }, [readOnlyFilePanes, readOnlyFilePaneOrderByGroup]);
+
+  useEffect(() => {
+    if (!resources || restoredReadOnlyPaneKeys.current.size === 0) {
+      return;
+    }
+    const knownWorkRootIds = new Set(
+      resources.workspaces.flatMap((workspace) =>
+        workspace.workRoots.map((root) => root.id),
+      ),
+    );
+    for (const logicalKey of Array.from(restoredReadOnlyPaneKeys.current)) {
+      const pane = readOnlyFilePanes[logicalKey];
+      if (!pane || pane.status !== "loading") {
+        restoredReadOnlyPaneKeys.current.delete(logicalKey);
+        continue;
+      }
+      if (!knownWorkRootIds.has(pane.workRootId)) {
+        continue;
+      }
+      restoredReadOnlyPaneKeys.current.delete(logicalKey);
+      void fetchWorkRootTextFile(pane.workRootId, pane.path)
+        .then((file) => {
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [logicalKey]: applyReadOnlyFilePaneContent(currentPane, file),
+            };
+          });
+        })
+        .catch((error) => {
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [logicalKey]: applyReadOnlyFilePaneError(
+                currentPane,
+                error instanceof Error ? error.message : "file read failed",
+              ),
+            };
+          });
+        });
+    }
+  }, [readOnlyFilePanes, resources]);
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;

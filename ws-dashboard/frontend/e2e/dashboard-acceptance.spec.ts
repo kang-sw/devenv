@@ -1933,12 +1933,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(terminalTabs(page)).toHaveCount(1);
     await terminalTabs(page).nth(0).click();
     await terminalSurface(page);
+    const restoredPinnedReadOnlyTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+    );
+    await expect(restoredPinnedReadOnlyTab).toBeVisible();
+    await restoredPinnedReadOnlyTab.click();
+    await expect(page.locator(".readonly-text-pane")).toContainText(
+      "ws-dashboard browser gate fixture",
+    );
     await page.screenshot({
       path: path.join(artifactsDir, "desktop-workbench.png"),
       fullPage: true,
     });
     note(
-      "refresh: daemon-owned terminal reconstructs as a selectable tab after reload, no mock surfaces",
+      "refresh: daemon-owned terminal and browser-owned read-only file descriptors reconstruct after reload, no mock surfaces",
     );
   });
 

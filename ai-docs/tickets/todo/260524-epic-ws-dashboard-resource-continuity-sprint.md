@@ -49,7 +49,7 @@ The sprint scope includes:
 - `260524-feat-ws-dashboard-workspace-root-prune-policy` - ready; implement the
   root ownership and automatic pruning policy first so later discovery and
   cleanup work has stable lifecycle semantics.
-- `260523-feat-ws-dashboard-readonly-file-pane-restore` - todo; restore
+- `260523-feat-ws-dashboard-readonly-file-pane-restore` - done; restore
   browser-visible read-only file panes after refresh or daemon restart without
   persisting file contents or absolute host paths.
 - `260523-feat-ws-dashboard-linked-worktree-discovery` - todo; add Git linked
