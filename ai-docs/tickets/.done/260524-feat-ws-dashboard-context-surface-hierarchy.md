@@ -153,3 +153,18 @@ Verification passed:
 - `cd ws-dashboard/frontend && npm run test:browser`
 - Manual screenshot review of `desktop-workbench.png`, `file-explorer.png`,
   and `topbar-overflow.png`
+
+#### Edition (f3a50c1) - 2026-05-24
+
+Adjusted the hierarchy direction toward role-specific surface themes instead
+of primarily seam/gutter differences. Navigation, file explorer, workRoot
+topbar, and editor/document surfaces now use more distinct semantic tones,
+while the left server header and workRoot topbar share the same minimum height
+and pill-style status grammar.
+
+Verification passed:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png`, `file-explorer.png`,
+  and `topbar-overflow.png`
