@@ -42,3 +42,16 @@ Update host harness detection, normalized harness handling, alias defaults,
 tests, and docs if stable Gemini host markers exist.
 
 TBA.
+
+## Drop Reason
+
+Dropped on 2026-05-24. Google announced the consumer transition from Gemini CLI
+to Antigravity CLI on 2026-05-19, with Gemini CLI and Gemini Code Assist IDE
+extensions stopping requests for Google AI Pro, Ultra, and free individual use
+on 2026-06-18:
+https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/
+
+Per user direction, ws should stop carrying Gemini CLI host-harness detection as
+active backlog. Any future Antigravity host or backend support should be scoped
+as a new ticket from observed Antigravity CLI/MCP behavior instead of reviving
+this Gemini-specific follow-up.
