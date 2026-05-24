@@ -161,7 +161,7 @@ The MVP should cover:
 - `260524-feat-ws-dashboard-root-picker-modal` - done; replace the temporary
   open-workRoot path input with an explorer-like modal over the authenticated
   root picker APIs.
-- `260524-feat-ws-dashboard-react-aria-root-picker-pilot` - todo; rework the
+- `260524-feat-ws-dashboard-react-aria-root-picker-pilot` - ready; rework the
   local root picker modal into a React Aria explorer-style folder picker while
   preserving the dashboard command and open-workRoot contracts.
 - `260524-feat-ws-dashboard-document-viewer-editor-substrate` - todo; add a

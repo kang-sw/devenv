@@ -693,6 +693,17 @@ reconciliation, and canonical resource refresh flow. The modal may expose only
 the existing single-segment `Create empty folder` action, not broad file-manager
 operations. {#260524-ws-dashboard-root-picker-modal}
 
+> [!note] Planned 🚧 {#260524-ws-dashboard-react-aria-root-picker-pilot}
+> The modal will be reworked as an explorer-style folder selection dialog using
+> accessible controlled browser primitives. The owner sees a top navigation
+> ribbon with local Back/Forward history, Up, Refresh, and address entry; a
+> platform-aware built-in places sidebar derived from daemon-owned data; a
+> details-style current-folder row list with room for optional metadata columns;
+> and footer controls for selected or typed path open/cancel. The picker remains
+> folder-selection-only, keeps host paths out of loggable command payload
+> fields, restores focus to the opener on close, and preserves the same
+> authenticated root picker and open-workRoot resource refresh contracts.
+
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the
 real opened workRoot instead of continuing to present mock workspace state.
