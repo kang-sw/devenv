@@ -2510,7 +2510,7 @@ button {
   display: grid;
   flex: 0 0 auto;
   min-height: 30px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--ws-space-03);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
@@ -2580,9 +2580,9 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
   background: var(--ws-color-surface-context);
   margin-bottom: var(--ws-space-03);
-  min-height: 38px;
-  padding-top: var(--ws-space-04);
-  padding-bottom: var(--ws-space-04);
+  min-height: 34px;
+  padding-top: var(--ws-space-03);
+  padding-bottom: var(--ws-space-03);
 }
 
 .resource-row[data-resource-presentation="workRoot"] {
@@ -2680,16 +2680,13 @@ button {
   border-left: var(--ws-border-width-state-rail) solid transparent;
   background: color-mix(in srgb, var(--ws-color-panel) 72%, transparent);
   color: var(--ws-color-text-primary);
-  cursor: pointer;
-  padding: var(--ws-space-04) var(--ws-space-05);
+  padding: var(--ws-space-03) var(--ws-space-05);
   text-align: left;
 }
 
 .server-row:hover,
-.server-row:focus-visible {
+.server-row:focus-within {
   background: var(--ws-color-panel-hover);
-  outline: var(--ws-focus-ring);
-  outline-offset: -2px;
 }
 
 .server-row-selected {
@@ -2709,6 +2706,25 @@ button {
   align-items: center;
   gap: var(--ws-space-04);
   color: var(--ws-color-text-secondary);
+}
+
+.server-row-select {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ws-space-04);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.server-row-select:focus-visible {
+  outline: var(--ws-focus-ring);
+  outline-offset: -2px;
 }
 
 .server-row-title {
@@ -2734,6 +2750,20 @@ button {
   line-height: var(--ws-line-height-02);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.server-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-02);
+}
+
+.server-row-action.icon-button,
+.server-row-actions .open-work-root-icon.open-work-root {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
 }
 
 .server-status-chip-connected {

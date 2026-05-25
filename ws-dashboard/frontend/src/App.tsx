@@ -1881,16 +1881,16 @@ function ResourceNavigation({
       <div className="server-nav-toolbar">
         <div className="server-nav-title">Servers</div>
         <ChromeIconButton
-          commandId="dashboard.refresh"
-          icon={RefreshCw}
-          label="Refresh servers"
-          onClick={() => onCommand(buildDashboardRefreshCommand())}
-        />
-        <OpenWorkRootControl
-          variant="icon"
-          disabled={selectedServerId !== "server-local"}
-          onOpened={onOpenWorkRoot}
-          onCommand={onCommand}
+          commandId="resource.action.server.add"
+          disabled
+          icon={Plus}
+          label="Add server"
+          onClick={() =>
+            onCommand({
+              commandId: "resource.action.server.add",
+              payload: { type: "action", label: "Add server", entityId: "servers" },
+            })
+          }
         />
       </div>
       <div className="resource-list resource-list-region">
@@ -1911,6 +1911,7 @@ function ResourceNavigation({
             selectedId={selectedId}
             resources={server.id === selectedServerId ? resources : null}
             onCommand={onCommand}
+            onOpenWorkRoot={onOpenWorkRoot}
             onSelectServer={onSelectServer}
           />
         ))}
@@ -1940,6 +1941,7 @@ function ServerRows({
   selectedId,
   resources,
   onCommand,
+  onOpenWorkRoot,
   onSelectServer,
 }: {
   server: ServerConnectionView;
@@ -1947,28 +1949,48 @@ function ServerRows({
   selectedId: string | null;
   resources: DashboardResourcesView | null;
   onCommand: DashboardCommandDispatcher;
+  onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
   onSelectServer: (server: ServerConnectionView) => void;
 }) {
   return (
     <div className="server-group">
-      <button
-        aria-label={`Select server ${server.label}`}
+      <div
         className={`server-row ws-row${selected ? " server-row-selected ws-row-selected" : ""}`}
-        data-command-id="server.select"
         data-server-kind={server.kind}
         data-server-status={server.status}
         title={[server.label, server.kind, server.status, server.state.status].join(" · ")}
-        type="button"
-        onClick={() => onSelectServer(server)}
       >
-        <span className="server-row-main">
-          <Server aria-hidden="true" size={15} strokeWidth={1.8} />
-          <span className="server-row-title">{server.label}</span>
+        <button
+          aria-label={`Select server ${server.label}`}
+          className="server-row-select"
+          data-command-id="server.select"
+          type="button"
+          onClick={() => onSelectServer(server)}
+        >
+          <span className="server-row-main">
+            <Server aria-hidden="true" size={15} strokeWidth={1.8} />
+            <span className="server-row-title">{server.label}</span>
+          </span>
+          <span className={`server-status-chip server-status-chip-${server.status}`}>
+            {serverConnectionStatusLabel(server)}
+          </span>
+        </button>
+        <span className="server-row-actions">
+          <ChromeIconButton
+            className="server-row-action"
+            commandId="dashboard.refresh"
+            icon={RefreshCw}
+            label={`Refresh ${server.label}`}
+            onClick={() => onCommand(buildDashboardRefreshCommand())}
+          />
+          <OpenWorkRootControl
+            variant="icon"
+            disabled={server.id !== "server-local"}
+            onOpened={onOpenWorkRoot}
+            onCommand={onCommand}
+          />
         </span>
-        <span className={`server-status-chip server-status-chip-${server.status}`}>
-          {serverConnectionStatusLabel(server)}
-        </span>
-      </button>
+      </div>
       {selected && resources ? (
         <div className="server-workspaces">
           {resources.workspaces.map((workspace) => (
