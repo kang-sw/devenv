@@ -3,6 +3,7 @@ package wsstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -58,6 +59,31 @@ type Actor struct {
 	ParentActorID string
 	Status        string
 	Pinned        bool
+}
+
+type AgentDefinition struct {
+	AgentKey            string
+	ActorID             string
+	PublicName          string
+	StatePath           string
+	SchemaVersion       int
+	Backend             string
+	Harness             string
+	Tier                string
+	Model               string
+	Effort              string
+	SessionID           string
+	Status              string
+	CreatedAt           string
+	LastSeenAt          string
+	LastCallAt          string
+	LastOutputPath      string
+	PromptRefs          []string
+	SystemPromptPath    string
+	ChildActorID        string
+	ChildActorAuthority string
+	Capabilities        map[string]bool
+	Ephemeral           bool
 }
 
 type Artifact struct {
@@ -216,11 +242,67 @@ func (s *Store) Migrate(ctx context.Context) error {
 			}
 		}
 		now := s.now().UTC().Format(time.RFC3339Nano)
+		if err := migrateAgentDefsColumns(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)`, schemaVersion, now); err != nil {
 			return err
 		}
 		return tx.Commit()
 	})
+}
+
+func migrateAgentDefsColumns(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(agent_defs)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, column := range agentDefColumnMigrations {
+		if columns[column.name] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_defs ADD COLUMN `+column.sql); err != nil {
+			return fmt.Errorf("migrate agent_defs.%s: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+var agentDefColumnMigrations = []struct{ name, sql string }{
+	{"public_name", `public_name TEXT NOT NULL DEFAULT ''`},
+	{"schema_version", `schema_version INTEGER NOT NULL DEFAULT 0`},
+	{"backend", `backend TEXT NOT NULL DEFAULT ''`},
+	{"harness", `harness TEXT NOT NULL DEFAULT ''`},
+	{"tier", `tier TEXT NOT NULL DEFAULT ''`},
+	{"model", `model TEXT NOT NULL DEFAULT ''`},
+	{"effort", `effort TEXT NOT NULL DEFAULT ''`},
+	{"session_id", `session_id TEXT NOT NULL DEFAULT ''`},
+	{"status", `status TEXT NOT NULL DEFAULT ''`},
+	{"last_seen_at", `last_seen_at TEXT NOT NULL DEFAULT ''`},
+	{"last_call_at", `last_call_at TEXT NOT NULL DEFAULT ''`},
+	{"last_output_path", `last_output_path TEXT NOT NULL DEFAULT ''`},
+	{"prompt_refs_json", `prompt_refs_json TEXT NOT NULL DEFAULT '[]'`},
+	{"system_prompt_path", `system_prompt_path TEXT NOT NULL DEFAULT ''`},
+	{"child_actor_id", `child_actor_id TEXT NOT NULL DEFAULT ''`},
+	{"child_actor_authority", `child_actor_authority TEXT NOT NULL DEFAULT ''`},
+	{"capabilities_json", `capabilities_json TEXT NOT NULL DEFAULT '{}'`},
+	{"ephemeral", `ephemeral INTEGER NOT NULL DEFAULT 0`},
 }
 
 func (s *Store) UpsertActor(ctx context.Context, actor Actor) error {
@@ -255,6 +337,85 @@ func (s *Store) Actor(ctx context.Context, id string) (Actor, bool, error) {
 	}
 	actor.Pinned = pinned != 0
 	return actor, true, nil
+}
+
+func (s *Store) UpsertAgentDefinition(ctx context.Context, def AgentDefinition) error {
+	if def.AgentKey == "" {
+		return errors.New("agent_key is required")
+	}
+	if def.PublicName == "" {
+		return errors.New("agent public name is required")
+	}
+	promptRefs, err := json.Marshal(def.PromptRefs)
+	if err != nil {
+		return fmt.Errorf("marshal prompt refs: %w", err)
+	}
+	capabilities := def.Capabilities
+	if capabilities == nil {
+		capabilities = map[string]bool{}
+	}
+	capabilitiesJSON, err := json.Marshal(capabilities)
+	if err != nil {
+		return fmt.Errorf("marshal capabilities: %w", err)
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	createdAt := def.CreatedAt
+	if createdAt == "" {
+		createdAt = now
+	}
+	_, err = s.execWrite(ctx, `
+INSERT INTO agent_defs(agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(agent_key) DO UPDATE SET
+  actor_id=excluded.actor_id,
+  public_name=excluded.public_name,
+  state_path=excluded.state_path,
+  schema_version=excluded.schema_version,
+  backend=excluded.backend,
+  harness=excluded.harness,
+  tier=excluded.tier,
+  model=excluded.model,
+  effort=excluded.effort,
+  session_id=excluded.session_id,
+  status=excluded.status,
+  updated_at=excluded.updated_at,
+  last_seen_at=excluded.last_seen_at,
+  last_call_at=excluded.last_call_at,
+  last_output_path=excluded.last_output_path,
+  prompt_refs_json=excluded.prompt_refs_json,
+  system_prompt_path=excluded.system_prompt_path,
+  child_actor_id=excluded.child_actor_id,
+  child_actor_authority=excluded.child_actor_authority,
+  capabilities_json=excluded.capabilities_json,
+  ephemeral=excluded.ephemeral`,
+		def.AgentKey, def.ActorID, def.PublicName, def.StatePath, def.SchemaVersion, def.Backend, def.Harness, def.Tier, def.Model, def.Effort, def.SessionID, def.Status, createdAt, now, def.LastSeenAt, def.LastCallAt, def.LastOutputPath, string(promptRefs), def.SystemPromptPath, def.ChildActorID, def.ChildActorAuthority, string(capabilitiesJSON), boolInt(def.Ephemeral))
+	return err
+}
+
+func (s *Store) AgentDefinition(ctx context.Context, agentKey string) (AgentDefinition, bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral FROM agent_defs WHERE agent_key = ?`, agentKey)
+	var def AgentDefinition
+	var promptRefsJSON, capabilitiesJSON string
+	var ephemeral int
+	if err := row.Scan(&def.AgentKey, &def.ActorID, &def.PublicName, &def.StatePath, &def.SchemaVersion, &def.Backend, &def.Harness, &def.Tier, &def.Model, &def.Effort, &def.SessionID, &def.Status, &def.CreatedAt, &def.LastSeenAt, &def.LastCallAt, &def.LastOutputPath, &promptRefsJSON, &def.SystemPromptPath, &def.ChildActorID, &def.ChildActorAuthority, &capabilitiesJSON, &ephemeral); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AgentDefinition{}, false, nil
+		}
+		return AgentDefinition{}, false, err
+	}
+	if err := json.Unmarshal([]byte(blankDefault(promptRefsJSON, "[]")), &def.PromptRefs); err != nil {
+		return AgentDefinition{}, false, fmt.Errorf("parse agent prompt refs: %w", err)
+	}
+	if err := json.Unmarshal([]byte(blankDefault(capabilitiesJSON, "{}")), &def.Capabilities); err != nil {
+		return AgentDefinition{}, false, fmt.Errorf("parse agent capabilities: %w", err)
+	}
+	def.Ephemeral = ephemeral != 0
+	return def, true, nil
+}
+
+func (s *Store) DeleteAgentDefinition(ctx context.Context, agentKey string) error {
+	_, err := s.execWrite(ctx, `DELETE FROM agent_defs WHERE agent_key = ?`, agentKey)
+	return err
 }
 
 func (s *Store) UpsertArtifact(ctx context.Context, artifact Artifact) error {
@@ -561,9 +722,27 @@ var schemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS agent_defs (
 		agent_key TEXT PRIMARY KEY,
 		actor_id TEXT NOT NULL DEFAULT '',
+		public_name TEXT NOT NULL DEFAULT '',
 		state_path TEXT NOT NULL DEFAULT '',
+		schema_version INTEGER NOT NULL DEFAULT 0,
+		backend TEXT NOT NULL DEFAULT '',
+		harness TEXT NOT NULL DEFAULT '',
+		tier TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		effort TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL DEFAULT '',
-		updated_at TEXT NOT NULL DEFAULT ''
+		updated_at TEXT NOT NULL DEFAULT '',
+		last_seen_at TEXT NOT NULL DEFAULT '',
+		last_call_at TEXT NOT NULL DEFAULT '',
+		last_output_path TEXT NOT NULL DEFAULT '',
+		prompt_refs_json TEXT NOT NULL DEFAULT '[]',
+		system_prompt_path TEXT NOT NULL DEFAULT '',
+		child_actor_id TEXT NOT NULL DEFAULT '',
+		child_actor_authority TEXT NOT NULL DEFAULT '',
+		capabilities_json TEXT NOT NULL DEFAULT '{}',
+		ephemeral INTEGER NOT NULL DEFAULT 0
 	)`,
 	`CREATE TABLE IF NOT EXISTS agent_calls (
 		call_id TEXT PRIMARY KEY,

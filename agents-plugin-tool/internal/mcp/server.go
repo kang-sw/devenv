@@ -820,6 +820,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
 			Root:                  root,
+			ActorID:               s.actorScopeForAgentTool(root, params.Arguments),
 			Question:              question,
 			DeepResearch:          deepResearch,
 			Harness:               s.currentHarness(),
@@ -848,17 +849,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
 		tier, _ := params.Arguments["tier"].(string)
 		model, _ := params.Arguments["model"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		child, err := s.childActorSetupForAgent(ctx, root, name, false)
+		child, err := s.childActorSetupForAgent(ctx, root, name, actorID, false)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
 			Root:                  root,
+			ActorID:               actorID,
 			Name:                  name,
 			Backend:               backend,
 			Harness:               s.currentHarness(),
@@ -877,14 +880,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
-		child, err := s.childActorSetupForAgent(ctx, root, name, true)
+		child, err := s.childActorSetupForAgent(ctx, root, name, actorID, true)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
 			Root:                  root,
+			ActorID:               actorID,
 			Name:                  name,
 			Prompt:                prompt,
 			ChildActorID:          child.ActorID,
@@ -900,10 +905,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		names := stringList(params.Arguments["names"])
 		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
 			Root:    root,
+			ActorID: actorID,
 			Name:    name,
 			Names:   names,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
@@ -915,9 +922,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
 			Root:    root,
+			ActorID: actorID,
 			Name:    name,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
 			Context: ctx,
@@ -931,18 +940,21 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
+		text, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, name, actorID)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.interrupt":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		message, _ := params.Arguments["message"].(string)
 		result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
 			Root:    root,
+			ActorID: actorID,
 			Name:    name,
 			Message: message,
 		})
@@ -955,12 +967,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Lines:   lines,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.tail":
@@ -968,13 +982,15 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
-			Raw:   true,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Lines:   lines,
+			Raw:     true,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
@@ -982,14 +998,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		stream := strings.TrimPrefix(params.Name, "agents.debug.")
 		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
-			Root:   root,
-			Name:   name,
-			Stream: stream,
-			Lines:  lines,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Stream:  stream,
+			Lines:   lines,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.cancel":
@@ -997,20 +1015,23 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
+		text, err := wsagent.NewManager(wsagent.Options{}).CancelScoped(root, name, actorID)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.recall":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Prompt:  prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.print":
@@ -1026,8 +1047,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		err = wsagent.NewManager(wsagent.Options{}).Erase(root, name)
+		err = wsagent.NewManager(wsagent.Options{}).EraseScoped(root, name, actorID)
 		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -1316,11 +1338,21 @@ type childActorSetup struct {
 	Instruction string
 }
 
-func (s *Server) childActorSetupForAgent(ctx context.Context, root, name string, requireExisting bool) (childActorSetup, error) {
+func (s *Server) actorScopeForAgentTool(root string, arguments map[string]any) string {
+	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
+		return ""
+	}
 	if !s.actorBoundToRoot(root) {
+		return ""
+	}
+	return s.currentActorID()
+}
+
+func (s *Server) childActorSetupForAgent(ctx context.Context, root, name, actorID string, requireExisting bool) (childActorSetup, error) {
+	if strings.TrimSpace(actorID) == "" {
 		return childActorSetup{}, nil
 	}
-	if agent, err := wsagent.NewManager(wsagent.Options{}).Agent(root, name); err == nil {
+	if agent, err := wsagent.NewManager(wsagent.Options{}).AgentScoped(root, name, actorID); err == nil {
 		if strings.TrimSpace(agent.ChildActorID) != "" {
 			return s.ensureChildActor(ctx, root, strings.TrimSpace(agent.ChildActorID), blankDefault(agent.ChildActorAuthority, "delegate"))
 		}

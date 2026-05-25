@@ -410,7 +410,7 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	if err := server.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"survey","tier":"light"}}}`+"\n"), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
-	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "survey")
+	status, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, "survey", server.currentActorID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +695,7 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	if toolIsError(t, byID["4"]) {
 		t.Fatalf("root-omitted agents.register after actor setup failed: %s", byID["4"])
 	}
-	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "after-setup"); err != nil {
+	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(rootA, "after-setup", server.currentActorID()); err != nil {
 		t.Fatalf("root-omitted agents.register did not use actor root: %v", err)
 	}
 
@@ -733,7 +733,7 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	if toolIsError(t, byID["7"]) {
 		t.Fatalf("root-omitted agents.register after actor recovery failed: %s", byID["7"])
 	}
-	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "fresh-after-recovery"); err != nil {
+	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(rootA, "fresh-after-recovery", recovered.ActorID); err != nil {
 		t.Fatalf("recovered actor did not bind root for agent register: %v", err)
 	}
 }
@@ -774,7 +774,13 @@ func TestServeStdioSetupFencesFollowingBatchRequest(t *testing.T) {
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("batched agents.register after setup failed: %s", byID["2"])
 	}
-	if _, err := wsagent.NewManager(wsagent.Options{}).Status(root, "batch-after-setup"); err != nil {
+	var setup struct {
+		ActorID string `json:"actor_id"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &setup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, "batch-after-setup", setup.ActorID); err != nil {
 		t.Fatalf("batched register did not use actor-bound root: %v", err)
 	}
 }
@@ -799,7 +805,7 @@ func TestServeStdioChildActorPromptInjection(t *testing.T) {
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("actor-bound agents.register failed: %s", byID["2"])
 	}
-	agent, err := wsagent.NewManager(wsagent.Options{}).Agent(root, "child-worker")
+	agent, err := wsagent.NewManager(wsagent.Options{}).AgentScoped(root, "child-worker", server.currentActorID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,12 +816,24 @@ func TestServeStdioChildActorPromptInjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	systemPath := filepath.Join(layout.AgentsDir, wsagent.AgentKey("child-worker"), agent.SystemPromptPath)
-	raw, err := os.ReadFile(systemPath)
+	matches, err := filepath.Glob(filepath.Join(layout.AgentsDir, "*", agent.SystemPromptPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	system := string(raw)
+	var system string
+	for _, systemPath := range matches {
+		raw, err := os.ReadFile(systemPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), agent.ChildActorID) {
+			system = string(raw)
+			break
+		}
+	}
+	if system == "" {
+		t.Fatalf("system prompt for child-worker not found under %s", layout.AgentsDir)
+	}
 	if !strings.Contains(system, `ws.setup`) || !strings.Contains(system, agent.ChildActorID) {
 		t.Fatalf("system prompt missing child actor setup instruction:\n%s", system)
 	}

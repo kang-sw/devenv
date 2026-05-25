@@ -987,9 +987,10 @@ func agentsRunCurrent(args []string) {
 	fs := flag.NewFlagSet("agents run-current", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
+	actorID := fs.String("actor-id", "", "hidden actor-scoped registry id")
 	_ = fs.Parse(args)
 
-	if err := wsagent.NewManager(wsagent.Options{}).RunCurrent(defaultRoot(*root), *name); err != nil {
+	if err := wsagent.NewManager(wsagent.Options{}).RunCurrentScoped(defaultRoot(*root), *name, *actorID); err != nil {
 		fatal("agents run-current", err)
 	}
 }

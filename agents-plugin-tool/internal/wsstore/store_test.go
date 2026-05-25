@@ -583,3 +583,35 @@ func TestAgentJSONCompatibilityIsNotWriteAuthority(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := AgentInternalKey("actor-one", "implementer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := AgentDefinition{AgentKey: key, ActorID: "actor-one", PublicName: "implementer", StatePath: "actor-dir", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "gpt-test", Status: "idle", CreatedAt: "2026-05-25T00:00:00Z", LastSeenAt: "2026-05-25T00:00:00Z", LastOutputPath: "output.md", PromptRefs: []string{"delegate-orientation"}, SystemPromptPath: "system.md", Capabilities: map[string]bool{"resume": true}, Ephemeral: true}
+	if err := store.UpsertAgentDefinition(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, ok, err := reopened.AgentDefinition(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got.PublicName != "implementer" || got.ActorID != "actor-one" || got.SystemPromptPath != "system.md" || !got.Capabilities["resume"] || !got.Ephemeral {
+		t.Fatalf("persisted agent definition mismatch: ok=%t def=%+v", ok, got)
+	}
+}

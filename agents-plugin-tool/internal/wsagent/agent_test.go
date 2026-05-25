@@ -2,7 +2,6 @@ package wsagent
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -244,7 +243,7 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 	if agent.SystemPromptPath != "system.md" {
 		t.Fatalf("system prompt path = %q", agent.SystemPromptPath)
 	}
-	for _, path := range []string{layout.AgentFile, layout.SystemFile, layout.EventsFile} {
+	for _, path := range []string{layout.SystemFile, layout.EventsFile} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
@@ -1239,7 +1238,7 @@ func TestRunCurrentUsesClaudeBackendRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := readAgent(layout.AgentFile)
+	agent, err := manager.Agent(repo, "impl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1323,7 +1322,7 @@ func TestRunCurrentUsesGeminiBackendRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := readAgent(layout.AgentFile)
+	agent, err := manager.Agent(repo, "impl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2096,7 +2095,7 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	if !strings.Contains(system, "You are a scoped sub-query worker") {
 		t.Fatalf("subquery prompt missing scoped worker prompt:\n%s", system)
 	}
-	agent, err := readAgent(layout.AgentFile)
+	agent, err := manager.Agent(repo, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2118,11 +2117,7 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	if !strings.HasPrefix(deepKey, "subquery-tmpdi93gjglur5s-") || deepKey == key {
 		t.Fatalf("deep subquery key = %q, first key = %q", deepKey, key)
 	}
-	deepLayout, err := deepManager.layout(repo, deepKey, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	deepAgent, err := readAgent(deepLayout.AgentFile)
+	deepAgent, err := deepManager.Agent(repo, deepKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2170,7 +2165,7 @@ func TestSubqueryInjectsChildActorSetupWithoutDelegateOrientation(t *testing.T) 
 	if strings.Count(system, childSetupStart) != 1 || strings.Count(system, childSetupEnd) != 1 {
 		t.Fatalf("subquery prompt has duplicated child setup markers:\n%s", system)
 	}
-	agent, err := readAgent(layout.AgentFile)
+	agent, err := manager.Agent(repo, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2292,7 +2287,7 @@ func (r *chunkReader) Read(p []byte) (int, error) {
 	return copy(p, chunk), nil
 }
 
-func TestAgentJSONRoundTripIncludesContractFields(t *testing.T) {
+func TestSQLiteAgentMetadataRoundTripIncludesContractFields(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
@@ -2300,12 +2295,11 @@ func TestAgentJSONRoundTripIncludesContractFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var agent Agent
-	raw, err := os.ReadFile(layout.AgentFile)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(layout.AgentFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("agent.json should not be written as metadata authority, stat err=%v", err)
 	}
-	if err := json.Unmarshal(raw, &agent); err != nil {
+	agent, err := manager.Agent(repo, "reviewer")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if agent.SchemaVersion != 1 || agent.LastOutputPath != "output.md" || !agent.Capabilities["resume"] {
@@ -2429,5 +2423,88 @@ func runGit(t *testing.T, dir string, args ...string) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+}
+
+func TestAgentMetadataImportsLegacyAgentJSONReadOnly(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
+	layout, err := manager.layout(repo, "legacy", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := Agent{SchemaVersion: 1, Name: "legacy", Backend: "codex", Tier: "core", Model: "gpt-test", Status: StatusIdle, CreatedAt: testNow.Format(time.RFC3339), LastSeenAt: testNow.Format(time.RFC3339), LastOutputPath: "output.md", Capabilities: map[string]bool{"resume": true}}
+	if err := writeAgent(layout.AgentFile, legacy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := manager.Agent(repo, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "legacy" || got.Backend != "codex" || !got.Capabilities["resume"] {
+		t.Fatalf("imported agent mismatch: %+v", got)
+	}
+	if _, err := os.Stat(layout.AgentFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy agent.json should be retired after import, stat err=%v", err)
+	}
+	restarted := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow.Add(time.Second) }})
+	if _, err := restarted.Agent(repo, "legacy"); err != nil {
+		t.Fatalf("imported metadata did not survive manager restart: %v", err)
+	}
+}
+
+func TestActorScopedRegistrationsWithSameNameDoNotCollide(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
+	a, layoutA, err := manager.Register(RegisterOptions{Root: repo, ActorID: "lead-worktree-aaaaaaaaaaaa", Name: "implementer", Model: "model-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, layoutB, err := manager.Register(RegisterOptions{Root: repo, ActorID: "delegate-worktree-bbbbbbbbbbbb", Name: "implementer", Model: "model-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layoutA.AgentDir == layoutB.AgentDir {
+		t.Fatalf("actor-scoped layouts collided: %s", layoutA.AgentDir)
+	}
+	gotA, err := manager.AgentScoped(repo, "implementer", "lead-worktree-aaaaaaaaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotB, err := manager.AgentScoped(repo, "implementer", "delegate-worktree-bbbbbbbbbbbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotA.Model != a.Model || gotB.Model != b.Model || gotA.Model == gotB.Model {
+		t.Fatalf("actor-scoped metadata mismatch: a=%+v b=%+v", gotA, gotB)
+	}
+}
+
+func TestResultReportsMissingOutputAsRecoverableConsistencyState(t *testing.T) {
+	repo := initRepo(t)
+	manager := NewManager(Options{CacheHome: filepath.Join(t.TempDir(), "cache"), Now: func() time.Time { return testNow }})
+	agent, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := manager.BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Status = CallStatusCompleted
+	now := testNow.Format(time.RFC3339)
+	call.UpdatedAt = now
+	call.FinishedAt = now
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		t.Fatal(err)
+	}
+	text, err := manager.Result(ResultOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "payload_consistency: missing_file_backed_payload_recoverable") || !strings.Contains(text, "missing_payload_path: output.md") {
+		t.Fatalf("missing output was not reported as recoverable:\n%s", text)
 	}
 }
