@@ -207,8 +207,10 @@ cache/release path.
 When the contract is valid, the forced local path builds
 `<tool_dir>/cmd/ws-mcp` with the declared Go executable first so pre-release
 dogfood exercises the current checkout. Non-forced repair may copy a local
-runtime binary from `<tool_dir>/dist/` or `<source_root>/agents-plugin/.runtime/`
-before building.
+runtime binary from `<tool_dir>/dist/` or the contract-addressed
+`<source_root>/agents-plugin/.runtime/<os>-<arch>/ws-mcp-<plugin-version>-<runtime-json-sha12>`
+path before building. Legacy fixed-name source-cache binaries such as
+`agents-plugin/.runtime/darwin-arm64/ws-mcp` are not local repair candidates.
 
 If no compatible local runtime can be installed while a valid marker is active,
 startup fails instead of falling back to the published release asset.

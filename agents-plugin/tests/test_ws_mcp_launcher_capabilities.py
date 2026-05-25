@@ -300,6 +300,42 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
                 self.assertFalse(launcher.runtime_install_forced(plugin_dir, "darwin"))
 
+    def test_release_install_without_local_marker_uses_download_path(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
+            plugin_dir.mkdir(parents=True)
+            runtime_dir = home / "runtime"
+            binary = runtime_dir / "ws-mcp-0.18.1-test"
+            calls = []
+
+            def fake_download(got_binary, got_runtime_dir, got_asset, got_contract):
+                calls.append((got_binary, got_runtime_dir, got_asset, got_contract))
+
+            def forbidden_local_candidate(*args, **kwargs):
+                raise AssertionError("release install without marker must not copy or build local runtime candidates")
+
+            launcher.copy_runtime = forbidden_local_candidate
+            launcher.build_local_devenv_runtime = forbidden_local_candidate
+            launcher.install_downloaded_runtime = fake_download
+
+            launcher.install_runtime(
+                plugin_dir,
+                runtime_dir,
+                binary,
+                "ws-mcp-darwin-arm64",
+                {"plugin_version": "0.18.1"},
+                "darwin",
+                "darwin-arm64",
+            )
+
+            self.assertEqual(
+                calls,
+                [(binary, runtime_dir, "ws-mcp-darwin-arm64", {"plugin_version": "0.18.1"})],
+            )
+
     def test_forced_local_runtime_does_not_fall_back_to_release_download(self):
         launcher = load_launcher()
 
@@ -363,6 +399,50 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                         "darwin",
                         "darwin-arm64",
                         prefer_build=True,
+                    )
+                )
+
+            self.assertEqual(build_calls, [(runtime_dir, binary, {"plugin_version": "0.18.1"}, local_contract)])
+
+    def test_local_runtime_ignores_legacy_fixed_name_source_candidate(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
+            plugin_dir.mkdir(parents=True)
+            local_contract = self.write_local_contract(plugin_dir, package_root=home)
+            runtime_dir = home / "runtime"
+            binary = runtime_dir / "ws-mcp-0.18.1-test"
+            asset = "ws-mcp-darwin-arm64"
+            legacy = local_contract["source_root"] / "agents-plugin" / ".runtime" / "darwin-arm64" / "ws-mcp"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("legacy fixed-name runtime", encoding="utf-8")
+            build_calls = []
+
+            def fake_copy(source, destination):
+                if source == legacy:
+                    raise AssertionError("legacy fixed-name source runtime must not be copied")
+                destination.write_text("copied", encoding="utf-8")
+
+            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract):
+                build_calls.append((got_runtime_dir, got_binary, got_contract, got_local_contract))
+                return True
+
+            launcher.copy_runtime = fake_copy
+            launcher.build_local_devenv_runtime = fake_build
+            launcher.runtime_fully_compatible = lambda *args, **kwargs: False
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertTrue(
+                    launcher.install_local_devenv_runtime(
+                        plugin_dir,
+                        runtime_dir,
+                        binary,
+                        asset,
+                        {"plugin_version": "0.18.1"},
+                        "darwin",
+                        "darwin-arm64",
                     )
                 )
 
