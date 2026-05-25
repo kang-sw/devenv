@@ -787,16 +787,30 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 
 func TestServeStdioSetupActorIDCollisionRetries(t *testing.T) {
 	useLeadProfile(t)
-	root := initTicketRepo(t, "260525-feat-actor-collision")
+	existingRoot := initTicketRepo(t, "260525-feat-existing-actor")
+	targetRoot := initTicketRepo(t, "260525-feat-actor-collision")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	existingStore, err := wsstore.NewManager(wsstore.Options{}).Open(existingRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertActor(context.Background(), wsstore.Actor{ActorID: "lead-aaaaaaaa", Authority: "lead", RootPath: canonicalTestPath(t, root), WorktreeKey: store.Layout().WorktreeKey, Status: "active", Pinned: true}); err != nil {
+	if err := existingStore.UpsertActor(context.Background(), wsstore.Actor{ActorID: "lead-aaaaaaaa", Authority: "lead", RootPath: canonicalTestPath(t, existingRoot), WorktreeKey: existingStore.Layout().WorktreeKey, Status: "active", Pinned: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	if err := existingStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	targetStore, err := wsstore.NewManager(wsstore.Options{}).Open(targetRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetStore.Layout().WorktreeKey == "" || targetStore.Layout().WorktreeKey == existingStore.Layout().WorktreeKey {
+		t.Fatalf("test setup did not create distinct worktree keys: existing=%q target=%q", existingStore.Layout().WorktreeKey, targetStore.Layout().WorktreeKey)
+	}
+	if _, ok, err := targetStore.Actor(context.Background(), "lead-aaaaaaaa"); err != nil || ok {
+		t.Fatalf("target store should not contain the colliding actor locally: ok=%t err=%v", ok, err)
+	}
+	if err := targetStore.Close(); err != nil {
 		t.Fatal(err)
 	}
 	oldGenerate := generateActorPayload
@@ -810,9 +824,9 @@ func TestServeStdioSetupActorIDCollisionRetries(t *testing.T) {
 	}
 	t.Cleanup(func() { generateActorPayload = oldGenerate })
 
-	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", root)
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", targetRoot)
 	var out bytes.Buffer
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := NewServer(targetRoot, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -823,7 +837,7 @@ func TestServeStdioSetupActorIDCollisionRetries(t *testing.T) {
 		t.Fatalf("setup response is not JSON: %v\n%s", err, byID["1"])
 	}
 	if setup.ActorID != "lead-bbbbbbbb" || calls != 2 {
-		t.Fatalf("collision retry mismatch: actor_id=%q calls=%d response=%s", setup.ActorID, calls, byID["1"])
+		t.Fatalf("cache-wide collision retry mismatch: actor_id=%q calls=%d response=%s", setup.ActorID, calls, byID["1"])
 	}
 }
 
