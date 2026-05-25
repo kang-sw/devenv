@@ -20,6 +20,10 @@ pub trait DashboardResourcesProvider {
 // static mock fixture. Before any workRoot is opened it returns an honest
 // empty live view (server present, `workspaces: []`).
 pub async fn dashboard_resources(State(state): State<AppState>) -> Json<DashboardResourcesView> {
+    Json(local_dashboard_resources_view(&state).await)
+}
+
+pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResourcesView {
     // Live discovery runs synchronous filesystem and `git` subprocess work, so
     // keep it off the async worker threads.
     let opened = state.opened_work_roots.clone();
@@ -32,7 +36,7 @@ pub async fn dashboard_resources(State(state): State<AppState>) -> Json<Dashboar
             .terminals
             .remove_for_work_roots(&pruned_work_root_ids.into_iter().collect());
     }
-    Json(view)
+    view
 }
 
 /// Build the live dashboard resource view from the daemon's opened workRoots.

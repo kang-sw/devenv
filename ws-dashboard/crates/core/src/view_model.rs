@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    InstanceId, InstanceKind, InstanceRole, InteractionMode, ResourcePath, ServerId,
-    WorkRootActivation, WorkRootAvailability, WorkRootId, WorkRootKind, WorkRootStatus,
-    WorkspaceId,
+    InstanceId, InstanceKind, InstanceRole, InteractionMode, ResourcePath,
+    ServerConnectionStatus, ServerId, ServerKind, WorkRootActivation, WorkRootAvailability,
+    WorkRootId, WorkRootKind, WorkRootStatus, WorkspaceId,
 };
 
 // CONTRACT: The first visible dashboard API returns the full hierarchy instead
@@ -13,6 +13,23 @@ use crate::{
 pub struct DashboardResourcesView {
     pub server: ServerView,
     pub workspaces: Vec<WorkspaceView>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardServersView {
+    pub servers: Vec<ServerConnectionView>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerConnectionView {
+    pub id: ServerId,
+    pub label: String,
+    pub kind: ServerKind,
+    pub status: ServerConnectionStatus,
+    pub state: ViewState,
+    pub actions: Vec<ActionHint>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -86,8 +103,9 @@ pub struct ActionHint {
 mod tests {
     use super::*;
     use crate::{
-        InstanceKind, InstanceRole, InteractionMode, OpaqueId, ResourcePath, WorkRootActivation,
-        WorkRootAvailability, WorkRootKind, WorkRootStatus,
+        InstanceKind, InstanceRole, InteractionMode, OpaqueId, ResourcePath,
+        ServerConnectionStatus, ServerKind, WorkRootActivation, WorkRootAvailability,
+        WorkRootKind, WorkRootStatus,
     };
 
     #[test]
@@ -142,6 +160,38 @@ mod tests {
         assert_eq!(
             value["workspaces"][0]["workRoots"][0]["mainInstances"][0]["actions"][0]["label"],
             "Open"
+        );
+    }
+
+    #[test]
+    fn dashboard_servers_view_serializes_connection_metadata() {
+        let value = serde_json::to_value(DashboardServersView {
+            servers: vec![ServerConnectionView {
+                id: OpaqueId::from("server-remote"),
+                label: "Remote".to_owned(),
+                kind: ServerKind::SshRemote,
+                status: ServerConnectionStatus::AuthRequired,
+                state: ViewState {
+                    status: "authRequired".to_owned(),
+                    loading: false,
+                    stale: false,
+                    error: None,
+                },
+                actions: vec![ActionHint {
+                    id: "enterPassphrase".to_owned(),
+                    label: "Enter passphrase".to_owned(),
+                    enabled: true,
+                }],
+            }],
+        })
+        .expect("serialize server list");
+
+        assert_eq!(value["servers"][0]["id"], "server-remote");
+        assert_eq!(value["servers"][0]["kind"], "sshRemote");
+        assert_eq!(value["servers"][0]["status"], "authRequired");
+        assert_eq!(
+            value["servers"][0]["actions"][0]["id"],
+            "enterPassphrase"
         );
     }
 

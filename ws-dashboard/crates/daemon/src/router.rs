@@ -30,6 +30,7 @@ use crate::root_picker::{
     create_empty_directory, list_root_picker, open_work_root, pin_root_picker_directory,
     remove_workspace, set_work_root_activation, unpin_root_picker_directory,
 };
+use crate::servers::{dashboard_server_resources, dashboard_servers};
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
     terminal_resize, terminal_websocket, TerminalRegistry,
@@ -64,6 +65,11 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route("/api/dashboard/servers", get(dashboard_servers))
+        .route(
+            "/api/dashboard/servers/{server_id}/resources",
+            get(dashboard_server_resources),
+        )
         .route(
             "/api/dashboard/document-translation/providers",
             get(translation_providers),

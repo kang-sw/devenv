@@ -6,7 +6,7 @@ use tokio::fs;
 use tracing::warn;
 
 use crate::work_root_files::{OpenedWorkRoots, WorkRootProvenance};
-use ws_dashboard_core::WorkRootActivation;
+use ws_dashboard_core::{ServerId, ServerKind, WorkRootActivation};
 
 const OPENED_WORKROOTS_STATE_VERSION: u32 = 1;
 const WORKROOT_REGISTRY_STATE_VERSION: u32 = 2;
@@ -85,7 +85,42 @@ impl DashboardStateStore {
             return Ok(());
         };
         let registry = read_work_root_registry(path).await.unwrap_or_default();
-        write_work_root_registry_from_entries(path, registry, pins).await
+        let linked_servers = read_linked_servers(path).await.unwrap_or_default();
+        write_dashboard_state(path, registry, pins, linked_servers).await
+    }
+
+    pub async fn load_linked_servers(&self) -> Vec<PersistedLinkedServer> {
+        let Some(path) = self.state_file.as_deref() else {
+            return Vec::new();
+        };
+
+        match read_linked_servers(path).await {
+            Ok(servers) => servers,
+            Err(StateReadError::Missing) => Vec::new(),
+            Err(error) => {
+                warn!(%error, path = %path.display(), "ignoring dashboard linked servers");
+                Vec::new()
+            }
+        }
+    }
+
+    pub async fn persist_linked_servers(
+        &self,
+        servers: Vec<PersistedLinkedServer>,
+    ) -> Result<(), String> {
+        let Some(path) = self.state_file.as_deref() else {
+            return Ok(());
+        };
+        let parts = read_dashboard_state_parts(path)
+            .await
+            .unwrap_or_else(|_| DashboardStateParts::default());
+        write_dashboard_state(
+            path,
+            parts.work_root_registry,
+            parts.root_picker_pins,
+            servers,
+        )
+        .await
     }
 }
 
@@ -109,6 +144,15 @@ pub struct PersistedRegistryWorkRoot {
     pub provenance: WorkRootProvenance,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedLinkedServer {
+    pub id: ServerId,
+    pub label: String,
+    pub kind: ServerKind,
+    pub ssh_target: Option<String>,
+    pub endpoint_hint: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkRootRegistryState {
@@ -116,6 +160,8 @@ struct WorkRootRegistryState {
     work_root_registry: Vec<PersistedWorkRootRegistryEntry>,
     #[serde(default)]
     root_picker_pins: Vec<PersistedRootPickerPin>,
+    #[serde(default)]
+    linked_servers: Vec<PersistedLinkedServerEntry>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -131,6 +177,18 @@ struct PersistedWorkRootRegistryEntry {
     activation: WorkRootActivation,
     #[serde(default = "default_registry_provenance")]
     provenance: PersistedWorkRootProvenance,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedLinkedServerEntry {
+    id: String,
+    label: String,
+    kind: ServerKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ssh_target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    endpoint_hint: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -174,9 +232,17 @@ async fn read_root_picker_pins(path: &Path) -> Result<Vec<PathBuf>, StateReadErr
         .map(|parts| parts.root_picker_pins)
 }
 
+async fn read_linked_servers(path: &Path) -> Result<Vec<PersistedLinkedServer>, StateReadError> {
+    read_dashboard_state_parts(path)
+        .await
+        .map(|parts| parts.linked_servers)
+}
+
+#[derive(Default)]
 struct DashboardStateParts {
     work_root_registry: Vec<PersistedRegistryWorkRoot>,
     root_picker_pins: Vec<PathBuf>,
+    linked_servers: Vec<PersistedLinkedServer>,
 }
 
 async fn read_dashboard_state_parts(path: &Path) -> Result<DashboardStateParts, StateReadError> {
@@ -214,6 +280,7 @@ async fn read_dashboard_state_parts(path: &Path) -> Result<DashboardStateParts, 
             })
             .collect(),
             root_picker_pins: Vec::new(),
+            linked_servers: Vec::new(),
         });
     }
     if version != WORKROOT_REGISTRY_STATE_VERSION {
@@ -246,6 +313,23 @@ async fn read_dashboard_state_parts(path: &Path) -> Result<DashboardStateParts, 
                 })
                 .collect(),
         ),
+        linked_servers: deduplicate_linked_servers(
+            state
+                .linked_servers
+                .into_iter()
+                .filter_map(|entry| {
+                    let id = entry.id.trim();
+                    let label = entry.label.trim();
+                    (!id.is_empty() && !label.is_empty()).then(|| PersistedLinkedServer {
+                        id: ServerId::from(id.to_owned()),
+                        label: label.to_owned(),
+                        kind: entry.kind,
+                        ssh_target: trim_optional(entry.ssh_target),
+                        endpoint_hint: trim_optional(entry.endpoint_hint),
+                    })
+                })
+                .collect(),
+        ),
     })
 }
 
@@ -273,6 +357,16 @@ async fn write_work_root_registry_from_entries(
     roots: Vec<PersistedRegistryWorkRoot>,
     root_picker_pins: Vec<PathBuf>,
 ) -> Result<(), String> {
+    let linked_servers = read_linked_servers(path).await.unwrap_or_default();
+    write_dashboard_state(path, roots, root_picker_pins, linked_servers).await
+}
+
+async fn write_dashboard_state(
+    path: &Path,
+    roots: Vec<PersistedRegistryWorkRoot>,
+    root_picker_pins: Vec<PathBuf>,
+    linked_servers: Vec<PersistedLinkedServer>,
+) -> Result<(), String> {
     let state = WorkRootRegistryState {
         version: WORKROOT_REGISTRY_STATE_VERSION,
         work_root_registry: deduplicate_registry_entries(roots)
@@ -287,6 +381,16 @@ async fn write_work_root_registry_from_entries(
             .into_iter()
             .map(|path| PersistedRootPickerPin {
                 path: path.to_string_lossy().into_owned(),
+            })
+            .collect(),
+        linked_servers: deduplicate_linked_servers(linked_servers)
+            .into_iter()
+            .map(|server| PersistedLinkedServerEntry {
+                id: server.id.as_str().to_owned(),
+                label: server.label,
+                kind: server.kind,
+                ssh_target: server.ssh_target,
+                endpoint_hint: server.endpoint_hint,
             })
             .collect(),
     };
@@ -349,6 +453,21 @@ fn deduplicate_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         seen.insert(path);
     }
     seen.into_iter().collect()
+}
+
+fn deduplicate_linked_servers(servers: Vec<PersistedLinkedServer>) -> Vec<PersistedLinkedServer> {
+    let mut by_id = std::collections::BTreeMap::new();
+    for server in servers {
+        by_id.insert(server.id.clone(), server);
+    }
+    by_id.into_values().collect()
+}
+
+fn trim_optional(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
 }
 
 fn default_state_file() -> Option<PathBuf> {
@@ -429,6 +548,50 @@ mod tests {
             .expect("read pinned state");
         assert!(raw.contains("\"rootPickerPins\""));
         assert!(raw.contains("pin-a"));
+        remove_temp(&root);
+    }
+
+    #[tokio::test]
+    async fn state_store_persists_linked_servers_without_dropping_registry() {
+        let root = temp_path("linked-servers");
+        let state_file = root.join("opened-workroots.json");
+        let store = DashboardStateStore::at_path(&state_file);
+        let opened = OpenedWorkRoots::from_paths(vec![root.join("work")]);
+        store
+            .persist_opened_work_roots(&opened)
+            .await
+            .expect("persist opened workRoots before linked servers");
+
+        store
+            .persist_linked_servers(vec![PersistedLinkedServer {
+                id: ServerId::from("server-remote"),
+                label: "Remote".to_owned(),
+                kind: ServerKind::SshRemote,
+                ssh_target: Some("user@example.test".to_owned()),
+                endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+            }])
+            .await
+            .expect("persist linked servers");
+
+        let restored_registry = store.load_work_root_registry().await;
+        assert_eq!(restored_registry.len(), 1);
+        assert_eq!(restored_registry[0].path, root.join("work"));
+        assert_eq!(
+            store.load_linked_servers().await,
+            vec![PersistedLinkedServer {
+                id: ServerId::from("server-remote"),
+                label: "Remote".to_owned(),
+                kind: ServerKind::SshRemote,
+                ssh_target: Some("user@example.test".to_owned()),
+                endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+            }]
+        );
+
+        let raw = fs::read_to_string(&state_file)
+            .await
+            .expect("read linked server state");
+        assert!(raw.contains("\"linkedServers\""));
+        assert!(raw.contains("\"kind\": \"sshRemote\""));
         remove_temp(&root);
     }
 

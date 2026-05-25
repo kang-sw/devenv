@@ -45,6 +45,26 @@ pub enum WorkRootKind {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum ServerKind {
+    Local,
+    SshRemote,
+    Wsl,
+    Manual,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerConnectionStatus {
+    Connected,
+    AuthRequired,
+    Unreachable,
+    Starting,
+    StaleEndpoint,
+    TunnelRequired,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum InstanceRole {
     Main,
     Sub,

@@ -112,6 +112,27 @@ Authenticated callers may observe compactability hints, but compaction is a
 presentation policy and not URL identity; the compact row selects the concrete
 workRoot id and does not require a main instance.
 
+## Linked Server Registry And Gateway Skeleton {#260525-ws-dashboard-linked-server-registry-gateway-skeleton}
+
+The local dashboard daemon exposes servers as first-tier owner-visible objects
+without requiring the browser to connect directly to remote hosts. The local
+daemon always appears as `server-local`, and remembered linked servers appear
+beside it with bounded state such as `connected`, `authRequired`,
+`unreachable`, `starting`, `staleEndpoint`, or `tunnelRequired`.
+
+The server list is separate from the selected server's resource tree. This lets
+existing callers keep consuming the single-server `DashboardResourcesView`
+shape while new callers can render a multi-server navigation shell from a
+server list plus the selected server resources.
+
+Authenticated callers can request resources through
+`/api/dashboard/servers/{serverId}/resources`. The local server id returns the
+same live resource view as the existing local resources route. Linked server
+ids are recognized from daemon-owned persisted metadata, but until link-auth
+and transport forwarding are implemented they return bounded refusal errors
+instead of leaking endpoint, SSH target, passphrase, host path, or cache path
+details. Unknown server ids return a bounded not-found response.
+
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
 The dashboard exposes known workspace and workRoot membership from a

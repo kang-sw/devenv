@@ -16,10 +16,10 @@ pub use events::{
 };
 pub use ids::{InstanceId, OpaqueId, ServerId, WorkRootId, WorkspaceId};
 pub use resources::{
-    InstanceKind, InstanceRole, InteractionMode, ResourcePath, WorkRootActivation,
-    WorkRootAvailability, WorkRootKind, WorkRootStatus,
+    InstanceKind, InstanceRole, InteractionMode, ResourcePath, ServerConnectionStatus, ServerKind,
+    WorkRootActivation, WorkRootAvailability, WorkRootKind, WorkRootStatus,
 };
 pub use view_model::{
-    ActionHint, DashboardResourcesView, InstanceView, ServerView, ViewState, WorkRootView,
-    WorkspaceView,
+    ActionHint, DashboardResourcesView, DashboardServersView, InstanceView,
+    ServerConnectionView, ServerView, ViewState, WorkRootView, WorkspaceView,
 };

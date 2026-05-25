@@ -37,12 +37,13 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
+use ws_dashboard_core::{ServerId, ServerKind};
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::document_translation::{
     DocumentTranslationService, TranslationProviderConfig,
 };
-use ws_dashboard_daemon::persistent_state::DashboardStateStore;
+use ws_dashboard_daemon::persistent_state::{DashboardStateStore, PersistedLinkedServer};
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
@@ -1873,6 +1874,145 @@ async fn dashboard_resources_api_includes_remembered_work_root_after_restart_see
             .and_then(|name| name.to_str())
             .expect("remembered root filename")
     );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn dashboard_servers_api_lists_local_and_persisted_linked_servers() {
+    let state_file_root = temp_fixture_path("servers-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::SshRemote,
+            ssh_target: Some("owner@example.test".to_owned()),
+            endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+        }])
+        .await
+        .expect("persist linked server seed");
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated servers request"),
+        )
+        .await
+        .expect("authenticated servers response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("servers body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("servers JSON body");
+    assert_eq!(value["servers"][0]["id"], "server-local");
+    assert_eq!(value["servers"][0]["status"], "connected");
+    assert_eq!(value["servers"][1]["id"], "server-windows");
+    assert_eq!(value["servers"][1]["kind"], "sshRemote");
+    assert_eq!(value["servers"][1]["status"], "authRequired");
+    assert_eq!(value["servers"][1]["actions"][0]["id"], "enterPassphrase");
+    assert!(
+        !body
+            .windows(b"owner@example.test".len())
+            .any(|window| window == b"owner@example.test"),
+        "server list must not expose SSH target"
+    );
+
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn server_scoped_resources_route_dispatches_local_and_refuses_linked_servers() {
+    let root = temp_fixture_path("server-scoped-resources");
+    let state_file_root = temp_fixture_path("server-scoped-resources-state");
+    fs::create_dir_all(&root).expect("create server scoped workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::SshRemote,
+            ssh_target: Some("owner@example.test".to_owned()),
+            endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+        }])
+        .await
+        .expect("persist linked server seed");
+    let state =
+        app_state_with_opened_and_store(OpenedWorkRoots::from_paths(vec![root.clone()]), store);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let local = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-local/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated local server resources request"),
+        )
+        .await
+        .expect("authenticated local server resources response");
+    assert_eq!(local.status(), StatusCode::OK);
+    let local_body = axum::body::to_bytes(local.into_body(), 64 * 1024)
+        .await
+        .expect("local server resources body bytes");
+    let local_value: serde_json::Value =
+        serde_json::from_slice(&local_body).expect("local server resources JSON");
+    assert_eq!(local_value["server"]["id"], "server-local");
+    assert_eq!(
+        local_value["workspaces"][0]["workRoots"][0]["label"],
+        root.file_name()
+            .and_then(|name| name.to_str())
+            .expect("server scoped root filename")
+    );
+
+    let linked = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated linked server resources request"),
+        )
+        .await
+        .expect("authenticated linked server resources response");
+    assert_eq!(linked.status(), StatusCode::CONFLICT);
+    let linked_body = axum::body::to_bytes(linked.into_body(), 64 * 1024)
+        .await
+        .expect("linked server resources body bytes");
+    let linked_value: serde_json::Value =
+        serde_json::from_slice(&linked_body).expect("linked server resources JSON");
+    assert_eq!(linked_value["error"], "linked server auth required");
+    assert!(
+        !linked_body
+            .windows(b"owner@example.test".len())
+            .any(|window| window == b"owner@example.test"),
+        "linked refusal must not expose SSH target"
+    );
+
+    let unknown = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-missing/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated unknown server resources request"),
+        )
+        .await
+        .expect("authenticated unknown server resources response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
 
     remove_static_fixture(&root);
     remove_static_fixture(&state_file_root);
