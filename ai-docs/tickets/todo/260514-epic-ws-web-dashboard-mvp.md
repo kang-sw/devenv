@@ -130,6 +130,9 @@ Active or planned product tracks:
   a local dashboard acting as a gateway that can integrate a remote Windows
   server seamlessly enough for dogfood use. Broader remote hardening and server
   federation remain future scope.
+  `260525-feat-ws-dashboard-multi-server-gateway` is todo for the linked-server
+  registry, gateway forwarding skeleton, passphrase link-auth handshake, SSH
+  start/reconnect path, and server-first left navigation.
 - Dashboard persistence map - research track.
   `260523-research-ws-dashboard-persistable-ui-state-map` remains the backlog
   map for selected resources,
