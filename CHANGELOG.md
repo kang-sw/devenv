@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.29.3 - 2026-05-25
+
+### Added
+- Add ws dashboard document viewing/editing, Git worktree/toolbar controls,
+  Activity Console improvements, and linked-server gateway flows.
+
+### Changed
+- Make `lead-implement` emit an Implementation Verdict before starting work.
+- Refine the dashboard server-scoped operation forwarding plan around
+  identity-first routing and separate HTTP, SSE, and WebSocket phases.
+
+### Fixed
+- Hide stale public `root` schema exposure from `subquery` and keep actor-scoped
+  subquery follow-up behavior aligned with named-agent tools.
+- Shorten root-omitted actor setup gate errors to compact recovery guidance.
+- Make local runtime marker handling explicit so plugin-cache dogfood uses the
+  intended local runtime.
+
 ## v0.29.2 - 2026-05-25
 
 ### Changed
