@@ -36,6 +36,10 @@ Tracked docs should keep that target generic; machine-local details belong in
   a separate daemon-level pairing or link-auth concern.
 - Remote daemons should prefer remote-loopback bind plus SSH forwarding for the
   MVP. Public remote bind, TLS, and broader hardening belong to later scope.
+- The `ws-dashboard` CLI should expose an AI-agent-readable remote deployment
+  guide, tentatively through a `--remote-guide` flag or equivalent help-surface
+  command, so downstream users and agents can inspect the expected SSH tunneling
+  bootstrap flow without reverse-engineering implementation details.
 
 ## Constraints
 
@@ -87,7 +91,26 @@ Verification should include daemon API tests for success and failure states plus
 browser coverage for entering a passphrase and observing the resulting server
 state transition.
 
-### Phase 3: SSH remote start and tunnel reconnect
+### Phase 3: CLI remote deployment guide
+
+Add a CLI help surface that dumps a concise remote deployment guide for AI
+agents and downstream users. The guide should describe the intended
+local-dashboard-as-gateway model, remote loopback bind, SSH tunneling shape,
+daemon-lifetime passphrase handling, credential non-persistence, reconnect
+expectations, and safe troubleshooting checks.
+
+The exact CLI shape can be `ws-dashboard --remote-guide` or another
+discoverable command-line affordance that appears in help text. The output
+should be stable enough for AI agents to follow, but it is documentation, not a
+machine protocol.
+
+Deferred scope: fully automated remote deployment, persisted credentials,
+service installation, and public remote exposure.
+
+Verification should include CLI help/output tests that assert the guide is
+discoverable and contains the key SSH tunneling and passphrase boundaries.
+
+### Phase 4: SSH remote start and tunnel reconnect
 
 Add SSH-backed remote start/reconnect support for owner-provided remote hosts.
 The local daemon may use SSH to deploy or locate the dashboard binary, start a
@@ -105,7 +128,7 @@ remote exposure, and full remote hardening.
 Verification should include at least one remote-dogfood path against an owner-
 provided SSH host, with local-daemon restart behavior observed.
 
-### Phase 4: Server-first left navigation
+### Phase 5: Server-first left navigation
 
 Refactor the left navigation so servers become the top hierarchy. Remove the
 current fixed local-server display and separate open-workRoot subsection in
