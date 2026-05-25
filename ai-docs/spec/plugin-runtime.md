@@ -111,11 +111,16 @@ present before delegating to it.
 When the binary is missing or incompatible, the launcher can install a runtime
 from an explicit bootstrap binary, a bootstrap URL, a local devenv runtime, or
 the release asset URL declared in the runtime contract. Explicit bootstrap
-inputs and the local devenv marker force repair before accepting an already
-compatible cache-local binary, so pre-release dogfood can exercise the intended
-runtime. Forced local devenv repair builds from local source before considering
-prebuilt local distribution assets. Downloaded release assets are verified
-against `SHA256SUMS` before becoming executable.
+inputs and an active local devenv contract force repair before accepting an
+already compatible cache-local binary, so pre-release dogfood can exercise the
+intended runtime. The local devenv marker is a JSON contract with
+`schema_version`, `source_root`, `tool_dir`, and `go` fields. Missing or invalid
+local contracts are inactive and fall back to ordinary cache/release repair.
+Valid local contracts force a build from the declared local source with the
+declared Go binary; if that active local repair cannot install a compatible
+runtime, startup fails instead of silently falling back to a published release
+asset. Downloaded release assets are verified against `SHA256SUMS` before
+becoming executable.
 
 Install and repair paths use process-unique temporary files and best-effort
 atomic replacement. If replacing the final cache-local binary fails because

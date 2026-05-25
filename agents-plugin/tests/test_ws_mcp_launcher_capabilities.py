@@ -20,6 +20,30 @@ def load_launcher():
 
 
 class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
+    def write_local_contract(self, plugin_dir: Path, *, package_root: Path | None = None) -> dict:
+        package_root = package_root or plugin_dir.parent.parent.parent.parent.parent.parent
+        source_root = package_root / "devenv"
+        tool_dir = source_root / "agents-plugin-tool"
+        go_binary = source_root / "bin" / "go"
+        (tool_dir / "cmd" / "ws-mcp").mkdir(parents=True)
+        go_binary.parent.mkdir(parents=True)
+        go_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        go_binary.chmod(0o755)
+        marker = plugin_dir / ".local-devenv-runtime"
+        marker.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "source_root": str(source_root),
+                    "tool_dir": str(tool_dir),
+                    "go": str(go_binary),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {"source_root": source_root, "tool_dir": tool_dir, "go": go_binary}
+
     def capability_contract(self):
         return {
             "plugin_version": "0.18.1",
@@ -253,7 +277,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             home = Path(temp_dir)
             plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
             plugin_dir.mkdir(parents=True)
-            (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
+            self.write_local_contract(plugin_dir, package_root=home)
 
             with mock.patch.object(launcher.Path, "home", return_value=home):
                 self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
@@ -262,6 +286,19 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
+
+    def test_invalid_local_devenv_contract_falls_back_to_release_path(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertFalse(launcher.runtime_install_forced(plugin_dir, "darwin"))
 
     def test_forced_local_runtime_does_not_fall_back_to_release_download(self):
         launcher = load_launcher()
@@ -296,17 +333,17 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             home = Path(temp_dir)
             plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
             plugin_dir.mkdir(parents=True)
-            (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
+            local_contract = self.write_local_contract(plugin_dir, package_root=home)
             runtime_dir = home / "runtime"
             binary = runtime_dir / "ws-mcp-0.18.1-test"
             asset = "ws-mcp-darwin-arm64"
-            dist = home / "devenv" / "agents-plugin-tool" / "dist"
+            dist = local_contract["tool_dir"] / "dist"
             dist.mkdir(parents=True)
             (dist / asset).write_text("stale dist", encoding="utf-8")
             build_calls = []
 
-            def fake_build(got_runtime_dir, got_binary, got_contract):
-                build_calls.append((got_runtime_dir, got_binary, got_contract))
+            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract):
+                build_calls.append((got_runtime_dir, got_binary, got_contract, got_local_contract))
                 return True
 
             def forbidden_copy(*args, **kwargs):
@@ -329,7 +366,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                     )
                 )
 
-            self.assertEqual(build_calls, [(runtime_dir, binary, {"plugin_version": "0.18.1"})])
+            self.assertEqual(build_calls, [(runtime_dir, binary, {"plugin_version": "0.18.1"}, local_contract)])
 
 
 if __name__ == "__main__":
