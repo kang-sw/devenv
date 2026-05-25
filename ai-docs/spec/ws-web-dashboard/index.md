@@ -133,6 +133,30 @@ and transport forwarding are implemented they return bounded refusal errors
 instead of leaking endpoint, SSH target, passphrase, host path, or cache path
 details. Unknown server ids return a bounded not-found response.
 
+## Remote Link Authentication Handshake {#260525-ws-dashboard-remote-link-auth-handshake}
+
+Remote dashboard daemons expose a link-auth handshake for local gateway
+daemons. The remote daemon owns a daemon-lifetime link passphrase that is
+separate from the one-time browser pairing URL. A caller that knows the
+passphrase can exchange it for a bearer token suitable for daemon-to-daemon
+gateway requests. Wrong passphrases fail without consuming browser pairing
+state or installing browser cookies.
+
+The local gateway accepts a passphrase for a remembered linked server through
+an owner-authenticated local route. It forwards the passphrase to the linked
+server endpoint, stores the returned bearer token only in memory, and updates
+the linked server view to `connected` for the local daemon lifetime. Linked
+server credentials are not persisted. If the local daemon restarts, the server
+can remain remembered but returns to an auth-required or tunnel-required state
+until the owner re-enters the passphrase.
+
+Once a linked server has a memory-only token, the local gateway may forward
+bounded read-only resource requests to the remote daemon using bearer auth while
+preserving the same server-scoped route shape. Link-auth failures distinguish
+unknown server, missing endpoint, wrong passphrase, upstream rejection, and
+unreachable endpoint without exposing SSH targets, endpoint hints, passphrases,
+bearer tokens, host paths, or cache paths.
+
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
 The dashboard exposes known workspace and workRoot membership from a

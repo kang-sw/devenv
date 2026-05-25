@@ -14,6 +14,7 @@ pub struct OwnerAuthState {
     // CONTRACT: Pairing token is startup-generated, one-time, and the only
     // unauthenticated browser path accepted by the daemon.
     pairing_token: PairingToken,
+    link_passphrase: LinkPassphrase,
     inner: Arc<Mutex<AuthInner>>,
 }
 
@@ -28,6 +29,9 @@ struct AuthInner {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PairingToken(String);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinkPassphrase(String);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OwnerSessionCookie(String);
@@ -70,6 +74,7 @@ impl OwnerAuthState {
         // path for ephemeral secrets; TTL enforcement remains Phase 2 logic.
         Self {
             pairing_token: PairingToken(random_secret()),
+            link_passphrase: LinkPassphrase(random_secret()),
             inner: Arc::new(Mutex::new(AuthInner {
                 pairing_consumed: false,
                 pairing_issued_at: Instant::now(),
@@ -82,6 +87,14 @@ impl OwnerAuthState {
 
     pub fn pairing_token(&self) -> &PairingToken {
         &self.pairing_token
+    }
+
+    pub fn link_passphrase(&self) -> &LinkPassphrase {
+        &self.link_passphrase
+    }
+
+    pub fn exchange_link_passphrase(&self, candidate: &str) -> Option<BearerAuthToken> {
+        (candidate == self.link_passphrase.0).then(|| self.issue_bearer_token())
     }
 
     pub fn consume_pairing_token(&self, candidate: &str) -> PairingOutcome {
@@ -189,6 +202,12 @@ impl PairingToken {
     }
 }
 
+impl LinkPassphrase {
+    pub fn expose_for_owner_record(&self) -> &str {
+        &self.0
+    }
+}
+
 impl OwnerSessionCookie {
     pub fn as_request_cookie_header(&self) -> String {
         format!("{OWNER_COOKIE_NAME}={}", self.0)
@@ -205,6 +224,14 @@ impl OwnerSessionCookie {
 impl BearerAuthToken {
     pub fn as_authorization_header(&self) -> String {
         format!("Bearer {}", self.0)
+    }
+
+    pub fn as_token_string(&self) -> String {
+        self.0.clone()
+    }
+
+    pub fn from_token_string(value: impl Into<String>) -> Self {
+        Self(value.into())
     }
 }
 

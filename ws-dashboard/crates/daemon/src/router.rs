@@ -30,7 +30,10 @@ use crate::root_picker::{
     create_empty_directory, list_root_picker, open_work_root, pin_root_picker_directory,
     remove_workspace, set_work_root_activation, unpin_root_picker_directory,
 };
-use crate::servers::{dashboard_server_resources, dashboard_servers};
+use crate::servers::{
+    dashboard_server_resources, dashboard_servers, link_dashboard_server, remote_link_auth,
+    LinkedServerSessions,
+};
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
     terminal_resize, terminal_websocket, TerminalRegistry,
@@ -55,6 +58,7 @@ pub struct AppState {
     pub work_root_activity: WorkRootActivityProjector,
     pub document_events: DocumentEventHub,
     pub document_write_locks: DocumentWriteLocks,
+    pub linked_server_sessions: LinkedServerSessions,
     pub registry_persist_lock: Arc<Mutex<()>>,
 }
 
@@ -69,6 +73,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_id}/resources",
             get(dashboard_server_resources),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/link-auth",
+            post(link_dashboard_server),
         )
         .route(
             "/api/dashboard/document-translation/providers",
@@ -197,6 +205,7 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/pair", get(pair))
+        .route("/api/dashboard/link-auth", post(remote_link_auth))
         .merge(protected)
         .with_state(state)
 }

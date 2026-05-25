@@ -45,6 +45,7 @@ use ws_dashboard_daemon::document_translation::{
 };
 use ws_dashboard_daemon::persistent_state::{DashboardStateStore, PersistedLinkedServer};
 use ws_dashboard_daemon::router::{build_router, AppState};
+use ws_dashboard_daemon::servers::LinkedServerSessions;
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
     resolve_work_root_agents_dir, WorkRootActivityProjectionConfig, WorkRootActivityProjector,
@@ -145,6 +146,7 @@ fn app_state_with_opened_and_store(
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
+        linked_server_sessions: LinkedServerSessions::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -163,6 +165,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
+        linked_server_sessions: LinkedServerSessions::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -385,6 +388,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
+        linked_server_sessions: LinkedServerSessions::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
@@ -2019,6 +2023,182 @@ async fn server_scoped_resources_route_dispatches_local_and_refuses_linked_serve
 }
 
 #[tokio::test]
+async fn remote_link_auth_exchanges_passphrase_for_bearer_without_browser_pairing() {
+    let state = app_state();
+    let passphrase = state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let app = build_router(state);
+
+    let rejected = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/link-auth")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": "wrong" }).to_string(),
+                ))
+                .expect("wrong link auth request"),
+        )
+        .await
+        .expect("wrong link auth response");
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+
+    let accepted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/link-auth")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("link auth request"),
+        )
+        .await
+        .expect("link auth response");
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(accepted.into_body(), 64 * 1024)
+        .await
+        .expect("link auth body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("link auth JSON");
+    let bearer = value["bearerToken"]
+        .as_str()
+        .expect("bearer token string")
+        .to_owned();
+
+    let health = app
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+                .body(Body::empty())
+                .expect("bearer health request"),
+        )
+        .await
+        .expect("bearer health response");
+    assert_eq!(health.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn local_link_auth_connects_and_forwards_remote_resources() {
+    let remote_root = temp_fixture_path("remote-linked-resources");
+    fs::create_dir_all(&remote_root).expect("create remote linked workRoot");
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::from_paths(vec![remote_root.clone()]),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("local-link-auth-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::SshRemote,
+            ssh_target: Some("owner@example.test".to_owned()),
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+        }])
+        .await
+        .expect("persist linked server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("local link auth request"),
+        )
+        .await
+        .expect("local link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+    let linked_body = axum::body::to_bytes(linked.into_body(), 64 * 1024)
+        .await
+        .expect("local link auth body bytes");
+    let linked_value: serde_json::Value =
+        serde_json::from_slice(&linked_body).expect("local link auth JSON");
+    assert_eq!(linked_value["id"], "server-windows");
+    assert_eq!(linked_value["status"], "connected");
+    assert!(
+        !linked_body
+            .windows(b"owner@example.test".len())
+            .any(|window| window == b"owner@example.test"),
+        "link auth response must not expose SSH target"
+    );
+
+    let servers = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("servers after link auth request"),
+        )
+        .await
+        .expect("servers after link auth response");
+    let servers_body = axum::body::to_bytes(servers.into_body(), 64 * 1024)
+        .await
+        .expect("servers after link auth body bytes");
+    let servers_value: serde_json::Value =
+        serde_json::from_slice(&servers_body).expect("servers after link auth JSON");
+    assert_eq!(servers_value["servers"][1]["status"], "connected");
+
+    let resources = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("linked resources request"),
+        )
+        .await
+        .expect("linked resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let resources_body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("linked resources body bytes");
+    let resources_value: serde_json::Value =
+        serde_json::from_slice(&resources_body).expect("linked resources JSON");
+    assert_eq!(resources_value["server"]["id"], "server-windows");
+    assert_eq!(resources_value["server"]["label"], "Windows dogfood");
+    assert_eq!(
+        resources_value["workspaces"][0]["workRoots"][0]["resourcePath"]["serverId"],
+        "server-windows"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn open_work_root_persists_opened_work_root_paths() {
     // CONTRACT: opening a workRoot updates daemon-owned local state after the
     // in-memory registration succeeds.
@@ -3035,6 +3215,7 @@ fn app_state_with_activity_cache_and_codex_home(
             codex_home,
             cache_home: Some(cache_home),
         }),
+        linked_server_sessions: LinkedServerSessions::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -6826,6 +7007,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
+        linked_server_sessions: LinkedServerSessions::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
