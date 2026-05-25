@@ -24,7 +24,8 @@ Target: user request
 
 1. Parse target: ticket path or inline description.
 2. If ticket-driven: read ticket; extract scope, stem, caller-provided slice, and phase results.
-3. Apply `judge: branch-mode`.
+3. Record `<current-branch>`.
+4. Apply `judge: branch-mode` to `<current-branch>`.
 
 ### 2. Emit Implementation Verdict
 
@@ -50,7 +51,7 @@ Create and maintain this task list:
 [ ] Merge - only when approved
 ```
 
-1. Record `<current-branch>`.
+1. Reuse `<current-branch>` recorded during Assess.
 2. Outside `implement/*`, set `<merge-target>` to `<current-branch>`.
 3. On `implement/*`, set `<merge-target>` from caller or confirm before execution.
 4. If continuing on `implement/*` and branch name no longer matches selected scope, rename with `git branch -m implement/<scope>`; stop if target branch exists or upstream tracking is ambiguous.

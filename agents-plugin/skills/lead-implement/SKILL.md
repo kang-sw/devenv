@@ -35,9 +35,10 @@ Review
 1. Parse target: ticket path or inline description.
 2. If ticket-driven: read ticket; extract scope, stem, artifacts, and caller-provided slice.
 3. Apply `judge: needs-delegation`.
-4. Apply `judge: branch-mode`.
-5. Apply `judge: plan-depth`.
-6. Apply `judge: review-allocation`.
+4. Record `<current-branch>`.
+5. Apply `judge: branch-mode` to `<current-branch>`.
+6. Apply `judge: plan-depth`.
+7. Apply `judge: review-allocation`.
 
 ### 2. Emit Implementation Verdict
 
@@ -49,7 +50,7 @@ Review
 
 ### 3. Prep
 
-1. Record `<current-branch>`.
+1. Reuse `<current-branch>` recorded during Route.
 2. Outside `implement/*`, set `<merge-target>` to `<current-branch>`.
 3. On `implement/*`, set `<merge-target>` from caller or confirm before execution.
 4. If continuing on `implement/*` and branch name no longer matches selected scope, rename with `git branch -m implement/<scope>`; stop if target branch exists or upstream tracking is ambiguous.
