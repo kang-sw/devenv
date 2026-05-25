@@ -2777,7 +2777,7 @@ test("linked server root picker uses server-scoped local gateway routes", async 
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(linkedServerBrowserResources("server-local")),
+      body: JSON.stringify(linkedServerBrowserResources("server-local", "remote-root-opened")),
     });
   });
   await page.route("**/api/dashboard/root-picker**", async (route) => {
@@ -2788,19 +2788,54 @@ test("linked server root picker uses server-scoped local gateway routes", async 
       body: JSON.stringify({ error: "local root picker should not be used" }),
     });
   });
-  await page.route("**/api/dashboard/work-roots/**/files**", async (route) => {
+  await page.route("**/api/dashboard/work-roots/remote-root-opened/files**", async (route) => {
+    const url = new URL(route.request().url());
     localFileRouteHits += 1;
+    if (url.pathname.endsWith("/files/read")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          workRootId: "remote-root-opened",
+          path: "remote-note.txt",
+          name: "remote-note.txt",
+          status: "ok",
+          readOnly: true,
+          editable: true,
+          contentHash: "sha256:local-same",
+          content: "local same-id document\n",
+          sizeBytes: "local same-id document\n".length,
+          languageHint: "text",
+          extension: "txt",
+        }),
+      });
+      return;
+    }
     await route.fulfill({
-      status: 500,
+      status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ error: "local file routes should not be used" }),
+      body: JSON.stringify({
+        workRootId: "remote-root-opened",
+        path: url.searchParams.get("path") ?? "",
+        status: "ok",
+        entries: [
+          {
+            name: "remote-note.txt",
+            path: "remote-note.txt",
+            kind: "file",
+            status: "ok",
+            readable: true,
+            previewEligible: true,
+          },
+        ],
+      }),
     });
   });
-  await page.route("**/api/dashboard/work-roots/**/documents/events", async (route) => {
+  await page.route("**/api/dashboard/work-roots/remote-root-opened/documents/events", async (route) => {
     localFileRouteHits += 1;
     await route.fulfill({
-      status: 500,
-      contentType: "application/json",
+      status: 200,
+      contentType: "text/event-stream",
       body: "",
     });
   });
@@ -2975,6 +3010,7 @@ test("linked server root picker uses server-scoped local gateway routes", async 
   await expect(page.locator('[data-resource-id="remote-root-opened"]')).toHaveClass(
     /resource-row-selected/,
   );
+  localFileRouteHits = 0;
 
   const remoteFileRow = page.locator(".file-explorer-row", {
     hasText: "remote-note.txt",
@@ -3005,6 +3041,43 @@ test("linked server root picker uses server-scoped local gateway routes", async 
       "POST /api/dashboard/servers/server-remote/work-roots/remote-root-opened/files/write",
     ]),
   );
+  const remotePreviewTab = page.locator(
+    '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+  );
+  await expect(remotePreviewTab).toHaveAttribute(
+    "data-workbench-pane-id",
+    /server-remote%2Fremote-root-opened/,
+  );
+
+  await page.locator(".server-row", { hasText: "Local ws dashboard" }).click();
+  const localSameIdRow = page.locator(".file-explorer-row", {
+    hasText: "remote-note.txt",
+  });
+  await expect(localSameIdRow).toBeVisible();
+  await localSameIdRow.click();
+  const localPane = page.locator(".document-pane", { hasText: "remote-note.txt" });
+  await expect(localPane.locator(".cm-content")).toContainText(
+    "local same-id document",
+  );
+  await expect(localPane.locator(".cm-content")).not.toContainText(
+    "remote linked document saved",
+  );
+  const localPreviewTab = page.locator(
+    '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+  );
+  await expect(localPreviewTab).toHaveAttribute(
+    "data-workbench-pane-id",
+    /server-local%2Fremote-root-opened/,
+  );
+
+  await remoteRow.click();
+  await expect(remotePane.locator(".cm-content")).toContainText(
+    "remote linked document saved",
+  );
+  await expect(remotePane.locator(".cm-content")).not.toContainText(
+    "local same-id document",
+  );
+  expect(localFileRouteHits).toBeGreaterThan(0);
   expect(localRootPickerHits).toBe(0);
   expect(remoteResourcesRefreshes).toBeGreaterThanOrEqual(1);
   expect(remoteGatewayRequests).toEqual(

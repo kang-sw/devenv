@@ -707,6 +707,12 @@ pub async fn server_scoped_write_work_root_file(
 ) -> Response {
     let operation = ServerScopedForwardOperation::write_work_root_file(&work_root_id);
     if server_id == LOCAL_SERVER_ID {
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
         return match serde_json::from_slice::<WorkRootFileWriteRequest>(&body) {
             Ok(request) => {
                 write_work_root_file(State(state), AxumPath(work_root_id), Json(request)).await
@@ -988,6 +994,25 @@ async fn request_remote_dashboard_operation(
         opened_work_root_id,
         body,
     })
+}
+
+fn has_json_content_type(headers: &HeaderMap) -> bool {
+    let Some(content_type) = headers.get(header::CONTENT_TYPE) else {
+        return false;
+    };
+    let Ok(content_type) = content_type.to_str() else {
+        return false;
+    };
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    essence == "application/json"
+        || essence
+            .strip_prefix("application/")
+            .is_some_and(|subtype| subtype.ends_with("+json"))
 }
 
 fn legacy_path_with_query(path: &str, uri: &OriginalUri) -> String {

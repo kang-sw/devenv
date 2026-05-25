@@ -33,6 +33,7 @@ use rusqlite::{params, Connection};
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
+use axum::response::IntoResponse;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
@@ -878,6 +879,51 @@ async fn dashboard_resources_refresh_prunes_workspace_without_available_work_roo
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
+
+    for (method, uri, body) in [
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-test/files",
+            Body::empty(),
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-test/files/read?path=src/main.rs",
+            Body::empty(),
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-test/files/write",
+            Body::from(
+                serde_json::json!({
+                    "path": "src/main.rs",
+                    "baseContentHash": "sha256:missing",
+                    "content": "changed"
+                })
+                .to_string(),
+            ),
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-test/documents/events",
+            Body::empty(),
+        ),
+    ] {
+        let unauthenticated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("unauthenticated server scoped file/document request"),
+            )
+            .await
+            .expect("unauthenticated server scoped file/document response");
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
@@ -2613,6 +2659,92 @@ async fn server_scoped_work_root_files_and_document_routes_dispatch_equivalent_l
     assert_eq!(scoped_write_status, StatusCode::OK);
     assert_eq!(scoped_write["sizeBytes"], 34);
 
+    let missing_content_type = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "src/main.rs",
+                        "baseContentHash": scoped_write["contentHash"],
+                        "content": "missing content type\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped write missing content-type request"),
+        )
+        .await
+        .expect("server scoped write missing content-type response");
+    let legacy_missing_content_type = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/write"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "src/main.rs",
+                        "baseContentHash": scoped_write["contentHash"],
+                        "content": "missing content type\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("legacy write missing content-type request"),
+        )
+        .await
+        .expect("legacy write missing content-type response");
+    assert_eq!(
+        missing_content_type.status(),
+        legacy_missing_content_type.status(),
+        "server-local scoped write should preserve legacy JSON content-type boundary"
+    );
+
+    let (stale_hash_status, _, stale_hash) = request_json_for_test(
+        app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"),
+        &cookie,
+        serde_json::json!({
+            "path": "src/main.rs",
+            "baseContentHash": read_json["contentHash"],
+            "content": "stale hash should conflict\n"
+        }),
+    )
+    .await;
+    assert_eq!(stale_hash_status, StatusCode::CONFLICT);
+    assert_eq!(stale_hash["error"], "content hash mismatch");
+
+    let missing_hash = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "src/main.rs",
+                        "content": "missing hash"
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped missing base hash write request"),
+        )
+        .await
+        .expect("server scoped missing base hash write response");
+    assert_eq!(missing_hash.status(), StatusCode::BAD_REQUEST);
+
     for (label, stream) in [
         ("legacy", &mut legacy_stream),
         ("scoped", &mut scoped_stream),
@@ -2738,17 +2870,29 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         );
     }
 
-    let not_forwarded = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/dashboard/servers/server-windows/terminals/terminal-1/socket")
-                .header(header::COOKIE, cookie.as_str())
-                .body(Body::empty())
-                .expect("non-allowlisted server scoped route request"),
-        )
-        .await
-        .expect("non-allowlisted server scoped route response");
-    assert_eq!(not_forwarded.status(), StatusCode::NOT_FOUND);
+    for uri in [
+        "/api/dashboard/servers/server-windows/terminals/terminal-1/socket",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/terminals",
+        "/api/dashboard/servers/server-windows/terminals/terminal-1/input",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
+        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
+        "/api/dashboard/servers/server-windows/document-translation/providers",
+    ] {
+        let not_forwarded = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("non-allowlisted server scoped route request"),
+            )
+            .await
+            .expect("non-allowlisted server scoped route response");
+        assert_eq!(not_forwarded.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
 
     remove_static_fixture(&state_file_root);
 }
@@ -3081,6 +3225,211 @@ async fn linked_server_work_root_files_and_document_forwarding_preserves_bearer_
 
     remote_server.abort();
     remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_invalid_sse() {
+    async fn link_auth() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({ "bearerToken": "test-token" })),
+        )
+            .into_response()
+    }
+    async fn file_list_error() -> axum::response::Response {
+        (
+            StatusCode::IM_A_TEAPOT,
+            [(header::CONTENT_TYPE, "application/problem+json")],
+            Body::from(r#"{"error":"list failed"}"#),
+        )
+            .into_response()
+    }
+    async fn file_read_error() -> axum::response::Response {
+        (
+            StatusCode::BAD_GATEWAY,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"read upstream failed"}"#),
+        )
+            .into_response()
+    }
+    async fn file_write_conflict() -> axum::response::Response {
+        (
+            StatusCode::CONFLICT,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"content hash mismatch"}"#),
+        )
+            .into_response()
+    }
+    async fn document_events_error() -> axum::response::Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"events unavailable"}"#),
+        )
+            .into_response()
+    }
+    async fn document_events_invalid_content_type() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"not":"sse"}"#),
+        )
+            .into_response()
+    }
+
+    let remote_app = axum::Router::new()
+        .route("/api/dashboard/link-auth", axum::routing::post(link_auth))
+        .route(
+            "/api/dashboard/work-roots/root-error/files",
+            axum::routing::get(file_list_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/files/read",
+            axum::routing::get(file_read_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/files/write",
+            axum::routing::post(file_write_conflict),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-events-error/documents/events",
+            axum::routing::get(document_events_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-events-invalid/documents/events",
+            axum::routing::get(document_events_invalid_content_type),
+        );
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-file-upstream-errors-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-errors"),
+            label: "Error fixture".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist upstream error fixture server");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-errors/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": "ok" }).to_string(),
+                ))
+                .expect("link custom error fixture server"),
+        )
+        .await
+        .expect("link custom error fixture response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    for (method, uri, expected_status, expected_content_type, expected_error) in [
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/files?path=missing",
+            StatusCode::IM_A_TEAPOT,
+            "application/problem+json",
+            "list failed",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/files/read?path=missing.txt",
+            StatusCode::BAD_GATEWAY,
+            "application/json",
+            "read upstream failed",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/files/write",
+            StatusCode::CONFLICT,
+            "application/json",
+            "content hash mismatch",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-events-error/documents/events",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            "events unavailable",
+        ),
+    ] {
+        let response = local_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "path": "missing.txt",
+                            "baseContentHash": "sha256:stale",
+                            "content": "new"
+                        })
+                        .to_string(),
+                    ))
+                    .expect("upstream error preservation request"),
+            )
+            .await
+            .expect("upstream error preservation response");
+        assert_eq!(response.status(), expected_status, "{uri}");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.starts_with(expected_content_type)),
+            Some(true),
+            "{uri} content-type"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("upstream error body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("upstream error JSON");
+        assert_eq!(value["error"], expected_error, "{uri}");
+    }
+
+    let invalid_sse = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-errors/work-roots/root-events-invalid/documents/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("invalid upstream SSE content-type request"),
+        )
+        .await
+        .expect("invalid upstream SSE content-type response");
+    assert_eq!(invalid_sse.status(), StatusCode::BAD_GATEWAY);
+    let invalid_body = axum::body::to_bytes(invalid_sse.into_body(), 4096)
+        .await
+        .expect("invalid SSE response body");
+    let invalid_value: serde_json::Value =
+        serde_json::from_slice(&invalid_body).expect("invalid SSE response JSON");
+    assert_eq!(
+        invalid_value["error"],
+        "linked server document events stream unavailable"
+    );
+
+    remote_server.abort();
     remove_static_fixture(&state_file_root);
 }
 
