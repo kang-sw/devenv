@@ -2444,6 +2444,199 @@ async fn local_link_auth_connects_and_forwards_remote_resources() {
 }
 
 #[tokio::test]
+async fn endpoint_link_registers_manual_server_and_forwards_resources() {
+    let remote_root = temp_fixture_path("endpoint-linked-resources");
+    fs::create_dir_all(&remote_root).expect("create endpoint linked workRoot");
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::from_paths(vec![remote_root.clone()]),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("endpoint-link-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let local_state =
+        app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/link")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "serverId": "server-manual",
+                        "label": "Manual endpoint",
+                        "endpoint": format!("http://{remote_addr}/"),
+                        "passphrase": passphrase
+                    })
+                    .to_string(),
+                ))
+                .expect("endpoint link request"),
+        )
+        .await
+        .expect("endpoint link response");
+    assert_eq!(linked.status(), StatusCode::OK);
+    let linked_body = axum::body::to_bytes(linked.into_body(), 64 * 1024)
+        .await
+        .expect("endpoint link body bytes");
+    let linked_value: serde_json::Value =
+        serde_json::from_slice(&linked_body).expect("endpoint link JSON");
+    assert_eq!(linked_value["id"], "server-manual");
+    assert_eq!(linked_value["kind"], "manual");
+    assert_eq!(linked_value["status"], "connected");
+
+    let restored = store.load_linked_servers().await;
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].id.as_str(), "server-manual");
+    assert_eq!(restored[0].kind, ServerKind::Manual);
+    assert_eq!(restored[0].ssh_target, None);
+    assert_eq!(restored[0].remote_endpoint_hint, None);
+    let expected_endpoint = format!("http://{remote_addr}");
+    assert_eq!(
+        restored[0].endpoint_hint.as_deref(),
+        Some(expected_endpoint.as_str())
+    );
+
+    let resources = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-manual/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("endpoint linked resources request"),
+        )
+        .await
+        .expect("endpoint linked resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let resources_body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("endpoint linked resources body bytes");
+    let resources_value: serde_json::Value =
+        serde_json::from_slice(&resources_body).expect("endpoint linked resources JSON");
+    assert_eq!(resources_value["server"]["id"], "server-manual");
+    assert_eq!(resources_value["server"]["label"], "Manual endpoint");
+
+    let restarted_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let restart_token = restarted_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let restarted_app = build_router(restarted_state);
+    let restart_cookie = pair_and_cookie(restarted_app.clone(), &restart_token).await;
+    let restarted_servers = restarted_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers")
+                .header(header::COOKIE, restart_cookie)
+                .body(Body::empty())
+                .expect("servers after endpoint link restart request"),
+        )
+        .await
+        .expect("servers after endpoint link restart response");
+    let restarted_body = axum::body::to_bytes(restarted_servers.into_body(), 64 * 1024)
+        .await
+        .expect("servers after endpoint link restart body bytes");
+    let restarted_value: serde_json::Value =
+        serde_json::from_slice(&restarted_body).expect("servers after restart JSON");
+    assert_eq!(restarted_value["servers"][1]["status"], "authRequired");
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn endpoint_link_keeps_compatible_server_visible_after_wrong_passphrase() {
+    let remote_state = app_state();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("endpoint-link-wrong-passphrase-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let local_state =
+        app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/link")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "serverId": "server-manual",
+                        "label": "Manual endpoint",
+                        "endpoint": format!("http://{remote_addr}"),
+                        "passphrase": "wrong"
+                    })
+                    .to_string(),
+                ))
+                .expect("endpoint wrong-passphrase link request"),
+        )
+        .await
+        .expect("endpoint wrong-passphrase link response");
+    assert_eq!(linked.status(), StatusCode::OK);
+    let linked_body = axum::body::to_bytes(linked.into_body(), 64 * 1024)
+        .await
+        .expect("endpoint wrong-passphrase body bytes");
+    let linked_value: serde_json::Value =
+        serde_json::from_slice(&linked_body).expect("endpoint wrong-passphrase JSON");
+    assert_eq!(linked_value["status"], "authRequired");
+
+    let servers = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("servers after wrong-passphrase endpoint link request"),
+        )
+        .await
+        .expect("servers after wrong-passphrase endpoint link response");
+    let servers_body = axum::body::to_bytes(servers.into_body(), 64 * 1024)
+        .await
+        .expect("servers after wrong-passphrase endpoint link body");
+    let servers_value: serde_json::Value =
+        serde_json::from_slice(&servers_body).expect("servers after wrong-passphrase JSON");
+    assert_eq!(servers_value["servers"][1]["kind"], "manual");
+    assert_eq!(servers_value["servers"][1]["status"], "authRequired");
+    assert_eq!(
+        servers_value["servers"][1]["actions"][0]["id"],
+        "enterPassphrase"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn open_work_root_persists_opened_work_root_paths() {
     // CONTRACT: opening a workRoot updates daemon-owned local state after the
     // in-memory registration succeeds.

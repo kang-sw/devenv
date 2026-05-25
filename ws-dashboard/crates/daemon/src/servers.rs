@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use axum::Json;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -240,6 +240,54 @@ pub async fn link_dashboard_server(
     }
 }
 
+pub async fn link_endpoint_server(
+    State(state): State<AppState>,
+    Json(request): Json<EndpointLinkedServerRequest>,
+) -> Response {
+    let Some(server) = linked_server_from_endpoint_request(&request) else {
+        return server_error(StatusCode::BAD_REQUEST, "invalid linked server request");
+    };
+    if server.id.as_str() == LOCAL_SERVER_ID {
+        return server_error(
+            StatusCode::BAD_REQUEST,
+            "local server cannot be linked as a remote endpoint",
+        );
+    }
+    let Some(endpoint) = server.endpoint_hint.as_deref() else {
+        return server_error(StatusCode::BAD_REQUEST, "invalid endpoint");
+    };
+
+    let passphrase = request.passphrase.as_deref().map(str::trim).unwrap_or("");
+    let auth_result = request_remote_link_token(endpoint, passphrase).await;
+    let status = match auth_result {
+        Ok(token) => {
+            state
+                .linked_server_sessions
+                .insert(server.id.clone(), token)
+                .await;
+            ServerConnectionStatus::Connected
+        }
+        Err(LinkAuthError::Rejected) => {
+            state.linked_server_sessions.remove(&server.id).await;
+            ServerConnectionStatus::AuthRequired
+        }
+        Err(LinkAuthError::UnexpectedStatus) => {
+            return server_error(
+                StatusCode::BAD_GATEWAY,
+                "linked server endpoint is incompatible",
+            );
+        }
+        Err(LinkAuthError::Unavailable) => {
+            return server_error(StatusCode::BAD_GATEWAY, "linked server unreachable");
+        }
+    };
+
+    if let Err(error) = persist_linked_server(&state, server.clone()).await {
+        return server_error(StatusCode::INTERNAL_SERVER_ERROR, error);
+    }
+    Json(linked_server_view_with_status(server, status)).into_response()
+}
+
 pub async fn start_ssh_dashboard_server(
     State(state): State<AppState>,
     Json(request): Json<SshServerTunnelRequest>,
@@ -457,6 +505,13 @@ fn linked_server_view(
     } else {
         server_status(&server, tunnel_active)
     };
+    linked_server_view_with_status(server, status)
+}
+
+fn linked_server_view_with_status(
+    server: PersistedLinkedServer,
+    status: ServerConnectionStatus,
+) -> ServerConnectionView {
     ServerConnectionView {
         id: server.id,
         label: server.label,
@@ -587,6 +642,16 @@ pub struct SshServerTunnelRequest {
     startup_command: Option<String>,
     #[serde(default)]
     local_port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointLinkedServerRequest {
+    server_id: String,
+    label: String,
+    endpoint: String,
+    #[serde(default)]
+    passphrase: Option<String>,
 }
 
 struct NormalizedSshServerTunnelRequest {
@@ -727,6 +792,45 @@ fn linked_server_from_tunnel_request(
         startup_command,
         local_port: request.local_port,
     })
+}
+
+fn linked_server_from_endpoint_request(
+    request: &EndpointLinkedServerRequest,
+) -> Option<PersistedLinkedServer> {
+    let server_id = request.server_id.trim();
+    let label = request.label.trim();
+    let endpoint = normalize_dashboard_endpoint(&request.endpoint)?;
+    if server_id.is_empty() || label.is_empty() {
+        return None;
+    }
+
+    Some(PersistedLinkedServer {
+        id: ServerId::from(server_id.to_owned()),
+        label: label.to_owned(),
+        kind: ServerKind::Manual,
+        ssh_target: None,
+        endpoint_hint: Some(endpoint),
+        remote_endpoint_hint: None,
+    })
+}
+
+fn normalize_dashboard_endpoint(endpoint: &str) -> Option<String> {
+    let trimmed = endpoint.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut url = Url::parse(trimmed).ok()?;
+    match url.scheme() {
+        "http" | "https" => {}
+        _ => return None,
+    }
+    url.host_str()?;
+    if url.query().is_some() || url.fragment().is_some() {
+        return None;
+    }
+    let normalized_path = url.path().trim_end_matches('/').to_owned();
+    url.set_path(&normalized_path);
+    Some(url.to_string().trim_end_matches('/').to_owned())
 }
 
 fn remote_loopback_port(endpoint: &str) -> Result<u16, TunnelConnectError> {
