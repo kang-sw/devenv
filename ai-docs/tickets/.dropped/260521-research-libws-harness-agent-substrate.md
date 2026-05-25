@@ -15,6 +15,20 @@ related-mental-model:
 
 # libws-harness agent substrate research
 
+## Superseded
+
+This custom-substrate research is dropped in favor of
+`260525-research-daemon-owned-harness-control-plane`.
+
+The useful ideas from this ticket remain preserved: durable event logs,
+filesystem-backed payloads, ToolHost-style authority separation, compaction
+direction, and host-neutral adapter boundaries. The active direction changes the
+first implementation order. Instead of starting with a custom JSONL run loop and
+local model substrate, ws should first prove a daemon-owned harness runtime with
+object-trait boundaries, Codex app-server as the first backend adapter, and
+daemon-owned capability and approval brokers. Future native/custom backends can
+reintroduce the deeper substrate behind that boundary.
+
 ## Background
 
 The proposed custom agent substrate would make a local harness the canonical

@@ -15,6 +15,20 @@ related-mental-model:
 
 # libws-harness MVP planning research
 
+## Superseded
+
+This planning research is dropped in favor of
+`260525-research-daemon-owned-harness-control-plane`.
+
+The old MVP plan assumed a JSONL-first custom harness core and CLI would be the
+first integration path. Subsequent Codex app-server investigation changed the
+recommended order: start with a daemon-owned harness runtime, use Codex
+app-server as the first backend adapter, and route execution authority through
+ws-owned capability and approval brokers. The durable event, store, and
+dashboard projection concerns from this ticket are preserved in the replacement
+research, but the proposed MVP epic and child-ticket order should no longer be
+used as the active backlog direction.
+
 ## Background
 
 `260521-research-libws-harness-agent-substrate` captured the target substrate:

@@ -1,6 +1,7 @@
 ---
 title: Codex app-server harness adapter research
 related:
+  260525-research-daemon-owned-harness-control-plane: umbrella direction for daemon-owned harness runtime, capability broker, and approval control plane
   260521-research-libws-harness-mvp-planning: may change the recommended first MVP backend and child-ticket ordering
   260521-research-libws-harness-agent-substrate: prior JSONL-first harness substrate direction and backend abstraction constraints
   260429-research-host-neutral-ws-plugin: host-neutral plugin and backend abstraction anchor
@@ -23,6 +24,10 @@ ToolHost implementations. That direction still protects the core harness
 contract, but the Codex CLI now exposes a richer `codex app-server` protocol
 that may be a better first integration layer than repeatedly forking
 `codex exec`.
+
+`260525-research-daemon-owned-harness-control-plane` is now the umbrella
+direction. This ticket remains the lower-level Codex app-server evidence and
+adapter investigation underneath that direction.
 
 This ticket captures the initial investigation into using `codex app-server` as
 the first Codex-backed harness adapter. It is research only. It should not make
