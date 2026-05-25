@@ -5,6 +5,8 @@ related:
   260525-feat-ws-dashboard-multi-server-gateway: introduced linked-server registry, link-auth, selected-server resource forwarding, and server-first navigation
   260525-feat-ws-dashboard-endpoint-linked-server-add: exposed endpoint-first linked server add flow and revealed non-resource API locality during Windows dogfood
   260514-research-ws-web-dashboard-direction: longer-range remote hardening and server federation direction
+spec:
+  - 260525-ws-dashboard-server-scoped-operation-forwarding
 related-mental-model:
   - ws-web-dashboard
 ---

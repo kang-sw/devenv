@@ -209,6 +209,41 @@ The left navigation's add-server affordance opens a compact endpoint-first
 modal. SSH-managed start or reconnect remains an advanced or agent-operated
 path and is not required by the default add-server flow.
 
+## 🚧 Server-Scoped Operation Forwarding {#260525-ws-dashboard-server-scoped-operation-forwarding}
+
+Dashboard operations whose target belongs to a server, workspace, workRoot,
+file, Activity item, terminal, or host filesystem path will carry `serverId` as
+an explicit route and UI identity dimension. The browser continues to call only
+the local gateway daemon. The local gateway handles `server-local` operations
+in-process and forwards linked-server operations to the remembered daemon using
+the daemon-lifetime memory-only bearer token.
+
+Canonical operation routes are nested under the selected server:
+
+```text
+/api/dashboard/servers/{serverId}/root-picker
+/api/dashboard/servers/{serverId}/root-picker/directories
+/api/dashboard/servers/{serverId}/root-picker/pins
+/api/dashboard/servers/{serverId}/work-roots/open
+/api/dashboard/servers/{serverId}/workspaces/{workspaceId}/...
+/api/dashboard/servers/{serverId}/work-roots/{workRootId}/...
+/api/dashboard/servers/{serverId}/terminals/{terminalId}/...
+```
+
+Existing non-server-scoped dashboard operation routes remain local
+compatibility aliases for `server-local`. New browser calls prefer canonical
+server-scoped routes. Frontend pane keys, file source keys, stream keys,
+terminal state, command payloads, and persisted UI records include `serverId`
+when the same opaque id can exist on more than one linked server.
+
+One-shot HTTP operations may use an allowlisted forwarding helper. SSE streams
+and terminal WebSockets require stream or upgrade proxy behavior rather than a
+simple JSON proxy. Gateway responses preserve owner-auth gating locally,
+forward bearer auth upstream for linked servers, bound refusal errors for
+unknown, auth-required, tunnel-required, or unreachable linked servers, and
+rewrite returned resource views and nested `ResourcePath.serverId` values to
+the selected linked-server id.
+
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
 The dashboard exposes known workspace and workRoot membership from a
