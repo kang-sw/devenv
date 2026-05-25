@@ -662,15 +662,15 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		}
 		agent.SystemPromptPath = "system.md"
 	}
-	if err := m.writeAgentMetadata(layout, agent, opts.ActorID); err != nil {
-		return Agent{}, Layout{}, err
-	}
 	if err := appendEvent(layout.EventsFile, m.now(), "registered", map[string]any{
 		"backend": agent.Backend,
 		"tier":    agent.Tier,
 		"model":   agent.Model,
 		"effort":  agent.Effort,
 	}); err != nil {
+		return Agent{}, Layout{}, err
+	}
+	if err := m.writeAgentMetadata(layout, agent, opts.ActorID); err != nil {
 		return Agent{}, Layout{}, err
 	}
 	return agent, layout, nil

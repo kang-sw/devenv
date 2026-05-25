@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -2022,6 +2023,16 @@ func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing
 	if _, err := os.Stat(oldLayout.OutputFile); err != nil {
 		t.Fatalf("old output should remain for history: %v", err)
 	}
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", Prompts: []string{filepath.Join(t.TempDir(), "missing.md")}}); err == nil {
+		t.Fatal("expected failed registration with missing prompt")
+	}
+	stillCurrent, err := manager.scopedLayout(repo, "impl", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillCurrent.AgentDir != layout.AgentDir {
+		t.Fatalf("failed registration advanced current pointer to %s, want %s", stillCurrent.AgentDir, layout.AgentDir)
+	}
 	if _, err := os.Stat(layout.OutputFile); !os.IsNotExist(err) {
 		t.Fatalf("new instance unexpectedly has output or stat failed differently: %v", err)
 	}
@@ -2465,9 +2476,30 @@ func TestAgentMetadataImportsLegacyAgentJSONReadOnly(t *testing.T) {
 	if _, err := os.Stat(layout.AgentFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("legacy agent.json should be retired after import, stat err=%v", err)
 	}
+	store, err := manager.registryStore(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := manager.registryKey("", "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, ok, err := store.AgentDefinition(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || def.StatePath != AgentKey("legacy") || def.InstanceID == "" {
+		t.Fatalf("legacy import did not create first global instance: ok=%t def=%+v", ok, def)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 	restarted := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow.Add(time.Second) }})
 	if _, err := restarted.Agent(repo, "legacy"); err != nil {
 		t.Fatalf("imported metadata did not survive manager restart: %v", err)
+	}
+	if _, err := os.Stat(layout.AgentFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("restarted metadata read recreated legacy agent.json, stat err=%v", err)
 	}
 }
 

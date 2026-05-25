@@ -909,12 +909,26 @@ func (s *Store) PruneAgentInstances(ctx context.Context, opts PruneOptions) (Age
 	if limit <= 0 {
 		limit = 50
 	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
+	nowTime := s.now().UTC()
+	now := nowTime.Format(time.RFC3339Nano)
+	runID, err := s.beginPruneRun(ctx, nowTime)
+	if err != nil {
+		return AgentInstanceCleanupResult{}, err
+	}
+	finish := func(result AgentInstanceCleanupResult, runErr error) error {
+		pruneResult := PruneResult{
+			Scanned:    result.Scanned,
+			Deleted:    result.Deleted,
+			Tombstoned: result.Failed,
+		}
+		return s.finishPruneRun(ctx, runID, pruneResult, runErr)
+	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT i.instance_id, i.state_path FROM agent_instances i
 LEFT JOIN agent_defs d ON d.agent_key = i.agent_key AND d.state_path = i.state_path
 WHERE d.agent_key IS NULL
   AND i.pinned = 0
+  AND i.status NOT IN ('running')
   AND i.cleanup_state NOT IN ('current', 'active', 'running', 'queued', 'recovery', 'cleanup_deleted')
   AND i.retention_eligible_at != ''
   AND i.retention_eligible_at <= ?
@@ -922,6 +936,7 @@ WHERE d.agent_key IS NULL
 ORDER BY i.retention_eligible_at ASC
 LIMIT ?`, now, now, limit)
 	if err != nil {
+		_ = finish(AgentInstanceCleanupResult{}, err)
 		return AgentInstanceCleanupResult{}, err
 	}
 	defer rows.Close()
@@ -930,11 +945,13 @@ LIMIT ?`, now, now, limit)
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.path); err != nil {
+			_ = finish(AgentInstanceCleanupResult{}, err)
 			return AgentInstanceCleanupResult{}, err
 		}
 		candidates = append(candidates, c)
 	}
 	if err := rows.Err(); err != nil {
+		_ = finish(AgentInstanceCleanupResult{}, err)
 		return AgentInstanceCleanupResult{}, err
 	}
 	result := AgentInstanceCleanupResult{}
@@ -947,17 +964,23 @@ LIMIT ?`, now, now, limit)
 		if err := os.RemoveAll(absPath); err != nil {
 			result.Failed++
 			next := s.now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+			if tombErr := s.recordTombstone(ctx, "agent_instance:"+c.id, absPath, "agent_instance_prune", err); tombErr != nil {
+				_ = finish(result, tombErr)
+				return result, tombErr
+			}
 			if _, err := s.execWrite(ctx, `UPDATE agent_instances SET cleanup_state = 'cleanup_failed', cleanup_attempted_at = ?, retention_checked_at = ?, retention_next_check_at = ?, cleanup_error = ?, updated_at = ? WHERE instance_id = ?`, now, now, next, err.Error(), now, c.id); err != nil {
+				_ = finish(result, err)
 				return result, err
 			}
 			continue
 		}
 		if _, err := s.execWrite(ctx, `UPDATE agent_instances SET cleanup_state = 'cleanup_deleted', cleanup_attempted_at = ?, retention_checked_at = ?, cleanup_error = '', updated_at = ? WHERE instance_id = ?`, now, now, now, c.id); err != nil {
+			_ = finish(result, err)
 			return result, err
 		}
 		result.Deleted++
 	}
-	return result, nil
+	return result, finish(result, nil)
 }
 
 func (s *Store) Count(ctx context.Context, table string) (int, error) {

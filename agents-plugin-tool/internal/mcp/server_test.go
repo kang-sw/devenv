@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
@@ -2119,6 +2120,54 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	call(3, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"same","backend":"bogus","model":"actor-model"}}}`)
 	manager := wsagent.NewManager(wsagent.Options{})
 	actorID := server.currentActorID()
+	state, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorSameKey, err := wsstore.AgentInternalKey(actorID, "same")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldActorSame, ok, err := store.AgentDefinition(context.Background(), actorSameKey)
+	if err != nil || !ok {
+		t.Fatalf("actor same definition ok=%t err=%v", ok, err)
+	}
+	oldActorSameDir := filepath.Join(state.AgentsDir, oldActorSame.StatePath)
+	if err := os.WriteFile(filepath.Join(oldActorSameDir, "history-marker"), []byte("old actor history"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call(13, `{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"same","backend":"bogus","model":"actor-model-new"}}}`)
+	newActorSame, ok, err := store.AgentDefinition(context.Background(), actorSameKey)
+	if err != nil || !ok {
+		t.Fatalf("new actor same definition ok=%t err=%v", ok, err)
+	}
+	if newActorSame.StatePath == oldActorSame.StatePath {
+		t.Fatalf("actor re-register reused state path %q", newActorSame.StatePath)
+	}
+	if _, err := os.Stat(filepath.Join(oldActorSameDir, "history-marker")); err != nil {
+		t.Fatalf("old actor same history should remain: %v", err)
+	}
+	globalSameKey, err := wsstore.AgentInternalKey("", "same")
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalSame, ok, err := store.AgentDefinition(context.Background(), globalSameKey)
+	if err != nil || !ok {
+		t.Fatalf("global same definition ok=%t err=%v", ok, err)
+	}
+	if err := os.WriteFile(filepath.Join(state.AgentsDir, globalSame.StatePath, "output.md"), []byte("global same output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state.AgentsDir, newActorSame.StatePath, "output.md"), []byte("actor same output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 	globalReady, globalReadyLayout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "ready", Backend: "bogus", Model: "global-ready-model"})
 	if err != nil {
 		t.Fatal(err)
@@ -2151,6 +2200,8 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	}
 	actorStatus := call(4, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"same"}}}`)
 	globalStatus := call(5, fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
+	actorPrint := call(14, `{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"agents.print","arguments":{"name":"same"}}}`)
+	globalPrint := call(15, fmt.Sprintf(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"agents.print","arguments":{"root":%q,"name":"same"}}}`, root))
 	callText := call(6, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"same","prompt":"do work"}}}`)
 	waitText := call(7, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"ready","timeout_seconds":5}}}`)
 	resultText := call(8, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"ready"}}}`)
@@ -2159,11 +2210,17 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	call(11, `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"agents.erase","arguments":{"name":"same"}}}`)
 	globalAfterErase := call(12, fmt.Sprintf(`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
 
-	if !strings.Contains(actorStatus, "model: actor-model") || strings.Contains(actorStatus, "global-model") {
+	if !strings.Contains(actorStatus, "model: actor-model-new") || strings.Contains(actorStatus, "global-model") {
 		t.Fatalf("root-omitted status did not use actor scope:\n%s", actorStatus)
 	}
 	if !strings.Contains(globalStatus, "model: global-model") || strings.Contains(globalStatus, "actor-model") {
 		t.Fatalf("explicit-root status did not use global compatibility scope:\n%s", globalStatus)
+	}
+	if !strings.Contains(actorPrint, "actor same output") || strings.Contains(actorPrint, "global same output") {
+		t.Fatalf("root-omitted print did not use actor scope:\n%s", actorPrint)
+	}
+	if !strings.Contains(globalPrint, "global same output") || strings.Contains(globalPrint, "actor same output") {
+		t.Fatalf("explicit-root print did not use global compatibility scope:\n%s", globalPrint)
 	}
 	if !strings.Contains(callText, "same\trunning") {
 		t.Fatalf("actor-scoped call did not start:\n%s", callText)
@@ -2180,7 +2237,7 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	if !strings.Contains(tailText, "call.started_async") {
 		t.Fatalf("actor-scoped tail did not read scoped diagnostics:\n%s", tailText)
 	}
-	if !strings.Contains(cancelText, "model: actor-model") {
+	if !strings.Contains(cancelText, "model: actor-model-new") {
 		t.Fatalf("actor-scoped cancel/status mismatch:\n%s", cancelText)
 	}
 	if !strings.Contains(globalAfterErase, "model: global-model") {

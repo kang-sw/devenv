@@ -684,8 +684,11 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	}
 	dueDir := filepath.Join(store.Layout().AgentsDir, "due")
 	currentDir := filepath.Join(store.Layout().AgentsDir, "current")
+	activeDir := filepath.Join(store.Layout().AgentsDir, "active")
+	recoveryDir := filepath.Join(store.Layout().AgentsDir, "recovery")
+	backoffDir := filepath.Join(store.Layout().AgentsDir, "backoff")
 	unrelatedDir := filepath.Join(store.Layout().AgentsDir, "unrelated")
-	for _, dir := range []string{dueDir, currentDir, unrelatedDir} {
+	for _, dir := range []string{dueDir, currentDir, activeDir, recoveryDir, backoffDir, unrelatedDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -708,7 +711,57 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	if err := store.UpsertAgentDefinition(ctx, pinned); err != nil {
 		t.Fatal(err)
 	}
+	activeKey, err := AgentInternalKey("", "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := due
+	active.AgentKey = activeKey
+	active.PublicName = "active"
+	active.StatePath = "active"
+	active.Status = "running"
+	if err := store.UpsertAgentDefinition(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	recoveryKey, err := AgentInternalKey("", "recovery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := due
+	recovery.AgentKey = recoveryKey
+	recovery.PublicName = "recovery"
+	recovery.StatePath = "recovery"
+	recovery.CleanupState = "recovery"
+	if err := store.UpsertAgentDefinition(ctx, recovery); err != nil {
+		t.Fatal(err)
+	}
+	backoffKey, err := AgentInternalKey("", "backoff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backoff := due
+	backoff.AgentKey = backoffKey
+	backoff.PublicName = "backoff"
+	backoff.StatePath = "backoff"
+	backoff.RetentionNextCheckAt = testNow.Add(time.Hour).Format(time.RFC3339Nano)
+	if err := store.UpsertAgentDefinition(ctx, backoff); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.DeleteAgentDefinition(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	for _, retireKey := range []string{activeKey, recoveryKey, backoffKey} {
+		if err := store.DeleteAgentDefinition(ctx, retireKey); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET status = 'running' WHERE agent_key = ?`, activeKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET cleanup_state = 'recovery' WHERE agent_key = ?`, recoveryKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET retention_next_check_at = ? WHERE agent_key = ?`, testNow.Add(time.Hour).Format(time.RFC3339Nano), backoffKey); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertAgentDefinition(ctx, current); err != nil {
@@ -724,7 +777,7 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	if _, err := os.Stat(dueDir); !os.IsNotExist(err) {
 		t.Fatalf("due dir still present/stat err=%v", err)
 	}
-	for _, dir := range []string{currentDir, unrelatedDir} {
+	for _, dir := range []string{currentDir, activeDir, recoveryDir, backoffDir, unrelatedDir} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Fatalf("dir %s should remain: %v", dir, err)
 		}
