@@ -86,22 +86,19 @@ Completed follow-up clusters:
 
 Active or planned product tracks:
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; next
-  implementation track. Add a reusable markdown document viewer, translation-
-  ready block model, panel-local view/edit mode, raw-text editing boundary, and
-  same-document save fan-out contract. This track is expected to proceed as
-  three conservative slices: markdown viewer/block interaction, daemon-backed
-  translation provider MVP, then raw text edit/save fan-out. This track should
-  be polished before the next large management or agent-panel slice.
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - done; editor
+  implementation track. Completed reusable Markdown/document viewing,
+  daemon-backed translation overlay, raw-text edit/save fan-out, and document
+  events.
 - WorkRoot management - planned child track. Continue from the completed
   registry/root-picker/workspace policies into practical owner operations for
   managing active, unavailable, linked, remembered, pinned, and recoverable
   workRoots without turning the picker into a generic file manager.
-  `260524-feat-ws-dashboard-add-git-worktree-ui` is the first planned slice:
+  `260524-feat-ws-dashboard-add-git-worktree-ui` is done:
   move workspace removal behind an overflow menu and add Git worktree creation
   with daemon-resolved branch/path preview.
-  `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is the companion
-  toolbar slice for selected-workRoot branch/status chips plus fetch, push, and
+  `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is done:
+  add selected-workRoot branch/status chips plus fetch, push, and
   fast-forward-only pull controls.
 - Agent view panel - planned child track. Promote read-only Activity Console
   foundations into a dedicated agent-oriented panel for named-agent/main-

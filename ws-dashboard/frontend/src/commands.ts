@@ -1,6 +1,19 @@
 export type DashboardCommandId =
   | "dashboard.refresh"
+  | "workspace.menu.open"
   | "workspace.remove"
+  | "gitWorktreeAdd.open"
+  | "gitWorktreeAdd.close"
+  | "gitWorktreeAdd.submit"
+  | "git.refresh"
+  | "git.fetch"
+  | "git.push"
+  | "git.pullFfOnly"
+  | "git.branchMenu.open"
+  | "git.branch.switch"
+  | "git.branchCreate.open"
+  | "git.branchCreate.submit"
+  | "git.branchCreate.close"
   | "workRoot.open"
   | "workRoot.activation.set"
   | "rootPicker.open"
@@ -21,6 +34,10 @@ export type DashboardCommandId =
   | "activity.transcript.loadMore"
   | "activity.refresh"
   | "activity.detail.toggle"
+  | "document.translation.toggle"
+  | "document.mode.set"
+  | "document.save"
+  | "document.revert"
   | `resource.action.${string}`
   | `workbench.toggle.${string}`
   | `workbench.tab.${string}`;
@@ -29,7 +46,20 @@ export type DashboardCommandPayload =
   | { type: "refresh" }
   | { type: "select"; entityId: string }
   | { type: "action"; label: string; entityId: string }
+  | { type: "workspace.menu.open"; workspaceId: string }
   | { type: "workspace.remove"; workspaceId: string }
+  | { type: "gitWorktreeAdd.open"; workspaceId: string }
+  | { type: "gitWorktreeAdd.close"; workspaceId: string }
+  | { type: "gitWorktreeAdd.submit"; workspaceId: string }
+  | { type: "git.refresh"; workRootId: string }
+  | { type: "git.fetch"; workRootId: string }
+  | { type: "git.push"; workRootId: string }
+  | { type: "git.pullFfOnly"; workRootId: string }
+  | { type: "git.branchMenu.open"; workRootId: string }
+  | { type: "git.branch.switch"; workRootId: string; branchName: string }
+  | { type: "git.branchCreate.open"; workRootId: string }
+  | { type: "git.branchCreate.submit"; workRootId: string; branchName: string; baseBranch?: string }
+  | { type: "git.branchCreate.close"; workRootId: string }
   | { type: "workRoot.open" }
   | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
   | { type: "rootPicker.open" }
@@ -53,7 +83,11 @@ export type DashboardCommandPayload =
   | { type: "activity.selectItem"; activityId: string }
   | { type: "activity.transcript.loadMore"; activityId: string }
   | { type: "activity.refresh"; workRootId: string }
-  | { type: "activity.detail.toggle"; activityId: string; detailKey: string };
+  | { type: "activity.detail.toggle"; activityId: string; detailKey: string }
+  | { type: "document.translation.toggle"; workRootId: string; path: string }
+  | { type: "document.mode.set"; workRootId: string; path: string; mode: "view" | "edit" }
+  | { type: "document.save"; workRootId: string; path: string }
+  | { type: "document.revert"; workRootId: string; path: string };
 
 export type DashboardCommand = {
   commandId: DashboardCommandId;
@@ -130,6 +164,62 @@ export function buildRootPickerUnpinDirectoryCommand(_path: string): DashboardCo
     commandId: "rootPicker.unpinDirectory",
     payload: { type: "rootPicker.unpinDirectory" },
   };
+}
+
+export function buildWorkspaceMenuOpenCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "workspace.menu.open",
+    payload: { type: "workspace.menu.open", workspaceId },
+  };
+}
+
+export function buildGitWorktreeAddOpenCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "gitWorktreeAdd.open",
+    payload: { type: "gitWorktreeAdd.open", workspaceId },
+  };
+}
+
+export function buildGitWorktreeAddCloseCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "gitWorktreeAdd.close",
+    payload: { type: "gitWorktreeAdd.close", workspaceId },
+  };
+}
+
+export function buildGitWorktreeAddSubmitCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "gitWorktreeAdd.submit",
+    payload: { type: "gitWorktreeAdd.submit", workspaceId },
+  };
+}
+
+export function buildGitRefreshCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.refresh", payload: { type: "git.refresh", workRootId } };
+}
+export function buildGitFetchCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.fetch", payload: { type: "git.fetch", workRootId } };
+}
+export function buildGitPushCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.push", payload: { type: "git.push", workRootId } };
+}
+export function buildGitPullFfOnlyCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.pullFfOnly", payload: { type: "git.pullFfOnly", workRootId } };
+}
+export function buildGitBranchMenuOpenCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.branchMenu.open", payload: { type: "git.branchMenu.open", workRootId } };
+}
+export function buildGitBranchSwitchCommand(workRootId: string, branchName: string): DashboardCommand {
+  return { commandId: "git.branch.switch", payload: { type: "git.branch.switch", workRootId, branchName } };
+}
+export function buildGitBranchCreateOpenCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.branchCreate.open", payload: { type: "git.branchCreate.open", workRootId } };
+}
+export function buildGitBranchCreateSubmitCommand(workRootId: string, branchName: string, baseBranch?: string): DashboardCommand {
+  return { commandId: "git.branchCreate.submit", payload: { type: "git.branchCreate.submit", workRootId, branchName, baseBranch } };
+}
+export function buildGitBranchCreateCloseCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.branchCreate.close", payload: { type: "git.branchCreate.close", workRootId } };
 }
 
 export function buildWorkspaceRemoveCommand(workspaceId: string): DashboardCommand {
@@ -236,6 +326,41 @@ export function buildActivityDetailToggleCommand(
   };
 }
 
+export function buildDocumentTranslationToggleCommand(
+  workRootId: string,
+  path: string,
+): DashboardCommand {
+  return {
+    commandId: "document.translation.toggle",
+    payload: { type: "document.translation.toggle", workRootId, path },
+  };
+}
+
+export function buildDocumentModeSetCommand(
+  workRootId: string,
+  path: string,
+  mode: "view" | "edit",
+): DashboardCommand {
+  return {
+    commandId: "document.mode.set",
+    payload: { type: "document.mode.set", workRootId, path, mode },
+  };
+}
+
+export function buildDocumentSaveCommand(workRootId: string, path: string): DashboardCommand {
+  return {
+    commandId: "document.save",
+    payload: { type: "document.save", workRootId, path },
+  };
+}
+
+export function buildDocumentRevertCommand(workRootId: string, path: string): DashboardCommand {
+  return {
+    commandId: "document.revert",
+    payload: { type: "document.revert", workRootId, path },
+  };
+}
+
 export function dispatchDashboardCommand(
   command: DashboardCommand,
   options: {
@@ -256,8 +381,34 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Refresh";
     case "select":
       return "Select";
+    case "workspace.menu.open":
+      return "Open workspace menu";
     case "workspace.remove":
       return "Remove workspace";
+    case "gitWorktreeAdd.open":
+      return "Add worktree";
+    case "gitWorktreeAdd.close":
+      return "Close add worktree";
+    case "gitWorktreeAdd.submit":
+      return "Create worktree";
+    case "git.refresh":
+      return "Refresh Git status";
+    case "git.fetch":
+      return "Fetch Git";
+    case "git.push":
+      return "Push Git";
+    case "git.pullFfOnly":
+      return "Pull Git ff-only";
+    case "git.branchMenu.open":
+      return "Open branch menu";
+    case "git.branch.switch":
+      return "Switch branch";
+    case "git.branchCreate.open":
+      return "Open new branch";
+    case "git.branchCreate.submit":
+      return "Create branch";
+    case "git.branchCreate.close":
+      return "Close new branch";
     case "workRoot.open":
       return "Open workRoot";
     case "workRoot.activation.set":
@@ -292,6 +443,14 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Load transcript";
     case "activity.detail.toggle":
       return "Toggle detail";
+    case "document.translation.toggle":
+      return "Toggle translation";
+    case "document.mode.set":
+      return payload.mode === "edit" ? "Edit document" : "View document";
+    case "document.save":
+      return "Save document";
+    case "document.revert":
+      return "Revert document";
     case "action":
       return payload.label;
   }

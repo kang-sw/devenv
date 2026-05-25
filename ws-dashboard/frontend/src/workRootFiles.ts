@@ -24,6 +24,8 @@ export type WorkRootTextFileView = {
   name: string;
   status: "ok" | string;
   readOnly: true;
+  editable: boolean;
+  contentHash: string;
   content: string;
   sizeBytes: number;
   languageHint: string | null;
@@ -44,6 +46,8 @@ export type ReadOnlyFilePane = {
   content: string;
   error: string | null;
   readOnly: true;
+  editable: boolean;
+  contentHash: string | null;
   sizeBytes: number | null;
   languageHint: string | null;
   extension: string | null;
@@ -55,6 +59,70 @@ export type ReadOnlyFilePaneRestoreSnapshot = {
   panes: Record<string, ReadOnlyFilePane>;
   orderByGroup: Record<string, string[]>;
 };
+
+export type DocumentSaveState =
+  | "idle"
+  | "dirty"
+  | "saving"
+  | "saved"
+  | "stale"
+  | "conflict"
+  | "error";
+
+export type DocumentDraftContentChangeDecision =
+  | { action: "preserveDraft"; saveState: "stale"; message: string }
+  | { action: "syncDraft" };
+
+export function documentDraftContentChangeDecision(
+  saveState: DocumentSaveState,
+): DocumentDraftContentChangeDecision {
+  if (saveState === "dirty" || saveState === "stale") {
+    return {
+      action: "preserveDraft",
+      saveState: "stale",
+      message: "File changed while this draft has unsaved edits",
+    };
+  }
+  return { action: "syncDraft" };
+}
+
+export function documentSaveStateForError(message: string): "conflict" | "error" {
+  return message.toLowerCase().includes("content hash") ? "conflict" : "error";
+}
+
+export function readOnlyFilePaneSourceKey(workRootId: string, path: string) {
+  return `${workRootId}\0${path}`;
+}
+
+export function applyReadOnlyFilePaneSourceContent(
+  panes: Record<string, ReadOnlyFilePane>,
+  file: WorkRootTextFileView,
+): Record<string, ReadOnlyFilePane> {
+  return Object.fromEntries(
+    Object.entries(panes).map(([key, pane]) => [
+      key,
+      pane.workRootId === file.workRootId && pane.path === file.path
+        ? applyReadOnlyFilePaneContent(pane, file)
+        : pane,
+    ]),
+  );
+}
+
+export function applyReadOnlyFilePaneSourceError(
+  panes: Record<string, ReadOnlyFilePane>,
+  workRootId: string,
+  path: string,
+  message: string,
+): Record<string, ReadOnlyFilePane> {
+  return Object.fromEntries(
+    Object.entries(panes).map(([key, pane]) => [
+      key,
+      pane.workRootId === workRootId && pane.path === path
+        ? applyReadOnlyFilePaneError(pane, message)
+        : pane,
+    ]),
+  );
+}
 
 type ReadOnlyFilePaneDescriptor = {
   workRootId: string;
@@ -123,6 +191,95 @@ export async function fetchWorkRootTextFile(
   return (await response.json()) as WorkRootTextFileView;
 }
 
+export type WorkRootFileWriteRequest = {
+  path: string;
+  baseContentHash: string;
+  content: string;
+};
+
+export type WorkRootFileWriteResponse = {
+  contentHash: string;
+  sizeBytes: number;
+  savedAtMs: number;
+};
+
+export type WorkRootDocumentEvent = {
+  type: "document.contentChanged";
+  workRootId: string;
+  path: string;
+  contentHash: string;
+  source: "dashboard" | "filesystem" | string;
+  savedAtMs: number;
+};
+
+export function workRootDocumentEventsEndpoint(workRootId: string) {
+  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/documents/events`;
+}
+
+export function parseWorkRootDocumentEvent(value: unknown): WorkRootDocumentEvent | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const source = record.source as Record<string, unknown> | undefined;
+  if (
+    record.type !== "document.contentChanged" ||
+    !source ||
+    typeof source !== "object" ||
+    typeof source.workRootId !== "string" ||
+    typeof source.path !== "string" ||
+    typeof record.contentHash !== "string" ||
+    typeof record.changedAtMs !== "number"
+  ) {
+    return null;
+  }
+  return {
+    type: record.type,
+    workRootId: source.workRootId,
+    path: source.path,
+    contentHash: record.contentHash,
+    source: "dashboard",
+    savedAtMs: record.changedAtMs,
+  };
+}
+
+export function workRootFileWriteEndpoint(workRootId: string) {
+  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/files/write`;
+}
+
+export async function writeWorkRootTextFile(
+  workRootId: string,
+  request: WorkRootFileWriteRequest,
+): Promise<WorkRootFileWriteResponse> {
+  const response = await fetch(workRootFileWriteEndpoint(workRootId), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorDetail(response));
+  }
+
+  return (await response.json()) as WorkRootFileWriteResponse;
+}
+
+export function applyReadOnlyFilePaneSavedContent(
+  pane: ReadOnlyFilePane,
+  content: string,
+  contentHash: string,
+  sizeBytes: number,
+): ReadOnlyFilePane {
+  return {
+    ...pane,
+    status: "loaded",
+    content,
+    contentHash,
+    sizeBytes,
+    error: null,
+  };
+}
+
 export function readOnlyFilePaneModeForOpenGesture(
   gesture: ReadOnlyFileOpenGesture,
 ): ReadOnlyFilePaneMode {
@@ -173,6 +330,8 @@ export function createLoadingReadOnlyFilePane(
     content: "",
     error: null,
     readOnly: true,
+    editable: false,
+    contentHash: null,
     sizeBytes: null,
     languageHint: null,
     extension: null,
@@ -189,6 +348,8 @@ export function applyReadOnlyFilePaneContent(
     status: "loaded",
     content: file.content,
     error: null,
+    editable: file.editable,
+    contentHash: file.contentHash,
     sizeBytes: file.sizeBytes,
     languageHint: file.languageHint,
     extension: file.extension,

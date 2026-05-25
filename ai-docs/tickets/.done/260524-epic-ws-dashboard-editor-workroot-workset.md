@@ -1,7 +1,8 @@
 ---
 title: ws dashboard editor and WorkRoot management workset
-parent: 260514-epic-ws-web-dashboard-mvp
+completed: 2026-05-25
 related:
+  260514-epic-ws-web-dashboard-mvp: umbrella dashboard MVP board
   260524-feat-ws-dashboard-document-viewer-editor-substrate: editor and markdown viewer track
   260524-feat-ws-dashboard-add-git-worktree-ui: WorkRoot management Git worktree creation slice
   260524-feat-ws-dashboard-git-aware-workroot-toolbar: WorkRoot toolbar Git status and branch controls
@@ -36,21 +37,21 @@ The workset covers:
 - Full IDE/editor parity, rich markdown editing, collaborative editing,
   Excalidraw/draw.io/HTML renderer support, or general translation-provider UI.
 
-## Child Tickets
+## Included Tickets
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; editor
-  polishing track. Implement as conservative slices for markdown viewer/block
-  interaction, daemon-backed translation provider MVP, then raw text edit/save
-  fan-out and document events.
-- `260524-feat-ws-dashboard-add-git-worktree-ui` - todo; first WorkRoot
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - done; editor
+  polishing track. Completed reusable Markdown/document viewing,
+  daemon-backed translation overlay, raw-text edit/save fan-out, and document
+  events.
+- `260524-feat-ws-dashboard-add-git-worktree-ui` - done; first WorkRoot
   management slice. Replace the workspace trash affordance with an overflow
   menu, keep remove workspace in that menu, and add Git worktree creation with
   daemon-resolved auto branch/path preview.
-- `260524-feat-ws-dashboard-git-aware-workroot-toolbar` - todo; companion
-  WorkRoot toolbar slice. Add Git-aware branch/status chips for selected Git
+- `260524-feat-ws-dashboard-git-aware-workroot-toolbar` - done; companion
+  WorkRoot toolbar slice. Added Git-aware branch/status chips for selected Git
   workRoots, including fetch, plain push, and fast-forward-only pull controls.
 
-## Cross-Child Decisions
+## Cross-Ticket Decisions
 
 - Preserve the existing dashboard resource model: workspaces own root
   workRoots, linked Git worktrees remain child workRoots, and public API/routes
@@ -74,11 +75,19 @@ The workset covers:
 
 ## Completion Criteria
 
-- Done: the three child tickets are implemented or split into more precise
-  completed children with equivalent editor/translation and WorkRoot Git UX
+- Done: the three included tickets are implemented or split into more precise
+  completed tickets with equivalent editor/translation and WorkRoot Git UX
   coverage.
 - Dropped: the dashboard direction moves away from browser-native document
   panels or from Git-aware WorkRoot management in the top-level dashboard UI.
 - Deferred: multi-server forwarding of Git/document operations, agent panel
   redesign, diagnostics/task panels, generalized provider configuration UI,
   and advanced Git workflows belong to later tickets.
+
+## Result
+
+Completed the workset through three child tickets: the reusable document
+viewer/editor substrate with Markdown translation overlay and save fan-out, the
+workspace menu Git worktree creation flow, and the selected WorkRoot Git-aware
+toolbar with branch/status chips plus safe fetch, push, and fast-forward-only
+pull controls.

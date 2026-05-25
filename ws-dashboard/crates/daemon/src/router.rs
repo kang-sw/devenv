@@ -13,7 +13,17 @@ use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
+use crate::document_translation::{
+    translate_document, translation_providers, DocumentTranslationService,
+};
 use crate::events::instance_events;
+use crate::git_toolbar::{
+    git_branches, git_create_branch, git_fetch, git_pull_ff_only, git_push, git_status,
+    git_switch_branch,
+};
+use crate::git_worktree::{
+    git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
+};
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{
@@ -28,7 +38,10 @@ use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
     WorkRootActivityProjector,
 };
-use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
+use crate::work_root_files::{
+    document_events, list_work_root_files, read_work_root_file, write_work_root_file,
+    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -36,8 +49,11 @@ pub struct AppState {
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
     pub dashboard_state: DashboardStateStore,
+    pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
+    pub document_events: DocumentEventHub,
+    pub document_write_locks: DocumentWriteLocks,
     pub registry_persist_lock: Arc<Mutex<()>>,
 }
 
@@ -48,6 +64,14 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route(
+            "/api/dashboard/document-translation/providers",
+            get(translation_providers),
+        )
+        .route(
+            "/api/dashboard/document-translation/translate",
+            post(translate_document),
+        )
         .route(
             "/api/dashboard/instance-events/{stream_id}",
             get(instance_events),
@@ -67,8 +91,44 @@ pub fn build_router(state: AppState) -> Router {
             delete(remove_workspace),
         )
         .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options",
+            get(git_worktree_add_options),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview",
+            post(git_worktree_add_preview),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add",
+            post(git_worktree_add_submit),
+        )
+        .route(
             "/api/dashboard/work-roots/{work_root_id}/activation",
             post(set_work_root_activation),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/status",
+            get(git_status),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/branches",
+            get(git_branches).post(git_create_branch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/switch-branch",
+            post(git_switch_branch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/fetch",
+            post(git_fetch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/push",
+            post(git_push),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/pull-ff-only",
+            post(git_pull_ff_only),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/terminals",
@@ -101,6 +161,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/files/read",
             get(read_work_root_file),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/files/write",
+            post(write_work_root_file),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/documents/events",
+            get(document_events),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activity",

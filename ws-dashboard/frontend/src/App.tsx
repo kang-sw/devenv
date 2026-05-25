@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, Key, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, FormEvent, Key, ReactNode, RefObject, SetStateAction } from "react";
 import {
   Activity,
   BriefcaseBusiness,
@@ -10,14 +10,20 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  Languages,
+  Plus,
   LayoutPanelTop,
   ListTodo,
   MoreHorizontal,
   PanelsTopLeft,
+  Pencil,
   RefreshCw,
+  RotateCcw,
+  Save,
   SquareTerminal,
   Stethoscope,
   Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -33,11 +39,36 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
+  DocumentViewer,
+  buildDocumentTranslationRequestPayload,
+  fetchTranslationProviders,
+  isMarkdownDocumentSource,
+  overlayFromTranslationResponse,
+  requestDocumentTranslation,
+  type DocumentTranslationOverlay,
+} from "./documentViewer";
+import {
   buildDashboardRefreshCommand,
+  buildDocumentModeSetCommand,
+  buildDocumentRevertCommand,
+  buildDocumentSaveCommand,
+  buildDocumentTranslationToggleCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
   buildFileExplorerToggleDirectoryCommand,
+  buildGitWorktreeAddCloseCommand,
+  buildGitWorktreeAddOpenCommand,
+  buildGitBranchCreateCloseCommand,
+  buildGitBranchCreateOpenCommand,
+  buildGitBranchCreateSubmitCommand,
+  buildGitBranchMenuOpenCommand,
+  buildGitBranchSwitchCommand,
+  buildGitFetchCommand,
+  buildGitPullFfOnlyCommand,
+  buildGitPushCommand,
+  buildGitRefreshCommand,
+  buildGitWorktreeAddSubmitCommand,
   buildRootPickerCloseCommand,
   buildRootPickerCreateDirectoryCommand,
   buildRootPickerNavigateCommand,
@@ -47,6 +78,7 @@ import {
   buildRootPickerUnpinDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
@@ -79,6 +111,9 @@ import {
 import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
+  applyReadOnlyFilePaneSavedContent,
+  applyReadOnlyFilePaneSourceContent,
+  applyReadOnlyFilePaneSourceError,
   createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
@@ -90,7 +125,14 @@ import {
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
+  documentDraftContentChangeDecision,
+  documentSaveStateForError,
+  parseWorkRootDocumentEvent,
+  workRootDocumentEventsEndpoint,
+  readOnlyFilePaneSourceKey,
+  writeWorkRootTextFile,
   type DirectoryLoadState,
+  type DocumentSaveState,
   readOnlyFilePaneLogicalKey,
   readOnlyFilePaneModeForOpenGesture,
   type ReadOnlyFileOpenGesture,
@@ -162,6 +204,31 @@ import {
   type RootPickerNavigationHistory,
   type RootPickerView,
 } from "./rootPicker";
+import {
+  fetchGitWorktreeAddOptions,
+  previewGitWorktreeAdd,
+  GitWorktreeAddSubmitError,
+  submitGitWorktreeAdd,
+  type GitWorktreeAddOptions,
+  type GitWorktreeAddPreview,
+  type GitWorktreeAddPreviewRequest,
+} from "./gitWorktreeAdd";
+import {
+  createWorkRootGitBranch,
+  fetchWorkRootGit,
+  fetchWorkRootGitBranches,
+  fetchWorkRootGitStatus,
+  gitChangeStatusSegments,
+  gitSyncStatusSegments,
+  gitStatusSegments,
+  pullWorkRootGitFfOnly,
+  pushWorkRootGit,
+  startGitRefreshScheduler,
+  switchWorkRootGitBranch,
+  type GitBranchList,
+  type GitStatusSegment,
+  type WorkRootGitStatus,
+} from "./gitToolbar";
 import { ActivityConsole } from "./ActivityConsole";
 import {
   createResourceRefreshCoordinator,
@@ -245,6 +312,7 @@ export function App() {
     null,
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -571,6 +639,11 @@ export function App() {
               setError(nextError instanceof Error ? nextError.message : "activation failed");
             });
         };
+      } else if (command.payload.type === "gitWorktreeAdd.open") {
+        const { workspaceId } = command.payload;
+        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(workspaceId);
+      } else if (command.payload.type === "gitWorktreeAdd.close") {
+        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(null);
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -647,6 +720,27 @@ export function App() {
     [loadResources, readOnlyFilePanes, resources],
   );
 
+  const applyDocumentSaved = useCallback(
+    (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => {
+      setReadOnlyFilePanes((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([key, pane]) => [
+            key,
+            pane.workRootId === source.workRootId && pane.path === source.path
+              ? applyReadOnlyFilePaneSavedContent(
+                  pane,
+                  source.content,
+                  source.contentHash,
+                  source.sizeBytes,
+                )
+              : pane,
+          ]),
+        ),
+      );
+    },
+    [],
+  );
+
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
@@ -671,6 +765,18 @@ export function App() {
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
           />
+          <GitWorktreeAddModal
+            workspaceId={gitWorktreeWorkspaceId}
+            onCommand={executeCommand}
+            onClose={() => setGitWorktreeWorkspaceId(null)}
+            onCreated={(response) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(response.resources);
+              if (response.createdWorkRootId) {
+                setSelectedId(response.createdWorkRootId);
+              }
+              setGitWorktreeWorkspaceId(null);
+            }}
+          />
         </aside>
 
         <section
@@ -694,11 +800,42 @@ export function App() {
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
             onReadOnlyFilePanesChange={setReadOnlyFilePanes}
             onReadOnlyFilePaneOrderByGroupChange={setReadOnlyFilePaneOrderByGroup}
+            onDocumentSaved={applyDocumentSaved}
           />
         </section>
       </div>
     </main>
   );
+}
+
+function useDismissableMenu(
+  open: boolean,
+  containerRef: RefObject<HTMLElement | null>,
+  onDismiss: () => void,
+) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const dismissIfOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || containerRef.current?.contains(target)) {
+        return;
+      }
+      onDismiss();
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onDismiss();
+      }
+    };
+    document.addEventListener("click", dismissIfOutside);
+    document.addEventListener("keydown", dismissOnEscape, true);
+    return () => {
+      document.removeEventListener("click", dismissIfOutside);
+      document.removeEventListener("keydown", dismissOnEscape, true);
+    };
+  }, [containerRef, onDismiss, open]);
 }
 
 function ChromeIconButton({
@@ -1085,23 +1222,22 @@ function OpenWorkRootControl({
       >
         <Modal className="root-picker-modal">
           <Dialog aria-label="Open workRoot" className="root-picker-dialog">
-            <div className="root-picker-header">
-              <div className="root-picker-title-block">
-                <Heading className="root-picker-title" slot="title">
-                  Open workRoot
-                </Heading>
-                <div className="root-picker-current" title={pickerView?.currentPath ?? ""}>
-                  {pickerView?.currentPath ?? "Loading host directories"}
-                </div>
+            <div className="root-picker-titlebar">
+              <Heading className="root-picker-title" slot="title">
+                Open workRoot
+              </Heading>
+              <div className="root-picker-window-actions">
+                <ChromeIconButton
+                  className="root-picker-close-button"
+                  commandId="rootPicker.close"
+                  icon={X}
+                  label="Close"
+                  onClick={closePicker}
+                />
               </div>
-              <button
-                className="action-button"
-                data-command-id="rootPicker.close"
-                type="button"
-                onClick={closePicker}
-              >
-                Close
-              </button>
+            </div>
+            <div className="root-picker-current root-picker-context" title={pickerView?.currentPath ?? ""}>
+              {pickerView?.currentPath ?? "Loading host directories"}
             </div>
 
             <form
@@ -1377,6 +1513,223 @@ function OpenWorkRootControl({
         </Modal>
       </ModalOverlay>
     </div>
+  );
+}
+
+
+function GitWorktreeAddModal({
+  workspaceId,
+  onCommand,
+  onClose,
+  onCreated,
+}: {
+  workspaceId: string | null;
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+  onCreated: (response: { resources: DashboardResourcesView; createdWorkRootId?: string }) => void;
+}) {
+  const [options, setOptions] = useState<GitWorktreeAddOptions | null>(null);
+  const [worktreeName, setWorktreeName] = useState("");
+  const [branchMode, setBranchMode] = useState<"auto" | "manual">("auto");
+  const [manualBranch, setManualBranch] = useState("");
+  const [pathMode, setPathMode] = useState<"auto" | "custom">("auto");
+  const [customPath, setCustomPath] = useState("");
+  const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null);
+  const previewSequenceRef = useRef(0);
+  const currentRequestKeyRef = useRef<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setOptions(null);
+      setPreview(null);
+      setPreviewRequestKey(null);
+      setError(null);
+      return;
+    }
+    setWorktreeName("");
+    setBranchMode("auto");
+    setManualBranch("");
+    setPathMode("auto");
+    setCustomPath("");
+    setPreview(null);
+    setPreviewRequestKey(null);
+    setError(null);
+    setLoading(true);
+    void fetchGitWorktreeAddOptions(workspaceId)
+      .then(setOptions)
+      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree options failed"))
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  const request = useMemo<GitWorktreeAddPreviewRequest | null>(() => {
+    if (!workspaceId) {
+      return null;
+    }
+    return {
+      worktreeName,
+      branch: branchMode === "auto" ? { mode: "auto" } : { mode: "manual", name: manualBranch },
+      path: pathMode === "auto" ? { mode: "auto" } : { mode: "custom", targetPath: customPath },
+    };
+  }, [branchMode, customPath, manualBranch, pathMode, worktreeName, workspaceId]);
+
+  const requestKey = request ? JSON.stringify(request) : null;
+
+  useEffect(() => {
+    currentRequestKeyRef.current = requestKey;
+  }, [requestKey]);
+
+  useEffect(() => {
+    if (!workspaceId || !request || !requestKey || worktreeName.trim().length === 0) {
+      setPreview(null);
+      setPreviewRequestKey(null);
+      return;
+    }
+    const sequence = previewSequenceRef.current + 1;
+    previewSequenceRef.current = sequence;
+    setPreview(null);
+    setPreviewRequestKey(null);
+    const timer = window.setTimeout(() => {
+      void previewGitWorktreeAdd(workspaceId, request)
+        .then((nextPreview) => {
+          if (previewSequenceRef.current !== sequence) {
+            return;
+          }
+          setPreview(nextPreview);
+          setPreviewRequestKey(requestKey);
+        })
+        .catch((nextError) => {
+          if (previewSequenceRef.current !== sequence) {
+            return;
+          }
+          setError(nextError instanceof Error ? nextError.message : "worktree preview failed");
+        });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [request, requestKey, worktreeName, workspaceId]);
+
+  if (!workspaceId) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildGitWorktreeAddCloseCommand(workspaceId), {
+      "gitWorktreeAdd.close": onClose,
+    });
+  };
+  const submitDisabled =
+    submitting ||
+    !request ||
+    worktreeName.trim().length === 0 ||
+    (branchMode === "manual" && manualBranch.trim().length === 0) ||
+    (pathMode === "custom" && customPath.trim().length === 0) ||
+    !preview ||
+    previewRequestKey !== requestKey ||
+    preview.status === "blocked" ||
+    options?.git.available === false;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!request || submitDisabled) {
+      return;
+    }
+    onCommand(buildGitWorktreeAddSubmitCommand(workspaceId), {
+      "gitWorktreeAdd.submit": () => {
+        const submittedRequestKey = requestKey;
+        setSubmitting(true);
+        setError(null);
+        void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
+          .then(onCreated)
+          .catch((nextError) => {
+            if (nextError instanceof GitWorktreeAddSubmitError && nextError.preview) {
+              if (currentRequestKeyRef.current !== submittedRequestKey) {
+                return;
+              }
+              setPreview(nextError.preview);
+              setPreviewRequestKey(submittedRequestKey);
+              setError("Submit blocked by current server validation");
+              return;
+            }
+            setError(nextError instanceof Error ? nextError.message : "worktree add failed");
+          })
+          .finally(() => setSubmitting(false));
+      },
+    });
+  };
+
+  const severity = preview?.status ?? "blocked";
+  const manualBranchOptions = (options?.branches ?? []).filter((branch) => !branch.checkedOut);
+  const autoBranchDisplay = preview?.branchName ?? worktreeName.trim();
+  const autoPathDisplay = preview?.targetPathLabel ?? (worktreeName.trim() ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}` : "");
+  return (
+    <ModalOverlay className="root-picker-backdrop" isDismissable isOpen onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
+      <Modal className="root-picker-modal git-worktree-modal">
+        <Dialog aria-label="Add Git worktree" className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">Add worktree</Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="gitWorktreeAdd.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
+            </div>
+          </div>
+          <div className="root-picker-current root-picker-context">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
+          <form className="git-worktree-form" onSubmit={submit}>
+            <label className="git-worktree-field">
+              <span className="section-label">Worktree name</span>
+              <input className="root-picker-input" autoComplete="off" value={worktreeName} onChange={(event) => setWorktreeName(event.target.value)} placeholder="feature-name" />
+            </label>
+            <fieldset className="git-worktree-fieldset">
+              <legend className="section-label">Branch</legend>
+              <div className="git-worktree-radio-grid">
+                <label><input type="radio" checked={branchMode === "auto"} onChange={() => setBranchMode("auto")} /> Auto from name</label>
+                <label><input type="radio" checked={branchMode === "manual"} onChange={() => setBranchMode("manual")} /> Existing/manual</label>
+              </div>
+              {branchMode === "auto" ? (
+                <input className="root-picker-input git-worktree-derived-input" readOnly value={autoBranchDisplay} placeholder="derived from worktree name" />
+              ) : (
+                <label className="git-worktree-select-wrap" aria-label="Existing or manual branch">
+                  <select className="root-picker-input git-worktree-select" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)}>
+                    <option value="">Select or type below…</option>
+                    {manualBranchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}
+                  </select>
+                  <input className="root-picker-input" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)} placeholder="or type branch-name" />
+                </label>
+              )}
+            </fieldset>
+            <fieldset className="git-worktree-fieldset">
+              <legend className="section-label">Path</legend>
+              <div className="git-worktree-radio-grid">
+                <label><input type="radio" checked={pathMode === "auto"} onChange={() => setPathMode("auto")} /> Auto path</label>
+                <label><input type="radio" checked={pathMode === "custom"} onChange={() => setPathMode("custom")} /> Custom path</label>
+              </div>
+              <input className="root-picker-input" readOnly={pathMode === "auto"} value={pathMode === "auto" ? autoPathDisplay : customPath} onChange={(event) => setCustomPath(event.target.value)} placeholder={pathMode === "auto" ? "derived from worktree name" : "/path/to/worktree"} />
+            </fieldset>
+            {options && !options.git.available ? <InlineNotice tone="error" title="Git unavailable" detail={options.git.reason ?? "workspace is not Git-capable"} /> : null}
+            {preview ? (
+              <div className={`git-worktree-preview git-worktree-preview-${severity}`} role="status">
+                <strong>{preview.message}</strong>
+                <span>{preview.branchName ? `Branch: ${preview.branchName}` : "Branch pending"}</span>
+                <span>{preview.targetPathLabel ? `Target: ${preview.targetPathLabel}` : "Target pending"}</span>
+                {preview.blockers.map((blocker) => <span key={`${blocker.code}:${blocker.field ?? ""}`}>{blocker.message}</span>)}
+              </div>
+            ) : loading ? <InlineNotice tone="info" title="Loading" detail="Git worktree options" /> : null}
+            {error ? <InlineNotice tone="error" title="Add worktree" detail={error} /> : null}
+            <div className="root-picker-footer-actions">
+              <button className="action-button action-button-primary" data-command-id="gitWorktreeAdd.submit" disabled={submitDisabled} type="submit">{submitting ? "Creating" : "Create worktree"}</button>
+              <button className="action-button" data-command-id="gitWorktreeAdd.close" type="button" onClick={close}>Cancel</button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
   );
 }
 
@@ -1822,6 +2175,7 @@ function WorkbenchShell({
   onPaneOrderByRootChange,
   onReadOnlyFilePanesChange,
   onReadOnlyFilePaneOrderByGroupChange,
+  onDocumentSaved,
 }: {
   resources: DashboardResourcesView | null;
   selection: WorkbenchSelection | null;
@@ -1850,6 +2204,7 @@ function WorkbenchShell({
   onReadOnlyFilePaneOrderByGroupChange: Dispatch<
     SetStateAction<WorkbenchPaneOrder>
   >;
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
   const [activePaneByRoot, setActivePaneByRoot] = useState<
     Record<string, Record<string, string>>
@@ -1923,6 +2278,63 @@ function WorkbenchShell({
   const activityPaneOpenForSelected = selectedWorkRootId
     ? (activityPaneOpenByRoot[selectedWorkRootId] ?? false)
     : false;
+  const readOnlyFilePanesRef = useRef(readOnlyFilePanes);
+  readOnlyFilePanesRef.current = readOnlyFilePanes;
+  const documentRefreshSequence = useRef<Record<string, number>>({});
+
+  const refreshOpenDocument = useCallback(
+    (workRootId: string, path: string, expectedContentHash?: string) => {
+      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path);
+      const requestSequence = (documentRefreshSequence.current[sourceKey] ?? 0) + 1;
+      documentRefreshSequence.current[sourceKey] = requestSequence;
+      if (
+        !readOnlyFilePanesRef.current.some(
+          (pane) =>
+            pane.workRootId === workRootId &&
+            pane.path === path &&
+            (!expectedContentHash || pane.contentHash !== expectedContentHash),
+        )
+      ) {
+        return;
+      }
+      void fetchWorkRootTextFile(workRootId, path)
+        .then((file) => {
+          if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
+            return;
+          }
+          onReadOnlyFilePanesChange((current) =>
+            applyReadOnlyFilePaneSourceContent(current, file),
+          );
+        })
+        .catch((error) => {
+          if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
+            return;
+          }
+          const message = error instanceof Error ? error.message : "file read failed";
+          onReadOnlyFilePanesChange((current) =>
+            applyReadOnlyFilePaneSourceError(current, workRootId, path, message),
+          );
+        });
+    },
+    [onReadOnlyFilePanesChange],
+  );
+
+  const refreshVisibleDocuments = useCallback(() => {
+    const rootId = selectedWorkRootId;
+    if (!rootId) {
+      return;
+    }
+    const paths = [
+      ...new Set(
+        readOnlyFilePanesRef.current
+          .filter((pane) => pane.workRootId === rootId && pane.status === "loaded")
+          .map((pane) => pane.path),
+      ),
+    ];
+    for (const path of paths) {
+      refreshOpenDocument(rootId, path);
+    }
+  }, [refreshOpenDocument, selectedWorkRootId]);
 
   const setActivePaneByGroupForSelected = (
     next:
@@ -1940,6 +2352,7 @@ function WorkbenchShell({
       };
     });
   };
+
 
   const workbenchModel =
     resources && selection
@@ -1979,6 +2392,7 @@ function WorkbenchShell({
                 ? activityTranscriptRefresh
                 : null,
               onCommand,
+              onDocumentSaved,
             ),
             paneOrderByGroup,
           );
@@ -2300,6 +2714,59 @@ function WorkbenchShell({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [workbenchModel?.root.id, activityPaneOpenForSelected, activityPollFallbackRootId]);
+
+  // Document content events are source-neutral invalidations for open file panes.
+  // A save from one pane fans out by re-reading the daemon view for matching
+  // clean panes, while pane-local edit state marks dirty drafts stale when the
+  // content prop changes underneath them. Browser focus/visibility re-reads are
+  // the bounded fallback when the SSE stream is unavailable.
+  useEffect(() => {
+    const rootId = selectedWorkRootId;
+    if (!rootId) {
+      return;
+    }
+
+    let cancelled = false;
+    const source = new EventSource(workRootDocumentEventsEndpoint(rootId));
+    const handleDocumentMessage = (message: MessageEvent) => {
+      if (cancelled) {
+        return;
+      }
+      let payload: unknown;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      const event = parseWorkRootDocumentEvent(payload);
+      if (!event || event.workRootId !== rootId) {
+        return;
+      }
+      refreshOpenDocument(event.workRootId, event.path, event.contentHash);
+    };
+    source.addEventListener("document", handleDocumentMessage);
+    source.onmessage = handleDocumentMessage;
+    return () => {
+      cancelled = true;
+      source.removeEventListener("document", handleDocumentMessage);
+      source.close();
+    };
+  }, [refreshOpenDocument, selectedWorkRootId]);
+
+  useEffect(() => {
+    const onFocus = () => refreshVisibleDocuments();
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshVisibleDocuments();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshVisibleDocuments]);
 
   // The output poll reads live terminal sessions from a ref so the polling
   // interval stays stable across renders. Depending the interval on
@@ -2631,14 +3098,14 @@ function WorkbenchShell({
     );
   }
 
-  function closeAgentPane(paneId: string) {
-    if (!selectedWorkRootId) {
+  function closeAgentPane(paneId: string, workRootId: string | null | undefined) {
+    if (!workRootId) {
       return;
     }
     setClosedAgentPaneByRoot((current) => ({
       ...current,
-      [selectedWorkRootId]: [
-        ...new Set([...(current[selectedWorkRootId] ?? []), paneId]),
+      [workRootId]: [
+        ...new Set([...(current[workRootId] ?? []), paneId]),
       ],
     }));
   }
@@ -2647,6 +3114,9 @@ function WorkbenchShell({
     request: DockviewTabCloseRequest & { readonly workRootId?: string },
   ) {
     if (request.workRootId && request.workRootId !== selectedWorkRootId) {
+      if (request.surfaceKind === "agent") {
+        closeAgentPane(request.paneId, request.workRootId);
+      }
       return;
     }
     const pane = editorGroups
@@ -2667,7 +3137,7 @@ function WorkbenchShell({
     } else if (pane.kind === "editor") {
       closeReadOnlyFilePane(pane.id);
     } else if (pane.kind === "agent") {
-      closeAgentPane(pane.id);
+      closeAgentPane(pane.id, request.workRootId ?? selectedWorkRootId);
     } else if (pane.kind === "workRootActivity") {
       closeActivityPane(pane.id);
     }
@@ -2699,13 +3169,14 @@ function WorkbenchShell({
       clientY: request.clientY,
     });
     if (decision.type === "requestConfirmation") {
-      if (!selectedWorkRootId) {
+      const requestWorkRootId = workbenchModel?.root.id ?? selectedWorkRootId;
+      if (!requestWorkRootId) {
         return;
       }
       setPendingCloseRequest({
         ...request,
         anchor: decision.anchor,
-        workRootId: selectedWorkRootId,
+        workRootId: requestWorkRootId,
       });
       return;
     }
@@ -2962,6 +3433,8 @@ function WorkbenchToolbar({
   onCreateTerminal: () => void;
 }) {
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(overflowOpen, overflowRef, () => setOverflowOpen(false));
   const toggles: WorkbenchToggle[] = [
     "viewer",
     "task",
@@ -3034,6 +3507,7 @@ function WorkbenchToolbar({
               );
             }}
           />
+          <WorkRootGitToolbar root={root} onCommand={onCommand} />
           {root.availability !== "available" ? (
             <span className="meta-chip ws-chip">{root.availability}</span>
           ) : null}
@@ -3073,7 +3547,7 @@ function WorkbenchToolbar({
             );
           }}
         />
-        <div className="workbench-overflow">
+        <div className="workbench-overflow" ref={overflowRef}>
           <button
             aria-expanded={overflowOpen}
             aria-haspopup="menu"
@@ -3130,6 +3604,230 @@ function WorkbenchToolbar({
         </div>
       </div>
     </div>
+  );
+}
+
+
+function WorkRootGitToolbar({
+  root,
+  onCommand,
+}: {
+  root: WorkRootView;
+  onCommand: DashboardCommandDispatcher;
+}) {
+  const gitCapable =
+    (root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree") &&
+    root.activation === "online" &&
+    root.availability === "available";
+  const [statusState, setStatusState] = useState<{ workRootId: string; status: WorkRootGitStatus } | null>(null);
+  const [branchesState, setBranchesState] = useState<{ workRootId: string; branches: GitBranchList } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const branchMenuRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(menuOpen, branchMenuRef, () => setMenuOpen(false));
+  const [pendingGitAction, setPendingGitAction] = useState<"fetch" | "push" | "pull" | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [baseBranchName, setBaseBranchName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+  const currentRootId = useRef(root.id);
+  currentRootId.current = root.id;
+
+  const status = statusState?.workRootId === root.id ? statusState.status : null;
+  const branches = branchesState?.workRootId === root.id ? branchesState.branches : null;
+
+  const refreshGit = useCallback((reason: string) => {
+    if (!gitCapable) {
+      requestSeq.current += 1;
+      setStatusState(null);
+      setBranchesState(null);
+      return;
+    }
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
+    const requestedRootId = root.id;
+    void Promise.all([
+      fetchWorkRootGitStatus(requestedRootId),
+      fetchWorkRootGitBranches(requestedRootId),
+    ])
+      .then(([nextStatus, nextBranches]) => {
+        if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
+        setStatusState(nextStatus.available ? { workRootId: requestedRootId, status: nextStatus } : null);
+        setBranchesState({ workRootId: requestedRootId, branches: nextBranches });
+        setError(null);
+      })
+      .catch((nextError) => {
+        if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
+        setStatusState(null);
+        setBranchesState(null);
+        setMenuOpen(false);
+        setModalOpen(false);
+        setError(nextError instanceof Error ? nextError.message : `${reason} failed`);
+      });
+  }, [gitCapable, root.id]);
+
+  useEffect(() => {
+    refreshGit("git status");
+  }, [refreshGit]);
+
+  useEffect(() => {
+    if (!gitCapable) return;
+    return startGitRefreshScheduler(refreshGit, {
+      isDocumentHidden: () => document.hidden,
+      addDocumentListener: (event, listener) => document.addEventListener(event, listener),
+      removeDocumentListener: (event, listener) => document.removeEventListener(event, listener),
+      addWindowListener: (event, listener) => window.addEventListener(event, listener),
+      removeWindowListener: (event, listener) => window.removeEventListener(event, listener),
+      setInterval: (listener, ms) => window.setInterval(listener, ms),
+      clearInterval: (handle) => window.clearInterval(handle),
+    });
+  }, [gitCapable, refreshGit]);
+
+  if (!gitCapable) return null;
+  if (!status) {
+    return error ? (
+      <div className="git-toolbar" aria-label="Git toolbar">
+        <span className="meta-chip ws-chip git-error-chip">{error}</span>
+      </div>
+    ) : null;
+  }
+
+  const branchLabel = status.branch?.name ?? (status.branch?.detachedOid ? `HEAD ${status.branch.detachedOid}` : "Git");
+  const branchOptions = branches?.branches ?? [];
+  const defaultBaseBranch = branches?.current ?? branchOptions.find((branch) => branch.current)?.name ?? branchOptions[0]?.name ?? "";
+  const selectedBaseBranch = baseBranchName || defaultBaseBranch;
+  const closeBranchModal = () => {
+    setModalOpen(false);
+    setNewBranchName("");
+    setBaseBranchName("");
+  };
+  const mutate = (command: ReturnType<typeof buildGitRefreshCommand>, run: () => Promise<WorkRootGitStatus>, pendingAction: "fetch" | "push" | "pull" | null = null) => {
+    const targetRootId = root.id;
+    onCommand(command, {
+      [command.commandId]: () => {
+        if (pendingAction) setPendingGitAction(pendingAction);
+        void run()
+          .then((nextStatus) => {
+            if (currentRootId.current !== targetRootId) return;
+            setStatusState(nextStatus.available ? { workRootId: targetRootId, status: nextStatus } : null);
+            refreshGit("git mutation refresh");
+          })
+          .catch((nextError) => {
+            if (currentRootId.current !== targetRootId) return;
+            setError(nextError instanceof Error ? nextError.message : "git action failed");
+            refreshGit("git mutation failure refresh");
+          })
+          .finally(() => {
+            if (currentRootId.current === targetRootId && pendingAction) setPendingGitAction(null);
+          });
+      },
+    });
+  };
+
+  const runBranchCreateCloseCommand = () =>
+    onCommand(buildGitBranchCreateCloseCommand(root.id), {
+      "git.branchCreate.close": closeBranchModal,
+    });
+
+  return (
+    <div className="git-toolbar" aria-label="Git toolbar">
+      <div className="git-branch-menu-wrap" ref={branchMenuRef}>
+        <button
+          className="meta-chip ws-chip git-branch-chip"
+          data-command-id="git.branchMenu.open"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => onCommand(buildGitBranchMenuOpenCommand(root.id), { "git.branchMenu.open": () => setMenuOpen((open) => !open) })}
+        >
+          <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+          <span>{branchLabel}</span>
+        </button>
+        {menuOpen ? (
+          <div className="workbench-overflow-menu git-branch-menu" role="menu">
+            <button className="workbench-overflow-item" data-command-id="git.branchCreate.open" role="menuitem" type="button" onClick={() => { setMenuOpen(false); onCommand(buildGitBranchCreateOpenCommand(root.id), { "git.branchCreate.open": () => setModalOpen(true) }); }}>
+              <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>+ New branch...</span>
+            </button>
+            {branchOptions.map((branch) => (
+              <button key={branch.name} className="workbench-overflow-item" data-command-id="git.branch.switch" disabled={branch.current || (branch.checkedOut && !branch.current)} role="menuitem" type="button" title={branch.disabledReason ?? branch.name} onClick={() => { setMenuOpen(false); mutate(buildGitBranchSwitchCommand(root.id, branch.name), () => switchWorkRootGitBranch(root.id, branch.name)); }}>
+                <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>{branch.name}{branch.current ? " ✓" : ""}{branch.checkedOut && !branch.current ? " (checked out)" : ""}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <GitStatusPill
+        status={status}
+        pendingAction={pendingGitAction}
+        onFetch={() => mutate(buildGitFetchCommand(root.id), () => fetchWorkRootGit(root.id), "fetch")}
+        onPush={() => mutate(buildGitPushCommand(root.id), () => pushWorkRootGit(root.id), "push")}
+        onPull={() => mutate(buildGitPullFfOnlyCommand(root.id), () => pullWorkRootGitFfOnly(root.id), "pull")}
+      />
+      {error ? <span className="meta-chip ws-chip git-error-chip">{error}</span> : null}
+      <ModalOverlay className="root-picker-backdrop" isDismissable isOpen={modalOpen} onOpenChange={(open) => { if (!open) runBranchCreateCloseCommand(); }}>
+        <Modal className="root-picker-modal git-branch-modal">
+          <Dialog aria-label="New Git branch" className="root-picker-dialog">
+            <div className="root-picker-titlebar">
+              <Heading className="root-picker-title" slot="title">New branch</Heading>
+              <div className="root-picker-window-actions">
+                <ChromeIconButton
+                  className="root-picker-close-button"
+                  commandId="git.branchCreate.close"
+                  icon={X}
+                  label="Close"
+                  onClick={runBranchCreateCloseCommand}
+                />
+              </div>
+            </div>
+            <form className="git-branch-create-form" onSubmit={(event) => { event.preventDefault(); const branchName = newBranchName.trim(); const baseBranch = selectedBaseBranch.trim(); if (!branchName) return; const targetRootId = root.id; onCommand(buildGitBranchCreateSubmitCommand(root.id, branchName, baseBranch || undefined), { "git.branchCreate.submit": () => { void createWorkRootGitBranch(root.id, branchName, baseBranch || undefined).then((nextStatus) => { if (currentRootId.current !== targetRootId) return; setStatusState({ workRootId: targetRootId, status: nextStatus }); closeBranchModal(); refreshGit("git branch create refresh"); }).catch((nextError) => { if (currentRootId.current !== targetRootId) return; setError(nextError instanceof Error ? nextError.message : "branch create failed"); refreshGit("git branch create failure refresh"); }); } }); }}>
+              <label className="git-worktree-field"><span className="section-label">Branch name</span><input className="root-picker-input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} placeholder="feature-name" /></label>
+              <label className="git-worktree-field"><span className="section-label">Base branch</span><select className="root-picker-input" value={selectedBaseBranch} onChange={(event) => setBaseBranchName(event.target.value)}>{branchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}</select></label>
+              <div className="root-picker-footer-actions"><button className="action-button action-button-primary" data-command-id="git.branchCreate.submit" type="submit" disabled={!newBranchName.trim() || !selectedBaseBranch}>Create and switch</button><button className="action-button" data-command-id="git.branchCreate.close" type="button" onClick={runBranchCreateCloseCommand}>Cancel</button></div>
+            </form>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+    </div>
+  );
+}
+
+function GitStatusPill({
+  status,
+  pendingAction,
+  onFetch,
+  onPush,
+  onPull,
+}: {
+  status: WorkRootGitStatus;
+  pendingAction: "fetch" | "push" | "pull" | null;
+  onFetch: () => void;
+  onPush: () => void;
+  onPull: () => void;
+}) {
+  const changeSegments = gitChangeStatusSegments(status);
+  const syncSegments = gitSyncStatusSegments(status);
+  const renderSegment = (segment: GitStatusSegment) => {
+    const className = `git-status-segment git-status-segment-${segment.tone}`;
+    if (segment.commandId === "git.push") {
+      return <button key={segment.key} className={className} data-command-id="git.push" type="button" disabled={segment.disabled || pendingAction === "push"} aria-label={pendingAction === "push" ? "Pushing Git changes" : undefined} onClick={onPush}>{pendingAction === "push" ? <RefreshCw className="git-spinner" aria-hidden="true" size={12} strokeWidth={1.9} /> : segment.label}</button>;
+    }
+    if (segment.commandId === "git.pullFfOnly") {
+      return <button key={segment.key} className={className} data-command-id="git.pullFfOnly" type="button" disabled={segment.disabled} onClick={onPull}>{segment.label}</button>;
+    }
+    return <span key={segment.key} className={className}>{segment.label}</span>;
+  };
+
+  return (
+    <span className="meta-chip ws-chip git-status-pill" title={status.branch?.upstream ?? "Git status"} aria-label={`Git status ${gitStatusSegments(status)}`}>
+      <button className="git-status-refresh" data-command-id="git.fetch" type="button" aria-label={pendingAction === "fetch" ? "Fetching Git status" : "Fetch Git status"} disabled={pendingAction === "fetch"} onClick={onFetch}>
+        <RefreshCw className={pendingAction === "fetch" ? "git-spinner" : undefined} aria-hidden="true" size={12} strokeWidth={1.9} />
+      </button>
+      {changeSegments.length ? changeSegments.map(renderSegment) : <span className="git-status-segment git-status-segment-clean">clean</span>}
+      {syncSegments.length ? <span className="git-status-separator" aria-hidden="true">|</span> : null}
+      {syncSegments.map(renderSegment)}
+    </span>
   );
 }
 
@@ -3417,6 +4115,7 @@ function buildWorkbenchEditorGroups(
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
   activityTranscriptRefresh: ActivityTranscriptRefreshSignal | null,
   onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -3426,6 +4125,8 @@ function buildWorkbenchEditorGroups(
     readOnlyFilePanes,
     readOnlyFilePaneOrderByGroup,
     dashboardGroups,
+    onCommand,
+    onDocumentSaved,
   );
   const terminalPanesByGroup = terminalWorkbenchPanesByGroup(
     root,
@@ -4184,10 +4885,12 @@ function readOnlyWorkbenchPanesByGroup(
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
   groups: ReadonlyArray<{ id: string; label: string }>,
+  onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
     .filter((pane) => pane.workRootId === root.id)
-    .map((pane) => readOnlyWorkbenchPane(root, pane));
+    .map((pane) => readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
   const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
@@ -4216,6 +4919,8 @@ function readOnlyWorkbenchPanesByGroup(
 function readOnlyWorkbenchPane(
   root: WorkRootView,
   pane: ReadOnlyFilePane,
+  onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): WorkbenchPane {
   const state: ViewState = {
     status: pane.status,
@@ -4241,32 +4946,284 @@ function readOnlyWorkbenchPane(
     state,
     meta,
     contentRevision: readOnlyFilePaneRevision(pane),
-    body: <ReadOnlyTextPane pane={pane} root={root} />,
+    body: (
+      <ReadOnlyDocumentPane
+        pane={pane}
+        root={root}
+        renderMarkdown={isMarkdownDocumentSource(pane)}
+        onCommand={onCommand}
+        onDocumentSaved={onDocumentSaved}
+      />
+    ),
   };
 }
 
-function ReadOnlyTextPane({
+function ReadOnlyDocumentPane({
   pane,
   root,
+  renderMarkdown,
+  onCommand,
+  onDocumentSaved,
 }: {
   pane: ReadOnlyFilePane;
   root: WorkRootView;
+  renderMarkdown: boolean;
+  onCommand: DashboardCommandDispatcher;
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [translationStatus, setTranslationStatus] = useState<
+    "idle" | "loading" | "ready" | "unavailable" | "error"
+  >("idle");
+  const [translationMessage, setTranslationMessage] = useState<string | null>(null);
+  const [translationOverlay, setTranslationOverlay] = useState<DocumentTranslationOverlay | undefined>();
+  const [documentMode, setDocumentMode] = useState<"view" | "edit">("view");
+  const [draft, setDraft] = useState(pane.content);
+  const [baseContentHash, setBaseContentHash] = useState(pane.contentHash);
+  const [saveState, setSaveState] = useState<DocumentSaveState>("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const decision = documentDraftContentChangeDecision(saveState);
+    if (decision.action === "preserveDraft") {
+      setSaveState(decision.saveState);
+      setSaveMessage(decision.message);
+      return;
+    }
+    setDraft(pane.content);
+    setBaseContentHash(pane.contentHash);
+    setTranslationOverlay(undefined);
+  }, [pane.content, pane.contentHash]);
+
+  const setModeCommand = (mode: "view" | "edit") => {
+    const command = buildDocumentModeSetCommand(pane.workRootId, pane.path, mode);
+    onCommand(command, { [command.commandId]: () => setDocumentMode(mode) });
+  };
+
+  const revertDraft = () => {
+    const command = buildDocumentRevertCommand(pane.workRootId, pane.path);
+    onCommand(command, {
+      [command.commandId]: () => {
+        setDraft(pane.content);
+        setBaseContentHash(pane.contentHash);
+        setSaveState("idle");
+        setSaveMessage(null);
+      },
+    });
+  };
+
+  const saveDraft = () => {
+    const command = buildDocumentSaveCommand(pane.workRootId, pane.path);
+    onCommand(command, {
+      [command.commandId]: () => {
+        if (!baseContentHash) {
+          setSaveState("error");
+          setSaveMessage("Missing base content hash");
+          return;
+        }
+        setSaveState("saving");
+        setSaveMessage("Saving");
+        void writeWorkRootTextFile(pane.workRootId, {
+          path: pane.path,
+          baseContentHash,
+          content: draft,
+        })
+          .then((response) => {
+            setBaseContentHash(response.contentHash);
+            setSaveState("saved");
+            setSaveMessage("Saved");
+            setTranslationOverlay(undefined);
+            onDocumentSaved({
+              workRootId: pane.workRootId,
+              path: pane.path,
+              content: draft,
+              contentHash: response.contentHash,
+              sizeBytes: response.sizeBytes,
+            });
+          })
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : "Save failed";
+            setSaveState(documentSaveStateForError(message));
+            setSaveMessage(message);
+          });
+      },
+    });
+  };
+
+  useEffect(() => {
+    if (!renderMarkdown || !translationEnabled || pane.status !== "loaded") {
+      return;
+    }
+    let cancelled = false;
+    setTranslationStatus("loading");
+    setTranslationMessage("Requesting document translation");
+    const payload = buildDocumentTranslationRequestPayload({
+      markdown: pane.content,
+      workRootId: pane.workRootId,
+      path: pane.path,
+      title: pane.title,
+      targetLocale: "ko",
+    });
+    void fetchTranslationProviders()
+      .then((providers) => {
+        const provider = providers.providers.find((candidate) => candidate.configured);
+        if (!provider) {
+          throw new Error("No translation provider configured");
+        }
+        return requestDocumentTranslation({
+          ...payload,
+          provider: {
+            id: provider.id,
+            model: provider.defaultModel ?? provider.models[0]?.id,
+          },
+        });
+      })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setTranslationOverlay(overlayFromTranslationResponse(response));
+        setTranslationStatus(response.status === "failed" ? "error" : "ready");
+        setTranslationMessage(
+          response.status === "completed"
+            ? `Translated to ${response.targetLocale}`
+            : `Translation ${response.status}`
+        );
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setTranslationOverlay(undefined);
+        setTranslationStatus("unavailable");
+        setTranslationMessage(error instanceof Error ? error.message : "Translation unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, renderMarkdown, translationEnabled]);
+
+  const documentFormatLabel = renderMarkdown ? "markdown" : (pane.languageHint ?? pane.extension ?? "text");
+  const translationButtonLabel = translationEnabled
+    ? "Disable Korean translation"
+    : "Enable Korean translation";
+  const translationStatusVisible =
+    translationStatus === "loading" ||
+    translationStatus === "ready" ||
+    translationStatus === "unavailable" ||
+    translationStatus === "error";
+  const documentPathLabel = pane.path;
+  const documentPathTitle = pane.path.startsWith("/") ? pane.path : `${root.label} / ${pane.path}`;
+  const saveStatusLabel =
+    saveState === "idle"
+      ? draft === pane.content
+        ? "clean"
+        : "dirty"
+      : saveState;
+  const showSaveStatusChip = documentMode === "edit" && pane.status === "loaded";
+
   return (
-    <div className="readonly-text-pane ws-pane">
-      <div className="readonly-text-pane-header ws-toolbar">
-        <div className="readonly-text-pane-title-block">
-          <div className="readonly-text-pane-title">{pane.title}</div>
-          <div className="readonly-text-pane-path" title={pane.path}>
-            {root.label} / {pane.path}
+    <div className="readonly-text-pane document-pane ws-pane">
+      <div className="readonly-text-pane-header readonly-text-pane-ribbon ws-toolbar">
+        <div className="document-ribbon-file">
+          <div className="readonly-text-pane-path" title={documentPathTitle}>
+            {documentPathLabel}
+          </div>
+          <div className="readonly-text-pane-badges">
+            <span className="meta-chip ws-chip">{pane.mode}</span>
+            <span className="meta-chip ws-chip">{documentFormatLabel}</span>
+            {showSaveStatusChip ? (
+              <span
+                className={`meta-chip ws-chip document-save-chip document-save-chip-${saveStatusLabel}`}
+                data-document-save-state={saveState}
+                title={saveMessage ?? saveStatusLabel}
+              >
+                {saveStatusLabel}
+              </span>
+            ) : null}
           </div>
         </div>
-        <div className="readonly-text-pane-badges">
-          <span className="meta-chip ws-chip">{pane.mode}</span>
-          <span className="meta-chip ws-chip">read-only</span>
-          <span className="meta-chip ws-chip">
-            {pane.languageHint ?? pane.extension ?? "text"}
-          </span>
+        <div className="document-ribbon-controls">
+          {pane.status === "loaded" ? (
+            <div className="document-viewer-segmented" role="group" aria-label="Document mode">
+              <button
+                type="button"
+                className={`document-viewer-segment${documentMode === "view" ? " is-active" : ""}`}
+                aria-label="View document"
+                title="View"
+                data-command-id="document.mode.set"
+                data-document-mode="view"
+                onClick={() => setModeCommand("view")}
+              >
+                <Eye aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className={`document-viewer-segment${documentMode === "edit" ? " is-active" : ""}`}
+                aria-label="Edit document"
+                title="Edit"
+                data-command-id="document.mode.set"
+                data-document-mode="edit"
+                onClick={() => setModeCommand("edit")}
+              >
+                <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+            </div>
+          ) : null}
+          {pane.status === "loaded" && renderMarkdown && documentMode === "view" ? (
+            <button
+              type="button"
+              className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
+              aria-label={translationButtonLabel}
+              aria-pressed={translationEnabled}
+              title={`${translationButtonLabel}; target: Korean`}
+              data-command-id="document.translation.toggle"
+              onClick={() => {
+                const command = buildDocumentTranslationToggleCommand(pane.workRootId, pane.path);
+                onCommand(command, {
+                  [command.commandId]: () => {
+                    setTranslationEnabled((current) => !current);
+                    setTranslationOverlay(undefined);
+                    setTranslationStatus("idle");
+                    setTranslationMessage(null);
+                  },
+                });
+              }}
+            >
+              <Languages aria-hidden="true" size={13} strokeWidth={1.8} />
+            </button>
+          ) : null}
+          {translationStatusVisible ? (
+            <span className="document-translation-status" data-translation-status={translationStatus}>
+              {translationMessage ?? translationStatus}
+            </span>
+          ) : null}
+          {documentMode === "edit" && pane.status === "loaded" ? (
+            <div className="document-edit-actions">
+              <button
+                type="button"
+                className="icon-button document-edit-icon-button"
+                data-command-id="document.save"
+                disabled={saveState === "saving" || draft === pane.content}
+                title="Save"
+                aria-label="Save document"
+                onClick={saveDraft}
+              >
+                <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className="icon-button document-edit-icon-button"
+                data-command-id="document.revert"
+                disabled={saveState === "saving" || draft === pane.content}
+                title="Revert"
+                aria-label="Revert document draft"
+                onClick={revertDraft}
+              >
+                <RotateCcw aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
       {pane.status === "loading" ? (
@@ -4276,9 +5233,25 @@ function ReadOnlyTextPane({
           {pane.error ?? "file read failed"}
         </div>
       ) : (
-        <pre className="readonly-text-content ws-doc-surface ws-code-block">
-          <code>{pane.content}</code>
-        </pre>
+        <>
+          {documentMode === "edit" ? (
+            <textarea
+              className="document-raw-editor ws-code-block"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.currentTarget.value);
+                setSaveState("dirty");
+                setSaveMessage("Unsaved changes");
+              }}
+            />
+          ) : renderMarkdown ? (
+            <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+          ) : (
+            <pre className="readonly-text-content ws-doc-surface ws-code-block">
+              <code>{pane.content}</code>
+            </pre>
+          )}
+        </>
       )}
     </div>
   );
@@ -4334,6 +5307,13 @@ function WorkspaceRows({
   onCommand: DashboardCommandDispatcher;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
+  const childWorkRoots = workspace.workRoots.filter(isWorkspaceNavChildWorkRoot);
+  const selectedChildWorkRootIds = new Set(childWorkRoots.map((root) => root.id));
+  const selectedWorkspace =
+    selectedId === workspace.id ||
+    workspace.workRoots.some(
+      (root) => root.id === selectedId && !selectedChildWorkRootIds.has(root.id),
+    );
 
   if (compactRoot) {
     return (
@@ -4350,6 +5330,7 @@ function WorkspaceRows({
           kind={compactRoot.kind}
           availability={compactRoot.availability}
           activation={compactRoot.activation}
+          canAddWorktree={compactRoot.kind === "gitPrimaryRoot" || compactRoot.kind === "gitLinkedWorktree"}
           debugMeta={[
             "compact workRoot",
             kindLabel(compactRoot.kind),
@@ -4370,13 +5351,14 @@ function WorkspaceRows({
         presentation="workspace"
         state={workspace.state}
         depth={0}
-        selected={selectedId === workspace.id}
+        selected={selectedWorkspace}
         actions={workspace.actions}
         actionEntityId={workspace.id}
+        canAddWorktree={workspace.workRoots.some((root) => root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree")}
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
-      {workspace.workRoots.map((root) => (
+      {childWorkRoots.map((root) => (
         <div key={root.id}>
           <ResourceRow
             id={root.id}
@@ -4410,6 +5392,10 @@ function WorkspaceRows({
   );
 }
 
+function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
+  return root.kind === "gitLinkedWorktree";
+}
+
 function ResourceRow({
   id,
   title,
@@ -4422,6 +5408,7 @@ function ResourceRow({
   kind,
   availability,
   activation,
+  canAddWorktree = false,
   debugMeta,
   onCommand,
 }: {
@@ -4436,18 +5423,23 @@ function ResourceRow({
   kind?: WorkRootView["kind"];
   availability?: WorkRootView["availability"];
   activation?: WorkRootView["activation"];
+  canAddWorktree?: boolean;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
 }) {
-  const visibleActions = actions.filter(
+  const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLSpanElement | null>(null);
+  useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
   return (
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
       data-command-id="resource.select"
+      data-resource-id={id}
       data-resource-presentation={presentation}
       data-resource-kind={kind ?? presentation}
       data-resource-activation={activation ?? ""}
@@ -4475,19 +5467,51 @@ function ResourceRow({
           ) : null}
         </span>
       </button>
-      {visibleActions.length > 0 ? (
-        <span className="resource-row-actions">
-          {visibleActions.map((action) => (
-            <ChromeIconButton
-              className="resource-row-action"
-              commandId="workspace.remove"
-              icon={Trash2}
-              key={action.id}
-              label={action.label}
-              tone="danger"
-              onClick={() => onCommand(buildWorkspaceRemoveCommand(actionEntityId))}
-            />
-          ))}
+      {hasWorkspaceRemove ? (
+        <span className="resource-row-actions workspace-row-menu-wrap" ref={menuRef}>
+          <ChromeIconButton
+            className="resource-row-action"
+            commandId="workspace.menu.open"
+            icon={MoreHorizontal}
+            label={`More actions for ${title}`}
+            onClick={() =>
+              onCommand(buildWorkspaceMenuOpenCommand(actionEntityId), {
+                "workspace.menu.open": () => setMenuOpen((current) => !current),
+              })
+            }
+          />
+          {menuOpen ? (
+            <div className="workbench-overflow-menu workspace-row-menu" role="menu">
+              {canAddWorktree ? (
+              <button
+                className="workbench-overflow-item"
+                data-command-id="gitWorktreeAdd.open"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCommand(buildGitWorktreeAddOpenCommand(actionEntityId));
+                }}
+              >
+                <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Add worktree...</span>
+              </button>
+              ) : null}
+              <button
+                className="workbench-overflow-item workbench-overflow-item-danger"
+                data-command-id="workspace.remove"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCommand(buildWorkspaceRemoveCommand(actionEntityId));
+                }}
+              >
+                <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Remove workspace...</span>
+              </button>
+            </div>
+          ) : null}
         </span>
       ) : null}
     </div>
@@ -4700,6 +5724,20 @@ function resolveWorkbenchSelection(
   let fallback: WorkbenchSelection | null = null;
 
   for (const workspace of resources.workspaces) {
+    const workspaceRoot =
+      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
+      workspace.workRoots[0] ??
+      null;
+    if (selectedId === workspace.id && workspaceRoot) {
+      const mainInstance = workspaceRoot.mainInstances[0] ?? null;
+      return {
+        workspace,
+        root: workspaceRoot,
+        mainInstance,
+        selectedInstance: mainInstance,
+      };
+    }
+
     for (const root of workspace.workRoots) {
       const mainInstance = root.mainInstances[0] ?? null;
       const rootSelection = {
@@ -4710,7 +5748,7 @@ function resolveWorkbenchSelection(
       };
       fallback ??= rootSelection;
 
-      if (selectedId === workspace.id || selectedId === root.id) {
+      if (selectedId === root.id) {
         return rootSelection;
       }
 

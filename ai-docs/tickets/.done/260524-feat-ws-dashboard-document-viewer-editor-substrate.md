@@ -13,8 +13,13 @@ spec:
   - 260524-ws-dashboard-document-viewer-mode
   - 260524-ws-dashboard-document-translation-overlay
   - 260524-ws-dashboard-document-edit-save-fanout
+plans:
+  phase-1: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate
+  phase-2: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate-phase-2
+  phase-3: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate-phase-3
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Add dashboard document viewer and editor mode substrate
@@ -331,6 +336,32 @@ tests and browser-level evidence that markdown renders in the daemon-served
 file pane with GFM/task/callout behavior, block actions, preview/pin behavior,
 and scroll containment intact.
 
+### Result (b8fb8cb) - 2026-05-24
+
+Implemented a reusable Markdown document viewer for read-only file panes while
+preserving existing read-only pane identity, preview/pinned behavior,
+workbench placement, descriptor restore compatibility, and scroll containment.
+Markdown files now render through an AST-based viewer with GFM tables/task
+items, Obsidian-style callouts, footnote hover data, block derivation, local
+content hashing, block selection, copy actions, workRoot-relative pathrefs, and
+a declarative translation-overlay shape.
+
+Review cycle follow-up `4173dd6` tightened Markdown link handling and pathref
+generation: unsafe link schemes render inert, relative Markdown links remain
+inactive until a dashboard-safe navigation model exists, and copyable pathrefs
+reject absolute, Windows-drive, backslash, home-relative, empty, or traversal
+inputs before browser exposure.
+
+Verification passed:
+
+- `npm run test:document-viewer`
+- `npm run test:work-root-files`
+- `npm run build`
+- `npm run test:browser`
+
+Deferred scope remains Phase 2 daemon translation providers/cache/prompting
+and Phase 3 raw edit/save/document events.
+
 ### Phase 2: Translation provider MVP and overlay UX
 
 Add daemon-owned document translation support for markdown view mode. The
@@ -373,6 +404,41 @@ block copy actions, and browser-level evidence against a daemon-served markdown
 pane. When local Ollama is available, dogfood evidence should record the
 provider/model used without depending on private prompt or raw model output.
 
+### Result (a4cdbff) - 2026-05-24
+
+Implemented daemon-owned document translation support for Markdown panes. The
+daemon now exposes OpenAI-compatible provider status/model probing and
+whole-document translation routes, uses environment-backed provider
+configuration, validates block-id roundtrips, bounds parse and provider
+failures, avoids raw provider output in browser responses, and caches
+translations with source, provider, model, locale, prompt, and block-model
+dimensions. Frontend Markdown panes now expose a command-routed translation
+toggle, request whole-document translation for the current content hash, render
+translated block overlays, preserve original-on-hover behavior, and keep
+selected current/translated/pathref copy actions.
+
+Review cycle follow-ups `9ac425e` and `51d128a` tightened cache-key dimensions,
+unknown provider block-id handling, raw-output leak tests, selected-copy
+coverage, and dashboard command-dispatch routing for the visible translation
+toggle.
+
+Verification passed:
+
+- `cargo test -p ws-dashboard-daemon`
+- `npm run test:commands`
+- `npm run test:document-viewer`
+- `npm run test:work-root-files`
+- `npm run build`
+- `npm run test:browser`
+
+Browser evidence covered daemon-served Markdown-pane translation toggle behavior
+with configured-unavailable state. Deterministic successful overlay behavior is
+covered by backend fake-provider tests and frontend overlay/copy helper tests.
+
+Deferred scope remains Phase 3 raw edit/save/document events, provider
+configuration UI, non-LLM provider implementation, streaming token UI, Activity
+Console translation, and durable cache persistence.
+
 ### Phase 3: Raw text edit mode, save fan-out, and document events
 
 Add raw text edit mode as an in-pane view/edit segmented control on document
@@ -408,3 +474,34 @@ same-document clean pane refresh, dirty pane stale marking, per-workRoot event
 delivery or invalidation behavior, focus re-read fallback, and browser-level
 evidence that view/edit mode switching does not create duplicate tabs or break
 workbench placement.
+
+### Result (d655a6c) - 2026-05-24
+
+Implemented raw-text edit/save and document freshness behavior for dashboard
+document panes. The daemon now returns content hashes on reads, accepts
+owner-authenticated workRoot-relative writes with optimistic base-hash checks,
+serializes same-source writes, publishes protected document content-change
+events, and keeps write errors bounded without host-path leakage. The frontend
+now uses one same-tab document shell for Markdown and non-Markdown text panes,
+supports `view | edit`, raw draft editing, save/revert, dirty/saving/saved,
+stale/conflict/error states, source-keyed clean-pane fan-out, dirty-pane stale
+preservation, translation overlay invalidation after source changes, and
+focus/visibility re-read fallback.
+
+Review cycle follow-up `cd24d12` fixed concurrent-save serialization,
+stale-reread overwrite guards, non-Markdown text pane edit/save coverage,
+backend boundary cases, frontend fan-out/state coverage, and explicit same-tab
+browser assertions.
+
+Verification passed:
+
+- `cargo test -p ws-dashboard-daemon`
+- `npm run test:commands`
+- `npm run test:work-root-files`
+- `npm run test:document-viewer`
+- `npm run build`
+- `npm run test:browser`
+
+Deferred scope remains rich editing, collaboration, merge/overwrite UI, file
+create/rename/delete/move, broad watcher correctness, and general persistence
+of editor drafts or translation preferences.

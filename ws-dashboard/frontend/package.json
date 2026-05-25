@@ -17,16 +17,21 @@
     "test:work-root-activity": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootActivity.test.js",
     "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminalCommandPlan.test.js && node ./node_modules/.tmp/route-tests/terminals.test.js && tsc -p tsconfig.e2e-tests.json && node ./node_modules/.tmp/e2e-tests/e2e/daemonHarness.test.js",
     "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test",
-    "test:open-work-root": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/openWorkRoot.test.js"
+    "test:open-work-root": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/openWorkRoot.test.js",
+    "test:document-viewer": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/documentViewer.test.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "dockview": "^6.2.2",
     "lucide-react": "^1.16.0",
+    "mdast-util-to-string": "^4.0.0",
     "react": "19.2.6",
     "react-aria-components": "^1.17.0",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

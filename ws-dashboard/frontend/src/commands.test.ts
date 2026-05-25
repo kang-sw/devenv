@@ -4,10 +4,25 @@ import {
   buildActivitySelectItemCommand,
   buildActivityTranscriptLoadMoreCommand,
   buildDashboardRefreshCommand,
+  buildDocumentModeSetCommand,
+  buildDocumentRevertCommand,
+  buildDocumentSaveCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
   buildFileExplorerToggleDirectoryCommand,
+  buildGitWorktreeAddCloseCommand,
+  buildGitWorktreeAddOpenCommand,
+  buildGitWorktreeAddSubmitCommand,
+  buildGitBranchCreateCloseCommand,
+  buildGitBranchCreateOpenCommand,
+  buildGitBranchCreateSubmitCommand,
+  buildGitBranchMenuOpenCommand,
+  buildGitBranchSwitchCommand,
+  buildGitFetchCommand,
+  buildGitPullFfOnlyCommand,
+  buildGitPushCommand,
+  buildGitRefreshCommand,
   buildRootPickerCloseCommand,
   buildRootPickerCreateDirectoryCommand,
   buildRootPickerNavigateCommand,
@@ -16,6 +31,7 @@ import {
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
   buildTerminalCreateCommand,
+  buildWorkspaceMenuOpenCommand,
   buildWorkbenchOpenActivityCommand,
   buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
@@ -62,12 +78,28 @@ const migratedCommands = [
   buildFileExplorerSelectEntryCommand(workRootId, "README.md"),
   buildWorkbenchOpenActivityCommand(workRootId),
   buildTerminalCreateCommand(workRootId),
+  buildWorkspaceMenuOpenCommand("workspace-local-abc"),
   buildWorkspaceRemoveCommand("workspace-local-abc"),
+  buildGitWorktreeAddOpenCommand("workspace-local-abc"),
+  buildGitWorktreeAddCloseCommand("workspace-local-abc"),
+  buildGitWorktreeAddSubmitCommand("workspace-local-abc"),
   buildWorkRootActivationCommand(workRootId, "offline"),
+  buildGitRefreshCommand(workRootId),
+  buildGitFetchCommand(workRootId),
+  buildGitPushCommand(workRootId),
+  buildGitPullFfOnlyCommand(workRootId),
+  buildGitBranchMenuOpenCommand(workRootId),
+  buildGitBranchSwitchCommand(workRootId, "feature/private"),
+  buildGitBranchCreateOpenCommand(workRootId),
+  buildGitBranchCreateSubmitCommand(workRootId, "new-private", "main"),
+  buildGitBranchCreateCloseCommand(workRootId),
   buildActivitySelectItemCommand("agent:reviewer"),
   buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
   buildActivityRefreshCommand(workRootId),
   buildActivityDetailToggleCommand("agent:reviewer", "block:1"),
+  buildDocumentModeSetCommand(workRootId, filePath, "edit"),
+  buildDocumentSaveCommand(workRootId, filePath),
+  buildDocumentRevertCommand(workRootId, filePath),
 ] as const;
 
 assertDeepEqual(
@@ -87,12 +119,28 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "workspace.menu.open",
     "workspace.remove",
+    "gitWorktreeAdd.open",
+    "gitWorktreeAdd.close",
+    "gitWorktreeAdd.submit",
     "workRoot.activation.set",
+    "git.refresh",
+    "git.fetch",
+    "git.push",
+    "git.pullFfOnly",
+    "git.branchMenu.open",
+    "git.branch.switch",
+    "git.branchCreate.open",
+    "git.branchCreate.submit",
+    "git.branchCreate.close",
     "activity.selectItem",
     "activity.transcript.loadMore",
     "activity.refresh",
     "activity.detail.toggle",
+    "document.mode.set",
+    "document.save",
+    "document.revert",
   ],
   "real command builders preserve migrated command ids",
 );
@@ -114,15 +162,37 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "workspace.menu.open",
     "workspace.remove",
+    "gitWorktreeAdd.open",
+    "gitWorktreeAdd.close",
+    "gitWorktreeAdd.submit",
     "workRoot.activation.set",
+    "git.refresh",
+    "git.fetch",
+    "git.push",
+    "git.pullFfOnly",
+    "git.branchMenu.open",
+    "git.branch.switch",
+    "git.branchCreate.open",
+    "git.branchCreate.submit",
+    "git.branchCreate.close",
     "activity.selectItem",
     "activity.transcript.loadMore",
     "activity.refresh",
     "activity.detail.toggle",
+    "document.mode.set",
+    "document.save",
+    "document.revert",
   ],
   "real command builders emit executable payload variants",
 );
+
+const branchCreateCommand = buildGitBranchCreateSubmitCommand(workRootId, "new-private", "main");
+if (branchCreateCommand.payload.type !== "git.branchCreate.submit") {
+  throw new Error("branch create command payload type mismatch");
+}
+assertEqual(branchCreateCommand.payload.baseBranch, "main", "branch create command records selected base branch");
 
 const observed: string[] = [];
 const executed: string[] = [];
@@ -305,3 +375,41 @@ assertEqual(
   "Toggle detail",
   "activity detail toggle command label is stable",
 );
+
+assertEqual(
+  dashboardCommandLabel(buildDocumentModeSetCommand(workRootId, filePath, "edit")),
+  "Edit document",
+  "document edit command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildDocumentModeSetCommand(workRootId, filePath, "view")),
+  "View document",
+  "document view command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildDocumentSaveCommand(workRootId, filePath)),
+  "Save document",
+  "document save command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildDocumentRevertCommand(workRootId, filePath)),
+  "Revert document",
+  "document revert command label is stable",
+);
+
+const gitPrivateRootPath = "/Users/kang-sw/private/git-root";
+const gitCommands = [
+  buildGitRefreshCommand(workRootId),
+  buildGitFetchCommand(workRootId),
+  buildGitPushCommand(workRootId),
+  buildGitPullFfOnlyCommand(workRootId),
+  buildGitBranchMenuOpenCommand(workRootId),
+  buildGitBranchSwitchCommand(workRootId, "feature/private"),
+  buildGitBranchCreateOpenCommand(workRootId),
+  buildGitBranchCreateSubmitCommand(workRootId, "new-private"),
+  buildGitBranchCreateCloseCommand(workRootId),
+];
+for (const command of gitCommands) {
+  assertNotContains(JSON.stringify(command), gitPrivateRootPath, `${command.commandId} omits host paths`);
+}
+assertEqual(dashboardCommandLabel(buildGitPullFfOnlyCommand(workRootId)), "Pull Git ff-only", "safe pull label is stable");

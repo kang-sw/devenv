@@ -39,13 +39,16 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as Tungs
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
+use ws_dashboard_daemon::document_translation::{
+    DocumentTranslationService, TranslationProviderConfig,
+};
 use ws_dashboard_daemon::persistent_state::DashboardStateStore;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
     resolve_work_root_agents_dir, WorkRootActivityProjectionConfig, WorkRootActivityProjector,
 };
-use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
+use ws_dashboard_daemon::work_root_files::{DocumentEventHub, OpenedWorkRoots};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TestShellProfile {
@@ -136,8 +139,11 @@ fn app_state_with_opened_and_store(
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots,
         dashboard_state,
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -151,8 +157,11 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -370,8 +379,11 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
@@ -1944,6 +1956,696 @@ async fn open_work_root_returns_aggregated_view_of_all_opened_roots() {
 }
 
 #[tokio::test]
+async fn git_worktree_add_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    for (method, uri) in [
+        (
+            Method::GET,
+            "/api/dashboard/workspaces/workspace-local-missing/git-worktree-add/options",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/workspaces/workspace-local-missing/git-worktree-add/preview",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/workspaces/workspace-local-missing/git-worktree-add",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated git worktree request"),
+            )
+            .await
+            .expect("unauthenticated git worktree response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn git_worktree_add_previews_and_submits_new_branch_with_resource_refresh() {
+    if skip_without_git("git_worktree_add_previews_and_submits_new_branch_with_resource_refresh") {
+        return;
+    }
+    let base = temp_fixture_path("git-worktree-create");
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned();
+
+    let options = git_worktree_options_json(app.clone(), cookie.as_str(), &workspace_id).await;
+    assert_eq!(options["git"]["available"], true);
+    assert!(options["branches"]
+        .as_array()
+        .expect("branches")
+        .iter()
+        .any(|branch| branch["checkedOut"] == true));
+
+    let preview = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        serde_json::json!({
+            "worktreeName": "Feature One",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" }
+        }),
+    )
+    .await;
+    assert_eq!(preview["status"], "willCreateBranch");
+    assert_eq!(preview["branchName"], "Feature-One");
+    assert!(preview["targetPathLabel"]
+        .as_str()
+        .expect("target label")
+        .contains("ws-worktree"));
+
+    let submit = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        serde_json::json!({
+            "worktreeName": "Feature One",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    let created = submit["createdWorkRootId"]
+        .as_str()
+        .expect("created workRoot id");
+    assert!(work_root_ids(&submit["resources"]).contains(&created.to_owned()));
+    assert!(submit["resources"]["workspaces"]
+        .as_array()
+        .expect("workspaces")
+        .iter()
+        .any(|workspace| workspace["id"] == workspace_id));
+    let body = serde_json::to_string(&submit).expect("submit JSON string");
+    assert!(
+        !body.contains(primary.to_string_lossy().as_ref()),
+        "submit response must not leak primary path"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_add_existing_branch_is_yellow_and_submit_checks_out_branch() {
+    if skip_without_git("git_worktree_add_existing_branch_is_yellow_and_submit_checks_out_branch") {
+        return;
+    }
+    let base = temp_fixture_path("git-worktree-existing");
+    let primary = base.join("primary");
+    let target = base.join("manual-existing");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(&primary, &["branch", "existing-topic"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned();
+
+    let request = serde_json::json!({
+        "worktreeName": "Existing Topic",
+        "branch": { "mode": "manual", "name": "existing-topic" },
+        "path": { "mode": "custom", "targetPath": target.display().to_string() }
+    });
+    let preview =
+        git_worktree_preview_json(app.clone(), cookie.as_str(), &workspace_id, request.clone())
+            .await;
+    assert_eq!(preview["status"], "willCheckoutExisting");
+    let submit = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        json_with_activate(request, true),
+        StatusCode::OK,
+    )
+    .await;
+    assert!(target.join("README.md").is_file());
+    assert_eq!(current_git_branch(&target), "existing-topic");
+    assert!(submit["createdWorkRootId"]
+        .as_str()
+        .expect("created id")
+        .starts_with("root-local-"));
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs() {
+    if skip_without_git("git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs") {
+        return;
+    }
+    let base = temp_fixture_path("git-worktree-blocks");
+    let primary = base.join("primary");
+    let conflict = base.join("conflict");
+    let plain = base.join("plain");
+    fs::create_dir_all(&primary).expect("create primary");
+    fs::create_dir_all(&conflict).expect("create conflict");
+    fs::create_dir_all(&plain).expect("create plain");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &plain).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let git_workspace_id = resources["workspaces"]
+        .as_array()
+        .expect("workspaces")
+        .iter()
+        .find(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("roots")
+                .iter()
+                .any(|root| root["kind"] == "gitPrimaryRoot")
+        })
+        .and_then(|workspace| workspace["id"].as_str())
+        .expect("git workspace id")
+        .to_owned();
+    let plain_workspace_id = resources["workspaces"]
+        .as_array()
+        .expect("workspaces")
+        .iter()
+        .find(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("roots")
+                .iter()
+                .any(|root| root["kind"] == "plainDirectory")
+        })
+        .and_then(|workspace| workspace["id"].as_str())
+        .expect("plain workspace id")
+        .to_owned();
+
+    let checked_out = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "Main Copy",
+            "branch": { "mode": "manual", "name": current_git_branch(&primary) },
+            "path": { "mode": "custom", "targetPath": base.join("main-copy").display().to_string() }
+        }),
+    )
+    .await;
+    assert_eq!(checked_out["status"], "blocked");
+    assert!(blocker_codes(&checked_out).contains(&"branchAlreadyCheckedOut".to_owned()));
+
+    let invalid = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "..",
+            "branch": { "mode": "manual", "name": "bad branch name" },
+            "path": { "mode": "custom", "targetPath": base.join("invalid").display().to_string() }
+        }),
+    )
+    .await;
+    assert_eq!(invalid["status"], "blocked");
+    assert!(blocker_codes(&invalid).contains(&"invalidWorktreeName".to_owned()));
+    assert!(blocker_codes(&invalid).contains(&"invalidBranchName".to_owned()));
+
+    let target_conflict = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "Conflict Branch",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "custom", "targetPath": conflict.display().to_string() }
+        }),
+    )
+    .await;
+    assert_eq!(target_conflict["status"], "blocked");
+    assert!(blocker_codes(&target_conflict).contains(&"targetExists".to_owned()));
+    let blocked_submit_target = base.join("blocked-submit-main-copy");
+    let blocked_submit = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "Blocked Main Copy",
+            "branch": { "mode": "manual", "name": current_git_branch(&primary) },
+            "path": { "mode": "custom", "targetPath": blocked_submit_target.display().to_string() },
+            "activate": true
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(blocked_submit["status"], "blocked");
+    assert!(blocker_codes(&blocked_submit).contains(&"branchAlreadyCheckedOut".to_owned()));
+    assert!(
+        !blocked_submit_target.exists(),
+        "blocked submit must not create the target worktree"
+    );
+
+    let missing_parent = git_worktree_preview_json(app.clone(), cookie.as_str(), &git_workspace_id, serde_json::json!({
+        "worktreeName": "Missing Parent",
+        "branch": { "mode": "auto" },
+        "path": { "mode": "custom", "targetPath": base.join("missing-parent").join("child").display().to_string() }
+    })).await;
+    assert_eq!(missing_parent["status"], "blocked");
+    assert!(blocker_codes(&missing_parent).contains(&"targetParentMissing".to_owned()));
+
+    let non_git_options =
+        git_worktree_options_json(app.clone(), cookie.as_str(), &plain_workspace_id).await;
+    assert_eq!(non_git_options["git"]["available"], false);
+    let non_git = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &plain_workspace_id,
+        serde_json::json!({
+            "worktreeName": "No Git",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" }
+        }),
+    )
+    .await;
+    assert_eq!(non_git["status"], "blocked");
+    assert!(blocker_codes(&non_git).contains(&"notGitWorkspace".to_owned()));
+
+    let unknown = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        "workspace-local-unknown",
+        serde_json::json!({
+            "worktreeName": "Unknown",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        unknown["error"],
+        "workspace is not available for Git worktree creation"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_toolbar_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    for (method, uri) in [
+        (
+            Method::GET,
+            "/api/dashboard/work-roots/root-local-missing/git/status",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/work-roots/root-local-missing/git/branches",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/switch-branch",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/branches",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/fetch",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/push",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/pull-ff-only",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated git toolbar request"),
+            )
+            .await
+            .expect("unauthenticated git toolbar response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn git_toolbar_status_gates_and_reports_counts_without_paths() {
+    if skip_without_git("git_toolbar_status_gates_and_reports_counts_without_paths") {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-status");
+    let primary = base.join("primary");
+    let plain = base.join("plain");
+    fs::create_dir_all(&primary).expect("create primary");
+    fs::create_dir_all(&plain).expect("create plain");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "one\ntwo\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let branch = current_git_branch(&primary);
+    fs::write(primary.join("README.md"), "one\nthree\nfour\n").expect("modify tracked");
+    fs::write(primary.join("new.txt"), "untracked\n").expect("write untracked");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let plain_id = open_work_root_for_test(app.clone(), cookie.as_str(), &plain).await;
+    let status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(status["available"], true);
+    assert_eq!(status["branch"]["name"], branch);
+    assert_eq!(status["changes"]["addedLines"], 2);
+    assert_eq!(status["changes"]["removedLines"], 1);
+    assert_eq!(status["changes"]["modifiedFiles"], 1);
+    assert_eq!(status["changes"]["untrackedFiles"], 1);
+    assert_eq!(status["operations"]["canFetch"], true);
+    assert!(!serde_json::to_string(&status)
+        .expect("status JSON")
+        .contains(primary.to_string_lossy().as_ref()));
+    let plain_status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{plain_id}/git/status"),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(plain_status["error"], "workRoot is not a Git workRoot");
+    let offline =
+        set_work_root_activation_for_test(app.clone(), cookie.as_str(), &git_id, "offline").await;
+    assert!(work_root_by_id(&offline, &git_id)["activation"] == "offline");
+    let offline_status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::CONFLICT,
+    )
+    .await;
+    assert_eq!(offline_status["error"], "workRoot offline");
+    let unknown = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/work-roots/root-local-unknown/git/branches",
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(unknown["error"], "unknown workRoot");
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_toolbar_branches_switch_and_create_revalidate_state() {
+    if skip_without_git("git_toolbar_branches_switch_and_create_revalidate_state") {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-branches");
+    let primary = base.join("primary");
+    let linked = base.join("linked-topic");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let original_branch = current_git_branch(&primary);
+    run_git(&primary, &["checkout", "-b", "conflict-target"]);
+    fs::write(primary.join("README.md"), "conflict target\n").expect("write conflict target");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "conflict target"]);
+    run_git(&primary, &["switch", &original_branch]);
+    run_git(&primary, &["checkout", "-b", "base-source"]);
+    fs::write(primary.join("base.txt"), "base source\n").expect("write base source");
+    run_git(&primary, &["add", "base.txt"]);
+    run_git(&primary, &["commit", "-m", "base source"]);
+    let base_source_oid = git_stdout(&primary, &["rev-parse", "HEAD"]);
+    run_git(&primary, &["switch", &original_branch]);
+    run_git(&primary, &["branch", "topic"]);
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path"),
+            "topic",
+        ],
+    );
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let branches = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        StatusCode::OK,
+    )
+    .await;
+    let topic = branches["branches"]
+        .as_array()
+        .expect("branches")
+        .iter()
+        .find(|branch| branch["name"] == "topic")
+        .expect("topic branch");
+    assert_eq!(topic["checkedOut"], true);
+    assert_eq!(topic["disabledReason"], "Already checked out");
+    let blocked = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/switch-branch"),
+        serde_json::json!({"branchName":"topic"}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(blocked["error"], "branch is already checked out");
+    let created = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        serde_json::json!({"branchName":"browser-created","baseBranch":"base-source","switchTo":true}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(created["branch"]["name"], "browser-created");
+    assert_eq!(current_git_branch(&primary), "browser-created");
+    assert_eq!(git_stdout(&primary, &["rev-parse", "HEAD"]), base_source_oid);
+    let duplicate_create = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        serde_json::json!({"branchName":"browser-created","switchTo":true}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(duplicate_create["error"], "branch cannot be created");
+    assert_eq!(current_git_branch(&primary), "browser-created");
+    fs::write(primary.join("README.md"), "dirty\n").expect("make dirty");
+    let dirty = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/switch-branch"),
+        serde_json::json!({"branchName": "conflict-target"}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(dirty["error"], "branch switch failed");
+    assert!(!serde_json::to_string(&dirty)
+        .expect("dirty JSON")
+        .contains(primary.to_string_lossy().as_ref()));
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults() {
+    if skip_without_git("git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults") {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-sync");
+    let remote = base.join("remote.git");
+    let primary = base.join("primary");
+    let other = base.join("other");
+    fs::create_dir_all(&base).expect("create sync base");
+    run_git(&base, &["init", "--bare", remote.to_str().expect("remote")]);
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let branch = current_git_branch(&primary);
+    run_git(
+        &primary,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    run_git(&primary, &["push", "-u", "origin", &branch]);
+    run_git(
+        &base,
+        &[
+            "clone",
+            remote.to_str().expect("remote path"),
+            other.to_str().expect("other path"),
+        ],
+    );
+    run_git(
+        &other,
+        &["config", "user.email", "ws-dashboard@example.local"],
+    );
+    run_git(&other, &["config", "user.name", "ws dashboard"]);
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    fs::write(primary.join("local.txt"), "local\n").expect("write local");
+    run_git(&primary, &["add", "local.txt"]);
+    run_git(&primary, &["commit", "-m", "local"]);
+    let ahead = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(ahead["sync"]["ahead"], 1);
+    assert_eq!(ahead["operations"]["canPush"], true);
+    let pushed = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/push"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(pushed["sync"]["ahead"], 0);
+    run_git(&other, &["pull", "--ff-only"]);
+    fs::write(other.join("remote.txt"), "remote\n").expect("write remote");
+    run_git(&other, &["add", "remote.txt"]);
+    run_git(&other, &["commit", "-m", "remote"]);
+    run_git(&other, &["push"]);
+    let fetched = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/fetch"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(fetched["sync"]["behind"], 1);
+    assert_eq!(fetched["operations"]["canPullFfOnly"], true);
+    let pulled = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/pull-ff-only"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(pulled["sync"]["behind"], 0);
+    run_git(&other, &["pull", "--ff-only"]);
+    fs::write(primary.join("local2.txt"), "local2\n").expect("write local2");
+    run_git(&primary, &["add", "local2.txt"]);
+    run_git(&primary, &["commit", "-m", "local2"]);
+    fs::write(other.join("remote2.txt"), "remote2\n").expect("write remote2");
+    run_git(&other, &["add", "remote2.txt"]);
+    run_git(&other, &["commit", "-m", "remote2"]);
+    run_git(&other, &["push"]);
+    let push_rejected = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/push"),
+        serde_json::json!({}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(push_rejected["error"], "push failed");
+    git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/fetch"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    let pull_rejected = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/pull-ff-only"),
+        serde_json::json!({}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(pull_rejected["error"], "pull --ff-only failed");
+    assert_eq!(current_git_branch(&primary), branch);
+    assert!(
+        !primary.join(".git").join("MERGE_HEAD").exists(),
+        "ff-only pull failure must not leave a merge in progress"
+    );
+    assert!(
+        !primary.join(".git").join("rebase-merge").exists()
+            && !primary.join(".git").join("rebase-apply").exists(),
+        "ff-only pull failure must not leave a rebase in progress"
+    );
+    assert!(
+        git_stdout(&primary, &["diff", "--name-only", "--diff-filter=U"]).is_empty(),
+        "ff-only pull failure must not leave conflicted index entries"
+    );
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
 async fn workspace_remove_route_forgets_workspace_without_deleting_files_or_paths() {
     let first = temp_fixture_path("workspace-remove-first");
     let second = temp_fixture_path("workspace-remove-second");
@@ -2185,7 +2887,10 @@ fn app_state_with_activity_cache_and_codex_home(
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
+        document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
             codex_home,
             cache_home: Some(cache_home),
@@ -4460,6 +5165,177 @@ fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> boo
         .unwrap_or(false)
 }
 
+async fn git_toolbar_get_json(
+    app: axum::Router,
+    cookie: &str,
+    uri: &str,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("git toolbar GET request"),
+        )
+        .await
+        .expect("git toolbar GET response");
+    assert_eq!(response.status(), expected_status, "{uri}");
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git toolbar GET body");
+    serde_json::from_slice(&body).expect("git toolbar GET JSON")
+}
+
+async fn git_toolbar_post_json(
+    app: axum::Router,
+    cookie: &str,
+    uri: &str,
+    request: serde_json::Value,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git toolbar POST request"),
+        )
+        .await
+        .expect("git toolbar POST response");
+    assert_eq!(response.status(), expected_status, "{uri}");
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git toolbar POST body");
+    serde_json::from_slice(&body).expect("git toolbar POST JSON")
+}
+
+async fn git_worktree_options_json(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("git worktree options request"),
+        )
+        .await
+        .expect("git worktree options response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree options body");
+    serde_json::from_slice(&body).expect("git worktree options JSON")
+}
+
+async fn git_worktree_preview_json(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+    request: serde_json::Value,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git worktree preview request"),
+        )
+        .await
+        .expect("git worktree preview response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree preview body");
+    serde_json::from_slice(&body).expect("git worktree preview JSON")
+}
+
+async fn git_worktree_submit_json(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+    request: serde_json::Value,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/workspaces/{workspace_id}/git-worktree-add"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git worktree submit request"),
+        )
+        .await
+        .expect("git worktree submit response");
+    assert_eq!(response.status(), expected_status);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree submit body");
+    serde_json::from_slice(&body).expect("git worktree submit JSON")
+}
+
+fn json_with_activate(mut value: serde_json::Value, activate: bool) -> serde_json::Value {
+    value
+        .as_object_mut()
+        .expect("request object")
+        .insert("activate".to_owned(), serde_json::Value::Bool(activate));
+    value
+}
+
+fn blocker_codes(value: &serde_json::Value) -> Vec<String> {
+    value["blockers"]
+        .as_array()
+        .expect("blockers")
+        .iter()
+        .filter_map(|blocker| blocker["code"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn current_git_branch(path: &Path) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .expect("current git branch");
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn git_stdout(path: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .expect("git stdout");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
 async fn dashboard_resources_json(app: axum::Router, cookie: &str) -> serde_json::Value {
     let response = app
         .oneshot(
@@ -5790,4 +6666,795 @@ async fn daemon_security_smoke_covers_auth_and_health_boundary() {
         .await
         .expect("authenticated UI response");
     assert_eq!(ui.status(), StatusCode::OK);
+}
+
+fn app_state_with_translation_provider(base_url: String, default_model: Option<&str>) -> AppState {
+    AppState {
+        config: ServeConfig::default_loopback(),
+        auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
+        document_translation: DocumentTranslationService::new(Some(TranslationProviderConfig {
+            id: "test-provider".to_owned(),
+            label: "Test provider".to_owned(),
+            base_url,
+            api_key: Some("test-key-redacted".to_owned()),
+            default_model: default_model.map(str::to_owned),
+            timeout_ms: 5_000,
+        })),
+        terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
+        document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
+    }
+}
+
+async fn start_fake_openai_provider(response_content: &'static str) -> (String, Arc<AtomicU64>) {
+    async fn models() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({ "data": [{ "id": "fake-model" }] }))
+    }
+    async fn chat(
+        axum::extract::State(state): axum::extract::State<(Arc<AtomicU64>, &'static str)>,
+        axum::Json(_request): axum::Json<serde_json::Value>,
+    ) -> axum::Json<serde_json::Value> {
+        state.0.fetch_add(1, Ordering::SeqCst);
+        axum::Json(serde_json::json!({
+            "choices": [{ "message": { "content": state.1 } }]
+        }))
+    }
+
+    let calls = Arc::new(AtomicU64::new(0));
+    let app = axum::Router::new()
+        .route("/v1/models", axum::routing::get(models))
+        .route("/v1/chat/completions", axum::routing::post(chat))
+        .with_state((calls.clone(), response_content));
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake provider");
+    let addr = listener.local_addr().expect("fake provider addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{addr}/v1"), calls)
+}
+
+fn translation_request_body() -> serde_json::Value {
+    serde_json::json!({
+        "source": {
+            "kind": "workRootFile",
+            "workRootId": "root-local-test",
+            "path": "docs/readme.md",
+            "contentHash": "fnv1a32:testhash",
+            "format": "markdown",
+            "title": "readme.md"
+        },
+        "provider": { "id": "test-provider", "model": "fake-model" },
+        "locale": { "source": null, "target": "ko" },
+        "blocks": [
+            {
+                "blockId": "paragraph-1",
+                "ordinal": 0,
+                "kind": "paragraph",
+                "markdown": "Hello",
+                "plainText": "Hello",
+                "lineStart": 1,
+                "lineEnd": 1,
+                "pathref": "@docs/readme.md#L1",
+                "translatable": true
+            },
+            {
+                "blockId": "code-2",
+                "ordinal": 1,
+                "kind": "code",
+                "markdown": "```sh\necho hi\n```",
+                "plainText": "echo hi",
+                "lineStart": 2,
+                "lineEnd": 4,
+                "pathref": "@docs/readme.md#L2-L4",
+                "translatable": false
+            }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn document_translation_routes_require_owner_auth() {
+    let app = build_router(app_state());
+    let providers = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/document-translation/providers")
+                .body(Body::empty())
+                .expect("providers request"),
+        )
+        .await
+        .expect("providers response");
+    assert_eq!(providers.status(), StatusCode::UNAUTHORIZED);
+
+    let translate = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(translation_request_body().to_string()))
+                .expect("translate request"),
+        )
+        .await
+        .expect("translate response");
+    assert_eq!(translate.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn document_translation_provider_status_probes_models_without_secrets() {
+    let (base_url, _calls) = start_fake_openai_provider("{\"blocks\":[]}").await;
+    let state = app_state_with_translation_provider(base_url, None);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/document-translation/providers")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("providers request"),
+        )
+        .await
+        .expect("providers response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("providers body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("providers json");
+    assert_eq!(value["providers"][0]["reachable"], true);
+    assert_eq!(value["providers"][0]["models"][0]["id"], "fake-model");
+    assert!(!String::from_utf8_lossy(&body).contains("test-key-redacted"));
+}
+
+#[tokio::test]
+async fn document_translation_translate_validates_blocks_and_reuses_cache() {
+    let (base_url, calls) = start_fake_openai_provider(
+        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"안녕하세요"}]}"#,
+    )
+    .await;
+    let state = app_state_with_translation_provider(base_url, Some("fake-model"));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    for expected_hit in [false, true] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/dashboard/document-translation/translate")
+                    .header(header::COOKIE, cookie.clone())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(translation_request_body().to_string()))
+                    .expect("translate request"),
+            )
+            .await
+            .expect("translate response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("translate body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("translate json");
+        assert_eq!(value["cache"]["hit"], expected_hit);
+        assert_eq!(value["blocks"][0]["status"], "ok");
+        assert_eq!(value["blocks"][0]["translatedMarkdown"], "안녕하세요");
+        assert_eq!(value["blocks"][1]["status"], "omitted");
+        assert!(!String::from_utf8_lossy(&body).contains("translatedContent"));
+        assert!(!String::from_utf8_lossy(&body).contains("test-key-redacted"));
+    }
+    let mut source_locale_request = translation_request_body();
+    source_locale_request["locale"]["source"] = serde_json::json!("en");
+    let source_locale_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(source_locale_request.to_string()))
+                .expect("source locale translate request"),
+        )
+        .await
+        .expect("source locale translate response");
+    assert_eq!(source_locale_response.status(), StatusCode::OK);
+    let source_locale_body = axum::body::to_bytes(source_locale_response.into_body(), 64 * 1024)
+        .await
+        .expect("source locale body");
+    let source_locale_value: serde_json::Value =
+        serde_json::from_slice(&source_locale_body).expect("source locale json");
+    assert_eq!(source_locale_value["cache"]["hit"], false);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() {
+    let (base_url, _calls) = start_fake_openai_provider(
+        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"하나"},{"blockId":"RAW_UNKNOWN_BLOCK_ID_SENTINEL","translatedContent":"RAW_TRANSLATION_SENTINEL"},{"blockId":"RAW_MISSING_TRANSLATION_BLOCK_ID_SENTINEL"},{"blockId":"paragraph-1","translatedContent":"둘"}]}"#,
+    )
+    .await;
+    let state = app_state_with_translation_provider(base_url, Some("fake-model"));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let mut duplicate = translation_request_body();
+    duplicate["blocks"][1]["blockId"] = serde_json::json!("paragraph-1");
+    let duplicate_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(duplicate.to_string()))
+                .expect("duplicate request"),
+        )
+        .await
+        .expect("duplicate response");
+    assert_eq!(duplicate_response.status(), StatusCode::BAD_REQUEST);
+
+    let mut absolute_path = translation_request_body();
+    absolute_path["source"]["path"] = serde_json::json!("/Users/example/private.md");
+    let absolute_path_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(absolute_path.to_string()))
+                .expect("absolute path request"),
+        )
+        .await
+        .expect("absolute path response");
+    assert_eq!(absolute_path_response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(translation_request_body().to_string()))
+                .expect("translate request"),
+        )
+        .await
+        .expect("translate response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("translate body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("translate json");
+    assert_eq!(value["status"], "partial");
+    assert!(
+        value["unmatched"]
+            .as_array()
+            .expect("unmatched array")
+            .len()
+            >= 2
+    );
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(!body_text.contains("RAW_UNKNOWN_BLOCK_ID_SENTINEL"));
+    assert!(!body_text.contains("RAW_TRANSLATION_SENTINEL"));
+    assert!(!body_text.contains("RAW_MISSING_TRANSLATION_BLOCK_ID_SENTINEL"));
+
+    let (parse_base_url, _parse_calls) =
+        start_fake_openai_provider("RAW_PARSE_FAILURE_SENTINEL").await;
+    let parse_state = app_state_with_translation_provider(parse_base_url, Some("fake-model"));
+    let parse_token = parse_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let parse_app = build_router(parse_state);
+    let parse_cookie = pair_and_cookie(parse_app.clone(), &parse_token).await;
+    let parse_response = parse_app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, parse_cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(translation_request_body().to_string()))
+                .expect("parse failure request"),
+        )
+        .await
+        .expect("parse failure response");
+    assert_eq!(parse_response.status(), StatusCode::OK);
+    let parse_body = axum::body::to_bytes(parse_response.into_body(), 64 * 1024)
+        .await
+        .expect("parse body");
+    let parse_body_text = String::from_utf8_lossy(&parse_body);
+    assert!(!parse_body_text.contains("RAW_PARSE_FAILURE_SENTINEL"));
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_save_and_reject_conflicts() {
+    let root = temp_fixture_path("write-file");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/read?path=doc.md",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("read request"),
+        )
+        .await
+        .expect("read response");
+    assert_eq!(read.status(), StatusCode::OK);
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
+    let read_json: serde_json::Value = serde_json::from_slice(&read_body).expect("read json");
+    let base_hash = read_json["contentHash"].as_str().expect("content hash");
+    assert!(base_hash.starts_with("sha256:"));
+
+    let stale = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:stale",
+                        "content": "# Stale\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("stale write request"),
+        )
+        .await
+        .expect("stale write response");
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+
+    let write = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": base_hash,
+                        "content": "# After\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("write request"),
+        )
+        .await
+        .expect("write response");
+    assert_eq!(write.status(), StatusCode::OK);
+    let write_body = axum::body::to_bytes(write.into_body(), 64 * 1024)
+        .await
+        .expect("write body");
+    let write_json: serde_json::Value = serde_json::from_slice(&write_body).expect("write json");
+    assert!(write_json["contentHash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(
+        fs::read_to_string(root.join("doc.md")).expect("saved doc"),
+        "# After\n"
+    );
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_are_owner_authenticated_and_reject_traversal() {
+    let root = temp_fixture_path("write-auth");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "path": "../outside.md",
+        "baseContentHash": "sha256:none",
+        "content": "bad"
+    })
+    .to_string();
+    let unauth = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .expect("unauth write"),
+        )
+        .await
+        .expect("unauth response");
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let traversal = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("traversal write"),
+        )
+        .await
+        .expect("traversal response");
+    assert_eq!(traversal.status(), StatusCode::BAD_REQUEST);
+    let traversal_body = axum::body::to_bytes(traversal.into_body(), 4096)
+        .await
+        .expect("traversal body");
+    assert!(!String::from_utf8_lossy(&traversal_body).contains(root.to_string_lossy().as_ref()));
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_serialize_same_source_optimistic_saves() {
+    let root = temp_fixture_path("write-concurrent");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/read?path=doc.md",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("read before concurrent writes"),
+        )
+        .await
+        .expect("read before concurrent writes response");
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
+    let read_json: serde_json::Value = serde_json::from_slice(&read_body).expect("read json");
+
+    let write_request = |content: &'static str| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        let work_root_id = work_root_id.clone();
+        let base_content_hash = read_json["contentHash"].clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/api/dashboard/work-roots/{}/files/write",
+                        work_root_id.as_str()
+                    ))
+                    .header(header::COOKIE, cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "path": "doc.md",
+                            "baseContentHash": base_content_hash,
+                            "content": content
+                        })
+                        .to_string(),
+                    ))
+                    .expect("concurrent write"),
+            )
+            .await
+            .expect("concurrent write response")
+            .status()
+        }
+    };
+
+    let (left, right) = tokio::join!(write_request("# Left\n"), write_request("# Right\n"));
+    let mut statuses = [left, right];
+    statuses.sort_by_key(|status| status.as_u16());
+    assert_eq!(statuses, [StatusCode::OK, StatusCode::CONFLICT]);
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_reject_unknown_unavailable_oversized_and_binary() {
+    let root = temp_fixture_path("write-validation");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    fs::write(root.join("binary.bin"), b"abc\0def").expect("write binary");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let unknown = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/missing-root/files/write")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:none",
+                        "content": "ignored"
+                    })
+                    .to_string(),
+                ))
+                .expect("unknown write"),
+        )
+        .await
+        .expect("unknown write response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let oversized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:none",
+                        "content": "x".repeat(1024 * 1024 + 1)
+                    })
+                    .to_string(),
+                ))
+                .expect("oversized write"),
+        )
+        .await
+        .expect("oversized write response");
+    assert_eq!(oversized.status(), StatusCode::BAD_REQUEST);
+
+    let binary = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "binary.bin",
+                        "baseContentHash": "sha256:none",
+                        "content": "text"
+                    })
+                    .to_string(),
+                ))
+                .expect("binary write"),
+        )
+        .await
+        .expect("binary write response");
+    assert_eq!(binary.status(), StatusCode::BAD_REQUEST);
+
+    remove_static_fixture(&root);
+    let unavailable = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:none",
+                        "content": "ignored"
+                    })
+                    .to_string(),
+                ))
+                .expect("unavailable write"),
+        )
+        .await
+        .expect("unavailable write response");
+    assert_eq!(unavailable.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn work_root_document_events_route_is_authenticated_and_rejects_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let unauth = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/missing-root/documents/events")
+                .body(Body::empty())
+                .expect("unauth document events"),
+        )
+        .await
+        .expect("unauth document events response");
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let unknown = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/missing-root/documents/events")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown document events"),
+        )
+        .await
+        .expect("unknown document events response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn work_root_document_events_deliver_save_invalidation() {
+    let root = temp_fixture_path("document-events-save");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/documents/events",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("document events request"),
+        )
+        .await
+        .expect("document events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    let mut stream = events.into_body().into_data_stream();
+
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/read?path=doc.md",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("read before write"),
+        )
+        .await
+        .expect("read before write response");
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
+    let read_json: serde_json::Value = serde_json::from_slice(&read_body).expect("read json");
+    let write_body = serde_json::json!({
+        "path": "doc.md",
+        "baseContentHash": read_json["contentHash"],
+        "content": "# After\n"
+    })
+    .to_string();
+    let write = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(write_body))
+                .expect("write request"),
+        )
+        .await
+        .expect("write response");
+    assert_eq!(write.status(), StatusCode::OK);
+    let write_body = axum::body::to_bytes(write.into_body(), 64 * 1024)
+        .await
+        .expect("write body");
+    let write_json: serde_json::Value = serde_json::from_slice(&write_body).expect("write json");
+
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "document.contentChanged"
+                && event["source"]["path"] == "doc.md"
+                && event["contentHash"] == write_json["contentHash"]
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("document SSE chunk")
+                .expect("document SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("document SSE UTF-8"));
+            drain_document_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("save invalidation event");
+
+    remove_static_fixture(&root);
+}
+
+fn drain_document_sse_events(buffer: &mut String, events: &mut Vec<serde_json::Value>) {
+    while let Some(boundary) = buffer.find("\n\n") {
+        let frame = buffer[..boundary].to_owned();
+        *buffer = buffer[(boundary + 2)..].to_owned();
+        if !frame.lines().any(|line| line == "event: document") {
+            continue;
+        }
+        let data = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("document SSE frame data field");
+        events.push(serde_json::from_str(data).expect("document SSE data JSON"));
+    }
 }

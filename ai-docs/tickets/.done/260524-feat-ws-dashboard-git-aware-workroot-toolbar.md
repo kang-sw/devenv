@@ -1,10 +1,13 @@
 ---
 title: Add Git-aware WorkRoot toolbar chips and branch controls
+completed: 2026-05-25
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-linked-worktree-discovery: toolbar chips apply to Git primary roots and linked worktrees discovered as workRoots
   260524-feat-ws-dashboard-add-git-worktree-ui: branch/worktree creation controls should share Git-aware workspace/workRoot semantics
   260523-feat-ws-dashboard-workroot-registry-activation: Git status is visible only for online available Git-aware workRoots
+spec:
+  - 260524-ws-dashboard-git-aware-workroot-toolbar
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -180,3 +183,18 @@ plain push success/failure behavior, `git pull --ff-only` success and
 non-fast-forward failure without conflict state, polling pause while hidden,
 immediate refresh on selected workRoot switch, no host-path leakage, and
 browser-level evidence against a daemon-served Git workRoot toolbar.
+
+### Result (3ac64908) - 2026-05-25
+
+Implemented daemon-backed Git status, branch listing, branch creation/switching,
+fetch, plain push, and fast-forward-only pull routes for selected online
+available Git workRoots. The toolbar now renders the branch chip, branch menu,
+new-branch modal with base selection, compact status pill, and safe sync
+interactions through dashboard commands and opaque `workRootId` routing.
+
+Review follow-up tightened typed route failures, stale cross-root state
+clearing, route-test coverage for duplicate/base branch and ff-only behavior,
+polling scheduler coverage, CSS token usage, browser fetch evidence, and
+visible-workbench-root close confirmation handling. Verification passed daemon
+tests, command tests, Git toolbar route tests, production frontend build, and
+browser acceptance after the close-confirmation fix.

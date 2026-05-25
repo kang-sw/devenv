@@ -146,6 +146,58 @@ one activation state and the same online/offline behavior across navigation,
 Activity, file, and terminal surfaces.
 {#260524-dashboard-workroot-registry-wide-activation-lookup}
 
+## Git Worktree Creation {#260524-ws-dashboard-git-worktree-creation}
+
+The dashboard lets an authenticated owner add a linked Git worktree from a
+workspace-scoped overflow menu. The workspace remove affordance appears
+behind the same overflow menu, preserving its dashboard-only confirmation and
+registry behavior while making room for non-destructive workspace operations.
+
+The add-worktree flow is a Git operation, not a generic filesystem picker. A
+modal collects a worktree name, branch resolution, and target path resolution.
+Automatic branch naming derives a branch-compatible candidate from the
+worktree name, then the daemon previews whether submit will create a new branch,
+check out an existing branch, or block the request. Automatic path naming
+targets the workspace Git root's `.git/ws-worktree/<branch-compatible-name>`
+convention. Custom path selection may reuse the folder picker in target-path
+or parent-directory mode without adding broad file-manager operations.
+
+Submit revalidates the preview, runs the corresponding `git worktree add`
+operation, refreshes canonical dashboard resources, activates the created
+workRoot by default, and selects or focuses the created linked workRoot when
+the daemon can identify it. Checked-out branches, invalid names, unavailable
+Git roots, and path conflicts produce bounded errors without exposing private
+host paths in command payloads, logs, or browser-visible diagnostics.
+
+## Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
+
+The selected WorkRoot toolbar shows Git controls only for online, available
+Git workRoots. Non-Git, offline, missing, moved, or inaccessible workRoots do
+not render branch or Git status controls beyond bounded
+unavailable diagnostics.
+
+The toolbar includes a branch chip for the current branch or a bounded detached
+`HEAD` label. Opening the chip shows a daemon-resolved branch list with
+checked-out branches disabled when known, plus a `+ New branch...` action that
+creates and switches to a new branch from a selected base branch. Branch switch
+and create actions follow Git defaults and revalidate server-side before
+mutation.
+
+A compact Git status pill summarizes line/file and upstream state with the
+segment grammar `+<added-lines> -<removed-lines> *<modified-files>
+?<untracked-files> | ↑<ahead> ↓<behind>`. The pill always exposes a small
+fetch/refresh action, and upstream push/pull segments are interactive only when
+applicable. Push runs plain `git push`; pull runs
+`git pull --ff-only` so dashboard-triggered pulls cannot leave the workRoot in
+a merge or rebase conflict state.
+
+Status refresh stays host-light: the dashboard refreshes immediately on
+selected WorkRoot changes, visibility return, explicit fetch/push/pull,
+branch switch, and branch create, then polls conservatively only for the
+selected visible WorkRoot. All Git toolbar routes remain owner-authenticated,
+address workRoots by opaque `workRootId`, keep Git work off async workers, and
+avoid exposing host paths in command logs or bounded browser-visible errors.
+
 Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots
 with offline activation return a bounded offline response. Online workRoots
@@ -812,14 +864,15 @@ top-level browser document, displacing dashboard chrome, or requiring a future
 editor replacement to prove containment.
 {#260517-ws-dashboard-readonly-text-scroll-containment}
 
-## 🚧 Document Viewer Mode {#260524-ws-dashboard-document-viewer-mode}
+## Document Viewer Mode {#260524-ws-dashboard-document-viewer-mode}
 
 The dashboard will present previewable documents through a reusable document
 viewer mode instead of treating every file as raw preformatted text. A document
 pane owns one workRoot-relative source attachment and a pane-local
 `view | edit` mode control. View mode is format-aware and read-only; edit mode
-is a separate raw-text editing surface. Switching modes does not create a
-second workbench tab for the same document.
+is visibly reserved but disabled until the raw-text edit/save feature lands.
+Switching document presentation mode does not create a second workbench tab for
+the same document.
 
 Markdown documents render through a real Markdown AST pipeline rather than a
 hand-rolled parser. The initial Markdown viewer supports polished GFM table and
@@ -836,9 +889,14 @@ non-translatable. Block-level actions copy the visible text or a workRoot-
 relative path reference such as `@path/to/file.md#L12-L18`; copied path
 references never include absolute host paths.
 
-## 🚧 Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
+The viewer accepts local translation overlay data keyed by the current content
+hash and block id so later daemon translation results can reuse the same
+rendering path. Without a real daemon translation result, translated-copy
+actions remain pending or unavailable.
 
-Markdown view mode will expose a pane-local translation toggle next to the
+## Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
+
+Markdown view mode exposes a pane-local translation toggle next to the
 view/edit control. When the toggle is enabled, opening or focusing the pane
 requests whole-document translation for the current immutable content hash.
 Translated blocks overlay the viewer by replacing each block's rendered
@@ -851,7 +909,10 @@ document block set and sends it with full document context; the daemon owns
 provider configuration, model discovery, prompting, bounded output parsing, and
 SHA256/content-hash cache behavior. The first provider shape is an
 OpenAI-compatible LLM provider, suitable for a local Ollama endpoint, while the
-provider union leaves room for future non-LLM translation APIs.
+provider union leaves room for future non-LLM translation APIs. Provider
+configuration is daemon-side; the browser can observe bounded configured,
+reachable, model, cache, and per-block status without receiving API keys,
+prompts, raw model output, or daemon cache paths.
 
 LLM translation roundtrips preserve block identity. Requests contain
 `blockId + content` pairs, and successful responses return matching
@@ -859,9 +920,9 @@ LLM translation roundtrips preserve block identity. Requests contain
 unparseable block ids become bounded block-level failure states rather than raw
 model output in the browser.
 
-## 🚧 Document Edit And Save Fan-Out {#260524-ws-dashboard-document-edit-save-fanout}
+## Document Edit And Save Fan-Out {#260524-ws-dashboard-document-edit-save-fanout}
 
-The dashboard will add a raw-text edit mode for editable workRoot files while
+The dashboard provides a raw-text edit mode for editable workRoot files while
 keeping formatted view mode read-only. Document reads return source identity,
 content hash, media or renderer hints, edit capability, size, and content.
 Document writes use optimistic concurrency through the read content hash and

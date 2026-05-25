@@ -5,8 +5,11 @@ related:
   260523-feat-ws-dashboard-linked-worktree-discovery: created worktrees should appear through the existing linked-worktree discovery projection
   260524-feat-ws-dashboard-workspace-forget-remove-ui: workspace remove moves behind the same overflow menu
   260523-feat-ws-dashboard-workroot-registry-activation: created worktrees should reuse durable workspace/workRoot activation and availability
+spec:
+  - 260524-ws-dashboard-git-worktree-creation
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Add Git worktree creation from the dashboard workspace menu
@@ -182,3 +185,25 @@ name blocking, target-path conflict blocking, resource refresh and selection,
 activation defaulting, no direct child workRoot remove action, and no private
 host-path leakage in command logs or bounded errors. Browser-level evidence
 should exercise the daemon-served modal against a real temporary Git workspace.
+
+### Result (c8695a70) - 2026-05-24
+
+Implemented owner-authenticated workspace Git worktree creation from the
+dashboard left navigation. Workspace rows now expose an overflow menu that
+contains `Add worktree...` and preserves `Remove workspace...` through the
+existing confirmation path. The daemon exposes workspace-scoped
+options/preview/submit routes, validates branch/path inputs, blocks checked-out
+branches, invalid names, non-Git roots, and path conflicts, revalidates on
+submit, runs the corresponding `git worktree add` operation, and returns
+canonical resources with `createdWorkRootId` when it can identify the linked
+workRoot.
+
+The frontend adds path-free command builders, request helpers, a modal with
+daemon-backed preview severity, stale preview/submit guards, semantic-token
+preview styling, canonical resource reconciliation, and selection of the
+daemon-created workRoot id. Browser acceptance covers the workspace menu,
+remove action preservation, new-branch preview/submit, resource refresh, and
+created row selection against a real temporary Git workspace. Review fixes
+tightened submit-time blocked preview surfacing, branch-checkout assertions,
+blocked submit no-side-effect coverage, and browser fixture isolation after
+opening multiple workRoots.

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
@@ -29,8 +30,10 @@ const artifactsDir = path.join(here, ".artifacts");
 let daemon: DaemonHandle;
 let workRoot: string;
 let secondWorkRoot: string | null = null;
+let gitWorkRoot: string | null = null;
 let ownsWorkRoot = false;
 let ownsSecondWorkRoot = false;
+let ownsGitWorkRoot = false;
 let ownsStateHome = false;
 let stateHome: string | null = null;
 let previousStateHome: string | undefined;
@@ -68,6 +71,24 @@ test.beforeAll(async () => {
         (_, index) => `readonly scroll containment line ${index + 1}`,
       ).join("\n") + "\n",
     );
+    writeFileSync(
+      path.join(workRoot, "gate-document.md"),
+      [
+        "# Gate Document",
+        "",
+        "Markdown paragraph line",
+        "with soft continuation",
+        "",
+        "- [x] completed task",
+        "",
+        "> [!note] Browser note",
+        "> callout body",
+        "",
+        "| Kind | Value |",
+        "| --- | --- |",
+        "| table | rendered |",
+      ].join("\n") + "\n",
+    );
     mkdirSync(path.join(workRoot, "gate-subdir"));
     writeFileSync(
       path.join(workRoot, "gate-subdir", "nested.txt"),
@@ -89,6 +110,13 @@ test.beforeAll(async () => {
       process.env.WS_DASHBOARD_DAEMON_BASE_URL ||
       process.env.WS_DASHBOARD_DAEMON_PAIRING_URL,
   );
+  if (process.env.WS_DASHBOARD_TEST_GIT_WORKROOT) {
+    gitWorkRoot = process.env.WS_DASHBOARD_TEST_GIT_WORKROOT;
+  } else if (!externalDaemon) {
+    gitWorkRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-git-gate-"));
+    ownsGitWorkRoot = true;
+    initGitFixture(gitWorkRoot);
+  }
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
   if (!externalDaemon) {
     stateHome = mkdtempSync(path.join(os.tmpdir(), "ws-dash-state-"));
@@ -183,6 +211,9 @@ test.afterAll(async () => {
   if (secondWorkRoot && ownsSecondWorkRoot) {
     rmSync(secondWorkRoot, { recursive: true, force: true });
   }
+  if (gitWorkRoot && ownsGitWorkRoot) {
+    rmSync(gitWorkRoot, { recursive: true, force: true });
+  }
   if (ownsStateHome && stateHome) {
     rmSync(stateHome, { recursive: true, force: true });
   }
@@ -233,6 +264,17 @@ async function expectTerminalInputFocused(page: Page) {
       className: expect.stringContaining("xterm-helper-textarea"),
       tagName: "TEXTAREA",
     });
+}
+
+
+function initGitFixture(rootPath: string) {
+  execFileSync("git", ["init"], { cwd: rootPath, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "ws-dashboard@example.local"], { cwd: rootPath });
+  execFileSync("git", ["config", "user.name", "ws dashboard"], { cwd: rootPath });
+  writeFileSync(path.join(rootPath, "README.md"), "git browser gate fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: rootPath });
+  execFileSync("git", ["commit", "-m", "seed"], { cwd: rootPath, stdio: "ignore" });
+  execFileSync("git", ["branch", "existing-browser-branch"], { cwd: rootPath });
 }
 
 function workRootDisplayName(rootPath: string) {
@@ -474,15 +516,82 @@ async function openWorkRootInBrowser(page: Page, rootPath: string) {
 }
 
 async function selectWorkRootInBrowser(page: Page, rootPath: string) {
-  await page
-    .locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workRoot"], .resource-row[data-command-id="resource.select"][data-resource-presentation="compactWorkRoot"]', {
-      hasText: workRootDisplayName(rootPath),
-    })
-    .click();
+  const label = workRootDisplayName(rootPath);
+  const ids = await resourceIdsForWorkRootLabel(page, label);
+  const directRow = page.locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workRoot"], .resource-row[data-command-id="resource.select"][data-resource-presentation="compactWorkRoot"]', {
+    hasText: label,
+  });
+  if (await directRow.count()) {
+    await directRow.first().click();
+  } else if (ids?.workspaceId) {
+    await page
+      .locator(`.resource-row[data-command-id="resource.select"][data-resource-id="${ids.workspaceId}"]`)
+      .first()
+      .click();
+  } else {
+    await page
+      .locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workspace"]', {
+        hasText: label,
+      })
+      .first()
+      .click();
+  }
   await expect(page.locator(".file-explorer-title")).toContainText(
-    workRootDisplayName(rootPath),
+    label,
   );
   await expectDockviewWorkbench(page);
+}
+
+async function resourceIdsForWorkRootLabel(
+  page: Page,
+  label: string,
+): Promise<{ workRootId: string; workspaceId: string } | null> {
+  return page.evaluate(async (targetLabel) => {
+    const response = await fetch("/api/dashboard/resources");
+    const resources = (await response.json()) as {
+      workspaces?: Array<{
+        id?: string;
+        workRoots?: Array<{
+          id?: string;
+          label?: string;
+          resourcePath?: { workspaceId?: string; workRootId?: string };
+        }>;
+      }>;
+    };
+    for (const workspace of resources.workspaces ?? []) {
+      for (const workRoot of workspace.workRoots ?? []) {
+        if (workRoot.label === targetLabel) {
+          const workspaceId = workRoot.resourcePath?.workspaceId ?? workspace.id ?? null;
+          const workRootId = workRoot.resourcePath?.workRootId ?? workRoot.id ?? null;
+          return workspaceId && workRootId ? { workspaceId, workRootId } : null;
+        }
+      }
+    }
+    return null;
+  }, label);
+}
+
+async function workRootIdForLabel(page: Page, label: string): Promise<string | null> {
+  return page.evaluate(async (targetLabel) => {
+    const response = await fetch("/api/dashboard/resources");
+    const resources = (await response.json()) as {
+      workspaces?: Array<{
+        workRoots?: Array<{
+          id?: string;
+          label?: string;
+          resourcePath?: { workRootId?: string };
+        }>;
+      }>;
+    };
+    for (const workspace of resources.workspaces ?? []) {
+      for (const workRoot of workspace.workRoots ?? []) {
+        if (workRoot.label === targetLabel) {
+          return workRoot.resourcePath?.workRootId ?? workRoot.id ?? null;
+        }
+      }
+    }
+    return null;
+  }, label);
 }
 
 // The terminal pane footer renders `<status> · <columns>x<rows>` from the
@@ -511,6 +620,9 @@ async function documentScrolls(page: Page): Promise<boolean> {
 }
 
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: daemon.baseUrl,
+  });
   const terminalSocketUrls: string[] = [];
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
@@ -572,6 +684,70 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       "visual hierarchy: nav, workbench topbar, Dockview group, tabbar, and pane body use distinct context surface/divider roles",
     );
+  });
+
+
+
+  await test.step("git workspace overflow adds linked worktree", async () => {
+    if (!gitWorkRoot) {
+      note("git worktree add: skipped because no daemon-host Git workRoot is configured");
+      return;
+    }
+    await openWorkRootInBrowser(page, gitWorkRoot);
+    const gitToolbar = page.locator(".git-toolbar");
+    await expect(gitToolbar).toBeVisible();
+    await expect(gitToolbar.locator('[data-command-id="git.branchMenu.open"]')).toBeVisible();
+    await expect(gitToolbar.locator(".git-status-pill")).toContainText("clean");
+    const fetchResponse = page.waitForResponse((response) =>
+      response.url().includes("/git/fetch") && response.request().method() === "POST",
+    );
+    await gitToolbar.locator('[data-command-id="git.fetch"]').click();
+    await expect((await fetchResponse).ok()).toBe(true);
+    await expect(gitToolbar.locator('[data-command-id="git.branchMenu.open"]')).toBeVisible();
+    await gitToolbar.locator('[data-command-id="git.branchMenu.open"]').click();
+    await expect(page.locator(".git-branch-menu")).toBeVisible();
+    await page.locator('.git-branch-menu [data-command-id="git.branchCreate.open"]').click();
+    const branchModal = page.locator(".git-branch-modal");
+    await expect(branchModal).toBeVisible();
+    await expect(branchModal.locator("select.root-picker-input")).toBeVisible();
+    await branchModal.locator('input[placeholder="feature-name"]').fill("browser-toolbar-branch");
+    await branchModal.locator('[data-command-id="git.branchCreate.submit"]').click();
+    await expect(branchModal).toHaveCount(0);
+    await expect(gitToolbar.locator('[data-command-id="git.branchMenu.open"]')).toContainText("browser-toolbar-branch");
+    await selectWorkRootInBrowser(page, workRoot);
+    await expect(page.locator(".git-toolbar")).toHaveCount(0);
+    await selectWorkRootInBrowser(page, gitWorkRoot);
+    await expect(page.locator(".git-toolbar")).toBeVisible();
+    const gitRow = page.locator(".resource-row", { hasText: workRootDisplayName(gitWorkRoot) }).first();
+    await expect(gitRow).toBeVisible();
+    const menuButton = gitRow.locator('[data-command-id="workspace.menu.open"]');
+    await expect(menuButton).toBeVisible();
+    await expect(gitRow.locator('[data-command-id="workspace.remove"]')).toHaveCount(0);
+    await menuButton.click();
+    const menu = page.locator(".workspace-row-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('[data-command-id="workspace.remove"]')).toContainText("Remove workspace...");
+    await menu.locator('[data-command-id="gitWorktreeAdd.open"]').click();
+    const modal = page.locator(".git-worktree-modal");
+    await expect(modal).toBeVisible();
+    await modal.locator('input[placeholder="feature-name"]').fill("Browser Gate Branch");
+    const preview = modal.locator(".git-worktree-preview");
+    await expect(preview).toContainText("new branch will be created");
+    await expect(preview).toHaveClass(/git-worktree-preview-willCreateBranch/);
+    await modal.locator('[data-command-id="gitWorktreeAdd.submit"]').click();
+    await expect(modal).toHaveCount(0);
+    const createdRow = page.locator(".resource-row", { hasText: "Browser-Gate-Branch" }).first();
+    await expect(createdRow).toBeVisible();
+    await expect(createdRow).toHaveClass(/resource-row-selected/);
+    await selectWorkRootInBrowser(page, gitWorkRoot);
+    const gitPrimaryChildRow = page.locator('.resource-row[data-resource-presentation="workRoot"]', {
+      hasText: workRootDisplayName(gitWorkRoot),
+    });
+    await expect(gitPrimaryChildRow).toHaveCount(0);
+    const gitWorkspaceRow = page.locator('.resource-row[data-resource-presentation="workspace"].resource-row-selected').first();
+    await expect(gitWorkspaceRow).toBeVisible();
+    await selectWorkRootInBrowser(page, workRoot);
+    note("git worktree add: workspace overflow preserved remove action, previewed new branch, submitted through daemon resources, and selected daemon-created workRoot id");
   });
 
   await test.step("activation controls are command-routed and update visible state", async () => {
@@ -786,6 +962,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityPane).toHaveCount(0);
     await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
 
+    activityFixtureRootId = await workRootIdForLabel(
+      page,
+      workRootDisplayName(workRoot),
+    );
+    expect(activityFixtureRootId).toBeTruthy();
+
     await page.route(
       /\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/,
       async (route) => {
@@ -797,9 +979,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           : "browser-gate-root";
         if (new URL(route.request().url()).searchParams.has("recentLimit")) {
           activityRecentPollRequests += 1;
-        }
-        if (!activityFixtureRootId) {
-          activityFixtureRootId = requestedWorkRootId;
         }
         if (requestedWorkRootId !== activityFixtureRootId) {
           await route.fulfill({
@@ -1541,7 +1720,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     });
     await replacementRow.click();
     await expect(previewTab).toHaveCount(1);
-    await expect(pane.locator(".readonly-text-pane-title")).toContainText(
+    await expect(pane.locator(".readonly-text-pane-path")).toContainText(
       "gate-bulk-000.txt",
     );
     await expect(pane.locator(".readonly-text-content")).toContainText(
@@ -1586,6 +1765,97 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       .toBe("normal");
     note(
       "read-only file: single click opened a replaceable preview, hover-only close immediately removed it, and double click pinned the file in the opened file group",
+    );
+  });
+
+  await test.step("markdown document viewer renders structured blocks and pathrefs", async () => {
+    const markdownRow = page.locator(".file-explorer-row", {
+      hasText: "gate-document.md",
+    });
+    if ((await markdownRow.count()) === 0) {
+      note(
+        "markdown document viewer: skipped because external daemon workRoot did not provide gate-document.md",
+      );
+      return;
+    }
+
+    await markdownRow.click();
+    const pane = page.locator(".document-pane");
+    await expect(pane).toBeVisible();
+    const previewTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+    );
+    await expect(previewTab).toBeVisible();
+    const previewTabIdBeforeEdit = await previewTab.getAttribute("data-workbench-pane-id");
+    if (!previewTabIdBeforeEdit) {
+      throw new Error("document preview tab id missing before edit");
+    }
+    const previewTabCountBeforeEdit = await previewTab.count();
+    await expect(pane.locator('.document-viewer-segment.is-active[data-document-mode="view"]')).toBeVisible();
+    await expect(pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]')).toBeEnabled();
+    await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
+    await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
+    await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
+    await expect(pane.locator("table")).toContainText("rendered");
+    await pane.locator(".document-translation-toggle").click();
+    await expect(pane.locator(".document-translation-status")).toContainText(
+      /No translation provider configured|Translation partial|Translated to/,
+    );
+
+    if (ownsWorkRoot) {
+      await pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]').click();
+      await expect(pane.locator(".document-raw-editor")).toBeVisible();
+      await pane.locator(".document-raw-editor").fill(
+        [
+          "# Gate Document Edited",
+          "",
+          "Markdown paragraph line",
+          "with soft continuation",
+          "",
+          "- [x] completed task",
+          "",
+          "> [!note] Browser note",
+          "> callout body",
+          "",
+          "| Kind | Value |",
+          "| --- | --- |",
+          "| table | rendered |",
+        ].join("\n") + "\n",
+      );
+      await pane.locator('[data-command-id="document.save"]').click();
+      await expect(pane.locator('[data-document-save-state="saved"]')).toContainText(/saved/i);
+      await pane.locator('[data-command-id="document.mode.set"][data-document-mode="view"]').click();
+      await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText(
+        "Gate Document Edited",
+      );
+      await expect(previewTab).toHaveCount(previewTabCountBeforeEdit);
+      await expect(previewTab).toHaveAttribute("data-workbench-pane-id", previewTabIdBeforeEdit);
+      expect(readFileSync(path.join(workRoot, "gate-document.md"), "utf8")).toContain(
+        "# Gate Document Edited",
+      );
+    }
+
+    const paragraphBlock = pane.locator('[data-document-block-kind="paragraph"]').first();
+    await paragraphBlock.click();
+    await expect(pane.locator(".document-viewer-action-strip")).toBeVisible();
+    await expect(pane.locator(".document-viewer-action-strip")).toContainText("Copy pathref");
+    await pane.locator(".document-viewer-action-strip button", { hasText: "Copy pathref" }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(
+      "@gate-document.md#L3-L4",
+    );
+
+    await expectDockviewWorkbench(page);
+    await expect(previewTab).toBeVisible();
+    await markdownRow.dblclick();
+    const markdownPinnedTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"][title="gate-document.md"]',
+    );
+    await expect(markdownPinnedTab).toBeVisible();
+    await markdownPinnedTab.hover();
+    await markdownPinnedTab.locator('[data-command-id="workbench.tab.close"]').click();
+    await expect(markdownPinnedTab).toHaveCount(0);
+    note(
+      "markdown document viewer: daemon-served markdown file rendered heading, task, callout, table, raw edit/save, block action strip, and relative pathref copy while preserving preview-to-pinned tabs",
     );
   });
 
@@ -1730,8 +2000,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       hasText: workRootDisplayName(secondWorkRoot),
     });
     await expect(secondRow).toBeVisible();
-    const removeButton = secondRow.locator('[data-command-id="workspace.remove"]');
-    await expect(removeButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
+    const menuButton = secondRow.locator('[data-command-id="workspace.menu.open"]');
+    await expect(menuButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
+    await menuButton.click();
+    const removeButton = page.locator(".workspace-row-menu").locator('[data-command-id="workspace.remove"]');
+    await expect(removeButton).toBeVisible();
     page.once("dialog", async (dialog) => {
       expect(dialog.message()).toContain("Files and Git worktrees on disk will not be deleted");
       await dialog.accept();
