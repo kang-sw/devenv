@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -759,6 +759,88 @@ function linkedServerBrowserResources(serverId: string, workRootId?: string) {
           },
         ]
       : [],
+  };
+}
+
+function linkedServerBrowserGitResources(serverId: string) {
+  return {
+    server: {
+      id: serverId,
+      label:
+        serverId === "server-local" ? "Local ws dashboard" : "Remote fixture",
+      state: {
+        status: "connected",
+        loading: false,
+        stale: false,
+        error: null,
+      },
+      actions: [
+        { id: "refresh", label: "Refresh", enabled: true },
+        { id: "openRoot", label: "Open root", enabled: true },
+      ],
+    },
+    workspaces: [
+      {
+        id: "workspace-shared-git",
+        label: `workspace-${serverId}`,
+        state: {
+          status: "ready",
+          loading: false,
+          stale: false,
+          error: null,
+        },
+        compactable: false,
+        actions: [],
+        workRoots: [
+          {
+            id: "same-git-root",
+            resourcePath: {
+              serverId,
+              workspaceId: "workspace-shared-git",
+              workRootId: "same-git-root",
+              instanceId: null,
+            },
+            label: `${serverId} git root`,
+            kind: "gitPrimaryRoot",
+            activation: "online",
+            availability: "available",
+            status: "online",
+            state: {
+              status: "ready",
+              loading: false,
+              stale: false,
+              error: null,
+            },
+            compactable: false,
+            mainInstances: [],
+            actions: [],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function gitStatusFixture(branchName: string) {
+  return {
+    available: true,
+    branch: { name: branchName, upstream: `origin/${branchName}` },
+    changes: {
+      addedLines: 0,
+      removedLines: 0,
+      modifiedFiles: 0,
+      untrackedFiles: 0,
+    },
+    sync: { ahead: 0, behind: 0, upstream: `origin/${branchName}` },
+    operations: { canFetch: true, canPush: true, canPullFfOnly: true },
+    refreshedAtMs: 1,
+  };
+}
+
+function gitBranchesFixture(branchName: string) {
+  return {
+    current: branchName,
+    branches: [{ name: branchName, current: true, checkedOut: true }],
   };
 }
 
@@ -2755,6 +2837,106 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   if (portabilityEvidence) {
     portabilityEvidence.browserGate.result = "pass";
   }
+});
+
+test("linked server Git toolbar keeps same-id state scoped by server", async ({ page }) => {
+  const localGitRequests: string[] = [];
+  const remoteGitRequests: string[] = [];
+  let releaseLocalGit: (() => void) | null = null;
+  let localGitReleased = false;
+
+  await page.route("**/api/dashboard/servers", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserServers()),
+    });
+  });
+  await page.route("**/api/dashboard/resources", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserGitResources("server-local")),
+    });
+  });
+  await page.route(
+    "**/api/dashboard/servers/server-remote/resources",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(linkedServerBrowserGitResources("server-remote")),
+      });
+    },
+  );
+
+  const fulfillGit = async (route: Route, branchName: string) => {
+    const url = new URL(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        url.pathname.endsWith("/branches")
+          ? gitBranchesFixture(branchName)
+          : gitStatusFixture(branchName),
+      ),
+    });
+  };
+
+  await page.route(
+    "**/api/dashboard/work-roots/same-git-root/git/**",
+    async (route) => {
+      const url = new URL(route.request().url());
+      localGitRequests.push(`${route.request().method()} ${url.pathname}`);
+      if (!localGitReleased) {
+        await new Promise<void>((resolve) => {
+          releaseLocalGit = resolve;
+        });
+      }
+      await fulfillGit(route, "local-main");
+    },
+  );
+  await page.route(
+    "**/api/dashboard/servers/server-remote/work-roots/same-git-root/git/**",
+    async (route) => {
+      const url = new URL(route.request().url());
+      remoteGitRequests.push(`${route.request().method()} ${url.pathname}`);
+      await fulfillGit(route, "remote-main");
+    },
+  );
+
+  await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-shell")).toBeVisible();
+  await expect.poll(() => localGitRequests.length).toBeGreaterThanOrEqual(2);
+
+  await page
+    .locator(".server-row", { hasText: "Remote fixture" })
+    .locator('[data-command-id="server.select"]')
+    .click();
+  await expect(page.locator(".git-toolbar")).toContainText("remote-main");
+  expect(remoteGitRequests).toEqual(
+    expect.arrayContaining([
+      "GET /api/dashboard/servers/server-remote/work-roots/same-git-root/git/status",
+      "GET /api/dashboard/servers/server-remote/work-roots/same-git-root/git/branches",
+    ]),
+  );
+  expect(
+    remoteGitRequests.every((request) =>
+      request.includes("/api/dashboard/servers/server-remote/"),
+    ),
+  ).toBe(true);
+
+  localGitReleased = true;
+  releaseLocalGit?.();
+  await page.waitForTimeout(100);
+  await expect(page.locator(".git-toolbar")).toContainText("remote-main");
+  await expect(page.locator(".git-toolbar")).not.toContainText("local-main");
+
+  await page
+    .locator(".server-row", { hasText: "Local ws dashboard" })
+    .locator('[data-command-id="server.select"]')
+    .click();
+  await expect(page.locator(".git-toolbar")).toContainText("local-main");
 });
 
 test("linked server root picker uses server-scoped local gateway routes", async ({ page }) => {
