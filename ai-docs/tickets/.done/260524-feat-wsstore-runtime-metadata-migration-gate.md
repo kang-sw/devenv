@@ -307,3 +307,17 @@ consistently; and added coverage for shell-mode metadata authority, all missing
 stream variants, prune/tombstone eligibility, and leased-record prune guards.
 Verification covered targeted `wsstore`, `execjob`, and `mcp` packages plus the
 full Go suite on this environment. Native Windows verification was not run.
+
+#### Edition (900b31da) - 2026-05-25
+
+Native Windows verification found that the `execjob` launch/result/raw/abort
+tests and MCP `exec.*` flow tests still skipped Windows because they depended
+on Unix shell snippets. The tests now use platform-neutral helper processes and
+small OS-specific shell commands so native Windows runs the exec launch,
+result, raw reader, abort, large-output, shell, and no-agent MCP coverage.
+
+Verification after this edition passed on native Windows for the targeted
+`wsstore`, `execjob`, and `mcp` packages, including contention, busy/locked
+retry, concurrent exec metadata writes, prune/tombstone, and missing-payload
+coverage. The full `agents-plugin-tool` Go suite also passed on native Windows
+and locally.
