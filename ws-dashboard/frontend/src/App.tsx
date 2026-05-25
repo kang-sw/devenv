@@ -1284,7 +1284,7 @@ function OpenWorkRootControl({
   }, [open]);
 
   const closePicker = () => {
-    onCommand(buildRootPickerCloseCommand(), {
+    onCommand(buildRootPickerCloseCommand(pickerServerId), {
       "rootPicker.close": () => {
         setOpen(false);
       },
@@ -1292,7 +1292,7 @@ function OpenWorkRootControl({
   };
 
   const openPicker = () => {
-    onCommand(buildRootPickerOpenCommand(), {
+    onCommand(buildRootPickerOpenCommand(pickerServerId), {
       "rootPicker.open": () => {
         setError(null);
         setOpen(true);
@@ -1304,7 +1304,7 @@ function OpenWorkRootControl({
     path: string,
     historyMode: "push" | "replace" = "push",
   ) => {
-    onCommand(buildRootPickerNavigateCommand(path), {
+    onCommand(buildRootPickerNavigateCommand(path, pickerServerId), {
       "rootPicker.navigate": () => {
         void loadPicker(path, historyMode);
       },
@@ -1312,7 +1312,7 @@ function OpenWorkRootControl({
   };
 
   const selectDirectory = (path: string) => {
-    onCommand(buildRootPickerSelectDirectoryCommand(path), {
+    onCommand(buildRootPickerSelectDirectoryCommand(path, pickerServerId), {
       "rootPicker.selectDirectory": () => {
         setSelectedPath(path);
         setExactPath(path);
@@ -1354,7 +1354,7 @@ function OpenWorkRootControl({
       return;
     }
 
-    onCommand(buildWorkRootOpenCommand(requestedPath), {
+    onCommand(buildWorkRootOpenCommand(requestedPath, pickerServerId), {
       "workRoot.open": () => {
         setPendingOpen(true);
         setError(null);
@@ -1387,7 +1387,7 @@ function OpenWorkRootControl({
     if (!parentPath || name.length === 0 || creating) {
       return;
     }
-    onCommand(buildRootPickerCreateDirectoryCommand(parentPath, name), {
+    onCommand(buildRootPickerCreateDirectoryCommand(parentPath, name, pickerServerId), {
       "rootPicker.createDirectory": () => {
         setCreating(true);
         setError(null);
@@ -1425,7 +1425,7 @@ function OpenWorkRootControl({
     if (pinningPath) {
       return;
     }
-    onCommand(buildRootPickerPinDirectoryCommand(path), {
+    onCommand(buildRootPickerPinDirectoryCommand(path, pickerServerId), {
       "rootPicker.pinDirectory": () => {
         setPinningPath(path);
         setError(null);
@@ -1445,7 +1445,7 @@ function OpenWorkRootControl({
     if (pinningPath) {
       return;
     }
-    onCommand(buildRootPickerUnpinDirectoryCommand(path), {
+    onCommand(buildRootPickerUnpinDirectoryCommand(path, pickerServerId), {
       "rootPicker.unpinDirectory": () => {
         setPinningPath(path);
         setError(null);

@@ -287,7 +287,6 @@ async function expectTerminalInputFocused(page: Page) {
     });
 }
 
-
 function initGitFixture(rootPath: string) {
   execFileSync("git", ["init"], { cwd: rootPath, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "ws-dashboard@example.local"], { cwd: rootPath });
@@ -480,7 +479,9 @@ async function openWorkRootInBrowser(page: Page, rootPath: string) {
   await opener.click();
   let modal = page.locator(".root-picker-modal");
   await expect(modal).toBeVisible();
-  await expect(modal.locator(".root-picker-title")).toHaveText("Open workRoot");
+  await expect(modal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on this host",
+  );
   await modal
     .locator('[data-command-id="rootPicker.close"]')
     .filter({ hasText: "Cancel" })
@@ -640,6 +641,146 @@ async function documentScrolls(page: Page): Promise<boolean> {
   });
 }
 
+function linkedServerBrowserServers() {
+  return {
+    servers: [
+      {
+        id: "server-local",
+        label: "Local ws dashboard",
+        kind: "local",
+        status: "connected",
+        state: {
+          status: "connected",
+          loading: false,
+          stale: false,
+          error: null,
+        },
+        actions: [
+          { id: "refresh", label: "Refresh", enabled: true },
+          { id: "openRoot", label: "Open root", enabled: true },
+        ],
+      },
+      {
+        id: "server-remote",
+        label: "Remote fixture",
+        kind: "manual",
+        status: "connected",
+        state: {
+          status: "connected",
+          loading: false,
+          stale: false,
+          error: null,
+        },
+        actions: [
+          { id: "refresh", label: "Refresh", enabled: true },
+          { id: "openRoot", label: "Open root", enabled: true },
+        ],
+      },
+      {
+        id: "server-other",
+        label: "Other remote",
+        kind: "manual",
+        status: "connected",
+        state: {
+          status: "connected",
+          loading: false,
+          stale: false,
+          error: null,
+        },
+        actions: [
+          { id: "refresh", label: "Refresh", enabled: true },
+          { id: "openRoot", label: "Open root", enabled: true },
+        ],
+      },
+    ],
+  };
+}
+
+function linkedServerBrowserResources(serverId: string, workRootId?: string) {
+  const hasRoot = Boolean(workRootId);
+  return {
+    server: {
+      id: serverId,
+      label:
+        serverId === "server-local"
+          ? "Local ws dashboard"
+          : serverId === "server-remote"
+            ? "Remote fixture"
+            : "Other remote",
+      state: {
+        status: "connected",
+        loading: false,
+        stale: false,
+        error: null,
+      },
+      actions: [
+        { id: "refresh", label: "Refresh", enabled: true },
+        { id: "openRoot", label: "Open root", enabled: true },
+      ],
+    },
+    workspaces: hasRoot
+      ? [
+          {
+            id: `workspace-${serverId}`,
+            label: `workspace-${serverId}`,
+            state: {
+              status: "ready",
+              loading: false,
+              stale: false,
+              error: null,
+            },
+            compactable: false,
+            actions: [],
+            workRoots: [
+              {
+                id: workRootId,
+                resourcePath: {
+                  serverId,
+                  workspaceId: `workspace-${serverId}`,
+                  workRootId,
+                  instanceId: null,
+                },
+                label: "remote-opened",
+                kind: "plainDirectory",
+                activation: "online",
+                availability: "available",
+                status: "online",
+                state: {
+              status: "ready",
+              loading: false,
+              stale: false,
+              error: null,
+            },
+                compactable: false,
+                mainInstances: [],
+                actions: [],
+              },
+            ],
+          },
+        ]
+      : [],
+  };
+}
+
+function linkedServerPickerView(currentPath: string, places: unknown[] = []) {
+  return {
+    currentPath,
+    parentPath: currentPath === "/remote/home" ? null : "/remote/home",
+    entries: [
+      {
+        name: "child",
+        path: `${currentPath}/child`,
+        entryType: "directory",
+        selectable: true,
+        kindLabel: "Folder",
+        modifiedTime: null,
+        size: null,
+      },
+    ],
+    places,
+  };
+}
+
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: daemon.baseUrl,
@@ -706,8 +847,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "visual hierarchy: nav, workbench topbar, Dockview group, tabbar, and pane body use distinct context surface/divider roles",
     );
   });
-
-
 
   await test.step("git workspace overflow adds linked worktree", async () => {
     if (!gitWorkRoot) {
@@ -1794,7 +1933,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
-
   await test.step("source CodeMirror viewer renders TOML, fallback text, quiet focus, and edit save", async () => {
     const tomlRow = page.locator(".file-explorer-row", {
       hasText: "gate-config.toml",
@@ -2617,4 +2755,194 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   if (portabilityEvidence) {
     portabilityEvidence.browserGate.result = "pass";
   }
+});
+
+test("linked server root picker uses server-scoped local gateway routes", async ({ page }) => {
+  const remoteGatewayRequests: string[] = [];
+  let localRootPickerHits = 0;
+  let remoteResourcesRefreshes = 0;
+
+  await page.route("**/api/dashboard/servers", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserServers()),
+    });
+  });
+  await page.route("**/api/dashboard/resources", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserResources("server-local")),
+    });
+  });
+  await page.route("**/api/dashboard/root-picker**", async (route) => {
+    localRootPickerHits += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "local root picker should not be used" }),
+    });
+  });
+  await page.route("**/api/dashboard/servers/server-remote/resources", async (route) => {
+    remoteResourcesRefreshes += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        linkedServerBrowserResources("server-remote", "remote-root-opened"),
+      ),
+    });
+  });
+  await page.route("**/api/dashboard/servers/server-remote/root-picker**", async (route) => {
+    const url = new URL(route.request().url());
+    remoteGatewayRequests.push(`${route.request().method()} ${url.pathname}${url.search}`);
+    if (url.pathname.endsWith("/directories")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          name: "new-child",
+          path: "/remote/target/new-child",
+          entryType: "directory",
+          selectable: true,
+          kindLabel: "Folder",
+        }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/pins")) {
+      const places =
+        route.request().method() === "POST"
+          ? [
+              {
+                id: "pin-remote-target",
+                label: "target",
+                path: "/remote/target",
+                kind: "pin",
+                source: "pin",
+                available: true,
+              },
+            ]
+          : [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ places }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        linkedServerPickerView(url.searchParams.get("path") ?? "/remote/home"),
+      ),
+    });
+  });
+  await page.route("**/api/dashboard/servers/server-remote/work-roots/open", async (route) => {
+    remoteGatewayRequests.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "x-ws-dashboard-opened-work-root-id": "remote-root-opened" },
+      body: JSON.stringify(
+        linkedServerBrowserResources("server-remote", "remote-root-opened"),
+      ),
+    });
+  });
+
+  await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-shell")).toBeVisible();
+
+  const remoteRow = page.locator(".server-row", { hasText: "Remote fixture" });
+  await remoteRow.locator('[data-command-id="rootPicker.open"]').click();
+  const modal = page.locator(".root-picker-modal");
+  await expect(modal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on Remote fixture",
+  );
+  await expect(modal.locator(".root-picker-current")).toContainText("/remote/home");
+
+  await modal.locator(".root-picker-address").fill("/remote/target");
+  await modal.locator(".root-picker-address").press("Enter");
+  await expect(modal.locator(".root-picker-current")).toContainText("/remote/target");
+  await modal.locator("#root-picker-create-name").fill("new-child");
+  await modal.locator('[data-command-id="rootPicker.createDirectory"]').click();
+  await expect(
+    modal.locator(".root-picker-row", { hasText: "new-child" }),
+  ).toBeVisible();
+  await modal.locator('[data-command-id="rootPicker.pinDirectory"]').click();
+  await expect(
+    modal.locator(".root-picker-place-row-pinned", { hasText: "target" }),
+  ).toBeVisible();
+  await modal.locator('[data-command-id="rootPicker.unpinDirectory"]').click();
+  await expect(
+    modal.locator(".root-picker-place-row-pinned", { hasText: "target" }),
+  ).toHaveCount(0);
+  await modal.locator("#root-picker-exact-path").fill("/remote/opened");
+  await modal.locator('[data-command-id="workRoot.open"]').filter({ hasText: "Open" }).click();
+
+  await expect(modal).toHaveCount(0);
+  await expect(remoteRow).toHaveClass(/server-row-selected/);
+  await expect(page.locator('[data-resource-id="remote-root-opened"]')).toHaveClass(
+    /resource-row-selected/,
+  );
+  expect(localRootPickerHits).toBe(0);
+  expect(remoteResourcesRefreshes).toBeGreaterThanOrEqual(1);
+  expect(remoteGatewayRequests).toEqual(
+    expect.arrayContaining([
+      "GET /api/dashboard/servers/server-remote/root-picker",
+      "GET /api/dashboard/servers/server-remote/root-picker?path=%2Fremote%2Ftarget",
+      "POST /api/dashboard/servers/server-remote/root-picker/directories",
+      "POST /api/dashboard/servers/server-remote/root-picker/pins",
+      "DELETE /api/dashboard/servers/server-remote/root-picker/pins",
+      "POST /api/dashboard/servers/server-remote/work-roots/open",
+    ]),
+  );
+
+  await page.unroute("**/api/dashboard/servers/server-remote/root-picker**");
+  let releaseFirstPicker: ((value: void) => void) | null = null;
+  await page.route("**/api/dashboard/servers/server-remote/root-picker**", async (route) => {
+    await new Promise<void>((resolve) => {
+      releaseFirstPicker = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerPickerView("/remote/stale")),
+    });
+  });
+  await page.route("**/api/dashboard/servers/server-other/root-picker**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerPickerView("/other/home")),
+    });
+  });
+
+  await remoteRow.locator('[data-command-id="rootPicker.open"]').click();
+  let staleModal = page.locator(".root-picker-modal");
+  await expect(staleModal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on Remote fixture",
+  );
+  await expect(staleModal.locator(".root-picker-current")).toContainText(
+    "Loading directories from Remote fixture",
+  );
+  await staleModal.locator('[data-command-id="rootPicker.close"]').filter({ hasText: "Cancel" }).click();
+
+  await page
+    .locator(".server-row", { hasText: "Other remote" })
+    .locator('[data-command-id="rootPicker.open"]')
+    .click();
+  staleModal = page.locator(".root-picker-modal");
+  await expect(staleModal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on Other remote",
+  );
+  await expect(staleModal.locator(".root-picker-current")).toContainText("/other/home");
+  await expect(staleModal.locator(".root-picker-address")).toHaveValue("/other/home");
+  await expect(staleModal.locator("#root-picker-create-name")).toHaveValue("");
+  releaseFirstPicker?.();
+  await page.waitForTimeout(100);
+  await expect(staleModal.locator(".root-picker-current")).toContainText("/other/home");
+  await expect(staleModal.locator(".root-picker-current")).not.toContainText("/remote/stale");
 });
