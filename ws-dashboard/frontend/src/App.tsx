@@ -18,6 +18,8 @@ import {
   PanelsTopLeft,
   Pencil,
   RefreshCw,
+  RotateCcw,
+  Save,
   SquareTerminal,
   Stethoscope,
   Trash2,
@@ -5112,6 +5114,13 @@ function ReadOnlyDocumentPane({
     translationStatus === "error";
   const documentPathLabel = pane.path;
   const documentPathTitle = pane.path.startsWith("/") ? pane.path : `${root.label} / ${pane.path}`;
+  const saveStatusLabel =
+    saveState === "idle"
+      ? draft === pane.content
+        ? "clean"
+        : "dirty"
+      : saveState;
+  const showSaveStatusChip = documentMode === "edit" && pane.status === "loaded";
 
   return (
     <div className="readonly-text-pane document-pane ws-pane">
@@ -5123,6 +5132,15 @@ function ReadOnlyDocumentPane({
           <div className="readonly-text-pane-badges">
             <span className="meta-chip ws-chip">{pane.mode}</span>
             <span className="meta-chip ws-chip">{documentFormatLabel}</span>
+            {showSaveStatusChip ? (
+              <span
+                className={`meta-chip ws-chip document-save-chip document-save-chip-${saveStatusLabel}`}
+                data-document-save-state={saveState}
+                title={saveMessage ?? saveStatusLabel}
+              >
+                {saveStatusLabel}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="document-ribbon-controls">
@@ -5182,13 +5200,28 @@ function ReadOnlyDocumentPane({
           ) : null}
           {documentMode === "edit" && pane.status === "loaded" ? (
             <div className="document-edit-actions">
-              <button type="button" data-command-id="document.save" disabled={saveState === "saving" || draft === pane.content} onClick={saveDraft}>
-                Save
+              <button
+                type="button"
+                className="icon-button document-edit-icon-button"
+                data-command-id="document.save"
+                disabled={saveState === "saving" || draft === pane.content}
+                title="Save"
+                aria-label="Save document"
+                onClick={saveDraft}
+              >
+                <Save aria-hidden="true" size={13} strokeWidth={1.8} />
               </button>
-              <button type="button" data-command-id="document.revert" disabled={saveState === "saving" || draft === pane.content} onClick={revertDraft}>
-                Revert
+              <button
+                type="button"
+                className="icon-button document-edit-icon-button"
+                data-command-id="document.revert"
+                disabled={saveState === "saving" || draft === pane.content}
+                title="Revert"
+                aria-label="Revert document draft"
+                onClick={revertDraft}
+              >
+                <RotateCcw aria-hidden="true" size={13} strokeWidth={1.8} />
               </button>
-              <span data-document-save-state={saveState}>{saveMessage ?? (draft === pane.content ? "Clean" : "Unsaved changes")}</span>
             </div>
           ) : null}
         </div>

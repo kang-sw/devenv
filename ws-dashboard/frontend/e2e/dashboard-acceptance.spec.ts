@@ -1823,7 +1823,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         ].join("\n") + "\n",
       );
       await pane.locator('[data-command-id="document.save"]').click();
-      await expect(pane.locator('[data-document-save-state="saved"]')).toContainText("Saved");
+      await expect(pane.locator('[data-document-save-state="saved"]')).toContainText(/saved/i);
       await pane.locator('[data-command-id="document.mode.set"][data-document-mode="view"]').click();
       await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText(
         "Gate Document Edited",
