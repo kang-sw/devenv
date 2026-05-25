@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -38,15 +37,12 @@ func gitRoot(t *testing.T) string {
 }
 
 func TestLaunchResultRawReadersAndWorkingDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix shell snippets")
-	}
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Launch(LaunchOptions{Root: root, WorkingDir: "sub", Cmd: "/bin/sh", Args: []string{"-c", "pwd; echo errline >&2; printf 'alpha\\nbeta42\\n'"}})
+	res, err := Launch(LaunchOptions{Root: root, WorkingDir: "sub", Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "flow"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,18 +65,15 @@ func TestLaunchResultRawReadersAndWorkingDir(t *testing.T) {
 	if err != nil || len(grep.Matches) != 1 {
 		t.Fatalf("Grep = %#v, %v", grep, err)
 	}
-	if _, err := Launch(LaunchOptions{Root: root, WorkingDir: "../escape", Cmd: "/bin/sh", Args: []string{"-c", "true"}}); err == nil {
+	if _, err := Launch(LaunchOptions{Root: root, WorkingDir: "../escape", Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "ok"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}}); err == nil {
 		t.Fatal("relative working_dir escaped worktree root")
 	}
 }
 
 func TestLongLargeAndAbort(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix shell snippets")
-	}
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)
-	long, err := Launch(LaunchOptions{Root: root, Command: "echo start; sleep 6; echo done", ShellMode: true})
+	long, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "slow"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +97,7 @@ func TestLongLargeAndAbort(t *testing.T) {
 		t.Fatalf("partial tail = %#v, %v", partial, err)
 	}
 
-	large, err := Launch(LaunchOptions{Root: root, Command: "python3 - <<'PY'\nprint('x'*5000)\nPY", ShellMode: true})
+	large, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "large"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +220,20 @@ func TestHelperProcess(t *testing.T) {
 	args := os.Args
 	for i, arg := range args {
 		if arg == "--" && i+1 < len(args) {
-			_, _ = os.Stdout.WriteString(args[i+1] + "\n")
+			switch args[i+1] {
+			case "flow":
+				wd, _ := os.Getwd()
+				_, _ = os.Stdout.WriteString(wd + "\nalpha\nbeta42\n")
+				_, _ = os.Stderr.WriteString("errline\n")
+			case "slow":
+				_, _ = os.Stdout.WriteString("start\n")
+				time.Sleep(6 * time.Second)
+				_, _ = os.Stdout.WriteString("done\n")
+			case "large":
+				_, _ = os.Stdout.WriteString(strings.Repeat("x", 5000))
+			default:
+				_, _ = os.Stdout.WriteString(args[i+1] + "\n")
+			}
 			os.Exit(0)
 		}
 	}

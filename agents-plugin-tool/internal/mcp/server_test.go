@@ -1898,9 +1898,6 @@ func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 }
 
 func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix shell snippets")
-	}
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "README.md", "x\n")
@@ -1910,8 +1907,8 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"/bin/sh","args":["-c","pwd; echo err >&2; printf 'alpha\\nbeta42\\n'"],"working_dir":"sub"}}}`,
-		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"pwd; printf shell-shape"}}}`,
+		toolCallLine(t, 2, "exec.spawn", map[string]any{"cmd": os.Args[0], "args": []string{"-test.run=TestMCPExecHelperProcess", "--", "flow"}, "env": map[string]string{"GO_WANT_MCP_EXEC_HELPER": "1"}, "working_dir": "sub"}),
+		toolCallLine(t, 9, "exec.shell", mcpShellShapeArgs()),
 	}, "\n") + "\n"
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
@@ -1924,10 +1921,11 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 		}
 	}
 	text := toolText(t, byID["2"])
-	if !strings.Contains(byID["9"], "shell-shape") || !strings.Contains(byID["9"], root) {
+	shellText := toolText(t, byID["9"])
+	if !strings.Contains(shellText, "shell-shape") || !strings.Contains(shellText, execToolJSONPath(root)) {
 		t.Fatalf("shell response = %s", byID["9"])
 	}
-	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, filepath.Join(root, "sub")) || !strings.Contains(text, `"stderr":"err`) {
+	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, execToolJSONPath(filepath.Join(root, "sub"))) || !strings.Contains(text, `"stderr":"err`) {
 		t.Fatalf("spawn response = %s", byID["2"])
 	}
 	var launch execToolResponse
@@ -1971,9 +1969,6 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 }
 
 func TestExecMCPRunningLargeAndAbort(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix shell snippets")
-	}
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "README.md", "x\n")
@@ -1981,7 +1976,7 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	server := NewServer(root, "test")
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"echo start; sleep 6; echo done"}}}` + "\n"
+	input := toolCallLine(t, 1, "exec.shell", mcpLongShellArgs()) + "\n"
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatal(err)
@@ -2019,8 +2014,7 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	}
 
 	out.Reset()
-	largeCommand := "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"
-	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":%q}}}`, largeCommand) + "\n"
+	input = toolCallLine(t, 4, "exec.shell", mcpLargeShellArgs()) + "\n"
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -2032,6 +2026,73 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 
 type execToolResponse struct {
 	ExecKey string `json:"exec_key"`
+}
+
+func toolCallLine(t *testing.T, id int, name string, arguments map[string]any) string {
+	t.Helper()
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      name,
+			"arguments": arguments,
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func mcpShellShapeArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "cd && echo shell-shape"}
+	}
+	return map[string]any{"command": "pwd; printf shell-shape"}
+}
+
+func mcpLongShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "echo start & ping -n 7 127.0.0.1 >NUL & echo done"}
+	}
+	return map[string]any{"command": "echo start; sleep 6; echo done"}
+}
+
+func mcpLargeShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"shell": "powershell", "command": "[Console]::Out.Write(('x' * 5000))"}
+	}
+	return map[string]any{"command": "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"}
+}
+
+func execToolJSONPath(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ReplaceAll(path, `\`, `\\`)
+	}
+	return path
+}
+
+func TestMCPExecHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_MCP_EXEC_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			switch args[i+1] {
+			case "flow":
+				wd, _ := os.Getwd()
+				_, _ = os.Stdout.WriteString(wd + "\nalpha\nbeta42\n")
+				_, _ = os.Stderr.WriteString("err\n")
+			default:
+				_, _ = os.Stdout.WriteString(args[i+1] + "\n")
+			}
+			os.Exit(0)
+		}
+	}
+	os.Exit(2)
 }
 
 func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *testing.T) {
