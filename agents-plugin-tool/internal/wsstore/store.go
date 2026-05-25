@@ -565,7 +565,62 @@ ON CONFLICT(exec_key) DO UPDATE SET
   cleanup_state=excluded.cleanup_state,
   updated_at=excluded.updated_at`,
 		job.ExecKey, job.OwnerActorID, job.Status, job.LeaseID, job.SchemaVersion, job.Root, job.WorkingDir, string(argv), job.Command, job.Shell, blankDefault(job.EnvJSON, "{}"), boolInt(job.StdinPresent), job.StdinBytes, job.PID, job.StartedAt, job.CompletedAt, job.ExitCode, job.Error, boolInt(job.CancelRequested), boolInt(job.LostWorker), job.StdoutPath, job.StderrPath, job.CombinedPath, job.StdoutBytes, job.StderrBytes, job.CombinedBytes, boolInt(job.Pinned), job.ExpiresAt, job.CleanupState, createdAt, updatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.upsertExecStreamArtifacts(ctx, job)
+}
+
+func (s *Store) upsertExecStreamArtifacts(ctx context.Context, job ExecJob) error {
+	state := execArtifactState(job)
+	expires := parseTime(job.ExpiresAt)
+	streams := []struct {
+		name  string
+		path  string
+		bytes int64
+	}{
+		{"stdout", job.StdoutPath, job.StdoutBytes},
+		{"stderr", job.StderrPath, job.StderrBytes},
+		{"combined", job.CombinedPath, job.CombinedBytes},
+	}
+	for _, stream := range streams {
+		if stream.path == "" {
+			continue
+		}
+		if err := s.UpsertArtifact(ctx, Artifact{
+			ArtifactID:   "exec:" + job.ExecKey + ":" + stream.name,
+			Kind:         "exec." + stream.name,
+			Path:         stream.path,
+			OwnerActorID: job.OwnerActorID,
+			State:        state,
+			ByteCount:    stream.bytes,
+			Pinned:       job.Pinned,
+			ExpiresAt:    expires,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func execArtifactState(job ExecJob) string {
+	if job.Pinned {
+		return ArtifactStateCompleted
+	}
+	if job.LeaseID != "" {
+		return ArtifactStateLeased
+	}
+	if job.CleanupState != "" {
+		return job.CleanupState
+	}
+	switch job.Status {
+	case "running":
+		return ArtifactStateRunning
+	case "cancel_requested":
+		return ArtifactStateCancelRequested
+	default:
+		return ArtifactStateCompleted
+	}
 }
 
 func (s *Store) ExecJob(ctx context.Context, key string) (ExecJob, bool, error) {

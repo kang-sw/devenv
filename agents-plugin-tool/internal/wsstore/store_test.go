@@ -659,7 +659,7 @@ func TestExecJobMetadataRoundTripAndConcurrentWrites(t *testing.T) {
 	}
 }
 
-func TestExecArtifactsPruneSkipsActiveAndDeletesExpiredCompleted(t *testing.T) {
+func TestExecArtifactsPruneEligibilityAndTombstones(t *testing.T) {
 	ctx := context.Background()
 	root := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -668,32 +668,66 @@ func TestExecArtifactsPruneSkipsActiveAndDeletesExpiredCompleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	active := filepath.Join(t.TempDir(), "active.payload")
-	completed := filepath.Join(t.TempDir(), "completed.payload")
-	if err := os.WriteFile(active, []byte("active"), 0o644); err != nil {
-		t.Fatal(err)
+	payloadDir := t.TempDir()
+	expired := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	touch := func(name string) string {
+		path := filepath.Join(payloadDir, name)
+		if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
-	if err := os.WriteFile(completed, []byte("done"), 0o644); err != nil {
-		t.Fatal(err)
+	jobs := []ExecJob{
+		{ExecKey: "exec-1-0000000000000101", Status: "running", StdoutPath: touch("running"), ExpiresAt: expired},
+		{ExecKey: "exec-1-0000000000000102", Status: "cancel_requested", StdoutPath: touch("cancel"), ExpiresAt: expired},
+		{ExecKey: "exec-1-0000000000000103", Status: "running", LeaseID: "lease-1", StdoutPath: touch("leased"), ExpiresAt: expired},
+		{ExecKey: "exec-1-0000000000000104", Status: "succeeded", Pinned: true, StdoutPath: touch("pinned"), ExpiresAt: expired},
+		{ExecKey: "exec-1-0000000000000105", Status: "succeeded", StdoutPath: touch("completed"), ExpiresAt: expired},
 	}
-	expired := time.Now().Add(-time.Hour)
-	if err := store.UpsertArtifact(ctx, Artifact{ArtifactID: "exec-active", Kind: "exec.stdout", Path: active, State: ArtifactStateRunning, ExpiresAt: expired}); err != nil {
-		t.Fatal(err)
+	for _, job := range jobs {
+		job.SchemaVersion = 1
+		job.Root = root
+		job.WorkingDir = root
+		job.StartedAt = testNow.Format(time.RFC3339Nano)
+		job.UpdatedAt = job.StartedAt
+		if err := store.UpsertExecJob(ctx, job); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := store.UpsertArtifact(ctx, Artifact{ArtifactID: "exec-completed", Kind: "exec.stdout", Path: completed, State: ArtifactStateCompleted, ExpiresAt: expired}); err != nil {
-		t.Fatal(err)
-	}
-	result, err := store.PruneExpired(ctx, PruneOptions{Limit: 10})
+	result, err := store.PruneExpired(ctx, PruneOptions{Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Deleted != 1 {
 		t.Fatalf("prune result = %#v", result)
 	}
-	if _, err := os.Stat(active); err != nil {
-		t.Fatalf("active payload was pruned: %v", err)
+	for _, name := range []string{"running", "cancel", "leased", "pinned"} {
+		if _, err := os.Stat(filepath.Join(payloadDir, name)); err != nil {
+			t.Fatalf("guarded exec payload %s was pruned: %v", name, err)
+		}
 	}
-	if _, err := os.Stat(completed); !os.IsNotExist(err) {
-		t.Fatalf("completed payload still exists or unexpected err: %v", err)
+	if _, err := os.Stat(filepath.Join(payloadDir, "completed")); !os.IsNotExist(err) {
+		t.Fatalf("completed exec payload still exists or unexpected err: %v", err)
+	}
+
+	blocked := filepath.Join(payloadDir, "blocked-dir")
+	if err := os.Mkdir(blocked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertExecJob(ctx, ExecJob{ExecKey: "exec-1-0000000000000106", Status: "succeeded", SchemaVersion: 1, Root: root, WorkingDir: root, StartedAt: testNow.Format(time.RFC3339Nano), UpdatedAt: testNow.Format(time.RFC3339Nano), StdoutPath: blocked, ExpiresAt: expired}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = store.PruneExpired(ctx, PruneOptions{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Tombstoned != 1 {
+		t.Fatalf("tombstone prune result = %#v", result)
+	}
+	if count, err := store.Count(ctx, "artifact_tombstones"); err != nil || count != 1 {
+		t.Fatalf("artifact_tombstones count=%d err=%v", count, err)
 	}
 }

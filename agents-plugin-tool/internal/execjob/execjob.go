@@ -261,6 +261,9 @@ func Tail(root, key, stream string, lines int) (RawTailResponse, error) {
 	if err != nil {
 		return RawTailResponse{}, err
 	}
+	if err := requirePayloadPresent(st, p); err != nil {
+		return RawTailResponse{ExecKey: key, Stream: st}, err
+	}
 	txt, err := textreader.Tail(p, lines)
 	return RawTailResponse{ExecKey: key, Stream: st, Text: txt}, err
 }
@@ -268,6 +271,9 @@ func Read(root, key, stream string, offset, limit int64) (RawReadResponse, error
 	p, st, err := streamPath(root, key, stream)
 	if err != nil {
 		return RawReadResponse{}, err
+	}
+	if err := requirePayloadPresent(st, p); err != nil {
+		return RawReadResponse{ExecKey: key, Stream: st}, err
 	}
 	rr, err := textreader.Read(p, offset, limit)
 	return RawReadResponse{ExecKey: key, Stream: st, ReadResult: rr}, err
@@ -277,11 +283,23 @@ func Grep(root, key, stream, pattern string, before, after, max int, regex bool)
 	if err != nil {
 		return RawGrepResponse{}, err
 	}
+	for _, p := range paths {
+		if err := requirePayloadPresent(st, p); err != nil {
+			return RawGrepResponse{ExecKey: key, Stream: st}, err
+		}
+	}
 	gr, err := textreader.Grep(paths, pattern, before, after, max, regex)
 	for i := range gr.Matches {
 		gr.Matches[i].Path = ""
 	}
 	return RawGrepResponse{ExecKey: key, Stream: st, GrepResult: gr}, err
+}
+
+func requirePayloadPresent(stream, path string) error {
+	if wsstore.ClassifyFileBackedPayload(path) == wsstore.PayloadConsistencyMissingPayload {
+		return fmt.Errorf("%s file-backed payload missing (recoverable consistency state): %s", stream, path)
+	}
+	return nil
 }
 
 func finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {

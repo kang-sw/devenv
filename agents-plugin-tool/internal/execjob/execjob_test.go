@@ -189,6 +189,37 @@ func TestSQLiteMetadataSurvivesRestartAndNoStateJSONAuthority(t *testing.T) {
 	}
 }
 
+func TestShellLaunchUsesSQLiteMetadataAndNoStateJSON(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	res, err := Launch(LaunchOptions{Root: root, Command: "echo shell-sqlite", ShellMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != stateSucceeded || !strings.Contains(res.Stdout, "shell-sqlite") {
+		t.Fatalf("shell launch = %#v", res)
+	}
+	state, err := statePath(root, res.ExecKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("shell state.json write authority present, stat err=%v", err)
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok, err := store.ExecJob(context.Background(), res.ExecKey)
+	store.Close()
+	if err != nil || !ok {
+		t.Fatalf("shell sqlite job ok=%t err=%v", ok, err)
+	}
+	if job.Command == "" || job.Shell == "" || job.StdoutPath == "" {
+		t.Fatalf("shell stored job = %#v", job)
+	}
+}
+
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
@@ -244,23 +275,51 @@ func TestLegacyFileBackedImportAndCorruptRecovery(t *testing.T) {
 func TestMissingPayloadReportedAsRecoverableConsistencyState(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)
-	res, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "payload"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		stream string
+		arg    string
+	}{
+		{"stdout", "payload"},
+		{"stderr", "stderr-payload"},
+		{"combined", "payload"},
 	}
-	p, _, err := streamPathFromStore(root, res.ExecKey, "stdout")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(p); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Result(root, res.ExecKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got.Error, "recoverable consistency state") || got.Stdout != "" {
-		t.Fatalf("missing payload result = %#v", got)
+	for _, tc := range cases {
+		t.Run(tc.stream, func(t *testing.T) {
+			res, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", tc.arg}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, _, err := streamPathFromStore(root, res.ExecKey, tc.stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			status, err := Status(root, res.ExecKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(status.Error, "recoverable consistency state") || !strings.Contains(status.Error, tc.stream) {
+				t.Fatalf("missing payload status = %#v", status)
+			}
+			got, err := Result(root, res.ExecKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got.Error, "recoverable consistency state") || !strings.Contains(got.Error, tc.stream) {
+				t.Fatalf("missing payload result = %#v", got)
+			}
+			if _, err := Tail(root, res.ExecKey, tc.stream, 1); err == nil || !strings.Contains(err.Error(), "recoverable consistency state") {
+				t.Fatalf("Tail missing %s err=%v", tc.stream, err)
+			}
+			if _, err := Read(root, res.ExecKey, tc.stream, 0, 100); err == nil || !strings.Contains(err.Error(), "recoverable consistency state") {
+				t.Fatalf("Read missing %s err=%v", tc.stream, err)
+			}
+			if _, err := Grep(root, res.ExecKey, tc.stream, "payload", 0, 0, 5, false); err == nil || !strings.Contains(err.Error(), "recoverable consistency state") {
+				t.Fatalf("Grep missing %s err=%v", tc.stream, err)
+			}
+		})
 	}
 }
 
