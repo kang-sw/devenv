@@ -1039,8 +1039,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
+		text, err := wsagent.NewManager(wsagent.Options{}).PrintScoped(root, name, actorID)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.erase":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)

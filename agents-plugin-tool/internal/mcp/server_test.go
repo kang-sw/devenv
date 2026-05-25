@@ -1270,8 +1270,8 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["1"]), "ephemeral answer") {
 		t.Fatalf("agents.result response mismatch: %s", byID["1"])
 	}
-	if _, err := os.Stat(layout.AgentDir); !os.IsNotExist(err) {
-		t.Fatalf("ephemeral agent dir still exists after MCP result: %v", err)
+	if _, err := os.Stat(layout.AgentDir); err != nil {
+		t.Fatalf("ephemeral agent dir should remain after MCP result for retention cleanup: %v", err)
 	}
 }
 

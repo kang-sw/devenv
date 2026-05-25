@@ -616,6 +616,153 @@ func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentRolePointerHistoryAndCollision(t *testing.T) {
+	ctx := context.Background()
+	root := initRepo(t)
+	store := openStore(t, root)
+	defer store.Close()
+	actorKey, err := AgentInternalKey("actor-one", "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalKey, err := AgentInternalKey("", "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := AgentDefinition{AgentKey: actorKey, ActorID: "actor-one", PublicName: "impl", StatePath: "actor-first", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "old", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
+	if err := store.UpsertAgentDefinition(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.StatePath = "actor-second"
+	second.Model = "new"
+	if err := store.UpsertAgentDefinition(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	global := AgentDefinition{AgentKey: globalKey, PublicName: "impl", StatePath: "global", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "global", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
+	if err := store.UpsertAgentDefinition(ctx, global); err != nil {
+		t.Fatal(err)
+	}
+	gotActor, ok, err := store.AgentDefinition(ctx, actorKey)
+	if err != nil || !ok {
+		t.Fatalf("actor role ok=%t err=%v", ok, err)
+	}
+	gotGlobal, ok, err := store.AgentDefinition(ctx, globalKey)
+	if err != nil || !ok {
+		t.Fatalf("global role ok=%t err=%v", ok, err)
+	}
+	if gotActor.StatePath != "actor-second" || gotActor.Model != "new" {
+		t.Fatalf("actor pointer = %+v", gotActor)
+	}
+	if gotGlobal.StatePath != "global" || gotGlobal.Model != "global" {
+		t.Fatalf("global pointer = %+v", gotGlobal)
+	}
+	count, err := store.Count(ctx, "agent_instances")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("agent instance count = %d, want 3", count)
+	}
+	var retired int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_instances WHERE agent_key = ? AND state_path = 'actor-first' AND cleanup_state = 'retired' AND retention_eligible_at != ''`, actorKey).Scan(&retired); err != nil {
+		t.Fatal(err)
+	}
+	if retired != 1 {
+		t.Fatalf("retired first instance rows = %d", retired)
+	}
+}
+
+func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
+	ctx := context.Background()
+	root := initRepo(t)
+	store := openStore(t, root)
+	defer store.Close()
+	key, err := AgentInternalKey("", "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueDir := filepath.Join(store.Layout().AgentsDir, "due")
+	currentDir := filepath.Join(store.Layout().AgentsDir, "current")
+	unrelatedDir := filepath.Join(store.Layout().AgentsDir, "unrelated")
+	for _, dir := range []string{dueDir, currentDir, unrelatedDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := testNow.Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano)
+	due := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "due", SchemaVersion: 1, Status: "idle", CreatedAt: old, RetentionEligibleAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), RetentionNextCheckAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), CleanupState: "retired"}
+	if err := store.UpsertAgentDefinition(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	current := due
+	current.StatePath = "current"
+	current.CleanupState = "current"
+	if err := store.UpsertAgentDefinition(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	pinned := due
+	pinned.StatePath = "pinned"
+	pinned.CleanupState = "retired"
+	pinned.Pinned = true
+	if err := store.UpsertAgentDefinition(ctx, pinned); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteAgentDefinition(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentDefinition(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.PruneAgentInstances(ctx, PruneOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deleted != 1 || res.Scanned != 1 {
+		t.Fatalf("cleanup result = %+v, want one recorded due deletion", res)
+	}
+	if _, err := os.Stat(dueDir); !os.IsNotExist(err) {
+		t.Fatalf("due dir still present/stat err=%v", err)
+	}
+	for _, dir := range []string{currentDir, unrelatedDir} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("dir %s should remain: %v", dir, err)
+		}
+	}
+}
+
+func TestPruneAgentInstancesRecordsRetryFence(t *testing.T) {
+	ctx := context.Background()
+	root := initRepo(t)
+	store := openStore(t, root)
+	defer store.Close()
+	key, err := AgentInternalKey("", "broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := AgentDefinition{AgentKey: key, PublicName: "broken", StatePath: string([]byte{'b', 'a', 'd', 0, 'p', 'a', 't', 'h'}), SchemaVersion: 1, Status: "idle", CreatedAt: testNow.Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano), RetentionEligibleAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), RetentionNextCheckAt: testNow.Add(-time.Hour).Format(time.RFC3339Nano), CleanupState: "retired"}
+	if err := store.UpsertAgentDefinition(ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteAgentDefinition(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.PruneAgentInstances(ctx, PruneOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 1 {
+		t.Fatalf("cleanup result = %+v, want failed retry fence", res)
+	}
+	var state, nextCheck, cleanupErr string
+	if err := store.db.QueryRowContext(ctx, `SELECT cleanup_state, retention_next_check_at, cleanup_error FROM agent_instances WHERE agent_key = ?`, key).Scan(&state, &nextCheck, &cleanupErr); err != nil {
+		t.Fatal(err)
+	}
+	if state != "cleanup_failed" || nextCheck == "" || cleanupErr == "" {
+		t.Fatalf("retry fence state=%q next=%q err=%q", state, nextCheck, cleanupErr)
+	}
+}
+
 func TestExecJobMetadataRoundTripAndConcurrentWrites(t *testing.T) {
 	ctx := context.Background()
 	root := initRepo(t)

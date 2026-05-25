@@ -627,9 +627,6 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Agent{}, Layout{}, err
 	}
-	if err := os.RemoveAll(existingLayout.AgentDir); err != nil {
-		return Agent{}, Layout{}, fmt.Errorf("reset agent directory: %w", err)
-	}
 	layout, err := m.scopedLayout(opts.Root, name, opts.ActorID, true)
 	if err != nil {
 		return Agent{}, Layout{}, err
@@ -1306,11 +1303,18 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 }
 
 func (m Manager) Print(root, name string) (string, error) {
+	return m.PrintScoped(root, name, "")
+}
+
+func (m Manager) PrintScoped(root, name, actorID string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.layout(root, name, false)
+	layout, err := m.scopedLayout(root, name, actorID, false)
 	if err != nil {
+		return "", err
+	}
+	if _, err := m.readAgentMetadata(layout, name, actorID); err != nil {
 		return "", err
 	}
 	raw, err := os.ReadFile(layout.OutputFile)
@@ -2328,15 +2332,8 @@ func (m Manager) eraseScoped(root, name, actorID string) error {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
-	if err != nil {
-		return err
-	}
 	if err := m.deleteAgentMetadata(root, name, actorID); err != nil {
 		return err
-	}
-	if err := os.RemoveAll(layout.AgentDir); err != nil {
-		return fmt.Errorf("erase agent: %w", err)
 	}
 	return nil
 }
@@ -2357,24 +2354,40 @@ func (m Manager) scopedLayout(root, name, actorID string, create bool) (Layout, 
 	if key == "" {
 		return Layout{}, errors.New("agent name resolves to empty path key")
 	}
+	trimmedActorID := strings.TrimSpace(actorID)
+	internalKey, err := m.registryKey(trimmedActorID, name)
+	if err != nil {
+		return Layout{}, err
+	}
 	dirKey := key
-	if strings.TrimSpace(actorID) != "" {
-		internalKey, err := m.registryKey(actorID, name)
-		if err != nil {
-			return Layout{}, err
-		}
+	if trimmedActorID != "" {
 		dirKey = actorScopedDirKey(internalKey, name)
-		if store, err := m.registryStore(root); err == nil {
-			if def, ok, defErr := store.AgentDefinition(context.Background(), internalKey); defErr == nil && ok && strings.TrimSpace(def.StatePath) != "" {
+	}
+	hasCurrentRole := false
+	if store, err := m.registryStore(root); err == nil {
+		if def, ok, defErr := store.AgentDefinition(context.Background(), internalKey); defErr == nil && ok && strings.TrimSpace(def.StatePath) != "" {
+			hasCurrentRole = true
+			if !create {
 				dirKey = def.StatePath
 			}
-			_ = store.Close()
+		}
+		_ = store.Close()
+	}
+	if create && hasCurrentRole {
+		stamp := m.now().UTC().Format("20060102T150405.000000000Z")
+		if trimmedActorID != "" {
+			dirKey = actorScopedDirKey(internalKey, name) + "-" + stamp
+		} else {
+			dirKey = key + "-" + stamp
+		}
+		for i := 0; pathExists(filepath.Join(state.AgentsDir, dirKey)) && i < 1000; i++ {
+			dirKey = fmt.Sprintf("%s-%03d", dirKey, i+1)
 		}
 	}
 	dir := filepath.Join(state.AgentsDir, dirKey)
 	layout := Layout{
 		Root:              root,
-		ActorID:           strings.TrimSpace(actorID),
+		ActorID:           trimmedActorID,
 		Name:              name,
 		AgentDir:          dir,
 		AgentFile:         filepath.Join(dir, "agent.json"),
@@ -2399,6 +2412,11 @@ func (m Manager) scopedLayout(root, name, actorID string, create bool) (Layout, 
 		}
 	}
 	return layout, nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func (m Manager) now() time.Time {

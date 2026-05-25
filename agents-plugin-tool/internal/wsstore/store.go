@@ -62,28 +62,45 @@ type Actor struct {
 }
 
 type AgentDefinition struct {
-	AgentKey            string
-	ActorID             string
-	PublicName          string
-	StatePath           string
-	SchemaVersion       int
-	Backend             string
-	Harness             string
-	Tier                string
-	Model               string
-	Effort              string
-	SessionID           string
-	Status              string
-	CreatedAt           string
-	LastSeenAt          string
-	LastCallAt          string
-	LastOutputPath      string
-	PromptRefs          []string
-	SystemPromptPath    string
-	ChildActorID        string
-	ChildActorAuthority string
-	Capabilities        map[string]bool
-	Ephemeral           bool
+	AgentKey             string
+	ActorID              string
+	PublicName           string
+	StatePath            string
+	SchemaVersion        int
+	Backend              string
+	Harness              string
+	Tier                 string
+	Model                string
+	Effort               string
+	SessionID            string
+	Status               string
+	CreatedAt            string
+	LastSeenAt           string
+	LastCallAt           string
+	LastOutputPath       string
+	PromptRefs           []string
+	SystemPromptPath     string
+	ChildActorID         string
+	ChildActorAuthority  string
+	Capabilities         map[string]bool
+	Ephemeral            bool
+	InstanceID           string
+	RetentionEligibleAt  string
+	RetentionCheckedAt   string
+	RetentionNextCheckAt string
+	CleanupState         string
+	CleanupAttemptedAt   string
+	CleanupError         string
+	Pinned               bool
+}
+
+const AgentInstanceRetentionTTL = 7 * 24 * time.Hour
+
+type AgentInstanceCleanupResult struct {
+	Scanned int
+	Deleted int
+	Failed  int
+	Skipped int
 }
 
 type ExecJob struct {
@@ -278,6 +295,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err := migrateAgentDefsColumns(ctx, tx); err != nil {
 			return err
 		}
+		if err := migrateAgentInstanceColumns(ctx, tx); err != nil {
+			return err
+		}
+		if err := migrateAgentDefinitionsToInstances(ctx, tx); err != nil {
+			return err
+		}
 		if err := migrateExecJobsColumns(ctx, tx); err != nil {
 			return err
 		}
@@ -339,6 +362,57 @@ var agentDefColumnMigrations = []struct{ name, sql string }{
 	{"child_actor_authority", `child_actor_authority TEXT NOT NULL DEFAULT ''`},
 	{"capabilities_json", `capabilities_json TEXT NOT NULL DEFAULT '{}'`},
 	{"ephemeral", `ephemeral INTEGER NOT NULL DEFAULT 0`},
+}
+
+func migrateAgentInstanceColumns(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(agent_instances)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, column := range agentInstanceColumnMigrations {
+		if columns[column.name] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_instances ADD COLUMN `+column.sql); err != nil {
+			return fmt.Errorf("migrate agent_instances.%s: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+var agentInstanceColumnMigrations = []struct{ name, sql string }{
+	{"retention_eligible_at", `retention_eligible_at TEXT NOT NULL DEFAULT ''`},
+	{"retention_checked_at", `retention_checked_at TEXT NOT NULL DEFAULT ''`},
+	{"retention_next_check_at", `retention_next_check_at TEXT NOT NULL DEFAULT ''`},
+	{"cleanup_state", `cleanup_state TEXT NOT NULL DEFAULT ''`},
+	{"cleanup_attempted_at", `cleanup_attempted_at TEXT NOT NULL DEFAULT ''`},
+	{"cleanup_error", `cleanup_error TEXT NOT NULL DEFAULT ''`},
+	{"pinned", `pinned INTEGER NOT NULL DEFAULT 0`},
+}
+
+func migrateAgentDefinitionsToInstances(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT OR IGNORE INTO agent_instances(instance_id, agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral, cleanup_state)
+SELECT agent_key || ':' || CASE WHEN state_path = '' THEN 'default' ELSE state_path END, agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral, 'current'
+FROM agent_defs
+WHERE public_name != ''`)
+	return err
 }
 
 func migrateExecJobsColumns(ctx context.Context, tx *sql.Tx) error {
@@ -439,9 +513,72 @@ func (s *Store) UpsertAgentDefinition(ctx context.Context, def AgentDefinition) 
 	if def.PublicName == "" {
 		return errors.New("agent public name is required")
 	}
+	promptRefs, capabilitiesJSON, err := marshalAgentDefinitionJSON(def)
+	if err != nil {
+		return err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	createdAt := def.CreatedAt
+	if createdAt == "" {
+		createdAt = now
+	}
+	instanceID := def.InstanceID
+	if instanceID == "" {
+		instanceID = def.AgentKey + ":" + def.StatePath
+	}
+	if instanceID == def.AgentKey+":" {
+		instanceID = def.AgentKey + ":default"
+	}
+	retentionEligibleAt := def.RetentionEligibleAt
+	if retentionEligibleAt == "" && def.CleanupState != "current" {
+		base := parseTime(def.LastCallAt)
+		if base.IsZero() {
+			base = parseTime(createdAt)
+		}
+		if !base.IsZero() {
+			retentionEligibleAt = base.Add(AgentInstanceRetentionTTL).UTC().Format(time.RFC3339Nano)
+		}
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return withSQLiteRetry(ctx, func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		var oldInstanceID string
+		_ = tx.QueryRowContext(ctx, `SELECT instance_id FROM agent_instances WHERE agent_key = ? AND state_path = (SELECT state_path FROM agent_defs WHERE agent_key = ?)`, def.AgentKey, def.AgentKey).Scan(&oldInstanceID)
+		if oldInstanceID != "" && oldInstanceID != instanceID {
+			eligible := s.agentRetentionEligibleAt(now)
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_instances SET cleanup_state = CASE WHEN cleanup_state = 'current' THEN 'retired' ELSE cleanup_state END, retention_eligible_at = CASE WHEN retention_eligible_at = '' THEN ? ELSE retention_eligible_at END, retention_next_check_at = CASE WHEN retention_next_check_at = '' THEN ? ELSE retention_next_check_at END, updated_at = ? WHERE instance_id = ?`, eligible, eligible, now, oldInstanceID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO agent_instances(instance_id, agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral, retention_eligible_at, retention_checked_at, retention_next_check_at, cleanup_state, cleanup_attempted_at, cleanup_error, pinned)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(instance_id) DO UPDATE SET
+  actor_id=excluded.actor_id, public_name=excluded.public_name, state_path=excluded.state_path, schema_version=excluded.schema_version, backend=excluded.backend, harness=excluded.harness, tier=excluded.tier, model=excluded.model, effort=excluded.effort, session_id=excluded.session_id, status=excluded.status, updated_at=excluded.updated_at, last_seen_at=excluded.last_seen_at, last_call_at=excluded.last_call_at, last_output_path=excluded.last_output_path, prompt_refs_json=excluded.prompt_refs_json, system_prompt_path=excluded.system_prompt_path, child_actor_id=excluded.child_actor_id, child_actor_authority=excluded.child_actor_authority, capabilities_json=excluded.capabilities_json, ephemeral=excluded.ephemeral, cleanup_state=excluded.cleanup_state, pinned=excluded.pinned`,
+			instanceID, def.AgentKey, def.ActorID, def.PublicName, def.StatePath, def.SchemaVersion, def.Backend, def.Harness, def.Tier, def.Model, def.Effort, def.SessionID, def.Status, createdAt, now, def.LastSeenAt, def.LastCallAt, def.LastOutputPath, string(promptRefs), def.SystemPromptPath, def.ChildActorID, def.ChildActorAuthority, string(capabilitiesJSON), boolInt(def.Ephemeral), retentionEligibleAt, def.RetentionCheckedAt, blankDefault(def.RetentionNextCheckAt, retentionEligibleAt), blankDefault(def.CleanupState, "current"), def.CleanupAttemptedAt, def.CleanupError, boolInt(def.Pinned)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO agent_defs(agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(agent_key) DO UPDATE SET
+  actor_id=excluded.actor_id, public_name=excluded.public_name, state_path=excluded.state_path, schema_version=excluded.schema_version, backend=excluded.backend, harness=excluded.harness, tier=excluded.tier, model=excluded.model, effort=excluded.effort, session_id=excluded.session_id, status=excluded.status, updated_at=excluded.updated_at, last_seen_at=excluded.last_seen_at, last_call_at=excluded.last_call_at, last_output_path=excluded.last_output_path, prompt_refs_json=excluded.prompt_refs_json, system_prompt_path=excluded.system_prompt_path, child_actor_id=excluded.child_actor_id, child_actor_authority=excluded.child_actor_authority, capabilities_json=excluded.capabilities_json, ephemeral=excluded.ephemeral`,
+			def.AgentKey, def.ActorID, def.PublicName, def.StatePath, def.SchemaVersion, def.Backend, def.Harness, def.Tier, def.Model, def.Effort, def.SessionID, def.Status, createdAt, now, def.LastSeenAt, def.LastCallAt, def.LastOutputPath, string(promptRefs), def.SystemPromptPath, def.ChildActorID, def.ChildActorAuthority, string(capabilitiesJSON), boolInt(def.Ephemeral)); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+}
+
+func marshalAgentDefinitionJSON(def AgentDefinition) ([]byte, []byte, error) {
 	promptRefs, err := json.Marshal(def.PromptRefs)
 	if err != nil {
-		return fmt.Errorf("marshal prompt refs: %w", err)
+		return nil, nil, fmt.Errorf("marshal prompt refs: %w", err)
 	}
 	capabilities := def.Capabilities
 	if capabilities == nil {
@@ -449,48 +586,25 @@ func (s *Store) UpsertAgentDefinition(ctx context.Context, def AgentDefinition) 
 	}
 	capabilitiesJSON, err := json.Marshal(capabilities)
 	if err != nil {
-		return fmt.Errorf("marshal capabilities: %w", err)
+		return nil, nil, fmt.Errorf("marshal capabilities: %w", err)
 	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
-	createdAt := def.CreatedAt
-	if createdAt == "" {
-		createdAt = now
+	return promptRefs, capabilitiesJSON, nil
+}
+
+func (s *Store) agentRetentionEligibleAt(now string) string {
+	base := parseTime(now)
+	if base.IsZero() {
+		base = s.now().UTC()
 	}
-	_, err = s.execWrite(ctx, `
-INSERT INTO agent_defs(agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(agent_key) DO UPDATE SET
-  actor_id=excluded.actor_id,
-  public_name=excluded.public_name,
-  state_path=excluded.state_path,
-  schema_version=excluded.schema_version,
-  backend=excluded.backend,
-  harness=excluded.harness,
-  tier=excluded.tier,
-  model=excluded.model,
-  effort=excluded.effort,
-  session_id=excluded.session_id,
-  status=excluded.status,
-  updated_at=excluded.updated_at,
-  last_seen_at=excluded.last_seen_at,
-  last_call_at=excluded.last_call_at,
-  last_output_path=excluded.last_output_path,
-  prompt_refs_json=excluded.prompt_refs_json,
-  system_prompt_path=excluded.system_prompt_path,
-  child_actor_id=excluded.child_actor_id,
-  child_actor_authority=excluded.child_actor_authority,
-  capabilities_json=excluded.capabilities_json,
-  ephemeral=excluded.ephemeral`,
-		def.AgentKey, def.ActorID, def.PublicName, def.StatePath, def.SchemaVersion, def.Backend, def.Harness, def.Tier, def.Model, def.Effort, def.SessionID, def.Status, createdAt, now, def.LastSeenAt, def.LastCallAt, def.LastOutputPath, string(promptRefs), def.SystemPromptPath, def.ChildActorID, def.ChildActorAuthority, string(capabilitiesJSON), boolInt(def.Ephemeral))
-	return err
+	return base.Add(AgentInstanceRetentionTTL).UTC().Format(time.RFC3339Nano)
 }
 
 func (s *Store) AgentDefinition(ctx context.Context, agentKey string) (AgentDefinition, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT agent_key, actor_id, public_name, state_path, schema_version, backend, harness, tier, model, effort, session_id, status, created_at, last_seen_at, last_call_at, last_output_path, prompt_refs_json, system_prompt_path, child_actor_id, child_actor_authority, capabilities_json, ephemeral FROM agent_defs WHERE agent_key = ?`, agentKey)
+	row := s.db.QueryRowContext(ctx, `SELECT d.agent_key, d.actor_id, d.public_name, d.state_path, d.schema_version, d.backend, d.harness, d.tier, d.model, d.effort, d.session_id, d.status, d.created_at, d.last_seen_at, d.last_call_at, d.last_output_path, d.prompt_refs_json, d.system_prompt_path, d.child_actor_id, d.child_actor_authority, d.capabilities_json, d.ephemeral, COALESCE(i.instance_id, '') FROM agent_defs d LEFT JOIN agent_instances i ON i.agent_key = d.agent_key AND i.state_path = d.state_path WHERE d.agent_key = ?`, agentKey)
 	var def AgentDefinition
 	var promptRefsJSON, capabilitiesJSON string
 	var ephemeral int
-	if err := row.Scan(&def.AgentKey, &def.ActorID, &def.PublicName, &def.StatePath, &def.SchemaVersion, &def.Backend, &def.Harness, &def.Tier, &def.Model, &def.Effort, &def.SessionID, &def.Status, &def.CreatedAt, &def.LastSeenAt, &def.LastCallAt, &def.LastOutputPath, &promptRefsJSON, &def.SystemPromptPath, &def.ChildActorID, &def.ChildActorAuthority, &capabilitiesJSON, &ephemeral); err != nil {
+	if err := row.Scan(&def.AgentKey, &def.ActorID, &def.PublicName, &def.StatePath, &def.SchemaVersion, &def.Backend, &def.Harness, &def.Tier, &def.Model, &def.Effort, &def.SessionID, &def.Status, &def.CreatedAt, &def.LastSeenAt, &def.LastCallAt, &def.LastOutputPath, &promptRefsJSON, &def.SystemPromptPath, &def.ChildActorID, &def.ChildActorAuthority, &capabilitiesJSON, &ephemeral, &def.InstanceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return AgentDefinition{}, false, nil
 		}
@@ -507,8 +621,28 @@ func (s *Store) AgentDefinition(ctx context.Context, agentKey string) (AgentDefi
 }
 
 func (s *Store) DeleteAgentDefinition(ctx context.Context, agentKey string) error {
-	_, err := s.execWrite(ctx, `DELETE FROM agent_defs WHERE agent_key = ?`, agentKey)
-	return err
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	eligible := s.agentRetentionEligibleAt(now)
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return withSQLiteRetry(ctx, func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		var statePath string
+		_ = tx.QueryRowContext(ctx, `SELECT state_path FROM agent_defs WHERE agent_key = ?`, agentKey).Scan(&statePath)
+		if statePath != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_instances SET cleanup_state = 'retired', retention_eligible_at = CASE WHEN retention_eligible_at = '' THEN ? ELSE retention_eligible_at END, retention_next_check_at = CASE WHEN retention_next_check_at = '' THEN ? ELSE retention_next_check_at END, updated_at = ? WHERE agent_key = ? AND state_path = ?`, eligible, eligible, now, agentKey, statePath); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_defs WHERE agent_key = ?`, agentKey); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
 
 func (s *Store) UpsertExecJob(ctx context.Context, job ExecJob) error {
@@ -770,9 +904,65 @@ LIMIT ?`,
 	return result, s.finishPruneRun(ctx, runID, result, nil)
 }
 
+func (s *Store) PruneAgentInstances(ctx context.Context, opts PruneOptions) (AgentInstanceCleanupResult, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT i.instance_id, i.state_path FROM agent_instances i
+LEFT JOIN agent_defs d ON d.agent_key = i.agent_key AND d.state_path = i.state_path
+WHERE d.agent_key IS NULL
+  AND i.pinned = 0
+  AND i.cleanup_state NOT IN ('current', 'active', 'running', 'queued', 'recovery', 'cleanup_deleted')
+  AND i.retention_eligible_at != ''
+  AND i.retention_eligible_at <= ?
+  AND (i.retention_next_check_at = '' OR i.retention_next_check_at <= ?)
+ORDER BY i.retention_eligible_at ASC
+LIMIT ?`, now, now, limit)
+	if err != nil {
+		return AgentInstanceCleanupResult{}, err
+	}
+	defer rows.Close()
+	type candidate struct{ id, path string }
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.path); err != nil {
+			return AgentInstanceCleanupResult{}, err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		return AgentInstanceCleanupResult{}, err
+	}
+	result := AgentInstanceCleanupResult{}
+	for _, c := range candidates {
+		result.Scanned++
+		absPath := c.path
+		if absPath != "" && !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(s.layout.AgentsDir, absPath)
+		}
+		if err := os.RemoveAll(absPath); err != nil {
+			result.Failed++
+			next := s.now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+			if _, err := s.execWrite(ctx, `UPDATE agent_instances SET cleanup_state = 'cleanup_failed', cleanup_attempted_at = ?, retention_checked_at = ?, retention_next_check_at = ?, cleanup_error = ?, updated_at = ? WHERE instance_id = ?`, now, now, next, err.Error(), now, c.id); err != nil {
+				return result, err
+			}
+			continue
+		}
+		if _, err := s.execWrite(ctx, `UPDATE agent_instances SET cleanup_state = 'cleanup_deleted', cleanup_attempted_at = ?, retention_checked_at = ?, cleanup_error = '', updated_at = ? WHERE instance_id = ?`, now, now, now, c.id); err != nil {
+			return result, err
+		}
+		result.Deleted++
+	}
+	return result, nil
+}
+
 func (s *Store) Count(ctx context.Context, table string) (int, error) {
 	switch table {
-	case "artifacts", "artifact_tombstones", "actors", "prune_runs", "retention_policies", "exec_jobs":
+	case "artifacts", "artifact_tombstones", "actors", "prune_runs", "retention_policies", "exec_jobs", "agent_defs", "agent_instances":
 	default:
 		return 0, fmt.Errorf("unsupported count table %q", table)
 	}
@@ -970,6 +1160,41 @@ var schemaStatements = []string{
 		capabilities_json TEXT NOT NULL DEFAULT '{}',
 		ephemeral INTEGER NOT NULL DEFAULT 0
 	)`,
+	`CREATE TABLE IF NOT EXISTS agent_instances (
+		instance_id TEXT PRIMARY KEY,
+		agent_key TEXT NOT NULL,
+		actor_id TEXT NOT NULL DEFAULT '',
+		public_name TEXT NOT NULL DEFAULT '',
+		state_path TEXT NOT NULL DEFAULT '',
+		schema_version INTEGER NOT NULL DEFAULT 0,
+		backend TEXT NOT NULL DEFAULT '',
+		harness TEXT NOT NULL DEFAULT '',
+		tier TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		effort TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL DEFAULT '',
+		last_seen_at TEXT NOT NULL DEFAULT '',
+		last_call_at TEXT NOT NULL DEFAULT '',
+		last_output_path TEXT NOT NULL DEFAULT '',
+		prompt_refs_json TEXT NOT NULL DEFAULT '[]',
+		system_prompt_path TEXT NOT NULL DEFAULT '',
+		child_actor_id TEXT NOT NULL DEFAULT '',
+		child_actor_authority TEXT NOT NULL DEFAULT '',
+		capabilities_json TEXT NOT NULL DEFAULT '{}',
+		ephemeral INTEGER NOT NULL DEFAULT 0,
+		retention_eligible_at TEXT NOT NULL DEFAULT '',
+		retention_checked_at TEXT NOT NULL DEFAULT '',
+		retention_next_check_at TEXT NOT NULL DEFAULT '',
+		cleanup_state TEXT NOT NULL DEFAULT '',
+		cleanup_attempted_at TEXT NOT NULL DEFAULT '',
+		cleanup_error TEXT NOT NULL DEFAULT '',
+		pinned INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX IF NOT EXISTS agent_instances_role_idx ON agent_instances(agent_key, created_at)`,
+	`CREATE INDEX IF NOT EXISTS agent_instances_cleanup_idx ON agent_instances(cleanup_state, retention_next_check_at, retention_eligible_at)`,
 	`CREATE TABLE IF NOT EXISTS agent_calls (
 		call_id TEXT PRIMARY KEY,
 		agent_key TEXT NOT NULL,

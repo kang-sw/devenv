@@ -1602,8 +1602,11 @@ func TestResultConsumesCompletedEphemeralAgentOnly(t *testing.T) {
 	if text != "temporary result\n" {
 		t.Fatalf("result = %q", text)
 	}
-	if _, err := os.Stat(ephemeralLayout.AgentDir); !os.IsNotExist(err) {
-		t.Fatalf("ephemeral agent dir still exists after result: %v", err)
+	if _, err := os.Stat(ephemeralLayout.AgentDir); err != nil {
+		t.Fatalf("ephemeral agent dir should remain after result for retention cleanup: %v", err)
+	}
+	if _, err := manager.Agent(repo, "tmp"); err == nil {
+		t.Fatalf("ephemeral role should be hidden after result consumption")
 	}
 
 	_, failedLayout, err := manager.Register(RegisterOptions{Root: repo, Name: "failed-tmp", Ephemeral: true})
@@ -1989,7 +1992,7 @@ func TestCurrentCallFailureAndRecoveryFromExistingState(t *testing.T) {
 	}
 }
 
-func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
+func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{
@@ -2005,15 +2008,22 @@ func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	oldLayout := layout
 	agent, layout, err = manager.Register(RegisterOptions{Root: repo, Name: "impl", SystemPromptText: "new"})
 	if err != nil {
-		t.Fatalf("Register reset returned error: %v", err)
+		t.Fatalf("Register returned error: %v", err)
 	}
 	if agent.SessionID != "" {
-		t.Fatalf("reset register kept session id: %+v", agent)
+		t.Fatalf("new registration kept session id: %+v", agent)
+	}
+	if layout.AgentDir == oldLayout.AgentDir {
+		t.Fatalf("new registration reused old instance dir: %s", layout.AgentDir)
+	}
+	if _, err := os.Stat(oldLayout.OutputFile); err != nil {
+		t.Fatalf("old output should remain for history: %v", err)
 	}
 	if _, err := os.Stat(layout.OutputFile); !os.IsNotExist(err) {
-		t.Fatalf("output survived reset or stat failed differently: %v", err)
+		t.Fatalf("new instance unexpectedly has output or stat failed differently: %v", err)
 	}
 	raw, err := os.ReadFile(layout.SystemFile)
 	if err != nil {
@@ -2031,7 +2041,7 @@ func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
 	}
 }
 
-func TestInternalOneShotErasesAgentDirectory(t *testing.T) {
+func TestInternalOneShotHidesRoleAndRetainsAgentDirectory(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{
@@ -2046,12 +2056,19 @@ func TestInternalOneShotErasesAgentDirectory(t *testing.T) {
 	if text != "reply: hello\n" {
 		t.Fatalf("oneshot text = %q", text)
 	}
-	layout, err := manager.layout(repo, "tmp", false)
+	if _, err := manager.Agent(repo, "tmp"); err == nil {
+		t.Fatalf("ephemeral role should be hidden after result consumption")
+	}
+	state, err := manager.scopedLayout(repo, "tmp", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(layout.AgentDir); !os.IsNotExist(err) {
-		t.Fatalf("agent dir still exists or stat failed differently: %v", err)
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(state.AgentDir), "tmp*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) == 0 {
+		t.Fatalf("ephemeral instance dir should remain for retention cleanup")
 	}
 }
 
@@ -2479,6 +2496,32 @@ func TestActorScopedRegistrationsWithSameNameDoNotCollide(t *testing.T) {
 	}
 	if gotA.Model != a.Model || gotB.Model != b.Model || gotA.Model == gotB.Model {
 		t.Fatalf("actor-scoped metadata mismatch: a=%+v b=%+v", gotA, gotB)
+	}
+}
+
+func TestActorScopedAndGlobalSameNameRolePointersDoNotCollide(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", Model: "global-old"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, ActorID: "actor-one", Name: "impl", Model: "actor-old"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, ActorID: "actor-one", Name: "impl", Model: "actor-new"}); err != nil {
+		t.Fatal(err)
+	}
+	global, err := manager.Agent(repo, "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := manager.AgentScoped(repo, "impl", "actor-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if global.Model != "global-old" || actor.Model != "actor-new" {
+		t.Fatalf("role collision: global=%+v actor=%+v", global, actor)
 	}
 }
 
