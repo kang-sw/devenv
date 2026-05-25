@@ -306,7 +306,9 @@ pub async fn start_ssh_dashboard_server(
                 .remove(&request.server.id)
                 .await;
             if let Some(passphrase) = link_passphrase {
-                if let Ok(token) = request_remote_link_token(&endpoint, &passphrase).await {
+                if let Ok(token) =
+                    request_remote_link_token_with_retry(&endpoint, &passphrase).await
+                {
                     state
                         .linked_server_sessions
                         .insert(request.server.id.clone(), token)
@@ -644,6 +646,24 @@ async fn request_remote_link_token(
         .map_err(|_| LinkAuthError::UnexpectedStatus)
 }
 
+async fn request_remote_link_token_with_retry(
+    endpoint: &str,
+    passphrase: &str,
+) -> Result<BearerAuthToken, LinkAuthError> {
+    let mut last_error = LinkAuthError::Unavailable;
+    for _ in 0..20 {
+        match request_remote_link_token(endpoint, passphrase).await {
+            Ok(token) => return Ok(token),
+            Err(LinkAuthError::Unavailable) => {
+                last_error = LinkAuthError::Unavailable;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error)
+}
+
 async fn request_remote_resources(
     endpoint: &str,
     token: &BearerAuthToken,
@@ -825,10 +845,12 @@ fn parse_remote_startup_metadata(
     let mut pairing_url = None;
     let mut link_passphrase = None;
     for line in output.lines() {
-        if let Some(value) = line.trim().strip_prefix(OWNER_PAIRING_PREFIX) {
+        if let Some(index) = line.find(OWNER_PAIRING_PREFIX) {
+            let value = &line[index + OWNER_PAIRING_PREFIX.len()..];
             pairing_url = Some(value.trim().to_owned());
         }
-        if let Some(value) = line.trim().strip_prefix(LINK_PASSPHRASE_PREFIX) {
+        if let Some(index) = line.find(LINK_PASSPHRASE_PREFIX) {
+            let value = &line[index + LINK_PASSPHRASE_PREFIX.len()..];
             let value = value.trim();
             if !value.is_empty() {
                 link_passphrase = Some(value.to_owned());
@@ -855,4 +877,31 @@ fn parse_remote_startup_metadata(
         remote_endpoint: format!("http://127.0.0.1:{port}"),
         link_passphrase,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_startup_parser_accepts_plain_startup_lines() {
+        let parsed = parse_remote_startup_metadata(
+            "ws-dashboard owner pairing URL: http://127.0.0.1:49170/pair?token=redacted\nws-dashboard remote link passphrase: secret\n",
+        )
+        .expect("parse startup output");
+
+        assert_eq!(parsed.remote_endpoint, "http://127.0.0.1:49170");
+        assert_eq!(parsed.link_passphrase.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn remote_startup_parser_accepts_powershell_native_stderr_prefix() {
+        let parsed = parse_remote_startup_metadata(
+            "ws-dashboard.exe : ws-dashboard owner pairing URL: http://127.0.0.1:60437/pair?token=redacted\nws-dashboard remote link passphrase: secret\n",
+        )
+        .expect("parse PowerShell-wrapped startup output");
+
+        assert_eq!(parsed.remote_endpoint, "http://127.0.0.1:60437");
+        assert_eq!(parsed.link_passphrase.as_deref(), Some("secret"));
+    }
 }
