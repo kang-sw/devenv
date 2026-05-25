@@ -8,7 +8,6 @@ related:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
-completed: 2026-05-25
 ---
 
 # wsstore runtime metadata migration gate
@@ -243,3 +242,44 @@ tools use actor scope for root-omitted calls, and explicit-root compatibility
 continues to target the global namespace. Verification covered targeted
 `wsstore`, `wsagent`, and `mcp` packages plus the full Go suite. Exec job
 metadata migration remains deferred outside this completed ticket.
+
+### Phase 3: Migrate exec metadata behind the gate
+
+This phase reopens the remaining exec runtime metadata migration in this ticket
+instead of leaving it as an external deferred follow-up. It must migrate exec
+job lifecycle metadata behind the same Phase 1 SQLite gate while preserving the
+existing public `exec.*` MCP tool behavior and file-backed stream readers.
+
+SQLite becomes the write authority for exec job metadata that benefits from
+transactional lookup and recovery: job identity, lifecycle status, command and
+working-directory metadata, environment/stdin metadata, pid or lost-worker
+reconciliation state, timestamps, exit status, stream path indexes, stream byte
+counts, retention visibility, tombstone/prune eligibility, and cleanup state.
+Stdout, stderr, combined output, raw command output bodies, and any future
+model-readable transcript bodies must remain file-backed payloads.
+
+The migration must preserve `exec.shell`, `exec.spawn`, `exec.status`,
+`exec.result`, `exec.abort`, and `exec.raw.*` behavior. Result and raw reader
+surfaces should continue to expose bounded inline output, byte offsets, tails,
+grep results, stream sizes, and follow-up guidance without requiring callers to
+know whether metadata lives in SQLite or an old file-backed state record.
+
+Existing file-backed exec records must have explicit compatibility behavior:
+best-effort import into SQLite when their metadata fits the boundary, or a
+bounded recoverable state that explains the record cannot be migrated. They
+must not disappear silently and must not leave a parallel JSON write authority
+after migration. Missing stream files should be reported as recoverable
+file-backed payload consistency states, not as SQLite corruption and not as a
+reason to store stream bytes in SQLite.
+
+Cancellation, abort, result inspection, and erase-style cleanup remain logical
+metadata transitions first. They must not synchronously delete stdout, stderr,
+combined stream, runtime diagnostic, or result payload files; physical cleanup
+belongs to prune/tombstone handling with active/leased/running records skipped.
+
+Verify fresh SQLite-backed exec launch, status/result/abort/raw reader behavior
+across MCP process restart, compatibility handling for a pre-existing
+file-backed exec record, missing stream payload reporting, lost-worker
+reconciliation, concurrent short metadata writes against the same worktree
+database, prune/tombstone eligibility, and macOS/Linux plus native Windows
+file-locking and cleanup behavior.
