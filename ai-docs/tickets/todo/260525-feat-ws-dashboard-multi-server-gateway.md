@@ -6,6 +6,7 @@ related:
   260514-research-ws-web-dashboard-direction: longer-range dashboard server federation and remote hardening direction
 spec:
   - 260525-ws-dashboard-remote-deployment-guide
+  - 260525-ws-dashboard-linked-server-registry-gateway-skeleton
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -99,6 +100,30 @@ remote bind, and rich UI polish.
 
 Verification should cover registry persistence, local-server compatibility, and
 gateway refusal behavior for unauthenticated or unreachable linked servers.
+
+### Result (e276809) - 2026-05-25
+
+Implemented the first backend multi-server skeleton. The daemon now exposes a
+separate authenticated server list with `server-local` plus persisted linked
+servers, while preserving the existing single-server `DashboardResourcesView`
+for selected-server resources.
+
+The state store can persist linked-server metadata without dropping WorkRoot
+registry or root-picker pin state. Persisted linked servers currently expose
+bounded `authRequired` or `tunnelRequired` states, not credentials, SSH targets,
+endpoint hints, passphrases, or host paths. A new server-scoped resources route
+dispatches `server-local` to the existing local resource view and returns
+bounded refusal errors for known linked servers until link-auth and transport
+forwarding are implemented.
+
+Verification:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-core`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon linked -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon dashboard_servers_api_lists_local_and_persisted_linked_servers -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon server_scoped_resources_route_dispatches_local_and_refuses_linked_servers -- --nocapture`
+- `ws/spec_index.verify`
 
 ### Phase 2: Remote link authentication and reconnect handshake
 
