@@ -5,6 +5,8 @@ related:
   260524-feat-wsstore-runtime-metadata-migration-gate: establishes SQLite as the named-agent metadata authority and keeps payload bytes file-backed
   260525-feat-named-agent-instance-history: introduces named-agent role pointers, current instances, retained instance history, and retention cleanup fences
   260518-epic-ws-dashboard-activity-console: provides the existing Activity feed, transcript, SSE, and compatibility projection surface this ticket must preserve
+spec:
+  - 260525-ws-dashboard-sqlite-agent-activity-source
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime

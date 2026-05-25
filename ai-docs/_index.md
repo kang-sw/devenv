@@ -154,7 +154,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
-| `260525-feat-ws-dashboard-sqlite-agent-activity-source` | todo | Migrate WorkRoot Activity agent projection from legacy `agent.json` scans to read-only wsstore SQLite role and instance metadata |
+| `260525-feat-ws-dashboard-sqlite-agent-activity-source` | ready | Migrate WorkRoot Activity agent projection from legacy `agent.json` scans to read-only wsstore SQLite role and instance metadata |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
@@ -191,7 +191,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-None.
+- `260525-feat-ws-dashboard-sqlite-agent-activity-source` - ready; backend-only migration of WorkRoot Activity named-agent projection to read-only wsstore SQLite registry metadata.
 
 ## Session Notes
 
