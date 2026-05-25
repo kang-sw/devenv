@@ -2002,7 +2002,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const viewer = page.locator('.document-source-viewer[data-editor-read-only="true"]');
     await expect(viewer).toHaveAttribute("data-editor-language", "text");
     await expect(viewer.locator(".cm-content")).toContainText(
-      "readonly scroll containment line 220",
+      "readonly scroll containment line 1",
     );
     const content = viewer.locator(".cm-scroller");
     const scrollBox = await content.boundingBox();
@@ -2021,6 +2021,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         timeout: 3_000,
       })
       .toBeGreaterThan(0);
+    await content.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect(viewer.locator(".cm-content")).toContainText(
+      "readonly scroll containment line 220",
+    );
     const scrollTopBeforeRefresh = await content.evaluate((node) => node.scrollTop);
     await page.locator('[data-command-id="fileExplorer.refresh"]').click();
     await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
