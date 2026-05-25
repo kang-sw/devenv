@@ -182,7 +182,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
 | `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
-| `260525-bug-subquery-result-actor-scope` | idea | Remove stale public root exposure from subquery and fix its actor-scope follow-up mismatch |
+| `260525-bug-subquery-result-actor-scope` | ready | Remove stale public root exposure from subquery and fix its actor-scope follow-up mismatch |
 | `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
 | `260525-bug-lead-implement-delegation-pre-edit-guard` | idea | Require an explicit direct-edit verdict or implementer spawn before lead-implement mutates source |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
@@ -193,7 +193,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-No ready ticket is currently selected.
+`260525-bug-subquery-result-actor-scope` - hotfix ready; remove stale public
+`root` exposure from `subquery`, align follow-up scope behavior, and verify the
+actor-owned schema invariant.
 
 ## Session Notes
 
