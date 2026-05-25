@@ -9,6 +9,7 @@ spec:
   - 260525-ws-dashboard-sqlite-agent-activity-source
 plans:
   phase-1: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-1
+  phase-2: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-2
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -140,6 +141,29 @@ Verification should prove retained historical instances appear in
 `ActivityFeed.items` without increasing `agents.length` or `summary.total`, and
 that transcript routes resolve both current role items and retained instance
 items.
+
+### Result (13f162f) - 2026-05-25
+
+Implemented retained `agent_instances` history for the WorkRoot Activity feed.
+Historical retained instances now appear only as source-neutral
+`ActivityFeed.items` with opaque `agent-instance:<token>` ids, while current
+compatibility `agents` rows and `summary.total` remain sourced only from
+`agent_defs`.
+
+Transcript reads now dispatch current `agent:<agentKey>` ids through the
+current role row and historical retained instance ids through the matching
+`agent_instances.state_path`, then reuse the existing file-backed output and
+native transcript readers. Current/protected cleanup states, cleanup-deleted
+rows, tombstone/internal rows, and payload-useless status-only rows stay hidden
+from historical item, transcript, and item-version projection.
+
+Verification covers retained historical items without increasing current counts,
+current versus historical transcript routing by distinct `state_path` values,
+opaque id non-collision, useful failed/cancelled/completed/retired retained
+rows, protected/tombstone/internal/deleted/status-only filtering, privacy
+redaction for raw instance and payload identifiers, full daemon package tests,
+daemon `cargo check`, rustfmt on changed files, and partitioned review.
+Phase 3 registry-only refresh/versioning remains open.
 
 ### Phase 3: Make Activity refresh/versioning SQLite-aware
 

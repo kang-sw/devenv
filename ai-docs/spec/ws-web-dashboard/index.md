@@ -562,12 +562,17 @@ file-backed transcript readers. Missing, locked, unavailable, or incompatible
 registry state degrades to an empty or partial read model rather than failing
 the whole route or exposing cache paths.
 
+Retained named-agent instance rows add historical Activity Items when their
+payloads or diagnostics remain useful. Historical instance items use stable
+opaque activity ids distinct from current `agent:<agentKey>` role ids, resolve
+transcripts through the instance `state_path`, and do not increase
+`ActivityFeed.agents` or current named-agent summary counts. Current,
+protected, cleanup-deleted, tombstone/internal, and payload-useless instance
+rows stay hidden from historical item and transcript projection.
+
 > [!note] Planned 🚧
-> Retained named-agent instance rows may add historical Activity Items when
-> their payloads or diagnostics are still useful. Historical instance items do
-> not increase the current named-agent count. Activity refresh/versioning will
-> also observe registry-only metadata changes rather than relying only on
-> payload file modification times.
+> Activity refresh/versioning will observe registry-only metadata changes
+> rather than relying only on payload file modification times.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
