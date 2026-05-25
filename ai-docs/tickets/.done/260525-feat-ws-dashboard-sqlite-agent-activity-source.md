@@ -7,10 +7,15 @@ related:
   260518-epic-ws-dashboard-activity-console: provides the existing Activity feed, transcript, SSE, and compatibility projection surface this ticket must preserve
 spec:
   - 260525-ws-dashboard-sqlite-agent-activity-source
+plans:
+  phase-1: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-1
+  phase-2: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-2
+  phase-3: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-3
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-25
 ---
 
 # ws dashboard SQLite-backed agent activity source
@@ -100,6 +105,21 @@ should report the correct current agent count, status counts, privacy-preserving
 session presence, transcript availability, and degraded behavior for missing or
 locked registry state.
 
+### Result (f0289c0) - 2026-05-25
+
+Implemented the backend-only current-role migration. WorkRoot Activity now reads
+current named-agent role metadata from read-only `state.sqlite` `agent_defs`
+through a small daemon registry adapter, keeps payload bytes file-backed, and
+resolves current-call, output, and native transcript readers through registry
+`state_path` instead of legacy `agents/*/agent.json` discovery.
+
+Verification covers SQLite registry fixtures without `agent.json`, mismatched
+`agent_key` and `state_path` payload lookup, missing/incompatible registry
+state, locked registry soft-degrade behavior, linked workRoot layout, bounded
+privacy assertions, and existing transcript/feed behavior. Retained
+`agent_instances` history and registry-only refresh/versioning remain Phase 2
+and Phase 3.
+
 ### Phase 2: Add retained instance history to Activity items without changing current agent counts
 
 Extend the backend projection so `agent_instances` rows can contribute
@@ -124,6 +144,29 @@ Verification should prove retained historical instances appear in
 that transcript routes resolve both current role items and retained instance
 items.
 
+### Result (13f162f) - 2026-05-25
+
+Implemented retained `agent_instances` history for the WorkRoot Activity feed.
+Historical retained instances now appear only as source-neutral
+`ActivityFeed.items` with opaque `agent-instance:<token>` ids, while current
+compatibility `agents` rows and `summary.total` remain sourced only from
+`agent_defs`.
+
+Transcript reads now dispatch current `agent:<agentKey>` ids through the
+current role row and historical retained instance ids through the matching
+`agent_instances.state_path`, then reuse the existing file-backed output and
+native transcript readers. Current/protected cleanup states, cleanup-deleted
+rows, tombstone/internal rows, and payload-useless status-only rows stay hidden
+from historical item, transcript, and item-version projection.
+
+Verification covers retained historical items without increasing current counts,
+current versus historical transcript routing by distinct `state_path` values,
+opaque id non-collision, useful failed/cancelled/completed/retired retained
+rows, protected/tombstone/internal/deleted/status-only filtering, privacy
+redaction for raw instance and payload identifiers, full daemon package tests,
+daemon `cargo check`, rustfmt on changed files, and partitioned review.
+Phase 3 registry-only refresh/versioning remains open.
+
 ### Phase 3: Make Activity refresh/versioning SQLite-aware
 
 Update snapshot, SSE polling, and recent refresh version calculation so SQLite
@@ -141,3 +184,24 @@ registry-backed ordering.
 Verification should cover registry-only status changes, payload-only transcript
 changes, retained instance appearance/removal, and recent-limit behavior after
 the source switches from directory mtimes to registry-aware versions.
+
+### Result (2a45d3b) - 2026-05-25
+
+Implemented registry-aware WorkRoot Activity freshness. Snapshot versions, SSE
+polling diffs, transcript invalidation checks, and recent refresh ordering now
+consider SQLite registry timestamps and cleanup/retention metadata together
+with current-call, output, runtime-log, stdout/stderr, and native transcript
+payload mtimes.
+
+Existing frontend behavior and Activity event vocabulary remain unchanged:
+registry-only metadata changes can produce item upserts, removals, transcript
+updates, and snapshot invalidations through the current API, while payload-only
+transcript changes continue to update transcript availability. Recent-limit
+ordering uses the latest valid registry or payload signal and preserves
+RFC3339Nano fractional timestamp ordering.
+
+Verification covers registry-only current-role changes, payload-only transcript
+changes, retained instance appearance/removal, combined registry/payload
+recency for current and retained rows, fractional registry timestamp ordering,
+full daemon package tests, daemon `cargo check`, rustfmt on changed files, and
+partitioned correctness/fit/test review.

@@ -546,14 +546,14 @@ ids, process ids, stdout/stderr paths, stream paths, or backend-native
 transcript paths. The read model remains read-only and does not add agent start,
 interrupt, cancel, erase, retry, or exec-job control actions.
 
-### 🚧 SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
+### SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
 
-The Activity Console read model will use the ws runtime SQLite registry as the
+The Activity Console read model uses the ws runtime SQLite registry as the
 named-agent metadata authority for opened workRoots. Current named-agent role
-rows remain the source for the compatibility agent projection and current agent
-counts, while retained named-agent instance rows may add historical Activity
-Items when their payloads or diagnostics are still useful. Historical instance
-items do not increase the current named-agent count.
+rows are the source for the compatibility agent projection and current agent
+counts, and file-backed payload readers resolve current call state, output, and
+transcripts through registry `state_path` metadata rather than legacy
+`agent.json` discovery.
 
 Browser-visible routes and payload shapes stay stable. Activity snapshots,
 watch stream events, and transcript reads continue to use opaque workRoot and
@@ -561,6 +561,22 @@ activity ids, and transcript/output bytes remain normalized by daemon-owned
 file-backed transcript readers. Missing, locked, unavailable, or incompatible
 registry state degrades to an empty or partial read model rather than failing
 the whole route or exposing cache paths.
+
+Retained named-agent instance rows add historical Activity Items when their
+payloads or diagnostics remain useful. Historical instance items use stable
+opaque activity ids distinct from current `agent:<agentKey>` role ids, resolve
+transcripts through the instance `state_path`, and do not increase
+`ActivityFeed.agents` or current named-agent summary counts. Current,
+protected, cleanup-deleted, tombstone/internal, and payload-useless instance
+rows stay hidden from historical item and transcript projection.
+
+Activity freshness is registry-aware. Item versions and recent refresh ordering
+consider SQLite registry timestamps and cleanup/retention metadata together
+with payload mtimes for current-call state, output, runtime logs,
+stdout/stderr, and native transcript files. Registry-only updates can produce
+Activity item upserts, removals, transcript invalidations, and snapshot
+invalidations through the existing event vocabulary, while payload-only
+transcript changes continue to update transcript availability.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 

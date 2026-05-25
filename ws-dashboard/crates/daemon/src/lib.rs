@@ -16,4 +16,5 @@ pub mod server;
 pub mod servers;
 pub mod terminal;
 pub mod work_root_activity;
+mod work_root_activity_registry;
 pub mod work_root_files;
