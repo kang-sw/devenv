@@ -39,6 +39,11 @@ use crate::root_picker::{
     SetWorkRootActivationRequest,
 };
 use crate::router::AppState;
+use crate::terminal::{
+    close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
+    terminal_resize, CreateTerminalRequest, TerminalInputRequest, TerminalOutputQuery,
+    TerminalResizeRequest,
+};
 use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
     ActivityEventsQuery, ActivityTranscriptQuery, WorkRootActivityQuery,
@@ -689,6 +694,49 @@ impl ServerScopedForwardOperation {
             rewrite: ForwardResponseRewrite::None,
         }
     }
+
+    fn terminals(work_root_id: &str, method: Method) -> Option<Self> {
+        matches!(method, Method::GET | Method::POST).then(|| Self {
+            method,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            rewrite: ForwardResponseRewrite::None,
+        })
+    }
+
+    fn terminal_output(terminal_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!("/api/dashboard/terminals/{terminal_id}/output"),
+                &uri,
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn terminal_input(terminal_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/terminals/{terminal_id}/input"),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn terminal_resize(terminal_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/terminals/{terminal_id}/resize"),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn terminal_close(terminal_id: &str) -> Self {
+        Self {
+            method: Method::DELETE,
+            legacy_path: format!("/api/dashboard/terminals/{terminal_id}"),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
 }
 
 enum ServerScopedResolution {
@@ -1086,6 +1134,112 @@ async fn server_scoped_git_no_body_mutation(
                 "unsupported server-scoped operation",
             ),
         };
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_terminals(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(operation) = ServerScopedForwardOperation::terminals(&work_root_id, method.clone())
+    else {
+        return server_error(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "unsupported server-scoped operation",
+        );
+    };
+    if server_id == LOCAL_SERVER_ID {
+        if method == Method::GET {
+            return list_terminals(State(state), AxumPath(work_root_id)).await;
+        }
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<CreateTerminalRequest>(&body) {
+            Ok(request) => {
+                create_terminal(State(state), AxumPath(work_root_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_terminal_output(
+    State(state): State<AppState>,
+    AxumPath((server_id, terminal_id)): AxumPath<(String, String)>,
+    Query(query): Query<TerminalOutputQuery>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::terminal_output(&terminal_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return terminal_output(State(state), AxumPath(terminal_id), Query(query)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_terminal_input(
+    State(state): State<AppState>,
+    AxumPath((server_id, terminal_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::terminal_input(&terminal_id);
+    if server_id == LOCAL_SERVER_ID {
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<TerminalInputRequest>(&body) {
+            Ok(request) => terminal_input(State(state), AxumPath(terminal_id), Json(request)).await,
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_terminal_resize(
+    State(state): State<AppState>,
+    AxumPath((server_id, terminal_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::terminal_resize(&terminal_id);
+    if server_id == LOCAL_SERVER_ID {
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<TerminalResizeRequest>(&body) {
+            Ok(request) => {
+                terminal_resize(State(state), AxumPath(terminal_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_close_terminal(
+    State(state): State<AppState>,
+    AxumPath((server_id, terminal_id)): AxumPath<(String, String)>,
+) -> Response {
+    let operation = ServerScopedForwardOperation::terminal_close(&terminal_id);
+    if server_id == LOCAL_SERVER_ID {
+        return close_terminal(State(state), AxumPath(terminal_id)).await;
     }
     forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
         .await

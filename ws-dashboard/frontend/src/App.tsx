@@ -4750,7 +4750,7 @@ function WorkbenchToolbar({
           icon={SquareTerminal}
           label="New terminal"
           onClick={() => {
-            onCommand(buildTerminalCreateCommand(root.id), {
+            onCommand(buildTerminalCreateCommand(root.id, root.resourcePath.serverId), {
               "terminal.create": onCreateTerminal,
             });
           }}

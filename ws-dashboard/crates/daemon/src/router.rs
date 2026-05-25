@@ -32,14 +32,16 @@ use crate::root_picker::{
 };
 use crate::servers::{
     dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
-    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_create_empty_directory,
-    server_scoped_document_events, server_scoped_git_branches, server_scoped_git_fetch,
-    server_scoped_git_pull_ff_only, server_scoped_git_push, server_scoped_git_status,
-    server_scoped_git_switch_branch, server_scoped_git_worktree_add_options,
-    server_scoped_git_worktree_add_preview, server_scoped_git_worktree_add_submit,
-    server_scoped_open_work_root, server_scoped_read_work_root_file,
-    server_scoped_remove_workspace, server_scoped_root_picker, server_scoped_root_picker_pins,
-    server_scoped_set_work_root_activation, server_scoped_work_root_activity,
+    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_close_terminal,
+    server_scoped_create_empty_directory, server_scoped_document_events,
+    server_scoped_git_branches, server_scoped_git_fetch, server_scoped_git_pull_ff_only,
+    server_scoped_git_push, server_scoped_git_status, server_scoped_git_switch_branch,
+    server_scoped_git_worktree_add_options, server_scoped_git_worktree_add_preview,
+    server_scoped_git_worktree_add_submit, server_scoped_open_work_root,
+    server_scoped_read_work_root_file, server_scoped_remove_workspace, server_scoped_root_picker,
+    server_scoped_root_picker_pins, server_scoped_set_work_root_activation,
+    server_scoped_terminal_input, server_scoped_terminal_output, server_scoped_terminal_resize,
+    server_scoped_terminals, server_scoped_work_root_activity,
     server_scoped_work_root_activity_events, server_scoped_work_root_activity_transcript,
     server_scoped_work_root_files, server_scoped_write_work_root_file, start_ssh_dashboard_server,
     LinkedServerSessions, LinkedServerTunnels,
@@ -185,6 +187,26 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/git/pull-ff-only",
             post(server_scoped_git_pull_ff_only),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/terminals",
+            get(server_scoped_terminals).post(server_scoped_terminals),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/terminals/{terminal_id}/output",
+            get(server_scoped_terminal_output),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/terminals/{terminal_id}/input",
+            post(server_scoped_terminal_input),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/terminals/{terminal_id}/resize",
+            post(server_scoped_terminal_resize),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/terminals/{terminal_id}",
+            delete(server_scoped_close_terminal),
         )
         .route(
             "/api/dashboard/document-translation/providers",
