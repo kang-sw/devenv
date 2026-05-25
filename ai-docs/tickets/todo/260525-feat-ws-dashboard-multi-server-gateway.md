@@ -4,6 +4,8 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260513-research-streamable-http-mcp-transport: adjacent long-running daemon transport research
   260514-research-ws-web-dashboard-direction: longer-range dashboard server federation and remote hardening direction
+spec:
+  - 260525-ws-dashboard-remote-deployment-guide
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -134,6 +136,28 @@ service installation, and public remote exposure.
 
 Verification should include CLI help/output tests that assert the guide is
 discoverable and contains the key SSH tunneling and passphrase boundaries.
+
+### Result (19e6371) - 2026-05-25
+
+Implemented the CLI remote deployment guide as `ws-dashboard --remote-guide`.
+The flag is visible in top-level help, parses without a subcommand, prints a
+human/AI-agent-readable SSH tunneling guide, and exits without starting the
+daemon.
+
+The guide covers local-dashboard-as-gateway topology, remote loopback binding,
+SSH tunnel boundaries, daemon-lifetime passphrase handling, disabled credential
+persistence, reconnect expectations, and troubleshooting checks. The spec now
+records the guide as documentation rather than a machine protocol or remote
+process launcher.
+
+Verification:
+
+- `rustfmt --edition 2024 --check ws-dashboard/crates/daemon/src/cli.rs ws-dashboard/crates/daemon/src/main.rs`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon cli::tests -- --nocapture`
+- `cargo run --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon -- --help | rg -n -- "--remote-guide|SSH-tunneled"`
+- `cargo run --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon -- --remote-guide | rg -n "local ws-dashboard daemon|SSH tunnel|remote loopback|daemon-lifetime passphrase|Credential persistence is disabled|not a stable"`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon`
+- `ws/spec_index.verify`
 
 ### Phase 4: SSH remote start and tunnel reconnect
 
