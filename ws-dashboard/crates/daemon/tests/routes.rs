@@ -29,6 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use rusqlite::{params, Connection};
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
@@ -4103,7 +4104,7 @@ async fn work_root_activity_events_poll_fallback_reports_agent_changes_and_delet
     .await
     .expect("transcript update event");
 
-    fs::remove_dir_all(agents_dir.join("delta")).expect("remove agent dir");
+    delete_agent_def(&agents_dir, "delta");
 
     timeout(Duration::from_secs(5), async {
         while !seen
@@ -4400,17 +4401,140 @@ fn skip_without_git(test_name: &str) -> bool {
 fn write_agent_metadata(agents_dir: &Path, agent_key: &str, agent_json: &serde_json::Value) {
     let agent_dir = agents_dir.join(agent_key);
     fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
-    fs::write(
-        agent_dir.join("agent.json"),
-        serde_json::to_string_pretty(agent_json).expect("encode agent fixture"),
-    )
-    .expect("write agent.json fixture");
+    upsert_agent_def(
+        agents_dir,
+        agent_key,
+        agent_json
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_key,
+        agent_json
+            .get("backend")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("harness")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("tier")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("model")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("effort")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("session_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("last_call_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        agent_json
+            .get("last_output_path")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+    );
 }
 
 fn write_agent_metadata_raw(agents_dir: &Path, agent_key: &str, raw: &str) {
     let agent_dir = agents_dir.join(agent_key);
     fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
-    fs::write(agent_dir.join("agent.json"), raw).expect("write raw agent.json fixture");
+    upsert_agent_def(
+        agents_dir, agent_key, "", agent_key, "", "", "", "", "", "", raw, "", "",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_agent_def(
+    agents_dir: &Path,
+    agent_key: &str,
+    public_name: &str,
+    state_path: &str,
+    backend: &str,
+    harness: &str,
+    tier: &str,
+    model: &str,
+    effort: &str,
+    session_id: &str,
+    status: &str,
+    last_call_at: &str,
+    last_output_path: &str,
+) {
+    let state_dir = agents_dir.parent().expect("agents dir has state parent");
+    fs::create_dir_all(agents_dir).expect("create wsstate agents dir");
+    let connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open state.sqlite fixture");
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_defs (
+                agent_key TEXT PRIMARY KEY,
+                actor_id TEXT,
+                public_name TEXT,
+                state_path TEXT,
+                schema_version INTEGER,
+                backend TEXT,
+                harness TEXT,
+                tier TEXT,
+                model TEXT,
+                effort TEXT,
+                session_id TEXT,
+                status TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                last_seen_at TEXT,
+                last_call_at TEXT,
+                last_output_path TEXT
+            );",
+        )
+        .expect("create agent_defs fixture schema");
+    connection
+        .execute(
+            "INSERT OR REPLACE INTO agent_defs (
+                agent_key, actor_id, public_name, state_path, schema_version,
+                backend, harness, tier, model, effort, session_id, status,
+                created_at, updated_at, last_seen_at, last_call_at, last_output_path
+            ) VALUES (?1, '', ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, '', '', '', ?11, ?12)",
+            params![
+                agent_key,
+                public_name,
+                state_path,
+                backend,
+                harness,
+                tier,
+                model,
+                effort,
+                session_id,
+                status,
+                last_call_at,
+                last_output_path
+            ],
+        )
+        .expect("insert agent_defs fixture row");
+}
+
+fn delete_agent_def(agents_dir: &Path, agent_key: &str) {
+    let state_dir = agents_dir.parent().expect("agents dir has state parent");
+    let connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open state.sqlite fixture");
+    connection
+        .execute(
+            "DELETE FROM agent_defs WHERE agent_key = ?1",
+            params![agent_key],
+        )
+        .expect("delete agent_defs fixture row");
+    let _ = fs::remove_dir_all(agents_dir.join(agent_key));
 }
 
 fn write_current_call(agents_dir: &Path, agent_key: &str, raw: &str) {
@@ -5523,11 +5647,8 @@ async fn work_root_activity_route_degrades_malformed_records() {
         }),
     );
 
-    // Malformed agent.json must degrade only its own row.
+    // Unrecognized registry status must degrade only its own row.
     write_agent_metadata_raw(&agents_dir, "broken-meta", "{ this is not valid json");
-
-    // Agent directory with no agent.json file at all.
-    fs::create_dir_all(agents_dir.join("missing-meta")).expect("create missing-meta agent dir");
 
     // Valid metadata but unreadable current-call state.
     write_agent_metadata(
@@ -5556,11 +5677,11 @@ async fn work_root_activity_route_degrades_malformed_records() {
         serde_json::from_str(&body_text).expect("degraded activity JSON");
 
     assert_eq!(value["status"], "degraded");
-    assert_eq!(value["summary"]["total"], 4);
-    assert_eq!(value["summary"]["unavailable"], 2);
+    assert_eq!(value["summary"]["total"], 3);
+    assert_eq!(value["summary"]["unavailable"], 1);
 
     let items = value["items"].as_array().expect("activity items array");
-    assert_eq!(items.len(), 4);
+    assert_eq!(items.len(), 3);
     let item_row = |item_id: &str| -> &serde_json::Value {
         items
             .iter()
@@ -5586,18 +5707,13 @@ async fn work_root_activity_route_degrades_malformed_records() {
     assert_eq!(broken_meta_item["transcript"]["status"], "unavailable");
     assert_eq!(broken_meta_item["transcript"]["available"], false);
     assert!(!item_diagnostics_of(broken_meta_item).is_empty());
-    let missing_meta_item = item_row("agent:missing-meta");
-    assert_eq!(missing_meta_item["status"], "unavailable");
-    assert_eq!(missing_meta_item["attention"], true);
-    assert_eq!(missing_meta_item["transcript"]["status"], "unavailable");
-    assert!(!item_diagnostics_of(missing_meta_item).is_empty());
     let healthy_item = item_row("agent:healthy");
     assert_eq!(healthy_item["status"], "idle");
     assert_eq!(healthy_item["attention"], false);
     assert!(item_diagnostics_of(healthy_item).is_empty());
 
     let agents = value["agents"].as_array().expect("activity agents array");
-    assert_eq!(agents.len(), 4);
+    assert_eq!(agents.len(), 3);
     let agent_row = |agent_id: &str| -> &serde_json::Value {
         agents
             .iter()
@@ -5619,18 +5735,11 @@ async fn work_root_activity_route_degrades_malformed_records() {
     assert!(broken_call["currentCall"].is_null());
     assert!(!diagnostics_of(broken_call).is_empty());
 
-    // Unreadable agent.json degrades the row to unavailable.
+    // Unrecognized registry status degrades the row to unavailable.
     let broken_meta = agent_row("broken-meta");
     assert_eq!(broken_meta["status"], "unavailable");
     assert!(broken_meta["name"].is_null());
     assert!(!diagnostics_of(broken_meta).is_empty());
-
-    // Missing agent.json also degrades the row to unavailable.
-    let missing_meta = agent_row("missing-meta");
-    assert_eq!(missing_meta["status"], "unavailable");
-    assert!(missing_meta["name"].is_null());
-    assert!(missing_meta["currentCall"].is_null());
-    assert!(!diagnostics_of(missing_meta).is_empty());
 
     // The healthy row is unaffected by sibling degradation.
     let healthy = agent_row("healthy");
@@ -5690,6 +5799,46 @@ async fn work_root_activity_route_returns_empty_for_git_workroot_without_agents_
             .len(),
         0
     );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_returns_empty_for_incompatible_registry_state() {
+    if skip_without_git("work_root_activity_route_returns_empty_for_incompatible_registry_state") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-incompatible-registry");
+    let cache_home = temp_fixture_path("work-root-activity-incompatible-registry-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    let state_dir = agents_dir.parent().expect("agents dir parent");
+    fs::create_dir_all(state_dir).expect("create wsstate state dir");
+    let connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open incompatible registry");
+    connection
+        .execute_batch("CREATE TABLE incompatible_registry (id TEXT PRIMARY KEY);")
+        .expect("write incompatible registry schema");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("incompatible registry activity JSON");
+
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["summary"]["total"], 0);
+    assert_eq!(value["agents"].as_array().expect("agents").len(), 0);
+    assert!(!body_text.contains("state.sqlite"));
+    assert!(!body_text.contains(&cache_home.display().to_string()));
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);

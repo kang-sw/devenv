@@ -10,6 +10,7 @@ use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::stream::{self, Stream};
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
     ActivityConsoleEvent, ActivityFeed, ActivityItem, ActivitySnapshotInvalidationReason,
@@ -29,8 +30,6 @@ const MAX_NATIVE_MESSAGE_TEXT: usize = 8_192;
 const TOOL_OUTPUT_HEAD_LINES: usize = 10;
 const TOOL_OUTPUT_TAIL_LINES: usize = 10;
 
-const DIAG_METADATA_MISSING: &str = "agent metadata missing";
-const DIAG_METADATA_UNREADABLE: &str = "agent metadata unreadable";
 const DIAG_STATUS_UNAVAILABLE: &str = "agent status unavailable";
 const DIAG_STATUS_UNRECOGNIZED: &str = "agent status unrecognized";
 const DIAG_CURRENT_CALL_UNREADABLE: &str = "current call state unreadable";
@@ -444,6 +443,10 @@ fn activity_access_error(error: WorkRootAccessError) -> Response {
 /// layout, no agents" empty projection. Exposed so daemon route tests can seed
 /// fixture cache trees at the same location the projector reads.
 pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
+    resolve_work_root_state_dir(cache_home, root_path).map(|state_dir| state_dir.join("agents"))
+}
+
+fn resolve_work_root_state_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
     let identity = git_identity(root_path)?;
     let project_key = short_hash(&canonical_path_bytes(&identity.common_root));
     let worktree_key = if identity.worktree_root == identity.common_root {
@@ -452,7 +455,7 @@ pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Opti
         let worktree_id = short_hash(&canonical_path_bytes(&identity.worktree_root));
         format!("{project_key}@{worktree_id}")
     };
-    Some(cache_home.join("proj").join(worktree_key).join("agents"))
+    Some(cache_home.join("proj").join(worktree_key))
 }
 
 fn project_blocking(
@@ -463,8 +466,8 @@ fn project_blocking(
     recent_limit: Option<usize>,
 ) -> WorkRootActivityView {
     let projections = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
-        .map(|agents_dir| scan_named_agents(&agents_dir, codex_home, recent_limit))
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+        .map(|state_dir| registry_named_agents(&state_dir, codex_home, recent_limit))
         .unwrap_or_default();
 
     let agents = projections
@@ -521,30 +524,24 @@ fn activity_item_versions(
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
 ) -> BTreeMap<String, String> {
-    let Some(agents_dir) = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
+    let Some(state_dir) = resolve_cache_root(cache_home)
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
     else {
-        return BTreeMap::new();
-    };
-    let Ok(entries) = std::fs::read_dir(agents_dir) else {
         return BTreeMap::new();
     };
 
     let mut versions = BTreeMap::new();
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
+    for record in read_agent_def_records(&state_dir).unwrap_or_default() {
+        let Some(agent_dir) = record.payload_dir(&state_dir) else {
             continue;
         };
-        if !file_type.is_dir() {
-            continue;
-        }
-        let agent_key = entry.file_name().to_string_lossy().into_owned();
-        if agent_key.is_empty() {
-            continue;
-        }
         versions.insert(
-            named_agent_activity_id(&agent_key),
-            system_time_version(agent_record_modified_at(&entry.path(), codex_home)),
+            named_agent_activity_id(&record.agent_key),
+            system_time_version(agent_record_modified_at(
+                &agent_dir,
+                codex_home,
+                &record.metadata,
+            )),
         );
     }
     versions
@@ -577,38 +574,35 @@ fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
     summary
 }
 
-/// Scan `<worktree>/agents` for `agents/*/agent.json` plus optional
-/// `current/state.json`, mapping each directory into a bounded row.
-fn scan_named_agents(
-    agents_dir: &Path,
+/// Read current named-agent role rows from `<worktree>/state.sqlite`
+/// `agent_defs`, then map each role to its file-backed payload directory.
+fn registry_named_agents(
+    state_dir: &Path,
     codex_home: Option<&Path>,
     recent_limit: Option<usize>,
 ) -> Vec<NamedAgentProjection> {
-    let Ok(entries) = std::fs::read_dir(agents_dir) else {
-        // No agents directory yet (or unreadable): an empty, healthy
-        // projection rather than a route failure.
+    let Ok(records) = read_agent_def_records(state_dir) else {
+        // Missing, locked, incompatible, or otherwise unreadable registry
+        // state soft-degrades to an empty healthy projection.
         return Vec::new();
     };
 
-    let mut agent_dirs = Vec::new();
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-        let agent_key = entry.file_name().to_string_lossy().into_owned();
-        if agent_key.is_empty() {
-            continue;
-        }
-        let agent_dir = entry.path();
-        agent_dirs.push(RecentAgentDir {
-            modified_at: agent_record_modified_at(&agent_dir, codex_home),
-            agent_key,
-            agent_dir,
-        });
-    }
+    let mut agent_dirs = records
+        .into_iter()
+        .map(|record| {
+            let agent_dir = record.payload_dir(state_dir);
+            RecentAgentDir {
+                modified_at: agent_dir
+                    .as_deref()
+                    .map(|agent_dir| {
+                        agent_record_modified_at(agent_dir, codex_home, &record.metadata)
+                    })
+                    .unwrap_or(UNIX_EPOCH),
+                record,
+                agent_dir,
+            }
+        })
+        .collect::<Vec<_>>();
 
     if let Some(limit) = recent_limit {
         // CONTRACT: hot-path refreshes can ask for only the recently changed
@@ -618,36 +612,121 @@ fn scan_named_agents(
             right
                 .modified_at
                 .cmp(&left.modified_at)
-                .then_with(|| left.agent_key.cmp(&right.agent_key))
+                .then_with(|| left.record.agent_key.cmp(&right.record.agent_key))
         });
         agent_dirs.truncate(limit);
     }
 
     let mut rows = agent_dirs
         .into_iter()
-        .map(|entry| named_agent_projection(&entry.agent_dir, entry.agent_key, codex_home))
+        .map(|entry| {
+            registry_named_agent_projection(entry.agent_dir.as_deref(), entry.record, codex_home)
+        })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.row.agent_id.cmp(&right.row.agent_id));
     rows
 }
 
-struct RecentAgentDir {
+fn read_agent_def_records(state_dir: &Path) -> rusqlite::Result<Vec<AgentDefRecord>> {
+    let db_path = state_dir.join("state.sqlite");
+    if !db_path.is_file() {
+        return Ok(Vec::new());
+    }
+
+    let connection = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    connection.busy_timeout(Duration::from_millis(50))?;
+    let mut statement = connection.prepare(
+        "SELECT agent_key, public_name, state_path, backend, harness, tier, model, effort, \
+         session_id, status, updated_at, last_seen_at, last_call_at, last_output_path \
+         FROM agent_defs ORDER BY agent_key",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let agent_key: String = row.get(0)?;
+        Ok(AgentDefRecord {
+            agent_key,
+            state_path: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            metadata: AgentMetadata {
+                name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                backend: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                harness: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                tier: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                model: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                effort: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                session_id: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                status: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                updated_at: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                last_seen_at: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+                last_call_at: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                last_output_path: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
+            },
+        })
+    })?;
+
+    let mut records = Vec::new();
+    for row in rows {
+        let record = row?;
+        if !record.agent_key.is_empty() {
+            records.push(record);
+        }
+    }
+    Ok(records)
+}
+
+#[derive(Clone, Debug)]
+struct AgentDefRecord {
     agent_key: String,
-    agent_dir: PathBuf,
+    state_path: String,
+    metadata: AgentMetadata,
+}
+
+impl AgentDefRecord {
+    fn payload_dir(&self, state_dir: &Path) -> Option<PathBuf> {
+        safe_relative_payload_path(&self.state_path)
+            .map(|relative| state_dir.join("agents").join(relative))
+    }
+}
+
+fn safe_relative_payload_path(value: &str) -> Option<PathBuf> {
+    let path = Path::new(value);
+    if value.is_empty() || path.is_absolute() {
+        return None;
+    }
+    let mut clean = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => clean.push(part),
+            _ => return None,
+        }
+    }
+    (!clean.as_os_str().is_empty()).then_some(clean)
+}
+
+struct RecentAgentDir {
+    record: AgentDefRecord,
+    agent_dir: Option<PathBuf>,
     modified_at: SystemTime,
 }
 
 #[derive(Clone, Debug)]
 struct NamedAgentProjection {
     row: NamedAgentActivityView,
+    private_metadata: AgentMetadata,
     output_available: bool,
     native_transcript_available: bool,
 }
 
-fn agent_record_modified_at(agent_dir: &Path, codex_home: Option<&Path>) -> SystemTime {
+fn agent_record_modified_at(
+    agent_dir: &Path,
+    codex_home: Option<&Path>,
+    metadata: &AgentMetadata,
+) -> SystemTime {
     let mut latest = modified_at(agent_dir);
     for relative in [
-        "agent.json",
         "output.md",
         "current/state.json",
         "current/runtime.jsonl",
@@ -659,12 +738,10 @@ fn agent_record_modified_at(agent_dir: &Path, codex_home: Option<&Path>) -> Syst
             latest = candidate;
         }
     }
-    if let Some(metadata) = read_agent_metadata(agent_dir).ok() {
-        if let Some(path) = resolve_codex_session_file(codex_home, &metadata) {
-            let candidate = modified_at(&path);
-            if candidate > latest {
-                latest = candidate;
-            }
+    if let Some(path) = resolve_codex_session_file(codex_home, metadata) {
+        let candidate = modified_at(&path);
+        if candidate > latest {
+            latest = candidate;
         }
     }
     latest
@@ -676,40 +753,15 @@ fn modified_at(path: &Path) -> SystemTime {
         .unwrap_or(UNIX_EPOCH)
 }
 
-fn named_agent_projection(
-    agent_dir: &Path,
-    agent_key: String,
+fn registry_named_agent_projection(
+    agent_dir: Option<&Path>,
+    record: AgentDefRecord,
     codex_home: Option<&Path>,
 ) -> NamedAgentProjection {
-    let output_available = agent_dir.join("output.md").is_file();
-    let metadata = read_agent_metadata(agent_dir);
-
-    let metadata = match metadata {
-        Ok(metadata) => metadata,
-        Err(diagnostic) => {
-            // CONTRACT: a malformed or missing record degrades only its own row
-            // instead of failing the whole route.
-            return NamedAgentProjection {
-                row: NamedAgentActivityView {
-                    agent_id: agent_key,
-                    name: None,
-                    backend: None,
-                    harness: None,
-                    tier: None,
-                    model: None,
-                    effort: None,
-                    status: STATUS_UNAVAILABLE.to_owned(),
-                    last_call_at: None,
-                    session_present: false,
-                    current_call: None,
-                    detail_hints: Vec::new(),
-                    diagnostics: vec![diagnostic.to_owned()],
-                },
-                output_available: false,
-                native_transcript_available: false,
-            };
-        }
-    };
+    let metadata = record.metadata;
+    let output_available = agent_dir
+        .map(|agent_dir| agent_dir.join("output.md").is_file())
+        .unwrap_or(false);
 
     let native_transcript_available = resolve_codex_session_file(codex_home, &metadata).is_some();
 
@@ -719,7 +771,8 @@ fn named_agent_projection(
         diagnostics.push(diagnostic.to_owned());
     }
 
-    let (current_call, current_call_diagnostic) = read_current_call(agent_dir);
+    let (current_call, current_call_diagnostic) =
+        agent_dir.map(read_current_call).unwrap_or((None, None));
     if let Some(diagnostic) = current_call_diagnostic {
         diagnostics.push(diagnostic.to_owned());
     }
@@ -730,9 +783,10 @@ fn named_agent_projection(
         detail_hints.push("recent output available".to_owned());
     }
 
+    let private_metadata = metadata.clone();
     NamedAgentProjection {
         row: NamedAgentActivityView {
-            agent_id: agent_key,
+            agent_id: record.agent_key,
             name: non_empty(metadata.name),
             backend: non_empty(metadata.backend),
             harness: non_empty(metadata.harness),
@@ -740,25 +794,18 @@ fn named_agent_projection(
             model: non_empty(metadata.model),
             effort: non_empty(metadata.effort),
             status,
-            last_call_at: non_empty(metadata.last_call_at),
+            last_call_at: non_empty(metadata.last_call_at)
+                .or_else(|| non_empty(metadata.last_seen_at))
+                .or_else(|| non_empty(metadata.updated_at)),
             // CONTRACT: collapse the private session id into a presence flag.
             session_present: !metadata.session_id.is_empty(),
             current_call,
             detail_hints,
             diagnostics,
         },
+        private_metadata,
         output_available,
         native_transcript_available,
-    }
-}
-
-fn read_agent_metadata(agent_dir: &Path) -> Result<AgentMetadata, &'static str> {
-    match std::fs::read(agent_dir.join("agent.json")) {
-        Ok(raw) => {
-            serde_json::from_slice::<AgentMetadata>(&raw).map_err(|_| DIAG_METADATA_UNREADABLE)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(DIAG_METADATA_MISSING),
-        Err(_) => Err(DIAG_METADATA_UNREADABLE),
     }
 }
 
@@ -957,9 +1004,9 @@ fn named_agent_transcript_blocking(
     before: Option<&str>,
     limit: usize,
 ) -> ActivityTranscript {
-    let agents_dir = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path));
-    let Some(agent_dir) = agents_dir.map(|agents_dir| agents_dir.join(agent_key)) else {
+    let Some(state_dir) = resolve_cache_root(cache_home)
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+    else {
         return unavailable_transcript(
             work_root_id,
             activity_id,
@@ -967,16 +1014,21 @@ fn named_agent_transcript_blocking(
             "activity source unavailable",
         );
     };
-    if !agent_dir.is_dir() {
+    let Some(record) = read_agent_def_records(&state_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|record| record.agent_key == agent_key)
+    else {
         return unavailable_transcript(
             work_root_id,
             activity_id,
             agent_key,
             "activity source unavailable",
         );
-    }
+    };
+    let agent_dir = record.payload_dir(&state_dir);
 
-    let projection = named_agent_projection(&agent_dir, agent_key.to_owned(), codex_home);
+    let projection = registry_named_agent_projection(agent_dir.as_deref(), record, codex_home);
     let source = named_agent_source(&projection.row);
     let live = projection
         .row
@@ -985,40 +1037,52 @@ fn named_agent_transcript_blocking(
         .map(|call| call.active)
         .unwrap_or(false);
 
-    let metadata = read_agent_metadata(&agent_dir).ok();
     let mut native_diagnostic: Option<&str> = None;
-    if let Some(metadata) = metadata.as_ref() {
-        if let Some(native_path) = resolve_codex_session_file(codex_home, metadata) {
-            match std::fs::read_to_string(native_path) {
-                Ok(raw) => {
-                    let parsed = parse_codex_session_transcript(&raw);
-                    let (blocks, next_cursor, has_more) =
-                        paginate_transcript_blocks(parsed.blocks, cursor, before, limit);
-                    let mut diagnostics = projection.row.diagnostics;
-                    diagnostics.extend(parsed.diagnostics);
-                    let degraded = !diagnostics.is_empty() || parsed.degraded;
-                    return ActivityTranscript {
-                        work_root_id,
-                        activity_id,
-                        status: if degraded { "degraded" } else { "available" }.to_owned(),
-                        source_status: if degraded { "degraded" } else { "ok" }.to_owned(),
-                        live,
-                        source,
-                        blocks,
-                        next_cursor: Some(next_cursor),
-                        has_more,
-                        diagnostics,
-                    };
-                }
-                Err(_) => {
-                    // Fall through to the output.md source while reporting only
-                    // a source-neutral diagnostic. Native paths stay daemon-side.
-                    native_diagnostic = Some("native transcript source unreadable");
-                }
+    if let Some(native_path) = resolve_codex_session_file(codex_home, &projection.private_metadata)
+    {
+        match std::fs::read_to_string(native_path) {
+            Ok(raw) => {
+                let parsed = parse_codex_session_transcript(&raw);
+                let (blocks, next_cursor, has_more) =
+                    paginate_transcript_blocks(parsed.blocks, cursor, before, limit);
+                let mut diagnostics = projection.row.diagnostics;
+                diagnostics.extend(parsed.diagnostics);
+                let degraded = !diagnostics.is_empty() || parsed.degraded;
+                return ActivityTranscript {
+                    work_root_id,
+                    activity_id,
+                    status: if degraded { "degraded" } else { "available" }.to_owned(),
+                    source_status: if degraded { "degraded" } else { "ok" }.to_owned(),
+                    live,
+                    source,
+                    blocks,
+                    next_cursor: Some(next_cursor),
+                    has_more,
+                    diagnostics,
+                };
+            }
+            Err(_) => {
+                // Fall through to the output.md source while reporting only
+                // a source-neutral diagnostic. Native paths stay daemon-side.
+                native_diagnostic = Some("native transcript source unreadable");
             }
         }
     }
 
+    let Some(agent_dir) = agent_dir else {
+        return ActivityTranscript {
+            work_root_id,
+            activity_id,
+            status: "empty".to_owned(),
+            source_status: "missing".to_owned(),
+            live,
+            source,
+            blocks: Vec::new(),
+            next_cursor: Some("0".to_owned()),
+            has_more: false,
+            diagnostics: projection.row.diagnostics,
+        };
+    };
     let output_path = agent_dir.join("output.md");
     let raw = match std::fs::read_to_string(&output_path) {
         Ok(raw) => raw,
@@ -2078,7 +2142,7 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 /// as `pid` and stream paths are intentionally not deserialized. The raw
 /// session id is deserialized only as daemon-private resolver input and is
 /// collapsed to `sessionPresent` before any browser response is built.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 struct AgentMetadata {
     #[serde(default)]
     name: String,
@@ -2098,6 +2162,10 @@ struct AgentMetadata {
     status: String,
     #[serde(default)]
     last_call_at: String,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    last_seen_at: String,
     #[serde(default)]
     last_output_path: String,
 }
