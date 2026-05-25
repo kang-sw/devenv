@@ -110,8 +110,12 @@ present before delegating to it.
 
 When the binary is missing or incompatible, the launcher can install a runtime
 from an explicit bootstrap binary, a bootstrap URL, a local devenv runtime, or
-the release asset URL declared in the runtime contract. Downloaded release
-assets are verified against `SHA256SUMS` before becoming executable.
+the release asset URL declared in the runtime contract. Explicit bootstrap
+inputs and the local devenv marker force repair before accepting an already
+compatible cache-local binary, so pre-release dogfood can exercise the intended
+runtime. Forced local devenv repair builds from local source before considering
+prebuilt local distribution assets. Downloaded release assets are verified
+against `SHA256SUMS` before becoming executable.
 
 Install and repair paths use process-unique temporary files and best-effort
 atomic replacement. If replacing the final cache-local binary fails because

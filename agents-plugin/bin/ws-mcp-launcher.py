@@ -356,15 +356,37 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
     return True
 
 
-def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str) -> bool:
+def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     home = Path.home()
     try:
         plugin_dir.relative_to(home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws")
     except ValueError:
         return False
-    if not (plugin_dir / ".local-devenv-runtime").is_file() or os_name == "windows":
+    return (plugin_dir / ".local-devenv-runtime").is_file() and os_name != "windows"
+
+
+def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict) -> bool:
+    tool_dir = Path.home() / "devenv" / "agents-plugin-tool"
+    if not tool_dir.is_dir() or not shutil.which("go"):
+        return False
+    tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
+    proc = subprocess.run(["go", "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
+    if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
+        install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
+        return True
+    tmp.unlink(missing_ok=True)
+    note("local devenv build produced incompatible runtime")
+    return False
+
+
+def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, prefer_build: bool = False) -> bool:
+    if not local_devenv_runtime_enabled(plugin_dir, os_name):
         return False
 
+    if prefer_build:
+        return build_local_devenv_runtime(runtime_dir, binary, contract)
+
+    home = Path.home()
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
     candidates = [
         home / "devenv" / "agents-plugin-tool" / "dist" / asset,
@@ -380,18 +402,14 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
             tmp.unlink(missing_ok=True)
             note(f"local devenv runtime candidate is incompatible: {candidate}")
 
-    tool_dir = home / "devenv" / "agents-plugin-tool"
-    if tool_dir.is_dir() and shutil.which("go"):
-        proc = subprocess.run(["go", "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
-        if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
-            install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
-            return True
-        tmp.unlink(missing_ok=True)
-        note("local devenv build produced incompatible runtime")
-    return False
+    return build_local_devenv_runtime(runtime_dir, binary, contract)
 
 
-def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str) -> None:
+def runtime_install_forced(plugin_dir: Path, os_name: str) -> bool:
+    return bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL")) or local_devenv_runtime_enabled(plugin_dir, os_name)
+
+
+def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, force_local: bool = False) -> None:
     bootstrap_binary = os.environ.get("WS_MCP_BOOTSTRAP_BINARY")
     bootstrap_url = os.environ.get("WS_MCP_BOOTSTRAP_URL")
     if bootstrap_binary:
@@ -421,8 +439,10 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
                 binary.chmod(0o755)
             except OSError:
                 pass
-    elif install_local_devenv_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name):
+    elif install_local_devenv_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, prefer_build=force_local):
         return
+    elif force_local:
+        fail("local devenv runtime was forced but no compatible local runtime could be installed")
     else:
         install_downloaded_runtime(binary, runtime_dir, asset, contract)
 
@@ -559,16 +579,22 @@ def main() -> int:
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
-    compatible = compatibility_stamp_current(binary, contract, contract_path, runtime_dir)
-    if not compatible:
+    forced_install = runtime_install_forced(plugin_dir, os_name)
+    compatible = False
+    if forced_install:
+        note("forcing runtime install from bootstrap or local devenv source")
+        clear_compatibility_stamp(runtime_dir)
+    else:
+        compatible = compatibility_stamp_current(binary, contract, contract_path, runtime_dir)
+    if not forced_install and not compatible:
         compatible = runtime_fully_compatible(binary, contract, runtime_dir)
         if compatible:
             write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
 
-    if not compatible:
+    if forced_install or not compatible:
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
-        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name)
+        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_devenv_runtime_enabled(plugin_dir, os_name))
         if not runtime_fully_compatible(binary, contract, runtime_dir):
             fail("incompatible ws-mcp runtime after repair")
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir)

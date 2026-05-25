@@ -183,12 +183,15 @@ paths run checks without publishing.
 Local development has one repository-specific repair exception. When the
 installed plugin path is under
 `~/.codex/plugins/cache/kang-sw-devenv/ws/` and the installed cache contains
-`.local-devenv-runtime`, the launcher may copy a local runtime binary from
-`~/devenv/agents-plugin-tool/dist/` or `~/devenv/agents-plugin/.runtime/`.
+`.local-devenv-runtime`, the launcher forces local runtime repair before
+accepting an already compatible cache-local binary. The forced local path builds
+`~/devenv/agents-plugin-tool/cmd/ws-mcp` from source first so pre-release
+dogfood exercises the current checkout. Non-forced repair may copy a local
+runtime binary from `~/devenv/agents-plugin-tool/dist/` or
+`~/devenv/agents-plugin/.runtime/` before building.
 
-If those binaries are absent or fail tool-surface checks, non-Windows local
-devenv startup may build `~/devenv/agents-plugin-tool/cmd/ws-mcp` directly into
-the cache-local runtime path when Go is available.
+If no compatible local runtime can be installed while the marker is present,
+startup fails instead of falling back to the published release asset.
 
 This path exists only for the repository-local Codex plugin development loop.
 The marker file is gitignored and should not exist in normal GitHub release
