@@ -1546,7 +1546,7 @@ func (s *Server) actorGate(name string, arguments map[string]any) error {
 	if hasActor {
 		return nil
 	}
-	return fmt.Errorf("setup required before root-omitted %s: call %s(method: %q, root: \"<absolute-working-directory>\") from lead-workflow-manual, or recover with %s(id: \"<actor-id>\")", name, setupToolName(), leadWorkflowBootstrapMethod, setupToolName())
+	return fmt.Errorf("setup required before root-omitted %s; call %s(id: \"<actor-id>\")", name, setupToolName())
 }
 
 func rootOmittedActorTool(name string) bool {
