@@ -11,6 +11,7 @@ spec:
   - 260525-ws-dashboard-ssh-tunnel-reconnect
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-25
 ---
 
 # ws dashboard multi-server gateway
@@ -298,3 +299,24 @@ Deferred scope: broad visual-system redesign and remote administration panels.
 Verification should include browser coverage for local server parity, linked
 server display states, open-workRoot targeting under the selected server, and
 workspace/workRoot navigation continuity.
+
+### Result (cb3ee8c) - 2026-05-25
+
+Implemented the server-first left navigation. The frontend now fetches the
+separate dashboard server list, tracks the selected server independently from
+workspace/workRoot selection, and requests the existing resource tree through
+the selected server scope. Only the selected server's resource tree is treated
+as active, so selecting a linked server without loaded resources no longer shows
+stale workspaces from a different server.
+
+The fixed local-server header and standalone open-workRoot subsection were
+replaced by a thin `Servers` toolbar and server rows. Workspace and WorkRoot
+rows now nest under the selected server group. The open-workRoot control is
+kept as a compact toolbar action but remains local-only until a server-scoped
+open route exists, so it is disabled for non-local selected servers instead of
+silently targeting the local daemon.
+
+Verification:
+
+- `npm --prefix ws-dashboard/frontend run test:resource-model`
+- `npm --prefix ws-dashboard/frontend run build`
