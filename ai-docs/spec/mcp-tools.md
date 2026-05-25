@@ -92,8 +92,11 @@ current directory from placeholders or relative paths.
 `ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
 and binds the current session root to the actor root. Root-omitted actor-owned
 tools such as agent registration, agent calls, and subqueries require either a
-current actor binding or a hidden explicit-root compatibility argument. The
-actor model is a cooperative workflow guard, not a hard security boundary.
+current actor binding or a hidden explicit-root compatibility argument. When
+that binding is missing, root-omitted actor-owned tools return compact recovery
+guidance pointing to `ws.setup(id: "<actor-id>")`; the full lead bootstrap
+ceremony remains in workflow guidance rather than repeated in each tool error.
+The actor model is a cooperative workflow guard, not a hard security boundary.
 {#260524-mcp-actor-setup-bootstrap}
 
 When host metadata names multiple workspaces and no higher-priority root exists,

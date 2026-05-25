@@ -7,6 +7,18 @@ PLUGIN_DIR = Path(__file__).resolve().parents[1]
 FULL_PLUGIN_SKILLS_DIR = PLUGIN_DIR.parent / "agents-plugin" / "skills"
 SKILLS_DIR = PLUGIN_DIR / "skills"
 
+
+def fenced_template(text: str, heading: str) -> str:
+    start = text.index(heading)
+    fence_start = text.index("```text", start)
+    fence_end = text.index("```", fence_start + len("```text"))
+    return text[fence_start:fence_end]
+
+
+def verdict_fields(template: str) -> list[str]:
+    return [line.strip() for line in template.splitlines() if line.startswith("- **")]
+
+
 EXPECTED_SKILLS = {
     "lead-add-rule",
     "lead-bootstrap",
@@ -94,7 +106,22 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_implement_keeps_wsflow_route_contract_owner(self):
         text = (SKILLS_DIR / "lead-implement" / "SKILL.md").read_text(encoding="utf-8")
+        verdict = fenced_template(text, "### Implementation Verdict")
 
+        self.assertIn("## Implementation Verdict", text)
+        self.assertIn("Do not use `NEXT:`", text)
+        self.assertIn("Record `<current-branch>`.", text)
+        self.assertIn("Apply `judge: branch-mode` to `<current-branch>`.", text)
+        self.assertEqual(
+            verdict_fields(verdict),
+            [
+                "- **Target**: <ticket path/stem or inline target>",
+                "- **Branch Mode**: <continue implementation branch | create implementation branch>",
+                "- **Scope**: <selected phase, whole target, or caller-provided slice>",
+                "- **Reason**: <decisive route facts only>",
+            ],
+        )
+        self.assertNotIn("\nNEXT:", verdict)
         self.assertIn("### judge: branch-mode", text)
         self.assertNotIn("Preserve caller-provided execution path", text)
         self.assertNotIn("Confirm execution context", text)

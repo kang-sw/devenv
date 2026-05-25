@@ -355,6 +355,14 @@ needs-delegation` selects the edit mode at Route time; branch isolation is
 independent of edit mode, and direct-edit escalates to delegated when scope
 grows beyond single-file internal-only.
 
+After route judgments and before preparation or source inspection,
+`lead-implement` emits a non-blocking Implementation Verdict. The verdict
+summarizes target, selected scope, branch mode, edit mode, plan depth, review
+allocation, and decisive route facts, then continues immediately. It does not
+use `NEXT:` because `lead-proceed` owns next-skill routing. wsflow mirrors this
+checkpoint with a smaller verdict that omits edit mode, plan depth, and review
+allocation because `wsflow:lead-edit` owns implementation strategy.
+
 Review is a single stage for both modes. `judge: review-allocation` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
 test) when partitioned. Relay cap is 2 cycles for single-reviewer, 3 cycles for

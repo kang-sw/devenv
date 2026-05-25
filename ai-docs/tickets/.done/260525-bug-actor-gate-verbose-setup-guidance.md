@@ -5,6 +5,7 @@ related:
   260525-feat-ws-dashboard-sqlite-agent-activity-source: dogfood context that exposed the tool guidance shape
 spec:
   - 260524-mcp-actor-setup-bootstrap
+completed: 2026-05-25
 ---
 
 # Trim actor-gate setup guidance in root-omitted agent tools
@@ -49,3 +50,16 @@ lead-workflow-manual" briefing text in the actor-gate error.
 Verification should cover the MCP contract test that exercises root-omitted
 `agents.register` before setup and should prove the removed verbose fragments
 are absent.
+
+### Result (41c7127) - 2026-05-25
+
+`Server.actorGate` now reports root-omitted actor setup failures with compact
+recovery guidance only: `ws.setup(id: "<actor-id>")`. The MCP contract test now
+asserts that `agents.register` before setup still fails, includes the compact
+recovery shape, and omits `lead-workflow-manual`,
+`lead-workflow-bootstrap`, and absolute-root bootstrap briefing text.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./internal/mcp -run TestServeStdioSetupRootAndExplicitOverride`
+- `cd agents-plugin-tool && go test ./internal/mcp`

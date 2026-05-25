@@ -679,8 +679,12 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
 		t.Fatalf("explicit root did not override session default: %s", byID["4"])
 	}
-	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") || !strings.Contains(toolText(t, byID["5"]), `root: "<absolute-working-directory>"`) {
+	setupGateText := toolText(t, byID["5"])
+	if !toolIsError(t, byID["5"]) || !strings.Contains(setupGateText, "setup required") || !strings.Contains(setupGateText, `ws.setup(id: "<actor-id>")`) {
 		t.Fatalf("root-omitted agents.register without actor was not setup-gated: %s", byID["5"])
+	}
+	if strings.Contains(setupGateText, "lead-workflow-manual") || strings.Contains(setupGateText, "lead-workflow-bootstrap") || strings.Contains(setupGateText, `root: "<absolute-working-directory>"`) {
+		t.Fatalf("root-omitted agents.register setup gate was too verbose: %s", byID["5"])
 	}
 	if toolIsError(t, byID["6"]) {
 		t.Fatalf("explicit-root agents.register compatibility failed: %s", byID["6"])

@@ -107,6 +107,10 @@ Deferred or local-gateway surfaces:
 
 ## Constraints
 
+- Frontend identity is the first dependency. Do not forward new remote
+  operations until pane keys, route helpers, command payloads, stream keys, and
+  persisted state either carry `serverId` or deliberately map old local-only
+  state to `server-local`.
 - Root picker and open-WorkRoot paths are remote host paths when `serverId` is
   not `server-local`; UI labels and placeholders must make the selected server
   context explicit enough that users do not mistake remote filesystem paths for
@@ -128,13 +132,41 @@ Deferred or local-gateway surfaces:
 - Existing local-only frontend helpers should either accept `serverId` or be
   wrapped by server-scoped helpers. Avoid ad hoc URL string construction in
   components.
+- Backend forwarding should be allowlisted. A generic proxy is acceptable only
+  when it is constrained to this ticket's server-scoped dashboard routes and
+  does not expose private, unauthenticated, or future daemon paths.
+
+## Implementation Strategy
+
+- Treat `serverId` as an explicit UI and route dimension before adding remote
+  behavior. Bare daemon ids are not unique across linked servers.
+- Add a backend linked-server resolver plus one-shot JSON forwarding helper
+  before forwarding individual operations. Reuse it for ordinary HTTP routes;
+  implement SSE and WebSocket forwarding separately.
+- Keep old local routes as `server-local` compatibility aliases, but move new
+  frontend calls to canonical `/api/dashboard/servers/{serverId}/...` helpers.
+- Use remote root picker/open WorkRoot as the first end-to-end proof because it
+  exercises host-path locality and resource rewriting without SSE or terminal
+  gateway complexity.
 
 ## Phases
 
-### Phase 1: Server-scoped route contract and frontend identity plumbing
+### Phase 1: Frontend server identity and endpoint helpers
 
-Define the canonical server-scoped route shape for every operation this ticket
-will forward. The preferred shape is:
+Introduce frontend route helper APIs for every canonical server-scoped
+dashboard operation this ticket will eventually forward. Callers should pass a
+`serverId` or a full `ResourcePath`; components should stop constructing
+server-sensitive API URLs inline.
+
+Define collision-safe frontend identities for workbench panes, file pane
+source keys, file explorer snapshots, document event subscriptions, Activity
+streams, Git state, terminal panes, terminal restore intents, command payloads,
+and persisted UI records. The same `workRootId`, `workspaceId`, `activityId`,
+or `terminalId` on two servers must produce distinct UI state. Existing
+persisted local-only records may be migrated to `server-local` or dropped with
+a bounded compatibility decision.
+
+The canonical route shapes are:
 
 ```text
 /api/dashboard/servers/{serverId}/root-picker
@@ -146,18 +178,42 @@ will forward. The preferred shape is:
 /api/dashboard/servers/{serverId}/terminals/{terminalId}/...
 ```
 
-Keep old local routes as compatibility aliases for `server-local`. Update
-frontend helper modules so callers pass either a `serverId` or a full
-`ResourcePath`, and update pane/state identity where needed so remote and local
-resources cannot collide.
+Deferred scope: backend remote forwarding and browser-visible remote behavior.
+This phase may add route-construction tests and local alias awareness, but it
+should not try to proxy SSE or WebSockets.
 
-Deferred scope: implementing every forwarded operation. This phase may include
-route stubs or local alias plumbing only when needed to lock the contract.
+Verification should cover endpoint helper tests for every canonical route,
+collision tests for same bare ids on different servers, persisted-state
+compatibility tests where state formats change, and command payload tests that
+prove `serverId` is carried where it constrains execution.
 
-Verification should cover endpoint helper tests, route construction tests,
-selection/pane key stability, and local compatibility aliases.
+### Phase 2: Backend local aliases and one-shot forwarding skeleton
 
-### Phase 2: Remote root picker and open WorkRoot
+Add server-scoped daemon routes for one-shot HTTP operations, with
+`server-local` handled in-process through the existing local handlers and
+linked servers resolved through daemon-owned linked-server metadata,
+memory-only bearer tokens, and endpoint hints.
+
+Introduce an allowlisted forwarding helper for JSON or ordinary HTTP routes.
+It should preserve upstream status/error shape as much as practical, translate
+unknown/auth-required/tunnel-required/unreachable cases into bounded gateway
+errors, and rewrite any returned `DashboardResourcesView` plus nested
+`ResourcePath.serverId` values to the selected linked server id.
+
+Keep old local routes as compatibility aliases for `server-local`. The aliases
+must preserve existing local tests and browser behavior while new frontend
+helpers prefer canonical server-scoped routes.
+
+Deferred scope: full operation coverage, SSE forwarding, terminal WebSocket
+gatewaying, credential persistence, deployment automation, and public endpoint
+hardening.
+
+Verification should cover protected-route auth on new server-scoped aliases,
+local alias equivalence for representative routes, linked-server refusal
+states, bearer forwarding on at least one test remote route, upstream error
+preservation, and resource-view rewriting.
+
+### Phase 3: Remote root picker and open WorkRoot
 
 Make the server row folder/open-root affordance available for connected linked
 servers. Opening it should launch a root picker scoped to that server. The
@@ -176,7 +232,7 @@ Verification should dogfood against a remote Windows endpoint tunnel: add the
 server, click its folder icon, browse the remote filesystem, open a remote test
 directory, and confirm the opened remote workspace appears under that server.
 
-### Phase 3: Remote files, documents, and document events
+### Phase 4: Remote files, documents, and document events
 
 Forward file listing, file read, file write, and document-event SSE routes
 through server-scoped routes. The file explorer, read-only/code/markdown views,
@@ -196,7 +252,7 @@ Verification should include pure endpoint tests, daemon forwarding tests for
 list/read/write, SSE proxy tests or browser smoke coverage for document events,
 and remote Windows dogfood opening/editing a small markdown or text file.
 
-### Phase 4: Remote Activity, Git, workspace, and WorkRoot mutations
+### Phase 5: Remote Activity, Git, workspace, and WorkRoot mutations
 
 Forward WorkRoot Activity snapshots, transcript reads, Activity event SSE,
 activation changes, workspace removal, Git toolbar operations, and Git
@@ -215,21 +271,42 @@ Verification should include forwarding tests for representative read and write
 operations, Activity SSE behavior, and remote Windows dogfood for Git status or
 bounded non-destructive Git operations when a remote Git fixture is available.
 
-### Phase 5: Remote terminal lifecycle and WebSocket gatewaying
+### Phase 6: Remote terminal HTTP lifecycle
 
-Forward terminal creation, output polling, input, resize, close, and WebSocket
-transport through server-scoped terminal routes. Terminal panes must carry
-server identity, and gateway terminal routing must prevent terminal id
-collisions across linked servers.
+Forward terminal creation, list, output polling, input, resize, and close
+through server-scoped terminal routes before adding the live WebSocket gateway.
+Terminal panes must carry server identity, and gateway terminal routing must
+prevent terminal id collisions across linked servers.
+
+HTTP terminal routes should use the same linked-server auth, refusal, and
+bounded-error behavior as other forwarded operations. Closing a remote
+terminal through the local gateway must close the upstream terminal; local
+terminal behavior must remain unchanged.
+
+Deferred scope: WebSocket live transport, larger terminal UX redesign, and
+native-Windows control-key polish not required for proving HTTP lifecycle
+transparency.
+
+Verification should include endpoint helper tests, daemon forwarding tests for
+create/list/output/input/resize/close, terminal pane identity collision tests,
+and browser or integration evidence that a remote terminal can be created and
+closed through the local gateway.
+
+### Phase 7: Remote terminal WebSocket gatewaying
+
+Forward live terminal WebSocket transport through the local gateway after the
+HTTP terminal lifecycle is already server-scoped. The browser should connect
+only to the local gateway, and the gateway should connect upstream to the
+linked daemon with bearer auth.
 
 The WebSocket route needs explicit upgrade proxy behavior from browser to local
 gateway to linked daemon, with bearer auth on the upstream request and bounded
 cleanup when either side closes.
 
 Deferred scope: larger terminal UX redesign and native-Windows control-key
-polish not required for proving server transparency.
+polish not required for proving live transport transparency.
 
 Verification should include endpoint helper tests, daemon forwarding tests for
-HTTP terminal operations, browser or integration evidence that WebSocket output
-flows through the local gateway for a remote Windows terminal, and cleanup
-checks for close/disconnect.
+WebSocket upgrade refusal states, browser or integration evidence that
+WebSocket output and input flow through the local gateway for a remote Windows
+terminal, and cleanup checks for close/disconnect on either side of the relay.
