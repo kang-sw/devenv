@@ -1,6 +1,6 @@
 ---
 domain: named-agent-runtime
-description: "File-backed named agents, async calls, locks, subqueries, and backend adapter handling."
+description: "SQLite-backed agent registry metadata, file-backed payloads, async calls, subqueries, and backend adapter handling."
 sources:
   - agents-plugin-tool/internal/wsagent/
   - agents-plugin-tool/internal/wsstate/
@@ -16,18 +16,19 @@ related:
 
 - `wsagent.Manager` owns registration, async calls, wait/result/status/tail/cancel/recall compatibility, inbox delivery, and erasure. {#260505-named-agent-registry-state-layout} {#260511-agent-recall-recovery}
 - `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
-- `wsstore` is available for future actor-owned metadata, leases, retention, artifact indexes, and named-agent metadata inventory, but named agents remain file/JSON-backed until a migration ticket rewires `wsagent`. {#260525-named-agent-runtime-metadata-inventory}
+- `wsstore` is the write authority for named-agent registry metadata; `wsstate` still derives the worktree-local payload directories for prompts, inboxes, current-call state, diagnostic streams, event logs, and outputs. {#260525-named-agent-runtime-metadata-inventory}
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
 - `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
 - `GeminiRunner` invokes Gemini CLI `stream-json`, tolerates non-JSON stdout notices, and extracts final text from assistant message chunks. {#260512-gemini-agent-runner}
 
 ## Module Contracts
 
-- All agent paths must come from `wsstate.Ensure(root)` plus `AgentKey(name)` while state is file-backed; bypassing this splits or merges worktree state incorrectly. The SQLite migration key shape for public names is actor-scoped (`actor:<escaped actor id>:name:<escaped public name>`) for bound sessions, with `global:<escaped public name>` reserved for unbound compatibility, so future registry migration must not key only by public name. {#260525-named-agent-runtime-metadata-inventory}
+- Registry metadata writes go through `wsstore.AgentDefinition`; `agent.json` is only a bounded read-only legacy import path for unbound global agents and is removed after import. Corrupt legacy metadata must surface a recovery/re-registration error instead of silently falling back or becoming a parallel source of truth. {#260525-named-agent-runtime-metadata-inventory}
+- Agent identity has two layers: SQLite registry keys use `wsstore.AgentInternalKey(actorID, publicName)` (`actor:<escaped actor id>:name:<escaped public name>` for actor-bound sessions, `global:<escaped public name>` for unbound compatibility), while payload directories use the stored `StatePath` or a hashed actor-scoped directory key. Do not derive authority from public names or directory names alone. {#260525-named-agent-runtime-metadata-inventory}
 - Async call setup order matters: acquire setup lock, create current call state, write prompt snapshot, mark running, append queued event, then start `agents run-current`. {#260505-agent-async-single-call-lifecycle}
 - Only `queued` and `running` are active states. Any new status must update busy checks, wait readiness, result handling, register reset safety, cancel, and follow-up text.
-- `Result` requires terminal completed state and `output.md`; output must be written before current call completion is recorded. {#260505-agent-readiness-result-split}
-- Interrupts are inbox files delivered at hook/check-inbox boundaries, not OS signals. {#260505-agent-inbox-interrupt-delivery}
+- `Result` requires terminal completed state and normally returns `output.md`; a missing output body is reported as `missing_file_backed_payload_recoverable` with the path instead of being treated as SQLite corruption. Output should still be written before current call completion is recorded. {#260505-agent-readiness-result-split}
+- Interrupts are inbox files delivered at hook/check-inbox boundaries, not OS signals; actor-scoped calls must pass the same actor id into `Interrupt`, `DeliverPendingInboxScoped`, and the hidden `agents check-inbox --actor-id` hook or messages land in the wrong namespace. {#260505-agent-inbox-interrupt-delivery}
 - `Recall` remains a compatibility/manual path only; model-visible recovery after no-result cancellation should retry `Call` on the same registered agent with a recovery prompt. {#260511-agent-recall-recovery} {#260512-agent-cancel-resume-guidance}
 - Successful `Result` erases ephemeral agents; `Print` is legacy and does not consume them. {#260505-async-subquery-ephemeral-agent}
 - Backend invocation failures are formatted at the call site with raw error text, bounded PATH-detected backend hints, and reconfiguration guidance; do not run separate model/login probes during registration or config inspection. {#260505-agent-backend-failure-diagnostics}
@@ -44,13 +45,13 @@ related:
 
 ## Coupling
 
-- MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces.
-- Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced.
+- MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces and actor-scoped variants where public names may collide with global compatibility registrations.
+- Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced, and `agents run-current` must receive the hidden actor id for actor-scoped calls so worker state matches parent MCP dispatch.
 - `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
 - Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
-- The SQLite state-store foundation is adjacent to named agents but not yet authoritative for `agent.json`, `current/state.json`, `events.jsonl`, or output files. Future migration must preserve current file-backed diagnostics and result consumption semantics: registry/current-call path fields become SQLite metadata indexes, while prompt/stdout/stderr/runtime-log/event/final-output bytes remain file-backed payloads. `agent.json` compatibility is bounded read-only input, not durable write authority. {#260525-named-agent-runtime-metadata-inventory}
-- Root-omitted MCP `agents.register`, `agents.call`, and `subquery` now depend on a current lead actor binding from `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")` or recovery through `ws.setup(id: "<actor-id>")`; hidden explicit-root arguments remain a compatibility override.
-- Named-agent metadata can carry a persistent delegated child actor id; the child setup instruction is appended to `system.md` once and reused across calls. Subqueries carry reader child actors and mark them inactive when successful ephemeral result consumption erases the agent.
+- The SQLite state-store is authoritative for named-agent registry metadata but not for `current/state.json`, `events.jsonl`, or payload bodies. Preserve file-backed diagnostics and result consumption semantics: path fields such as `system_prompt_path` and `last_output_path` are SQLite metadata indexes, while prompt/stdout/stderr/runtime-log/event/final-output bytes remain file-backed payloads. {#260525-named-agent-runtime-metadata-inventory}
+- Root-omitted MCP `agents.*` lifecycle tools and `subquery` depend on a current lead actor binding from `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")` or recovery through `ws.setup(id: "<actor-id>")`; hidden explicit-root arguments deliberately route to the unbound global compatibility namespace.
+- Named-agent metadata can carry a persistent delegated child actor id; the child setup instruction is appended to `system.md` once and reused across calls. Subqueries carry reader child actors and must register/call in the same actor scope as the parent, then mark child actors inactive when successful ephemeral result consumption erases the agent.
 - Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
 - Agent status includes the detected harness when one influenced registration plus the resolved effort when an alias mapping supplied one; backend error diagnostics include the harness to make alias misrouting visible.
 - Registered effort is applied at call time through `RunnerRequest`: Codex emits `model_reasoning_effort`, Claude emits `--effort`, and empty/no-override effort emits no backend option. New backends must opt into their own mapping instead of assuming the manager path is sufficient. {#260505-codex-agent-session-jsonl-handling} {#260505-claude-agent-runner}
@@ -59,13 +60,14 @@ related:
 
 - **Add a backend**: implement `Runner`, add it to backend runner selection, and keep session persistence, stream capture, status transitions, inbox delivery, and diagnostics on the shared manager path; only backend-specific parsing and invocation details belong in the runner.
 - **Add a diagnostic stream**: update stream path mapping, MCP debug tools, CLI debug tools, tail output, and tests. Keep path metadata and payload body ownership distinct when updating the migration inventory. {#260505-agent-diagnostics-tail-debug}
+- **Change registry metadata**: update `wsstore.AgentDefinition`, `agentDefinitionFromAgent`, legacy import, actor/global collision tests, and MCP actor-scoped lifecycle tests together. `wsstore` tests should use local fixtures or source-level inventories rather than importing runtime consumers.
 - **Add generated path kinds**: update `generatedPathTarget`, MCP schema, callers, and cleanup rules.
 
 ## Common Mistakes
 
 - Setting `Agent.Status` alone does not make an agent reusable; `current/state.json` controls active calls.
 - Forgetting `reconcileActiveCall` before status/result/wait leaves dead workers appearing `running`.
-- Assuming agent names are arbitrary safe paths; `AgentKey` normalization can make distinct names collide, and future SQLite registry keys must include actor scope for bound sessions rather than preserving path-key collisions.
+- Assuming public agent names or `AgentKey` directories are authoritative; actor-scoped registry keys allow the same public name in different actor/global namespaces, and payload directory names may be hashed/stored compatibility paths.
 - Inferring login state from backend output is brittle; preserve raw backend errors and present configuration options as hints.
 - Treating every stdout line after a completed Codex result as model output can discard a valid Windows result when process-control messages are appended.
 - Assuming Gemini has live hook-style interrupt delivery; until a stable mechanism exists, inbox messages are delivered by prepending them to the next resumed call.

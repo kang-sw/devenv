@@ -8,6 +8,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-25
 ---
 
 # wsstore runtime metadata migration gate
@@ -220,3 +221,25 @@ across MCP process restart, missing payload path reporting, and macOS/Linux plus
 native Windows file-locking and cleanup behavior. Exec job metadata migration is
 deferred to a later phase or ticket after named-agent registry migration is
 reviewed.
+
+### Result (32112e66) - 2026-05-25
+
+Implemented named-agent registry metadata as a SQLite-authoritative runtime
+surface in `internal/wsstore` and `internal/wsagent`. Agent definition metadata
+now persists through `wsstore.AgentDefinition` with actor-scoped keys for
+actor-bound sessions and a global compatibility namespace for unbound or hidden
+explicit-root calls.
+
+The implementation preserves file-backed payload bodies for materialized system
+prompts, inboxes, current-call state, diagnostic streams, event JSONL, and final
+outputs. Pre-existing global `agent.json` metadata is imported read-only when
+possible, corrupt legacy metadata returns a bounded recovery/re-registration
+error, and missing final-output payloads report a recoverable consistency state
+instead of becoming SQLite corruption.
+
+Review fixes ensured actor-bound subqueries register and call in the same
+scope, interrupt/check-inbox hooks carry the hidden actor id, MCP lifecycle
+tools use actor scope for root-omitted calls, and explicit-root compatibility
+continues to target the global namespace. Verification covered targeted
+`wsstore`, `wsagent`, and `mcp` packages plus the full Go suite. Exec job
+metadata migration remains deferred outside this completed ticket.

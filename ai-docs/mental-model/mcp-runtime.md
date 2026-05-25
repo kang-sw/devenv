@@ -25,7 +25,7 @@ related:
 - `ws-mcp smoke --root <repo>` is the single-process executable smoke entrypoint; keep it aligned with release workflow checks. {#260505-runtime-cli-entrypoints}
 - `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, optional profile filtering, and cancellation. {#260505-mcp-server-protocol-surface}
 - `internal/mcp/api_async.go` owns recoverable API documentation job state behind the `api.ask_async` tool family. {#260508-api-documentation-async-mcp-tools}
-- `internal/wsstore` owns root/worktree SQLite metadata for setup actors, future async metadata, retention, pruning, tombstone cleanup, and the runtime metadata migration gate inventory. Current named-agent and exec runtime paths still read their existing JSON/file state until later migration tickets wire the store in. {#260525-runtime-metadata-migration-gate}
+- `internal/wsstore` owns root/worktree SQLite metadata for setup actors, named-agent registry metadata, future async metadata, retention, pruning, tombstone cleanup, and the runtime metadata migration gate inventory. Exec runtime paths still read their existing JSON/file state until a later migration ticket wires the store in. {#260525-runtime-metadata-migration-gate}
 - `runtime.info` and `runtime.capabilities` are launcher-facing compatibility data; capabilities adds MCP protocol, lead tool names, and CLI commands. {#260505-runtime-debug-metadata-tools} {#260506-runtime-capabilities-single-probe}
 
 ## Module Contracts
@@ -43,8 +43,8 @@ related:
 - `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
 - `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")` creates a cooperative lead actor, persists actor metadata in root/worktree SQLite state, and binds the actor root to the current server process; callers must pass the repository's absolute filesystem path because the MCP server cannot infer the agent cwd. `ws.setup(id: "<actor-id>")` restores that binding after restart. {#260524-mcp-actor-setup-bootstrap}
 - `ws.setup(root)` without a method remains the compatibility root-session setup surface; it stores a canonical Git worktree root in the current server instance only and does not change process cwd or write config. Hidden `session.*` dispatch can exist for compatibility but must not be advertised as canonical.
-- Root-omitted `agents.register`, `agents.call`, and `subquery` require a current actor binding, while hidden explicit-root arguments remain compatibility overrides during migration. {#260524-mcp-actor-setup-bootstrap}
-- Actor-bound `agents.register`, `agents.call`, and `subquery` mint or reuse child actors and inject `ws.setup(id: "<child-actor-id>")` recovery instructions into child system prompts; delegate/subquery prompts must not expose the lead bootstrap method.
+- Root-omitted `agents.*` lifecycle tools and `subquery` resolve through the current actor scope when the resolved root is actor-bound; hidden explicit-root arguments intentionally bypass actor scope and use the global compatibility namespace. {#260524-mcp-actor-setup-bootstrap}
+- Actor-bound `agents.register`, `agents.call`, and `subquery` mint or reuse child actors and inject `ws.setup(id: "<child-actor-id>")` recovery instructions into child system prompts; delegate/subquery prompts must not expose the lead bootstrap method. Async worker and check-inbox CLI mirrors carry hidden `--actor-id` only to preserve this dispatch scope.
 - Public `agents.*` MCP schemas intentionally omit `root` even though dispatch still accepts hidden explicit-root compatibility arguments through the normal root resolver; non-agent root-aware schemas keep advertising `root`. {#260523-agents-root-schema-invisibility}
 - Public `exec.*` schemas use `working_dir` for command execution location, not `root`; dispatch resolves the ws worktree root internally, constrains resolved working directories inside that root, and reconciles lost running workers so persisted exec jobs do not remain indefinitely running. {#260524-exec-job-mcp-tools}
 - `wsstore` is metadata/control-plane storage only: path indexes and byte counts are SQLite metadata, but large stdout, stderr, prompts, final outputs, transcripts, runtime logs, and other payload bodies remain file-backed. Missing payload files are recoverable consistency states, not a reason to move payload bytes into SQLite. {#260525-runtime-metadata-migration-gate}
@@ -65,14 +65,14 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add an MCP tool**: add schema in `tools()`, dispatch in `callTool`, optional profile permissions in `roleAllowsTool`, visibility tests when filtered, and `runtime.json`.
-- **Change an `agents.*` MCP tool**: keep the advertised schema rootless, route dispatch through the shared root resolver for session-root and hidden explicit-root compatibility, and test raw `tools()` schema plus session and explicit-root calls together.
+- **Change an `agents.*` MCP tool**: keep the advertised schema rootless, route dispatch through the shared root resolver, pass actor scope only when the call is root-omitted in an actor-bound session, and test raw `tools()` schema, actor-scoped lifecycle behavior, and explicit-root global compatibility with colliding public names together.
 - **Add a CLI mirror**: add the top-level or group subcommand in `cmd/ws-mcp`, map flags to the same internal package as MCP, add readable default output plus explicit `--format json` when structured consumers exist, and add command smoke tests.
 - **Change broad documentation find formatting**: update MCP text dispatch, CLI query paths, exported format helpers, and JSON tests together; zero-result guidance and truncation wording are part of the LLM-facing contract.
 - **Restrict a tool under a profile**: update profile tables and add tests proving allowlists cannot regain a hidden tool.
 - **Add or change a product-mode gate**: update MCP tool filtering, explicit call errors, CLI command dispatch, `runtimeCapabilityCommandNames`, and both default and mode-specific tests.
 - **Change wsflow no-agent mode**: update `agents-plugin-wsflow/runtime.json`, package tests, and launcher contract expectations in the same logical change.
 - **Add or change the exec job surface**: keep launch, status, result, abort, and raw fallback readers in the MCP registry together; preserve bounded default output, route omitted `working_dir` through ws root resolution instead of process cwd, constrain resolved command working directories inside the worktree root, reconcile lost running workers, and hide the entire `exec.*` family in wsflow no-agent mode. {#260524-exec-job-mcp-tools} {#260524-exec-runtime-contract-surface}
-- **Move runtime metadata into SQLite**: add or reuse `wsstore` tables for metadata and indexes, keep stream payloads file-backed, add retention/tombstone behavior with active-state skips, and test macOS/Linux plus Windows behavior for database access, file deletion, and existing JSON-backed compatibility. Keep `wsstore` tests pointed at source-level inventories or local fixtures rather than importing future wsstore consumers, or Phase 2 wiring can create reverse-import cycles.
+- **Move runtime metadata into SQLite**: add or reuse `wsstore` tables for metadata and indexes, keep stream payloads file-backed, add retention/tombstone behavior with active-state skips, and test macOS/Linux plus Windows behavior for database access, file deletion, and existing JSON-backed compatibility. Named-agent registry metadata already uses this path; exec metadata is still deferred. Keep `wsstore` tests pointed at source-level inventories or local fixtures rather than importing runtime consumers, or wiring creates reverse-import cycles.
 
 ## Common Mistakes
 
@@ -91,6 +91,7 @@ related:
 - Treating `ai-docs/ref/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
 - Migrating agent or exec state into SQLite while also moving large stream payloads into the database; that defeats raw tail/read/grep and increases lock pressure.
 - Classifying `*_path` fields as file-backed payloads; the path strings are SQLite metadata indexes even when the bytes at those paths stay file-backed.
+- Testing actor-scoped agent dispatch only with a live bogus worker; use controlled completed scoped fixtures for wait/result assertions so timing does not decide whether dispatch was correct.
 
 ## Technical Debt
 

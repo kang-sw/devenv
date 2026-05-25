@@ -12,24 +12,28 @@ can continue across MCP process restarts and host sessions.
 
 ## Named Agent Registry And State Layout {#260505-named-agent-registry-state-layout}
 
-Each registered agent owns a worktree-local state directory keyed by its name.
-The directory contains registry metadata, the materialized system prompt, inbox
-messages, current-call state, diagnostic streams, an append-only event log, and
-the last plain-text output.
+Each registered agent owns SQLite registry metadata plus a worktree-local
+payload directory. Registry identity is worktree-local and may be actor-scoped:
+actor-bound registrations are keyed by actor id and public name, while unbound
+or explicit-root compatibility registrations use the global public-name
+namespace. Actor-bound sessions can therefore register the same public name
+without colliding.
 
 Agent metadata records the backend, compatibility alias field, resolved model
-when present, session id, status, prompt references, output path, capability
-flags, and whether the agent is ephemeral. Re-registering an existing agent
-replaces its directory only when it has no active current call.
+when present, session id, status, prompt references, materialized system prompt
+path, output path, capability flags, child actor binding, and whether the agent
+is ephemeral. SQLite is the write authority for this registry metadata.
+Re-registering an existing agent replaces its payload directory and metadata
+only when it has no active current call.
 
-The runtime metadata migration gate classifies named-agent registry and current
-call fields before those fields move to SQLite authority.
-`agent.json` and `current/state.json` metadata such as backend/model selection,
-session id, lifecycle status, actor binding, timestamps, path indexes, and
-visibility flags are SQLite metadata candidates. Prompt text, system prompt
-text, stdout, stderr, runtime logs, event JSONL, and final output bodies remain
-file-backed payloads. Any `agent.json` compatibility during migration is
-bounded and read-only, not a durable write authority.
+The payload directory contains the materialized system prompt bytes, inbox
+messages, current-call state, diagnostic streams, an append-only event log, and
+the last plain-text output. Prompt text, system prompt text, stdout, stderr,
+runtime logs, event JSONL, and final output bodies remain file-backed payloads;
+SQLite stores metadata and path indexes for them, not their bytes. Pre-existing
+`agent.json` records are bounded read-only compatibility input for import or
+diagnostics, not a durable write authority. Corrupt legacy metadata surfaces a
+bounded recovery/re-registration error instead of silently disappearing.
 {#260525-named-agent-runtime-metadata-inventory}
 
 ## Prompt Registration And Model Alias Resolution {#260505-agent-prompt-registration-tier-resolution}
@@ -75,7 +79,9 @@ When a call is launched from an actor-bound lead MCP session, the agent system
 prompt includes a child actor setup instruction that tells the child process to
 recover with `ws.setup(id: "<child-actor-id>")` before root-omitted ws tool
 calls. Persistent named agents keep the child actor id in agent metadata so
-later calls reuse the same delegated actor.
+later calls reuse the same delegated actor. Async worker and interrupt hook
+commands carry the hidden actor id needed to read the same actor-scoped
+registry, current-call state, and inbox as the parent MCP tool dispatch.
 
 ## Readiness And Result Split {#260505-agent-readiness-result-split}
 

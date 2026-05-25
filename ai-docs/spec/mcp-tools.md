@@ -301,6 +301,13 @@ id in agent metadata plus a child setup instruction in the system prompt.
 Subqueries receive ephemeral reader child actors with the same recovery
 instruction shape and do not receive the lead bootstrap method.
 
+Root-omitted `agents.*` lifecycle tools in an actor-bound MCP session resolve
+named agents through the current actor scope. This includes registration, call,
+wait, result, status, tail, interrupt, cancel, and erase. Hidden explicit-root
+compatibility calls use the unbound global namespace, so an actor-bound session
+can still inspect or manage a global compatibility registration explicitly
+without shadowing the actor-local agent of the same public name.
+
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
 aliases; concrete provider model names select a one-off backend model. The
@@ -388,14 +395,15 @@ sets `regex: true`.
 
 ## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
 
-The ws runtime has a SQLite metadata migration gate before named-agent or exec
-runtime metadata becomes SQLite-authoritative. The gate keeps public `agents.*`
+The ws runtime has a SQLite metadata migration gate for moving named-agent and
+exec runtime metadata into SQLite authority. The gate keeps public `agents.*`
 and `exec.*` MCP APIs stable while separating lifecycle metadata from
-file-backed payload bodies. SQLite metadata may track identities, lifecycle
-state, actor/session binding, path indexes, byte counts, retention visibility,
-leases, tombstones, and prune bookkeeping. Prompts, streams, runtime logs,
-event JSONL, transcripts, backend raw output, and final output bodies remain
-file-backed.
+file-backed payload bodies. Named-agent registry metadata is SQLite-backed;
+exec runtime metadata remains a later migration surface. SQLite metadata may
+track identities, lifecycle state, actor/session binding, path indexes, byte
+counts, retention visibility, leases, tombstones, and prune bookkeeping.
+Prompts, streams, runtime logs, event JSONL, transcripts, backend raw output,
+and final output bodies remain file-backed.
 
 SQLite state-store configure, migration, and short write paths use bounded
 retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
