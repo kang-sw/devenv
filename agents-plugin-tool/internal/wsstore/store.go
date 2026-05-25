@@ -244,6 +244,47 @@ func (m Manager) OpenWorktreeKey(worktreeKey string) (*Store, error) {
 	return store, nil
 }
 
+func (m Manager) FindActor(ctx context.Context, id string) (Actor, bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Actor{}, false, errors.New("actor_id is required")
+	}
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: m.opts.CacheHome})
+	if err != nil {
+		return Actor{}, false, err
+	}
+	matches, err := filepath.Glob(filepath.Join(cacheRoot, "proj", "*", "state.sqlite"))
+	if err != nil {
+		return Actor{}, false, err
+	}
+	var found Actor
+	foundOK := false
+	for _, path := range matches {
+		worktreeKey := filepath.Base(filepath.Dir(path))
+		store, err := m.OpenWorktreeKey(worktreeKey)
+		if err != nil {
+			return Actor{}, false, err
+		}
+		actor, ok, actorErr := store.Actor(ctx, id)
+		closeErr := store.Close()
+		if actorErr != nil {
+			return Actor{}, false, actorErr
+		}
+		if closeErr != nil {
+			return Actor{}, false, closeErr
+		}
+		if !ok {
+			continue
+		}
+		if foundOK && found.WorktreeKey != actor.WorktreeKey {
+			return Actor{}, false, fmt.Errorf("actor id %q is ambiguous across worktrees", id)
+		}
+		found = actor
+		foundOK = true
+	}
+	return found, foundOK, nil
+}
+
 func (m Manager) now() time.Time {
 	if m.opts.Now != nil {
 		return m.opts.Now()

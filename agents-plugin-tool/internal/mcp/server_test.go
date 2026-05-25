@@ -82,6 +82,41 @@ func TestRawPublicAgentToolSchemasOmitRoot(t *testing.T) {
 	}
 }
 
+func assertCompactActorID(t *testing.T, actorID, authority string) {
+	t.Helper()
+	prefix := authority + "-"
+	if !strings.HasPrefix(actorID, prefix) || len(strings.TrimPrefix(actorID, prefix)) != 8 {
+		t.Fatalf("actor id %q does not match compact %s-prefixed shape", actorID, authority)
+	}
+	for _, r := range strings.TrimPrefix(actorID, prefix) {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			t.Fatalf("actor id %q contains non-lowercase base36 payload character %q", actorID, r)
+		}
+	}
+}
+
+func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]any {
+	t.Helper()
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := listResp["result"].(map[string]any)
+	listedTools, _ := result["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if name != toolName {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		return properties
+	}
+	t.Fatalf("tools/list missing %s: %s", toolName, listLine)
+	return nil
+}
+
 func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -150,6 +185,13 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(byID["2"], "ws.setup") {
 		t.Fatalf("tools/list missing ws.setup: %s", byID["2"])
+	}
+	setupProperties := toolPropertiesByName(t, byID["2"], "ws.setup")
+	if _, ok := setupProperties["format"]; ok {
+		t.Fatalf("ws.setup publicly advertises hidden format property: %s", byID["2"])
+	}
+	if _, ok := setupProperties["root"]; !ok {
+		t.Fatalf("ws.setup schema missing root property: %s", byID["2"])
 	}
 	if strings.Contains(byID["2"], "session.set_default_root") || strings.Contains(byID["2"], "session.get_default_root") {
 		t.Fatalf("tools/list still advertises session root compatibility tools: %s", byID["2"])
@@ -547,6 +589,9 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
 	}
+	if _, ok := toolPropertiesByName(t, list, "setup")["format"]; ok {
+		t.Fatalf("setup alias publicly advertises hidden format property: %s", list)
+	}
 	if strings.Contains(list, "ws MCP") || !strings.Contains(list, "wsflow MCP") {
 		t.Fatalf("tools/list did not use namespace override in descriptions: %s", list)
 	}
@@ -688,6 +733,7 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	if setup.Root != canonicalTestPath(t, rootA) || !setup.HasActor || setup.ActorID == "" || setup.ActorAuthority != "lead" || !strings.Contains(setup.RecoveryGuidance, setup.ActorID) {
 		t.Fatalf("bootstrap setup response mismatch: %s", byID["3"])
 	}
+	assertCompactActorID(t, setup.ActorID, "lead")
 	out.Reset()
 	if err := server.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"after-setup","model":"light"}}}`+"\n"), &out); err != nil {
 		t.Fatalf("ServeStdio after setup returned error: %v", err)
@@ -710,7 +756,7 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 		t.Fatalf("fresh server did not require actor recovery before root-omitted agent call: %s", byID["5"])
 	}
 	out.Reset()
-	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ws.setup","arguments":{"id":%q,"format":"json"}}}`+"\n", setup.ActorID)), &out); err != nil {
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ws.setup","arguments":{"id":%q,"format":"json"}}}`+"\n", strings.ToUpper(setup.ActorID))), &out); err != nil {
 		t.Fatalf("ServeStdio recovery returned error: %v", err)
 	}
 	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -736,6 +782,48 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	}
 	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(rootA, "fresh-after-recovery", recovered.ActorID); err != nil {
 		t.Fatalf("recovered actor did not bind root for agent register: %v", err)
+	}
+}
+
+func TestServeStdioSetupActorIDCollisionRetries(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260525-feat-actor-collision")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertActor(context.Background(), wsstore.Actor{ActorID: "lead-aaaaaaaa", Authority: "lead", RootPath: canonicalTestPath(t, root), WorktreeKey: store.Layout().WorktreeKey, Status: "active", Pinned: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	oldGenerate := generateActorPayload
+	calls := 0
+	generateActorPayload = func(length int) (string, error) {
+		calls++
+		if calls == 1 {
+			return "aaaaaaaa", nil
+		}
+		return "bbbbbbbb", nil
+	}
+	t.Cleanup(func() { generateActorPayload = oldGenerate })
+
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", root)
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var setup struct {
+		ActorID string `json:"actor_id"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &setup); err != nil {
+		t.Fatalf("setup response is not JSON: %v\n%s", err, byID["1"])
+	}
+	if setup.ActorID != "lead-bbbbbbbb" || calls != 2 {
+		t.Fatalf("collision retry mismatch: actor_id=%q calls=%d response=%s", setup.ActorID, calls, byID["1"])
 	}
 }
 
@@ -813,6 +901,7 @@ func TestServeStdioChildActorPromptInjection(t *testing.T) {
 	if !strings.HasPrefix(agent.ChildActorID, "delegate-") || agent.ChildActorAuthority != "delegate" {
 		t.Fatalf("child actor metadata mismatch: id=%q authority=%q", agent.ChildActorID, agent.ChildActorAuthority)
 	}
+	assertCompactActorID(t, agent.ChildActorID, "delegate")
 	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
 	if err != nil {
 		t.Fatal(err)
