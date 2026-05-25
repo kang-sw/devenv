@@ -309,10 +309,22 @@ from one server from updating another server's same-id WorkRoot. Workspace
 removal cleanup removes panes and layout state only for WorkRoots on the
 targeted server.
 
+Terminal create, list, output polling, input, resize, and close requests also
+use explicit server-scoped gateway routes for linked-server WorkRoots and
+terminal ids. For `server-local`, the aliases dispatch in-process to the
+existing terminal lifecycle handlers and preserve local JSON content-type,
+workRoot access, size validation, output cursor, and close-as-terminate
+semantics. For linked servers, ordinary terminal HTTP requests forward through
+the allowlisted one-shot gateway with upstream bearer auth, bounded refusal
+states, and upstream status/body/content-type preservation. Terminal ids remain
+daemon-local opaque ids; frontend terminal command creation, session panes,
+restore descriptors, output polling, input, resize, and close state carry
+`serverId` so same bare terminal ids on different servers do not collide.
+
 > [!note] Planned 🚧
-> Later phases will attach terminal HTTP lifecycle and terminal WebSocket
-> operations to the server-scoped route model. Terminal WebSockets require
-> upgrade proxy behavior rather than the one-shot JSON forwarding helper.
+> A later phase will attach terminal WebSocket operations to the server-scoped
+> route model. Terminal WebSockets require upgrade proxy behavior rather than
+> the one-shot JSON forwarding helper.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 

@@ -471,6 +471,47 @@ create/list/output/input/resize/close, terminal pane identity collision tests,
 and browser or integration evidence that a remote terminal can be created and
 closed through the local gateway.
 
+### Result (c4231ea) - 2026-05-26
+
+Implemented remote terminal HTTP lifecycle forwarding through explicit
+server-scoped gateway routes for create, list, output polling, input, resize,
+and close. `server-local` aliases dispatch in-process through the existing
+terminal handlers and preserve local JSON content-type, access, size, cursor,
+and close semantics. Linked-server terminal HTTP requests forward through the
+local gateway with bearer auth, bounded refusal states, upstream
+status/body/content-type preservation, and upstream-owned opaque terminal ids.
+
+Frontend visible terminal creation now carries the selected WorkRoot
+`serverId`; terminal session panes, restore identity, output polling, input,
+resize, and close continue to use server-scoped terminal identity so same bare
+terminal ids on different servers do not collide. Server-scoped terminal
+WebSocket routing remains unregistered and deferred to Phase 7.
+
+Deferred scope remains terminal WebSocket gatewaying, larger terminal UX
+redesign, native-Windows control-key polish, agent controls, document
+translation forwarding, credential persistence, deployment automation, and
+public endpoint hardening. No native Windows endpoint dogfood was run for this
+HTTP-only phase; automated coverage uses backend route tests, frontend helper
+tests, and daemon-served browser tests with mocked linked-server terminal
+routes.
+
+Review outcome: correctness and fit were clean. Test review found backend
+coverage gaps for linked terminal input, server-local successful lifecycle
+parity, and terminal-specific upstream error preservation. The gaps were fixed
+and the test re-review returned clean.
+
+Verification passed:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml server_scoped`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml forwarding`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml linked_server`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml terminal`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml`
+- `npm --prefix ws-dashboard/frontend run test:terminals`
+- `npm --prefix ws-dashboard/frontend run test:commands`
+- `npm --prefix ws-dashboard/frontend run build`
+- `npm --prefix ws-dashboard/frontend run test:browser -- -g "linked server terminal HTTP lifecycle"`
+
 ### Phase 7: Remote terminal WebSocket gatewaying
 
 Forward live terminal WebSocket transport through the local gateway after the
