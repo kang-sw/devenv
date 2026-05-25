@@ -103,24 +103,33 @@ Active or planned product tracks:
   CodeMirror for source files without custom viewers, remove noisy CodeMirror
   focus border chrome, and broaden lazy-loaded syntax highlighting coverage
   while preserving the document pane's view/edit lifecycle.
-- WorkRoot management - planned child track. Continue from the completed
-  registry/root-picker/workspace policies into practical owner operations for
-  managing active, unavailable, linked, remembered, pinned, and recoverable
-  workRoots without turning the picker into a generic file manager.
+- `260525-feat-ws-dashboard-document-polishing-backlog` - todo; non-critical
+  document viewer/editor quality work after the MVP document substrate is
+  considered complete enough for the current milestone.
+- WorkRoot management - MVP-complete child track. Registry/root-picker/
+  workspace continuity, practical owner operations, Git worktree creation, and
+  selected-workRoot Git controls are implemented enough for the current
+  milestone. Remaining quality work is tracked as polishing rather than a
+  blocker.
   `260524-feat-ws-dashboard-add-git-worktree-ui` is done:
   move workspace removal behind an overflow menu and add Git worktree creation
   with daemon-resolved branch/path preview.
   `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is done:
   add selected-workRoot branch/status chips plus fetch, push, and
   fast-forward-only pull controls.
+  `260525-feat-ws-dashboard-workroot-polishing-backlog` is todo for
+  on-demand WorkRoot lifecycle and Git toolbar polish.
 - Agent view panel - planned child track. Promote read-only Activity Console
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
-- Multi-server management - planned design track. Define the minimum MVP shape
-  for local, WSL, and remote linked daemons, server capability/status display,
-  forwarding under the same `serverId` namespace, and auth/pairing boundaries.
-  Broader remote hardening and server federation remain future scope.
+- Multi-server management - next-priority design track. Define the minimum MVP
+  shape for local, WSL, and owner-provided remote linked daemons, server
+  capability/status display, forwarding under the same `serverId` namespace,
+  deployment/pairing flows, and auth boundaries. The near-term design target is
+  a local dashboard acting as a gateway that can integrate a remote Windows
+  server seamlessly enough for dogfood use. Broader remote hardening and server
+  federation remain future scope.
 - Dashboard persistence map - research track.
   `260523-research-ws-dashboard-persistable-ui-state-map` remains the backlog
   map for selected resources,
@@ -141,15 +150,18 @@ Active or planned product tracks:
 
 Implementation sequence:
 
-1. Editor polishing: markdown viewer, document mode substrate, raw-text editing
-   boundary, translation-ready overlays, and save fan-out.
-2. WorkRoot management: owner operations and recovery flows over the durable
-   workspace/workRoot registry.
-3. Agent view panel: dedicated agent-oriented visibility over Activity Console
-   and future main-session/subtask sources.
-4. Multi-server management, diagnostics/task panels, persistence expansion,
-   terminal UX redesign, and broader visual-system research should be split
-   into child tickets when their boundaries are ready.
+1. Agent view panel: dedicated agent-oriented visibility over Activity Console
+   and future main-session/subtask sources. Keep custom harness versus deeper
+   Codex integration as an explicit unresolved design choice until the panel
+   scope clarifies.
+2. Multi-server management: local dashboard as gateway for local, WSL, and
+   remote linked daemons, including remote Windows dogfood deployment and
+   seamless resource integration under `serverId`.
+3. Editor/document and WorkRoot management polishing continue on demand through
+   backlog tickets, but they no longer block the MVP sequence.
+4. Diagnostics/task panels, persistence expansion, terminal UX redesign, and
+   broader visual-system research should be split into child tickets when their
+   boundaries are ready.
 
 Longer-range product direction stays in
 `260514-research-ws-web-dashboard-direction`: harness/runtime library
