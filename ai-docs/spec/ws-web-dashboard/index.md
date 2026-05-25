@@ -259,6 +259,18 @@ practical. When a forwarded response body is a `DashboardResourcesView`, the
 gateway rewrites the top-level server identity and nested `ResourcePath.serverId`
 values to the selected linked-server id.
 
+Connected linked-server rows expose the same folder/open-root affordance as the
+local server. Opening that affordance starts a root-picker session scoped to
+the selected server. Picker listing, navigation, empty-directory creation,
+pin/unpin, and open WorkRoot requests go through the local gateway's
+server-scoped routes; the browser does not call the linked daemon directly.
+Successful remote open responses apply the rewritten resources from the gateway,
+use the returned opened WorkRoot id when present, select the linked server's
+opened WorkRoot, and refresh through the canonical server resource route. Late
+picker responses after close, server-context reset, or successful open are
+ignored so stale remote directory state cannot repopulate a later picker
+session.
+
 > [!note] Planned 🚧
 > Later phases will attach the remaining file, document, Activity, Git,
 > workspace, terminal HTTP lifecycle, document-event SSE, Activity-event SSE,

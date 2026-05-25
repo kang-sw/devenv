@@ -293,6 +293,42 @@ Verification should dogfood against a remote Windows endpoint tunnel: add the
 server, click its folder icon, browse the remote filesystem, open a remote test
 directory, and confirm the opened remote workspace appears under that server.
 
+### Result (e760ecf) - 2026-05-25
+
+Implemented remote root picker and open WorkRoot behavior for connected linked
+servers through the local gateway. The linked-server row open-root affordance
+now opens the shared picker with that server as context; list, navigate,
+create-directory, pin, unpin, and open WorkRoot actions use
+`/api/dashboard/servers/{serverId}/...` routes while `server-local` keeps
+legacy local behavior.
+
+Root-picker command payloads now carry server identity without adding host or
+remote paths to command identity. Successful remote open applies the gateway's
+rewritten resource view, selects the opened linked-server WorkRoot using the
+opened-id header when present, and refreshes via the canonical resource flow.
+Late picker responses after close, server-context reset, or successful open
+are ignored so stale remote directory state cannot repopulate later sessions.
+
+No native Windows endpoint dogfood was run in this phase; automated coverage
+uses the daemon-served browser with mocked linked-server API routes plus
+backend/frontend route tests.
+
+Review outcome: correctness, fit, and test reviews all returned clean after
+fixes for command server identity and stale picker response races.
+
+Verification passed:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml server_scoped`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml linked_server`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml forwarding`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml root_picker`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml`
+- `npm --prefix ws-dashboard/frontend run test:root-picker`
+- `npm --prefix ws-dashboard/frontend run test:open-work-root`
+- `npm --prefix ws-dashboard/frontend run test:commands`
+- `npm --prefix ws-dashboard/frontend run build`
+- `cd ws-dashboard/frontend && npx playwright test -g "linked server root picker"`
+
 ### Phase 4: Remote files, documents, and document events
 
 Forward file listing, file read, file write, and document-event SSE routes
