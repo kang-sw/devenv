@@ -18,6 +18,9 @@ use ws_dashboard_core::{
     WorkRootActivityView, WorkRootId,
 };
 
+use crate::agent_registry::{
+    historical_activity_suffix, lookup_activity_record, read_agent_registry, AgentRegistryRecord,
+};
 use crate::router::AppState;
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
@@ -29,11 +32,10 @@ const MAX_NATIVE_MESSAGE_TEXT: usize = 8_192;
 const TOOL_OUTPUT_HEAD_LINES: usize = 10;
 const TOOL_OUTPUT_TAIL_LINES: usize = 10;
 
-const DIAG_METADATA_MISSING: &str = "agent metadata missing";
-const DIAG_METADATA_UNREADABLE: &str = "agent metadata unreadable";
 const DIAG_STATUS_UNAVAILABLE: &str = "agent status unavailable";
 const DIAG_STATUS_UNRECOGNIZED: &str = "agent status unrecognized";
 const DIAG_CURRENT_CALL_UNREADABLE: &str = "current call state unreadable";
+const DIAG_PAYLOAD_PATH_UNAVAILABLE: &str = "agent payload path unavailable";
 
 const STATUS_UNAVAILABLE: &str = "unavailable";
 const MAX_RECENT_ACTIVITY_LIMIT: usize = 30;
@@ -42,6 +44,7 @@ const MAX_TRANSCRIPT_LIMIT: usize = 100;
 const MAX_CODEX_SESSION_SCAN_ENTRIES: usize = 4096;
 const ACTIVITY_KIND_NAMED_AGENT: &str = "namedAgent";
 const ACTIVITY_ID_NAMED_AGENT_PREFIX: &str = "agent:";
+const ACTIVITY_ID_NAMED_AGENT_INSTANCE_PREFIX: &str = "agent-instance:";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,7 +140,6 @@ impl WorkRootActivityProjector {
         work_root_id: WorkRootId,
         root_path: &Path,
         activity_id: String,
-        agent_key: String,
         cursor: Option<String>,
         before: Option<String>,
         limit: Option<usize>,
@@ -152,7 +154,6 @@ impl WorkRootActivityProjector {
                 cache_home.as_deref(),
                 codex_home.as_deref(),
                 activity_id,
-                &agent_key,
                 cursor.as_deref(),
                 before.as_deref(),
                 normalize_transcript_limit(limit),
@@ -214,9 +215,9 @@ pub async fn work_root_activity_transcript(
         Err(error) => return activity_access_error(error),
     };
 
-    let Some(agent_key) = named_agent_key_from_activity_id(&activity_id) else {
+    if !is_named_agent_activity_id(&activity_id) {
         return activity_error(StatusCode::NOT_FOUND, "unknown activity");
-    };
+    }
 
     Json(
         state
@@ -225,7 +226,6 @@ pub async fn work_root_activity_transcript(
                 work_root_id,
                 &root_path,
                 activity_id,
-                agent_key,
                 query.cursor,
                 query.before,
                 query.limit,
@@ -444,6 +444,14 @@ fn activity_access_error(error: WorkRootAccessError) -> Response {
 /// layout, no agents" empty projection. Exposed so daemon route tests can seed
 /// fixture cache trees at the same location the projector reads.
 pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
+    Some(resolve_work_root_state_dir(cache_home, root_path)?.join("agents"))
+}
+
+pub fn resolve_work_root_state_db(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
+    Some(resolve_work_root_state_dir(cache_home, root_path)?.join("state.sqlite"))
+}
+
+fn resolve_work_root_state_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
     let identity = git_identity(root_path)?;
     let project_key = short_hash(&canonical_path_bytes(&identity.common_root));
     let worktree_key = if identity.worktree_root == identity.common_root {
@@ -452,7 +460,7 @@ pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Opti
         let worktree_id = short_hash(&canonical_path_bytes(&identity.worktree_root));
         format!("{project_key}@{worktree_id}")
     };
-    Some(cache_home.join("proj").join(worktree_key).join("agents"))
+    Some(cache_home.join("proj").join(worktree_key))
 }
 
 fn project_blocking(
@@ -462,23 +470,51 @@ fn project_blocking(
     codex_home: Option<&Path>,
     recent_limit: Option<usize>,
 ) -> WorkRootActivityView {
-    let projections = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
-        .map(|agents_dir| scan_named_agents(&agents_dir, codex_home, recent_limit))
-        .unwrap_or_default();
+    let Some((agents_dir, db_path)) = resolve_cache_root(cache_home).and_then(|cache_root| {
+        Some((
+            resolve_work_root_agents_dir(&cache_root, root_path)?,
+            resolve_work_root_state_db(&cache_root, root_path)?,
+        ))
+    }) else {
+        return empty_activity_feed(work_root_id, false);
+    };
 
-    let agents = projections
+    let registry = read_agent_registry(&db_path, recent_limit);
+    let current_projections = registry
+        .current_roles
+        .iter()
+        .map(|record| {
+            let payload_dir = payload_dir_for_record(&agents_dir, record);
+            let payload_diagnostic = payload_dir.as_ref().err().copied();
+            named_agent_projection(
+                payload_dir.as_ref().ok().map(PathBuf::as_path),
+                payload_diagnostic,
+                record,
+                named_agent_activity_id(&record.agent_key),
+                codex_home,
+            )
+        })
+        .collect::<Vec<_>>();
+    let agents = current_projections
         .iter()
         .map(|projection| projection.row.clone())
         .collect::<Vec<_>>();
     let summary = summarize(&agents);
-    let degraded = agents.iter().any(|agent| !agent.diagnostics.is_empty());
-    let mut items = projections
+
+    let mut items = current_projections
         .iter()
         .map(named_agent_activity_item)
         .collect::<Vec<_>>();
+    items.extend(
+        registry
+            .historical_instances
+            .iter()
+            .filter_map(|record| historical_named_agent_projection(&agents_dir, record, codex_home))
+            .map(|projection| named_agent_activity_item(&projection)),
+    );
     items.sort_by(activity_item_ordering);
 
+    let degraded = registry.degraded || agents.iter().any(|agent| !agent.diagnostics.is_empty());
     let selected_item_id = items.first().map(|item| item.id.clone());
     let feed_cursor = Some(feed_cursor(&items));
 
@@ -491,6 +527,19 @@ fn project_blocking(
         summary,
         items,
         agents,
+    }
+}
+
+fn empty_activity_feed(work_root_id: WorkRootId, degraded: bool) -> WorkRootActivityView {
+    ActivityFeed {
+        work_root_id,
+        status: if degraded { "degraded" } else { "ok" }.to_owned(),
+        update_mode: "snapshot".to_owned(),
+        feed_cursor: Some(feed_cursor(&[])),
+        selected_item_id: None,
+        summary: WorkRootActivitySummary::default(),
+        items: Vec::new(),
+        agents: Vec::new(),
     }
 }
 
@@ -521,31 +570,29 @@ fn activity_item_versions(
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
 ) -> BTreeMap<String, String> {
-    let Some(agents_dir) = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
-    else {
+    let Some((agents_dir, db_path)) = resolve_cache_root(cache_home).and_then(|cache_root| {
+        Some((
+            resolve_work_root_agents_dir(&cache_root, root_path)?,
+            resolve_work_root_state_db(&cache_root, root_path)?,
+        ))
+    }) else {
         return BTreeMap::new();
     };
-    let Ok(entries) = std::fs::read_dir(agents_dir) else {
-        return BTreeMap::new();
-    };
-
+    let registry = read_agent_registry(&db_path, None);
     let mut versions = BTreeMap::new();
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-        let agent_key = entry.file_name().to_string_lossy().into_owned();
-        if agent_key.is_empty() {
-            continue;
-        }
+    for record in registry.current_roles.iter() {
         versions.insert(
-            named_agent_activity_id(&agent_key),
-            system_time_version(agent_record_modified_at(&entry.path(), codex_home)),
+            named_agent_activity_id(&record.agent_key),
+            activity_record_version(&agents_dir, record, codex_home),
         );
+    }
+    for record in registry.historical_instances.iter() {
+        if historical_payload_useful(&agents_dir, record, codex_home) {
+            versions.insert(
+                historical_named_agent_activity_id(record),
+                activity_record_version(&agents_dir, record, codex_home),
+            );
+        }
     }
     versions
 }
@@ -577,77 +624,43 @@ fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
     summary
 }
 
-/// Scan `<worktree>/agents` for `agents/*/agent.json` plus optional
-/// `current/state.json`, mapping each directory into a bounded row.
-fn scan_named_agents(
-    agents_dir: &Path,
-    codex_home: Option<&Path>,
-    recent_limit: Option<usize>,
-) -> Vec<NamedAgentProjection> {
-    let Ok(entries) = std::fs::read_dir(agents_dir) else {
-        // No agents directory yet (or unreadable): an empty, healthy
-        // projection rather than a route failure.
-        return Vec::new();
-    };
-
-    let mut agent_dirs = Vec::new();
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-        let agent_key = entry.file_name().to_string_lossy().into_owned();
-        if agent_key.is_empty() {
-            continue;
-        }
-        let agent_dir = entry.path();
-        agent_dirs.push(RecentAgentDir {
-            modified_at: agent_record_modified_at(&agent_dir, codex_home),
-            agent_key,
-            agent_dir,
-        });
-    }
-
-    if let Some(limit) = recent_limit {
-        // CONTRACT: hot-path refreshes can ask for only the recently changed
-        // rows. Use portable filesystem modification times from the agent dir
-        // plus key child files instead of platform-specific watchers here.
-        agent_dirs.sort_by(|left, right| {
-            right
-                .modified_at
-                .cmp(&left.modified_at)
-                .then_with(|| left.agent_key.cmp(&right.agent_key))
-        });
-        agent_dirs.truncate(limit);
-    }
-
-    let mut rows = agent_dirs
-        .into_iter()
-        .map(|entry| named_agent_projection(&entry.agent_dir, entry.agent_key, codex_home))
-        .collect::<Vec<_>>();
-    rows.sort_by(|left, right| left.row.agent_id.cmp(&right.row.agent_id));
-    rows
-}
-
-struct RecentAgentDir {
-    agent_key: String,
-    agent_dir: PathBuf,
-    modified_at: SystemTime,
-}
-
 #[derive(Clone, Debug)]
 struct NamedAgentProjection {
+    activity_id: String,
     row: NamedAgentActivityView,
     output_available: bool,
     native_transcript_available: bool,
+    instance_id: Option<String>,
 }
 
-fn agent_record_modified_at(agent_dir: &Path, codex_home: Option<&Path>) -> SystemTime {
+fn activity_record_version(
+    agents_dir: &Path,
+    record: &AgentRegistryRecord,
+    codex_home: Option<&Path>,
+) -> String {
+    let payload_modified_at = payload_dir_for_record(agents_dir, record)
+        .ok()
+        .map(|agent_dir| payload_record_modified_at(&agent_dir, record, codex_home))
+        .unwrap_or(UNIX_EPOCH);
+    let payload_version = system_time_version(payload_modified_at);
+    format!(
+        "{}|{}|{}|{}|{}|{}",
+        record.updated_at,
+        record.last_seen_at,
+        record.last_call_at,
+        record.cleanup_state,
+        record.cleanup_error,
+        payload_version
+    )
+}
+
+fn payload_record_modified_at(
+    agent_dir: &Path,
+    record: &AgentRegistryRecord,
+    codex_home: Option<&Path>,
+) -> SystemTime {
     let mut latest = modified_at(agent_dir);
     for relative in [
-        "agent.json",
         "output.md",
         "current/state.json",
         "current/runtime.jsonl",
@@ -659,12 +672,11 @@ fn agent_record_modified_at(agent_dir: &Path, codex_home: Option<&Path>) -> Syst
             latest = candidate;
         }
     }
-    if let Some(metadata) = read_agent_metadata(agent_dir).ok() {
-        if let Some(path) = resolve_codex_session_file(codex_home, &metadata) {
-            let candidate = modified_at(&path);
-            if candidate > latest {
-                latest = candidate;
-            }
+    let metadata = agent_metadata_from_record(record);
+    if let Some(path) = resolve_codex_session_file(codex_home, &metadata) {
+        let candidate = modified_at(&path);
+        if candidate > latest {
+            latest = candidate;
         }
     }
     latest
@@ -677,49 +689,30 @@ fn modified_at(path: &Path) -> SystemTime {
 }
 
 fn named_agent_projection(
-    agent_dir: &Path,
-    agent_key: String,
+    agent_dir: Option<&Path>,
+    payload_diagnostic: Option<&'static str>,
+    record: &AgentRegistryRecord,
+    activity_id: String,
     codex_home: Option<&Path>,
 ) -> NamedAgentProjection {
-    let output_available = agent_dir.join("output.md").is_file();
-    let metadata = read_agent_metadata(agent_dir);
-
-    let metadata = match metadata {
-        Ok(metadata) => metadata,
-        Err(diagnostic) => {
-            // CONTRACT: a malformed or missing record degrades only its own row
-            // instead of failing the whole route.
-            return NamedAgentProjection {
-                row: NamedAgentActivityView {
-                    agent_id: agent_key,
-                    name: None,
-                    backend: None,
-                    harness: None,
-                    tier: None,
-                    model: None,
-                    effort: None,
-                    status: STATUS_UNAVAILABLE.to_owned(),
-                    last_call_at: None,
-                    session_present: false,
-                    current_call: None,
-                    detail_hints: Vec::new(),
-                    diagnostics: vec![diagnostic.to_owned()],
-                },
-                output_available: false,
-                native_transcript_available: false,
-            };
-        }
-    };
+    let output_available = agent_dir
+        .map(|agent_dir| agent_dir.join("output.md").is_file())
+        .unwrap_or(false);
+    let metadata = agent_metadata_from_record(record);
 
     let native_transcript_available = resolve_codex_session_file(codex_home, &metadata).is_some();
 
     let mut diagnostics = Vec::new();
+    if let Some(diagnostic) = payload_diagnostic {
+        diagnostics.push(diagnostic.to_owned());
+    }
     let (status, status_diagnostic) = agent_status(&metadata.status);
     if let Some(diagnostic) = status_diagnostic {
         diagnostics.push(diagnostic.to_owned());
     }
 
-    let (current_call, current_call_diagnostic) = read_current_call(agent_dir);
+    let (current_call, current_call_diagnostic) =
+        agent_dir.map(read_current_call).unwrap_or((None, None));
     if let Some(diagnostic) = current_call_diagnostic {
         diagnostics.push(diagnostic.to_owned());
     }
@@ -731,8 +724,9 @@ fn named_agent_projection(
     }
 
     NamedAgentProjection {
+        activity_id,
         row: NamedAgentActivityView {
-            agent_id: agent_key,
+            agent_id: record.agent_key.clone(),
             name: non_empty(metadata.name),
             backend: non_empty(metadata.backend),
             harness: non_empty(metadata.harness),
@@ -749,16 +743,118 @@ fn named_agent_projection(
         },
         output_available,
         native_transcript_available,
+        instance_id: record.instance_id.clone(),
     }
 }
 
-fn read_agent_metadata(agent_dir: &Path) -> Result<AgentMetadata, &'static str> {
-    match std::fs::read(agent_dir.join("agent.json")) {
-        Ok(raw) => {
-            serde_json::from_slice::<AgentMetadata>(&raw).map_err(|_| DIAG_METADATA_UNREADABLE)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(DIAG_METADATA_MISSING),
-        Err(_) => Err(DIAG_METADATA_UNREADABLE),
+fn historical_named_agent_projection(
+    agents_dir: &Path,
+    record: &AgentRegistryRecord,
+    codex_home: Option<&Path>,
+) -> Option<NamedAgentProjection> {
+    if !historical_payload_useful(agents_dir, record, codex_home) {
+        return None;
+    }
+    let payload_dir = payload_dir_for_record(agents_dir, record);
+    let payload_diagnostic = payload_dir.as_ref().err().copied();
+    let mut projection = named_agent_projection(
+        payload_dir.as_ref().ok().map(PathBuf::as_path),
+        payload_diagnostic,
+        record,
+        historical_named_agent_activity_id(record),
+        codex_home,
+    );
+    if !record.cleanup_state.is_empty() && record.cleanup_state != "retired" {
+        projection
+            .row
+            .diagnostics
+            .push(format!("instance cleanup state: {}", record.cleanup_state));
+    }
+    if !record.cleanup_error.is_empty() {
+        projection.row.diagnostics.push(format!(
+            "instance cleanup error: {}",
+            bounded(&record.cleanup_error)
+        ));
+    }
+    Some(projection)
+}
+
+fn historical_payload_useful(
+    agents_dir: &Path,
+    record: &AgentRegistryRecord,
+    codex_home: Option<&Path>,
+) -> bool {
+    if matches!(record.cleanup_state.as_str(), "current" | "cleanup_deleted") {
+        return false;
+    }
+    if !record.cleanup_error.is_empty() {
+        return true;
+    }
+    let metadata = agent_metadata_from_record(record);
+    if resolve_codex_session_file(codex_home, &metadata).is_some() {
+        return true;
+    }
+    if matches!(
+        record.status.as_str(),
+        "blocked" | "failed" | "cancelled" | "canceled" | "erased" | STATUS_UNAVAILABLE
+    ) {
+        return true;
+    }
+    let Ok(agent_dir) = payload_dir_for_record(agents_dir, record) else {
+        return false;
+    };
+    agent_dir.join("output.md").is_file()
+        || agent_dir.join("current").join("state.json").is_file()
+        || agent_dir.join("current").join("runtime.jsonl").is_file()
+        || agent_dir.join("current").join("stdout").is_file()
+        || agent_dir.join("current").join("stderr").is_file()
+}
+
+fn payload_dir_for_record(
+    agents_dir: &Path,
+    record: &AgentRegistryRecord,
+) -> Result<PathBuf, &'static str> {
+    let state_path = payload_state_path(record);
+    if !is_safe_payload_state_path(state_path) {
+        return Err(DIAG_PAYLOAD_PATH_UNAVAILABLE);
+    }
+    Ok(agents_dir.join(state_path))
+}
+
+fn payload_state_path(record: &AgentRegistryRecord) -> &str {
+    if record.state_path.is_empty() {
+        &record.agent_key
+    } else {
+        &record.state_path
+    }
+}
+
+fn is_safe_payload_state_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.contains('\\')
+        || value.contains(':')
+        || value.as_bytes().contains(&0)
+        || Path::new(value).is_absolute()
+    {
+        return false;
+    }
+    Path::new(value)
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn agent_metadata_from_record(record: &AgentRegistryRecord) -> AgentMetadata {
+    AgentMetadata {
+        name: record.role_name(),
+        backend: record.backend.clone(),
+        harness: record.harness.clone(),
+        tier: record.tier.clone(),
+        model: record.model.clone(),
+        effort: record.effort.clone(),
+        session_id: record.session_id.clone(),
+        status: record.status.clone(),
+        last_call_at: record.last_call_at.clone(),
+        last_output_path: record.last_output_path.clone(),
     }
 }
 
@@ -795,9 +891,15 @@ fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem 
             serde_json::Value::String(effort.clone()),
         );
     }
+    if let Some(instance_id) = &projection.instance_id {
+        metadata.insert(
+            "instanceId".to_owned(),
+            serde_json::Value::String(instance_id.clone()),
+        );
+    }
 
     ActivityItem {
-        id: named_agent_activity_id(&agent.agent_id),
+        id: projection.activity_id.clone(),
         kind: ACTIVITY_KIND_NAMED_AGENT.to_owned(),
         label: agent.name.clone().unwrap_or_else(|| agent.agent_id.clone()),
         status: agent.status.clone(),
@@ -891,13 +993,25 @@ fn named_agent_activity_id(agent_key: &str) -> String {
     format!("{ACTIVITY_ID_NAMED_AGENT_PREFIX}{agent_key}")
 }
 
-fn named_agent_key_from_activity_id(activity_id: &str) -> Option<String> {
-    activity_id
+fn historical_named_agent_activity_id(record: &AgentRegistryRecord) -> String {
+    format!(
+        "{ACTIVITY_ID_NAMED_AGENT_INSTANCE_PREFIX}{}",
+        historical_activity_suffix(record)
+    )
+}
+
+fn is_named_agent_activity_id(activity_id: &str) -> bool {
+    let current = activity_id
         .strip_prefix(ACTIVITY_ID_NAMED_AGENT_PREFIX)
         .filter(|agent_key| {
             !agent_key.is_empty() && !agent_key.contains('/') && !agent_key.contains('\\')
         })
-        .map(str::to_owned)
+        .is_some();
+    let historical = activity_id
+        .strip_prefix(ACTIVITY_ID_NAMED_AGENT_INSTANCE_PREFIX)
+        .filter(|suffix| !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .is_some();
+    current || historical
 }
 
 fn normalize_transcript_limit(limit: Option<usize>) -> usize {
@@ -952,18 +1066,41 @@ fn named_agent_transcript_blocking(
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
     activity_id: String,
-    agent_key: &str,
     cursor: Option<&str>,
     before: Option<&str>,
     limit: usize,
 ) -> ActivityTranscript {
-    let agents_dir = resolve_cache_root(cache_home)
-        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path));
-    let Some(agent_dir) = agents_dir.map(|agents_dir| agents_dir.join(agent_key)) else {
+    let Some((agents_dir, db_path)) = resolve_cache_root(cache_home).and_then(|cache_root| {
+        Some((
+            resolve_work_root_agents_dir(&cache_root, root_path)?,
+            resolve_work_root_state_db(&cache_root, root_path)?,
+        ))
+    }) else {
         return unavailable_transcript(
             work_root_id,
             activity_id,
-            agent_key,
+            "unknown",
+            "activity source unavailable",
+        );
+    };
+    let Some(record) = lookup_activity_record(
+        &db_path,
+        &activity_id,
+        ACTIVITY_ID_NAMED_AGENT_PREFIX,
+        ACTIVITY_ID_NAMED_AGENT_INSTANCE_PREFIX,
+    ) else {
+        return unavailable_transcript(
+            work_root_id,
+            activity_id,
+            "unknown",
+            "activity source unavailable",
+        );
+    };
+    let Ok(agent_dir) = payload_dir_for_record(&agents_dir, &record) else {
+        return unavailable_transcript(
+            work_root_id,
+            activity_id,
+            &record.agent_key,
             "activity source unavailable",
         );
     };
@@ -971,12 +1108,18 @@ fn named_agent_transcript_blocking(
         return unavailable_transcript(
             work_root_id,
             activity_id,
-            agent_key,
+            &record.agent_key,
             "activity source unavailable",
         );
     }
 
-    let projection = named_agent_projection(&agent_dir, agent_key.to_owned(), codex_home);
+    let projection = named_agent_projection(
+        Some(&agent_dir),
+        None,
+        &record,
+        activity_id.clone(),
+        codex_home,
+    );
     let source = named_agent_source(&projection.row);
     let live = projection
         .row
@@ -985,36 +1128,34 @@ fn named_agent_transcript_blocking(
         .map(|call| call.active)
         .unwrap_or(false);
 
-    let metadata = read_agent_metadata(&agent_dir).ok();
+    let metadata = agent_metadata_from_record(&record);
     let mut native_diagnostic: Option<&str> = None;
-    if let Some(metadata) = metadata.as_ref() {
-        if let Some(native_path) = resolve_codex_session_file(codex_home, metadata) {
-            match std::fs::read_to_string(native_path) {
-                Ok(raw) => {
-                    let parsed = parse_codex_session_transcript(&raw);
-                    let (blocks, next_cursor, has_more) =
-                        paginate_transcript_blocks(parsed.blocks, cursor, before, limit);
-                    let mut diagnostics = projection.row.diagnostics;
-                    diagnostics.extend(parsed.diagnostics);
-                    let degraded = !diagnostics.is_empty() || parsed.degraded;
-                    return ActivityTranscript {
-                        work_root_id,
-                        activity_id,
-                        status: if degraded { "degraded" } else { "available" }.to_owned(),
-                        source_status: if degraded { "degraded" } else { "ok" }.to_owned(),
-                        live,
-                        source,
-                        blocks,
-                        next_cursor: Some(next_cursor),
-                        has_more,
-                        diagnostics,
-                    };
-                }
-                Err(_) => {
-                    // Fall through to the output.md source while reporting only
-                    // a source-neutral diagnostic. Native paths stay daemon-side.
-                    native_diagnostic = Some("native transcript source unreadable");
-                }
+    if let Some(native_path) = resolve_codex_session_file(codex_home, &metadata) {
+        match std::fs::read_to_string(native_path) {
+            Ok(raw) => {
+                let parsed = parse_codex_session_transcript(&raw);
+                let (blocks, next_cursor, has_more) =
+                    paginate_transcript_blocks(parsed.blocks, cursor, before, limit);
+                let mut diagnostics = projection.row.diagnostics;
+                diagnostics.extend(parsed.diagnostics);
+                let degraded = !diagnostics.is_empty() || parsed.degraded;
+                return ActivityTranscript {
+                    work_root_id,
+                    activity_id,
+                    status: if degraded { "degraded" } else { "available" }.to_owned(),
+                    source_status: if degraded { "degraded" } else { "ok" }.to_owned(),
+                    live,
+                    source,
+                    blocks,
+                    next_cursor: Some(next_cursor),
+                    has_more,
+                    diagnostics,
+                };
+            }
+            Err(_) => {
+                // Fall through to the output.md source while reporting only
+                // a source-neutral diagnostic. Native paths stay daemon-side.
+                native_diagnostic = Some("native transcript source unreadable");
             }
         }
     }
@@ -2074,31 +2215,21 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     digest
 }
 
-/// Subset of `wsagent` `agent.json` the projection needs. Private fields such
-/// as `pid` and stream paths are intentionally not deserialized. The raw
-/// session id is deserialized only as daemon-private resolver input and is
-/// collapsed to `sessionPresent` before any browser response is built.
-#[derive(Debug, Default, Deserialize)]
+/// Subset of wsstore named-agent registry metadata the projection needs.
+/// Private fields such as process ids and stream paths are not part of this
+/// shape. The raw session id is held only as daemon-private resolver input and
+/// is collapsed to `sessionPresent` before any browser response is built.
+#[derive(Debug, Default)]
 struct AgentMetadata {
-    #[serde(default)]
     name: String,
-    #[serde(default)]
     backend: String,
-    #[serde(default)]
     harness: String,
-    #[serde(default)]
     tier: String,
-    #[serde(default)]
     model: String,
-    #[serde(default)]
     effort: String,
-    #[serde(default)]
     session_id: String,
-    #[serde(default)]
     status: String,
-    #[serde(default)]
     last_call_at: String,
-    #[serde(default)]
     last_output_path: String,
 }
 

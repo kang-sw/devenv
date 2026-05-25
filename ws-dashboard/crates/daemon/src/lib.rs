@@ -1,3 +1,4 @@
+pub mod agent_registry;
 pub mod auth;
 pub mod cli;
 pub mod config;
