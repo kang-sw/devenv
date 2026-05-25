@@ -3,6 +3,10 @@ title: subquery still advertises root and returns mismatched actor-scope follow-
 related:
   260524-bug-subquery-working-directory-stderr: adjacent subquery reliability issue
   260525-bug-ws-setup-cwd-plugin-cache-root: adjacent setup/root recovery behavior
+spec:
+  - 260523-agents-root-schema-invisibility
+  - 260505-workflow-state-delegation-tools
+  - 260505-async-subquery-ephemeral-agent
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
@@ -117,3 +121,36 @@ The remaining stale exposure is therefore in the MCP advertised schema and
 dispatch compatibility path, not in ordinary skill prose. The general notation
 line may still be worth tightening so workflow authors do not infer that
 actor-owned tools should accept public `root` arguments.
+
+## Phases
+
+### Phase 1: Hide subquery root and align actor-scoped follow-up
+
+Remove public `root` from the advertised `subquery` MCP input schema. Extend
+raw `tools()` and `tools/list` tests so actor-owned public tools include
+`subquery` in the rootless schema invariant rather than checking only
+`agents.*`.
+
+Keep the rootless public workflow as the contract: in an actor-bound lead
+session, `subquery` should register/call in the current actor scope and the
+printed `agents.result/status/tail/cancel` follow-up should work as printed.
+Add MCP-level regression coverage for an actor-bound `subquery` followed by
+rootless result/status access to the returned key.
+
+Decide explicitly what hidden explicit-root compatibility should do for
+`subquery`. The preferred hotfix behavior is to stop advertising `root` and
+avoid creating a reader child actor when an explicit hidden root routes the
+subquery into the global compatibility namespace. If hidden explicit-root
+compatibility remains accepted, its returned follow-up must not imply a
+rootless actor-scoped lookup for a globally registered subquery.
+
+Deferred scope: removing hidden explicit-root compatibility from every
+dispatch path, changing setup/root resolution for non-agent tools, or changing
+`ws.setup` public `root` behavior.
+
+Verification should include focused MCP tests around schema visibility,
+actor-bound rootless subquery follow-up, explicit-root compatibility behavior,
+and the existing actor setup/named-agent lifecycle tests. Documentation
+closeout should update the MCP and named-agent specs plus mental models if the
+hidden compatibility behavior changes or if the public schema invariant is
+expanded from `agents.*` to actor-owned tools.
