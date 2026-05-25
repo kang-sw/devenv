@@ -143,3 +143,17 @@ covered document-viewer tests, e2e TypeScript compilation, and frontend build.
 The full Playwright gate passed in the implementer run, while a later local
 rerun hit the separately tracked sticky agent tab close confirmation issue
 before reaching the Markdown step.
+
+#### Edition (7528758) - 2026-05-25
+
+Adjusted `Copy visible` serialization so selected list, task-list, and code
+blocks copy closer to their rendered/source Markdown shape. Untranslated list
+items now preserve bullet, task, numbering, nested indentation, and adjacent
+same-family list items are joined with single newlines instead of blank lines.
+Untranslated code blocks copy their source fenced block so whitespace and line
+breaks survive.
+
+Translated blocks still use the translated markdown returned for that block
+without inventing list markers. Focused document-viewer tests cover mixed
+heading, paragraph, unordered/task list, ordered list, translated list, and
+fenced code visible-copy formatting.

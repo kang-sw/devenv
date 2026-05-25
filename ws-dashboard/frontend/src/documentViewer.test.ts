@@ -306,6 +306,76 @@ assert(!listHtml.includes("✓"), "rail selected-state glyph text is absent from
 assert(!listHtml.includes("Copy visible text"), "copy actions are absent until the selected-block toolbar is shown");
 assert(!listHtml.includes("document-viewer-action-strip"), "block actions no longer live in the legacy body-click selection strip");
 
+const visibleCopyMarkdown = [
+  "# Copy Format",
+  "",
+  "Paragraph line",
+  "continuation",
+  "",
+  "- bullet one",
+  "  - nested bullet",
+  "- [x] done task",
+  "",
+  "3. third",
+  "4. fourth",
+  "",
+  "```ts",
+  "const value = 1;",
+  "  console.log(value);",
+  "```",
+].join("\n");
+const visibleCopyModel = deriveMarkdownDocumentModel(visibleCopyMarkdown, { path: "docs/copy.md" });
+assertDeepEqual(
+  visibleCopyModel.blocks.map((block) => block.kind),
+  ["heading", "paragraph", "listItem", "taskItem", "listItem", "listItem", "code"],
+  "visible-copy fixture has heading, paragraph, unordered/task list, ordered list, and code blocks",
+);
+assertEqual(
+  documentBlocksVisibleText(visibleCopyModel.blocks, undefined, visibleCopyModel.contentHash),
+  [
+    "Copy Format",
+    "",
+    "Paragraph line continuation",
+    "",
+    "- bullet one",
+    "  - nested bullet",
+    "- [x] done task",
+    "",
+    "3. third",
+    "4. fourth",
+    "",
+    "```ts",
+    "const value = 1;",
+    "  console.log(value);",
+    "```",
+  ].join("\n"),
+  "visible copy preserves list markers, compact adjacent list items, ordered numbering, and fenced code whitespace",
+);
+assertEqual(
+  documentBlocksVisibleText(visibleCopyModel.blocks.slice(2, 4), undefined, visibleCopyModel.contentHash),
+  ["- bullet one", "  - nested bullet", "- [x] done task"].join("\n"),
+  "adjacent unordered and task list items copy compactly with one newline boundary",
+);
+assertEqual(
+  documentBlocksVisibleText(visibleCopyModel.blocks.slice(4, 6), undefined, visibleCopyModel.contentHash),
+  ["3. third", "4. fourth"].join("\n"),
+  "adjacent ordered list items copy compactly with source numbering",
+);
+const visibleCopyOverlay: DocumentTranslationOverlay = {
+  contentHash: visibleCopyModel.contentHash,
+  blocks: {
+    [buildOverlayKey(visibleCopyModel.contentHash, visibleCopyModel.blocks[2].blockId)]: {
+      translatedMarkdown: "번역된 항목",
+      status: "ok",
+    },
+  },
+};
+assertEqual(
+  documentBlocksVisibleText(visibleCopyModel.blocks.slice(2, 4), visibleCopyOverlay, visibleCopyModel.contentHash),
+  ["번역된 항목", "- [x] done task"].join("\n"),
+  "visible copy uses translated markdown when present without inventing list markers",
+);
+
 const railBlocks = listPolishModel.blocks.slice(0, 4);
 const selectedFirst = nextRailSelectedBlockIds({
   current: [],
