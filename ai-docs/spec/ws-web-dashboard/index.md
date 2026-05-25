@@ -158,6 +158,27 @@ unknown server, missing endpoint, wrong passphrase, upstream rejection, and
 unreachable endpoint without exposing SSH targets, endpoint hints, passphrases,
 bearer tokens, host paths, or cache paths.
 
+## SSH Tunnel Reconnect For Linked Servers {#260525-ws-dashboard-ssh-tunnel-reconnect}
+
+The local gateway may remember non-secret SSH remote metadata for a linked
+dashboard server: a display label, opaque server id, SSH target, remote
+loopback dashboard endpoint, and the most recent local forwarded endpoint.
+Passphrases, bearer tokens, and active tunnel process handles remain
+daemon-memory-only.
+
+An authenticated owner can ask the local gateway to start or reconnect an SSH
+tunnel for a linked server. The gateway creates a local loopback forward to the
+remembered remote loopback endpoint, updates the linked server's local endpoint
+hint, and returns only the bounded `ServerConnectionView` state. Responses do
+not expose SSH targets, local forwarded endpoint ports, remote endpoint hints,
+passphrases, bearer tokens, host paths, or cache paths.
+
+After local daemon restart, remembered linked servers with SSH and remote
+endpoint metadata are visible as `tunnelRequired` until a tunnel is recreated.
+Once the tunnel exists but no memory-only link token is present, the linked
+server becomes `authRequired` and the owner must re-enter the remote
+daemon-lifetime passphrase through the link-auth route.
+
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
 The dashboard exposes known workspace and workRoot membership from a

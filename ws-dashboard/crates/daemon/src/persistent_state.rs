@@ -151,6 +151,7 @@ pub struct PersistedLinkedServer {
     pub kind: ServerKind,
     pub ssh_target: Option<String>,
     pub endpoint_hint: Option<String>,
+    pub remote_endpoint_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -189,6 +190,8 @@ struct PersistedLinkedServerEntry {
     ssh_target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     endpoint_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_endpoint_hint: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -326,6 +329,7 @@ async fn read_dashboard_state_parts(path: &Path) -> Result<DashboardStateParts, 
                         kind: entry.kind,
                         ssh_target: trim_optional(entry.ssh_target),
                         endpoint_hint: trim_optional(entry.endpoint_hint),
+                        remote_endpoint_hint: trim_optional(entry.remote_endpoint_hint),
                     })
                 })
                 .collect(),
@@ -391,6 +395,7 @@ async fn write_dashboard_state(
                 kind: server.kind,
                 ssh_target: server.ssh_target,
                 endpoint_hint: server.endpoint_hint,
+                remote_endpoint_hint: server.remote_endpoint_hint,
             })
             .collect(),
     };
@@ -569,6 +574,7 @@ mod tests {
                 kind: ServerKind::SshRemote,
                 ssh_target: Some("user@example.test".to_owned()),
                 endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+                remote_endpoint_hint: Some("http://127.0.0.1:5100".to_owned()),
             }])
             .await
             .expect("persist linked servers");
@@ -584,6 +590,7 @@ mod tests {
                 kind: ServerKind::SshRemote,
                 ssh_target: Some("user@example.test".to_owned()),
                 endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+                remote_endpoint_hint: Some("http://127.0.0.1:5100".to_owned()),
             }]
         );
 
@@ -592,6 +599,7 @@ mod tests {
             .expect("read linked server state");
         assert!(raw.contains("\"linkedServers\""));
         assert!(raw.contains("\"kind\": \"sshRemote\""));
+        assert!(raw.contains("\"remoteEndpointHint\""));
         remove_temp(&root);
     }
 

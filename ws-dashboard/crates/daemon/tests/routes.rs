@@ -45,7 +45,7 @@ use ws_dashboard_daemon::document_translation::{
 };
 use ws_dashboard_daemon::persistent_state::{DashboardStateStore, PersistedLinkedServer};
 use ws_dashboard_daemon::router::{build_router, AppState};
-use ws_dashboard_daemon::servers::LinkedServerSessions;
+use ws_dashboard_daemon::servers::{LinkedServerSessions, LinkedServerTunnels};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
     resolve_work_root_agents_dir, WorkRootActivityProjectionConfig, WorkRootActivityProjector,
@@ -147,6 +147,7 @@ fn app_state_with_opened_and_store(
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         linked_server_sessions: LinkedServerSessions::default(),
+        linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -166,6 +167,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         linked_server_sessions: LinkedServerSessions::default(),
+        linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -389,6 +391,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         linked_server_sessions: LinkedServerSessions::default(),
+        linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
@@ -1894,6 +1897,7 @@ async fn dashboard_servers_api_lists_local_and_persisted_linked_servers() {
             kind: ServerKind::SshRemote,
             ssh_target: Some("owner@example.test".to_owned()),
             endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+            remote_endpoint_hint: None,
         }])
         .await
         .expect("persist linked server seed");
@@ -1935,6 +1939,161 @@ async fn dashboard_servers_api_lists_local_and_persisted_linked_servers() {
 }
 
 #[tokio::test]
+async fn ssh_server_start_persists_tunnel_metadata_without_exposing_secrets() {
+    let state_file_root = temp_fixture_path("ssh-server-start-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/ssh/start")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "serverId": "server-windows",
+                        "label": "Windows dogfood",
+                        "sshTarget": "owner@example.test",
+                        "remoteEndpoint": "http://127.0.0.1:4100",
+                        "localPort": 49155
+                    })
+                    .to_string(),
+                ))
+                .expect("ssh server start request"),
+        )
+        .await
+        .expect("ssh server start response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("ssh server start body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("ssh start JSON");
+    assert_eq!(value["id"], "server-windows");
+    assert_eq!(value["status"], "authRequired");
+    assert_eq!(value["actions"][0]["id"], "enterPassphrase");
+    assert!(
+        !body
+            .windows(b"owner@example.test".len())
+            .any(|window| window == b"owner@example.test"),
+        "start response must not expose SSH target"
+    );
+    assert!(
+        !body
+            .windows(b"49155".len())
+            .any(|window| window == b"49155"),
+        "start response must not expose local forwarded endpoint"
+    );
+
+    let restored = store.load_linked_servers().await;
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].id.as_str(), "server-windows");
+    assert_eq!(
+        restored[0].ssh_target.as_deref(),
+        Some("owner@example.test")
+    );
+    assert_eq!(
+        restored[0].endpoint_hint.as_deref(),
+        Some("http://127.0.0.1:49155")
+    );
+    assert_eq!(
+        restored[0].remote_endpoint_hint.as_deref(),
+        Some("http://127.0.0.1:4100")
+    );
+
+    let servers = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("servers after ssh start request"),
+        )
+        .await
+        .expect("servers after ssh start response");
+    let servers_body = axum::body::to_bytes(servers.into_body(), 64 * 1024)
+        .await
+        .expect("servers after ssh start body");
+    let servers_value: serde_json::Value =
+        serde_json::from_slice(&servers_body).expect("servers after ssh start JSON");
+    assert_eq!(servers_value["servers"][1]["status"], "authRequired");
+
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_reconnect_restores_tunnel_required_after_restart() {
+    let state_file_root = temp_fixture_path("ssh-reconnect-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::SshRemote,
+            ssh_target: Some("owner@example.test".to_owned()),
+            endpoint_hint: Some("http://127.0.0.1:49155".to_owned()),
+            remote_endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+        }])
+        .await
+        .expect("persist linked server seed");
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let servers = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers")
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("servers before reconnect request"),
+        )
+        .await
+        .expect("servers before reconnect response");
+    let servers_body = axum::body::to_bytes(servers.into_body(), 64 * 1024)
+        .await
+        .expect("servers before reconnect body");
+    let servers_value: serde_json::Value =
+        serde_json::from_slice(&servers_body).expect("servers before reconnect JSON");
+    assert_eq!(servers_value["servers"][1]["status"], "tunnelRequired");
+    assert_eq!(
+        servers_value["servers"][1]["actions"][0]["id"],
+        "reconnectTunnel"
+    );
+
+    let reconnected = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/tunnel/reconnect")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("server reconnect request"),
+        )
+        .await
+        .expect("server reconnect response");
+
+    assert_eq!(reconnected.status(), StatusCode::OK);
+    let reconnected_body = axum::body::to_bytes(reconnected.into_body(), 64 * 1024)
+        .await
+        .expect("server reconnect body");
+    let reconnected_value: serde_json::Value =
+        serde_json::from_slice(&reconnected_body).expect("server reconnect JSON");
+    assert_eq!(reconnected_value["status"], "authRequired");
+    assert_eq!(reconnected_value["actions"][0]["id"], "enterPassphrase");
+
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn server_scoped_resources_route_dispatches_local_and_refuses_linked_servers() {
     let root = temp_fixture_path("server-scoped-resources");
     let state_file_root = temp_fixture_path("server-scoped-resources-state");
@@ -1947,6 +2106,7 @@ async fn server_scoped_resources_route_dispatches_local_and_refuses_linked_serve
             kind: ServerKind::SshRemote,
             ssh_target: Some("owner@example.test".to_owned()),
             endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+            remote_endpoint_hint: None,
         }])
         .await
         .expect("persist linked server seed");
@@ -2110,6 +2270,7 @@ async fn local_link_auth_connects_and_forwards_remote_resources() {
             kind: ServerKind::SshRemote,
             ssh_target: Some("owner@example.test".to_owned()),
             endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
         }])
         .await
         .expect("persist linked server seed");
@@ -3216,6 +3377,7 @@ fn app_state_with_activity_cache_and_codex_home(
             cache_home: Some(cache_home),
         }),
         linked_server_sessions: LinkedServerSessions::default(),
+        linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -7008,6 +7170,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         linked_server_sessions: LinkedServerSessions::default(),
+        linked_server_tunnels: LinkedServerTunnels::record_only_for_tests(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }

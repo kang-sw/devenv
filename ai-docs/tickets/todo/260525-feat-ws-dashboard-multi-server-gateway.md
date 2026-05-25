@@ -8,6 +8,7 @@ spec:
   - 260525-ws-dashboard-remote-deployment-guide
   - 260525-ws-dashboard-linked-server-registry-gateway-skeleton
   - 260525-ws-dashboard-remote-link-auth-handshake
+  - 260525-ws-dashboard-ssh-tunnel-reconnect
 related-mental-model:
   - ws-web-dashboard
 ---

@@ -85,6 +85,7 @@ where
         document_events: crate::work_root_files::DocumentEventHub::default(),
         document_write_locks: crate::work_root_files::DocumentWriteLocks::default(),
         linked_server_sessions: crate::servers::LinkedServerSessions::default(),
+        linked_server_tunnels: crate::servers::LinkedServerTunnels::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     });
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
