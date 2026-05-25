@@ -47,6 +47,7 @@ import {
   requestDocumentTranslation,
   type DocumentTranslationOverlay,
 } from "./documentViewer";
+import { DocumentRawEditor } from "./documentRawEditor";
 import {
   buildDashboardRefreshCommand,
   buildDocumentModeSetCommand,
@@ -5235,11 +5236,12 @@ function ReadOnlyDocumentPane({
       ) : (
         <>
           {documentMode === "edit" ? (
-            <textarea
-              className="document-raw-editor ws-code-block"
+            <DocumentRawEditor
               value={draft}
-              onChange={(event) => {
-                setDraft(event.currentTarget.value);
+              source={pane}
+              ariaLabel={`Raw editor for ${pane.path}`}
+              onChange={(nextDraft) => {
+                setDraft(nextDraft);
                 setSaveState("dirty");
                 setSaveMessage("Unsaved changes");
               }}

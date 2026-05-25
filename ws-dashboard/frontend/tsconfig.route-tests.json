@@ -30,6 +30,8 @@
     "src/resourceRefresh.ts",
     "src/resourceRefresh.test.ts",
     "src/documentViewer.tsx",
+    "src/documentRawEditor.tsx",
+    "src/documentRawEditor.test.ts",
     "src/documentViewer.test.ts",
     "src/workRootFiles.ts",
     "src/workRootFiles.test.ts",

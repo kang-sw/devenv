@@ -3152,11 +3152,42 @@ button {
   border: 0;
   background: var(--ws-color-surface-editor-body);
   color: var(--ws-color-text-primary);
-  padding: var(--ws-space-09);
   font-family: var(--ws-font-family-mono);
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-04);
-  resize: none;
+}
+
+.document-codemirror-editor {
+  overflow: hidden;
+}
+
+.document-codemirror-editor .cm-editor {
+  height: 100%;
+}
+
+.document-codemirror-editor .cm-panels {
+  border-color: var(--ws-color-divider-local);
+  background: var(--ws-color-surface-editor-chrome);
+  color: var(--ws-color-text-primary);
+}
+
+.document-codemirror-editor .cm-panel input {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-inset);
+  color: var(--ws-color-text-primary);
+}
+
+.document-codemirror-editor .cm-panel button {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-raised);
+  color: var(--ws-color-text-primary);
+  font: inherit;
+}
+
+.document-codemirror-editor .cm-tooltip {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-raised);
+  color: var(--ws-color-text-primary);
 }
 .workspace-row-menu-wrap {
   position: relative;
