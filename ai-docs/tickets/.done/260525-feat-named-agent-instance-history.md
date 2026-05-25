@@ -10,6 +10,7 @@ spec:
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-25
 ---
 
 # Named-agent role pointers and instance history
@@ -138,3 +139,33 @@ agent directories on ordinary calls. Verify legacy `agent.json` import creates
 a global role and first instance without restoring file-backed write authority.
 Run targeted `wsstore`, `wsagent`, and `mcp` tests, the full Go suite, and
 native Windows coverage for path cleanup and retention timing behavior.
+
+### Result (ade814a) - 2026-05-25
+
+Implemented named-agent role pointers and retained instance history. SQLite now
+stores role/current-instance metadata, retained instance rows, path indexes, and
+retention/cleanup fences while prompt, output, event, stream, runtime-log, and
+`current/state.json` bytes remain file-backed. Re-registering an inactive role
+creates a new instance and moves the role pointer without deleting the previous
+payload directory; failed registration leaves the existing pointer intact.
+
+`agents.call`, `agents.status`, `agents.wait`, `agents.result`, `agents.tail`,
+`agents.cancel`, `agents.interrupt`, worker/inbox hooks, and deprecated
+`agents.print` resolve the current instance for root-omitted actor-scoped calls,
+while hidden explicit-root compatibility remains global. `agents.erase` and
+successful ephemeral result consumption hide/remove role pointers without
+synchronous payload deletion.
+
+Retention cleanup is bounded and SQLite-candidate-driven. It uses seven-day
+eligibility from final call time or instance creation time, skips current,
+pinned, recovery, backoff-fenced, and per-instance `current/state.json`
+queued/running instances, removes only recorded instance paths, and records retry
+metadata on `agent_instances` after cleanup failures. Legacy `agent.json` import
+creates the first global role instance and keeps `agent.json` retired as
+read-only compatibility input.
+
+Verification:
+
+- `go test -count=1 ./internal/wsstore ./internal/wsagent ./internal/mcp`
+- `go test -count=1 ./...`
+- Native Windows: `go test -count=1 ./internal/wsstore ./internal/wsagent ./internal/mcp`

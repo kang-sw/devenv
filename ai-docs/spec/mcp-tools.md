@@ -303,10 +303,11 @@ instruction shape and do not receive the lead bootstrap method.
 
 Root-omitted `agents.*` lifecycle tools in an actor-bound MCP session resolve
 named agents through the current actor scope. This includes registration, call,
-wait, result, status, tail, interrupt, cancel, and erase. Hidden explicit-root
-compatibility calls use the unbound global namespace, so an actor-bound session
-can still inspect or manage a global compatibility registration explicitly
-without shadowing the actor-local agent of the same public name.
+wait, result, status, tail, interrupt, cancel, print, and erase. Hidden
+explicit-root compatibility calls use the unbound global namespace, so an
+actor-bound session can still inspect or manage a global compatibility
+registration explicitly without shadowing the actor-local agent of the same
+public name.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
@@ -338,8 +339,10 @@ through `agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
 `agents.debug.runtime_log`, and `agents.debug.events`.
 
 `agents.interrupt` queues a redirect message for a running agent. `agents.print`
-remains a deprecated compatibility reader, and `agents.erase` removes an agent
-directory for the current worktree.
+remains a deprecated compatibility reader over the resolved current instance.
+`agents.erase` removes or hides the resolved role pointer for the current
+worktree and actor scope; historical instance payloads are removed later by the
+named-agent retention cleanup policy rather than synchronously during erase.
 
 ## API Documentation MCP Tools {#260505-api-documentation-mcp-tools}
 
