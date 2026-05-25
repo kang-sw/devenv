@@ -3,6 +3,8 @@ title: Trim actor-gate setup guidance in root-omitted agent tools
 related:
   260524-mcp-actor-setup-bootstrap: actor setup and recovery contract
   260525-feat-ws-dashboard-sqlite-agent-activity-source: dogfood context that exposed the tool guidance shape
+spec:
+  - 260524-mcp-actor-setup-bootstrap
 ---
 
 # Trim actor-gate setup guidance in root-omitted agent tools
@@ -30,3 +32,20 @@ Current evidence points to `Server.actorGate` in
 `agents-plugin-tool/internal/mcp/server.go`; tests currently assert the verbose
 absolute-root guidance, so the fix should update both the string and the
 contract test expectations.
+
+## Phases
+
+### Phase 1: Trim root-omitted actor setup errors
+
+Change root-omitted `agents.register`, `agents.call`, and `subquery` setup-gate
+errors so the tool layer reports only the missing setup condition plus compact
+recovery guidance such as `ws.setup(id: "<actor-id>")`.
+
+Preserve the authoritative bootstrap ceremony in `lead-workflow-manual` and the
+existing `ws.setup` tool schema/docs. Do not embed
+`lead-workflow-bootstrap`, absolute-root examples, or "from
+lead-workflow-manual" briefing text in the actor-gate error.
+
+Verification should cover the MCP contract test that exercises root-omitted
+`agents.register` before setup and should prove the removed verbose fragments
+are absent.
