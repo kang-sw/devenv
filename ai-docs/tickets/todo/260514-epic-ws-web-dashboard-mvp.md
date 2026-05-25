@@ -123,14 +123,17 @@ Active or planned product tracks:
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
-- Multi-server management - MVP-complete child track.
+- Multi-server management - active child track.
   `260525-feat-ws-dashboard-multi-server-gateway` is done for
   linked-server registry, selected-server resource forwarding, passphrase
   link-auth, SSH start/reconnect dogfood, and server-first left navigation.
   `260525-feat-ws-dashboard-endpoint-linked-server-add` is done for the
-  endpoint-first add-server API and browser modal. Broader remote hardening,
-  automatic deployment, credential persistence, and server federation remain
-  future scope.
+  endpoint-first add-server API and browser modal.
+  `260525-feat-ws-dashboard-server-scoped-operation-forwarding` is todo for
+  making root picker, open WorkRoot, files/documents, Activity, Git, workspace
+  mutations, and terminals transparent across linked servers. Broader remote
+  hardening, automatic deployment, credential persistence, and server
+  federation remain future scope.
 - Dashboard persistence map - research track.
   `260523-research-ws-dashboard-persistable-ui-state-map` remains the backlog
   map for selected resources,
