@@ -1800,7 +1800,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]')).toBeEnabled();
     await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
     await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
-    await expect(pane.locator(".document-list-unordered")).toContainText("nested item");
+    const nestedUnorderedList = pane.locator(".document-list-unordered .document-list-unordered");
+    await expect(nestedUnorderedList).toHaveCount(1);
+    await expect(nestedUnorderedList).toContainText("nested item");
     await expect(pane.locator(".document-list-ordered")).toHaveAttribute("start", "5");
     await expect(pane.locator("code")).toContainText("inline code");
     await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
