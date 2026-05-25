@@ -7,6 +7,8 @@ related:
   260518-epic-ws-dashboard-activity-console: provides the existing Activity feed, transcript, SSE, and compatibility projection surface this ticket must preserve
 spec:
   - 260525-ws-dashboard-sqlite-agent-activity-source
+plans:
+  phase-1: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-1
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -99,6 +101,21 @@ agents and whose payload directories have no `agent.json` files. The route
 should report the correct current agent count, status counts, privacy-preserving
 session presence, transcript availability, and degraded behavior for missing or
 locked registry state.
+
+### Result (f0289c0) - 2026-05-25
+
+Implemented the backend-only current-role migration. WorkRoot Activity now reads
+current named-agent role metadata from read-only `state.sqlite` `agent_defs`
+through a small daemon registry adapter, keeps payload bytes file-backed, and
+resolves current-call, output, and native transcript readers through registry
+`state_path` instead of legacy `agents/*/agent.json` discovery.
+
+Verification covers SQLite registry fixtures without `agent.json`, mismatched
+`agent_key` and `state_path` payload lookup, missing/incompatible registry
+state, locked registry soft-degrade behavior, linked workRoot layout, bounded
+privacy assertions, and existing transcript/feed behavior. Retained
+`agent_instances` history and registry-only refresh/versioning remain Phase 2
+and Phase 3.
 
 ### Phase 2: Add retained instance history to Activity items without changing current agent counts
 

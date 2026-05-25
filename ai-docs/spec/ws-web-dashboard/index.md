@@ -546,14 +546,14 @@ ids, process ids, stdout/stderr paths, stream paths, or backend-native
 transcript paths. The read model remains read-only and does not add agent start,
 interrupt, cancel, erase, retry, or exec-job control actions.
 
-### 🚧 SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
+### SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
 
-The Activity Console read model will use the ws runtime SQLite registry as the
+The Activity Console read model uses the ws runtime SQLite registry as the
 named-agent metadata authority for opened workRoots. Current named-agent role
-rows remain the source for the compatibility agent projection and current agent
-counts, while retained named-agent instance rows may add historical Activity
-Items when their payloads or diagnostics are still useful. Historical instance
-items do not increase the current named-agent count.
+rows are the source for the compatibility agent projection and current agent
+counts, and file-backed payload readers resolve current call state, output, and
+transcripts through registry `state_path` metadata rather than legacy
+`agent.json` discovery.
 
 Browser-visible routes and payload shapes stay stable. Activity snapshots,
 watch stream events, and transcript reads continue to use opaque workRoot and
@@ -561,6 +561,13 @@ activity ids, and transcript/output bytes remain normalized by daemon-owned
 file-backed transcript readers. Missing, locked, unavailable, or incompatible
 registry state degrades to an empty or partial read model rather than failing
 the whole route or exposing cache paths.
+
+> [!note] Planned 🚧
+> Retained named-agent instance rows may add historical Activity Items when
+> their payloads or diagnostics are still useful. Historical instance items do
+> not increase the current named-agent count. Activity refresh/versioning will
+> also observe registry-only metadata changes rather than relying only on
+> payload file modification times.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
