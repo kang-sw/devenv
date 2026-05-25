@@ -87,10 +87,12 @@ final output, and transitions the call to `completed`, `failed`, or `cancelled`.
 When a call is launched from an actor-bound lead MCP session, the agent system
 prompt includes a child actor setup instruction that tells the child process to
 recover with `ws.setup(id: "<child-actor-id>")` before root-omitted ws tool
-calls. Persistent named agents keep the child actor id in agent metadata so
-later calls reuse the same delegated actor. Async worker and interrupt hook
-commands carry the hidden actor id needed to read the same actor-scoped
-registry, current-call state, and inbox as the parent MCP tool dispatch.
+calls. Child actor ids use the same short opaque authority-prefixed token shape
+as lead actors, for example `delegate-k9f2p7qx` or `reader-4m8q2z7p`.
+Persistent named agents keep the child actor id in agent metadata so later calls
+reuse the same delegated actor. Async worker and interrupt hook commands carry
+the hidden actor id needed to read the same actor-scoped registry, current-call
+state, and inbox as the parent MCP tool dispatch.
 
 ## Readiness And Result Split {#260505-agent-readiness-result-split}
 

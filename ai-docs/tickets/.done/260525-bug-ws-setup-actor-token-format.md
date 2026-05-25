@@ -7,6 +7,7 @@ spec:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-25
 ---
 
 # ws setup actor token format
@@ -66,3 +67,15 @@ Deferred scope:
 Verification should cover setup bootstrap, restart recovery, child actor prompt
 injection/recovery, actor-scoped named-agent dispatch, and collision retry or an
 equivalent deterministic collision test.
+
+### Result (1038545) - 2026-05-25
+
+Implemented compact actor ids for setup lead, delegated child, and reader actor
+recovery. New tokens use authority-prefixed lowercase payloads such as
+`lead-k9f2p7qx`, recover through runtime actor lookup instead of visible
+worktree-key parsing, and keep legacy long-token recovery as a compatibility
+fallback.
+
+Verification covered bootstrap recovery, case-insensitive recovery input, child
+actor prompt injection and recovery, actor-scoped dispatch, cache-wide collision
+retry, and the affected package tests.
