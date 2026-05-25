@@ -1,9 +1,15 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
 import {
   buildDocumentTranslationRequestPayload,
   buildOverlayKey,
   deriveMarkdownDocumentModel,
   documentBlocksTranslatedText,
   documentBlocksVisibleText,
+  DocumentViewer,
+  groupedMarkdownRenderUnits,
+  nextRailSelectedBlockIds,
   canCopyTranslatedBlocks,
   isMarkdownDocumentSource,
   localDocumentContentHash,
@@ -251,3 +257,78 @@ assertEqual(
   "번역",
   "translated copy uses overlay text",
 );
+
+const listPolishMarkdown = [
+  "Intro with `inline code` token.",
+  "",
+  "- Alpha",
+  "  - Nested alpha",
+  "- [ ] Todo item",
+  "",
+  "5. Fifth",
+  "6. Sixth",
+  "",
+  "<aside>ignored html</aside>",
+].join("\n");
+const listPolishModel = deriveMarkdownDocumentModel(listPolishMarkdown, { path: "docs/list.md" });
+const listUnits = groupedMarkdownRenderUnits(listPolishModel.renderBlocks);
+assertEqual(listUnits[1]?.type, "list", "adjacent unordered list blocks share one visual list unit");
+if (listUnits[1]?.type === "list") {
+  assertEqual(listUnits[1].context.ordered, false, "unordered list unit keeps unordered context");
+  assertEqual(listUnits[1].blocks.length, 2, "unordered visual list preserves per-item block identities");
+  assertDeepEqual(
+    listUnits[1].blocks.map((block) => block.kind),
+    ["listItem", "taskItem"],
+    "ordinary and task list items remain independently addressable blocks",
+  );
+}
+assertEqual(listUnits[2]?.type, "list", "ordered list blocks share one visual list unit");
+if (listUnits[2]?.type === "list") {
+  assertEqual(listUnits[2].context.ordered, true, "ordered list unit keeps ordered context");
+  assertEqual(listUnits[2].context.start, 5, "ordered list unit preserves non-default start number");
+  assertEqual(listUnits[2].blocks.length, 2, "ordered list preserves each item block identity");
+}
+
+const listHtml = renderToStaticMarkup(createElement(DocumentViewer, {
+  markdown: listPolishMarkdown,
+  path: "docs/list.md",
+}));
+assert(listHtml.includes("<code>inline code</code>"), "inline code renders as semantic code span");
+assert(listHtml.includes("<ul") && listHtml.includes("<li"), "unordered list renders semantic ul/li markup");
+assert(listHtml.includes("Nested alpha"), "nested list content renders inside semantic list item");
+assert(listHtml.includes("type=\"checkbox\""), "task list renders a disabled checkbox");
+assert(listHtml.includes("<ol") && listHtml.includes("start=\"5\""), "ordered list renders semantic ol with non-default start");
+assert(!listHtml.includes("ignored html"), "raw HTML remains inert in rendered markup");
+assert(listHtml.includes("document-block-rail-select"), "selection control is exposed through the rail");
+assert(listHtml.includes("Copy visible text"), "visible copy action is exposed through the rail");
+assert(listHtml.includes("Copy translated text"), "translated copy action is exposed through the rail");
+assert(listHtml.includes("Copy pathref"), "pathref copy action is exposed through the rail");
+assert(!listHtml.includes("document-viewer-action-strip"), "block actions no longer live in a body-click selection strip");
+
+const railBlocks = listPolishModel.blocks.slice(0, 4);
+const selectedFirst = nextRailSelectedBlockIds({
+  current: [],
+  blockId: railBlocks[1].blockId,
+  blockOrdinal: railBlocks[1].ordinal,
+  blocks: listPolishModel.blocks,
+});
+assert(selectedFirst.has(railBlocks[1].blockId), "rail click selects the targeted block");
+const rangeSelected = nextRailSelectedBlockIds({
+  current: selectedFirst,
+  blockId: railBlocks[3].blockId,
+  blockOrdinal: railBlocks[3].ordinal,
+  lastSelectedOrdinal: railBlocks[1].ordinal,
+  shiftKey: true,
+  blocks: listPolishModel.blocks,
+});
+assert(
+  railBlocks.slice(1, 4).every((block) => rangeSelected.has(block.blockId)),
+  "shift-clicking the rail selects the ordinal block range",
+);
+const toggledOff = nextRailSelectedBlockIds({
+  current: selectedFirst,
+  blockId: railBlocks[1].blockId,
+  blockOrdinal: railBlocks[1].ordinal,
+  blocks: listPolishModel.blocks,
+});
+assert(!toggledOff.has(railBlocks[1].blockId), "rail click toggles an already-selected block off");
