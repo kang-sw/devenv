@@ -2902,14 +2902,24 @@ test("linked server root picker uses server-scoped local gateway routes", async 
 
   await page.unroute("**/api/dashboard/servers/server-remote/root-picker**");
   let releaseFirstPicker: ((value: void) => void) | null = null;
+  let remoteStalePickerRequests = 0;
   await page.route("**/api/dashboard/servers/server-remote/root-picker**", async (route) => {
-    await new Promise<void>((resolve) => {
-      releaseFirstPicker = resolve;
-    });
+    remoteStalePickerRequests += 1;
+    if (remoteStalePickerRequests === 1) {
+      await new Promise<void>((resolve) => {
+        releaseFirstPicker = resolve;
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(linkedServerPickerView("/remote/stale")),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(linkedServerPickerView("/remote/stale")),
+      body: JSON.stringify(linkedServerPickerView("/remote/fresh")),
     });
   });
   await page.route("**/api/dashboard/servers/server-other/root-picker**", async (route) => {
@@ -2928,7 +2938,24 @@ test("linked server root picker uses server-scoped local gateway routes", async 
   await expect(staleModal.locator(".root-picker-current")).toContainText(
     "Loading directories from Remote fixture",
   );
-  await staleModal.locator('[data-command-id="rootPicker.close"]').filter({ hasText: "Cancel" }).click();
+  await staleModal
+    .locator('[data-command-id="rootPicker.close"]')
+    .filter({ hasText: "Cancel" })
+    .click();
+  releaseFirstPicker?.();
+  await page.waitForTimeout(100);
+
+  await remoteRow.locator('[data-command-id="rootPicker.open"]').click();
+  staleModal = page.locator(".root-picker-modal");
+  await expect(staleModal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on Remote fixture",
+  );
+  await expect(staleModal.locator(".root-picker-current")).toContainText("/remote/fresh");
+  await expect(staleModal.locator(".root-picker-current")).not.toContainText("/remote/stale");
+  await staleModal
+    .locator('[data-command-id="rootPicker.close"]')
+    .filter({ hasText: "Cancel" })
+    .click();
 
   await page
     .locator(".server-row", { hasText: "Other remote" })
@@ -2941,8 +2968,4 @@ test("linked server root picker uses server-scoped local gateway routes", async 
   await expect(staleModal.locator(".root-picker-current")).toContainText("/other/home");
   await expect(staleModal.locator(".root-picker-address")).toHaveValue("/other/home");
   await expect(staleModal.locator("#root-picker-create-name")).toHaveValue("");
-  releaseFirstPicker?.();
-  await page.waitForTimeout(100);
-  await expect(staleModal.locator(".root-picker-current")).toContainText("/other/home");
-  await expect(staleModal.locator(".root-picker-current")).not.toContainText("/remote/stale");
 });

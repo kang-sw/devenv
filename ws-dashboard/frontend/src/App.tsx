@@ -1222,6 +1222,8 @@ function OpenWorkRootControl({
   const [error, setError] = useState<string | null>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
+  const pickerOpenRef = useRef(open);
+  const pickerRequestSequence = useRef(0);
   const pickerServerId = dashboardServerId(server?.id);
   const pickerServerLabel = server?.label ?? "Local ws dashboard";
   const pickerIsLocal = isLocalDashboardServerId(pickerServerId);
@@ -1231,10 +1233,18 @@ function OpenWorkRootControl({
 
   const loadPicker = useCallback(
     async (path: string | null, historyMode: "push" | "replace" = "push") => {
+      const requestSequence = pickerRequestSequence.current + 1;
+      pickerRequestSequence.current = requestSequence;
       setLoading(true);
       setError(null);
       try {
         const view = await fetchRootPicker(path, pickerServerId);
+        if (
+          pickerRequestSequence.current !== requestSequence ||
+          !pickerOpenRef.current
+        ) {
+          return;
+        }
         setPickerView(view);
         setSelectedPath(view.currentPath);
         setAddressPath(view.currentPath);
@@ -1245,17 +1255,26 @@ function OpenWorkRootControl({
           );
         }
       } catch (nextError) {
+        if (
+          pickerRequestSequence.current !== requestSequence ||
+          !pickerOpenRef.current
+        ) {
+          return;
+        }
         setError(
           nextError instanceof Error ? nextError.message : "picker load failed",
         );
       } finally {
-        setLoading(false);
+        if (pickerRequestSequence.current === requestSequence) {
+          setLoading(false);
+        }
       }
     },
     [pickerServerId],
   );
 
   useEffect(() => {
+    pickerRequestSequence.current += 1;
     setPickerView(null);
     setSelectedPath(null);
     setAddressPath("");
@@ -1277,6 +1296,7 @@ function OpenWorkRootControl({
   }, [loadPicker, loading, open, pickerView]);
 
   useEffect(() => {
+    pickerOpenRef.current = open;
     if (wasOpenRef.current && !open) {
       openerRef.current?.focus();
     }
@@ -1286,6 +1306,8 @@ function OpenWorkRootControl({
   const closePicker = () => {
     onCommand(buildRootPickerCloseCommand(pickerServerId), {
       "rootPicker.close": () => {
+        pickerRequestSequence.current += 1;
+        setLoading(false);
         setOpen(false);
       },
     });
@@ -1294,6 +1316,7 @@ function OpenWorkRootControl({
   const openPicker = () => {
     onCommand(buildRootPickerOpenCommand(pickerServerId), {
       "rootPicker.open": () => {
+        pickerOpenRef.current = true;
         setError(null);
         setOpen(true);
       },
