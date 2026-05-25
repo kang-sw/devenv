@@ -7,11 +7,15 @@ import {
   rootPickerHistoryInitial,
   rootPickerHistoryPush,
   rootPickerCreateDirectoryEndpoint,
+  rootPickerEndpoint,
   rootPickerEntryLabel,
   rootPickerInsertEntry,
   rootPickerListEndpoint,
   rootPickerModifiedTimeLabel,
   rootPickerPinnedPathSet,
+  serverRootPickerCreateDirectoryEndpoint,
+  serverRootPickerEndpoint,
+  serverRootPickerPinsEndpoint,
   rootPickerPinsEndpoint,
   rootPickerVisibleEntries,
   rootPickerVisiblePlaces,
@@ -22,7 +26,9 @@ import {
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${label}: expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
@@ -58,6 +64,33 @@ assertEqual(
   "/api/dashboard/root-picker?path=%2Ftmp%2Fwork+root",
   "picker endpoint encodes exact host path as authenticated request data",
 );
+
+assertEqual(
+  rootPickerListEndpoint(null, "server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/root-picker",
+  "server-scoped picker endpoint encodes server id",
+);
+assertEqual(
+  rootPickerListEndpoint("C:/Users/Test Root", "server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/root-picker?path=C%3A%2FUsers%2FTest+Root",
+  "server-scoped picker endpoint keeps host path only as query data",
+);
+assertEqual(
+  serverRootPickerCreateDirectoryEndpoint("server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/root-picker/directories",
+  "server-scoped create-directory endpoint encodes server id",
+);
+assertEqual(
+  serverRootPickerPinsEndpoint("server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/root-picker/pins",
+  "server-scoped pins endpoint encodes server id",
+);
+assertEqual(
+  serverRootPickerEndpoint("server-local"),
+  rootPickerEndpoint,
+  "server-local picker endpoint preserves local compatibility route",
+);
+
 assertEqual(
   rootPickerEntryLabel("/tmp/work-root"),
   "work-root",
@@ -109,7 +142,9 @@ const pickerView: RootPickerView = {
 };
 
 assertDeepEqual(
-  rootPickerVisibleEntries([{ ...alpha, entryType: "directory" }]).map((entry) => entry.path),
+  rootPickerVisibleEntries([{ ...alpha, entryType: "directory" }]).map(
+    (entry) => entry.path,
+  ),
   ["/tmp/root/alpha"],
   "folder-only picker filter keeps directory rows",
 );
@@ -135,13 +170,24 @@ assertEqual(
 );
 
 const history = rootPickerHistoryPush(
-  rootPickerHistoryPush(rootPickerHistoryInitial("/tmp/root"), "/tmp/root/alpha"),
+  rootPickerHistoryPush(
+    rootPickerHistoryInitial("/tmp/root"),
+    "/tmp/root/alpha",
+  ),
   "/tmp/root/zeta",
 );
 const back = rootPickerHistoryBack(history);
-assertEqual(back.targetPath, "/tmp/root/alpha", "back history targets previous folder");
+assertEqual(
+  back.targetPath,
+  "/tmp/root/alpha",
+  "back history targets previous folder",
+);
 const forward = rootPickerHistoryForward(back.history);
-assertEqual(forward.targetPath, "/tmp/root/zeta", "forward history restores next folder");
+assertEqual(
+  forward.targetPath,
+  "/tmp/root/zeta",
+  "forward history restores next folder",
+);
 
 const originalFetch = globalThis.fetch;
 let capturedUrl = "";
@@ -175,10 +221,18 @@ assertEqual(
   "/api/dashboard/root-picker?path=%2Ftmp%2Froot",
   "fetchRootPicker targets encoded picker listing endpoint",
 );
-assertEqual(fetched.currentPath, "/tmp/root", "fetchRootPicker decodes picker view");
+assertEqual(
+  fetched.currentPath,
+  "/tmp/root",
+  "fetchRootPicker decodes picker view",
+);
 
 const created = await createRootPickerDirectory("/tmp/root", "alpha");
-assertEqual(capturedUrl, rootPickerCreateDirectoryEndpoint, "create directory endpoint is stable");
+assertEqual(
+  capturedUrl,
+  rootPickerCreateDirectoryEndpoint,
+  "create directory endpoint is stable",
+);
 assertDeepEqual(
   JSON.parse(capturedBody),
   { parentPath: "/tmp/root", name: "alpha" },
@@ -187,7 +241,11 @@ assertDeepEqual(
 assertEqual(created.path, "/tmp/root/alpha", "create directory decodes entry");
 
 await pinRootPickerDirectory("/tmp/root/alpha");
-assertEqual(capturedUrl, rootPickerPinsEndpoint, "pin directory endpoint is stable");
+assertEqual(
+  capturedUrl,
+  rootPickerPinsEndpoint,
+  "pin directory endpoint is stable",
+);
 assertEqual(capturedMethod, "POST", "pin directory uses POST");
 assertDeepEqual(
   JSON.parse(capturedBody),
@@ -196,7 +254,11 @@ assertDeepEqual(
 );
 
 await unpinRootPickerDirectory("/tmp/root/alpha");
-assertEqual(capturedUrl, rootPickerPinsEndpoint, "unpin directory endpoint is stable");
+assertEqual(
+  capturedUrl,
+  rootPickerPinsEndpoint,
+  "unpin directory endpoint is stable",
+);
 assertEqual(capturedMethod, "DELETE", "unpin directory uses DELETE");
 
 globalThis.fetch = originalFetch;

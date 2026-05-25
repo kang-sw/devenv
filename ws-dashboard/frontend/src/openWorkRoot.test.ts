@@ -1,9 +1,15 @@
-import { requestOpenWorkRoot, openWorkRootEndpoint } from "./openWorkRoot.js";
+import {
+  requestOpenWorkRoot,
+  openWorkRootEndpoint,
+  serverOpenWorkRootEndpoint,
+} from "./openWorkRoot.js";
 import type { DashboardResourcesView } from "./resourceModel.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${label}: expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
@@ -72,6 +78,17 @@ const sameLabelView: DashboardResourcesView = {
   ],
 };
 
+assertEqual(
+  serverOpenWorkRootEndpoint("server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/open",
+  "server-scoped open workRoot endpoint encodes server id",
+);
+assertEqual(
+  serverOpenWorkRootEndpoint("server-local"),
+  openWorkRootEndpoint,
+  "server-local open workRoot endpoint preserves local compatibility route",
+);
+
 const originalFetch = globalThis.fetch;
 let capturedUrl = "";
 let capturedBody = "";
@@ -88,7 +105,11 @@ globalThis.fetch = (async (input, init) => {
 }) as typeof fetch;
 
 const result = await requestOpenWorkRoot("/tmp/second/same-name");
-assertEqual(capturedUrl, openWorkRootEndpoint, "open workRoot endpoint is stable");
+assertEqual(
+  capturedUrl,
+  openWorkRootEndpoint,
+  "open workRoot endpoint is stable",
+);
 assertEqual(
   JSON.parse(capturedBody).path,
   "/tmp/second/same-name",

@@ -1,3 +1,4 @@
+import { localCompatibleDashboardApiRoute } from "./resourceModel.js";
 export type WorkRootGitStatus = {
   available: boolean;
   reason?: string;
@@ -46,46 +47,79 @@ export type GitStatusSegment = {
 
 export type GitRefreshSchedulerEnvironment = {
   isDocumentHidden: () => boolean;
-  addDocumentListener: (event: "visibilitychange", listener: () => void) => void;
-  removeDocumentListener: (event: "visibilitychange", listener: () => void) => void;
+  addDocumentListener: (
+    event: "visibilitychange",
+    listener: () => void,
+  ) => void;
+  removeDocumentListener: (
+    event: "visibilitychange",
+    listener: () => void,
+  ) => void;
   addWindowListener: (event: "focus", listener: () => void) => void;
   removeWindowListener: (event: "focus", listener: () => void) => void;
   setInterval: (listener: () => void, ms: number) => number;
   clearInterval: (handle: number) => void;
 };
 
-const gitBase = (workRootId: string) =>
-  `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/git`;
+export const gitBase = (workRootId: string, serverId?: string | null) =>
+  localCompatibleDashboardApiRoute(serverId, ["work-roots", workRootId, "git"]);
 
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `HTTP ${response.status}: ${fallback}`);
   }
   return (await response.json()) as T;
 }
 
-export async function fetchWorkRootGitStatus(workRootId: string): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId)}/status`, { headers: { Accept: "application/json" } });
+export async function fetchWorkRootGitStatus(
+  workRootId: string,
+  serverId?: string | null,
+): Promise<WorkRootGitStatus> {
+  const response = await fetch(`${gitBase(workRootId, serverId)}/status`, {
+    headers: { Accept: "application/json" },
+  });
   return readJson<WorkRootGitStatus>(response, "git status failed");
 }
 
-export async function fetchWorkRootGitBranches(workRootId: string): Promise<GitBranchList> {
-  const response = await fetch(`${gitBase(workRootId)}/branches`, { headers: { Accept: "application/json" } });
+export async function fetchWorkRootGitBranches(
+  workRootId: string,
+  serverId?: string | null,
+): Promise<GitBranchList> {
+  const response = await fetch(`${gitBase(workRootId, serverId)}/branches`, {
+    headers: { Accept: "application/json" },
+  });
   return readJson<GitBranchList>(response, "git branches failed");
 }
 
-export async function switchWorkRootGitBranch(workRootId: string, branchName: string): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId)}/switch-branch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ branchName }),
-  });
+export async function switchWorkRootGitBranch(
+  workRootId: string,
+  branchName: string,
+  serverId?: string | null,
+): Promise<WorkRootGitStatus> {
+  const response = await fetch(
+    `${gitBase(workRootId, serverId)}/switch-branch`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ branchName }),
+    },
+  );
   return readJson<WorkRootGitStatus>(response, "git branch switch failed");
 }
 
-export async function createWorkRootGitBranch(workRootId: string, branchName: string, baseBranch?: string): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId)}/branches`, {
+export async function createWorkRootGitBranch(
+  workRootId: string,
+  branchName: string,
+  baseBranch?: string,
+  serverId?: string | null,
+): Promise<WorkRootGitStatus> {
+  const response = await fetch(`${gitBase(workRootId, serverId)}/branches`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ branchName, baseBranch, switchTo: true }),
@@ -93,45 +127,81 @@ export async function createWorkRootGitBranch(workRootId: string, branchName: st
   return readJson<WorkRootGitStatus>(response, "git branch create failed");
 }
 
-export async function fetchWorkRootGit(workRootId: string): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId)}/fetch`, { method: "POST", headers: { Accept: "application/json" } });
+export async function fetchWorkRootGit(
+  workRootId: string,
+  serverId?: string | null,
+): Promise<WorkRootGitStatus> {
+  const response = await fetch(`${gitBase(workRootId, serverId)}/fetch`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
   return readJson<WorkRootGitStatus>(response, "git fetch failed");
 }
 
-export async function pushWorkRootGit(workRootId: string): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId)}/push`, { method: "POST", headers: { Accept: "application/json" } });
+export async function pushWorkRootGit(
+  workRootId: string,
+  serverId?: string | null,
+): Promise<WorkRootGitStatus> {
+  const response = await fetch(`${gitBase(workRootId, serverId)}/push`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
   return readJson<WorkRootGitStatus>(response, "git push failed");
 }
 
-export async function pullWorkRootGitFfOnly(workRootId: string): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId)}/pull-ff-only`, { method: "POST", headers: { Accept: "application/json" } });
+export async function pullWorkRootGitFfOnly(
+  workRootId: string,
+  serverId?: string | null,
+): Promise<WorkRootGitStatus> {
+  const response = await fetch(
+    `${gitBase(workRootId, serverId)}/pull-ff-only`,
+    { method: "POST", headers: { Accept: "application/json" } },
+  );
   return readJson<WorkRootGitStatus>(response, "git pull --ff-only failed");
 }
 
 export function gitStatusSegments(status: WorkRootGitStatus): string {
-  const segments = gitChangeStatusSegments(status).map((segment) => segment.label);
+  const segments = gitChangeStatusSegments(status).map(
+    (segment) => segment.label,
+  );
   const sync = gitSyncStatusSegments(status).map((segment) => segment.label);
   return `${segments.length ? segments.join(" ") : "clean"}${sync.length ? ` | ${sync.join(" ")}` : ""}`;
 }
 
-export function gitChangeStatusSegments(status: WorkRootGitStatus): GitStatusSegment[] {
+export function gitChangeStatusSegments(
+  status: WorkRootGitStatus,
+): GitStatusSegment[] {
   return [
     status.changes.addedLines > 0
       ? { key: "added", label: `+${status.changes.addedLines}`, tone: "added" }
       : null,
     status.changes.removedLines > 0
-      ? { key: "removed", label: `-${status.changes.removedLines}`, tone: "removed" }
+      ? {
+          key: "removed",
+          label: `-${status.changes.removedLines}`,
+          tone: "removed",
+        }
       : null,
     status.changes.modifiedFiles > 0
-      ? { key: "modified", label: `*${status.changes.modifiedFiles}`, tone: "modified" }
+      ? {
+          key: "modified",
+          label: `*${status.changes.modifiedFiles}`,
+          tone: "modified",
+        }
       : null,
     status.changes.untrackedFiles > 0
-      ? { key: "untracked", label: `?${status.changes.untrackedFiles}`, tone: "untracked" }
+      ? {
+          key: "untracked",
+          label: `?${status.changes.untrackedFiles}`,
+          tone: "untracked",
+        }
       : null,
   ].filter((segment): segment is GitStatusSegment => segment !== null);
 }
 
-export function gitSyncStatusSegments(status: WorkRootGitStatus): GitStatusSegment[] {
+export function gitSyncStatusSegments(
+  status: WorkRootGitStatus,
+): GitStatusSegment[] {
   const segments: GitStatusSegment[] = [];
   if (status.sync.ahead > 0) {
     segments.push({
@@ -164,13 +234,17 @@ export function startGitRefreshScheduler(
   intervalMs = 5000,
 ): () => void {
   const refreshIfVisible = (reason: string) => {
-    if (shouldRefreshGitWhileVisible(env.isDocumentHidden())) refreshGit(reason);
+    if (shouldRefreshGitWhileVisible(env.isDocumentHidden()))
+      refreshGit(reason);
   };
   const onVisible = () => refreshIfVisible("git visibility refresh");
   const onFocus = () => refreshGit("git focus refresh");
   env.addDocumentListener("visibilitychange", onVisible);
   env.addWindowListener("focus", onFocus);
-  const interval = env.setInterval(() => refreshIfVisible("git poll"), intervalMs);
+  const interval = env.setInterval(
+    () => refreshIfVisible("git poll"),
+    intervalMs,
+  );
   return () => {
     env.removeDocumentListener("visibilitychange", onVisible);
     env.removeWindowListener("focus", onFocus);

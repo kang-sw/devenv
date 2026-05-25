@@ -1,4 +1,5 @@
 import { apiErrorDetail } from "./apiError.js";
+import { localCompatibleDashboardApiRoute } from "./resourceModel.js";
 
 export type RootPickerEntryType = "directory";
 
@@ -48,17 +49,43 @@ export const rootPickerCreateDirectoryEndpoint =
   "/api/dashboard/root-picker/directories";
 export const rootPickerPinsEndpoint = "/api/dashboard/root-picker/pins";
 
-export function rootPickerListEndpoint(path: string | null = null) {
+export function serverRootPickerEndpoint(serverId: string | null | undefined) {
+  return localCompatibleDashboardApiRoute(serverId, ["root-picker"]);
+}
+
+export function serverRootPickerCreateDirectoryEndpoint(
+  serverId: string | null | undefined,
+) {
+  return localCompatibleDashboardApiRoute(serverId, [
+    "root-picker",
+    "directories",
+  ]);
+}
+
+export function serverRootPickerPinsEndpoint(
+  serverId: string | null | undefined,
+) {
+  return localCompatibleDashboardApiRoute(serverId, ["root-picker", "pins"]);
+}
+
+export function rootPickerListEndpoint(
+  path: string | null = null,
+  serverId?: string | null,
+) {
+  const endpoint = serverRootPickerEndpoint(serverId);
   if (path === null || path.length === 0) {
-    return rootPickerEndpoint;
+    return endpoint;
   }
 
   const query = new URLSearchParams({ path });
-  return `${rootPickerEndpoint}?${query.toString()}`;
+  return `${endpoint}?${query.toString()}`;
 }
 
-export async function fetchRootPicker(path: string | null = null): Promise<RootPickerView> {
-  const response = await fetch(rootPickerListEndpoint(path), {
+export async function fetchRootPicker(
+  path: string | null = null,
+  serverId?: string | null,
+): Promise<RootPickerView> {
+  const response = await fetch(rootPickerListEndpoint(path, serverId), {
     headers: { Accept: "application/json" },
   });
 
@@ -72,15 +99,19 @@ export async function fetchRootPicker(path: string | null = null): Promise<RootP
 export async function createRootPickerDirectory(
   parentPath: string,
   name: string,
+  serverId?: string | null,
 ): Promise<RootPickerEntry> {
-  const response = await fetch(rootPickerCreateDirectoryEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
+  const response = await fetch(
+    serverRootPickerCreateDirectoryEndpoint(serverId),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ parentPath, name }),
     },
-    body: JSON.stringify({ parentPath, name }),
-  });
+  );
 
   if (!response.ok) {
     throw new Error(await apiErrorDetail(response));
@@ -89,19 +120,26 @@ export async function createRootPickerDirectory(
   return (await response.json()) as RootPickerEntry;
 }
 
-export async function pinRootPickerDirectory(path: string): Promise<RootPickerPlacesView> {
-  return requestRootPickerPin("POST", path);
+export async function pinRootPickerDirectory(
+  path: string,
+  serverId?: string | null,
+): Promise<RootPickerPlacesView> {
+  return requestRootPickerPin("POST", path, serverId);
 }
 
-export async function unpinRootPickerDirectory(path: string): Promise<RootPickerPlacesView> {
-  return requestRootPickerPin("DELETE", path);
+export async function unpinRootPickerDirectory(
+  path: string,
+  serverId?: string | null,
+): Promise<RootPickerPlacesView> {
+  return requestRootPickerPin("DELETE", path, serverId);
 }
 
 async function requestRootPickerPin(
   method: "POST" | "DELETE",
   path: string,
+  serverId?: string | null,
 ): Promise<RootPickerPlacesView> {
-  const response = await fetch(rootPickerPinsEndpoint, {
+  const response = await fetch(serverRootPickerPinsEndpoint(serverId), {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -132,13 +170,17 @@ export function rootPickerVisibleEntries(
   return entries.filter((entry) => entry.entryType === "directory");
 }
 
-export function rootPickerVisiblePlaces(view: RootPickerView | null): RootPickerPlace[] {
+export function rootPickerVisiblePlaces(
+  view: RootPickerView | null,
+): RootPickerPlace[] {
   return (view?.places ?? []).filter(
     (place) => place.available || place.source === "pin",
   );
 }
 
-export function rootPickerPinnedPathSet(view: RootPickerView | null): Set<string> {
+export function rootPickerPinnedPathSet(
+  view: RootPickerView | null,
+): Set<string> {
   return new Set(
     (view?.places ?? [])
       .filter((place) => place.source === "pin")
@@ -146,7 +188,9 @@ export function rootPickerPinnedPathSet(view: RootPickerView | null): Set<string
   );
 }
 
-export function rootPickerModifiedTimeLabel(value: string | null | undefined): string {
+export function rootPickerModifiedTimeLabel(
+  value: string | null | undefined,
+): string {
   if (!value) {
     return "";
   }
@@ -211,7 +255,9 @@ export function rootPickerHistoryBack(history: RootPickerNavigationHistory): {
   };
 }
 
-export function rootPickerHistoryForward(history: RootPickerNavigationHistory): {
+export function rootPickerHistoryForward(
+  history: RootPickerNavigationHistory,
+): {
   history: RootPickerNavigationHistory;
   targetPath: string | null;
 } {

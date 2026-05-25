@@ -17,6 +17,82 @@ export type ActionHint = {
   enabled: boolean;
 };
 
+export const LOCAL_DASHBOARD_SERVER_ID = "server-local";
+
+export type ServerScopedRouteTarget = { readonly serverId?: string | null };
+
+export function dashboardServerId(
+  target:
+    | string
+    | ServerScopedRouteTarget
+    | null
+    | undefined = LOCAL_DASHBOARD_SERVER_ID,
+): string {
+  if (typeof target === "string") {
+    return target.trim() || LOCAL_DASHBOARD_SERVER_ID;
+  }
+  return target?.serverId?.trim() || LOCAL_DASHBOARD_SERVER_ID;
+}
+
+export function isLocalDashboardServerId(
+  serverId: string | null | undefined,
+): boolean {
+  return dashboardServerId(serverId) === LOCAL_DASHBOARD_SERVER_ID;
+}
+
+export function dashboardApiRoute(segments: readonly string[]): string {
+  return `/api/dashboard/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+export function dashboardServerApiRoute(
+  serverId: string,
+  segments: readonly string[],
+): string {
+  return dashboardApiRoute([
+    "servers",
+    dashboardServerId(serverId),
+    ...segments,
+  ]);
+}
+
+export function localCompatibleDashboardApiRoute(
+  serverId: string | null | undefined,
+  localSegments: readonly string[],
+  serverSegments: readonly string[] = localSegments,
+): string {
+  return isLocalDashboardServerId(serverId)
+    ? dashboardApiRoute(localSegments)
+    : dashboardServerApiRoute(dashboardServerId(serverId), serverSegments);
+}
+
+export function serverScopedIdentity(
+  serverId: string | null | undefined,
+  ...parts: readonly string[]
+): string {
+  return [dashboardServerId(serverId), ...parts].join("/");
+}
+
+export function workRootActivationEndpoint(
+  workRootId: string,
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+): string {
+  return localCompatibleDashboardApiRoute(serverId, [
+    "work-roots",
+    workRootId,
+    "activation",
+  ]);
+}
+
+export function workspaceEndpoint(
+  workspaceId: string,
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+): string {
+  return localCompatibleDashboardApiRoute(serverId, [
+    "workspaces",
+    workspaceId,
+  ]);
+}
+
 export type ResourcePath = {
   serverId: string;
   workspaceId: string;
@@ -146,7 +222,9 @@ export type ResourceEntity =
 // workRoot row in the browser left nav. The selected location remains the
 // concrete workRoot id; main/sub instances are workbench surfaces and do not
 // participate in this presentation decision.
-export function compactWorkspaceWorkRoot(workspace: WorkspaceView): WorkRootView | null {
+export function compactWorkspaceWorkRoot(
+  workspace: WorkspaceView,
+): WorkRootView | null {
   if (workspace.workRoots.length !== 1) {
     return null;
   }
@@ -221,10 +299,11 @@ export function flattenEntities(
 // The entity that should be selected by default: the first workRoot row, or
 // the first entity (the server) when no workRoot exists yet. Returns undefined
 // only for an empty entity list.
-export function preferredSelection(entities: ResourceEntity[]): string | undefined {
+export function preferredSelection(
+  entities: ResourceEntity[],
+): string | undefined {
   return (
-    entities.find((entity) => entity.type === "workRoot")?.id ??
-    entities[0]?.id
+    entities.find((entity) => entity.type === "workRoot")?.id ?? entities[0]?.id
   );
 }
 

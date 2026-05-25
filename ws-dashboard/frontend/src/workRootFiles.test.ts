@@ -30,11 +30,17 @@ import {
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${label}: expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
-async function assertRejects(action: () => Promise<unknown>, pattern: RegExp, label: string) {
+async function assertRejects(
+  action: () => Promise<unknown>,
+  pattern: RegExp,
+  label: string,
+) {
   try {
     await action();
   } catch (error) {
@@ -86,6 +92,28 @@ assertEqual(
   "/api/dashboard/work-roots/root%2Flocal%20abc/documents/events",
   "document events endpoint encodes only the opaque workRootId",
 );
+
+assertEqual(
+  workRootFilesEndpoint("root/id", "src/main.ts", "server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/files?path=src%2Fmain.ts",
+  "server-scoped file listing endpoint encodes server id and nested ids",
+);
+assertEqual(
+  workRootFileReadEndpoint("root/id", "docs/read me.md", "server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/files/read?path=docs%2Fread+me.md",
+  "server-scoped file read endpoint encodes server id and relative path",
+);
+assertEqual(
+  workRootFileWriteEndpoint("root/id", "server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/files/write",
+  "server-scoped file write endpoint encodes server id",
+);
+assertEqual(
+  workRootDocumentEventsEndpoint("root/id", "server remote/1"),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/documents/events",
+  "server-scoped document events endpoint encodes server id",
+);
+
 assertDeepEqual(
   parseWorkRootDocumentEvent({
     type: "document.contentChanged",
@@ -120,12 +148,12 @@ assertEqual(
 );
 assertEqual(
   readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs"),
-  "editor/root-local-abc/src/main.rs",
+  "editor/server-local/root-local-abc/src/main.rs",
   "read-only logical key is scoped by workRootId and relative path",
 );
 assertEqual(
   readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs", "preview"),
-  "editor-preview/root-local-abc",
+  "editor-preview/server-local/root-local-abc",
   "preview logical key is a replaceable workRoot-scoped surface",
 );
 assertEqual(
@@ -142,13 +170,36 @@ assertEqual(
 );
 assertEqual(
   readOnlyFilePaneId("root/local abc", "docs/read me.md"),
-  "readonly:root%2Flocal%20abc:docs%2Fread%20me.md",
+  "readonly:server-local%2Froot%2Flocal%20abc:docs%2Fread%20me.md",
   "pane id encodes scoped file identity without host paths",
 );
 assertEqual(
   readOnlyFilePaneId("root/local abc", "docs/read me.md", "preview"),
-  "readonly-preview:root%2Flocal%20abc",
+  "readonly-preview:server-local%2Froot%2Flocal%20abc",
   "preview pane id is one replaceable pane per workRoot",
+);
+
+assertEqual(
+  readOnlyFilePaneLogicalKey(
+    "root-same",
+    "src/main.rs",
+    "pinned",
+    "server-a",
+  ) ===
+    readOnlyFilePaneLogicalKey(
+      "root-same",
+      "src/main.rs",
+      "pinned",
+      "server-b",
+    ),
+  false,
+  "same bare file ids on different servers produce distinct read-only logical keys",
+);
+assertEqual(
+  readOnlyFilePaneId("root-same", "src/main.rs", "pinned", "server-a") ===
+    readOnlyFilePaneId("root-same", "src/main.rs", "pinned", "server-b"),
+  false,
+  "same bare file ids on different servers produce distinct pane ids",
 );
 
 const pinnedPane = applyReadOnlyFilePaneContent(
@@ -205,7 +256,11 @@ const unrelatedPane = applyReadOnlyFilePaneContent(
   },
 );
 const fannedOut = applyReadOnlyFilePaneSourceContent(
-  { [pinnedPane.logicalKey]: pinnedPane, [secondPane.logicalKey]: secondPane, [unrelatedPane.logicalKey]: unrelatedPane },
+  {
+    [pinnedPane.logicalKey]: pinnedPane,
+    [secondPane.logicalKey]: secondPane,
+    [unrelatedPane.logicalKey]: unrelatedPane,
+  },
   {
     workRootId: "root-local-abc",
     path: "src/main.ts",
@@ -236,7 +291,10 @@ assertEqual(
   "source-key fan-out leaves unrelated panes untouched",
 );
 const erroredFanout = applyReadOnlyFilePaneSourceError(
-  { [pinnedPane.logicalKey]: pinnedPane, [unrelatedPane.logicalKey]: unrelatedPane },
+  {
+    [pinnedPane.logicalKey]: pinnedPane,
+    [unrelatedPane.logicalKey]: unrelatedPane,
+  },
   "root-local-abc",
   "src/main.ts",
   "refresh failed",
@@ -375,11 +433,28 @@ fakeStorage.set(
   JSON.stringify({
     version: 1,
     panes: [
-      { workRootId: "root-local-abc", path: "/abs/path", mode: "pinned", title: "bad" },
-      { workRootId: "root-local-abc", path: "../secret", mode: "pinned", title: "bad" },
-      { workRootId: "root-local-ok", path: "notes..md", mode: "pinned", title: "ok" },
+      {
+        workRootId: "root-local-abc",
+        path: "/abs/path",
+        mode: "pinned",
+        title: "bad",
+      },
+      {
+        workRootId: "root-local-abc",
+        path: "../secret",
+        mode: "pinned",
+        title: "bad",
+      },
+      {
+        workRootId: "root-local-ok",
+        path: "notes..md",
+        mode: "pinned",
+        title: "ok",
+      },
     ],
-    orderByGroup: { "group-1": ["readonly:root-local-ok:notes..md", "unknown"] },
+    orderByGroup: {
+      "group-1": ["readonly:root-local-ok:notes..md", "unknown"],
+    },
   }),
 );
 const sanitized = loadReadOnlyFilePaneRestoreSnapshot(storage);
@@ -398,9 +473,15 @@ assertDeepEqual(
 const expanded = toggleExpandedPath(new Set([""]), "src");
 assertEqual(expanded.has(""), true, "toggle preserves existing expanded root");
 assertEqual(expanded.has("src"), true, "toggle expands a collapsed path");
-assertEqual(toggleExpandedPath(expanded, "src").has("src"), false, "toggle collapses an expanded path");
+assertEqual(
+  toggleExpandedPath(expanded, "src").has("src"),
+  false,
+  "toggle collapses an expanded path",
+);
 
-const loaded = (entries: DirectoryLoadState["entries"]): DirectoryLoadState => ({
+const loaded = (
+  entries: DirectoryLoadState["entries"],
+): DirectoryLoadState => ({
   status: "loaded",
   entries,
   error: null,
@@ -442,18 +523,30 @@ const rows = flattenWorkRootFileTree({
 });
 
 assertDeepEqual(
-  rows.map((row) => (row.type === "entry" ? `${row.depth}:${row.entry.path}` : `${row.depth}:${row.status}`)),
+  rows.map((row) =>
+    row.type === "entry"
+      ? `${row.depth}:${row.entry.path}`
+      : `${row.depth}:${row.status}`,
+  ),
   ["0:src", "1:src/main.ts", "0:README.md"],
   "flattened tree includes expanded child rows in order",
 );
-assertEqual(rows[2].type === "entry" && rows[2].selected, true, "flattened tree marks selected row");
+assertEqual(
+  rows[2].type === "entry" && rows[2].selected,
+  true,
+  "flattened tree marks selected row",
+);
 
 const emptyRows = flattenWorkRootFileTree({
   expandedPaths: new Set([""]),
   selectedPath: null,
   directories: { "": loaded([]) },
 });
-assertEqual(emptyRows[0]?.type === "state" && emptyRows[0].status, "empty", "empty root surfaces state row");
+assertEqual(
+  emptyRows[0]?.type === "state" && emptyRows[0].status,
+  "empty",
+  "empty root surfaces state row",
+);
 
 const errorFetch = globalThis.fetch;
 try {
@@ -468,7 +561,8 @@ try {
     "fetch surfaces bounded backend JSON errors",
   );
 
-  globalThis.fetch = (async () => new Response("not json", { status: 418 })) as typeof fetch;
+  globalThis.fetch = (async () =>
+    new Response("not json", { status: 418 })) as typeof fetch;
   await assertRejects(
     () => fetchWorkRootFiles("root-local-teapot", "src"),
     /HTTP 418/,
@@ -506,7 +600,8 @@ try {
     "read helper surfaces bounded backend JSON errors",
   );
 
-  globalThis.fetch = (async () => new Response("not json", { status: 413 })) as typeof fetch;
+  globalThis.fetch = (async () =>
+    new Response("not json", { status: 413 })) as typeof fetch;
   await assertRejects(
     () => fetchWorkRootTextFile("root-local-abc", "large.txt"),
     /HTTP 413/,
@@ -517,11 +612,19 @@ try {
     assertEqual(init?.method, "POST", "write helper uses POST");
     assertEqual(
       init?.body,
-      JSON.stringify({ path: "README.md", baseContentHash: "sha256:old", content: "saved\n" }),
+      JSON.stringify({
+        path: "README.md",
+        baseContentHash: "sha256:old",
+        content: "saved\n",
+      }),
       "write helper sends optimistic hash and content",
     );
     return new Response(
-      JSON.stringify({ contentHash: "sha256:new", sizeBytes: 6, savedAtMs: 123 }),
+      JSON.stringify({
+        contentHash: "sha256:new",
+        sizeBytes: 6,
+        savedAtMs: 123,
+      }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
   }) as typeof fetch;
@@ -573,7 +676,11 @@ assertEqual(
   "expanding an unloaded directory requests that relative path",
 );
 assertEqual(
-  workRootExplorerShouldLoadOnExpand({ directories: { src: loaded([]) } }, "src", false),
+  workRootExplorerShouldLoadOnExpand(
+    { directories: { src: loaded([]) } },
+    "src",
+    false,
+  ),
   false,
   "expanding a loaded directory does not request it again",
 );
@@ -596,7 +703,9 @@ assertDeepEqual(
 const errorRows = flattenWorkRootFileTree({
   expandedPaths: new Set([""]),
   selectedPath: null,
-  directories: { "": { status: "error", entries: [], error: "unknown workRoot" } },
+  directories: {
+    "": { status: "error", entries: [], error: "unknown workRoot" },
+  },
 });
 assertEqual(
   errorRows[0]?.type === "state" && errorRows[0].status,
@@ -604,13 +713,20 @@ assertEqual(
   "error snapshot renders an error state row",
 );
 
-
-const loadingPane = createLoadingReadOnlyFilePane("root-local-abc", "src/main.rs");
+const loadingPane = createLoadingReadOnlyFilePane(
+  "root-local-abc",
+  "src/main.rs",
+);
 assertEqual(loadingPane.status, "loading", "new read-only pane starts loading");
-assertEqual(loadingPane.title, "main.rs", "new read-only pane derives basename title");
+assertEqual(
+  loadingPane.title,
+  "main.rs",
+  "new read-only pane derives basename title",
+);
 assertEqual(loadingPane.mode, "pinned", "default read-only pane is pinned");
 assertEqual(
-  createLoadingReadOnlyFilePane("root-local-abc", "src/main.rs", "preview").mode,
+  createLoadingReadOnlyFilePane("root-local-abc", "src/main.rs", "preview")
+    .mode,
   "preview",
   "preview read-only pane mode is explicit",
 );

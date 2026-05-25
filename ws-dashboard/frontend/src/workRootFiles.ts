@@ -1,4 +1,9 @@
 import { apiErrorDetail } from "./apiError.js";
+import {
+  LOCAL_DASHBOARD_SERVER_ID,
+  localCompatibleDashboardApiRoute,
+  serverScopedIdentity,
+} from "./resourceModel.js";
 
 export type WorkRootFileEntryKind = "directory" | "file" | "other";
 
@@ -12,6 +17,7 @@ export type WorkRootFileEntryView = {
 };
 
 export type WorkRootFileListView = {
+  serverId: string;
   workRootId: string;
   path: string;
   status: "ok" | string;
@@ -19,6 +25,7 @@ export type WorkRootFileListView = {
 };
 
 export type WorkRootTextFileView = {
+  serverId?: string;
   workRootId: string;
   path: string;
   name: string;
@@ -39,6 +46,7 @@ export type ReadOnlyFilePane = {
   id: string;
   logicalKey: string;
   mode: ReadOnlyFilePaneMode;
+  serverId: string;
   workRootId: string;
   path: string;
   title: string;
@@ -86,12 +94,18 @@ export function documentDraftContentChangeDecision(
   return { action: "syncDraft" };
 }
 
-export function documentSaveStateForError(message: string): "conflict" | "error" {
+export function documentSaveStateForError(
+  message: string,
+): "conflict" | "error" {
   return message.toLowerCase().includes("content hash") ? "conflict" : "error";
 }
 
-export function readOnlyFilePaneSourceKey(workRootId: string, path: string) {
-  return `${workRootId}\0${path}`;
+export function readOnlyFilePaneSourceKey(
+  workRootId: string,
+  path: string,
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+) {
+  return `${serverScopedIdentity(serverId, workRootId)}\0${path}`;
 }
 
 export function applyReadOnlyFilePaneSourceContent(
@@ -101,7 +115,9 @@ export function applyReadOnlyFilePaneSourceContent(
   return Object.fromEntries(
     Object.entries(panes).map(([key, pane]) => [
       key,
-      pane.workRootId === file.workRootId && pane.path === file.path
+      (file.serverId ?? LOCAL_DASHBOARD_SERVER_ID) === pane.serverId &&
+      pane.workRootId === file.workRootId &&
+      pane.path === file.path
         ? applyReadOnlyFilePaneContent(pane, file)
         : pane,
     ]),
@@ -113,11 +129,14 @@ export function applyReadOnlyFilePaneSourceError(
   workRootId: string,
   path: string,
   message: string,
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
 ): Record<string, ReadOnlyFilePane> {
   return Object.fromEntries(
     Object.entries(panes).map(([key, pane]) => [
       key,
-      pane.workRootId === workRootId && pane.path === path
+      pane.serverId === (serverId || LOCAL_DASHBOARD_SERVER_ID) &&
+      pane.workRootId === workRootId &&
+      pane.path === path
         ? applyReadOnlyFilePaneError(pane, message)
         : pane,
     ]),
@@ -125,6 +144,7 @@ export function applyReadOnlyFilePaneSourceError(
 }
 
 type ReadOnlyFilePaneDescriptor = {
+  serverId: string;
   workRootId: string;
   path: string;
   mode: ReadOnlyFilePaneMode;
@@ -159,9 +179,16 @@ export const idleDirectoryLoadState = (): DirectoryLoadState => ({
   error: null,
 });
 
-export function workRootFilesEndpoint(workRootId: string, path = "") {
-  const encodedWorkRootId = encodeURIComponent(workRootId);
-  const endpoint = `/api/dashboard/work-roots/${encodedWorkRootId}/files`;
+export function workRootFilesEndpoint(
+  workRootId: string,
+  path = "",
+  serverId?: string | null,
+) {
+  const endpoint = localCompatibleDashboardApiRoute(serverId, [
+    "work-roots",
+    workRootId,
+    "files",
+  ]);
   if (!path) {
     return endpoint;
   }
@@ -170,19 +197,26 @@ export function workRootFilesEndpoint(workRootId: string, path = "") {
   return `${endpoint}?${query.toString()}`;
 }
 
-export function workRootFileReadEndpoint(workRootId: string, path: string) {
-  const encodedWorkRootId = encodeURIComponent(workRootId);
+export function workRootFileReadEndpoint(
+  workRootId: string,
+  path: string,
+  serverId?: string | null,
+) {
   const query = new URLSearchParams({ path });
-  return `/api/dashboard/work-roots/${encodedWorkRootId}/files/read?${query.toString()}`;
+  return `${localCompatibleDashboardApiRoute(serverId, ["work-roots", workRootId, "files", "read"])}?${query.toString()}`;
 }
 
 export async function fetchWorkRootTextFile(
   workRootId: string,
   path: string,
+  serverId?: string | null,
 ): Promise<WorkRootTextFileView> {
-  const response = await fetch(workRootFileReadEndpoint(workRootId, path), {
-    headers: { Accept: "application/json" },
-  });
+  const response = await fetch(
+    workRootFileReadEndpoint(workRootId, path, serverId),
+    {
+      headers: { Accept: "application/json" },
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await apiErrorDetail(response));
@@ -212,11 +246,21 @@ export type WorkRootDocumentEvent = {
   savedAtMs: number;
 };
 
-export function workRootDocumentEventsEndpoint(workRootId: string) {
-  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/documents/events`;
+export function workRootDocumentEventsEndpoint(
+  workRootId: string,
+  serverId?: string | null,
+) {
+  return localCompatibleDashboardApiRoute(serverId, [
+    "work-roots",
+    workRootId,
+    "documents",
+    "events",
+  ]);
 }
 
-export function parseWorkRootDocumentEvent(value: unknown): WorkRootDocumentEvent | null {
+export function parseWorkRootDocumentEvent(
+  value: unknown,
+): WorkRootDocumentEvent | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -243,19 +287,34 @@ export function parseWorkRootDocumentEvent(value: unknown): WorkRootDocumentEven
   };
 }
 
-export function workRootFileWriteEndpoint(workRootId: string) {
-  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/files/write`;
+export function workRootFileWriteEndpoint(
+  workRootId: string,
+  serverId?: string | null,
+) {
+  return localCompatibleDashboardApiRoute(serverId, [
+    "work-roots",
+    workRootId,
+    "files",
+    "write",
+  ]);
 }
 
 export async function writeWorkRootTextFile(
   workRootId: string,
   request: WorkRootFileWriteRequest,
+  serverId?: string | null,
 ): Promise<WorkRootFileWriteResponse> {
-  const response = await fetch(workRootFileWriteEndpoint(workRootId), {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
+  const response = await fetch(
+    workRootFileWriteEndpoint(workRootId, serverId),
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await apiErrorDetail(response));
@@ -290,39 +349,45 @@ export function readOnlyFilePaneLogicalKey(
   workRootId: string,
   path: string,
   mode: ReadOnlyFilePaneMode = "pinned",
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
 ) {
+  const scopedRoot = serverScopedIdentity(serverId, workRootId);
   if (mode === "preview") {
-    return ["editor-preview", workRootId].join("/");
+    return ["editor-preview", scopedRoot].join("/");
   }
 
-  return ["editor", workRootId, path].join("/");
+  return ["editor", scopedRoot, path].join("/");
 }
 
 export function readOnlyFilePaneId(
   workRootId: string,
   path: string,
   mode: ReadOnlyFilePaneMode = "pinned",
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
 ) {
+  const scopedRoot = serverScopedIdentity(serverId, workRootId);
   if (mode === "preview") {
-    return `readonly-preview:${encodeURIComponent(workRootId)}`;
+    return `readonly-preview:${encodeURIComponent(scopedRoot)}`;
   }
 
-  return `readonly:${encodeURIComponent(workRootId)}:${encodeURIComponent(path)}`;
+  return `readonly:${encodeURIComponent(scopedRoot)}:${encodeURIComponent(path)}`;
 }
 
 export function createLoadingReadOnlyFilePane(
   workRootId: string,
   path: string,
   mode: ReadOnlyFilePaneMode = "pinned",
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
 ): ReadOnlyFilePane {
   // CONTRACT: Preview panes are one replaceable logical surface per workRoot;
   // pinned panes remain file-path-addressed stable tabs. App-level single-click
   // and double-click handlers must choose the mode, then placement policy
   // focuses existing pinned files or replaces the preview pane.
   return {
-    id: readOnlyFilePaneId(workRootId, path, mode),
-    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path, mode),
+    id: readOnlyFilePaneId(workRootId, path, mode, serverId),
+    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path, mode, serverId),
     mode,
+    serverId: serverId || LOCAL_DASHBOARD_SERVER_ID,
     workRootId,
     path,
     title: fileNameFromPath(path),
@@ -356,7 +421,10 @@ export function applyReadOnlyFilePaneContent(
   };
 }
 
-export function applyReadOnlyFilePaneError(pane: ReadOnlyFilePane, error: string): ReadOnlyFilePane {
+export function applyReadOnlyFilePaneError(
+  pane: ReadOnlyFilePane,
+  error: string,
+): ReadOnlyFilePane {
   return {
     ...pane,
     status: "error",
@@ -374,6 +442,7 @@ export function readOnlyFilePaneRestoreSnapshot(
       panes.map((pane) => [
         pane.logicalKey,
         createRestoredReadOnlyFilePane({
+          serverId: pane.serverId,
           workRootId: pane.workRootId,
           path: pane.path,
           mode: pane.mode,
@@ -447,12 +516,15 @@ export function saveReadOnlyFilePaneRestoreSnapshot(
       readOnlyFilePaneRestoreStorageKey,
       JSON.stringify({
         version: 1,
-        panes: panes.map((pane): ReadOnlyFilePaneDescriptor => ({
-          workRootId: pane.workRootId,
-          path: pane.path,
-          mode: pane.mode,
-          title: pane.title,
-        })),
+        panes: panes.map(
+          (pane): ReadOnlyFilePaneDescriptor => ({
+            serverId: pane.serverId,
+            workRootId: pane.workRootId,
+            path: pane.path,
+            mode: pane.mode,
+            title: pane.title,
+          }),
+        ),
         orderByGroup: pruneReadOnlyFilePaneOrder(orderByGroup, paneIds),
       }),
     );
@@ -464,10 +536,14 @@ export function saveReadOnlyFilePaneRestoreSnapshot(
 export async function fetchWorkRootFiles(
   workRootId: string,
   path = "",
+  serverId?: string | null,
 ): Promise<WorkRootFileListView> {
-  const response = await fetch(workRootFilesEndpoint(workRootId, path), {
-    headers: { Accept: "application/json" },
-  });
+  const response = await fetch(
+    workRootFilesEndpoint(workRootId, path, serverId),
+    {
+      headers: { Accept: "application/json" },
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await apiErrorDetail(response));
@@ -477,14 +553,20 @@ export async function fetchWorkRootFiles(
 }
 
 export function workRootExplorerInitialLoadPath(
-  snapshot: { directories: Record<string, DirectoryLoadState> } | null | undefined,
+  snapshot:
+    | { directories: Record<string, DirectoryLoadState> }
+    | null
+    | undefined,
 ) {
   const rootState = snapshot?.directories[""];
   return !rootState || rootState.status === "idle" ? "" : null;
 }
 
 export function workRootExplorerShouldLoadOnExpand(
-  snapshot: { directories: Record<string, DirectoryLoadState> } | null | undefined,
+  snapshot:
+    | { directories: Record<string, DirectoryLoadState> }
+    | null
+    | undefined,
   path: string,
   wasExpanded: boolean,
 ) {
@@ -496,12 +578,17 @@ export function workRootExplorerShouldLoadOnExpand(
   return !directoryState || directoryState.status === "idle";
 }
 
-export function workRootExplorerRefreshPaths(expandedPaths: ReadonlySet<string>) {
+export function workRootExplorerRefreshPaths(
+  expandedPaths: ReadonlySet<string>,
+) {
   const paths = Array.from(expandedPaths);
   return paths.length > 0 ? paths : [""];
 }
 
-export function toggleExpandedPath(expandedPaths: ReadonlySet<string>, path: string) {
+export function toggleExpandedPath(
+  expandedPaths: ReadonlySet<string>,
+  path: string,
+) {
   const next = new Set(expandedPaths);
   if (next.has(path)) {
     next.delete(path);
@@ -523,7 +610,14 @@ export function flattenWorkRootFileTree({
   selectedPath: string | null;
 }): WorkRootFileTreeRow[] {
   const rows: WorkRootFileTreeRow[] = [];
-  appendDirectoryRows(rows, rootPath, 0, expandedPaths, directories, selectedPath);
+  appendDirectoryRows(
+    rows,
+    rootPath,
+    0,
+    expandedPaths,
+    directories,
+    selectedPath,
+  );
   return rows;
 }
 
@@ -535,6 +629,7 @@ function createRestoredReadOnlyFilePane(
       descriptor.workRootId,
       descriptor.path,
       descriptor.mode,
+      descriptor.serverId,
     ),
     title: descriptor.title.trim() || fileNameFromPath(descriptor.path),
   };
@@ -567,6 +662,10 @@ function parseReadOnlyFilePaneDescriptor(
     return null;
   }
   return {
+    serverId:
+      typeof record.serverId === "string"
+        ? record.serverId.trim() || LOCAL_DASHBOARD_SERVER_ID
+        : LOCAL_DASHBOARD_SERVER_ID,
     workRootId,
     path,
     mode: record.mode,
@@ -626,7 +725,13 @@ function appendDirectoryRows(
   const directory = directories[path] ?? idleDirectoryLoadState();
 
   if (directory.status === "loading") {
-    rows.push({ type: "state", depth, path, status: "loading", label: "Loading" });
+    rows.push({
+      type: "state",
+      depth,
+      path,
+      status: "loading",
+      label: "Loading",
+    });
     return;
   }
 
@@ -642,12 +747,19 @@ function appendDirectoryRows(
   }
 
   if (directory.status === "loaded" && directory.entries.length === 0) {
-    rows.push({ type: "state", depth, path, status: "empty", label: "Empty directory" });
+    rows.push({
+      type: "state",
+      depth,
+      path,
+      status: "empty",
+      label: "Empty directory",
+    });
     return;
   }
 
   for (const entry of directory.entries) {
-    const expanded = entry.kind === "directory" && expandedPaths.has(entry.path);
+    const expanded =
+      entry.kind === "directory" && expandedPaths.has(entry.path);
     rows.push({
       type: "entry",
       depth,
@@ -657,7 +769,14 @@ function appendDirectoryRows(
     });
 
     if (expanded) {
-      appendDirectoryRows(rows, entry.path, depth + 1, expandedPaths, directories, selectedPath);
+      appendDirectoryRows(
+        rows,
+        entry.path,
+        depth + 1,
+        expandedPaths,
+        directories,
+        selectedPath,
+      );
     }
   }
 }
