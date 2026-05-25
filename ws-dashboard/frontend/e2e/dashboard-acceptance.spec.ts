@@ -76,10 +76,15 @@ test.beforeAll(async () => {
       [
         "# Gate Document",
         "",
-        "Markdown paragraph line",
+        "Markdown paragraph line with `inline code`",
         "with soft continuation",
         "",
         "- [x] completed task",
+        "- parent item",
+        "  - nested item",
+        "",
+        "5. ordered fifth",
+        "6. ordered sixth",
         "",
         "> [!note] Browser note",
         "> callout body",
@@ -1795,6 +1800,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]')).toBeEnabled();
     await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
     await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
+    const nestedUnorderedList = pane.locator(".document-list-unordered .document-list-unordered");
+    await expect(nestedUnorderedList).toHaveCount(1);
+    await expect(nestedUnorderedList).toContainText("nested item");
+    await expect(pane.locator(".document-list-ordered")).toHaveAttribute("start", "5");
+    await expect(pane.locator("code")).toContainText("inline code");
     await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
     await expect(pane.locator("table")).toContainText("rendered");
     await pane.locator(".document-translation-toggle").click();
@@ -1809,10 +1819,15 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         [
           "# Gate Document Edited",
           "",
-          "Markdown paragraph line",
+          "Markdown paragraph line with `inline code`",
           "with soft continuation",
           "",
           "- [x] completed task",
+          "- parent item",
+          "  - nested item",
+          "",
+          "5. ordered fifth",
+          "6. ordered sixth",
           "",
           "> [!note] Browser note",
           "> callout body",
@@ -1837,9 +1852,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     const paragraphBlock = pane.locator('[data-document-block-kind="paragraph"]').first();
     await paragraphBlock.click();
-    await expect(pane.locator(".document-viewer-action-strip")).toBeVisible();
-    await expect(pane.locator(".document-viewer-action-strip")).toContainText("Copy pathref");
-    await pane.locator(".document-viewer-action-strip button", { hasText: "Copy pathref" }).click();
+    await expect(pane.locator(".document-viewer-action-strip")).toHaveCount(0);
+    await expect(paragraphBlock).not.toHaveClass(/is-selected/);
+    await paragraphBlock.locator(".document-block-rail-select").click();
+    await expect(paragraphBlock).toHaveClass(/is-selected/);
+    await paragraphBlock.locator('.document-block-rail-actions button[aria-label="Copy pathref"]').click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(
       "@gate-document.md#L3-L4",
     );
@@ -1855,7 +1872,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await markdownPinnedTab.locator('[data-command-id="workbench.tab.close"]').click();
     await expect(markdownPinnedTab).toHaveCount(0);
     note(
-      "markdown document viewer: daemon-served markdown file rendered heading, task, callout, table, raw edit/save, block action strip, and relative pathref copy while preserving preview-to-pinned tabs",
+      "markdown document viewer: daemon-served markdown file rendered heading, task, callout, table, raw edit/save, semantic list/code rendering, rail actions, and relative pathref copy while preserving preview-to-pinned tabs",
     );
   });
 

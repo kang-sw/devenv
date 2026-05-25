@@ -14,6 +14,9 @@ type MarkdownNode = {
   identifier?: string;
   label?: string;
   children?: MarkdownNode[];
+  ordered?: boolean | null;
+  start?: number | null;
+  spread?: boolean | null;
   position?: {
     start?: { line?: number; column?: number; offset?: number };
     end?: { line?: number; column?: number; offset?: number };
@@ -51,10 +54,22 @@ export type DocumentTranslationOverlay = {
   >;
 };
 
-type RenderBlock = DocumentBlock & {
+export type RenderBlock = DocumentBlock & {
   node: MarkdownNode;
   calloutKind?: string;
+  listContext?: ListRenderContext;
 };
+
+type ListRenderContext = {
+  ordered: boolean;
+  start?: number;
+  spread?: boolean;
+  groupKey: string;
+};
+
+export type RenderUnit =
+  | { type: "block"; block: RenderBlock }
+  | { type: "list"; context: ListRenderContext; blocks: RenderBlock[] };
 
 export type MarkdownDocumentModel = {
   contentHash: string;
@@ -132,7 +147,12 @@ export function deriveMarkdownDocumentModel(
   const contentHash = options.contentHash ?? localDocumentContentHash(markdown);
   const lines = markdown.split(/\r?\n/);
   const renderBlocks: RenderBlock[] = [];
-  const pushBlock = (node: MarkdownNode, kind: DocumentBlockKind, calloutKind?: string) => {
+  const pushBlock = (
+    node: MarkdownNode,
+    kind: DocumentBlockKind,
+    calloutKind?: string,
+    listContext?: ListRenderContext,
+  ) => {
     const lineStart = node.position?.start?.line;
     const lineEnd = node.position?.end?.line;
     const plainText = normalizedPlainText(node, kind, calloutKind);
@@ -151,13 +171,30 @@ export function deriveMarkdownDocumentModel(
       translatable: kind !== "code" && plainText.trim().length > 0,
       node,
       calloutKind,
+      listContext,
     });
   };
 
   for (const child of tree.children ?? []) {
     if (child.type === "list") {
+      const listContext: ListRenderContext = {
+        ordered: child.ordered === true,
+        start: typeof child.start === "number" ? child.start : undefined,
+        spread: child.spread === true,
+        groupKey: [
+          child.position?.start?.line ?? "",
+          child.position?.end?.line ?? "",
+          child.ordered === true ? "ol" : "ul",
+          typeof child.start === "number" ? child.start : "",
+        ].join(":"),
+      };
       for (const item of child.children ?? []) {
-        pushBlock(item, item.checked === true || item.checked === false ? "taskItem" : "listItem");
+        pushBlock(
+          item,
+          item.checked === true || item.checked === false ? "taskItem" : "listItem",
+          undefined,
+          listContext,
+        );
       }
       continue;
     }
@@ -187,7 +224,12 @@ export function deriveMarkdownDocumentModel(
 
   return {
     contentHash,
-    blocks: renderBlocks.map(({ node: _node, calloutKind: _calloutKind, ...block }) => block),
+    blocks: renderBlocks.map(({
+      node: _node,
+      calloutKind: _calloutKind,
+      listContext: _listContext,
+      ...block
+    }) => block),
     renderBlocks,
     footnotes: footnotesForTree(tree),
   };
@@ -304,6 +346,50 @@ export function documentBlocksTranslatedText(
     .join("\n\n");
 }
 
+export function groupedMarkdownRenderUnits(renderBlocks: readonly RenderBlock[]): RenderUnit[] {
+  const units: RenderUnit[] = [];
+  for (const block of renderBlocks) {
+    if (block.listContext) {
+      const previous = units[units.length - 1];
+      if (previous?.type === "list" && previous.context.groupKey === block.listContext.groupKey) {
+        previous.blocks.push(block);
+      } else {
+        units.push({ type: "list", context: block.listContext, blocks: [block] });
+      }
+      continue;
+    }
+    units.push({ type: "block", block });
+  }
+  return units;
+}
+
+export function nextRailSelectedBlockIds(options: {
+  current: Iterable<string>;
+  blockId: string;
+  blockOrdinal: number;
+  lastSelectedOrdinal?: number;
+  shiftKey?: boolean;
+  blocks: readonly Pick<DocumentBlock, "blockId" | "ordinal">[];
+}) {
+  const next = new Set(options.current);
+  if (options.shiftKey && typeof options.lastSelectedOrdinal === "number") {
+    const start = Math.min(options.lastSelectedOrdinal, options.blockOrdinal);
+    const end = Math.max(options.lastSelectedOrdinal, options.blockOrdinal);
+    for (const block of options.blocks) {
+      if (block.ordinal >= start && block.ordinal <= end) {
+        next.add(block.blockId);
+      }
+    }
+    return next;
+  }
+  if (next.has(options.blockId)) {
+    next.delete(options.blockId);
+  } else {
+    next.add(options.blockId);
+  }
+  return next;
+}
+
 export function DocumentViewer({
   markdown,
   path,
@@ -314,65 +400,138 @@ export function DocumentViewer({
   overlay?: DocumentTranslationOverlay;
 }) {
   const model = useMemo(() => deriveMarkdownDocumentModel(markdown, { path }), [markdown, path]);
+  const renderUnits = useMemo(() => groupedMarkdownRenderUnits(model.renderBlocks), [model.renderBlocks]);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
+  const [lastSelectedOrdinal, setLastSelectedOrdinal] = useState<number | undefined>();
   const selectedBlocks = model.blocks.filter((block) => selectedBlockIds.has(block.blockId));
 
   const copyText = (text: string) => {
     void navigator.clipboard?.writeText(text);
   };
-
-  return (
-    <div className="document-viewer" data-content-hash={model.contentHash}>
-      {selectedBlocks.length > 0 ? (
-        <div className="document-viewer-action-strip" data-selected-block-count={selectedBlocks.length}>
-          <span>{selectedBlocks.length} block{selectedBlocks.length === 1 ? "" : "s"} selected</span>
-          <button type="button" onClick={() => copyText(documentBlocksVisibleText(selectedBlocks, overlay, model.contentHash))}>
-            Copy visible
+  const blocksForRailAction = (block: DocumentBlock) =>
+    selectedBlockIds.has(block.blockId) && selectedBlocks.length > 0 ? selectedBlocks : [block];
+  const toggleBlockFromRail = (block: DocumentBlock, event: { shiftKey?: boolean }) => {
+    setSelectedBlockIds((current) => nextRailSelectedBlockIds({
+      current,
+      blockId: block.blockId,
+      blockOrdinal: block.ordinal,
+      lastSelectedOrdinal,
+      shiftKey: event.shiftKey,
+      blocks: model.blocks,
+    }));
+    setLastSelectedOrdinal(block.ordinal);
+  };
+  const renderRail = (block: RenderBlock, selected: boolean) => {
+    const actionBlocks = blocksForRailAction(block);
+    return (
+      <div className="document-block-rail" aria-label={`Block actions for ${block.kind}`}>
+        <button
+          type="button"
+          className="document-block-rail-select"
+          aria-label={selected ? "Deselect block" : "Select block"}
+          aria-pressed={selected}
+          onClick={(event) => toggleBlockFromRail(block, event)}
+        >
+          <span aria-hidden="true">{selected ? "✓" : ""}</span>
+        </button>
+        <div className="document-block-rail-actions" aria-label="Copy block actions">
+          <button
+            type="button"
+            title="Copy visible text"
+            aria-label="Copy visible text"
+            onClick={() => copyText(documentBlocksVisibleText(actionBlocks, overlay, model.contentHash))}
+          >
+            V
           </button>
           <button
             type="button"
-            disabled={!canCopyTranslatedBlocks(selectedBlocks, overlay, model.contentHash)}
-            onClick={() => copyText(documentBlocksTranslatedText(selectedBlocks, overlay, model.contentHash))}
+            title="Copy translated text"
+            aria-label="Copy translated text"
+            disabled={!canCopyTranslatedBlocks(actionBlocks, overlay, model.contentHash)}
+            onClick={() => copyText(documentBlocksTranslatedText(actionBlocks, overlay, model.contentHash))}
           >
-            Copy translation
+            T
           </button>
-          <button type="button" onClick={() => copyText(selectedBlocks.map((block) => block.pathref).filter(Boolean).join("\n"))}>
-            Copy pathref
+          <button
+            type="button"
+            title="Copy pathref"
+            aria-label="Copy pathref"
+            disabled={!actionBlocks.some((actionBlock) => actionBlock.pathref)}
+            onClick={() => copyText(actionBlocks.map((actionBlock) => actionBlock.pathref).filter(Boolean).join("\n"))}
+          >
+            @
           </button>
         </div>
-      ) : null}
+      </div>
+    );
+  };
+  const renderBlockContent = (block: RenderBlock) => {
+    const translation = translationForBlock(overlay, model.contentHash, block.blockId);
+    return translation?.status === "ok" ? (
+      <div className="document-block-translation" title={block.plainText}>
+        {renderTranslatedMarkdown(translation.translatedMarkdown)}
+      </div>
+    ) : (
+      renderBlockNode(block, model.footnotes)
+    );
+  };
+  const renderBlock = (block: RenderBlock) => {
+    const selected = selectedBlockIds.has(block.blockId);
+    return (
+      <section
+        key={block.blockId}
+        className={`document-block document-block-${block.kind}${selected ? " is-selected" : ""}`}
+        data-document-block-id={block.blockId}
+        data-document-block-kind={block.kind}
+        data-pathref={block.pathref}
+      >
+        {renderRail(block, selected)}
+        <div className="document-block-body">{renderBlockContent(block)}</div>
+      </section>
+    );
+  };
+  const renderListItem = (block: RenderBlock) => {
+    const selected = selectedBlockIds.has(block.blockId);
+    const translation = translationForBlock(overlay, model.contentHash, block.blockId);
+    return (
+      <li
+        key={block.blockId}
+        className={`document-block document-block-${block.kind}${selected ? " is-selected" : ""}`}
+        data-document-block-id={block.blockId}
+        data-document-block-kind={block.kind}
+        data-pathref={block.pathref}
+      >
+        {renderRail(block, selected)}
+        <div className="document-block-body document-list-item-body">
+          {translation?.status === "ok" ? (
+            <div className="document-block-translation" title={block.plainText}>
+              {renderTranslatedMarkdown(translation.translatedMarkdown)}
+            </div>
+          ) : (
+            renderListItemContents(block.node, `block-${block.blockId}`, model.footnotes)
+          )}
+        </div>
+      </li>
+    );
+  };
+
+  return (
+    <div className="document-viewer" data-content-hash={model.contentHash}>
       <div className="document-viewer-scroll ws-doc-surface">
-        {model.renderBlocks.map((block) => {
-          const selected = selectedBlockIds.has(block.blockId);
-          const translation = translationForBlock(overlay, model.contentHash, block.blockId);
-          return (
-            <section
-              key={block.blockId}
-              className={`document-block document-block-${block.kind}${selected ? " is-selected" : ""}`}
-              data-document-block-id={block.blockId}
-              data-document-block-kind={block.kind}
-              data-pathref={block.pathref}
-              onClick={() => {
-                setSelectedBlockIds((current) => {
-                  const next = new Set(current);
-                  if (next.has(block.blockId)) {
-                    next.delete(block.blockId);
-                  } else {
-                    next.add(block.blockId);
-                  }
-                  return next;
-                });
-              }}
-            >
-              {translation?.status === "ok" ? (
-                <div className="document-block-translation" title={block.plainText}>
-                  {renderTranslatedMarkdown(translation.translatedMarkdown)}
-                </div>
-              ) : (
-                renderBlockNode(block, model.footnotes)
-              )}
-            </section>
-          );
+        {renderUnits.map((unit) => {
+          if (unit.type === "list") {
+            const ListTag = unit.context.ordered ? "ol" : "ul";
+            return (
+              <ListTag
+                key={unit.context.groupKey}
+                className={`document-list document-list-${unit.context.ordered ? "ordered" : "unordered"}${unit.context.spread ? " is-spread" : ""}`}
+                start={unit.context.ordered && unit.context.start && unit.context.start !== 1 ? unit.context.start : undefined}
+              >
+                {unit.blocks.map(renderListItem)}
+              </ListTag>
+            );
+          }
+          return renderBlock(unit.block);
         })}
       </div>
     </div>
@@ -395,6 +554,17 @@ function renderBlockNode(block: RenderBlock, footnotes: Record<string, string>):
     );
   }
   return renderNode(block.node, `block-${block.blockId}`, footnotes);
+}
+
+function renderListItemContents(node: MarkdownNode, key: string, footnotes: Record<string, string>) {
+  const children = (node.children ?? []).map((child, index) => renderNode(child, `${key}-${index}`, footnotes));
+  if (typeof node.checked !== "boolean") {
+    return children;
+  }
+  return [
+    <input key={`${key}-checkbox`} type="checkbox" checked={node.checked} disabled readOnly />,
+    ...children,
+  ];
 }
 
 function renderChildrenWithoutCalloutMarker(node: MarkdownNode, footnotes: Record<string, string>) {
@@ -446,8 +616,25 @@ function renderNode(node: MarkdownNode, key: string, footnotes: Record<string, s
       }
       return <a key={key} href={href} target="_blank" rel="noreferrer">{renderChildren(node, key, footnotes)}</a>;
     }
+    case "list": {
+      const ListTag = node.ordered === true ? "ol" : "ul";
+      return (
+        <ListTag
+          key={key}
+          className={`document-list document-list-${node.ordered === true ? "ordered" : "unordered"}${node.spread ? " is-spread" : ""}`}
+          start={node.ordered === true && node.start && node.start !== 1 ? node.start : undefined}
+        >
+          {renderChildren(node, key, footnotes)}
+        </ListTag>
+      );
+    }
     case "listItem":
-      return <div key={key} className="document-list-item">{typeof node.checked === "boolean" ? <input type="checkbox" checked={node.checked} disabled readOnly /> : null}{renderChildren(node, key, footnotes)}</div>;
+      return (
+        <li key={key} className={typeof node.checked === "boolean" ? "document-nested-task-item" : undefined}>
+          {typeof node.checked === "boolean" ? <input type="checkbox" checked={node.checked} disabled readOnly /> : null}
+          {renderChildren(node, key, footnotes)}
+        </li>
+      );
     case "blockquote":
       return <blockquote key={key}>{renderChildren(node, key, footnotes)}</blockquote>;
     case "table":
