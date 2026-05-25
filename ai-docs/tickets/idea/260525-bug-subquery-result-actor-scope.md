@@ -1,5 +1,5 @@
 ---
-title: subquery result is not retrievable in actor scope after explicit-root start
+title: subquery still advertises root and returns mismatched actor-scope follow-up
 related:
   260524-bug-subquery-working-directory-stderr: adjacent subquery reliability issue
   260525-bug-ws-setup-cwd-plugin-cache-root: adjacent setup/root recovery behavior
@@ -8,7 +8,7 @@ related-mental-model:
   - named-agent-runtime
 ---
 
-# subquery result is not retrievable in actor scope after explicit-root start
+# subquery still advertises root and returns mismatched actor-scope follow-up
 
 ## Background
 
@@ -32,13 +32,20 @@ same lead session. If explicit `root` changes actor scope or registration
 authority, the subquery tool should either bind the returned key to the
 caller-visible actor scope or return recovery guidance that works.
 
+Follow-up investigation corrected the premise: `root` should not be publicly
+advertised on `subquery` at all. The `agents.*` root schema cleanup removed
+public `root` from named-agent lifecycle tools but missed `subquery`, even
+though subquery is actor-owned and should follow the same rootless public
+workflow.
+
 ## Investigation - 2026-05-25
 
-The failure is a namespace mismatch, not a worker execution failure. The
-explicit-root subqueries completed successfully and were visible through
-explicit-root `agents.status(root: "/Users/kang-sw/devenv", name: ...)`.
-The same names failed through root-omitted `agents.result(name: ...)` because
-that call resolved through the current lead actor scope.
+The failure is a namespace mismatch caused by a stale public schema, not a
+worker execution failure. The explicit-root subqueries completed successfully
+and were visible through explicit-root
+`agents.status(root: "/Users/kang-sw/devenv", name: ...)`. The same names
+failed through root-omitted `agents.result(name: ...)` because that call
+resolved through the current lead actor scope.
 
 The relevant code path is:
 
@@ -69,7 +76,44 @@ Existing tests cover the pieces separately:
   actor id.
 
 Missing coverage is the MCP-level integration case: actor-bound session,
-explicit-root `subquery`, then the returned follow-up command. A fix should
-either make the subquery follow-up executable as printed, or make explicit-root
-subquery return explicit-root recovery guidance instead of rootless
-`agents.*` calls.
+explicit-root `subquery`, then the returned follow-up command. More importantly,
+raw and `tools/list` schema coverage must assert that `subquery` does not
+advertise `root`, just as public `agents.*` schemas do not advertise `root`.
+
+The historical gap appears to be `40f32164 fix(mcp): hide agent root schemas`:
+it removed `root` from `agents.*` schemas while preserving dispatch-time hidden
+explicit-root compatibility, but it did not remove `root` from the top-level
+`subquery` schema. The added tests only checked `strings.HasPrefix(name,
+"agents.")`, so they never failed on `subquery`.
+
+A fix should remove `root` from the public `subquery` schema, keep or explicitly
+reject hidden explicit-root compatibility according to the intended contract,
+and align child-reader actor setup with the same decision. If hidden
+explicit-root compatibility remains accepted, returned follow-up text must not
+be rootless in a way that routes to a different namespace than the generated
+subquery agent.
+
+## Skill Audit - 2026-05-25
+
+Current skill text does not instruct callers to use `root` on `subquery` or
+`agents.*` tools. The only `root` mentions in shipped ws skills are:
+
+- `agents-plugin/skills/lead-workflow-manual/SKILL.md`: general notation says
+  to omit `root` when the current repository root is intended, and session setup
+  uses `ws/setup(method: "lead-workflow-bootstrap", root:
+  "<absolute-working-directory>")`.
+- `agents-plugin-wsflow/skills/lead-workflow-manual/SKILL.md`: general notation
+  says to omit `root` when the current repository root is intended, and setup
+  uses `wsflow/setup(root: "<absolute-working-directory>")`.
+- The installed cache copy of `agents-plugin/skills/lead-workflow-manual` has
+  the same ws text.
+
+No other `SKILL.md` under `agents-plugin/skills`,
+`agents-plugin-wsflow/skills`, or the installed ws plugin cache contains an
+MCP-call pattern that passes `root` to `subquery`, `agents.*`, `api.*`, or
+`config.*`.
+
+The remaining stale exposure is therefore in the MCP advertised schema and
+dispatch compatibility path, not in ordinary skill prose. The general notation
+line may still be worth tightening so workflow authors do not infer that
+actor-owned tools should accept public `root` arguments.
