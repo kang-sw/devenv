@@ -1814,8 +1814,15 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     if (ownsWorkRoot) {
       await pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]').click();
-      await expect(pane.locator(".document-raw-editor")).toBeVisible();
-      await pane.locator(".document-raw-editor").fill(
+      const editor = pane.locator(".document-raw-editor");
+      await expect(editor).toBeVisible();
+      await expect(editor).toHaveAttribute("data-editor-language", "markdown");
+      await expect(editor.locator(".cm-lineNumbers")).toBeVisible();
+      const editorContent = editor.locator(".cm-content");
+      await editorContent.click();
+      await expect(editorContent).toBeFocused();
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+      await page.keyboard.insertText(
         [
           "# Gate Document Edited",
           "",
@@ -1835,8 +1842,15 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           "| Kind | Value |",
           "| --- | --- |",
           "| table | rendered |",
+          "",
+          ...Array.from({ length: 80 }, (_, index) => `editor internal scroll line ${index + 1}`),
         ].join("\n") + "\n",
       );
+      const scroller = editor.locator(".cm-scroller");
+      await scroller.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      await expect.poll(() => scroller.evaluate((node) => node.scrollTop > 0)).toBe(true);
       await pane.locator('[data-command-id="document.save"]').click();
       await expect(pane.locator('[data-document-save-state="saved"]')).toContainText(/saved/i);
       await pane.locator('[data-command-id="document.mode.set"][data-document-mode="view"]').click();

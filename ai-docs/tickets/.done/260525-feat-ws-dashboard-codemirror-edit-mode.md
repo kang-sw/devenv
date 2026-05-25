@@ -9,6 +9,7 @@ spec:
   - 260524-ws-dashboard-document-edit-save-fanout
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-25
 ---
 
 # Add CodeMirror document edit mode
@@ -64,6 +65,18 @@ The editor must fit within the existing pane body without page-level scroll,
 match the dashboard dark visual system, keep the document ribbon height stable,
 and preserve source-identity fan-out for same-file multi-pane saves.
 
+### Result (1726c1b) - 2026-05-25
+
+Implemented a reusable CodeMirror 6 raw editor inside the existing document
+pane edit mode. The pane still owns view/edit switching, draft state, save,
+revert, stale/conflict presentation, and same-source save fan-out through the
+existing command ids and write API.
+
+The editor replaces the browser textarea without creating a new workbench
+surface identity. It uses dashboard dark-theme styling, fills the pane body,
+scrolls internally, keeps the ribbon chrome stable, and preserves the
+read-only Markdown viewer as the separate format-aware view mode.
+
 ### Phase 2: Add language and editing affordances
 
 Add extension-based syntax highlighting and core editing affordances: line
@@ -75,3 +88,26 @@ Verification should cover Markdown/raw text save behavior, dirty/revert/stale
 state, same-source fan-out, at least one highlighted language, plain-text
 fallback, and browser evidence that the editor scrolls inside the pane and
 does not interfere with view/edit mode switching.
+
+### Result (1726c1b) - 2026-05-25
+
+Added conservative language detection from language hints, extensions, and
+paths for Markdown, TypeScript/JavaScript, JSON, CSS, HTML, YAML, Python, Rust,
+shell, and text fallback. Language packages load asynchronously and unsupported
+types remain plain text.
+
+The first-pass CodeMirror affordances include line numbers, search keymaps,
+bracket matching, history, indentation behavior, active-line highlighting,
+selection handling, and dashboard-styled search/tooltips. Browser coverage now
+edits Markdown through CodeMirror content, verifies the Markdown language
+selection and line-number gutter, checks internal scrolling, saves, and returns
+to rendered Markdown view.
+
+Verification passed:
+
+- `npm run test:document-viewer`
+- `npx tsc -p tsconfig.e2e-tests.json`
+- `npm run build`
+- `npm run test:browser` after one retry; the first run stopped before the
+  CodeMirror step at the separately tracked
+  `260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky` path.
