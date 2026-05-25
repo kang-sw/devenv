@@ -18,7 +18,8 @@
     "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminalCommandPlan.test.js && node ./node_modules/.tmp/route-tests/terminals.test.js && tsc -p tsconfig.e2e-tests.json && node ./node_modules/.tmp/e2e-tests/e2e/daemonHarness.test.js",
     "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test",
     "test:open-work-root": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/openWorkRoot.test.js",
-    "test:document-viewer": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/documentViewer.test.js && node ./node_modules/.tmp/route-tests/documentRawEditor.test.js"
+    "test:document-viewer": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/documentViewer.test.js && node ./node_modules/.tmp/route-tests/documentRawEditor.test.js",
+    "test:git": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/gitToolbar.test.js && node ./node_modules/.tmp/route-tests/gitWorktreeAdd.test.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

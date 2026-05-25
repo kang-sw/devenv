@@ -322,12 +322,14 @@ export function shouldApplyActivityStreamRequest(
 
 export type WorkRootActivityFetchOptions = {
   readonly recentLimit?: number;
+  readonly serverId?: string | null;
 };
 
 export type ActivityTranscriptFetchOptions = {
   readonly cursor?: string;
   readonly before?: string;
   readonly limit?: number;
+  readonly serverId?: string | null;
 };
 
 export function workRootActivityEndpoint(
