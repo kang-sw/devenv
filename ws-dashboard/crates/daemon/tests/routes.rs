@@ -5907,6 +5907,84 @@ async fn work_root_activity_route_recent_agent_limit_uses_latest_payload_or_regi
 }
 
 #[tokio::test]
+async fn work_root_activity_route_recent_agent_limit_orders_fractional_registry_timestamps() {
+    if skip_without_git(
+        "work_root_activity_route_recent_agent_limit_orders_fractional_registry_timestamps",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-current-fractional-recency");
+    let cache_home = temp_fixture_path("work-root-activity-current-fractional-recency-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    for (agent_key, name, updated_at) in [
+        (
+            "fractional-early",
+            "fractional early",
+            "2026-05-25T00:00:00.100Z",
+        ),
+        (
+            "fractional-late",
+            "fractional late",
+            "2026-05-25T00:00:00.900Z",
+        ),
+    ] {
+        upsert_agent_def(
+            &agents_dir,
+            agent_key,
+            name,
+            agent_key,
+            "codex",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "idle",
+            "",
+            "",
+        );
+        update_agent_def_registry_fields(
+            &agents_dir,
+            agent_key,
+            "idle",
+            updated_at,
+            updated_at,
+            "",
+        );
+    }
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("fractional current recency activity JSON");
+    let agent_ids = value["agents"]
+        .as_array()
+        .expect("recent-limited agents array")
+        .iter()
+        .map(|agent| agent["agentId"].as_str().expect("agent id").to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(agent_ids, vec!["fractional-late"]);
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
 async fn work_root_activity_route_limits_recent_retained_items_by_registry_metadata() {
     if skip_without_git(
         "work_root_activity_route_limits_recent_retained_items_by_registry_metadata",
@@ -6164,6 +6242,134 @@ async fn work_root_activity_route_recent_retained_limit_uses_latest_payload_or_r
         assert!(
             !body_text.contains(&forbidden),
             "retained combined recency response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_recent_retained_limit_orders_fractional_registry_timestamps() {
+    if skip_without_git(
+        "work_root_activity_route_recent_retained_limit_orders_fractional_registry_timestamps",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-retained-fractional-recency");
+    let cache_home = temp_fixture_path("work-root-activity-retained-fractional-recency-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    upsert_agent_def(
+        &agents_dir,
+        "current",
+        "current",
+        "current",
+        "codex",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "idle",
+        "",
+        "",
+    );
+
+    for (instance_id, name, state_path, updated_at) in [
+        (
+            "current:private/state/fractional-early-secret",
+            "fractional early",
+            "fractional-retained-early",
+            "2026-05-25T00:00:00.100Z",
+        ),
+        (
+            "current:private/state/fractional-late-secret",
+            "fractional late",
+            "fractional-retained-late",
+            "2026-05-25T00:00:00.900Z",
+        ),
+    ] {
+        upsert_agent_instance(
+            &agents_dir,
+            instance_id,
+            "current",
+            name,
+            state_path,
+            "codex",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "completed",
+            "2026-05-25T00:00:00Z",
+            "",
+            "retired",
+            "",
+            true,
+        );
+        update_agent_instance_registry_fields(
+            &agents_dir,
+            instance_id,
+            "retired",
+            updated_at,
+            updated_at,
+            updated_at,
+            updated_at,
+            updated_at,
+        );
+    }
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("fractional retained recency activity JSON");
+    let labels = value["items"]
+        .as_array()
+        .expect("items array")
+        .iter()
+        .map(|item| item["label"].as_str().expect("item label").to_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "fractional late (historical)"),
+        "later fractional retained row should be selected; labels were {labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .all(|label| label != "fractional early (historical)"),
+        "earlier fractional retained row should be omitted; labels were {labels:?}"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "current:private/state/fractional-early-secret".to_owned(),
+        "current:private/state/fractional-late-secret".to_owned(),
+        "fractional-retained-early".to_owned(),
+        "fractional-retained-late".to_owned(),
+        "state.sqlite".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "fractional retained recency response must not leak {forbidden}"
         );
     }
 

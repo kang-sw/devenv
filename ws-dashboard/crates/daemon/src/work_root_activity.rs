@@ -707,6 +707,7 @@ fn parse_registry_timestamp(value: &str) -> Option<SystemTime> {
     let minute = parse_digits(value.get(14..16)?)? as u32;
     let second = parse_digits(value.get(17..19)?)? as u32;
     let suffix = value.get(19..)?;
+    let nanos = parse_fractional_nanos(suffix)?;
     if suffix != "Z" && !(suffix.starts_with('.') && suffix.ends_with('Z')) {
         return None;
     }
@@ -723,7 +724,7 @@ fn parse_registry_timestamp(value: &str) -> Option<SystemTime> {
         return None;
     }
     let seconds = days as u64 * 86_400 + hour as u64 * 3_600 + minute as u64 * 60 + second as u64;
-    Some(UNIX_EPOCH + Duration::from_secs(seconds))
+    Some(UNIX_EPOCH + Duration::new(seconds, nanos))
 }
 
 fn parse_digits(value: &str) -> Option<u32> {
@@ -731,6 +732,24 @@ fn parse_digits(value: &str) -> Option<u32> {
         byte.is_ascii_digit()
             .then_some(acc * 10 + u32::from(byte - b'0'))
     })
+}
+
+fn parse_fractional_nanos(suffix: &str) -> Option<u32> {
+    if suffix == "Z" {
+        return Some(0);
+    }
+    let fraction = suffix.strip_prefix('.')?.strip_suffix('Z')?;
+    if fraction.is_empty()
+        || fraction.len() > 9
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let mut nanos = parse_digits(fraction)?;
+    for _ in fraction.len()..9 {
+        nanos *= 10;
+    }
+    Some(nanos)
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
