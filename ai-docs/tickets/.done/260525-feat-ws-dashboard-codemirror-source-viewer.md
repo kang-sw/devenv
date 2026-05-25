@@ -9,6 +9,7 @@ spec:
   - 260524-ws-dashboard-document-edit-save-fanout
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-25
 ---
 
 # Use CodeMirror for source document viewing
@@ -62,6 +63,19 @@ trigger dirty draft state while in view mode.
 As part of this phase, remove the bright focused CodeMirror outline/border
 effect from both read-only and editable CodeMirror surfaces.
 
+### Result (8feb467) - 2026-05-25
+
+Non-Markdown document view mode now renders through the shared CodeMirror
+source surface in read-only mode instead of the legacy preformatted text
+surface. Markdown view mode remains the dedicated Markdown renderer, while edit
+mode continues to use raw CodeMirror editing.
+
+`DocumentRawEditor` now supports editable and read-only configurations. The
+read-only configuration keeps keyboard focus and text selection available but
+does not publish draft changes or dirty the pane. The visible focused
+CodeMirror outline was removed for both read-only and editable surfaces so
+focus no longer draws the bright blue editor border.
+
 ### Phase 2: Expand source language coverage
 
 Extend the language mapping and lazy-loaded highlight support for common source
@@ -94,3 +108,30 @@ non-Markdown file, Markdown still using the dedicated viewer in view mode,
 editable CodeMirror still saving correctly, focus chrome staying visually
 quiet, TOML highlighting selection, fallback plain text, and browser evidence
 that read-only and editable source surfaces scroll inside the pane.
+
+### Result (8feb467, 0078e7f) - 2026-05-25
+
+Expanded language detection and lazy highlighting for TOML, XML, SQL,
+diff/patch, INI/properties/env, Dockerfile, Go, Java, C/C++, PHP, Ruby, and
+Lua. Workflow-specific candidates such as Makefile, Nix, Typst, Mermaid,
+Justfile, and gitignore now receive stable language ids where useful, with
+plain CodeMirror text fallback when no safe highlighter is wired.
+
+Browser coverage now verifies TOML read-only CodeMirror viewing, quiet focus
+chrome, source viewer line numbers, read-only source scrolling, CodeMirror edit
+save, fallback text viewing, and Markdown view mode staying on the dedicated
+Markdown renderer. The follow-up test commit accounts for CodeMirror's
+virtualized DOM by scrolling before asserting the last long-file line.
+
+Verification passed:
+
+- `npm run test:document-viewer`
+- `npx tsc -p tsconfig.e2e-tests.json`
+- `npm run build`
+- `npm run test:browser`
+
+Two earlier browser attempts stopped at the separately tracked
+`260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky` path before the
+source viewer step; a later run reached the source viewer and exposed the
+virtualized-line assertion, and the final browser gate passed after the test
+fix.
