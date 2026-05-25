@@ -189,6 +189,33 @@ collision tests for same bare ids on different servers, persisted-state
 compatibility tests where state formats change, and command payload tests that
 prove `serverId` is carried where it constrains execution.
 
+### Result (bfab8b7) - 2026-05-25
+
+Implemented the frontend-only server identity foundation for the dashboard
+operation-forwarding sequence. Route helpers now accept or derive `serverId`
+for canonical server-scoped route shapes while preserving local compatibility
+for `server-local` and omitted server ids. Workbench pane identities, file
+source keys, read-only panes, document event subscriptions, Activity pane
+state, Git calls, terminal sessions/restores, command payloads, and persisted
+local-only records now carry or map to server identity where same bare ids can
+collide across linked servers.
+
+Backend route registration, linked-server forwarding, SSE proxying, terminal
+WebSocket gatewaying, and browser-visible remote operation behavior remain
+deferred to later phases. Review found and fixed two rounds of remaining
+bare-id gaps before the phase was considered clean.
+
+Verification passed:
+
+- `npm --prefix ws-dashboard/frontend run test:root-picker`
+- `npm --prefix ws-dashboard/frontend run test:open-work-root`
+- `npm --prefix ws-dashboard/frontend run test:work-root-files`
+- `npm --prefix ws-dashboard/frontend run test:work-root-activity`
+- `npm --prefix ws-dashboard/frontend run test:terminals`
+- `npm --prefix ws-dashboard/frontend run test:commands`
+- `npm --prefix ws-dashboard/frontend run test:git`
+- `npm --prefix ws-dashboard/frontend run build`
+
 ### Phase 2: Backend local aliases and one-shot forwarding skeleton
 
 Add server-scoped daemon routes for one-shot HTTP operations, with
