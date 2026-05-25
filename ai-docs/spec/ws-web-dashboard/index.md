@@ -209,7 +209,7 @@ The left navigation's add-server affordance opens a compact endpoint-first
 modal. SSH-managed start or reconnect remains an advanced or agent-operated
 path and is not required by the default add-server flow.
 
-## Server-Scoped Operation Frontend Foundation {#260525-ws-dashboard-server-scoped-operation-forwarding}
+## Server-Scoped Operation Gateway Foundation {#260525-ws-dashboard-server-scoped-operation-forwarding}
 
 Dashboard frontend operations whose target belongs to a server, workspace,
 workRoot, file, Activity item, terminal, or host filesystem path carry
@@ -237,15 +237,34 @@ stream keys, terminal state, command payloads, and persisted UI records include
 Existing local-only persisted file pane and terminal restore records are read
 as `server-local` records.
 
+The local gateway also registers protected server-scoped one-shot backend
+routes for the root picker, root-picker directory creation, root-picker pins,
+open WorkRoot, and WorkRoot activation:
+
+```text
+/api/dashboard/servers/{serverId}/root-picker
+/api/dashboard/servers/{serverId}/root-picker/directories
+/api/dashboard/servers/{serverId}/root-picker/pins
+/api/dashboard/servers/{serverId}/work-roots/open
+/api/dashboard/servers/{serverId}/work-roots/{workRootId}/activation
+```
+
+For `server-local`, these routes dispatch in-process with the same behavior as
+the existing non-server-scoped compatibility routes. For linked servers, the
+gateway resolves remembered endpoint and daemon-lifetime bearer-token state,
+returns bounded refusal responses for unknown, auth-required, tunnel-required,
+or unreachable servers, and forwards only the allowlisted ordinary HTTP/JSON
+operation paths. Forwarded responses preserve upstream status and body where
+practical. When a forwarded response body is a `DashboardResourcesView`, the
+gateway rewrites the top-level server identity and nested `ResourcePath.serverId`
+values to the selected linked-server id.
+
 > [!note] Planned 🚧
-> Gateway route registration and remote forwarding will make the canonical
-> server-scoped routes operational for linked servers. The gateway will handle
-> `server-local` operations in-process, forward linked-server one-shot HTTP
-> operations with the daemon-lifetime memory-only bearer token, preserve bounded
-> refusal states, and rewrite returned resource views and nested
-> `ResourcePath.serverId` values to the selected linked-server id. SSE streams
-> and terminal WebSockets require stream or upgrade proxy behavior rather than a
-> simple JSON forwarding helper.
+> Later phases will attach the remaining file, document, Activity, Git,
+> workspace, terminal HTTP lifecycle, document-event SSE, Activity-event SSE,
+> and terminal WebSocket operations to the server-scoped route model. SSE
+> streams and terminal WebSockets require stream or upgrade proxy behavior
+> rather than the one-shot JSON forwarding helper.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 

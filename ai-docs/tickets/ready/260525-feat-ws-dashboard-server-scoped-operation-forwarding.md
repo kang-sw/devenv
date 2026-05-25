@@ -242,6 +242,38 @@ local alias equivalence for representative routes, linked-server refusal
 states, bearer forwarding on at least one test remote route, upstream error
 preservation, and resource-view rewriting.
 
+### Result (51a148b) - 2026-05-25
+
+Implemented the backend one-shot forwarding skeleton for representative
+server-scoped dashboard operations. The protected router now exposes
+server-scoped aliases for root-picker listing, directory creation, pins,
+open WorkRoot, and WorkRoot activation. `server-local` aliases dispatch
+in-process with the same behavior as the legacy local routes, while linked
+server aliases use allowlisted ordinary HTTP/JSON forwarding through the local
+gateway with daemon-lifetime bearer auth.
+
+The skeleton returns bounded refusal states for unknown, auth-required,
+tunnel-required, or unreachable linked servers, preserves upstream status and
+body where practical, and rewrites forwarded `DashboardResourcesView` server
+identity plus nested `ResourcePath.serverId` values to the selected linked
+server id. It does not implement full operation coverage, SSE forwarding,
+terminal WebSocket gatewaying, or remote browser dogfood; those remain in later
+phases.
+
+Review outcome: correctness and fit were clean on first pass. Test review found
+missing local equivalence coverage for mutation aliases; that was fixed before
+re-review returned clean.
+
+Verification passed:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml server_scoped`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml linked_server`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml forwarding`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml`
+- `npm --prefix ws-dashboard/frontend run build`
+- `npm --prefix ws-dashboard/frontend run test:root-picker`
+- `npm --prefix ws-dashboard/frontend run test:open-work-root`
+
 ### Phase 3: Remote root picker and open WorkRoot
 
 Make the server row folder/open-root affordance available for connected linked

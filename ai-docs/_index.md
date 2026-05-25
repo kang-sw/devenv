@@ -193,8 +193,8 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Focus
 
 `260525-feat-ws-dashboard-server-scoped-operation-forwarding` - ready for Phase
-2 backend local aliases and one-shot forwarding skeleton after the Phase 1
-frontend identity foundation.
+3 remote root picker and open WorkRoot behavior after the Phase 2 backend
+one-shot forwarding skeleton.
 
 ## Session Notes
 
