@@ -23,11 +23,18 @@ USAGE
 }
 
 ensure_frontend_deps() {
-  if [[ -d "$FRONTEND_DIR/node_modules" ]]; then
+  local npm_state="$FRONTEND_DIR/node_modules/.package-lock.json"
+  local package_json="$FRONTEND_DIR/package.json"
+  local package_lock="$FRONTEND_DIR/package-lock.json"
+
+  if [[ -d "$FRONTEND_DIR/node_modules" &&
+        -f "$npm_state" &&
+        ! "$package_json" -nt "$npm_state" &&
+        ( ! -f "$package_lock" || ! "$package_lock" -nt "$npm_state" ) ]]; then
     return
   fi
 
-  if [[ -f "$FRONTEND_DIR/package-lock.json" ]]; then
+  if [[ -f "$package_lock" ]]; then
     (cd "$FRONTEND_DIR" && npm ci)
   else
     (cd "$FRONTEND_DIR" && npm install)
