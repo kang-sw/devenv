@@ -240,6 +240,48 @@ remote exposure, and full remote hardening.
 Verification should include at least one remote-dogfood path against an owner-
 provided SSH host, with local-daemon restart behavior observed.
 
+### Result (be10fe9) - 2026-05-25
+
+Implemented the SSH-backed remote start/reconnect path in reviewable backend
+slices. The daemon now persists non-secret linked-server SSH metadata, keeps
+active SSH tunnel handles and bearer tokens in memory only, and exposes owner-
+authenticated routes to start a linked SSH server or reconnect its tunnel.
+Remembered SSH servers return to `tunnelRequired` after local daemon restart
+until a tunnel is recreated, then move to `authRequired` or `connected`
+depending on memory-only link-auth state.
+
+The start route can run an owner-provided SSH startup command, capture bounded
+remote daemon startup output, derive the remote loopback endpoint from the
+printed pairing URL, capture the daemon-lifetime link passphrase only in
+memory, create a local SSH forward, and attempt immediate link-auth through the
+forwarded endpoint. Responses remain bounded `ServerConnectionView` objects and
+do not expose SSH targets, forwarded ports, remote endpoint hints, passphrases,
+bearer tokens, host paths, or cache paths.
+
+Remote Windows dogfood verified the path end-to-end after copying the current
+dashboard daemon workspace to an owner-provided Windows SSH host and building it
+there. The local daemon started a remote Windows dashboard daemon through an
+owner-provided Scheduled Task script so the remote daemon outlived the SSH
+startup command, captured startup metadata, created the SSH tunnel, linked
+automatically, and forwarded resources under the linked server id. Automatic
+binary deployment and service installation remain deferred; the MVP start path
+expects the owner or owner-directed agent to provide the remote startup command
+that locates or launches the dashboard binary.
+
+Verification:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon ssh -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon linked -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-core`
+- Remote Windows dogfood: copied the current `ws-dashboard` Rust workspace to
+  the owner-provided SSH host, built `ws-dashboard-daemon`, started the remote
+  daemon through the local `/api/dashboard/servers/ssh/start` route with an
+  owner-provided Scheduled Task startup script, observed `status:
+  "connected"`, and verified `/api/dashboard/servers/{serverId}/resources`
+  returned the linked server id.
+- `ws/spec_index.verify`
+
 ### Phase 5: Server-first left navigation
 
 Refactor the left navigation so servers become the top hierarchy. Remove the
