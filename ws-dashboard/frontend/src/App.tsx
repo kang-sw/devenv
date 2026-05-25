@@ -3339,6 +3339,10 @@ function WorkbenchShell({
     resources && selection
       ? (() => {
           const { workspace, root, mainInstance, selectedInstance } = selection;
+          const rootKey = serverScopedIdentity(
+            root.resourcePath.serverId,
+            root.id,
+          );
           const supportEntity =
             selectedEntity ?? resourceEntityForWorkRoot(root);
           const editorGroups = applyWorkbenchPaneOrder(
@@ -3365,11 +3369,14 @@ function WorkbenchShell({
                   focusedTerminalPaneIdRef.current === pane.paneId,
               },
               closedAgentPaneByRoot[root.id] ?? [],
-              activityPaneOpenByRoot[root.id] ?? false,
-              workRootActivityState.rootId === root.id
+              activityPaneOpenByRoot[rootKey] ?? false,
+              workRootActivityState.rootId === root.id &&
+                workRootActivityState.serverId === root.resourcePath.serverId
                 ? workRootActivityState.activity
                 : { phase: "loading" },
-              activityTranscriptRefresh?.rootId === root.id
+              activityTranscriptRefresh?.rootId === root.id &&
+                activityTranscriptRefresh.serverId ===
+                  root.resourcePath.serverId
                 ? activityTranscriptRefresh
                 : null,
               onCommand,
@@ -3430,6 +3437,7 @@ function WorkbenchShell({
               listStartedAtMs,
               serverId,
             ),
+            serverId,
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
@@ -3848,6 +3856,8 @@ function WorkbenchShell({
         .filter(
           (pane) =>
             pane.session.workRootId === workbenchModel.root.id &&
+            (pane.session.serverId ?? "server-local") ===
+              workbenchModel.root.resourcePath.serverId &&
             shouldPollTerminalOutput(pane),
         )
         .map((pane) => ({
@@ -4334,12 +4344,14 @@ function WorkbenchShell({
     // existing pane and new opens using policy-owned support-split placement
     // instead of a raw Dockview handle.
     const rootId = workbenchModel.root.id;
-    const paneId = workRootActivityPaneId(rootId);
+    const serverId = workbenchModel.root.resourcePath.serverId;
+    const rootKey = serverScopedIdentity(serverId, rootId);
+    const paneId = workRootActivityPaneId(rootKey);
     const decision = decideSurfaceOpenWithDynamicGroups(
-      workRootActivityPlacementState(workbenchGroups, editorGroups, rootId),
+      workRootActivityPlacementState(workbenchGroups, editorGroups, rootKey),
       {
         surfaceKind: "workRootActivity",
-        logicalKey: workRootActivityPaneLogicalKey(rootId),
+        logicalKey: workRootActivityPaneLogicalKey(rootKey),
         attachmentId:
           paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
       },
@@ -4348,17 +4360,17 @@ function WorkbenchShell({
       if (decision.createdGroupId) {
         onWorkbenchGroupsByRootChange((current) => ({
           ...current,
-          [rootId]: reconcileDashboardGroupsForPlacement(
-            current[rootId] ?? workbenchGroups,
+          [rootKey]: reconcileDashboardGroupsForPlacement(
+            current[rootKey] ?? workbenchGroups,
             decision,
           ),
         }));
       }
-      setActivityPaneOpenByRoot((current) => ({ ...current, [rootId]: true }));
+      setActivityPaneOpenByRoot((current) => ({ ...current, [rootKey]: true }));
       onPaneOrderByRootChange((current) => ({
         ...current,
-        [rootId]: addPaneToGroupOrder(
-          current[rootId] ?? {},
+        [rootKey]: addPaneToGroupOrder(
+          current[rootKey] ?? {},
           paneId,
           String(decision.groupId),
         ),
@@ -4373,17 +4385,17 @@ function WorkbenchShell({
     // CONTRACT: closing the WorkRoot Activity pane only detaches the browser
     // view. It is reversible and daemon-owned, so no daemon named-agent state
     // changes here.
-    if (!selectedWorkRootId) {
+    if (!selectedWorkRootStateKey) {
       return;
     }
     setActivityPaneOpenByRoot((current) => ({
       ...current,
-      [selectedWorkRootId]: false,
+      [selectedWorkRootStateKey]: false,
     }));
     onPaneOrderByRootChange((current) => ({
       ...current,
-      [selectedWorkRootId]: removePaneFromOrder(
-        current[selectedWorkRootId] ?? {},
+      [selectedWorkRootStateKey]: removePaneFromOrder(
+        current[selectedWorkRootStateKey] ?? {},
         paneId,
       ),
     }));
@@ -4408,7 +4420,8 @@ function WorkbenchShell({
 
   const { workspace, root } = workbenchModel;
   const activityBadge = workRootActivityBadge(
-    workRootActivityState.rootId === root.id
+    workRootActivityState.rootId === root.id &&
+      workRootActivityState.serverId === root.resourcePath.serverId
       ? workRootActivityState.activity
       : { phase: "loading" },
   );
@@ -4588,6 +4601,7 @@ function WorkbenchToolbar({
             buildWorkRootActivationCommand(
               activationAction.entityId,
               activation,
+              root.resourcePath.serverId,
             ),
           );
         }}
@@ -4603,9 +4617,15 @@ function WorkbenchToolbar({
           <WorkbenchActivityBadge
             activity={activity}
             onOpenActivity={() => {
-              onCommand(buildWorkbenchOpenActivityCommand(root.id), {
-                "workbench.openActivity": onOpenActivity,
-              });
+              onCommand(
+                buildWorkbenchOpenActivityCommand(
+                  root.id,
+                  root.resourcePath.serverId,
+                ),
+                {
+                  "workbench.openActivity": onOpenActivity,
+                },
+              );
             }}
           />
           <WorkRootGitToolbar root={root} onCommand={onCommand} />
@@ -5318,7 +5338,9 @@ function workRootActivityWorkbenchPane(
         ]
       : [activity.phase, "read-only"];
   return {
-    id: workRootActivityPaneId(root.id),
+    id: workRootActivityPaneId(
+      serverScopedIdentity(root.resourcePath.serverId, root.id),
+    ),
     kind: "workRootActivity",
     category: "opened",
     title: "WorkRoot Activity",
@@ -5665,7 +5687,12 @@ function terminalWorkbenchPanesByGroup(
   groups: ReadonlyArray<{ id: string; label: string }>,
 ): Record<string, WorkbenchPane[]> {
   const panes = terminalPanes
-    .filter((pane) => pane.session.workRootId === root.id)
+    .filter(
+      (pane) =>
+        pane.session.workRootId === root.id &&
+        (pane.session.serverId ?? "server-local") ===
+          root.resourcePath.serverId,
+    )
     .map((pane) => terminalWorkbenchPane(pane, terminalActions));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
@@ -6298,7 +6325,11 @@ function readOnlyWorkbenchPanesByGroup(
   }) => void,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
-    .filter((pane) => pane.workRootId === root.id)
+    .filter(
+      (pane) =>
+        pane.workRootId === root.id &&
+        pane.serverId === root.resourcePath.serverId,
+    )
     .map((pane) =>
       readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved),
     );
