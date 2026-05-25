@@ -2462,8 +2462,7 @@ async fn endpoint_link_registers_manual_server_and_forwards_resources() {
 
     let state_file_root = temp_fixture_path("endpoint-link-state");
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
-    let local_state =
-        app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
     let token = local_state
         .auth
         .pairing_token()
@@ -2572,8 +2571,7 @@ async fn endpoint_link_keeps_compatible_server_visible_after_wrong_passphrase() 
 
     let state_file_root = temp_fixture_path("endpoint-link-wrong-passphrase-state");
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
-    let local_state =
-        app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
     let token = local_state
         .auth
         .pairing_token()
@@ -3236,7 +3234,10 @@ async fn git_toolbar_branches_switch_and_create_revalidate_state() {
     .await;
     assert_eq!(created["branch"]["name"], "browser-created");
     assert_eq!(current_git_branch(&primary), "browser-created");
-    assert_eq!(git_stdout(&primary, &["rev-parse", "HEAD"]), base_source_oid);
+    assert_eq!(
+        git_stdout(&primary, &["rev-parse", "HEAD"]),
+        base_source_oid
+    );
     let duplicate_create = git_toolbar_post_json(
         app.clone(),
         cookie.as_str(),
@@ -4527,6 +4528,84 @@ fn upsert_agent_def(
         .expect("insert agent_defs fixture row");
 }
 
+#[allow(clippy::too_many_arguments)]
+fn upsert_agent_instance(
+    agents_dir: &Path,
+    instance_id: &str,
+    agent_key: &str,
+    public_name: &str,
+    state_path: &str,
+    backend: &str,
+    harness: &str,
+    tier: &str,
+    model: &str,
+    effort: &str,
+    session_id: &str,
+    status: &str,
+    last_call_at: &str,
+    last_output_path: &str,
+    cleanup_state: &str,
+    cleanup_error: &str,
+    pinned: bool,
+) {
+    let state_dir = agents_dir.parent().expect("agents dir has state parent");
+    fs::create_dir_all(agents_dir).expect("create wsstate agents dir");
+    let connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open state.sqlite fixture");
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_instances (
+                instance_id TEXT PRIMARY KEY,
+                agent_key TEXT,
+                public_name TEXT,
+                state_path TEXT,
+                backend TEXT,
+                harness TEXT,
+                tier TEXT,
+                model TEXT,
+                effort TEXT,
+                session_id TEXT,
+                status TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                last_seen_at TEXT,
+                last_call_at TEXT,
+                last_output_path TEXT,
+                cleanup_state TEXT,
+                cleanup_error TEXT,
+                pinned INTEGER
+            );",
+        )
+        .expect("create agent_instances fixture schema");
+    connection
+        .execute(
+            "INSERT OR REPLACE INTO agent_instances (
+                instance_id, agent_key, public_name, state_path, backend, harness, tier, model,
+                effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at,
+                last_output_path, cleanup_state, cleanup_error, pinned
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, '', ?12, '', ?12, ?13, ?14, ?15, ?16)",
+            params![
+                instance_id,
+                agent_key,
+                public_name,
+                state_path,
+                backend,
+                harness,
+                tier,
+                model,
+                effort,
+                session_id,
+                status,
+                last_call_at,
+                last_output_path,
+                cleanup_state,
+                cleanup_error,
+                if pinned { 1 } else { 0 }
+            ],
+        )
+        .expect("insert agent_instances fixture row");
+}
+
 fn delete_agent_def(agents_dir: &Path, agent_key: &str) {
     let state_dir = agents_dir.parent().expect("agents dir has state parent");
     let connection =
@@ -5017,6 +5096,273 @@ async fn work_root_activity_route_resolves_payloads_by_registry_state_path() {
         assert!(
             !body_text.contains(&forbidden) && !transcript_body.contains(&forbidden),
             "state_path activity responses must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_projects_retained_agent_instances_as_items_only() {
+    if skip_without_git("work_root_activity_route_projects_retained_agent_instances_as_items_only")
+    {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-retained-instances");
+    let cache_home = temp_fixture_path("work-root-activity-retained-instances-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    upsert_agent_def(
+        &agents_dir,
+        "reviewer",
+        "reviewer current",
+        "payload-current-reviewer",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "current-session-secret",
+        "running",
+        "2026-05-17T10:00:00Z",
+        "/private/cache/current/output.md",
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-current-reviewer",
+        "current role transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/completed-secret",
+        "reviewer",
+        "reviewer old completed",
+        "payload-historical-completed",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "historical-session-secret",
+        "completed",
+        "2026-05-17T09:00:00Z",
+        "/private/cache/historical/output.md",
+        "retired",
+        "",
+        false,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-historical-completed",
+        "historical completed transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/failed-secret",
+        "reviewer",
+        "reviewer old failed",
+        "payload-historical-failed",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "failed-session-secret",
+        "failed",
+        "2026-05-17T08:00:00Z",
+        "/private/cache/failed/output.md",
+        "cleanup_failed",
+        "private cleanup path /tmp/secret",
+        false,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-historical-failed",
+        "failed transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/cancelled-secret",
+        "reviewer",
+        "reviewer old cancelled",
+        "payload-historical-cancelled",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "cancelled-session-secret",
+        "cancelled",
+        "2026-05-17T07:00:00Z",
+        "/private/cache/cancelled/output.md",
+        "retired",
+        "",
+        false,
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/retired-secret",
+        "reviewer",
+        "reviewer old retired",
+        "payload-historical-retired",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "retired-session-secret",
+        "retired",
+        "2026-05-17T06:00:00Z",
+        "",
+        "retired",
+        "",
+        false,
+    );
+    write_current_call_at_state_path(
+        &agents_dir,
+        "payload-historical-retired",
+        r#"{"status":"completed","execution_id":"retired-run","started_at":"2026-05-17T05:59:00Z","updated_at":"2026-05-17T06:00:00Z","finished_at":"2026-05-17T06:00:00Z"}"#,
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/deleted-secret",
+        "reviewer",
+        "reviewer deleted",
+        "payload-historical-deleted",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "deleted-session-secret",
+        "completed",
+        "2026-05-17T05:00:00Z",
+        "/private/cache/deleted/output.md",
+        "cleanup_deleted",
+        "",
+        false,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-historical-deleted",
+        "deleted transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/useless-secret",
+        "reviewer",
+        "reviewer useless",
+        "payload-historical-useless",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "useless-session-secret",
+        "",
+        "",
+        "",
+        "retired",
+        "",
+        false,
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("retained instance activity JSON");
+
+    assert_eq!(value["summary"]["total"], 1);
+    assert_eq!(value["agents"].as_array().expect("agents array").len(), 1);
+    assert_eq!(value["agents"][0]["agentId"], "reviewer");
+
+    let items = value["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 5);
+    assert!(items.iter().any(|item| item["id"] == "agent:reviewer"));
+    assert!(items.iter().any(|item| item["status"] == "failed"));
+    assert!(items.iter().any(|item| item["status"] == "cancelled"));
+    assert!(items.iter().any(|item| item["status"] == "completed"));
+    assert!(items.iter().any(|item| item["status"] == "retired"));
+    assert!(!body_text.contains("reviewer deleted"));
+    assert!(!body_text.contains("reviewer useless"));
+
+    let historical_item = items
+        .iter()
+        .find(|item| {
+            item["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("agent-instance:"))
+                && item["status"] == "completed"
+        })
+        .expect("completed historical item");
+    let historical_id = historical_item["id"].as_str().expect("historical id");
+    assert_ne!(historical_id, "agent:reviewer");
+    assert_eq!(historical_item["metadata"]["agentId"], "reviewer");
+    assert_eq!(historical_item["metadata"]["historical"], true);
+    assert_eq!(historical_item["transcript"]["available"], true);
+
+    let (current_status, current_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "agent:reviewer",
+        "",
+    )
+    .await;
+    assert_eq!(current_status, StatusCode::OK);
+    let current_transcript: serde_json::Value =
+        serde_json::from_str(&current_body).expect("current role transcript JSON");
+    assert_eq!(
+        current_transcript["blocks"][0]["text"],
+        "current role transcript"
+    );
+
+    let (historical_status, historical_body) =
+        fetch_work_root_activity_transcript(app, cookie.as_str(), &work_root_id, historical_id, "")
+            .await;
+    assert_eq!(historical_status, StatusCode::OK);
+    let historical_transcript: serde_json::Value =
+        serde_json::from_str(&historical_body).expect("historical transcript JSON");
+    assert_eq!(historical_transcript["activityId"], historical_id);
+    assert_eq!(historical_transcript["status"], "available");
+    assert_eq!(
+        historical_transcript["blocks"][0]["text"],
+        "historical completed transcript"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "current-session-secret".to_owned(),
+        "historical-session-secret".to_owned(),
+        "reviewer:private/state/completed-secret".to_owned(),
+        "payload-historical-completed".to_owned(),
+        "state.sqlite".to_owned(),
+        "/private/cache/historical/output.md".to_owned(),
+        "private cleanup path".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden)
+                && !current_body.contains(&forbidden)
+                && !historical_body.contains(&forbidden),
+            "retained instance responses must not leak {forbidden}"
         );
     }
 

@@ -20,7 +20,8 @@ use ws_dashboard_core::{
 
 use crate::router::AppState;
 use crate::work_root_activity_registry::{
-    read_activity_agent_records, ActivityRegistryAgentRecord,
+    read_activity_agent_instance_records, read_activity_agent_records,
+    ActivityRegistryAgentInstanceRecord, ActivityRegistryAgentRecord,
 };
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
@@ -43,6 +44,7 @@ const MAX_TRANSCRIPT_LIMIT: usize = 100;
 const MAX_CODEX_SESSION_SCAN_ENTRIES: usize = 4096;
 const ACTIVITY_KIND_NAMED_AGENT: &str = "namedAgent";
 const ACTIVITY_ID_NAMED_AGENT_PREFIX: &str = "agent:";
+const ACTIVITY_ID_AGENT_INSTANCE_PREFIX: &str = "agent-instance:";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,7 +140,6 @@ impl WorkRootActivityProjector {
         work_root_id: WorkRootId,
         root_path: &Path,
         activity_id: String,
-        agent_key: String,
         cursor: Option<String>,
         before: Option<String>,
         limit: Option<usize>,
@@ -153,7 +154,6 @@ impl WorkRootActivityProjector {
                 cache_home.as_deref(),
                 codex_home.as_deref(),
                 activity_id,
-                &agent_key,
                 cursor.as_deref(),
                 before.as_deref(),
                 normalize_transcript_limit(limit),
@@ -215,9 +215,9 @@ pub async fn work_root_activity_transcript(
         Err(error) => return activity_access_error(error),
     };
 
-    let Some(agent_key) = named_agent_key_from_activity_id(&activity_id) else {
+    if activity_source_from_id(&activity_id).is_none() {
         return activity_error(StatusCode::NOT_FOUND, "unknown activity");
-    };
+    }
 
     Json(
         state
@@ -226,7 +226,6 @@ pub async fn work_root_activity_transcript(
                 work_root_id,
                 &root_path,
                 activity_id,
-                agent_key,
                 query.cursor,
                 query.before,
                 query.limit,
@@ -482,6 +481,15 @@ fn project_blocking(
         .iter()
         .map(named_agent_activity_item)
         .collect::<Vec<_>>();
+    if let Some(state_dir) = resolve_cache_root(cache_home)
+        .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
+    {
+        items.extend(registry_historical_agent_items(
+            &state_dir,
+            codex_home,
+            recent_limit,
+        ));
+    }
     items.sort_by(activity_item_ordering);
 
     let selected_item_id = items.first().map(|item| item.id.clone());
@@ -540,6 +548,17 @@ fn activity_item_versions(
         let metadata = AgentMetadata::from(&record);
         versions.insert(
             named_agent_activity_id(&record.agent_key),
+            system_time_version(agent_record_modified_at(&agent_dir, codex_home, &metadata)),
+        );
+    }
+    for instance in read_activity_agent_instance_records(&state_dir).unwrap_or_default() {
+        let Some(agent_dir) = instance.payload_dir(&state_dir) else {
+            continue;
+        };
+        let record = instance.as_agent_record();
+        let metadata = AgentMetadata::from(&record);
+        versions.insert(
+            historical_agent_activity_id(&historical_agent_instance_token(&instance)),
             system_time_version(agent_record_modified_at(&agent_dir, codex_home, &metadata)),
         );
     }
@@ -728,7 +747,112 @@ fn registry_named_agent_projection(
     }
 }
 
+fn registry_historical_agent_items(
+    state_dir: &Path,
+    codex_home: Option<&Path>,
+    recent_limit: Option<usize>,
+) -> Vec<ActivityItem> {
+    let Ok(records) = read_activity_agent_instance_records(state_dir) else {
+        return Vec::new();
+    };
+
+    let mut entries = Vec::new();
+    for instance in records {
+        if historical_instance_cleanup_hidden(&instance.cleanup_state) {
+            continue;
+        }
+        let Some(agent_dir) = instance.payload_dir(state_dir) else {
+            continue;
+        };
+        let mut projection = registry_named_agent_projection(
+            Some(&agent_dir),
+            instance.as_agent_record(),
+            codex_home,
+        );
+        if instance
+            .cleanup_state
+            .eq_ignore_ascii_case("cleanup_failed")
+            || !instance.cleanup_error.trim().is_empty()
+        {
+            projection
+                .row
+                .diagnostics
+                .push("retention cleanup diagnostic available".to_owned());
+        }
+        if !historical_instance_has_useful_signal(&instance, &projection) {
+            continue;
+        }
+        let token = historical_agent_instance_token(&instance);
+        let mut item = named_agent_activity_item_with_id(
+            &projection,
+            historical_agent_activity_id(&token),
+            true,
+        );
+        item.label = format!("{} (historical)", item.label);
+        entries.push((
+            agent_record_modified_at(&agent_dir, codex_home, &projection.private_metadata),
+            item,
+        ));
+    }
+
+    entries.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.id.cmp(&right.1.id))
+    });
+    if let Some(limit) = recent_limit {
+        entries.truncate(limit);
+    }
+    entries.into_iter().map(|(_, item)| item).collect()
+}
+
+fn historical_instance_cleanup_hidden(cleanup_state: &str) -> bool {
+    let cleanup_state = cleanup_state.trim().to_ascii_lowercase();
+    cleanup_state == "cleanup_deleted"
+        || cleanup_state == "deleted"
+        || cleanup_state.contains("tombstone")
+        || cleanup_state.contains("internal")
+}
+
+fn historical_instance_has_useful_signal(
+    instance: &ActivityRegistryAgentInstanceRecord,
+    projection: &NamedAgentProjection,
+) -> bool {
+    projection.output_available
+        || projection.native_transcript_available
+        || projection.row.current_call.is_some()
+        || !projection.private_metadata.last_output_path.is_empty()
+        || !projection.private_metadata.status.is_empty()
+        || projection
+            .row
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic != DIAG_STATUS_UNAVAILABLE)
+        || matches!(
+            projection.row.status.as_str(),
+            "running" | "blocked" | "failed" | "completed" | "cancelled" | "retired" | "erased"
+        )
+        || instance.pinned
+        || instance
+            .cleanup_state
+            .eq_ignore_ascii_case("cleanup_failed")
+        || !instance.cleanup_error.trim().is_empty()
+}
+
 fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem {
+    named_agent_activity_item_with_id(
+        projection,
+        named_agent_activity_id(&projection.row.agent_id),
+        false,
+    )
+}
+
+fn named_agent_activity_item_with_id(
+    projection: &NamedAgentProjection,
+    id: String,
+    historical: bool,
+) -> ActivityItem {
     let agent = &projection.row;
     let source = named_agent_source(agent);
     let live = agent
@@ -752,6 +876,9 @@ fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem 
         "agentId".to_owned(),
         serde_json::Value::String(agent.agent_id.clone()),
     );
+    if historical {
+        metadata.insert("historical".to_owned(), serde_json::Value::Bool(true));
+    }
     if agent.session_present {
         metadata.insert("sessionPresent".to_owned(), serde_json::Value::Bool(true));
     }
@@ -763,7 +890,7 @@ fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem 
     }
 
     ActivityItem {
-        id: named_agent_activity_id(&agent.agent_id),
+        id,
         kind: ACTIVITY_KIND_NAMED_AGENT.to_owned(),
         label: agent.name.clone().unwrap_or_else(|| agent.agent_id.clone()),
         status: agent.status.clone(),
@@ -857,12 +984,52 @@ fn named_agent_activity_id(agent_key: &str) -> String {
     format!("{ACTIVITY_ID_NAMED_AGENT_PREFIX}{agent_key}")
 }
 
+fn historical_agent_activity_id(token: &str) -> String {
+    format!("{ACTIVITY_ID_AGENT_INSTANCE_PREFIX}{token}")
+}
+
+fn historical_agent_instance_token(instance: &ActivityRegistryAgentInstanceRecord) -> String {
+    let digest = sha256(
+        format!(
+            "agent-instance\0{}\0{}",
+            instance.instance_id, instance.agent_key
+        )
+        .as_bytes(),
+    );
+    let mut hex = String::with_capacity(24);
+    for byte in &digest[..12] {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+#[derive(Clone, Debug)]
+enum ActivitySourceId {
+    CurrentAgent(String),
+    HistoricalAgentInstance(String),
+}
+
+fn activity_source_from_id(activity_id: &str) -> Option<ActivitySourceId> {
+    if let Some(agent_key) = named_agent_key_from_activity_id(activity_id) {
+        return Some(ActivitySourceId::CurrentAgent(agent_key));
+    }
+    historical_agent_token_from_activity_id(activity_id)
+        .map(ActivitySourceId::HistoricalAgentInstance)
+}
+
 fn named_agent_key_from_activity_id(activity_id: &str) -> Option<String> {
     activity_id
         .strip_prefix(ACTIVITY_ID_NAMED_AGENT_PREFIX)
         .filter(|agent_key| {
             !agent_key.is_empty() && !agent_key.contains('/') && !agent_key.contains('\\')
         })
+        .map(str::to_owned)
+}
+
+fn historical_agent_token_from_activity_id(activity_id: &str) -> Option<String> {
+    activity_id
+        .strip_prefix(ACTIVITY_ID_AGENT_INSTANCE_PREFIX)
+        .filter(|token| token.len() == 24 && token.chars().all(|ch| ch.is_ascii_hexdigit()))
         .map(str::to_owned)
 }
 
@@ -912,40 +1079,88 @@ fn paginate_transcript_blocks(
     )
 }
 
+fn resolve_transcript_record(
+    state_dir: &Path,
+    source_id: Option<ActivitySourceId>,
+    codex_home: Option<&Path>,
+) -> Option<(ActivityRegistryAgentRecord, Option<PathBuf>)> {
+    match source_id? {
+        ActivitySourceId::CurrentAgent(agent_key) => {
+            let record = read_activity_agent_records(state_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|record| record.agent_key == agent_key)?;
+            let agent_dir = record.payload_dir(state_dir);
+            Some((record, agent_dir))
+        }
+        ActivitySourceId::HistoricalAgentInstance(token) => {
+            let instance = read_activity_agent_instance_records(state_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|instance| historical_agent_instance_token(instance) == token)?;
+            if historical_instance_cleanup_hidden(&instance.cleanup_state) {
+                return None;
+            }
+            let agent_dir = instance.payload_dir(state_dir)?;
+            let mut projection = registry_named_agent_projection(
+                Some(&agent_dir),
+                instance.as_agent_record(),
+                codex_home,
+            );
+            if instance
+                .cleanup_state
+                .eq_ignore_ascii_case("cleanup_failed")
+                || !instance.cleanup_error.trim().is_empty()
+            {
+                projection
+                    .row
+                    .diagnostics
+                    .push("retention cleanup diagnostic available".to_owned());
+            }
+            if !historical_instance_has_useful_signal(&instance, &projection) {
+                return None;
+            }
+            Some((instance.as_agent_record(), Some(agent_dir)))
+        }
+    }
+}
+
 fn named_agent_transcript_blocking(
     work_root_id: WorkRootId,
     root_path: &Path,
     cache_home: Option<&Path>,
     codex_home: Option<&Path>,
     activity_id: String,
-    agent_key: &str,
     cursor: Option<&str>,
     before: Option<&str>,
     limit: usize,
 ) -> ActivityTranscript {
+    let source_id = activity_source_from_id(&activity_id);
+    let fallback_agent_key = match &source_id {
+        Some(ActivitySourceId::CurrentAgent(agent_key)) => agent_key.as_str(),
+        Some(ActivitySourceId::HistoricalAgentInstance(_)) => "agent",
+        None => "agent",
+    };
     let Some(state_dir) = resolve_cache_root(cache_home)
         .and_then(|cache_root| resolve_work_root_state_dir(&cache_root, root_path))
     else {
         return unavailable_transcript(
             work_root_id,
             activity_id,
-            agent_key,
+            fallback_agent_key,
             "activity source unavailable",
         );
     };
-    let Some(record) = read_activity_agent_records(&state_dir)
-        .unwrap_or_default()
-        .into_iter()
-        .find(|record| record.agent_key == agent_key)
+    let Some((record, agent_dir)) =
+        resolve_transcript_record(&state_dir, source_id.clone(), codex_home)
     else {
         return unavailable_transcript(
             work_root_id,
             activity_id,
-            agent_key,
+            fallback_agent_key,
             "activity source unavailable",
         );
     };
-    let agent_dir = record.payload_dir(&state_dir);
 
     let projection = registry_named_agent_projection(agent_dir.as_deref(), record, codex_home);
     let source = named_agent_source(&projection.row);
@@ -1760,7 +1975,8 @@ fn read_current_call(
 /// diagnostic for empty or unrecognized values.
 fn agent_status(raw: &str) -> (String, Option<&'static str>) {
     match raw {
-        "idle" | "running" | "blocked" | "failed" | "erased" => (raw.to_owned(), None),
+        "idle" | "running" | "blocked" | "failed" | "completed" | "cancelled" | "retired"
+        | "erased" => (raw.to_owned(), None),
         "" => (STATUS_UNAVAILABLE.to_owned(), Some(DIAG_STATUS_UNAVAILABLE)),
         _ => (
             STATUS_UNAVAILABLE.to_owned(),
