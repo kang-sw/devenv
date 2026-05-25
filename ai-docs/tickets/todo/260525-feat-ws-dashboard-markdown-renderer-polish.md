@@ -21,7 +21,9 @@ and Obsidian-style callout scaffolding. Dogfood review showed that the visible
 renderer still feels rough: inline code has no conventional token chrome,
 unordered lists lose natural bullets and nesting, ordered lists lose numbering,
 and adjacent list items inherit document-block spacing rather than compact
-intra-list rhythm.
+intra-list rhythm. The block selection interaction also feels too heavy because
+ordinary body clicks currently double as document-block selection, making the
+rendered document feel less like normal selectable text.
 
 The cause is architectural rather than only CSS. The viewer currently flattens
 top-level Markdown lists into separate selectable `listItem` blocks before
@@ -42,6 +44,14 @@ that normal Markdown readers expect.
 - Treat the current block flattening as an implementation detail that may need
   a view grouping layer. Adjacent top-level list-item blocks can remain
   independently selectable while sharing a rendered list context.
+- Move block selection and block-level actions into a dedicated left-side
+  interaction rail. The rendered Markdown body should behave like normal text:
+  dragging or selecting inside the body should select text, not toggle document
+  blocks.
+- The rail should appear or strengthen on hover/focus and provide a natural
+  checkbox or handle affordance for selecting blocks, range-selecting adjacent
+  blocks, and exposing copy/pathref/translated-copy actions without visually
+  dominating the document.
 - Style inline code as a conventional Markdown token with monospace font,
   subtle background, border, padding, and restrained warm accent color.
 - Keep raw HTML disabled or inert; this polish does not reopen the deferred
@@ -63,3 +73,20 @@ Markdown tokens rather than unstyled text. Verification should include focused
 frontend tests or fixtures for inline code, unordered lists, nested lists,
 ordered lists including non-default starts when available, and task lists, plus
 browser evidence for a representative Markdown pane.
+
+### Phase 2: Move block selection into an interaction rail
+
+Replace body-click block selection with a left-side Markdown block rail that
+appears naturally on hover or focus. The rail owns block selection, range
+selection, and block action affordances such as visible-text copy, translated
+copy when available, and pathref copy. The document body remains readable and
+text-selectable, so dragging across rendered Markdown text behaves like normal
+browser text selection rather than block toggling.
+
+The rail should feel integrated with the document surface rather than like a
+literal form checkbox column. It may use a subtle vertical ribbon, check/handle
+glyphs, hover chrome, and selected-state markers, but it must keep the main
+Markdown layout stable and avoid stealing space from list markers or nested
+list indentation. Verification should include text selection behavior, block
+range selection through the rail, pathref copy from selected blocks, and
+translation-overlay action availability when translated blocks are present.
