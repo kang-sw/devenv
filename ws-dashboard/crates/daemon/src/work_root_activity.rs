@@ -552,14 +552,18 @@ fn activity_item_versions(
         );
     }
     for instance in read_activity_agent_instance_records(&state_dir).unwrap_or_default() {
-        let Some(agent_dir) = instance.payload_dir(&state_dir) else {
+        let Some((projection, agent_dir)) =
+            historical_agent_instance_projection(&state_dir, codex_home, &instance)
+        else {
             continue;
         };
-        let record = instance.as_agent_record();
-        let metadata = AgentMetadata::from(&record);
         versions.insert(
             historical_agent_activity_id(&historical_agent_instance_token(&instance)),
-            system_time_version(agent_record_modified_at(&agent_dir, codex_home, &metadata)),
+            system_time_version(agent_record_modified_at(
+                &agent_dir,
+                codex_home,
+                &projection.private_metadata,
+            )),
         );
     }
     versions
@@ -758,30 +762,11 @@ fn registry_historical_agent_items(
 
     let mut entries = Vec::new();
     for instance in records {
-        if historical_instance_cleanup_hidden(&instance.cleanup_state) {
-            continue;
-        }
-        let Some(agent_dir) = instance.payload_dir(state_dir) else {
+        let Some((projection, agent_dir)) =
+            historical_agent_instance_projection(state_dir, codex_home, &instance)
+        else {
             continue;
         };
-        let mut projection = registry_named_agent_projection(
-            Some(&agent_dir),
-            instance.as_agent_record(),
-            codex_home,
-        );
-        if instance
-            .cleanup_state
-            .eq_ignore_ascii_case("cleanup_failed")
-            || !instance.cleanup_error.trim().is_empty()
-        {
-            projection
-                .row
-                .diagnostics
-                .push("retention cleanup diagnostic available".to_owned());
-        }
-        if !historical_instance_has_useful_signal(&instance, &projection) {
-            continue;
-        }
         let token = historical_agent_instance_token(&instance);
         let mut item = named_agent_activity_item_with_id(
             &projection,
@@ -807,11 +792,36 @@ fn registry_historical_agent_items(
     entries.into_iter().map(|(_, item)| item).collect()
 }
 
+fn historical_agent_instance_projection(
+    state_dir: &Path,
+    codex_home: Option<&Path>,
+    instance: &ActivityRegistryAgentInstanceRecord,
+) -> Option<(NamedAgentProjection, PathBuf)> {
+    if historical_instance_cleanup_hidden(&instance.cleanup_state) {
+        return None;
+    }
+    let agent_dir = instance.payload_dir(state_dir)?;
+    let mut projection =
+        registry_named_agent_projection(Some(&agent_dir), instance.as_agent_record(), codex_home);
+    if instance
+        .cleanup_state
+        .eq_ignore_ascii_case("cleanup_failed")
+        || !instance.cleanup_error.trim().is_empty()
+    {
+        projection
+            .row
+            .diagnostics
+            .push("retention cleanup diagnostic available".to_owned());
+    }
+    historical_instance_has_useful_signal(instance, &projection).then_some((projection, agent_dir))
+}
+
 fn historical_instance_cleanup_hidden(cleanup_state: &str) -> bool {
     let cleanup_state = cleanup_state.trim().to_ascii_lowercase();
-    cleanup_state == "cleanup_deleted"
-        || cleanup_state == "deleted"
-        || cleanup_state.contains("tombstone")
+    matches!(
+        cleanup_state.as_str(),
+        "current" | "active" | "running" | "queued" | "recovery" | "cleanup_deleted" | "deleted"
+    ) || cleanup_state.contains("tombstone")
         || cleanup_state.contains("internal")
 }
 
@@ -823,16 +833,9 @@ fn historical_instance_has_useful_signal(
         || projection.native_transcript_available
         || projection.row.current_call.is_some()
         || !projection.private_metadata.last_output_path.is_empty()
-        || !projection.private_metadata.status.is_empty()
-        || projection
-            .row
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic != DIAG_STATUS_UNAVAILABLE)
-        || matches!(
-            projection.row.status.as_str(),
-            "running" | "blocked" | "failed" | "completed" | "cancelled" | "retired" | "erased"
-        )
+        || projection.row.diagnostics.iter().any(|diagnostic| {
+            diagnostic != DIAG_STATUS_UNAVAILABLE && diagnostic != DIAG_STATUS_UNRECOGNIZED
+        })
         || instance.pinned
         || instance
             .cleanup_state
@@ -1098,28 +1101,8 @@ fn resolve_transcript_record(
                 .unwrap_or_default()
                 .into_iter()
                 .find(|instance| historical_agent_instance_token(instance) == token)?;
-            if historical_instance_cleanup_hidden(&instance.cleanup_state) {
-                return None;
-            }
-            let agent_dir = instance.payload_dir(state_dir)?;
-            let mut projection = registry_named_agent_projection(
-                Some(&agent_dir),
-                instance.as_agent_record(),
-                codex_home,
-            );
-            if instance
-                .cleanup_state
-                .eq_ignore_ascii_case("cleanup_failed")
-                || !instance.cleanup_error.trim().is_empty()
-            {
-                projection
-                    .row
-                    .diagnostics
-                    .push("retention cleanup diagnostic available".to_owned());
-            }
-            if !historical_instance_has_useful_signal(&instance, &projection) {
-                return None;
-            }
+            let (_projection, agent_dir) =
+                historical_agent_instance_projection(state_dir, codex_home, &instance)?;
             Some((instance.as_agent_record(), Some(agent_dir)))
         }
     }

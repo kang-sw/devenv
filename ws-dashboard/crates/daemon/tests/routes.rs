@@ -5139,6 +5139,26 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
 
     upsert_agent_instance(
         &agents_dir,
+        "reviewer:private/state/current-secret",
+        "reviewer",
+        "reviewer current duplicate",
+        "payload-current-reviewer",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "current-instance-session-secret",
+        "running",
+        "2026-05-17T10:00:00Z",
+        "/private/cache/current/output.md",
+        "current",
+        "",
+        false,
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
         "reviewer:private/state/completed-secret",
         "reviewer",
         "reviewer old completed",
@@ -5259,23 +5279,25 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
 
     upsert_agent_instance(
         &agents_dir,
-        "reviewer:private/state/useless-secret",
+        "reviewer:private/state/status-only-secret",
         "reviewer",
-        "reviewer useless",
-        "payload-historical-useless",
+        "reviewer status only",
+        "payload-historical-status-only",
         "codex",
         "codex",
         "core",
         "gpt-5.3-codex",
         "medium",
-        "useless-session-secret",
-        "",
-        "",
+        "status-only-session-secret",
+        "completed",
+        "2026-05-17T04:00:00Z",
         "",
         "retired",
         "",
         false,
     );
+    fs::create_dir_all(agents_dir.join("payload-historical-status-only"))
+        .expect("create status-only historical payload dir");
 
     let state = app_state_with_activity_cache_home(cache_home.clone());
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
@@ -5300,8 +5322,18 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
     assert!(items.iter().any(|item| item["status"] == "cancelled"));
     assert!(items.iter().any(|item| item["status"] == "completed"));
     assert!(items.iter().any(|item| item["status"] == "retired"));
+    assert!(!body_text.contains("reviewer current duplicate"));
     assert!(!body_text.contains("reviewer deleted"));
-    assert!(!body_text.contains("reviewer useless"));
+    assert!(!body_text.contains("reviewer status only"));
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| item["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("agent-instance:")))
+            .count(),
+        4
+    );
 
     let historical_item = items
         .iter()
@@ -5352,6 +5384,8 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
         cache_home.display().to_string(),
         "current-session-secret".to_owned(),
         "historical-session-secret".to_owned(),
+        "current-instance-session-secret".to_owned(),
+        "status-only-session-secret".to_owned(),
         "reviewer:private/state/completed-secret".to_owned(),
         "payload-historical-completed".to_owned(),
         "state.sqlite".to_owned(),
