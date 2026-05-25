@@ -167,6 +167,19 @@ Verification:
 - `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon`
 - `ws/spec_index.verify`
 
+#### Edition (348a435) - 2026-05-25
+
+Exposed the daemon-lifetime link passphrase through startup info/output so a
+remote daemon launched by SSH can be linked by the owner or an owner-directed
+AI agent. Browser pairing remains a separate one-time URL, and SSH deployment,
+tunnel lifecycle, and remote Windows dogfood remain Phase 4 scope.
+
+Verification:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon startup_info_builds_local_pairing_url_and_remote_link_passphrase -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon remote_link_auth_exchanges_passphrase_for_bearer_without_browser_pairing -- --nocapture`
+- `ws/spec_index.verify`
+
 ### Phase 3: CLI remote deployment guide
 
 Add a CLI help surface that dumps a concise remote deployment guide for AI
