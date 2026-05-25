@@ -2268,6 +2268,274 @@ async fn server_scoped_resources_route_dispatches_local_and_refuses_linked_serve
 }
 
 #[tokio::test]
+async fn server_scoped_one_shot_routes_are_protected_and_dispatch_local_aliases() {
+    let root = temp_fixture_path("server-scoped-root-picker-local");
+    let child = root.join("child");
+    fs::create_dir_all(&child).expect("create server scoped root picker fixture");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/root-picker?path={}",
+                    root.display()
+                ))
+                .body(Body::empty())
+                .expect("unauthenticated server scoped root-picker request"),
+        )
+        .await
+        .expect("unauthenticated server scoped root-picker response");
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let legacy = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/root-picker?path={}",
+                    root.display()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy root-picker request"),
+        )
+        .await
+        .expect("legacy root-picker response");
+    assert_eq!(legacy.status(), StatusCode::OK);
+    let legacy_body = axum::body::to_bytes(legacy.into_body(), 64 * 1024)
+        .await
+        .expect("legacy root-picker body");
+
+    let scoped = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/root-picker?path={}",
+                    root.display()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped local root-picker request"),
+        )
+        .await
+        .expect("server scoped local root-picker response");
+    assert_eq!(scoped.status(), StatusCode::OK);
+    let scoped_body = axum::body::to_bytes(scoped.into_body(), 64 * 1024)
+        .await
+        .expect("server scoped local root-picker body");
+    assert_eq!(scoped_body, legacy_body);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn server_scoped_one_shot_routes_return_bounded_refusals() {
+    let state_file_root = temp_fixture_path("server-scoped-one-shot-refusal-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::SshRemote,
+            ssh_target: Some("owner@example.test".to_owned()),
+            endpoint_hint: Some("http://127.0.0.1:4100".to_owned()),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked server seed");
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let unknown = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-missing/root-picker")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("unknown server scoped route request"),
+        )
+        .await
+        .expect("unknown server scoped route response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    let unknown_body = axum::body::to_bytes(unknown.into_body(), 4096)
+        .await
+        .expect("unknown response body");
+    let unknown_value: serde_json::Value =
+        serde_json::from_slice(&unknown_body).expect("unknown response JSON");
+    assert_eq!(unknown_value["error"], "unknown server");
+
+    let auth_required = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/root-picker")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("auth-required server scoped route request"),
+        )
+        .await
+        .expect("auth-required server scoped route response");
+    assert_eq!(auth_required.status(), StatusCode::CONFLICT);
+    let auth_body = axum::body::to_bytes(auth_required.into_body(), 4096)
+        .await
+        .expect("auth-required body");
+    let auth_value: serde_json::Value =
+        serde_json::from_slice(&auth_body).expect("auth-required response JSON");
+    assert_eq!(auth_value["error"], "linked server auth required");
+    assert!(
+        !auth_body
+            .windows(b"owner@example.test".len())
+            .any(|window| window == b"owner@example.test"),
+        "server scoped refusal must not expose SSH target"
+    );
+
+    let not_forwarded = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/terminals/terminal-1/socket")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("non-allowlisted server scoped route request"),
+        )
+        .await
+        .expect("non-allowlisted server scoped route response");
+    assert_eq!(not_forwarded.status(), StatusCode::NOT_FOUND);
+
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_one_shot_forwarding_preserves_bearer_errors_and_rewrites_resources() {
+    let remote_root = temp_fixture_path("server-scoped-one-shot-remote-root");
+    fs::create_dir_all(&remote_root).expect("create remote one-shot root");
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-one-shot-forwarding-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("local link auth request"),
+        )
+        .await
+        .expect("local link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    let open = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": remote_root.display().to_string() }).to_string(),
+                ))
+                .expect("server scoped remote open request"),
+        )
+        .await
+        .expect("server scoped remote open response");
+    assert_eq!(open.status(), StatusCode::OK);
+    assert!(
+        open.headers()
+            .get("x-ws-dashboard-opened-work-root-id")
+            .is_some(),
+        "forwarded open response must preserve opened-id header"
+    );
+    let open_body = axum::body::to_bytes(open.into_body(), 64 * 1024)
+        .await
+        .expect("server scoped remote open body");
+    let open_value: serde_json::Value =
+        serde_json::from_slice(&open_body).expect("server scoped remote open JSON");
+    assert_eq!(open_value["server"]["id"], "server-windows");
+    assert_eq!(open_value["server"]["label"], "Windows dogfood");
+    assert_eq!(
+        open_value["workspaces"][0]["workRoots"][0]["resourcePath"]["serverId"],
+        "server-windows"
+    );
+
+    let bad_create = local_app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/root-picker/directories")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "parentPath": remote_root.display().to_string(),
+                        "name": "nested/bad"
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped remote bad create request"),
+        )
+        .await
+        .expect("server scoped remote bad create response");
+    assert_eq!(bad_create.status(), StatusCode::BAD_REQUEST);
+    let bad_body = axum::body::to_bytes(bad_create.into_body(), 4096)
+        .await
+        .expect("server scoped remote bad create body");
+    let bad_value: serde_json::Value =
+        serde_json::from_slice(&bad_body).expect("server scoped remote bad create JSON");
+    assert_eq!(
+        bad_value["error"],
+        "directory name must be one path segment"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn remote_link_auth_exchanges_passphrase_for_bearer_without_browser_pairing() {
     let state = app_state();
     let passphrase = state

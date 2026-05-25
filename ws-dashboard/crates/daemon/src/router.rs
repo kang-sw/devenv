@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
-use axum::Router;
 use axum::extract::{Path as AxumPath, Query, Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::middleware::{Next, from_fn_with_state};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
+use axum::Router;
 use tokio::fs;
 use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::document_translation::{
-    DocumentTranslationService, translate_document, translation_providers,
+    translate_document, translation_providers, DocumentTranslationService,
 };
 use crate::events::instance_events;
 use crate::git_toolbar::{
@@ -31,21 +31,23 @@ use crate::root_picker::{
     remove_workspace, set_work_root_activation, unpin_root_picker_directory,
 };
 use crate::servers::{
-    LinkedServerSessions, LinkedServerTunnels, dashboard_server_resources, dashboard_servers,
-    link_dashboard_server, link_endpoint_server, reconnect_dashboard_server_tunnel,
-    remote_link_auth, start_ssh_dashboard_server,
+    dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
+    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_create_empty_directory,
+    server_scoped_open_work_root, server_scoped_root_picker, server_scoped_root_picker_pins,
+    server_scoped_set_work_root_activation, start_ssh_dashboard_server, LinkedServerSessions,
+    LinkedServerTunnels,
 };
 use crate::terminal::{
-    TerminalRegistry, close_terminal, create_terminal, list_terminals, terminal_input,
-    terminal_output, terminal_resize, terminal_websocket,
+    close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
+    terminal_resize, terminal_websocket, TerminalRegistry,
 };
 use crate::work_root_activity::{
-    WorkRootActivityProjector, work_root_activity, work_root_activity_events,
-    work_root_activity_transcript,
+    work_root_activity, work_root_activity_events, work_root_activity_transcript,
+    WorkRootActivityProjector,
 };
 use crate::work_root_files::{
-    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots, document_events, list_work_root_files,
-    read_work_root_file, write_work_root_file,
+    document_events, list_work_root_files, read_work_root_file, write_work_root_file,
+    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots,
 };
 
 #[derive(Clone)]
@@ -88,6 +90,26 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_id}/tunnel/reconnect",
             post(reconnect_dashboard_server_tunnel),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/root-picker",
+            get(server_scoped_root_picker),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/root-picker/directories",
+            post(server_scoped_create_empty_directory),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/root-picker/pins",
+            post(server_scoped_root_picker_pins).delete(server_scoped_root_picker_pins),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/open",
+            post(server_scoped_open_work_root),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/activation",
+            post(server_scoped_set_work_root_activation),
         )
         .route(
             "/api/dashboard/document-translation/providers",
