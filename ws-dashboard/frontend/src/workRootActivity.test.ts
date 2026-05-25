@@ -1,5 +1,6 @@
 import {
   acknowledgeActivityItem,
+  activityStreamKey,
   activityItemRevisionToken,
   activityRibbonSourceLabel,
   activityRibbonStatusLine,
@@ -34,7 +35,9 @@ import {
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${label}: expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
@@ -46,7 +49,11 @@ function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
-async function assertRejects(action: () => Promise<unknown>, pattern: RegExp, label: string) {
+async function assertRejects(
+  action: () => Promise<unknown>,
+  pattern: RegExp,
+  label: string,
+) {
   try {
     await action();
   } catch (error) {
@@ -70,6 +77,21 @@ assertEqual(
   "/api/dashboard/work-roots/root-local-abc/activity?recentLimit=30",
   "activity endpoint encodes a recent-limit refresh query",
 );
+
+assertEqual(
+  workRootActivityEndpoint("root/local test", { serverId: "server remote/1" }),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20test/activity",
+  "server-scoped activity endpoint encodes server id",
+);
+assertEqual(
+  workRootActivityEndpoint("root-local-abc", {
+    recentLimit: 30,
+    serverId: "server remote/1",
+  }),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root-local-abc/activity?recentLimit=30",
+  "server-scoped activity endpoint preserves recent-limit query",
+);
+
 assertEqual(
   workRootActivityTranscriptEndpoint("root/local test", "agent:reviewer", {
     cursor: "2",
@@ -81,10 +103,35 @@ assertEqual(
 );
 
 assertEqual(
+  workRootActivityTranscriptEndpoint("root/local test", "agent/1", {
+    cursor: "c 1",
+    serverId: "server remote/1",
+  }),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20test/activity/items/agent%2F1/transcript?cursor=c+1",
+  "server-scoped transcript endpoint encodes server id, activity id, and cursor",
+);
+
+assertEqual(
   workRootActivityEventsEndpoint("root/local test", { after: "cursor:1/2" }),
   "/api/dashboard/work-roots/root%2Flocal%20test/activity/events?after=cursor%3A1%2F2",
   "activity event endpoint addresses an encoded opaque workRoot id and after cursor",
 );
+
+assertEqual(
+  workRootActivityEventsEndpoint("root/local test", {
+    after: "cursor:1/2",
+    serverId: "server remote/1",
+  }),
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20test/activity/events?after=cursor%3A1%2F2",
+  "server-scoped activity event endpoint encodes server id and after cursor",
+);
+assertEqual(
+  activityStreamKey("root-same", "activity-same", "server-a") ===
+    activityStreamKey("root-same", "activity-same", "server-b"),
+  false,
+  "same bare activity ids on different servers produce distinct stream keys",
+);
+
 assertEqual(
   workRootActivityEventsEndpoint("root-local-abc"),
   "/api/dashboard/work-roots/root-local-abc/activity/events",
@@ -123,8 +170,16 @@ try {
   const activity = await fetchWorkRootActivity("root-local-abc", {
     recentLimit: 30,
   });
-  assertEqual(activity.workRootId, "root-local-abc", "fetch helper returns the daemon view");
-  assertEqual(activity.summary.total, 0, "Phase 1 no-agent summary can be consumed");
+  assertEqual(
+    activity.workRootId,
+    "root-local-abc",
+    "fetch helper returns the daemon view",
+  );
+  assertEqual(
+    activity.summary.total,
+    0,
+    "Phase 1 no-agent summary can be consumed",
+  );
 
   globalThis.fetch = (async (input, init) => {
     assertEqual(
@@ -176,7 +231,11 @@ try {
     "agent:reviewer",
     { cursor: "1", limit: 1 },
   );
-  assertEqual(transcript.blocks[0]?.renderKind, "markdown", "transcript shape is consumed");
+  assertEqual(
+    transcript.blocks[0]?.renderKind,
+    "markdown",
+    "transcript shape is consumed",
+  );
   assertEqual(
     JSON.stringify(transcript).includes("/Users/"),
     false,
@@ -213,7 +272,14 @@ try {
 function activitySummary(
   partial: Partial<WorkRootActivitySummary> = {},
 ): WorkRootActivitySummary {
-  return { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0, ...partial };
+  return {
+    total: 0,
+    active: 0,
+    blocked: 0,
+    failed: 0,
+    unavailable: 0,
+    ...partial,
+  };
 }
 
 function activityView(
@@ -233,7 +299,9 @@ function activityView(
   };
 }
 
-function activityItem(partial: Partial<ActivityItem> & { id: string }): ActivityItem {
+function activityItem(
+  partial: Partial<ActivityItem> & { id: string },
+): ActivityItem {
   return {
     id: partial.id,
     kind: partial.kind ?? "namedAgent",
@@ -262,15 +330,25 @@ function activityItem(partial: Partial<ActivityItem> & { id: string }): Activity
   };
 }
 
-
 const parsedUpsert = parseActivityConsoleEvent({
   type: "itemUpserted",
   cursor: "event:1",
-  item: activityItem({ id: "agent:streamed", updatedAt: "2026-05-21T12:05:00Z" }),
+  item: activityItem({
+    id: "agent:streamed",
+    updatedAt: "2026-05-21T12:05:00Z",
+  }),
 });
-assertEqual(parsedUpsert?.type, "itemUpserted", "itemUpserted events parse with source-neutral payloads");
 assertEqual(
-  parseActivityConsoleEvent({ type: "itemRemoved", cursor: "event:2", path: "/Users/nope" }),
+  parsedUpsert?.type,
+  "itemUpserted",
+  "itemUpserted events parse with source-neutral payloads",
+);
+assertEqual(
+  parseActivityConsoleEvent({
+    type: "itemRemoved",
+    cursor: "event:2",
+    path: "/Users/nope",
+  }),
   null,
   "activity events reject payloads without source-neutral activity ids",
 );
@@ -288,8 +366,16 @@ const eventBase = activityView({
   selectedItemId: "agent:keep",
   summary: { total: 2 },
   items: [
-    activityItem({ id: "agent:keep", label: "keep", updatedAt: "2026-05-21T12:00:00Z" }),
-    activityItem({ id: "agent:remove", label: "remove", updatedAt: "2026-05-21T11:00:00Z" }),
+    activityItem({
+      id: "agent:keep",
+      label: "keep",
+      updatedAt: "2026-05-21T12:00:00Z",
+    }),
+    activityItem({
+      id: "agent:remove",
+      label: "remove",
+      updatedAt: "2026-05-21T11:00:00Z",
+    }),
   ],
 });
 const upsertedEvent = applyActivityConsoleEvent(eventBase, {
@@ -307,9 +393,21 @@ assertDeepEqual(
   ["agent:new", "agent:keep", "agent:remove"],
   "itemUpserted merges the item into the ordered feed",
 );
-assertEqual(upsertedEvent.view.selectedItemId, "agent:keep", "itemUpserted preserves existing selection");
-assertEqual(upsertedEvent.view.summary.total, 2, "itemUpserted preserves authoritative source-neutral summary totals");
-assertEqual(upsertedEvent.refetchSnapshot, false, "itemUpserted does not request snapshot refetch");
+assertEqual(
+  upsertedEvent.view.selectedItemId,
+  "agent:keep",
+  "itemUpserted preserves existing selection",
+);
+assertEqual(
+  upsertedEvent.view.summary.total,
+  2,
+  "itemUpserted preserves authoritative source-neutral summary totals",
+);
+assertEqual(
+  upsertedEvent.refetchSnapshot,
+  false,
+  "itemUpserted does not request snapshot refetch",
+);
 
 const removedUnselectedEvent = applyActivityConsoleEvent(eventBase, {
   type: "itemRemoved",
@@ -342,8 +440,16 @@ const invalidatedEvent = applyActivityConsoleEvent(eventBase, {
   cursor: "event:invalidated",
   reason: "watchReset",
 });
-assertEqual(invalidatedEvent.refetchSnapshot, true, "snapshotInvalidated requests a read-model refetch");
-assertEqual(invalidatedEvent.view.feedCursor, "event:invalidated", "snapshotInvalidated advances the event cursor");
+assertEqual(
+  invalidatedEvent.refetchSnapshot,
+  true,
+  "snapshotInvalidated requests a read-model refetch",
+);
+assertEqual(
+  invalidatedEvent.view.feedCursor,
+  "event:invalidated",
+  "snapshotInvalidated advances the event cursor",
+);
 
 const transcriptEvent = applyActivityConsoleEvent(eventBase, {
   type: "transcriptUpdated",
@@ -357,7 +463,8 @@ assertEqual(
   "transcriptUpdated exposes the activity id for selected-transcript refresh decisions",
 );
 assertEqual(
-  transcriptEvent.view.items.find((item) => item.id === "agent:keep")?.transcript.cursor,
+  transcriptEvent.view.items.find((item) => item.id === "agent:keep")
+    ?.transcript.cursor,
   "transcript:2",
   "transcriptUpdated backfills the item transcript cursor without rebuilding transcript blocks",
 );
@@ -367,14 +474,26 @@ const pollFallbackEvent = applyActivityConsoleEvent(eventBase, {
   cursor: "event:poll",
   updateMode: "pollFallback",
 });
-assertEqual(pollFallbackEvent.updateMode, "pollFallback", "modeChanged pollFallback activates fallback decisions");
-assertEqual(pollFallbackEvent.view.updateMode, "pollFallback", "modeChanged records the daemon update mode");
+assertEqual(
+  pollFallbackEvent.updateMode,
+  "pollFallback",
+  "modeChanged pollFallback activates fallback decisions",
+);
+assertEqual(
+  pollFallbackEvent.view.updateMode,
+  "pollFallback",
+  "modeChanged records the daemon update mode",
+);
 const watchEvent = applyActivityConsoleEvent(eventBase, {
   type: "modeChanged",
   cursor: "event:watch",
   updateMode: "watch",
 });
-assertEqual(watchEvent.updateMode, "watch", "modeChanged watch suppresses fallback polling decisions");
+assertEqual(
+  watchEvent.updateMode,
+  "watch",
+  "modeChanged watch suppresses fallback polling decisions",
+);
 const locallyAcknowledged = acknowledgeActivityItem({}, eventBase.items[0]!);
 const dirtyAfterStreamMerge = initializeActivityDirtyItems(
   upsertedEvent.view.items,
@@ -397,9 +516,13 @@ const selectedRevisionEvent = applyActivityConsoleEvent(eventBase, {
 });
 assertDeepEqual(
   Array.from(
-    initializeActivityDirtyItems(selectedRevisionEvent.view.items, locallyAcknowledged, {
-      "agent:keep": activityItemRevisionToken(eventBase.items[0]!),
-    }),
+    initializeActivityDirtyItems(
+      selectedRevisionEvent.view.items,
+      locallyAcknowledged,
+      {
+        "agent:keep": activityItemRevisionToken(eventBase.items[0]!),
+      },
+    ),
   ),
   ["agent:keep"],
   "a streamed revision change for the selected item remains dirty until explicit acknowledgement",
@@ -407,42 +530,54 @@ assertDeepEqual(
 
 assertEqual(
   shouldApplyActivityStreamRequest(
-    { workRootId: "root-a", requestId: 1 },
-    { workRootId: "root-a", requestId: 1 },
+    { serverId: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverId: "server-a", workRootId: "root-a", requestId: 1 },
   ),
   true,
   "matching activity stream request may update state",
 );
 assertEqual(
   shouldApplyActivityStreamRequest(
-    { workRootId: "root-a", requestId: 1 },
-    { workRootId: "root-b", requestId: 2 },
+    { serverId: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverId: "server-b", workRootId: "root-a", requestId: 1 },
   ),
   false,
   "stale workRoot stream completions are ignored after root switch",
 );
 
 assertEqual(
-  activityTranscriptDistanceFromTail({ scrollTop: 240, clientHeight: 160, scrollHeight: 400 }),
+  activityTranscriptDistanceFromTail({
+    scrollTop: 240,
+    clientHeight: 160,
+    scrollHeight: 400,
+  }),
   0,
   "transcript scroll metrics report zero distance at the tail",
 );
 assertEqual(
-  isActivityTranscriptAtTail({ scrollTop: 230, clientHeight: 160, scrollHeight: 400 }, 12),
+  isActivityTranscriptAtTail(
+    { scrollTop: 230, clientHeight: 160, scrollHeight: 400 },
+    12,
+  ),
   true,
   "transcript follow policy treats near-tail scroll as following",
 );
 assertEqual(
-  shouldFollowActivityTranscriptTail({ scrollTop: 120, clientHeight: 160, scrollHeight: 400 }, 12),
+  shouldFollowActivityTranscriptTail(
+    { scrollTop: 120, clientHeight: 160, scrollHeight: 400 },
+    12,
+  ),
   false,
   "transcript follow policy pauses when the user scrolls away from the tail",
 );
 assertEqual(
-  shouldFollowActivityTranscriptTail({ scrollTop: 240, clientHeight: 160, scrollHeight: 400 }, 12),
+  shouldFollowActivityTranscriptTail(
+    { scrollTop: 240, clientHeight: 160, scrollHeight: 400 },
+    12,
+  ),
   true,
   "transcript follow policy resumes when the user returns to the tail",
 );
-
 
 function activityAgent(
   partial: Partial<NamedAgentActivityView> & { agentId: string },
@@ -498,7 +633,8 @@ assertEqual(
   "stream item updates preserve authoritative full activity summary totals",
 );
 assertEqual(
-  workRootActivityBadge({ phase: "ready", view: streamedAgentActivity.view }).label,
+  workRootActivityBadge({ phase: "ready", view: streamedAgentActivity.view })
+    .label,
   "51 agents",
   "top-bar activity badge does not collapse to bounded recent item count after stream updates",
 );
@@ -509,7 +645,9 @@ const mergedActivity = mergeWorkRootActivityViews(
     feedCursor: "snapshot:old",
     selectedItemId: "agent:agent-a",
     summary: { total: 2, active: 1 },
-    items: [activityItem({ id: "agent:agent-a", status: "running", live: true })],
+    items: [
+      activityItem({ id: "agent:agent-a", status: "running", live: true }),
+    ],
     agents: [
       activityAgent({ agentId: "agent-a", status: "running" }),
       activityAgent({ agentId: "agent-b", status: "idle" }),
@@ -520,7 +658,9 @@ const mergedActivity = mergeWorkRootActivityViews(
     feedCursor: "snapshot:new",
     selectedItemId: "agent:agent-b",
     summary: { total: 2, blocked: 1, unavailable: 1 },
-    items: [activityItem({ id: "agent:agent-b", status: "blocked", attention: true })],
+    items: [
+      activityItem({ id: "agent:agent-b", status: "blocked", attention: true }),
+    ],
     agents: [
       activityAgent({ agentId: "agent-b", status: "blocked" }),
       activityAgent({
@@ -572,9 +712,21 @@ assertEqual(
 );
 
 const loadingBadge = workRootActivityBadge({ phase: "loading" });
-assertEqual(loadingBadge.tone, "loading", "loading badge uses the loading tone");
-assertEqual(loadingBadge.label, "agents", "loading badge keeps a compact label");
-assertEqual(loadingBadge.summary, "loading", "loading badge marks the loading state");
+assertEqual(
+  loadingBadge.tone,
+  "loading",
+  "loading badge uses the loading tone",
+);
+assertEqual(
+  loadingBadge.label,
+  "agents",
+  "loading badge keeps a compact label",
+);
+assertEqual(
+  loadingBadge.summary,
+  "loading",
+  "loading badge marks the loading state",
+);
 
 const errorBadge = workRootActivityBadge({ phase: "error" });
 assertEqual(errorBadge.tone, "error", "error badge uses the error tone");
@@ -616,16 +768,32 @@ assertEqual(
   "1 agent",
   "a single agent uses the singular agent label",
 );
-assertEqual(singleIdleBadge.tone, "idle", "all-idle agents render the idle tone");
-assertEqual(singleIdleBadge.summary, "idle", "all-idle agents render an idle summary");
+assertEqual(
+  singleIdleBadge.tone,
+  "idle",
+  "all-idle agents render the idle tone",
+);
+assertEqual(
+  singleIdleBadge.summary,
+  "idle",
+  "all-idle agents render an idle summary",
+);
 
 const activeBadge = workRootActivityBadge({
   phase: "ready",
   view: activityView({ summary: { total: 3, active: 2 } }),
 });
-assertEqual(activeBadge.label, "3 agents", "multiple agents use the plural label");
+assertEqual(
+  activeBadge.label,
+  "3 agents",
+  "multiple agents use the plural label",
+);
 assertEqual(activeBadge.tone, "active", "active agents render the active tone");
-assertEqual(activeBadge.summary, "2 active", "active agents summarize the active count");
+assertEqual(
+  activeBadge.summary,
+  "2 active",
+  "active agents summarize the active count",
+);
 
 const failedBadge = workRootActivityBadge({
   phase: "ready",
@@ -707,9 +875,17 @@ assertEqual(
 );
 
 const orderedItems = orderActivityItems([
-  activityItem({ id: "old-live", live: true, updatedAt: "2026-05-21T10:00:00Z" }),
+  activityItem({
+    id: "old-live",
+    live: true,
+    updatedAt: "2026-05-21T10:00:00Z",
+  }),
   activityItem({ id: "new-idle", updatedAt: "2026-05-21T12:00:00Z" }),
-  activityItem({ id: "attention", attention: true, updatedAt: "2026-05-21T09:00:00Z" }),
+  activityItem({
+    id: "attention",
+    attention: true,
+    updatedAt: "2026-05-21T09:00:00Z",
+  }),
   activityItem({ id: "same-a", updatedAt: "2026-05-21T08:00:00Z" }),
   activityItem({ id: "same-b", updatedAt: "2026-05-21T08:00:00Z" }),
 ]);
@@ -813,10 +989,16 @@ assertDeepEqual(
       [
         { ...ackSource, updatedAt: "2026-05-21T12:01:00Z" },
         activityItem({ id: "attention-dirty", attention: true }),
-        activityItem({ id: "first-load-idle", updatedAt: "2026-05-21T12:02:00Z" }),
+        activityItem({
+          id: "first-load-idle",
+          updatedAt: "2026-05-21T12:02:00Z",
+        }),
       ],
       acknowledgements,
-      { ackable: "2026-05-21T12:00:00Z", "first-load-idle": "2026-05-21T12:02:00Z" },
+      {
+        ackable: "2026-05-21T12:00:00Z",
+        "first-load-idle": "2026-05-21T12:02:00Z",
+      },
     ),
   ),
   ["ackable", "attention-dirty"],
@@ -907,12 +1089,18 @@ function block(partial: Partial<TranscriptBlock>): TranscriptBlock {
 }
 
 assertEqual(
-  transcriptBlockView(block({ renderKind: "markdown", text: "assistant output" }), "namedAgent").mode,
+  transcriptBlockView(
+    block({ renderKind: "markdown", text: "assistant output" }),
+    "namedAgent",
+  ).mode,
   "expanded",
   "assistant/output-like transcript blocks expand by default",
 );
 assertEqual(
-  transcriptBlockView(block({ renderKind: "json", title: "tool call", data: { ok: true } }), "namedAgent").tone,
+  transcriptBlockView(
+    block({ renderKind: "json", title: "tool call", data: { ok: true } }),
+    "namedAgent",
+  ).tone,
   "tool",
   "tool-like transcript blocks default to compact tool summaries",
 );
@@ -943,13 +1131,20 @@ assertEqual(
   "tool result compact summaries include bounded output size",
 );
 assertEqual(
-  transcriptBlockView(block({ renderKind: "status", title: "running" }), "namedAgent").mode,
+  transcriptBlockView(
+    block({ renderKind: "status", title: "running" }),
+    "namedAgent",
+  ).mode,
   "compact",
   "status transcript blocks default to compact summaries",
 );
 assertEqual(
   transcriptBlockView(
-    block({ renderKind: "status", title: "Task started", text: "Agent turn started" }),
+    block({
+      renderKind: "status",
+      title: "Task started",
+      text: "Agent turn started",
+    }),
     "namedAgent",
   ).summary,
   "Agent turn started",
@@ -970,12 +1165,18 @@ assertEqual(
   "degraded unsupported-like compact summaries avoid repeating the generic title",
 );
 assertEqual(
-  transcriptBlockView(block({ renderKind: "error", title: "failed", degraded: true }), "namedAgent").tone,
+  transcriptBlockView(
+    block({ renderKind: "error", title: "failed", degraded: true }),
+    "namedAgent",
+  ).tone,
   "error",
   "error transcript blocks use error tone",
 );
 assertEqual(
-  transcriptBlockView(block({ renderKind: "text", title: "exec", text: "$ echo ok\nok" }), "exec").mode,
+  transcriptBlockView(
+    block({ renderKind: "text", title: "exec", text: "$ echo ok\nok" }),
+    "exec",
+  ).mode,
   "terminal",
   "exec transcript blocks render with terminal mode",
 );

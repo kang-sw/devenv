@@ -43,7 +43,9 @@ import {
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${label}: expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
@@ -57,7 +59,9 @@ function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
 
 function assertNotContains(value: string, forbidden: string, label: string) {
   if (value.includes(forbidden)) {
-    throw new Error(`${label}: ${JSON.stringify(value)} contained ${JSON.stringify(forbidden)}`);
+    throw new Error(
+      `${label}: ${JSON.stringify(value)} contained ${JSON.stringify(forbidden)}`,
+    );
   }
 }
 
@@ -188,11 +192,58 @@ assertDeepEqual(
   "real command builders emit executable payload variants",
 );
 
-const branchCreateCommand = buildGitBranchCreateSubmitCommand(workRootId, "new-private", "main");
+const remoteFileCommand = buildFileExplorerOpenFileCommand(
+  "root-same",
+  "src/App.tsx",
+  "singleClick",
+  "server-a",
+);
+const otherRemoteFileCommand = buildFileExplorerOpenFileCommand(
+  "root-same",
+  "src/App.tsx",
+  "singleClick",
+  "server-b",
+);
+assertEqual(
+  remoteFileCommand.payload.serverId,
+  "server-a",
+  "file command payload carries server id for execution routing",
+);
+assertEqual(
+  JSON.stringify(remoteFileCommand.payload) ===
+    JSON.stringify(otherRemoteFileCommand.payload),
+  false,
+  "same bare file command identity does not collapse across servers",
+);
+assertEqual(
+  buildTerminalCreateCommand("root-same", "server-a").payload.serverId,
+  "server-a",
+  "terminal command payload carries server id",
+);
+assertEqual(
+  buildActivitySelectItemCommand("activity-same", "server-a").payload.serverId,
+  "server-a",
+  "activity command payload carries server id",
+);
+assertEqual(
+  buildWorkRootOpenCommand("/private/path", "server-a").payload.serverId,
+  "server-a",
+  "open workRoot command payload keeps server id while omitting host path",
+);
+
+const branchCreateCommand = buildGitBranchCreateSubmitCommand(
+  workRootId,
+  "new-private",
+  "main",
+);
 if (branchCreateCommand.payload.type !== "git.branchCreate.submit") {
   throw new Error("branch create command payload type mismatch");
 }
-assertEqual(branchCreateCommand.payload.baseBranch, "main", "branch create command records selected base branch");
+assertEqual(
+  branchCreateCommand.payload.baseBranch,
+  "main",
+  "branch create command records selected base branch",
+);
 
 const observed: string[] = [];
 const executed: string[] = [];
@@ -201,7 +252,9 @@ for (const command of migratedCommands) {
     observer: (observedCommand) => observed.push(observedCommand.commandId),
     handlers: {
       [command.commandId]: (handledCommand: DashboardCommand) => {
-        executed.push(`${handledCommand.commandId}:${handledCommand.payload.type}`);
+        executed.push(
+          `${handledCommand.commandId}:${handledCommand.payload.type}`,
+        );
       },
     },
   });
@@ -214,7 +267,9 @@ assertDeepEqual(
 );
 assertDeepEqual(
   executed,
-  migratedCommands.map((command) => `${command.commandId}:${command.payload.type}`),
+  migratedCommands.map(
+    (command) => `${command.commandId}:${command.payload.type}`,
+  ),
   "programmatic dispatch executes handlers keyed by real migrated command ids",
 );
 
@@ -223,7 +278,11 @@ const openFileCommand: DashboardCommand = buildFileExplorerOpenFileCommand(
   filePath,
   "singleClick",
 );
-assertEqual(dashboardCommandLabel(openFileCommand), "Open file", "open file label is stable");
+assertEqual(
+  dashboardCommandLabel(openFileCommand),
+  "Open file",
+  "open file label is stable",
+);
 
 const submittedHostPath = "/Users/kang-sw/private/customer repo";
 const workRootOpenCommand = buildWorkRootOpenCommand(submittedHostPath);
@@ -234,16 +293,32 @@ dispatchDashboardCommand(workRootOpenCommand, {
   },
   handlers: {
     "workRoot.open": (command) => {
-      assertEqual(command.payload.type, "workRoot.open", "workRoot open handler receives logical payload");
+      assertEqual(
+        command.payload.type,
+        "workRoot.open",
+        "workRoot open handler receives logical payload",
+      );
     },
   },
 });
 
-assertEqual(workRootOpenCommand.commandId, "workRoot.open", "submitted host path builds workRoot.open command");
-assertEqual(workRootOpenCommand.payload.type, "workRoot.open", "workRoot.open payload stays logical");
+assertEqual(
+  workRootOpenCommand.commandId,
+  "workRoot.open",
+  "submitted host path builds workRoot.open command",
+);
+assertEqual(
+  workRootOpenCommand.payload.type,
+  "workRoot.open",
+  "workRoot.open payload stays logical",
+);
 const serializedPayload = JSON.stringify(workRootOpenCommand.payload);
 const serializedLoggableCommand = JSON.stringify(loggableWorkRootOpenCommand);
-assertNotContains(serializedPayload, submittedHostPath, "workRoot.open payload omits submitted host path");
+assertNotContains(
+  serializedPayload,
+  submittedHostPath,
+  "workRoot.open payload omits submitted host path",
+);
 assertNotContains(
   serializedLoggableCommand,
   submittedHostPath,
@@ -281,17 +356,23 @@ assertEqual(
   "root picker close label is stable",
 );
 assertEqual(
-  dashboardCommandLabel(buildRootPickerCreateDirectoryCommand(rootPickerPrivatePath, "child")),
+  dashboardCommandLabel(
+    buildRootPickerCreateDirectoryCommand(rootPickerPrivatePath, "child"),
+  ),
   "Create directory",
   "root picker create-directory label is stable",
 );
 assertEqual(
-  dashboardCommandLabel(buildRootPickerPinDirectoryCommand(rootPickerPrivatePath)),
+  dashboardCommandLabel(
+    buildRootPickerPinDirectoryCommand(rootPickerPrivatePath),
+  ),
   "Pin directory",
   "root picker pin-directory label is stable",
 );
 assertEqual(
-  dashboardCommandLabel(buildRootPickerUnpinDirectoryCommand(rootPickerPrivatePath)),
+  dashboardCommandLabel(
+    buildRootPickerUnpinDirectoryCommand(rootPickerPrivatePath),
+  ),
   "Unpin directory",
   "root picker unpin-directory label is stable",
 );
@@ -307,7 +388,11 @@ dispatchDashboardCommand(buildTerminalCreateCommand(workRootId), {
     },
   },
 });
-assertEqual(terminalCreates, 1, "programmatic terminal.create dispatch reaches executable handler");
+assertEqual(
+  terminalCreates,
+  1,
+  "programmatic terminal.create dispatch reaches executable handler",
+);
 let activationChanges = 0;
 dispatchDashboardCommand(buildWorkRootActivationCommand(workRootId, "online"), {
   handlers: {
@@ -316,7 +401,8 @@ dispatchDashboardCommand(buildWorkRootActivationCommand(workRootId, "online"), {
         throw new Error("activation handler received wrong payload");
       }
       activationChanges +=
-        command.payload.workRootId === workRootId && command.payload.activation === "online"
+        command.payload.workRootId === workRootId &&
+        command.payload.activation === "online"
           ? 1
           : 0;
     },
@@ -337,7 +423,9 @@ assertEqual(
   "Remove workspace",
   "workspace remove command label is stable",
 );
-const workspaceRemoveCommand = buildWorkspaceRemoveCommand("workspace-local-abc");
+const workspaceRemoveCommand = buildWorkspaceRemoveCommand(
+  "workspace-local-abc",
+);
 assertEqual(
   workspaceRemoveCommand.payload.type === "workspace.remove" &&
     workspaceRemoveCommand.payload.workspaceId,
@@ -361,7 +449,9 @@ assertEqual(
   "activity selection command label is stable",
 );
 assertEqual(
-  dashboardCommandLabel(buildActivityTranscriptLoadMoreCommand("agent:reviewer")),
+  dashboardCommandLabel(
+    buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
+  ),
   "Load transcript",
   "activity transcript load-more command label is stable",
 );
@@ -371,18 +461,24 @@ assertEqual(
   "activity refresh command label reuses refresh wording",
 );
 assertEqual(
-  dashboardCommandLabel(buildActivityDetailToggleCommand("agent:reviewer", "block:1")),
+  dashboardCommandLabel(
+    buildActivityDetailToggleCommand("agent:reviewer", "block:1"),
+  ),
   "Toggle detail",
   "activity detail toggle command label is stable",
 );
 
 assertEqual(
-  dashboardCommandLabel(buildDocumentModeSetCommand(workRootId, filePath, "edit")),
+  dashboardCommandLabel(
+    buildDocumentModeSetCommand(workRootId, filePath, "edit"),
+  ),
   "Edit document",
   "document edit command label is stable",
 );
 assertEqual(
-  dashboardCommandLabel(buildDocumentModeSetCommand(workRootId, filePath, "view")),
+  dashboardCommandLabel(
+    buildDocumentModeSetCommand(workRootId, filePath, "view"),
+  ),
   "View document",
   "document view command label is stable",
 );
@@ -410,6 +506,14 @@ const gitCommands = [
   buildGitBranchCreateCloseCommand(workRootId),
 ];
 for (const command of gitCommands) {
-  assertNotContains(JSON.stringify(command), gitPrivateRootPath, `${command.commandId} omits host paths`);
+  assertNotContains(
+    JSON.stringify(command),
+    gitPrivateRootPath,
+    `${command.commandId} omits host paths`,
+  );
 }
-assertEqual(dashboardCommandLabel(buildGitPullFfOnlyCommand(workRootId)), "Pull Git ff-only", "safe pull label is stable");
+assertEqual(
+  dashboardCommandLabel(buildGitPullFfOnlyCommand(workRootId)),
+  "Pull Git ff-only",
+  "safe pull label is stable",
+);

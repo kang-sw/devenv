@@ -1,4 +1,9 @@
 import { apiErrorDetail } from "./apiError.js";
+import {
+  LOCAL_DASHBOARD_SERVER_ID,
+  localCompatibleDashboardApiRoute,
+  serverScopedIdentity,
+} from "./resourceModel.js";
 
 export type WorkRootActivitySummary = {
   total: number;
@@ -104,8 +109,11 @@ export type WorkRootActivityView = {
   agents: NamedAgentActivityView[];
 };
 
-
-export type ActivityConsoleUpdateMode = "watch" | "pollFallback" | "snapshot" | string;
+export type ActivityConsoleUpdateMode =
+  | "watch"
+  | "pollFallback"
+  | "snapshot"
+  | string;
 
 export type ActivityConsoleEvent =
   | { type: "itemUpserted"; cursor: string; item: ActivityItem }
@@ -121,7 +129,11 @@ export type ActivityConsoleEvent =
       cursor: string;
       reason: "overflow" | "watchReset" | "fallback" | string;
     }
-  | { type: "modeChanged"; cursor: string; updateMode: ActivityConsoleUpdateMode }
+  | {
+      type: "modeChanged";
+      cursor: string;
+      updateMode: ActivityConsoleUpdateMode;
+    }
   | { type: "heartbeat"; cursor: string };
 
 export type ActivityConsoleEventApplication = {
@@ -132,15 +144,32 @@ export type ActivityConsoleEventApplication = {
 };
 
 export type ActivityConsoleStreamRequest = {
+  readonly serverId?: string;
   readonly workRootId: string;
   readonly requestId: number;
 };
 
+export function activityStreamKey(
+  workRootId: string,
+  activityId: string,
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+) {
+  return serverScopedIdentity(serverId, workRootId, activityId);
+}
+
 export function workRootActivityEventsEndpoint(
   workRootId: string,
-  options: { readonly after?: string | null } = {},
+  options: {
+    readonly after?: string | null;
+    readonly serverId?: string | null;
+  } = {},
 ) {
-  const path = `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity/events`;
+  const path = localCompatibleDashboardApiRoute(options.serverId, [
+    "work-roots",
+    workRootId,
+    "activity",
+    "events",
+  ]);
   if (!options.after) {
     return path;
   }
@@ -161,21 +190,32 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
-export function parseActivityConsoleEvent(value: unknown): ActivityConsoleEvent | null {
+export function parseActivityConsoleEvent(
+  value: unknown,
+): ActivityConsoleEvent | null {
   if (!isObject(value) || !isString(value.type) || !isString(value.cursor)) {
     return null;
   }
   switch (value.type) {
     case "itemUpserted":
       return isObject(value.item) && isString(value.item.id)
-        ? ({ type: "itemUpserted", cursor: value.cursor, item: value.item as ActivityItem })
+        ? {
+            type: "itemUpserted",
+            cursor: value.cursor,
+            item: value.item as ActivityItem,
+          }
         : null;
     case "itemRemoved":
       return isString(value.activityId)
-        ? { type: "itemRemoved", cursor: value.cursor, activityId: value.activityId }
+        ? {
+            type: "itemRemoved",
+            cursor: value.cursor,
+            activityId: value.activityId,
+          }
         : null;
     case "transcriptUpdated":
-      return isString(value.activityId) && isNullableString(value.transcriptCursor)
+      return isString(value.activityId) &&
+        isNullableString(value.transcriptCursor)
         ? {
             type: "transcriptUpdated",
             cursor: value.cursor,
@@ -185,11 +225,19 @@ export function parseActivityConsoleEvent(value: unknown): ActivityConsoleEvent 
         : null;
     case "snapshotInvalidated":
       return isString(value.reason)
-        ? { type: "snapshotInvalidated", cursor: value.cursor, reason: value.reason }
+        ? {
+            type: "snapshotInvalidated",
+            cursor: value.cursor,
+            reason: value.reason,
+          }
         : null;
     case "modeChanged":
       return isString(value.updateMode)
-        ? { type: "modeChanged", cursor: value.cursor, updateMode: value.updateMode }
+        ? {
+            type: "modeChanged",
+            cursor: value.cursor,
+            updateMode: value.updateMode,
+          }
         : null;
     case "heartbeat":
       return { type: "heartbeat", cursor: value.cursor };
@@ -198,7 +246,10 @@ export function parseActivityConsoleEvent(value: unknown): ActivityConsoleEvent 
   }
 }
 
-function withEventCursor(view: WorkRootActivityView, cursor: string): WorkRootActivityView {
+function withEventCursor(
+  view: WorkRootActivityView,
+  cursor: string,
+): WorkRootActivityView {
   return { ...view, feedCursor: cursor };
 }
 
@@ -212,7 +263,9 @@ export function applyActivityConsoleEvent(
   let updateMode: ActivityConsoleUpdateMode | null = null;
 
   if (event.type === "itemUpserted") {
-    const itemsById = new Map(current.items.map((item) => [item.id, item] as const));
+    const itemsById = new Map(
+      current.items.map((item) => [item.id, item] as const),
+    );
     itemsById.set(event.item.id, event.item);
     const items = orderActivityItems(Array.from(itemsById.values()));
     view = {
@@ -253,9 +306,18 @@ export function applyActivityConsoleEvent(
 
 export function shouldApplyActivityStreamRequest(
   expected: ActivityConsoleStreamRequest,
-  current: { readonly workRootId: string | null; readonly requestId: number },
+  current: {
+    readonly serverId?: string | null;
+    readonly workRootId: string | null;
+    readonly requestId: number;
+  },
 ): boolean {
-  return expected.workRootId === current.workRootId && expected.requestId === current.requestId;
+  return (
+    (current.serverId ?? LOCAL_DASHBOARD_SERVER_ID) ===
+      (expected.serverId ?? LOCAL_DASHBOARD_SERVER_ID) &&
+    expected.workRootId === current.workRootId &&
+    expected.requestId === current.requestId
+  );
 }
 
 export type WorkRootActivityFetchOptions = {
@@ -270,9 +332,15 @@ export type ActivityTranscriptFetchOptions = {
 
 export function workRootActivityEndpoint(
   workRootId: string,
-  options: WorkRootActivityFetchOptions = {},
+  options: WorkRootActivityFetchOptions & {
+    readonly serverId?: string | null;
+  } = {},
 ) {
-  const path = `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity`;
+  const path = localCompatibleDashboardApiRoute(options.serverId, [
+    "work-roots",
+    workRootId,
+    "activity",
+  ]);
   if (options.recentLimit === undefined) {
     return path;
   }
@@ -284,9 +352,18 @@ export function workRootActivityEndpoint(
 export function workRootActivityTranscriptEndpoint(
   workRootId: string,
   activityId: string,
-  options: ActivityTranscriptFetchOptions = {},
+  options: ActivityTranscriptFetchOptions & {
+    readonly serverId?: string | null;
+  } = {},
 ) {
-  const path = `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity/items/${encodeURIComponent(activityId)}/transcript`;
+  const path = localCompatibleDashboardApiRoute(options.serverId, [
+    "work-roots",
+    workRootId,
+    "activity",
+    "items",
+    activityId,
+    "transcript",
+  ]);
   const params = new URLSearchParams();
   if (options.cursor !== undefined) {
     params.set("cursor", options.cursor);
@@ -367,10 +444,17 @@ export function mergeWorkRootActivityViews(
   return {
     ...current,
     status:
-      update.status === "unavailable" ? "unavailable" : degraded ? "degraded" : "ok",
+      update.status === "unavailable"
+        ? "unavailable"
+        : degraded
+          ? "degraded"
+          : "ok",
     updateMode: update.updateMode,
     feedCursor: update.feedCursor,
-    selectedItemId: preserveActivitySelection(items, update.selectedItemId ?? current.selectedItemId),
+    selectedItemId: preserveActivitySelection(
+      items,
+      update.selectedItemId ?? current.selectedItemId,
+    ),
     summary,
     items,
     agents,
@@ -379,10 +463,7 @@ export function mergeWorkRootActivityViews(
 
 export type ActivityAcknowledgements = Record<string, string>;
 
-export type TranscriptBlockRenderMode =
-  | "expanded"
-  | "compact"
-  | "terminal";
+export type TranscriptBlockRenderMode = "expanded" | "compact" | "terminal";
 
 export type TranscriptBlockView = {
   mode: TranscriptBlockRenderMode;
@@ -414,7 +495,9 @@ export function orderActivityItems(
     if (leftPriority !== rightPriority) {
       return rightPriority - leftPriority;
     }
-    const timeCompare = activitySortKey(right).localeCompare(activitySortKey(left));
+    const timeCompare = activitySortKey(right).localeCompare(
+      activitySortKey(left),
+    );
     if (timeCompare !== 0) {
       return timeCompare;
     }
@@ -501,7 +584,10 @@ export type ActivityTranscriptScrollMetrics = {
 export function activityTranscriptDistanceFromTail(
   metrics: ActivityTranscriptScrollMetrics,
 ): number {
-  return Math.max(0, metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight));
+  return Math.max(
+    0,
+    metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight),
+  );
 }
 
 export function isActivityTranscriptAtTail(
@@ -533,7 +619,10 @@ export function shouldLoadMoreActivityTranscript(
 export function activityRibbonSourceLabel(item: ActivityItem): string {
   if (item.kind === "namedAgent") {
     return `agent.${activityRibbonToken(
-      item.source.backend ?? item.source.label ?? item.source.harness ?? item.kind,
+      item.source.backend ??
+        item.source.label ??
+        item.source.harness ??
+        item.kind,
     )}`;
   }
   if (item.kind === "exec") {
@@ -572,7 +661,10 @@ function activityRibbonToken(value: string): string {
   return token || "activity";
 }
 
-function activityRelativeTimeLabel(value: string | null, nowMs: number): string | null {
+function activityRelativeTimeLabel(
+  value: string | null,
+  nowMs: number,
+): string | null {
   const timestamp = parseActivityTimestamp(value);
   if (timestamp === null) {
     return null;
@@ -593,7 +685,10 @@ function activityRelativeTimeLabel(value: string | null, nowMs: number): string 
   return `${elapsedDays} ${elapsedDays === 1 ? "day" : "days"}`;
 }
 
-function activityDurationLabel(startedAt: string | null, finishedAt: string | null): string | null {
+function activityDurationLabel(
+  startedAt: string | null,
+  finishedAt: string | null,
+): string | null {
   const started = parseActivityTimestamp(startedAt);
   const finished = parseActivityTimestamp(finishedAt);
   if (started === null || finished === null || finished < started) {
@@ -648,7 +743,9 @@ function transcriptSummaryLine(value: string | null | undefined): string {
   return `${line.slice(0, TRANSCRIPT_SUMMARY_MAX_CHARS - 3)}...`;
 }
 
-function transcriptBlockDataObject(block: TranscriptBlock): Record<string, unknown> | null {
+function transcriptBlockDataObject(
+  block: TranscriptBlock,
+): Record<string, unknown> | null {
   if (
     block.data !== null &&
     typeof block.data === "object" &&
@@ -763,8 +860,17 @@ export function transcriptBlockView(
   const key = `${block.renderKind} ${block.title ?? ""}`.toLowerCase();
   const text = transcriptBlockText(block);
   const summary = transcriptCompactSummary(block);
-  if (sourceKind === "exec" || key.includes("terminal") || block.renderKind === "ansi") {
-    return { mode: "terminal", tone: "terminal", summary, detail: text || null };
+  if (
+    sourceKind === "exec" ||
+    key.includes("terminal") ||
+    block.renderKind === "ansi"
+  ) {
+    return {
+      mode: "terminal",
+      tone: "terminal",
+      summary,
+      detail: text || null,
+    };
   }
   if (block.degraded || key.includes("error") || block.renderKind === "error") {
     return { mode: "compact", tone: "error", summary, detail: text || null };
@@ -776,7 +882,12 @@ export function transcriptBlockView(
     key.includes("status") ||
     block.renderKind === "json"
   ) {
-    return { mode: "compact", tone: key.includes("tool") || key.includes("mcp") ? "tool" : "status", summary, detail: text || null };
+    return {
+      mode: "compact",
+      tone: key.includes("tool") || key.includes("mcp") ? "tool" : "status",
+      summary,
+      detail: text || null,
+    };
   }
   return { mode: "expanded", tone: "normal", summary, detail: text || null };
 }

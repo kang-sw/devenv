@@ -1,3 +1,4 @@
+import { LOCAL_DASHBOARD_SERVER_ID } from "./resourceModel.js";
 export type DashboardCommandId =
   | "dashboard.refresh"
   | "workspace.menu.open"
@@ -58,10 +59,19 @@ export type DashboardCommandPayload =
   | { type: "git.branchMenu.open"; workRootId: string }
   | { type: "git.branch.switch"; workRootId: string; branchName: string }
   | { type: "git.branchCreate.open"; workRootId: string }
-  | { type: "git.branchCreate.submit"; workRootId: string; branchName: string; baseBranch?: string }
+  | {
+      type: "git.branchCreate.submit";
+      workRootId: string;
+      branchName: string;
+      baseBranch?: string;
+    }
   | { type: "git.branchCreate.close"; workRootId: string }
   | { type: "workRoot.open" }
-  | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
+  | {
+      type: "workRoot.activation.set";
+      workRootId: string;
+      activation: "online" | "offline";
+    }
   | { type: "rootPicker.open" }
   | { type: "rootPicker.close" }
   | { type: "rootPicker.navigate" }
@@ -85,13 +95,18 @@ export type DashboardCommandPayload =
   | { type: "activity.refresh"; workRootId: string }
   | { type: "activity.detail.toggle"; activityId: string; detailKey: string }
   | { type: "document.translation.toggle"; workRootId: string; path: string }
-  | { type: "document.mode.set"; workRootId: string; path: string; mode: "view" | "edit" }
+  | {
+      type: "document.mode.set";
+      workRootId: string;
+      path: string;
+      mode: "view" | "edit";
+    }
   | { type: "document.save"; workRootId: string; path: string }
   | { type: "document.revert"; workRootId: string; path: string };
 
 export type DashboardCommand = {
   commandId: DashboardCommandId;
-  payload: DashboardCommandPayload;
+  payload: DashboardCommandPayload & { readonly serverId?: string };
 };
 
 export type DashboardCommandEntry = {
@@ -111,148 +126,269 @@ export type DashboardCommandDispatcher = (
   handlers?: DashboardCommandHandlers,
 ) => void;
 
-
 export function buildDashboardRefreshCommand(): DashboardCommand {
   return { commandId: "dashboard.refresh", payload: { type: "refresh" } };
 }
 
-export function buildWorkRootOpenCommand(_submittedHostPath: string): DashboardCommand {
-  return { commandId: "workRoot.open", payload: { type: "workRoot.open" } };
-}
-
-export function buildRootPickerOpenCommand(): DashboardCommand {
-  return { commandId: "rootPicker.open", payload: { type: "rootPicker.open" } };
-}
-
-export function buildRootPickerCloseCommand(): DashboardCommand {
-  return { commandId: "rootPicker.close", payload: { type: "rootPicker.close" } };
-}
-
-export function buildRootPickerNavigateCommand(_targetPath: string): DashboardCommand {
+export function buildWorkRootOpenCommand(
+  _submittedHostPath: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
-    commandId: "rootPicker.navigate",
-    payload: { type: "rootPicker.navigate" },
+    commandId: "workRoot.open",
+    payload: { type: "workRoot.open", serverId },
   };
 }
 
-export function buildRootPickerSelectDirectoryCommand(_targetPath: string): DashboardCommand {
+export function buildRootPickerOpenCommand(
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "rootPicker.open",
+    payload: { type: "rootPicker.open", serverId },
+  };
+}
+
+export function buildRootPickerCloseCommand(
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "rootPicker.close",
+    payload: { type: "rootPicker.close", serverId },
+  };
+}
+
+export function buildRootPickerNavigateCommand(
+  _targetPath: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "rootPicker.navigate",
+    payload: { type: "rootPicker.navigate", serverId },
+  };
+}
+
+export function buildRootPickerSelectDirectoryCommand(
+  _targetPath: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "rootPicker.selectDirectory",
-    payload: { type: "rootPicker.selectDirectory" },
+    payload: { type: "rootPicker.selectDirectory", serverId },
   };
 }
 
 export function buildRootPickerCreateDirectoryCommand(
   _parentPath: string,
   _name: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.createDirectory",
-    payload: { type: "rootPicker.createDirectory" },
+    payload: { type: "rootPicker.createDirectory", serverId },
   };
 }
 
-export function buildRootPickerPinDirectoryCommand(_path: string): DashboardCommand {
+export function buildRootPickerPinDirectoryCommand(
+  _path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "rootPicker.pinDirectory",
-    payload: { type: "rootPicker.pinDirectory" },
+    payload: { type: "rootPicker.pinDirectory", serverId },
   };
 }
 
-export function buildRootPickerUnpinDirectoryCommand(_path: string): DashboardCommand {
+export function buildRootPickerUnpinDirectoryCommand(
+  _path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "rootPicker.unpinDirectory",
-    payload: { type: "rootPicker.unpinDirectory" },
+    payload: { type: "rootPicker.unpinDirectory", serverId },
   };
 }
 
-export function buildWorkspaceMenuOpenCommand(workspaceId: string): DashboardCommand {
+export function buildWorkspaceMenuOpenCommand(
+  workspaceId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "workspace.menu.open",
-    payload: { type: "workspace.menu.open", workspaceId },
+    payload: { type: "workspace.menu.open", serverId, workspaceId },
   };
 }
 
-export function buildGitWorktreeAddOpenCommand(workspaceId: string): DashboardCommand {
+export function buildGitWorktreeAddOpenCommand(
+  workspaceId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "gitWorktreeAdd.open",
-    payload: { type: "gitWorktreeAdd.open", workspaceId },
+    payload: { type: "gitWorktreeAdd.open", serverId, workspaceId },
   };
 }
 
-export function buildGitWorktreeAddCloseCommand(workspaceId: string): DashboardCommand {
+export function buildGitWorktreeAddCloseCommand(
+  workspaceId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "gitWorktreeAdd.close",
-    payload: { type: "gitWorktreeAdd.close", workspaceId },
+    payload: { type: "gitWorktreeAdd.close", serverId, workspaceId },
   };
 }
 
-export function buildGitWorktreeAddSubmitCommand(workspaceId: string): DashboardCommand {
+export function buildGitWorktreeAddSubmitCommand(
+  workspaceId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "gitWorktreeAdd.submit",
-    payload: { type: "gitWorktreeAdd.submit", workspaceId },
+    payload: { type: "gitWorktreeAdd.submit", serverId, workspaceId },
   };
 }
 
-export function buildGitRefreshCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.refresh", payload: { type: "git.refresh", workRootId } };
+export function buildGitRefreshCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.refresh",
+    payload: { type: "git.refresh", serverId, workRootId },
+  };
 }
-export function buildGitFetchCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.fetch", payload: { type: "git.fetch", workRootId } };
+export function buildGitFetchCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.fetch",
+    payload: { type: "git.fetch", serverId, workRootId },
+  };
 }
-export function buildGitPushCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.push", payload: { type: "git.push", workRootId } };
+export function buildGitPushCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.push",
+    payload: { type: "git.push", serverId, workRootId },
+  };
 }
-export function buildGitPullFfOnlyCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.pullFfOnly", payload: { type: "git.pullFfOnly", workRootId } };
+export function buildGitPullFfOnlyCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.pullFfOnly",
+    payload: { type: "git.pullFfOnly", serverId, workRootId },
+  };
 }
-export function buildGitBranchMenuOpenCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.branchMenu.open", payload: { type: "git.branchMenu.open", workRootId } };
+export function buildGitBranchMenuOpenCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.branchMenu.open",
+    payload: { type: "git.branchMenu.open", serverId, workRootId },
+  };
 }
-export function buildGitBranchSwitchCommand(workRootId: string, branchName: string): DashboardCommand {
-  return { commandId: "git.branch.switch", payload: { type: "git.branch.switch", workRootId, branchName } };
+export function buildGitBranchSwitchCommand(
+  workRootId: string,
+  branchName: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.branch.switch",
+    payload: { type: "git.branch.switch", serverId, workRootId, branchName },
+  };
 }
-export function buildGitBranchCreateOpenCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.branchCreate.open", payload: { type: "git.branchCreate.open", workRootId } };
+export function buildGitBranchCreateOpenCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.branchCreate.open",
+    payload: { type: "git.branchCreate.open", serverId, workRootId },
+  };
 }
-export function buildGitBranchCreateSubmitCommand(workRootId: string, branchName: string, baseBranch?: string): DashboardCommand {
-  return { commandId: "git.branchCreate.submit", payload: { type: "git.branchCreate.submit", workRootId, branchName, baseBranch } };
+export function buildGitBranchCreateSubmitCommand(
+  workRootId: string,
+  branchName: string,
+  baseBranch?: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.branchCreate.submit",
+    payload: {
+      type: "git.branchCreate.submit",
+      serverId,
+      workRootId,
+      branchName,
+      baseBranch,
+    },
+  };
 }
-export function buildGitBranchCreateCloseCommand(workRootId: string): DashboardCommand {
-  return { commandId: "git.branchCreate.close", payload: { type: "git.branchCreate.close", workRootId } };
+export function buildGitBranchCreateCloseCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
+  return {
+    commandId: "git.branchCreate.close",
+    payload: { type: "git.branchCreate.close", serverId, workRootId },
+  };
 }
 
-export function buildWorkspaceRemoveCommand(workspaceId: string): DashboardCommand {
+export function buildWorkspaceRemoveCommand(
+  workspaceId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "workspace.remove",
-    payload: { type: "workspace.remove", workspaceId },
+    payload: { type: "workspace.remove", serverId, workspaceId },
   };
 }
 
 export function buildWorkRootActivationCommand(
   workRootId: string,
   activation: "online" | "offline",
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "workRoot.activation.set",
-    payload: { type: "workRoot.activation.set", workRootId, activation },
+    payload: {
+      type: "workRoot.activation.set",
+      serverId,
+      workRootId,
+      activation,
+    },
   };
 }
 
-export function buildFileExplorerRefreshCommand(workRootId: string): DashboardCommand {
+export function buildFileExplorerRefreshCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "fileExplorer.refresh",
-    payload: { type: "fileExplorer.refresh", workRootId },
+    payload: { type: "fileExplorer.refresh", serverId, workRootId },
   };
 }
 
 export function buildFileExplorerToggleDirectoryCommand(
   workRootId: string,
   path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.toggleDirectory",
-    payload: { type: "fileExplorer.toggleDirectory", workRootId, path },
+    payload: {
+      type: "fileExplorer.toggleDirectory",
+      serverId,
+      workRootId,
+      path,
+    },
   };
 }
 
@@ -260,79 +396,110 @@ export function buildFileExplorerOpenFileCommand(
   workRootId: string,
   path: string,
   gesture: "singleClick" | "doubleClick",
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.openFile",
-    payload: { type: "fileExplorer.openFile", workRootId, path, gesture },
+    payload: {
+      type: "fileExplorer.openFile",
+      serverId,
+      workRootId,
+      path,
+      gesture,
+    },
   };
 }
 
 export function buildFileExplorerSelectEntryCommand(
   workRootId: string,
   path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.selectEntry",
-    payload: { type: "fileExplorer.selectEntry", workRootId, path },
+    payload: { type: "fileExplorer.selectEntry", serverId, workRootId, path },
   };
 }
 
-export function buildWorkbenchOpenActivityCommand(workRootId: string): DashboardCommand {
+export function buildWorkbenchOpenActivityCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "workbench.openActivity",
-    payload: { type: "workbench.openActivity", workRootId },
+    payload: { type: "workbench.openActivity", serverId, workRootId },
   };
 }
 
-export function buildTerminalCreateCommand(workRootId: string): DashboardCommand {
+export function buildTerminalCreateCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "terminal.create",
-    payload: { type: "terminal.create", workRootId },
+    payload: { type: "terminal.create", serverId, workRootId },
   };
 }
 
 export function buildActivitySelectItemCommand(
   activityId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "activity.selectItem",
-    payload: { type: "activity.selectItem", activityId },
+    payload: { type: "activity.selectItem", serverId, activityId },
   };
 }
 
 export function buildActivityTranscriptLoadMoreCommand(
   activityId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "activity.transcript.loadMore",
-    payload: { type: "activity.transcript.loadMore", activityId },
+    payload: { type: "activity.transcript.loadMore", serverId, activityId },
   };
 }
 
-export function buildActivityRefreshCommand(workRootId: string): DashboardCommand {
+export function buildActivityRefreshCommand(
+  workRootId: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "activity.refresh",
-    payload: { type: "activity.refresh", workRootId },
+    payload: { type: "activity.refresh", serverId, workRootId },
   };
 }
 
 export function buildActivityDetailToggleCommand(
   activityId: string,
   detailKey: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "activity.detail.toggle",
-    payload: { type: "activity.detail.toggle", activityId, detailKey },
+    payload: {
+      type: "activity.detail.toggle",
+      serverId,
+      activityId,
+      detailKey,
+    },
   };
 }
 
 export function buildDocumentTranslationToggleCommand(
   workRootId: string,
   path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "document.translation.toggle",
-    payload: { type: "document.translation.toggle", workRootId, path },
+    payload: {
+      type: "document.translation.toggle",
+      serverId,
+      workRootId,
+      path,
+    },
   };
 }
 
@@ -340,24 +507,33 @@ export function buildDocumentModeSetCommand(
   workRootId: string,
   path: string,
   mode: "view" | "edit",
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
 ): DashboardCommand {
   return {
     commandId: "document.mode.set",
-    payload: { type: "document.mode.set", workRootId, path, mode },
+    payload: { type: "document.mode.set", serverId, workRootId, path, mode },
   };
 }
 
-export function buildDocumentSaveCommand(workRootId: string, path: string): DashboardCommand {
+export function buildDocumentSaveCommand(
+  workRootId: string,
+  path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "document.save",
-    payload: { type: "document.save", workRootId, path },
+    payload: { type: "document.save", serverId, workRootId, path },
   };
 }
 
-export function buildDocumentRevertCommand(workRootId: string, path: string): DashboardCommand {
+export function buildDocumentRevertCommand(
+  workRootId: string,
+  path: string,
+  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+): DashboardCommand {
   return {
     commandId: "document.revert",
-    payload: { type: "document.revert", workRootId, path },
+    payload: { type: "document.revert", serverId, workRootId, path },
   };
 }
 
@@ -412,7 +588,9 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
     case "workRoot.open":
       return "Open workRoot";
     case "workRoot.activation.set":
-      return payload.activation === "online" ? "Bring workRoot online" : "Take workRoot offline";
+      return payload.activation === "online"
+        ? "Bring workRoot online"
+        : "Take workRoot offline";
     case "rootPicker.open":
       return "Open root picker";
     case "rootPicker.close":
@@ -430,7 +608,9 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
     case "fileExplorer.toggleDirectory":
       return "Toggle directory";
     case "fileExplorer.openFile":
-      return payload.gesture === "doubleClick" ? "Open pinned file" : "Open file";
+      return payload.gesture === "doubleClick"
+        ? "Open pinned file"
+        : "Open file";
     case "fileExplorer.selectEntry":
       return "Select file entry";
     case "workbench.openActivity":

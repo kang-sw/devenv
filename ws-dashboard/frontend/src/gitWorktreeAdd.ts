@@ -1,4 +1,7 @@
-import type { DashboardResourcesView } from "./resourceModel.js";
+import {
+  localCompatibleDashboardApiRoute,
+  type DashboardResourcesView,
+} from "./resourceModel.js";
 
 export type GitWorktreeAddOptions = {
   workspaceId: string;
@@ -46,14 +49,25 @@ export type AddGitWorktreeResponse = {
   createdWorkRootId?: string;
 };
 
-const base = (workspaceId: string) =>
-  `/api/dashboard/workspaces/${encodeURIComponent(workspaceId)}/git-worktree-add`;
+export const gitWorktreeAddBase = (
+  workspaceId: string,
+  serverId?: string | null,
+) =>
+  localCompatibleDashboardApiRoute(serverId, [
+    "workspaces",
+    workspaceId,
+    "git-worktree-add",
+  ]);
 
 export class GitWorktreeAddSubmitError extends Error {
   readonly status: number;
   readonly preview: GitWorktreeAddPreview | null;
 
-  constructor(status: number, fallback: string, preview: GitWorktreeAddPreview | null) {
+  constructor(
+    status: number,
+    fallback: string,
+    preview: GitWorktreeAddPreview | null,
+  ) {
     super(`HTTP ${status}: ${preview?.message ?? fallback}`);
     this.name = "GitWorktreeAddSubmitError";
     this.status = status;
@@ -61,14 +75,19 @@ export class GitWorktreeAddSubmitError extends Error {
   }
 }
 
-async function readJsonResponse<T>(response: Response, fallback: string): Promise<T> {
+async function readJsonResponse<T>(
+  response: Response,
+  fallback: string,
+): Promise<T> {
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${fallback}`);
   }
   return (await response.json()) as T;
 }
 
-function isGitWorktreeAddPreview(value: unknown): value is GitWorktreeAddPreview {
+function isGitWorktreeAddPreview(
+  value: unknown,
+): value is GitWorktreeAddPreview {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -85,7 +104,9 @@ function isGitWorktreeAddPreview(value: unknown): value is GitWorktreeAddPreview
   );
 }
 
-async function readSubmitResponse(response: Response): Promise<AddGitWorktreeResponse> {
+async function readSubmitResponse(
+  response: Response,
+): Promise<AddGitWorktreeResponse> {
   const body = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     throw new GitWorktreeAddSubmitError(
@@ -99,30 +120,48 @@ async function readSubmitResponse(response: Response): Promise<AddGitWorktreeRes
 
 export async function fetchGitWorktreeAddOptions(
   workspaceId: string,
+  serverId?: string | null,
 ): Promise<GitWorktreeAddOptions> {
-  const response = await fetch(`${base(workspaceId)}/options`, {
-    headers: { Accept: "application/json" },
-  });
-  return readJsonResponse<GitWorktreeAddOptions>(response, "worktree options failed");
+  const response = await fetch(
+    `${gitWorktreeAddBase(workspaceId, serverId)}/options`,
+    {
+      headers: { Accept: "application/json" },
+    },
+  );
+  return readJsonResponse<GitWorktreeAddOptions>(
+    response,
+    "worktree options failed",
+  );
 }
 
 export async function previewGitWorktreeAdd(
   workspaceId: string,
   request: GitWorktreeAddPreviewRequest,
+  serverId?: string | null,
 ): Promise<GitWorktreeAddPreview> {
-  const response = await fetch(`${base(workspaceId)}/preview`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(request),
-  });
-  return readJsonResponse<GitWorktreeAddPreview>(response, "worktree preview failed");
+  const response = await fetch(
+    `${gitWorktreeAddBase(workspaceId, serverId)}/preview`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(request),
+    },
+  );
+  return readJsonResponse<GitWorktreeAddPreview>(
+    response,
+    "worktree preview failed",
+  );
 }
 
 export async function submitGitWorktreeAdd(
   workspaceId: string,
   request: AddGitWorktreeRequest,
+  serverId?: string | null,
 ): Promise<AddGitWorktreeResponse> {
-  const response = await fetch(base(workspaceId), {
+  const response = await fetch(gitWorktreeAddBase(workspaceId, serverId), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(request),

@@ -179,6 +179,8 @@ import {
   compactWorkspaceWorkRootTitle,
   flattenEntities,
   reconcileSelectedId,
+  workRootActivationEndpoint,
+  workspaceEndpoint,
   type ActionHint,
   type DashboardResourcesView,
   type DashboardServersView,
@@ -286,9 +288,10 @@ type ServerModalState =
 async function requestWorkRootActivation(
   workRootId: string,
   activation: "online" | "offline",
+  serverId: string | null | undefined,
 ): Promise<DashboardResourcesView> {
   const response = await fetch(
-    `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activation`,
+    workRootActivationEndpoint(workRootId, serverId),
     {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -303,9 +306,10 @@ async function requestWorkRootActivation(
 
 async function requestWorkspaceRemoval(
   workspaceId: string,
+  serverId: string | null | undefined,
 ): Promise<DashboardResourcesView> {
   const response = await fetch(
-    `/api/dashboard/workspaces/${encodeURIComponent(workspaceId)}`,
+    workspaceEndpoint(workspaceId, serverId),
     { method: "DELETE", headers: { Accept: "application/json" } },
   );
   if (!response.ok) {
@@ -743,9 +747,9 @@ export function App() {
           void loadResources("explicit");
         };
       } else if (command.payload.type === "workRoot.activation.set") {
-        const { workRootId, activation } = command.payload;
+        const { workRootId, activation, serverId } = command.payload;
         executableHandlers[command.commandId] = () => {
-          void requestWorkRootActivation(workRootId, activation)
+          void requestWorkRootActivation(workRootId, activation, serverId)
             .then((nextResources) => {
               resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
             })
@@ -759,7 +763,7 @@ export function App() {
       } else if (command.payload.type === "gitWorktreeAdd.close") {
         executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(null);
       } else if (command.payload.type === "workspace.remove") {
-        const { workspaceId } = command.payload;
+        const { workspaceId, serverId } = command.payload;
         executableHandlers[command.commandId] = () => {
           const workspace = activeResources?.workspaces.find(
             (candidate) => candidate.id === workspaceId,
@@ -774,7 +778,7 @@ export function App() {
           const removedRootIds = new Set(
             workspace?.workRoots.map((root) => root.id) ?? [],
           );
-          void requestWorkspaceRemoval(workspaceId)
+          void requestWorkspaceRemoval(workspaceId, serverId)
             .then((nextResources) => {
               resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
               if (removedRootIds.size > 0) {
