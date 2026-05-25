@@ -179,12 +179,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
 | `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
-| `260524-feat-wsstore-runtime-metadata-migration-gate` | ready | Finish SQLite runtime metadata migration by moving exec job metadata behind the existing gate |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 
 ## Ticket Focus
-
-- `260524-feat-wsstore-runtime-metadata-migration-gate` - ready; Phase 3 remains to migrate exec job metadata behind the SQLite gate, without deferring it to a separate follow-up.
 
 ## Session Notes
 

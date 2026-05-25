@@ -377,6 +377,13 @@ finishes during the window and combined stdout plus stderr is within the fixed
 status, `exec_key`, and metadata. Running jobs or larger outputs return compact
 metadata, stream sizes, and follow-up guidance without inline raw output.
 
+Exec lifecycle metadata is SQLite-backed while stream payload bytes remain in
+job-owned files. SQLite stores job identity, command and working-directory
+metadata, lifecycle state, process or lost-worker state, timestamps, exit
+status, stream paths, stream byte counts, and retention/prune metadata. Existing
+file-backed exec state is imported when possible; corrupt or unimportable legacy
+state returns bounded recovery metadata rather than silently disappearing.
+
 `exec.status` reports job lifecycle state and stream metadata. `exec.result`
 returns terminal job metadata and at most the fixed 4096-byte inline output
 budget; larger results guide callers to the future `exec.ask` path first and
@@ -391,19 +398,20 @@ Raw fallback readers are named under `exec.raw.*`. `exec.raw.tail` returns a
 bounded tail from a selected stream. `exec.raw.read` reads by byte offset and
 returns `next_offset`. `exec.raw.grep` searches selected streams, defaults to
 literal matching, and uses regular expressions only when the caller explicitly
-sets `regex: true`.
+sets `regex: true`. If a stored stream path is missing, raw readers report a
+recoverable file-backed payload consistency state instead of treating the stream
+as empty.
 
 ## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
 
 The ws runtime has a SQLite metadata migration gate for moving named-agent and
 exec runtime metadata into SQLite authority. The gate keeps public `agents.*`
 and `exec.*` MCP APIs stable while separating lifecycle metadata from
-file-backed payload bodies. Named-agent registry metadata is SQLite-backed;
-exec runtime metadata remains a later migration surface. SQLite metadata may
-track identities, lifecycle state, actor/session binding, path indexes, byte
-counts, retention visibility, leases, tombstones, and prune bookkeeping.
-Prompts, streams, runtime logs, event JSONL, transcripts, backend raw output,
-and final output bodies remain file-backed.
+file-backed payload bodies. Named-agent registry metadata and exec job metadata
+are SQLite-backed. SQLite metadata may track identities, lifecycle state,
+actor/session binding, path indexes, byte counts, retention visibility, leases,
+tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
+transcripts, backend raw output, and final output bodies remain file-backed.
 
 SQLite state-store configure, migration, and short write paths use bounded
 retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining

@@ -8,6 +8,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-25
 ---
 
 # wsstore runtime metadata migration gate
@@ -283,3 +284,26 @@ file-backed exec record, missing stream payload reporting, lost-worker
 reconciliation, concurrent short metadata writes against the same worktree
 database, prune/tombstone eligibility, and macOS/Linux plus native Windows
 file-locking and cleanup behavior.
+
+### Result (a9329833) - 2026-05-25
+
+Implemented exec job lifecycle metadata as a SQLite-authoritative runtime
+surface in `internal/wsstore` and `internal/execjob`. Exec job identity,
+command and working-directory metadata, lifecycle state, lost-worker state,
+timestamps, exit status, stream path indexes, byte counts, retention visibility,
+and prune/tombstone metadata now persist through `wsstore.ExecJob`.
+
+The implementation preserves stdout, stderr, and combined output as job-owned
+file-backed payloads. Existing file-backed `state.json` records are imported
+forward when possible; corrupt or incomplete legacy state returns bounded
+recovery metadata instead of disappearing or becoming a parallel JSON write
+authority. Missing stream payload files are reported as recoverable
+file-backed payload consistency states across status, result, and raw readers
+instead of being treated as empty output.
+
+Review fixes routed exec stream metadata through the shared artifact, retention,
+prune, and tombstone metadata path; made raw readers report missing payloads
+consistently; and added coverage for shell-mode metadata authority, all missing
+stream variants, prune/tombstone eligibility, and leased-record prune guards.
+Verification covered targeted `wsstore`, `execjob`, and `mcp` packages plus the
+full Go suite on this environment. Native Windows verification was not run.
