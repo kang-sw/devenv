@@ -10,6 +10,7 @@ spec:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-25
 ---
 
 # subquery still advertises root and returns mismatched actor-scope follow-up
@@ -154,3 +155,17 @@ and the existing actor setup/named-agent lifecycle tests. Documentation
 closeout should update the MCP and named-agent specs plus mental models if the
 hidden compatibility behavior changes or if the public schema invariant is
 expanded from `agents.*` to actor-owned tools.
+
+### Result (131da52) - 2026-05-25
+
+Removed public `root` from the `subquery` MCP schema and expanded raw plus
+`tools/list` schema tests so actor-owned public tools cover both `agents.*` and
+`subquery`. Rootless subquery dispatch now computes actor scope once and uses it
+for both subquery registration and reader child actor setup.
+
+Hidden explicit-root compatibility remains accepted as the global namespace
+escape hatch, matching existing `agents.*` behavior. It no longer creates or
+injects reader child actor setup because the explicit-root call is not
+actor-scoped. Focused MCP tests cover public schema omission, actor-scope
+selection, explicit-root compatibility child setup, and the existing actor
+lifecycle behavior.

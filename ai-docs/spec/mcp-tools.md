@@ -294,24 +294,26 @@ or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
 immediately. Public named-agent workflows use `ws.setup` for session root
 selection; explicit root arguments may remain accepted as a hidden compatibility
-override. Public and generated `agents.*` schemas omit `root` end-to-end,
-including raw advertised schema metadata and host-visible generated metadata,
-while preserving intentional hidden explicit-root dispatch compatibility.
+override. Public and generated actor-owned schemas for `agents.*` and `subquery`
+omit `root` end-to-end, including raw advertised schema metadata and
+host-visible generated metadata, while preserving intentional hidden
+explicit-root dispatch compatibility.
 {#260523-agents-root-schema-invisibility}
 
 When the parent MCP session is bound to an actor and the call targets that actor
 root, named-agent registration/calls receive a persistent delegated child actor
 id in agent metadata plus a child setup instruction in the system prompt.
-Subqueries receive ephemeral reader child actors with the same recovery
-instruction shape and do not receive the lead bootstrap method.
+Rootless actor-scoped subqueries receive ephemeral reader child actors with the
+same recovery instruction shape and do not receive the lead bootstrap method.
 
-Root-omitted `agents.*` lifecycle tools in an actor-bound MCP session resolve
-named agents through the current actor scope. This includes registration, call,
-wait, result, status, tail, interrupt, cancel, print, and erase. Hidden
-explicit-root compatibility calls use the unbound global namespace, so an
-actor-bound session can still inspect or manage a global compatibility
-registration explicitly without shadowing the actor-local agent of the same
-public name.
+Root-omitted actor-owned MCP calls in an actor-bound MCP session resolve through
+the current actor scope. For `agents.*`, this includes registration, call, wait,
+result, status, tail, interrupt, cancel, print, and erase. Root-omitted
+`subquery` starts the generated subquery agent in the same actor scope as the
+printed rootless follow-up commands. Hidden explicit-root compatibility calls
+use the unbound global namespace, so an actor-bound session can still inspect or
+manage a global compatibility registration explicitly without shadowing the
+actor-local agent of the same public name.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
