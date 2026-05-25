@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.29.2 - 2026-05-25
+
+### Changed
+- Preserve named-agent instance history while reconciling active instance
+  cleanup through the SQLite-backed registry.
+- Persist exec job metadata and runtime migration metadata in `wsstore`.
+
+### Fixed
+- Shorten `ws.setup` actor recovery tokens, keep legacy recovery compatible, and
+  hide setup-only `format` schema attention while preserving hidden JSON calls.
+- Force local Codex plugin-cache dogfood paths to build or install the intended
+  local runtime before falling back to compatible cache reuse.
+- Harden exec raw-payload errors, actor-scoped agent retention, and cache-wide
+  actor token collision coverage.
+
 ## v0.29.1 - 2026-05-24
 
 ### Fixed

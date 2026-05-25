@@ -251,7 +251,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir)
-            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.1"
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
             plugin_dir.mkdir(parents=True)
             (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
 
@@ -294,7 +294,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir)
-            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.1"
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.2"
             plugin_dir.mkdir(parents=True)
             (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
             runtime_dir = home / "runtime"
