@@ -2028,6 +2028,90 @@ async fn ssh_server_start_persists_tunnel_metadata_without_exposing_secrets() {
 }
 
 #[tokio::test]
+async fn ssh_server_start_captures_remote_startup_and_links_with_passphrase() {
+    let remote_state = app_state();
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+    let remote_port = remote_addr
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse::<u16>().ok())
+        .expect("remote test port");
+
+    let state_file_root = temp_fixture_path("ssh-server-start-capture-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let startup_output = format!(
+        "ws-dashboard owner pairing URL: http://127.0.0.1:{remote_port}/pair?token=redacted\nws-dashboard remote link passphrase: {passphrase}\n"
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/ssh/start")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "serverId": "server-windows",
+                        "label": "Windows dogfood",
+                        "sshTarget": "owner@example.test",
+                        "startupCommand": startup_output,
+                        "localPort": remote_port
+                    })
+                    .to_string(),
+                ))
+                .expect("ssh server start capture request"),
+        )
+        .await
+        .expect("ssh server start capture response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("ssh server start capture body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("ssh capture JSON");
+    assert_eq!(value["id"], "server-windows");
+    assert_eq!(value["status"], "connected");
+    assert!(
+        !body
+            .windows(passphrase.as_bytes().len())
+            .any(|window| window == passphrase.as_bytes()),
+        "start response must not expose captured passphrase"
+    );
+
+    let resources = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("linked resources after startup capture request"),
+        )
+        .await
+        .expect("linked resources after startup capture response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let resources_body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("linked resources after startup capture body");
+    let resources_value: serde_json::Value =
+        serde_json::from_slice(&resources_body).expect("linked resources JSON");
+    assert_eq!(resources_value["server"]["id"], "server-windows");
+
+    remote_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn linked_server_reconnect_restores_tunnel_required_after_restart() {
     let state_file_root = temp_fixture_path("ssh-reconnect-state");
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));

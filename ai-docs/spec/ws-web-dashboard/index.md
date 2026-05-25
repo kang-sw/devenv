@@ -173,6 +173,15 @@ hint, and returns only the bounded `ServerConnectionView` state. Responses do
 not expose SSH targets, local forwarded endpoint ports, remote endpoint hints,
 passphrases, bearer tokens, host paths, or cache paths.
 
+For SSH start, the owner may provide a remote startup command that prints the
+remote daemon startup output and then exits while the remote daemon remains
+alive. The local gateway captures bounded startup output, derives the remote
+loopback endpoint from the printed pairing URL, captures the daemon-lifetime
+link passphrase only in memory, creates the SSH forward, and attempts immediate
+link-auth through the forwarded endpoint. A failed automatic link-auth attempt
+does not persist credentials; the linked server remains visible as
+`authRequired`.
+
 After local daemon restart, remembered linked servers with SSH and remote
 endpoint metadata are visible as `tunnelRequired` until a tunnel is recreated.
 Once the tunnel exists but no memory-only link token is present, the linked

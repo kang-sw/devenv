@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::Mutex;
 use ws_dashboard_core::{
     ActionHint, DashboardResourcesView, DashboardServersView, InstanceView, ServerConnectionStatus,
@@ -24,6 +25,10 @@ use crate::router::AppState;
 
 const LOCAL_SERVER_ID: &str = "server-local";
 const SSH_TUNNEL_STARTUP_GRACE: Duration = Duration::from_millis(150);
+const SSH_STARTUP_CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
+const SSH_STARTUP_CAPTURE_BYTE_LIMIT: usize = 64 * 1024;
+const OWNER_PAIRING_PREFIX: &str = "ws-dashboard owner pairing URL:";
+const LINK_PASSPHRASE_PREFIX: &str = "ws-dashboard remote link passphrase:";
 
 #[derive(Clone, Default)]
 pub struct LinkedServerSessions {
@@ -37,6 +42,10 @@ impl LinkedServerSessions {
 
     async fn get(&self, server_id: &ServerId) -> Option<BearerAuthToken> {
         self.tokens.lock().await.get(server_id).cloned()
+    }
+
+    async fn remove(&self, server_id: &ServerId) {
+        self.tokens.lock().await.remove(server_id);
     }
 
     async fn contains(&self, server_id: &ServerId) -> bool {
@@ -104,6 +113,19 @@ impl LinkedServerTunnels {
         Ok(endpoint)
     }
 
+    async fn capture_remote_startup(
+        &self,
+        ssh_target: &str,
+        startup_command: &str,
+    ) -> Result<RemoteStartupCapture, StartupCaptureError> {
+        match self.launcher {
+            TunnelLauncher::System => {
+                capture_system_remote_startup(ssh_target, startup_command).await
+            }
+            TunnelLauncher::RecordOnly => parse_remote_startup_metadata(startup_command),
+        }
+    }
+
     async fn contains(&self, server_id: &ServerId) -> bool {
         self.tunnels.lock().await.contains_key(server_id)
     }
@@ -131,6 +153,19 @@ impl Drop for ManagedTunnel {
 enum TunnelConnectError {
     InvalidEndpoint,
     Failed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteStartupCapture {
+    remote_endpoint: String,
+    link_passphrase: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupCaptureError {
+    Failed,
+    MissingEndpoint,
+    InvalidEndpoint,
 }
 
 pub async fn dashboard_servers(State(state): State<AppState>) -> Json<DashboardServersView> {
@@ -209,30 +244,83 @@ pub async fn start_ssh_dashboard_server(
     State(state): State<AppState>,
     Json(request): Json<SshServerTunnelRequest>,
 ) -> Response {
-    let Some((mut server, local_port)) = linked_server_from_tunnel_request(request) else {
+    let Some(mut request) = linked_server_from_tunnel_request(request) else {
         return server_error(StatusCode::BAD_REQUEST, "invalid linked server request");
     };
-    if server.id.as_str() == LOCAL_SERVER_ID {
+    if request.server.id.as_str() == LOCAL_SERVER_ID {
         return server_error(StatusCode::BAD_REQUEST, "local server cannot use SSH start");
     }
-    let Some(ssh_target) = server.ssh_target.clone() else {
+    let Some(ssh_target) = request.server.ssh_target.clone() else {
         return server_error(StatusCode::BAD_REQUEST, "missing SSH target");
     };
-    let Some(remote_endpoint) = server.remote_endpoint_hint.clone() else {
-        return server_error(StatusCode::BAD_REQUEST, "missing remote endpoint");
+    let mut link_passphrase = None;
+    let remote_endpoint = match request.server.remote_endpoint_hint.clone() {
+        Some(endpoint) => endpoint,
+        None => {
+            let Some(startup_command) = request.startup_command.as_deref() else {
+                return server_error(StatusCode::BAD_REQUEST, "missing remote endpoint");
+            };
+            match state
+                .linked_server_tunnels
+                .capture_remote_startup(&ssh_target, startup_command)
+                .await
+            {
+                Ok(capture) => {
+                    link_passphrase = capture.link_passphrase;
+                    request.server.remote_endpoint_hint = Some(capture.remote_endpoint.clone());
+                    capture.remote_endpoint
+                }
+                Err(StartupCaptureError::MissingEndpoint) => {
+                    return server_error(
+                        StatusCode::BAD_GATEWAY,
+                        "remote startup endpoint missing",
+                    );
+                }
+                Err(StartupCaptureError::InvalidEndpoint) => {
+                    return server_error(
+                        StatusCode::BAD_GATEWAY,
+                        "remote startup endpoint invalid",
+                    );
+                }
+                Err(StartupCaptureError::Failed) => {
+                    return server_error(StatusCode::BAD_GATEWAY, "remote startup failed");
+                }
+            }
+        }
     };
 
     match state
         .linked_server_tunnels
-        .connect(server.id.clone(), ssh_target, remote_endpoint, local_port)
+        .connect(
+            request.server.id.clone(),
+            ssh_target,
+            remote_endpoint,
+            request.local_port,
+        )
         .await
     {
         Ok(endpoint) => {
-            server.endpoint_hint = Some(endpoint);
-            if let Err(error) = persist_linked_server(&state, server.clone()).await {
+            request.server.endpoint_hint = Some(endpoint.clone());
+            state
+                .linked_server_sessions
+                .remove(&request.server.id)
+                .await;
+            if let Some(passphrase) = link_passphrase {
+                if let Ok(token) = request_remote_link_token(&endpoint, &passphrase).await {
+                    state
+                        .linked_server_sessions
+                        .insert(request.server.id.clone(), token)
+                        .await;
+                }
+            }
+            if let Err(error) = persist_linked_server(&state, request.server.clone()).await {
                 return server_error(StatusCode::INTERNAL_SERVER_ERROR, error);
             }
-            Json(linked_server_view(server, false, true)).into_response()
+            let connected = state
+                .linked_server_sessions
+                .contains(&request.server.id)
+                .await;
+            Json(linked_server_view(request.server, connected, true)).into_response()
         }
         Err(TunnelConnectError::InvalidEndpoint) => {
             server_error(StatusCode::BAD_REQUEST, "invalid remote endpoint")
@@ -491,8 +579,17 @@ pub struct SshServerTunnelRequest {
     server_id: String,
     label: String,
     ssh_target: String,
-    remote_endpoint: String,
     #[serde(default)]
+    remote_endpoint: Option<String>,
+    #[serde(default)]
+    startup_command: Option<String>,
+    #[serde(default)]
+    local_port: Option<u16>,
+}
+
+struct NormalizedSshServerTunnelRequest {
+    server: PersistedLinkedServer,
+    startup_command: Option<String>,
     local_port: Option<u16>,
 }
 
@@ -576,32 +673,40 @@ fn remote_url(endpoint: &str, path: &str) -> String {
     format!("{}{}", endpoint.trim_end_matches('/'), path)
 }
 
+fn trim_optional(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
+}
+
 fn linked_server_from_tunnel_request(
     request: SshServerTunnelRequest,
-) -> Option<(PersistedLinkedServer, Option<u16>)> {
+) -> Option<NormalizedSshServerTunnelRequest> {
     let server_id = request.server_id.trim();
     let label = request.label.trim();
     let ssh_target = request.ssh_target.trim();
-    let remote_endpoint = request.remote_endpoint.trim();
-    if server_id.is_empty()
-        || label.is_empty()
-        || ssh_target.is_empty()
-        || remote_endpoint.is_empty()
-    {
+    if server_id.is_empty() || label.is_empty() || ssh_target.is_empty() {
+        return None;
+    }
+    let remote_endpoint = trim_optional(request.remote_endpoint);
+    let startup_command = trim_optional(request.startup_command);
+    if remote_endpoint.is_none() && startup_command.is_none() {
         return None;
     }
 
-    Some((
-        PersistedLinkedServer {
+    Some(NormalizedSshServerTunnelRequest {
+        server: PersistedLinkedServer {
             id: ServerId::from(server_id.to_owned()),
             label: label.to_owned(),
             kind: ServerKind::SshRemote,
             ssh_target: Some(ssh_target.to_owned()),
             endpoint_hint: None,
-            remote_endpoint_hint: Some(remote_endpoint.to_owned()),
+            remote_endpoint_hint: remote_endpoint,
         },
-        request.local_port,
-    ))
+        startup_command,
+        local_port: request.local_port,
+    })
 }
 
 fn remote_loopback_port(endpoint: &str) -> Result<u16, TunnelConnectError> {
@@ -653,4 +758,101 @@ fn start_system_ssh_tunnel(
         ));
     }
     Ok(child)
+}
+
+async fn capture_system_remote_startup(
+    ssh_target: &str,
+    startup_command: &str,
+) -> Result<RemoteStartupCapture, StartupCaptureError> {
+    let ssh_bin = std::env::var("WS_DASHBOARD_SSH_BIN").unwrap_or_else(|_| "ssh".to_owned());
+    let mut command = tokio::process::Command::new(ssh_bin);
+    command
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg(ssh_target)
+        .arg(startup_command)
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|_| StartupCaptureError::Failed)?;
+    let stdout = child.stdout.take().ok_or(StartupCaptureError::Failed)?;
+    let stderr = child.stderr.take().ok_or(StartupCaptureError::Failed)?;
+
+    let (stdout, stderr, _status) = tokio::time::timeout(SSH_STARTUP_CAPTURE_TIMEOUT, async {
+        let stdout = read_bounded_startup_output(stdout);
+        let stderr = read_bounded_startup_output(stderr);
+        let status = child.wait();
+        tokio::join!(stdout, stderr, status)
+    })
+    .await
+    .map_err(|_| StartupCaptureError::Failed)?;
+    let stdout = stdout?;
+    let stderr = stderr?;
+    _status.map_err(|_| StartupCaptureError::Failed)?;
+
+    let raw = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&stdout),
+        String::from_utf8_lossy(&stderr)
+    );
+    parse_remote_startup_metadata(&raw)
+}
+
+async fn read_bounded_startup_output<R>(mut reader: R) -> Result<Vec<u8>, StartupCaptureError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut output = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = reader
+            .read(&mut chunk)
+            .await
+            .map_err(|_| StartupCaptureError::Failed)?;
+        if read == 0 {
+            return Ok(output);
+        }
+        if output.len() + read > SSH_STARTUP_CAPTURE_BYTE_LIMIT {
+            return Err(StartupCaptureError::Failed);
+        }
+        output.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn parse_remote_startup_metadata(
+    output: &str,
+) -> Result<RemoteStartupCapture, StartupCaptureError> {
+    let mut pairing_url = None;
+    let mut link_passphrase = None;
+    for line in output.lines() {
+        if let Some(value) = line.trim().strip_prefix(OWNER_PAIRING_PREFIX) {
+            pairing_url = Some(value.trim().to_owned());
+        }
+        if let Some(value) = line.trim().strip_prefix(LINK_PASSPHRASE_PREFIX) {
+            let value = value.trim();
+            if !value.is_empty() {
+                link_passphrase = Some(value.to_owned());
+            }
+        }
+    }
+    let Some(pairing_url) = pairing_url else {
+        return Err(StartupCaptureError::MissingEndpoint);
+    };
+    let url = Url::parse(&pairing_url).map_err(|_| StartupCaptureError::InvalidEndpoint)?;
+    if url.scheme() != "http" {
+        return Err(StartupCaptureError::InvalidEndpoint);
+    }
+    let Some(host) = url.host_str() else {
+        return Err(StartupCaptureError::InvalidEndpoint);
+    };
+    if host != "127.0.0.1" && host != "localhost" {
+        return Err(StartupCaptureError::InvalidEndpoint);
+    }
+    let Some(port) = url.port() else {
+        return Err(StartupCaptureError::InvalidEndpoint);
+    };
+    Ok(RemoteStartupCapture {
+        remote_endpoint: format!("http://127.0.0.1:{port}"),
+        link_passphrase,
+    })
 }
