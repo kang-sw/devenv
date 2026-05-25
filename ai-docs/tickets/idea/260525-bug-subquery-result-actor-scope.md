@@ -31,3 +31,45 @@ retrievable through the documented result/status/tail follow-up tools in the
 same lead session. If explicit `root` changes actor scope or registration
 authority, the subquery tool should either bind the returned key to the
 caller-visible actor scope or return recovery guidance that works.
+
+## Investigation - 2026-05-25
+
+The failure is a namespace mismatch, not a worker execution failure. The
+explicit-root subqueries completed successfully and were visible through
+explicit-root `agents.status(root: "/Users/kang-sw/devenv", name: ...)`.
+The same names failed through root-omitted `agents.result(name: ...)` because
+that call resolved through the current lead actor scope.
+
+The relevant code path is:
+
+- `internal/mcp/server.go` calls `actorScopeForAgentTool(root, arguments)` for
+  `subquery`.
+- `actorScopeForAgentTool` returns an empty actor id when the caller supplied
+  an explicit non-empty hidden `root` argument.
+- `wsagent.Manager.Subquery` therefore registers and calls the generated
+  `subquery-*` agent in the unbound global compatibility namespace.
+- `wsagent.Manager.Subquery` always returns rootless follow-up text:
+  `agents.result(name: "<subquery-key>", timeout_seconds: 600) | ...`.
+- In an actor-bound lead session, rootless `agents.result/status/tail/cancel`
+  intentionally resolve through the actor namespace, so they cannot see the
+  explicit-root global subquery.
+
+There is a secondary inconsistency: `childActorSetupForSubquery` checks only
+`actorBoundToRoot(root)`, not whether the caller supplied explicit `root`.
+That can create and inject a reader child actor for a subquery that is otherwise
+registered globally because `actorScopeForAgentTool` returned an empty actor id.
+
+Existing tests cover the pieces separately:
+
+- `TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility` proves
+  root-omitted agent lifecycle tools use actor scope while explicit-root calls
+  use the global namespace.
+- `TestActorScopedSubqueryRegistersAndCallsSameScope` proves direct
+  actor-scoped `wsagent.Manager.Subquery` registration and call use the same
+  actor id.
+
+Missing coverage is the MCP-level integration case: actor-bound session,
+explicit-root `subquery`, then the returned follow-up command. A fix should
+either make the subquery follow-up executable as printed, or make explicit-root
+subquery return explicit-root recovery guidance instead of rootless
+`agents.*` calls.
