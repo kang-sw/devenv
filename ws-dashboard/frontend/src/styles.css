@@ -3446,6 +3446,36 @@ button {
   flex-direction: column;
 }
 
+.linked-server-modal {
+  height: auto;
+  width: min(440px, calc(100vw - 32px));
+  overflow: auto;
+}
+
+.linked-server-modal .root-picker-dialog {
+  gap: var(--ws-space-05);
+  height: auto;
+  min-height: 0;
+  grid-template-rows: auto auto;
+}
+
+.linked-server-form,
+.linked-server-field {
+  display: grid;
+  gap: var(--ws-space-04);
+}
+
+.linked-server-form {
+  gap: var(--ws-space-05);
+  padding: 0 var(--ws-space-07) var(--ws-space-07);
+}
+
+.linked-server-hint {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
+}
+
 .git-worktree-select,
 .git-worktree-select option {
   font-size: var(--ws-font-size-02);

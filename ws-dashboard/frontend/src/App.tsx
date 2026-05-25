@@ -10,8 +10,10 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  KeyRound,
   Languages,
   Plus,
+  PlugZap,
   LayoutPanelTop,
   ListTodo,
   MoreHorizontal,
@@ -233,6 +235,12 @@ import {
   type GitStatusSegment,
   type WorkRootGitStatus,
 } from "./gitToolbar";
+import {
+  defaultLinkedServerId,
+  linkEndpointServer,
+  linkServerPassphrase,
+  reconnectServerTunnel,
+} from "./linkedServers";
 import { ActivityConsole } from "./ActivityConsole";
 import {
   createResourceRefreshCoordinator,
@@ -270,6 +278,10 @@ type WorkbenchSelection = {
   mainInstance: InstanceView | null;
   selectedInstance: InstanceView | null;
 };
+
+type ServerModalState =
+  | { mode: "add" }
+  | { mode: "auth"; server: ServerConnectionView };
 
 async function requestWorkRootActivation(
   workRootId: string,
@@ -323,6 +335,7 @@ export function App() {
   const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<string | null>(null);
+  const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -461,6 +474,37 @@ export function App() {
       }
     },
     [loadResources],
+  );
+
+  const applyServerConnection = useCallback(
+    (server: ServerConnectionView) => {
+      setServersView((current) => {
+        const servers = current?.servers ?? serverConnections;
+        const nextServers = servers.some((candidate) => candidate.id === server.id)
+          ? servers.map((candidate) => candidate.id === server.id ? server : candidate)
+          : [...servers, server];
+        return { servers: nextServers };
+      });
+      selectedServerIdRef.current = server.id;
+      setSelectedServerId(server.id);
+      setSelectedId(server.id);
+      void loadServers();
+      if (server.status === "connected") {
+        void loadResources("explicit");
+      }
+    },
+    [loadResources, loadServers, serverConnections],
+  );
+
+  const reconnectServer = useCallback(
+    (server: ServerConnectionView) => {
+      void reconnectServerTunnel(server.id)
+        .then(applyServerConnection)
+        .catch((nextError) => {
+          setError(nextError instanceof Error ? nextError.message : "server reconnect failed");
+        });
+    },
+    [applyServerConnection],
   );
 
   const entities = useMemo(
@@ -824,6 +868,9 @@ export function App() {
             selectedId={selectedId}
             selectedWorkRoot={workbenchSelection?.root ?? null}
             onOpenWorkRoot={handleWorkRootOpened}
+            onOpenAddServer={() => setServerModal({ mode: "add" })}
+            onOpenServerAuth={(server) => setServerModal({ mode: "auth", server })}
+            onReconnectServer={reconnectServer}
             onSelectServer={handleServerSelected}
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
@@ -838,6 +885,13 @@ export function App() {
                 setSelectedId(response.createdWorkRootId);
               }
               setGitWorktreeWorkspaceId(null);
+            }}
+          />
+          <LinkedServerModal
+            state={serverModal}
+            onClose={() => setServerModal(null)}
+            onLinked={(server) => {
+              applyServerConnection(server);
             }}
           />
         </aside>
@@ -1842,6 +1896,183 @@ function GitWorktreeAddModal({
   );
 }
 
+function LinkedServerModal({
+  state,
+  onClose,
+  onLinked,
+}: {
+  state: ServerModalState | null;
+  onClose: () => void;
+  onLinked: (server: ServerConnectionView) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [endpoint, setEndpoint] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+    setError(null);
+    setSubmitting(false);
+    setPassphrase("");
+    if (state.mode === "add") {
+      setLabel("");
+      setEndpoint("");
+    } else {
+      setLabel(state.server.label);
+      setEndpoint("");
+    }
+  }, [state]);
+
+  if (!state) {
+    return null;
+  }
+
+  const addMode = state.mode === "add";
+  const title = addMode ? "Add server" : `Authenticate ${state.server.label}`;
+  const submitDisabled =
+    submitting ||
+    (addMode && (label.trim().length === 0 || endpoint.trim().length === 0)) ||
+    (!addMode && passphrase.trim().length === 0);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (submitDisabled) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const passphraseValue = passphrase.trim();
+    const request = addMode
+      ? linkEndpointServer({
+          serverId: defaultLinkedServerId(label, endpoint),
+          label: label.trim(),
+          endpoint: endpoint.trim(),
+          ...(passphraseValue ? { passphrase: passphraseValue } : {}),
+        })
+      : linkServerPassphrase(state.server.id, passphraseValue);
+    void request
+      .then((server) => {
+        onLinked(server);
+        if (server.status === "connected") {
+          onClose();
+          return;
+        }
+        if (addMode && passphraseValue.length === 0) {
+          onClose();
+          return;
+        }
+        setError("Passphrase was not accepted; the server is saved and still requires authentication.");
+      })
+      .catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : "server link failed");
+      })
+      .finally(() => setSubmitting(false));
+  };
+
+  return (
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onClose();
+        }
+      }}
+    >
+      <Modal className="root-picker-modal linked-server-modal">
+        <Dialog aria-label={title} className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">
+              {title}
+            </Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="resource.action.server.modal.close"
+                icon={X}
+                label="Close"
+                onClick={onClose}
+              />
+            </div>
+          </div>
+          <form className="linked-server-form" onSubmit={submit}>
+            {addMode ? (
+              <>
+                <label className="linked-server-field">
+                  <span className="section-label">Name</span>
+                  <input
+                    className="root-picker-input"
+                    autoComplete="off"
+                    value={label}
+                    onChange={(event) => setLabel(event.target.value)}
+                    placeholder="Remote dev"
+                  />
+                </label>
+                <label className="linked-server-field">
+                  <span className="section-label">Endpoint</span>
+                  <input
+                    className="root-picker-input"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={endpoint}
+                    onChange={(event) => setEndpoint(event.target.value)}
+                    placeholder="http://127.0.0.1:49170"
+                  />
+                </label>
+                <div className="linked-server-hint">
+                  Use an endpoint already reachable from this host, including a
+                  loopback tunnel you created outside the dashboard.
+                </div>
+              </>
+            ) : (
+              <div className="linked-server-hint">
+                Enter the daemon-lifetime passphrase printed by the remote
+                dashboard daemon.
+              </div>
+            )}
+            <label className="linked-server-field">
+              <span className="section-label">Passphrase</span>
+              <input
+                className="root-picker-input"
+                autoComplete="off"
+                spellCheck={false}
+                type="password"
+                value={passphrase}
+                onChange={(event) => setPassphrase(event.target.value)}
+                placeholder={addMode ? "Optional" : "Required"}
+              />
+            </label>
+            {error ? <InlineNotice tone="error" title="Server link" detail={error} /> : null}
+            <div className="root-picker-footer-actions">
+              <button
+                className="action-button action-button-primary"
+                data-command-id="resource.action.server.link.submit"
+                disabled={submitDisabled}
+                type="submit"
+              >
+                {submitting ? "Connecting" : addMode ? "Connect" : "Authenticate"}
+              </button>
+              <button
+                className="action-button"
+                data-command-id="resource.action.server.modal.close"
+                type="button"
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
 function ResourceNavigation({
   resources,
   servers,
@@ -1851,6 +2082,9 @@ function ResourceNavigation({
   selectedId,
   selectedWorkRoot,
   onOpenWorkRoot,
+  onOpenAddServer,
+  onOpenServerAuth,
+  onReconnectServer,
   onSelectServer,
   onCommand,
   onOpenFile,
@@ -1863,6 +2097,9 @@ function ResourceNavigation({
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
   onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpenAddServer: () => void;
+  onOpenServerAuth: (server: ServerConnectionView) => void;
+  onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
   onCommand: DashboardCommandDispatcher;
   onOpenFile: (
@@ -1882,14 +2119,13 @@ function ResourceNavigation({
         <div className="server-nav-title">Servers</div>
         <ChromeIconButton
           commandId="resource.action.server.add"
-          disabled
           icon={Plus}
           label="Add server"
           onClick={() =>
             onCommand({
               commandId: "resource.action.server.add",
               payload: { type: "action", label: "Add server", entityId: "servers" },
-            })
+            }, { "resource.action.server.add": onOpenAddServer })
           }
         />
       </div>
@@ -1912,6 +2148,8 @@ function ResourceNavigation({
             resources={server.id === selectedServerId ? resources : null}
             onCommand={onCommand}
             onOpenWorkRoot={onOpenWorkRoot}
+            onOpenServerAuth={onOpenServerAuth}
+            onReconnectServer={onReconnectServer}
             onSelectServer={onSelectServer}
           />
         ))}
@@ -1942,6 +2180,8 @@ function ServerRows({
   resources,
   onCommand,
   onOpenWorkRoot,
+  onOpenServerAuth,
+  onReconnectServer,
   onSelectServer,
 }: {
   server: ServerConnectionView;
@@ -1950,8 +2190,11 @@ function ServerRows({
   resources: DashboardResourcesView | null;
   onCommand: DashboardCommandDispatcher;
   onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpenServerAuth: (server: ServerConnectionView) => void;
+  onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
 }) {
+  const actions = server.actions.length > 0 ? server.actions : [];
   return (
     <div className="server-group">
       <div
@@ -1976,19 +2219,23 @@ function ServerRows({
           </span>
         </button>
         <span className="server-row-actions">
-          <ChromeIconButton
-            className="server-row-action"
-            commandId="dashboard.refresh"
-            icon={RefreshCw}
-            label={`Refresh ${server.label}`}
-            onClick={() => onCommand(buildDashboardRefreshCommand())}
-          />
-          <OpenWorkRootControl
-            variant="icon"
-            disabled={server.id !== "server-local"}
-            onOpened={onOpenWorkRoot}
-            onCommand={onCommand}
-          />
+          {actions.map((action) => (
+            <ServerActionButton
+              key={action.id}
+              action={action}
+              server={server}
+              onCommand={onCommand}
+              onOpenServerAuth={onOpenServerAuth}
+              onReconnectServer={onReconnectServer}
+            />
+          ))}
+          {server.actions.some((action) => action.id === "openRoot" && action.enabled) ? (
+            <OpenWorkRootControl
+              variant="icon"
+              onOpened={onOpenWorkRoot}
+              onCommand={onCommand}
+            />
+          ) : null}
         </span>
       </div>
       {selected && resources ? (
@@ -2005,6 +2252,79 @@ function ServerRows({
       ) : null}
     </div>
   );
+}
+
+function ServerActionButton({
+  action,
+  server,
+  onCommand,
+  onOpenServerAuth,
+  onReconnectServer,
+}: {
+  action: ActionHint;
+  server: ServerConnectionView;
+  onCommand: DashboardCommandDispatcher;
+  onOpenServerAuth: (server: ServerConnectionView) => void;
+  onReconnectServer: (server: ServerConnectionView) => void;
+}) {
+  if (action.id === "openRoot") {
+    return null;
+  }
+
+  const commandId: DashboardCommand["commandId"] = `resource.action.server.${action.id}`;
+  if (action.id === "refresh") {
+    return (
+      <ChromeIconButton
+        className="server-row-action"
+        commandId={commandId}
+        disabled={!action.enabled}
+        icon={RefreshCw}
+        label={action.label}
+        onClick={() =>
+          onCommand(
+            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            { [commandId]: () => onCommand(buildDashboardRefreshCommand()) },
+          )
+        }
+      />
+    );
+  }
+  if (action.id === "enterPassphrase") {
+    return (
+      <ChromeIconButton
+        className="server-row-action"
+        commandId={commandId}
+        disabled={!action.enabled}
+        icon={KeyRound}
+        label={action.label}
+        onClick={() =>
+          onCommand(
+            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            { [commandId]: () => onOpenServerAuth(server) },
+          )
+        }
+      />
+    );
+  }
+  if (action.id === "reconnectTunnel") {
+    return (
+      <ChromeIconButton
+        className="server-row-action"
+        commandId={commandId}
+        disabled={!action.enabled}
+        icon={PlugZap}
+        label={action.label}
+        onClick={() =>
+          onCommand(
+            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            { [commandId]: () => onReconnectServer(server) },
+          )
+        }
+      />
+    );
+  }
+
+  return null;
 }
 
 function WorkRootFileExplorer({
