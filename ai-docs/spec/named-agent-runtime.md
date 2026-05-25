@@ -117,10 +117,14 @@ Generated subquery agents are marked ephemeral and suppress delegate orientation
 because their system prompt is self-contained. Callers collect answers with
 `agents.result(name: <subquery-key>, timeout_seconds: 600)` and can use
 `agents.status`, `agents.tail`, or `agents.cancel` for diagnostics or recovery.
-When launched from an actor-bound lead MCP session, each subquery receives its
-own reader child actor setup instruction without receiving the lead bootstrap
-method. Successful result consumption erases the ephemeral agent and marks the
-reader actor inactive.
+The public `subquery` MCP schema omits `root`, matching the actor-owned
+`agents.*` schema invariant. When launched rootlessly from an actor-bound lead
+MCP session, each subquery runs in the current actor scope and receives its own
+reader child actor setup instruction without receiving the lead bootstrap
+method. Hidden explicit-root compatibility launches remain in the global
+compatibility namespace and do not receive reader child actor setup. Successful
+result consumption erases the ephemeral agent and marks the reader actor
+inactive.
 
 ## Diagnostics, Tail, And Debug Streams {#260505-agent-diagnostics-tail-debug}
 

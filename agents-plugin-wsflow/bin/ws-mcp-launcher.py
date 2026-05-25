@@ -439,7 +439,6 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
     candidates = [
         tool_dir / "dist" / asset,
         source_root / "agents-plugin" / ".runtime" / platform_name / binary.name,
-        source_root / "agents-plugin" / ".runtime" / platform_name / ("ws-mcp.exe" if os_name == "windows" else "ws-mcp"),
     ]
     for candidate in candidates:
         if candidate.is_file():

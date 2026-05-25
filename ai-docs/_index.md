@@ -193,7 +193,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-No ready ticket is currently selected.
+No ready ticket is selected.
 
 ## Session Notes
 

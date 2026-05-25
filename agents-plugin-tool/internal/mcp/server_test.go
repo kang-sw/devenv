@@ -58,16 +58,16 @@ func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testi
 	}
 }
 
-func TestRawPublicAgentToolSchemasOmitRoot(t *testing.T) {
-	agentTools := 0
+func TestRawPublicActorOwnedToolSchemasOmitRoot(t *testing.T) {
+	actorOwnedTools := 0
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
 		schema, _ := tool["inputSchema"].(map[string]any)
 		properties, _ := schema["properties"].(map[string]any)
-		if strings.HasPrefix(name, "agents.") {
-			agentTools++
+		if strings.HasPrefix(name, "agents.") || name == "subquery" {
+			actorOwnedTools++
 			if _, ok := properties["root"]; ok {
-				t.Fatalf("raw public agent tool %s advertises root", name)
+				t.Fatalf("raw public actor-owned tool %s advertises root", name)
 			}
 			continue
 		}
@@ -77,8 +77,8 @@ func TestRawPublicAgentToolSchemasOmitRoot(t *testing.T) {
 			}
 		}
 	}
-	if agentTools == 0 {
-		t.Fatal("raw tools list has no public agent tools")
+	if actorOwnedTools == 0 {
+		t.Fatal("raw tools list has no public actor-owned tools")
 	}
 }
 
@@ -176,6 +176,10 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(byID["2"], "subquery") {
 		t.Fatalf("tools/list missing subquery: %s", byID["2"])
+	}
+	subqueryProperties := toolPropertiesByName(t, byID["2"], "subquery")
+	if _, ok := subqueryProperties["root"]; ok {
+		t.Fatalf("subquery publicly advertises root in schema: %s", byID["2"])
 	}
 	if !strings.Contains(byID["2"], "path.generate") {
 		t.Fatalf("tools/list missing path.generate: %s", byID["2"])
@@ -2370,5 +2374,45 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	}
 	if !strings.Contains(globalAfterErase, "model: global-model") {
 		t.Fatalf("actor erase removed or shadowed explicit global agent:\n%s", globalAfterErase)
+	}
+}
+
+func TestSubqueryHiddenExplicitRootUsesCompatibilityScopeWithoutChildActor(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260525-bug-subquery-root")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	call := func(id int, payload string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := server.ServeStdio(context.Background(), strings.NewReader(payload+"\n"), &out); err != nil {
+			t.Fatalf("ServeStdio id %d returned error: %v", id, err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		line := byID[fmt.Sprint(id)]
+		if toolIsError(t, line) {
+			t.Fatalf("tool id %d returned error: %s", id, line)
+		}
+		return toolText(t, line)
+	}
+
+	call(1, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`, root))
+	server.rootMu.RLock()
+	boundRoot := server.sessionRoot
+	server.rootMu.RUnlock()
+	rootlessActorID := server.actorScopeForAgentTool(boundRoot, map[string]any{})
+	if rootlessActorID == "" {
+		t.Fatal("rootless subquery did not resolve to the current actor scope")
+	}
+	explicitRootActorID := server.actorScopeForAgentTool(boundRoot, map[string]any{"root": boundRoot})
+	if explicitRootActorID != "" {
+		t.Fatalf("hidden explicit-root subquery resolved to actor scope %q", explicitRootActorID)
+	}
+	child, err := server.childActorSetupForSubquery(context.Background(), filepath.Join(root, "does-not-need-to-exist"), explicitRootActorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child != (childActorSetup{}) {
+		t.Fatalf("explicit-root compatibility subquery received child actor setup: %+v", child)
 	}
 }
