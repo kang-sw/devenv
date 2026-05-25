@@ -6,6 +6,10 @@ async fn main() -> anyhow::Result<()> {
     // CONTRACT: `ws-dashboard serve` is the public daemon command; the binary
     // stays a thin adapter over the testable daemon library.
     let cli = Cli::parse();
+    if cli.wants_remote_guide() {
+        print!("{}", Cli::remote_deployment_guide());
+        return Ok(());
+    }
     logging::init(cli.log_filter())?;
     server::run(cli.into_serve_config()?).await
 }

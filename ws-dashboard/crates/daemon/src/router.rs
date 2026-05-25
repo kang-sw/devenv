@@ -1,33 +1,67 @@
 use std::collections::HashMap;
 use std::path::{Component, PathBuf};
+use std::sync::Arc;
 
-use axum::extract::{Path as AxumPath, Query, Request, State};
-use axum::http::{header, HeaderMap, StatusCode};
-use axum::middleware::{from_fn_with_state, Next};
-use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
 use axum::Router;
+use axum::extract::{Path as AxumPath, Query, Request, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{Next, from_fn_with_state};
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{delete, get, post};
 use tokio::fs;
+use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
-use crate::events::instance_events;
-use crate::resources::dashboard_resources;
-use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
-use crate::terminal::{
-    close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_resize, terminal_websocket, TerminalRegistry,
+use crate::document_translation::{
+    DocumentTranslationService, translate_document, translation_providers,
 };
-use crate::work_root_activity::{work_root_activity, WorkRootActivityProjector};
-use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
+use crate::events::instance_events;
+use crate::git_toolbar::{
+    git_branches, git_create_branch, git_fetch, git_pull_ff_only, git_push, git_status,
+    git_switch_branch,
+};
+use crate::git_worktree::{
+    git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
+};
+use crate::persistent_state::DashboardStateStore;
+use crate::resources::dashboard_resources;
+use crate::root_picker::{
+    create_empty_directory, list_root_picker, open_work_root, pin_root_picker_directory,
+    remove_workspace, set_work_root_activation, unpin_root_picker_directory,
+};
+use crate::servers::{
+    LinkedServerSessions, LinkedServerTunnels, dashboard_server_resources, dashboard_servers,
+    link_dashboard_server, link_endpoint_server, reconnect_dashboard_server_tunnel,
+    remote_link_auth, start_ssh_dashboard_server,
+};
+use crate::terminal::{
+    TerminalRegistry, close_terminal, create_terminal, list_terminals, terminal_input,
+    terminal_output, terminal_resize, terminal_websocket,
+};
+use crate::work_root_activity::{
+    WorkRootActivityProjector, work_root_activity, work_root_activity_events,
+    work_root_activity_transcript,
+};
+use crate::work_root_files::{
+    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots, document_events, list_work_root_files,
+    read_work_root_file, write_work_root_file,
+};
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: ServeConfig,
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
+    pub dashboard_state: DashboardStateStore,
+    pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
+    pub document_events: DocumentEventHub,
+    pub document_write_locks: DocumentWriteLocks,
+    pub linked_server_sessions: LinkedServerSessions,
+    pub linked_server_tunnels: LinkedServerTunnels,
+    pub registry_persist_lock: Arc<Mutex<()>>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -37,6 +71,32 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route("/api/dashboard/servers", get(dashboard_servers))
+        .route(
+            "/api/dashboard/servers/ssh/start",
+            post(start_ssh_dashboard_server),
+        )
+        .route("/api/dashboard/servers/link", post(link_endpoint_server))
+        .route(
+            "/api/dashboard/servers/{server_id}/resources",
+            get(dashboard_server_resources),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/link-auth",
+            post(link_dashboard_server),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/tunnel/reconnect",
+            post(reconnect_dashboard_server_tunnel),
+        )
+        .route(
+            "/api/dashboard/document-translation/providers",
+            get(translation_providers),
+        )
+        .route(
+            "/api/dashboard/document-translation/translate",
+            post(translate_document),
+        )
         .route(
             "/api/dashboard/instance-events/{stream_id}",
             get(instance_events),
@@ -46,7 +106,55 @@ pub fn build_router(state: AppState) -> Router {
             "/api/dashboard/root-picker/directories",
             post(create_empty_directory),
         )
+        .route(
+            "/api/dashboard/root-picker/pins",
+            post(pin_root_picker_directory).delete(unpin_root_picker_directory),
+        )
         .route("/api/dashboard/work-roots/open", post(open_work_root))
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}",
+            delete(remove_workspace),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options",
+            get(git_worktree_add_options),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview",
+            post(git_worktree_add_preview),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add",
+            post(git_worktree_add_submit),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activation",
+            post(set_work_root_activation),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/status",
+            get(git_status),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/branches",
+            get(git_branches).post(git_create_branch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/switch-branch",
+            post(git_switch_branch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/fetch",
+            post(git_fetch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/push",
+            post(git_push),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/pull-ff-only",
+            post(git_pull_ff_only),
+        )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/terminals",
             get(list_terminals).post(create_terminal),
@@ -80,8 +188,24 @@ pub fn build_router(state: AppState) -> Router {
             get(read_work_root_file),
         )
         .route(
+            "/api/dashboard/work-roots/{work_root_id}/files/write",
+            post(write_work_root_file),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/documents/events",
+            get(document_events),
+        )
+        .route(
             "/api/dashboard/work-roots/{work_root_id}/activity",
             get(work_root_activity),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/items/{activity_id}/transcript",
+            get(work_root_activity_transcript),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/events",
+            get(work_root_activity_events),
         )
         .route("/assets/{*asset_path}", get(static_asset))
         .route("/servers", get(index))
@@ -92,6 +216,7 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/pair", get(pair))
+        .route("/api/dashboard/link-auth", post(remote_link_auth))
         .merge(protected)
         .with_state(state)
 }

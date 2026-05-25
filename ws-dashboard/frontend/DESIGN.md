@@ -26,13 +26,43 @@ Components should prefer purpose-based names over raw color names.
 - `--ws-color-panel-subtle`: recessed navigation, viewer, or reserved surface.
 - `--ws-color-panel-hover`: hover affordance on rows and neutral controls.
 - `--ws-color-panel-selected`: selected row or active scope background.
+- `--ws-color-surface-app`: app canvas behind all context regions.
+- `--ws-color-surface-region-nav`: left navigation region surface.
+- `--ws-color-surface-region-workbench`: workRoot workbench region surface.
+- `--ws-color-surface-nav-header`: server/navigation top header surface.
+- `--ws-color-surface-nav-body`: workspace navigation section surface.
+- `--ws-color-surface-files`: file explorer body surface.
+- `--ws-color-surface-files-header`: file explorer header surface.
+- `--ws-color-surface-workbench-topbar`: selected workRoot topbar surface.
+- `--ws-color-surface-context`: nested context surface such as a nav section
+  or Dockview group.
+- `--ws-color-surface-context-raised`: context chrome such as toolbars and tab
+  bars.
+- `--ws-color-surface-pane`: workbench pane shell surface.
+- `--ws-color-surface-pane-body`: pane body surface below pane chrome.
+- `--ws-color-surface-editor-chrome`: editor/document header or ribbon
+  surface.
+- `--ws-color-surface-editor-body`: editor/document content body surface.
+- `--ws-color-surface-document-chrome`: document/editor ribbon or header
+  chrome inside a pane.
+- `--ws-color-split-gutter`: structural gutter between large regions or split
+  groups.
 
 ### Borders and separators
 
 - `--ws-color-border-subtle`: low-emphasis separators and grid lines.
 - `--ws-color-border`: default component boundary.
 - `--ws-color-border-strong`: interactive boundary or higher-emphasis rule.
+- `--ws-color-divider-local`: muted divider inside one context unit.
+- `--ws-color-divider-context`: boundary between sibling context units.
+- `--ws-color-divider-structural`: boundary between large application regions.
+- `--ws-color-split-gutter-highlight`: hover or visible edge for resizable
+  split gutters.
 - `--ws-border-width-hairline`: the default `1px` separator width.
+- `--ws-border-width-structural`: hairline width used for application region
+  boundaries.
+- `--ws-split-gutter-size`: subtle gutter size for major region or Dockview
+  split separation.
 - `--ws-radius-square`: the default `0` radius. New dashboard UI should stay
   square unless a component has a specific functional need.
 
@@ -75,6 +105,31 @@ hairlines and alignment to separate regions.
 
 ## Component rules
 
+New UI should be composed from these dashboard-local building blocks before it
+adds feature-specific styling. The block names are vocabulary, not a separate
+package boundary; keep them small enough to coexist with feature classes.
+
+- **Frame**: the full viewport workbench shell. It owns global background and
+  region splits, not feature status.
+- **Panel**: a persistent top-level region such as navigation, workbench, or
+  reserved viewer. Panels separate with hairlines and never float as cards.
+- **Context Surface**: a nested working unit inside a panel, such as a
+  navigation section, Dockview group, editor/document shell, or pane-local
+  ribbon/body set. Context boundaries are stronger than local dividers but
+  quieter than selected/focus states.
+- **Pane**: a workbench attachment body. Pane identity belongs to Dockview tabs;
+  pane-local headers exist only when the content needs controls or metadata.
+- **Toolbar**: compact command and metadata row. Toolbars keep stable height,
+  clip secondary metadata, and reserve the right edge for actions.
+- **Row**: the default selectable list unit. Rows use a selected background plus
+  a left rail, with indentation for hierarchy.
+- **Chip/Badge**: bounded inline metadata. Chips are neutral; badges carry
+  state through border color and a small state dot.
+- **State Surface**: empty, loading, stale, notice, and error messages. State
+  surfaces use a left rail and muted fill rather than full-panel alerts.
+- **Document Surface**: scrollable reading/editing body. Raw text and transcript
+  details use a darker code surface and the mono font token.
+
 ### Buttons
 
 Buttons are square, compact, and explicit. Neutral buttons use panel surfaces
@@ -87,6 +142,22 @@ and use disabled text, not reduced opacity that harms contrast.
 Panel headers are functional toolbars. Keep them short, left-align title and
 state, and reserve the right edge for actions. Headers use a single bottom
 hairline instead of shadows.
+
+### Context hierarchy
+
+Use subtle surface tone and divider roles before adding stronger borders.
+Large application boundaries such as `left nav | workRoot workbench` and
+Dockview split groups use structural divider or restrained gutter tokens, not
+wide dark gaps. Sibling context units such as nav sections, workRoot topbar,
+Dockview groups, and document/editor shells use context surfaces and context
+dividers. Internal separators such as tabbar-to-body, ribbon-to-body, and
+section-header lines use local dividers so they do not compete with outer
+region boundaries.
+
+Selection, focus, and hover treatment stay separate from structural hierarchy:
+selected rows and active tabs may use state rails, selected backgrounds, and
+text color; focus-visible controls keep the focus ring; quiet icon buttons
+reveal border/glass treatment only on hover, focus, or active states.
 
 ### Navigation rows
 
@@ -112,6 +183,18 @@ Future terminal, agent, editor, viewer, diagnostics, and task split groups
 should reuse row density, selected rails, hairline separators, and semantic state
 tokens. Split-group UI should not introduce rounded cards, gradient panels, or
 heavy drop shadows.
+
+### Activity and document panes
+
+Activity ribbons are dense horizontal lists, not cards. Selected items use the
+same row selection language as navigation. Transcript blocks are document/code
+surfaces with tone rails; terminal-like blocks use the code surface token rather
+than one-off literal colors.
+
+Read-only and future markdown/document panes should use document surfaces for
+the body, toolbar rules for mode/action controls, and chips for source metadata.
+Markdown rendering, translation overlays, and edit mode may add content-specific
+rules later, but should not redefine pane chrome.
 
 ## Constraints
 

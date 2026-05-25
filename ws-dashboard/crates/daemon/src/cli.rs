@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::config::ServeConfig;
 
@@ -6,10 +6,13 @@ use crate::config::ServeConfig;
 #[command(name = "ws-dashboard")]
 pub struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 
     #[arg(long, default_value = "info")]
     log_filter: String,
+
+    #[arg(long, help = "Print the SSH-tunneled remote deployment guide and exit")]
+    remote_guide: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -55,9 +58,112 @@ impl Cli {
         &self.log_filter
     }
 
+    pub fn wants_remote_guide(&self) -> bool {
+        self.remote_guide
+    }
+
+    pub fn remote_deployment_guide() -> &'static str {
+        REMOTE_DEPLOYMENT_GUIDE
+    }
+
     pub fn into_serve_config(self) -> anyhow::Result<ServeConfig> {
         match self.command {
-            Command::Serve(args) => ServeConfig::from_args(args),
+            Some(Command::Serve(args)) => ServeConfig::from_args(args),
+            None => {
+                let mut command = Self::command();
+                command.print_help()?;
+                eprintln!();
+                anyhow::bail!("missing ws-dashboard command")
+            }
         }
+    }
+}
+
+const REMOTE_DEPLOYMENT_GUIDE: &str = r#"ws-dashboard remote deployment guide
+
+Purpose:
+  Run the browser against the local dashboard daemon while the local daemon
+  acts as a gateway to a dashboard daemon on a remote host.
+
+Model:
+  browser -> local ws-dashboard daemon -> SSH tunnel -> remote ws-dashboard daemon
+
+Remote daemon:
+  - Prefer binding the remote daemon to remote loopback, for example:
+      ws-dashboard serve --bind-mode tunnel --host 127.0.0.1 --port 0
+  - Do not expose the remote daemon on a public interface for the MVP path.
+  - The remote daemon can outlive the local daemon. Stopping the local gateway
+    should not be treated as a request to stop the remote process.
+
+SSH tunnel:
+  - Create a local forward from the local dashboard host to the remote
+    loopback endpoint printed by the remote daemon.
+  - Keep SSH as the deploy/start/tunnel transport. Dashboard owner
+    authentication remains separate from SSH authentication.
+
+Passphrase and credentials:
+  - The remote daemon may print a daemon-lifetime passphrase or pairing secret.
+  - The user records that passphrase outside ws-dashboard and enters it in the
+    local dashboard UI when linking or reconnecting.
+  - The local daemon may hold a remote link token in memory after successful
+    link authentication.
+  - Credential persistence is disabled in the MVP.
+  - Passphrases, link tokens, and active tunnel process details are not
+    persisted in the MVP.
+
+Reconnect:
+  - Persist only non-secret linked-server metadata such as display name, SSH
+    target, endpoint hints, tunnel configuration, last-seen time, and bounded
+    capabilities.
+  - After local daemon restart, recreate the SSH tunnel from persisted metadata
+    when possible, then ask the user to re-enter the passphrase if
+    authentication is required.
+
+Troubleshooting checks:
+  - Verify SSH connectivity to the remote host before starting the remote
+    daemon.
+  - Verify the remote daemon is reachable through a local-forwarded loopback
+    URL before entering the passphrase.
+  - Treat wrong passphrase, stale endpoint, tunnel failure, incompatible
+    capability, and non-dashboard HTTP responses as distinct failures.
+
+This guide is documentation for humans and AI agents. It is not a stable
+machine protocol, does not persist credentials, and does not start or expose a
+remote daemon by itself.
+"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn remote_guide_flag_is_discoverable_from_help() {
+        let mut command = Cli::command();
+        let mut help = Vec::new();
+        command.write_long_help(&mut help).expect("write help");
+        let help = String::from_utf8(help).expect("utf8 help");
+
+        assert!(help.contains("--remote-guide"));
+        assert!(help.contains("SSH-tunneled remote deployment guide"));
+    }
+
+    #[test]
+    fn remote_guide_flag_parses_without_subcommand() {
+        let cli = Cli::parse_from(["ws-dashboard", "--remote-guide"]);
+
+        assert!(cli.wants_remote_guide());
+    }
+
+    #[test]
+    fn remote_deployment_guide_records_remote_boundaries() {
+        let guide = Cli::remote_deployment_guide();
+
+        assert!(guide.contains("browser -> local ws-dashboard daemon"));
+        assert!(guide.contains("SSH tunnel"));
+        assert!(guide.contains("remote loopback"));
+        assert!(guide.contains("daemon-lifetime passphrase"));
+        assert!(guide.contains("Credential persistence is disabled"));
+        assert!(guide.contains("not a stable\nmachine protocol"));
     }
 }

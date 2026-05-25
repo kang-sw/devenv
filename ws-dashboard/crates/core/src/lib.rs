@@ -5,7 +5,9 @@ pub mod resources;
 pub mod view_model;
 
 pub use activity::{
-    NamedAgentActivityView, NamedAgentCallActivityView, WorkRootActivitySummary,
+    ActivityConsoleEvent, ActivityFeed, ActivityItem, ActivitySnapshotInvalidationReason,
+    ActivitySourceDisplay, ActivityTranscript, ActivityTranscriptAvailability, ActivityUpdateMode,
+    NamedAgentActivityView, NamedAgentCallActivityView, TranscriptBlock, WorkRootActivitySummary,
     WorkRootActivityView,
 };
 pub use events::{
@@ -14,9 +16,10 @@ pub use events::{
 };
 pub use ids::{InstanceId, OpaqueId, ServerId, WorkRootId, WorkspaceId};
 pub use resources::{
-    InstanceKind, InstanceRole, InteractionMode, ResourcePath, WorkRootKind, WorkRootStatus,
+    InstanceKind, InstanceRole, InteractionMode, ResourcePath, ServerConnectionStatus, ServerKind,
+    WorkRootActivation, WorkRootAvailability, WorkRootKind, WorkRootStatus,
 };
 pub use view_model::{
-    ActionHint, DashboardResourcesView, InstanceView, ServerView, ViewState, WorkRootView,
-    WorkspaceView,
+    ActionHint, DashboardResourcesView, DashboardServersView, InstanceView,
+    ServerConnectionView, ServerView, ViewState, WorkRootView, WorkspaceView,
 };

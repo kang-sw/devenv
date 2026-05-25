@@ -13,9 +13,12 @@ authentication, and consumes ws runtime state through daemon-owned view models.
 
 The dashboard daemon starts through the `ws-dashboard serve` command as a
 Rust/Axum HTTP server with explicit serving configuration, structured startup
-logging, graceful shutdown, and a minimal health surface. The default bind
-target is `127.0.0.1`. The daemon does not treat loopback access as
-authorization.
+logging, bounded graceful shutdown, and a minimal health surface. The default
+bind target is `127.0.0.1`. The daemon does not treat loopback access as
+authorization. After the outer server process receives its shutdown signal,
+long-lived browser connections such as idle sockets, SSE streams, or WebSockets
+may receive a short drain window, but they must not keep the local development
+server alive indefinitely.
 
 On startup, the daemon creates an in-memory high-entropy one-time pairing token
 with an explicit expiry policy and exposes the corresponding pairing URL to the
@@ -52,6 +55,14 @@ unless the caller explicitly selects public mode. Public mode can accept a
 non-loopback host only while owner authentication is enabled; bind-mode
 acceptance does not relax browser cookie auth, bearer auth, Host/Origin checks,
 or WebSocket pre-upgrade auth.
+
+The `ws-dashboard --remote-guide` CLI surface prints an AI-agent-readable
+remote deployment guide and exits without starting the daemon. The guide
+describes the local-dashboard-as-gateway model, remote loopback serving,
+SSH tunneling, daemon-lifetime passphrase handling, non-persisted credentials,
+reconnect expectations, and safe troubleshooting checks. The guide is human and
+agent documentation, not a machine protocol, and does not grant authentication
+or start remote processes by itself. {#260525-ws-dashboard-remote-deployment-guide}
 
 The initial UI route serves a minimal placeholder surface behind owner
 authentication. Health output is the exact minimal body `ok\n`; host paths,
@@ -96,9 +107,221 @@ core workRoot API shape while preserving enough metadata for the UI to
 distinguish their repository role and lifecycle affordances.
 
 The API shape preserves the full hierarchy even when the browser later renders
-singleton `workspace -> workRoot -> mainInstance` chains as compact rows.
+a singleton `workspace -> workRoot` resource tree as one compact workRoot row.
 Authenticated callers may observe compactability hints, but compaction is a
-presentation policy and not URL identity.
+presentation policy and not URL identity; the compact row selects the concrete
+workRoot id and does not require a main instance.
+
+## Linked Server Registry And Gateway Skeleton {#260525-ws-dashboard-linked-server-registry-gateway-skeleton}
+
+The local dashboard daemon exposes servers as first-tier owner-visible objects
+without requiring the browser to connect directly to remote hosts. The local
+daemon always appears as `server-local`, and remembered linked servers appear
+beside it with bounded state such as `connected`, `authRequired`,
+`unreachable`, `starting`, `staleEndpoint`, or `tunnelRequired`.
+
+The server list is separate from the selected server's resource tree. This lets
+existing callers keep consuming the single-server `DashboardResourcesView`
+shape while new callers can render a multi-server navigation shell from a
+server list plus the selected server resources.
+
+Authenticated callers can request resources through
+`/api/dashboard/servers/{serverId}/resources`. The local server id returns the
+same live resource view as the existing local resources route. Linked server
+ids are recognized from daemon-owned persisted metadata, but until link-auth
+and transport forwarding are implemented they return bounded refusal errors
+instead of leaking endpoint, SSH target, passphrase, host path, or cache path
+details. Unknown server ids return a bounded not-found response.
+
+## Remote Link Authentication Handshake {#260525-ws-dashboard-remote-link-auth-handshake}
+
+Remote dashboard daemons expose a link-auth handshake for local gateway
+daemons. The remote daemon owns a daemon-lifetime link passphrase that is
+separate from the one-time browser pairing URL and exposes it through startup
+info/output for the owner or an owner-directed AI agent to record. A caller
+that knows the passphrase can exchange it for a bearer token suitable for
+daemon-to-daemon gateway requests. Wrong passphrases fail without consuming
+browser pairing state or installing browser cookies.
+
+The local gateway accepts a passphrase for a remembered linked server through
+an owner-authenticated local route. It forwards the passphrase to the linked
+server endpoint, stores the returned bearer token only in memory, and updates
+the linked server view to `connected` for the local daemon lifetime. Linked
+server credentials are not persisted. If the local daemon restarts, the server
+can remain remembered but returns to an auth-required or tunnel-required state
+until the owner re-enters the passphrase.
+
+Once a linked server has a memory-only token, the local gateway may forward
+bounded read-only resource requests to the remote daemon using bearer auth while
+preserving the same server-scoped route shape. Link-auth failures distinguish
+unknown server, missing endpoint, wrong passphrase, upstream rejection, and
+unreachable endpoint without exposing SSH targets, endpoint hints, passphrases,
+bearer tokens, host paths, or cache paths.
+
+## SSH Tunnel Reconnect For Linked Servers {#260525-ws-dashboard-ssh-tunnel-reconnect}
+
+The local gateway may remember non-secret SSH remote metadata for a linked
+dashboard server: a display label, opaque server id, SSH target, remote
+loopback dashboard endpoint, and the most recent local forwarded endpoint.
+Passphrases, bearer tokens, and active tunnel process handles remain
+daemon-memory-only.
+
+An authenticated owner can ask the local gateway to start or reconnect an SSH
+tunnel for a linked server. The gateway creates a local loopback forward to the
+remembered remote loopback endpoint, updates the linked server's local endpoint
+hint, and returns only the bounded `ServerConnectionView` state. Responses do
+not expose SSH targets, local forwarded endpoint ports, remote endpoint hints,
+passphrases, bearer tokens, host paths, or cache paths.
+
+For SSH start, the owner may provide a remote startup command that prints the
+remote daemon startup output and then exits while the remote daemon remains
+alive. The local gateway captures bounded startup output, derives the remote
+loopback endpoint from the printed pairing URL, captures the daemon-lifetime
+link passphrase only in memory, creates the SSH forward, and attempts immediate
+link-auth through the forwarded endpoint. A failed automatic link-auth attempt
+does not persist credentials; the linked server remains visible as
+`authRequired`.
+
+After local daemon restart, remembered linked servers with SSH and remote
+endpoint metadata are visible as `tunnelRequired` until a tunnel is recreated.
+Once the tunnel exists but no memory-only link token is present, the linked
+server becomes `authRequired` and the owner must re-enter the remote
+daemon-lifetime passphrase through the link-auth route.
+
+## Endpoint-First Linked Server Add {#260525-ws-dashboard-endpoint-linked-server-add}
+
+The local dashboard lets an authenticated owner register a linked dashboard
+server from an owner-provided endpoint without asking the dashboard to manage
+SSH. The endpoint may be a user-managed loopback tunnel, VPN/private network
+route, port forward, or other reachable dashboard daemon URL. The browser
+submits the endpoint and optional daemon-lifetime link passphrase to the local
+daemon; the browser does not call the remote endpoint directly.
+
+The local daemon normalizes and validates the endpoint, rejects unsupported
+schemes, probes enough to distinguish unreachable or incompatible targets, and
+persists only non-secret linked-server metadata such as opaque server id,
+display label, kind, and endpoint hint. If a passphrase is supplied, the local
+daemon exchanges it with the remote `/api/dashboard/link-auth` endpoint and
+stores the returned bearer token only in memory. Without a memory-only token,
+the server remains visible in a bounded auth-required or unreachable state.
+
+The left navigation's add-server affordance opens a compact endpoint-first
+modal. SSH-managed start or reconnect remains an advanced or agent-operated
+path and is not required by the default add-server flow.
+
+## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
+
+The dashboard exposes known workspace and workRoot membership from a
+daemon-local durable registry instead of treating only currently opened
+workRoots as the visible resource set. A known workRoot remains visible until a
+future explicit forget/remove policy removes it, even when it is currently
+missing, inaccessible, moved, or inactive.
+
+> [!note] Planned 🚧 {#260524-dashboard-workspace-root-prune-policy}
+> The registry will distinguish owner-managed workspaces from automatically
+> detected workRoots. A workspace has a root workRoot anchor, such as an
+> owner-added directory or Git root, and may contain discovered child workRoots
+> such as linked Git worktrees. If the root workRoot becomes unavailable, the
+> workspace remains visible in a disabled or recovery-needed state while any
+> child workRoot is still active, where active means activation permits
+> targeting and availability is currently usable. This gives callers room to
+> reconnect the root or derive a new workspace from a dangling child. Automatic
+> pruning removes a workspace only when it has no active workRoots. Explicit
+> forget/remove UI remains a separate owner-driven cleanup policy.
+
+WorkRoot view-models separate live availability from user-controlled
+activation. `availability` describes the daemon's current filesystem/Git
+assessment of whether the workRoot can be used now, with initial public values
+for available, missing, moved, inaccessible, and unknown states. `activation`
+describes whether the dashboard is currently allowed to target that workRoot
+for file, Activity, and terminal APIs, with `online` and `offline` values.
+A reachable workRoot with `activation: offline` remains a visible row and is
+not the same state as a missing or inaccessible workRoot.
+
+Existing opened-workRoot persistence migrates into the registry as known
+membership with `activation: online`, preserving current restart behavior.
+Newly discovered sibling workRoots may enter the same registry with
+`activation: offline` while remaining visible in the resource tree.
+
+Resource views, activation actions, and protected route gates derive activation
+from the same registered workRoot id regardless of whether the visible row is
+reached as an explicitly opened root or as an automatically discovered linked
+workRoot. If one physical workRoot is visible through both paths, callers see
+one activation state and the same online/offline behavior across navigation,
+Activity, file, and terminal surfaces.
+{#260524-dashboard-workroot-registry-wide-activation-lookup}
+
+## Git Worktree Creation {#260524-ws-dashboard-git-worktree-creation}
+
+The dashboard lets an authenticated owner add a linked Git worktree from a
+workspace-scoped overflow menu. The workspace remove affordance appears
+behind the same overflow menu, preserving its dashboard-only confirmation and
+registry behavior while making room for non-destructive workspace operations.
+
+The add-worktree flow is a Git operation, not a generic filesystem picker. A
+modal collects a worktree name, branch resolution, and target path resolution.
+Automatic branch naming derives a branch-compatible candidate from the
+worktree name, then the daemon previews whether submit will create a new branch,
+check out an existing branch, or block the request. Automatic path naming
+targets the workspace Git root's `.git/ws-worktree/<branch-compatible-name>`
+convention. Custom path selection may reuse the folder picker in target-path
+or parent-directory mode without adding broad file-manager operations.
+
+Submit revalidates the preview, runs the corresponding `git worktree add`
+operation, refreshes canonical dashboard resources, activates the created
+workRoot by default, and selects or focuses the created linked workRoot when
+the daemon can identify it. Checked-out branches, invalid names, unavailable
+Git roots, and path conflicts produce bounded errors without exposing private
+host paths in command payloads, logs, or browser-visible diagnostics.
+
+## Git-Aware WorkRoot Toolbar {#260524-ws-dashboard-git-aware-workroot-toolbar}
+
+The selected WorkRoot toolbar shows Git controls only for online, available
+Git workRoots. Non-Git, offline, missing, moved, or inaccessible workRoots do
+not render branch or Git status controls beyond bounded
+unavailable diagnostics.
+
+The toolbar includes a branch chip for the current branch or a bounded detached
+`HEAD` label. Opening the chip shows a daemon-resolved branch list with
+checked-out branches disabled when known, plus a `+ New branch...` action that
+creates and switches to a new branch from a selected base branch. Branch switch
+and create actions follow Git defaults and revalidate server-side before
+mutation.
+
+A compact Git status pill summarizes line/file and upstream state with the
+segment grammar `+<added-lines> -<removed-lines> *<modified-files>
+?<untracked-files> | ↑<ahead> ↓<behind>`. The pill always exposes a small
+fetch/refresh action, and upstream push/pull segments are interactive only when
+applicable. Push runs plain `git push`; pull runs
+`git pull --ff-only` so dashboard-triggered pulls cannot leave the workRoot in
+a merge or rebase conflict state.
+
+Status refresh stays host-light: the dashboard refreshes immediately on
+selected WorkRoot changes, visibility return, explicit fetch/push/pull,
+branch switch, and branch create, then polls conservatively only for the
+selected visible WorkRoot. All Git toolbar routes remain owner-authenticated,
+address workRoots by opaque `workRootId`, keep Git work off async workers, and
+avoid exposing host paths in command logs or bounded browser-visible errors.
+
+Authenticated route behavior distinguishes registry membership and current
+operability. Unknown workRoot ids return not-found responses. Known workRoots
+with offline activation return a bounded offline response. Online workRoots
+whose availability has degraded return a bounded unavailable response without
+exposing host paths. Terminal HTTP routes and already-open terminal WebSockets
+re-check the owning workRoot's activation and availability before accepting
+input, resize, close, or output/backfill access. Online/offline transitions are
+dashboard commands with logical targets so mouse controls and later keybindings
+share the same command path.
+
+Explicit resource refresh recomputes availability from filesystem/Git without
+changing activation. While the dashboard is open, bounded polling refreshes
+known workRoot availability through the same canonical resource endpoint so
+external filesystem or Git worktree changes can become visible. Polling is not
+the sole correctness mechanism: explicit refresh remains deterministic, polling
+does not become browser-side resource authority, overlapping refresh requests
+are suppressed, stale poll results do not overwrite newer open or activation
+resource views, and refresh failures keep the last known resource tree visible.
+Filesystem watchers, if added later, act only as refresh hints.
 
 ## Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
 
@@ -142,14 +365,29 @@ boundary. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the
-daemon API. It shows server, workspace, workRoot, main-instance, and
-sub-instance state; loading, empty, stale, and error states; compact singleton
-rows; and a reserved right-side viewer region without implementing the deferred
-viewer feature.
+daemon API. It shows server, workspace, and workRoot location state; loading,
+empty, stale, and error states; compact singleton rows; and a reserved
+right-side viewer region without implementing the deferred viewer feature. Each
+workspace with one workRoot renders as one compact left-nav row selected by the
+concrete workRoot id, without depending on main/sub instance presence.
+When the workspace and workRoot labels are identical, the compact row displays
+that label once; distinct labels remain visible as a workspace/workRoot pair.
+Workspaces with multiple workRoots continue to show separate workspace and
+workRoot rows. Main/sub instances remain workbench surfaces or projections
+rather than default recursive left-nav rows.
 
-Mouse-triggered navigation actions route through command ids so later keyboard
-bindings can call the same commands. The shell reserves `^b` to
-mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
+User-visible dashboard controls expose stable command ids so later keyboard
+bindings can target the same behaviors. Representative visible controls route
+mouse or click behavior through a shared dashboard command dispatch path, with
+a command observer preserving recent-command evidence and programmatic dispatch
+using the same command ids as click handlers. Command payloads use logical
+dashboard targets such as opaque resource ids, pane ids, logical surface keys,
+activity ids, or terminal ids; host paths, cache paths, stream paths, pids, and
+backend session paths are not command identity. Terminal raw byte input remains
+the narrow exception because shell input fidelity must not be forked through
+dashboard commands. The shell reserves `^b` to mean ctrl plus lowercase `b`;
+full custom keybinding UI remains out of scope.
+{#260523-ws-dashboard-single-workroot-nav-collapse}
 
 ## WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
 
@@ -198,6 +436,11 @@ attachment layout. Dashboard-owned policy still owns surface identity,
 duplicate-open focus, placement, close behavior, restore sanitization, and the
 choice to flatten pinned/opened row concepts into Dockview-compatible tab
 metadata when a two-row custom tab shell would compete with Dockview ownership.
+Synchronization back into Dockview must be group-local: an inactive split
+group's selected tab is not treated as inactive merely because another split has
+global focus, and pane parameter updates must be keyed by stable content
+revisions instead of React node identity so unrelated refreshes do not remount
+scrolling pane bodies.
 
 Dockview-created split drops become durable dashboard workbench groups instead
 of snapping back to a fixed `primary`/`support` pair. Each opened workRoot owns
@@ -251,10 +494,11 @@ the browser view immediately without confirmation and without changing daemon
 agent state.
 
 Opening the activity detail from the top-bar badge focuses an existing activity
-pane for the selected workRoot or creates one in group 1, the
-agent/terminal-side split. This group-1 placement is an explicit exception for
-a reversible projection surface; general opened/support surfaces continue to use
-their existing support-group placement policy.
+pane for the selected workRoot or creates one through the workbench support
+split placement policy. New Activity panes prefer the second/support split when
+available or creatable, while duplicate opens focus the existing Activity pane
+in whatever split currently owns it. Activity pane close remains reversible and
+has no daemon-side effect.
 
 The pane displays named-agent projection rows and an explicit empty Running
 Commands section. Real running-command rows remain absent until the async exec
@@ -264,6 +508,227 @@ While the Activity pane is open, the dashboard refreshes recently updated
 named-agent rows and merges them into the existing projection so newly
 registered or called agents appear without a browser reload. The full projection
 remains available for the initial selected-workRoot fetch.
+
+## Activity Console Read Model {#260521-ws-dashboard-activity-console-read-model}
+
+The dashboard exposes a workRoot-scoped Activity Console read model that
+combines a live/latest Activity Feed snapshot with selected activity transcript
+backfill. The existing workRoot Activity endpoint returns selectable Activity
+Items for the opened workRoot while preserving a compatibility named-agent
+projection for the current Activity pane. A per-item transcript endpoint
+returns normalized Transcript Blocks for the selected item. Named agents are the
+first supported source, but the public shape stays source-neutral so main-agent
+sessions, exec jobs, diagnostics, and later readable activity can fit the same
+console contract.
+
+Activity Feed snapshots report enough item state for compact ribbon rendering
+without requiring a transcript fetch: stable activity id, kind, label, status,
+live/attention flags, timing fields, source display metadata, transcript
+availability, bounded diagnostics, selected item hint, feed cursor, and update
+mode. Ordering favors active, live, attention, blocked, failed, and recently
+updated activity before using alphabetical order as a tie-breaker.
+
+Transcript backfill returns bounded normalized blocks rather than backend-native
+cache records, raw session JSON, stdout/stderr paths, or file contents. Each
+block carries a cursor, timestamp when available, a render kind such as user,
+assistant, tool call/result, status, error, or output, and degraded-state
+markers. Cursor, block-count, and byte-count bounds keep transcript reads
+finite and make unknown activity ids, unavailable sources, empty transcripts,
+and malformed records explicit response states instead of whole-feed failures.
+Transcript reads default to the latest bounded tail window for the selected
+activity. Older transcript history pages backward from the current earliest
+loaded cursor so the UI can prepend older blocks when the user scrolls upward,
+without forcing an initial read from the beginning of a long transcript.
+
+Browser callers continue to address the model by opaque `workRootId` and
+activity id. Responses must not expose host paths, cache paths, backend session
+ids, process ids, stdout/stderr paths, stream paths, or backend-native
+transcript paths. The read model remains read-only and does not add agent start,
+interrupt, cancel, erase, retry, or exec-job control actions.
+
+### SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
+
+The Activity Console read model uses the ws runtime SQLite registry as the
+named-agent metadata authority for opened workRoots. Current named-agent role
+rows are the source for the compatibility agent projection and current agent
+counts, and file-backed payload readers resolve current call state, output, and
+transcripts through registry `state_path` metadata rather than legacy
+`agent.json` discovery.
+
+Browser-visible routes and payload shapes stay stable. Activity snapshots,
+watch stream events, and transcript reads continue to use opaque workRoot and
+activity ids, and transcript/output bytes remain normalized by daemon-owned
+file-backed transcript readers. Missing, locked, unavailable, or incompatible
+registry state degrades to an empty or partial read model rather than failing
+the whole route or exposing cache paths.
+
+Retained named-agent instance rows add historical Activity Items when their
+payloads or diagnostics remain useful. Historical instance items use stable
+opaque activity ids distinct from current `agent:<agentKey>` role ids, resolve
+transcripts through the instance `state_path`, and do not increase
+`ActivityFeed.agents` or current named-agent summary counts. Current,
+protected, cleanup-deleted, tombstone/internal, and payload-useless instance
+rows stay hidden from historical item and transcript projection.
+
+Activity freshness is registry-aware. Item versions and recent refresh ordering
+consider SQLite registry timestamps and cleanup/retention metadata together
+with payload mtimes for current-call state, output, runtime logs,
+stdout/stderr, and native transcript files. Registry-only updates can produce
+Activity item upserts, removals, transcript invalidations, and snapshot
+invalidations through the existing event vocabulary, while payload-only
+transcript changes continue to update transcript availability.
+
+## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
+
+The WorkRoot Activity pane renders a reusable read-only Activity Console
+instead of a vertical named-agent card dump. The console combines a horizontal
+Activity Ribbon for live/latest items with a selected Transcript Block viewer
+below it, using the Activity Console read model as its route-backed source.
+
+Ribbon items use a compact three-line shape: small source discriminator text, a
+primary name/title line, and small status/recency text. Source discriminator
+text identifies the activity channel such as `agent.codex`, `agent.claude`, or
+`cmd.exec` rather than repeating the primary title. The status row includes the
+current activity status plus relative update time when known; completed activity
+may also show bounded elapsed duration when space allows. The text area stays
+compact, truncates instead of wrapping, and the ribbon scrolls horizontally at
+constrained desktop widths. Live, active, and attention-worthy items use
+semantic active styling, and a small short-lived green breathing indicator may
+mark newly updated or locally dirty items until the user selects or otherwise
+acknowledges them. The Activity Console body does not render a separate summary
+chip row above the ribbon; the ribbon is the primary item selector.
+
+The browser may keep a local acknowledgement watermark per workRoot/activity
+item. On initial feed load it compares that local watermark with daemon item
+timestamps or cursors to mark newly updated items dirty. Selecting or explicitly
+acknowledging an item clears only browser-local dirty state; the daemon does not
+gain read-receipt authority.
+
+Selecting a ribbon item renders normalized transcript blocks. Agent activity
+renders as action-unit blocks where dialogue and assistant output are expanded
+by default, while tool calls, MCP activity, and command runs default to one-line
+summaries with inline detail expansion. Compact summaries prefer bounded
+semantic content from normalized safe fields and first-line text over generic
+category titles, so tool calls can show the tool name and argument-size hint,
+tool results can show outcome/status/byte hints, and degraded records can show
+their omission reason without exposing raw native payloads. Exec activity
+renders as terminal-style output. Transcript views follow the tail by default
+for newly selected or live updated activity. When the user scrolls away from the
+tail, the browser preserves that scroll position across feed refreshes,
+transcript refreshes, selected-transcript invalidations, and workbench split
+rerenders until the user returns to the tail. Initial selected transcript loads
+start from the latest tail window, not the oldest block. Older transcript
+history is loaded when the user scrolls near the top and is prepended while
+preserving the user's visible position. Explicit refresh or load-more controls
+remain available for fallback and error states rather than being the primary
+navigation path.
+
+> [!note] Implementation Gap · 2026-05-23
+> Missing behavior: expanded dialogue and assistant transcript text is rendered
+> as plain preformatted text rather than markdown. The dashboard should define a
+> shared markdown rendering component first, then apply that component
+> consistently across Activity Console messages and other project surfaces that
+> render trusted normalized markdown.
+
+Visible Activity Console controls expose stable command ids and route their
+clicked behavior through the dashboard command dispatch path so later keyboard
+bindings can invoke the same behavior. The shell remains read-only, does not add
+agent control buttons, and does not consume live SSE/watch streams until the
+live UX child implements that behavior.
+
+## Activity Console Watch Stream {#260521-ws-dashboard-activity-console-watch-stream}
+
+The dashboard exposes a workRoot-scoped read-only Activity Console event
+stream for feed and transcript invalidations:
+
+```text
+GET /api/dashboard/work-roots/{workRootId}/activity/events?after={cursor}
+```
+
+The stream is owner-authenticated before any transport is accepted. It uses SSE
+because Activity Console updates are read-only; a different transport requires
+a recorded bidirectional need. Subscriptions are scoped to the requested opened
+workRoot instead of every remembered or opened root. The current backend stream
+announces `pollFallback` mode and uses bounded polling to produce event updates;
+a later native watcher can switch to `watch` mode without changing the public
+payload vocabulary.
+
+Stream events carry source-neutral Activity Feed semantics rather than
+filesystem or backend-native payloads. Expected event categories include item
+upsert/removal, transcript invalidation with transcript cursor metadata,
+snapshot invalidation for overflow or watch resets, mode changes between watch
+and polling fallback, and heartbeats. Event cursors let reconnecting callers ask
+for events after the last observed cursor, but the stream may intentionally
+force a snapshot refetch when events were missed or coalesced.
+
+The fallback stream normalizes observed agent changes, missing directories,
+agent erasure, and recreated agent directories without leaking cache paths, raw
+file paths, backend-native transcript records, process ids, session ids,
+stdout/stderr paths, or file contents. The stream remains read-only and does
+not make the frontend responsible for consuming live updates; frontend merge
+and stale-root behavior belongs to the live UX feature.
+
+## Activity Console Live UX {#260521-ws-dashboard-activity-console-live-ux}
+
+The Activity Console frontend subscribes to the workRoot activity event
+stream while the console is visible or otherwise actively used. Stream handling
+merges source-neutral events into the route-backed Activity Console state
+without making browser state authoritative over daemon activity.
+
+`itemUpserted` and `itemRemoved` events update the current feed while preserving
+selection when the selected item still exists. `snapshotInvalidated` causes a
+bounded read-model refetch instead of browser-side reconstruction of missed
+events. `transcriptUpdated` refreshes or backfills transcript state only when
+the affected activity is the currently selected item. `modeChanged` transitions
+the frontend between stream-driven updates and bounded fallback polling; always
+on full-list polling is not the normal live mode.
+
+The frontend ignores events for stale workRoots after the user switches
+roots or closes the console, tears down subscriptions when the console is no
+longer visible, and keep the static UI shell usable when the stream is
+unavailable. Streamed or polled updates newer than the browser-local
+acknowledgement watermark may turn on the ribbon dirty cue; selecting or
+acknowledging an item clears only local dirty state and sends no daemon read
+receipt.
+
+Live UX adoption remains read-only. It does not expose raw SSE payloads, backend
+paths, cache paths, source ids, or control actions in browser UI state.
+
+## Activity Console Transcript Expansion {#260522-ws-dashboard-activity-console-transcript-expansion}
+
+The Activity Console transcript backend supports additional daemon-owned
+transcript source adapters behind the existing `ActivityTranscript` and
+`TranscriptBlock` contracts. Browser callers continue to request selected
+activity transcripts by opaque workRoot and activity ids; they never receive
+backend session paths, cache paths, host paths, pids, session ids,
+stdout/stderr paths, stream paths, native transcript paths, or backend-native
+record formats.
+
+Native backend transcript parsing starts only from fixture-backed formats whose
+shape can be verified without invoking a live backend. Codex native session
+JSONL is the first supported native source. Claude and Gemini native transcript
+handling remain deferred unless their formats are similarly documented or
+fixture-backed. Missing, unreadable, malformed, or unsupported native transcript
+records degrade individual blocks or source status where possible instead of
+failing the whole selected activity transcript, and the existing `output.md`
+fallback remains available.
+
+Source adapters normalize dialogue, assistant output, tool calls, tool results,
+status/error entries, prompt/user messages, interruptions, handoff/status
+records, MCP/tool activity, patch/apply outcomes, and command/output-like
+records into bounded `TranscriptBlock` values when their fixture-backed native
+shape is known. Raw backend JSON or markdown may be adapter input but is not the
+browser contract. Low-value native telemetry may be skipped instead of rendered
+as transcript noise. Remaining unsupported records degrade into bounded
+structural summaries with omission reasons, never raw JSON, private record
+strings, payload snippets, paths, session ids, or tool output. Exec transcript
+source integration remains blocked until the async exec output reader model
+exists.
+
+The backend continues to use feed-level `transcriptUpdated` invalidations plus
+bounded selected backfill for live transcript updates. It does not expose a
+selected-activity block-level transcript event stream until block append/update
+behavior has a clear UX win.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
@@ -277,6 +742,37 @@ The visual system uses `ai-docs/ref/design.md` as a Carbon-inspired density,
 geometry, hairline, and component reference rather than as a default light
 palette. Desktop and narrow viewport screenshot checks make the resulting
 shell inspectable before larger workbench surfaces depend on it.
+
+The frontend visual guide also defines a dashboard-local building-block
+vocabulary for frames, panels, panes, toolbars, rows, chips, badges, state
+surfaces, document surfaces, and code blocks. Current high-impact surfaces
+consume that vocabulary while preserving their existing commands and data:
+left navigation, open-workRoot chrome, workbench toolbar and Dockview tabs,
+Activity Console ribbon/transcript blocks, read-only text panes, and common
+empty/loading/error surfaces.
+
+The dashboard chrome presents left navigation, file explorer, and workRoot
+topbar controls with conventional icon-first affordances, accessible names, and
+reduced visible metadata clutter. High-signal status remains visible,
+secondary diagnostics move to low-weight surfaces or overflow menus, and all
+visible or overflowed actions continue to route through the existing dashboard
+command model. Ready navigation rows remain low-height without status chips,
+compact resource glyphs do not overlap, power state reads through symmetric
+icon color rather than filled action backgrounds, topbar chips and overflow
+menu labels preserve readable semantic text, WorkRoot Activity ribbons reserve
+bright text for the primary label, and icon buttons expose most border or
+glass-like treatment only on hover/focus/active states while retaining stable
+dimensions and accessible names. {#260524-dashboard-icon-first-chrome}
+
+The dashboard distinguishes large working context regions through a surface
+hierarchy rather than uniform hairlines. Left navigation, workRoot topbar
+chrome, Dockview split groups, editor/document shells, pane-local ribbons, and
+content bodies use separate semantic surface and divider roles so structural
+boundaries, local dividers, selection states, and hover/focus control chrome do
+not compete visually. Editor/document panes read as one context island whose
+tabbar, internal ribbon, and body belong together, while Dockview split
+boundaries use a stronger structural gutter or surface contrast than local
+tab/body dividers. {#260524-dashboard-context-surface-hierarchy}
 
 ## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
 
@@ -315,7 +811,8 @@ corresponds to durable dashboard behavior: dragging a tab into a new split
 target creates or maps a dashboard group, the pane remains there after React
 synchronization, ordinary file/terminal interactions still work in the
 resulting layout, and opening a second workRoot does not leak the first
-workRoot's user-created groups or active panes.
+workRoot's user-created groups or active panes. Split-scroll evidence also
+keeps a scrolled pane away from the top across refresh-driven synchronization.
 
 Workbench tab polish evidence is browser-level Playwright evidence against the
 daemon-served frontend. It covers hover-only close affordances, terminal and
@@ -405,11 +902,39 @@ The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
 
+The browser shell opens workRoots through an owner-authenticated root picker
+modal instead of an always-visible path input. The left navigation exposes an
+`Open...` entrypoint; the modal is an explorer-style folder selection dialog
+with local Back/Forward history, Up and Refresh actions, an address field,
+platform-aware built-in places derived from daemon-owned data, a details-style
+current-folder row list, and footer controls for opening the selected or typed
+path. Directory rows support keyboard-friendly selection and row action, and
+closing the modal restores focus to the opener. Opening a selected or exact
+directory continues through the `workRoot.open` command path, open-workRoot API,
+daemon-opened workRoot id reconciliation, and canonical resource refresh flow.
+The modal may expose only the existing single-segment `Create empty folder`
+action, not broad file-manager operations. Host paths remain authenticated
+picker/open request data rather than loggable command payload fields.
+{#260524-ws-dashboard-root-picker-modal}
+{#260524-ws-dashboard-react-aria-root-picker-pilot}
+
+Authenticated owners can pin and unpin root picker directories in the picker
+sidebar. Pinned directories are stored in daemon-local dashboard persistence,
+are visually distinguished from built-in places, and remain selection or
+navigation affordances only. Unavailable pinned directories stay visible in a
+degraded state so the owner can remove them without the picker exposing private
+diagnostics or silently creating, opening, deleting, renaming, or moving
+filesystem resources. Pin and unpin controls keep host paths as authenticated
+request data rather than loggable command payload fields.
+{#260524-ws-dashboard-root-picker-pins}
+
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the
 real opened workRoot instead of continuing to present mock workspace state.
-Open-workRoot responses may update the view immediately, but the resources
-endpoint remains the canonical source for subsequent refreshes.
+Open-workRoot responses may update the view immediately, and successful
+responses include an `x-ws-dashboard-opened-work-root-id` header identifying
+the daemon-owned id for the requested root. The resources endpoint remains the
+canonical source for subsequent refreshes.
 {#260516-ws-web-dashboard-open-workroot-resource-refresh}
 
 ## WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
@@ -476,6 +1001,78 @@ top-level browser document, displacing dashboard chrome, or requiring a future
 editor replacement to prove containment.
 {#260517-ws-dashboard-readonly-text-scroll-containment}
 
+## Document Viewer Mode {#260524-ws-dashboard-document-viewer-mode}
+
+The dashboard will present previewable documents through a reusable document
+viewer mode instead of treating every file as raw preformatted text. A document
+pane owns one workRoot-relative source attachment and a pane-local
+`view | edit` mode control. View mode is format-aware and read-only; edit mode
+is visibly reserved but disabled until the raw-text edit/save feature lands.
+Switching document presentation mode does not create a second workbench tab for
+the same document.
+
+Markdown documents render through a real Markdown AST pipeline rather than a
+hand-rolled parser. The initial Markdown viewer supports polished GFM table and
+task-list rendering, Obsidian-style callouts such as `> [!note]`, and bounded
+footnote or footer hover affordances while keeping raw HTML disabled or safely
+ignored until a later sanitized or sandboxed HTML feature exists.
+
+The viewer exposes a block model that callers can address independently from
+rendered React nodes. Blocks include stable-in-content ids, ordinal position,
+kind, original markdown, plain text, translatability, and line ranges when
+available. Ordinary soft line breaks remain part of one prose block, list items
+are separate blocks, and non-prose blocks such as fenced code may be marked
+non-translatable. Block-level actions copy the visible text or a workRoot-
+relative path reference such as `@path/to/file.md#L12-L18`; copied path
+references never include absolute host paths.
+
+The viewer accepts local translation overlay data keyed by the current content
+hash and block id so later daemon translation results can reuse the same
+rendering path. Without a real daemon translation result, translated-copy
+actions remain pending or unavailable.
+
+## Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
+
+Markdown view mode exposes a pane-local translation toggle next to the
+view/edit control. When the toggle is enabled, opening or focusing the pane
+requests whole-document translation for the current immutable content hash.
+Translated blocks overlay the viewer by replacing each block's rendered
+content as results become available. Hovering a translated block temporarily
+shows the original block. Selecting one or more blocks exposes copy actions for
+the currently visible text, translated text when available, and pathrefs.
+
+Translation requests are daemon-owned operations. The frontend builds the
+document block set and sends it with full document context; the daemon owns
+provider configuration, model discovery, prompting, bounded output parsing, and
+SHA256/content-hash cache behavior. The first provider shape is an
+OpenAI-compatible LLM provider, suitable for a local Ollama endpoint, while the
+provider union leaves room for future non-LLM translation APIs. Provider
+configuration is daemon-side; the browser can observe bounded configured,
+reachable, model, cache, and per-block status without receiving API keys,
+prompts, raw model output, or daemon cache paths.
+
+LLM translation roundtrips preserve block identity. Requests contain
+`blockId + content` pairs, and successful responses return matching
+`blockId + translatedContent` pairs. Missing, duplicate, unknown, or
+unparseable block ids become bounded block-level failure states rather than raw
+model output in the browser.
+
+## Document Edit And Save Fan-Out {#260524-ws-dashboard-document-edit-save-fanout}
+
+The dashboard provides a raw-text edit mode for editable workRoot files while
+keeping formatted view mode read-only. Document reads return source identity,
+content hash, media or renderer hints, edit capability, size, and content.
+Document writes use optimistic concurrency through the read content hash and
+return a fresh content hash after a successful save.
+
+Open panes for the same `workRootId + path` receive save and external-change
+updates by document source identity instead of pane identity. Clean panes can
+re-read or update to the new content hash after another pane saves. Dirty edit
+panes are marked stale or conflicted without silently overwriting user edits.
+Per-workRoot document event streams publish content-change and watch-invalidated
+events; filesystem watchers are freshness hints only, with focus and visibility
+re-reads plus content-hash checks remaining the correctness fallback.
+
 ## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
 
 File-open commands from the workRoot file explorer use workbench placement
@@ -506,9 +1103,11 @@ Live browser terminal I/O uses an owner-authenticated WebSocket as the primary
 transport for daemon-owned PTY sessions. The WebSocket attaches to existing
 opaque terminal ids after owner auth, carries ordered PTY output, status, and
 exit data to the browser, and carries raw input plus bounded resize requests
-back to the daemon. HTTP output transport remains available for initial replay,
-reload reconstruction, deterministic tests, or fallback, but the normal
-connected xterm path does not depend on periodic output polling.
+back to the daemon. If the owning workRoot goes offline or becomes unavailable,
+the WebSocket stops accepting client input and stops sending buffered or live
+PTY output. HTTP output transport remains available for initial replay, reload
+reconstruction, deterministic tests, or fallback, but the normal connected
+xterm path does not depend on periodic output polling.
 {#260516-ws-web-dashboard-terminal-websocket-transport}
 
 ## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
@@ -613,7 +1212,18 @@ state, and browser workbench arrangement into one restore model for selected
 workRoots. Daemon state is authoritative for live terminal existence, while
 browser arrangement remains presentation state. File panes restore only when
 the file remains previewable; otherwise the pane shows an honest unavailable
-state.
+state. The daemon persists the owner's opened workRoot paths in local dashboard
+state and seeds the live resource view from that remembered list on startup.
+Remembered roots re-run normal discovery instead of bypassing moved, offline,
+inaccessible, primary-root, or linked-worktree classification. Auth sessions,
+live terminal process survival, Activity acknowledgement state, and exact
+browser workbench arrangement remain outside the restore model.
+
+Browser-visible terminal tab descriptors can restore after daemon restart as
+newly created daemon terminal sessions attached to the remembered workRoot. The
+restore descriptor carries title plus a workRoot-relative cwd hint, but it does
+not treat old daemon terminal ids or PTY processes as resumable state.
+{#260523-ws-dashboard-terminal-tab-restore}
 
 ## WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}
 

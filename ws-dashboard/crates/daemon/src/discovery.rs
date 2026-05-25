@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::io;
@@ -6,21 +6,33 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ws_dashboard_core::{
-    ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView,
-    InteractionMode, OpaqueId, ResourcePath, ServerView, ViewState, WorkRootKind,
-    WorkRootStatus, WorkRootView, WorkspaceView,
+    ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView, InteractionMode,
+    OpaqueId, ResourcePath, ServerView, ViewState, WorkRootActivation, WorkRootAvailability,
+    WorkRootId, WorkRootKind, WorkRootStatus, WorkRootView, WorkspaceView,
 };
 
 use crate::resources::DashboardResourcesProvider;
+use crate::work_root_files::{RegisteredWorkRoot, WorkRootProvenance};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWorkRootCandidate {
     path: PathBuf,
+    activation: WorkRootActivation,
 }
 
 impl LocalWorkRootCandidate {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            activation: WorkRootActivation::Online,
+        }
+    }
+
+    pub fn with_activation(path: impl Into<PathBuf>, activation: WorkRootActivation) -> Self {
+        Self {
+            path: path.into(),
+            activation,
+        }
     }
 }
 
@@ -29,53 +41,118 @@ pub struct LocalDashboardResourcesProvider {
     server_id: OpaqueId,
     server_label: String,
     candidates: Vec<LocalWorkRootCandidate>,
+    registry_activations: HashMap<WorkRootId, WorkRootActivation>,
 }
 
 impl LocalDashboardResourcesProvider {
     pub fn new(candidates: Vec<LocalWorkRootCandidate>) -> Self {
+        Self::with_registry_activations(candidates, HashMap::new())
+    }
+
+    pub fn with_registry_activations(
+        candidates: Vec<LocalWorkRootCandidate>,
+        registry_activations: HashMap<WorkRootId, WorkRootActivation>,
+    ) -> Self {
         Self {
             server_id: OpaqueId::from("server-local"),
             server_label: "Local ws dashboard".to_owned(),
             candidates,
+            registry_activations,
+        }
+    }
+
+    pub fn dashboard_resources_with_registry_sync(&self) -> DashboardResourcesSync {
+        let mut workspaces = BTreeMap::<WorkspaceKey, WorkspaceBuilder>::new();
+        let mut discovered_registry_roots = Vec::new();
+        let mut pruned_work_root_ids = Vec::new();
+
+        for candidate in &self.candidates {
+            let owner = discover_work_root(&candidate.path);
+            let workspace_key = owner.workspace_key.clone();
+            let linked_paths = if owner.availability == WorkRootAvailability::Available {
+                git_worktree_paths(&candidate.path)
+            } else {
+                Vec::new()
+            };
+            let workspace = workspaces
+                .entry(workspace_key.clone())
+                .or_insert_with(|| WorkspaceBuilder::new(&self.server_id, workspace_key.clone()));
+            workspace.push(owner, candidate.activation, true);
+
+            for linked_path in linked_paths {
+                let linked_id = local_work_root_id_for_path(&linked_path);
+                if linked_id == local_work_root_id_for_path(&candidate.path)
+                    || paths_equivalent(&linked_path, &candidate.path)
+                {
+                    continue;
+                }
+                let mut linked = discover_work_root(&linked_path);
+                linked.workspace_key = workspace_key.clone();
+                let linked_activation = self
+                    .registry_activations
+                    .get(&linked_id)
+                    .copied()
+                    .unwrap_or(WorkRootActivation::Online);
+                if linked.availability == WorkRootAvailability::Available {
+                    discovered_registry_roots.push(RegisteredWorkRoot {
+                        path: linked_path,
+                        activation: linked_activation,
+                        provenance: WorkRootProvenance::Discovered,
+                    });
+                }
+                workspace.push(linked, linked_activation, false);
+            }
+        }
+
+        let mut workspace_views = Vec::new();
+        for workspace in workspaces.into_values() {
+            if workspace.active_work_root_count == 0 {
+                pruned_work_root_ids
+                    .extend(workspace.work_roots.iter().map(|root| root.id.clone()));
+                continue;
+            }
+            workspace_views.push(workspace.into_view());
+        }
+
+        DashboardResourcesSync {
+            view: DashboardResourcesView {
+                server: self.server_view(),
+                workspaces: workspace_views,
+            },
+            discovered_registry_roots,
+            pruned_work_root_ids,
+        }
+    }
+
+    fn server_view(&self) -> ServerView {
+        ServerView {
+            id: self.server_id.clone(),
+            label: self.server_label.clone(),
+            state: ViewState {
+                status: "online".to_owned(),
+                loading: false,
+                stale: false,
+                error: None,
+            },
+            actions: vec![ActionHint {
+                id: "refresh".to_owned(),
+                label: "Refresh".to_owned(),
+                enabled: true,
+            }],
         }
     }
 }
 
 impl DashboardResourcesProvider for LocalDashboardResourcesProvider {
     fn dashboard_resources(&self) -> DashboardResourcesView {
-        let mut workspaces = BTreeMap::<WorkspaceKey, WorkspaceBuilder>::new();
-
-        for candidate in &self.candidates {
-            let discovered = discover_work_root(&candidate.path);
-            let workspace_key = discovered.workspace_key.clone();
-            let workspace = workspaces
-                .entry(workspace_key.clone())
-                .or_insert_with(|| WorkspaceBuilder::new(&self.server_id, workspace_key));
-            workspace.push(discovered);
-        }
-
-        DashboardResourcesView {
-            server: ServerView {
-                id: self.server_id.clone(),
-                label: self.server_label.clone(),
-                state: ViewState {
-                    status: "online".to_owned(),
-                    loading: false,
-                    stale: false,
-                    error: None,
-                },
-                actions: vec![ActionHint {
-                    id: "refresh".to_owned(),
-                    label: "Refresh".to_owned(),
-                    enabled: true,
-                }],
-            },
-            workspaces: workspaces
-                .into_values()
-                .map(WorkspaceBuilder::into_view)
-                .collect(),
-        }
+        self.dashboard_resources_with_registry_sync().view
     }
+}
+
+pub struct DashboardResourcesSync {
+    pub view: DashboardResourcesView,
+    pub discovered_registry_roots: Vec<RegisteredWorkRoot>,
+    pub pruned_work_root_ids: Vec<WorkRootId>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -89,6 +166,8 @@ struct WorkspaceBuilder {
     label: String,
     server_id: OpaqueId,
     work_roots: Vec<WorkRootView>,
+    active_work_root_count: usize,
+    root_unavailable_with_active_child: bool,
 }
 
 impl WorkspaceBuilder {
@@ -98,13 +177,30 @@ impl WorkspaceBuilder {
             label: key.label,
             server_id: server_id.clone(),
             work_roots: Vec::new(),
+            active_work_root_count: 0,
+            root_unavailable_with_active_child: false,
         }
     }
 
-    fn push(&mut self, discovered: DiscoveredWorkRoot) {
-        let work_root_id =
-            OpaqueId::from(format!("root-local-{}", stable_path_hash(&discovered.path)));
-        let enabled = discovered.status == WorkRootStatus::Online;
+    fn push(
+        &mut self,
+        discovered: DiscoveredWorkRoot,
+        activation: WorkRootActivation,
+        root_anchor: bool,
+    ) {
+        let work_root_id = local_work_root_id_for_path(&discovered.path);
+        if self.work_roots.iter().any(|root| root.id == work_root_id) {
+            return;
+        }
+        let available = discovered.availability == WorkRootAvailability::Available;
+        let active = activation == WorkRootActivation::Online;
+        let enabled = available && active;
+        if available {
+            self.active_work_root_count += 1;
+        }
+        if root_anchor && !available {
+            self.root_unavailable_with_active_child = true;
+        }
 
         let resource_path = ResourcePath {
             server_id: self.server_id.clone(),
@@ -123,20 +219,18 @@ impl WorkspaceBuilder {
             resource_path,
             label: label_for_path(&discovered.path),
             kind: discovered.kind,
+            activation,
+            availability: discovered.availability,
             status: discovered.status,
             state: ViewState {
-                status: state_status(discovered.status).to_owned(),
+                status: state_status(discovered.availability, activation).to_owned(),
                 loading: false,
-                stale: discovered.status != WorkRootStatus::Online,
-                error: discovered.error,
+                stale: !enabled,
+                error: if active { discovered.error } else { None },
             },
             compactable: false,
             main_instances,
-            actions: vec![ActionHint {
-                id: if enabled { "openRoot" } else { "reconnect" }.to_owned(),
-                label: if enabled { "Open root" } else { "Reconnect" }.to_owned(),
-                enabled,
-            }],
+            actions: activation_actions(active, available),
         });
     }
 
@@ -145,23 +239,43 @@ impl WorkspaceBuilder {
             .work_roots
             .iter()
             .any(|root| root.status != WorkRootStatus::Online);
+        let recovery_needed =
+            self.root_unavailable_with_active_child && self.active_work_root_count > 0;
 
         WorkspaceView {
             id: self.id,
             label: self.label,
             state: ViewState {
-                status: if degraded { "degraded" } else { "ready" }.to_owned(),
+                status: if recovery_needed {
+                    "recoveryNeeded"
+                } else if degraded {
+                    "degraded"
+                } else {
+                    "ready"
+                }
+                .to_owned(),
                 loading: false,
-                stale: degraded,
-                error: degraded.then(|| "one or more workRoots need refresh".to_owned()),
+                stale: degraded || recovery_needed,
+                error: if recovery_needed {
+                    Some("workspace root workRoot unavailable".to_owned())
+                } else {
+                    degraded.then(|| "one or more workRoots need refresh".to_owned())
+                },
             },
             compactable: self.work_roots.len() == 1,
             work_roots: self.work_roots,
-            actions: vec![ActionHint {
-                id: "refreshWorkspace".to_owned(),
-                label: "Refresh workspace".to_owned(),
-                enabled: true,
-            }],
+            actions: vec![
+                ActionHint {
+                    id: "refreshWorkspace".to_owned(),
+                    label: "Refresh workspace".to_owned(),
+                    enabled: true,
+                },
+                ActionHint {
+                    id: "workspace.remove".to_owned(),
+                    label: "Remove workspace".to_owned(),
+                    enabled: true,
+                },
+            ],
         }
     }
 }
@@ -199,6 +313,7 @@ struct DiscoveredWorkRoot {
     workspace_key: WorkspaceKey,
     kind: WorkRootKind,
     status: WorkRootStatus,
+    availability: WorkRootAvailability,
     error: Option<String>,
 }
 
@@ -210,23 +325,33 @@ fn discover_work_root(path: &Path) -> DiscoveredWorkRoot {
         Ok(_) => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             "workRoot is not a directory",
         ),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let status = match normalized.parent() {
-                Some(parent) if parent.exists() => WorkRootStatus::Moved,
-                _ => WorkRootStatus::Offline,
+            let (status, availability) = match normalized.parent() {
+                Some(parent) if parent.exists() => {
+                    (WorkRootStatus::Moved, WorkRootAvailability::Moved)
+                }
+                _ => (WorkRootStatus::Offline, WorkRootAvailability::Missing),
             };
-            discovered_unusable(normalized, status, state_status(status))
+            discovered_unusable(
+                normalized,
+                status,
+                availability,
+                availability_status(availability),
+            )
         }
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             "permission denied",
         ),
         Err(error) => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             &format!("metadata failed: {error}"),
         ),
     }
@@ -237,6 +362,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
         return discovered_unusable(
             path,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             if error.kind() == io::ErrorKind::PermissionDenied {
                 "permission denied"
             } else {
@@ -257,6 +383,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
             path,
             kind: git.kind,
             status: WorkRootStatus::Online,
+            availability: WorkRootAvailability::Available,
             error: None,
         },
         None => DiscoveredWorkRoot {
@@ -267,12 +394,18 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
             path,
             kind: WorkRootKind::PlainDirectory,
             status: WorkRootStatus::Online,
+            availability: WorkRootAvailability::Available,
             error: None,
         },
     }
 }
 
-fn discovered_unusable(path: PathBuf, status: WorkRootStatus, error: &str) -> DiscoveredWorkRoot {
+fn discovered_unusable(
+    path: PathBuf,
+    status: WorkRootStatus,
+    availability: WorkRootAvailability,
+    error: &str,
+) -> DiscoveredWorkRoot {
     DiscoveredWorkRoot {
         workspace_key: WorkspaceKey {
             id: OpaqueId::from(format!("workspace-local-{}", stable_path_hash(&path))),
@@ -281,6 +414,7 @@ fn discovered_unusable(path: PathBuf, status: WorkRootStatus, error: &str) -> Di
         path,
         kind: WorkRootKind::PlainDirectory,
         status,
+        availability,
         error: Some(error.to_owned()),
     }
 }
@@ -341,6 +475,25 @@ fn git_path(path: &Path, args: &[&str]) -> Option<PathBuf> {
     (!trimmed.is_empty()).then(|| normalize_candidate_path(Path::new(trimmed)))
 }
 
+fn git_worktree_paths(path: &Path) -> Vec<PathBuf> {
+    let output = match Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+    let Ok(raw) = String::from_utf8(output.stdout) else {
+        return Vec::new();
+    };
+    raw.lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(|path| normalize_candidate_path(Path::new(path)))
+        .collect()
+}
+
 fn normalize_candidate_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
         return path.to_path_buf();
@@ -351,6 +504,20 @@ fn normalize_candidate_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => normalize_candidate_path(left) == normalize_candidate_path(right),
+    }
+}
+
+pub fn local_work_root_id_for_path(path: &Path) -> WorkRootId {
+    OpaqueId::from(format!(
+        "root-local-{}",
+        stable_path_hash(&normalize_candidate_path(path))
+    ))
+}
+
 fn label_for_path(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -359,13 +526,47 @@ fn label_for_path(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-fn state_status(status: WorkRootStatus) -> &'static str {
-    match status {
-        WorkRootStatus::Online => "ready",
-        WorkRootStatus::Offline => "offline",
-        WorkRootStatus::Moved => "moved",
-        WorkRootStatus::Inaccessible => "inaccessible",
+fn state_status(
+    availability: WorkRootAvailability,
+    activation: WorkRootActivation,
+) -> &'static str {
+    if activation == WorkRootActivation::Offline {
+        return "offline";
     }
+    availability_status(availability)
+}
+
+fn availability_status(availability: WorkRootAvailability) -> &'static str {
+    match availability {
+        WorkRootAvailability::Available => "ready",
+        WorkRootAvailability::Missing => "missing",
+        WorkRootAvailability::Moved => "moved",
+        WorkRootAvailability::Inaccessible => "inaccessible",
+        WorkRootAvailability::Unknown => "unknown",
+    }
+}
+
+fn activation_actions(active: bool, available: bool) -> Vec<ActionHint> {
+    let mut actions = Vec::new();
+    if active {
+        actions.push(ActionHint {
+            id: if available { "openRoot" } else { "reconnect" }.to_owned(),
+            label: if available { "Open root" } else { "Reconnect" }.to_owned(),
+            enabled: available,
+        });
+        actions.push(ActionHint {
+            id: "workRoot.activation.offline".to_owned(),
+            label: "Go offline".to_owned(),
+            enabled: true,
+        });
+    } else {
+        actions.push(ActionHint {
+            id: "workRoot.activation.online".to_owned(),
+            label: "Go online".to_owned(),
+            enabled: true,
+        });
+    }
+    actions
 }
 
 fn stable_path_hash(path: &Path) -> String {
@@ -412,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn local_provider_reports_moved_and_offline_paths_without_dropping_them() {
+    fn local_provider_prunes_workspaces_without_available_work_roots() {
         let parent = temp_path("missing-parent");
         fs::create_dir_all(&parent).expect("create parent");
         let moved = parent.join("moved");
@@ -424,27 +625,17 @@ mod tests {
         ])
         .dashboard_resources();
 
-        let statuses: Vec<_> = view
-            .workspaces
-            .iter()
-            .flat_map(|workspace| &workspace.work_roots)
-            .map(|root| root.status)
-            .collect();
-
-        assert!(statuses.contains(&WorkRootStatus::Moved));
-        assert!(statuses.contains(&WorkRootStatus::Offline));
-        assert_eq!(view.workspaces.len(), 2);
-        assert!(view
-            .workspaces
-            .iter()
-            .all(|workspace| workspace.state.stale));
+        assert!(
+            view.workspaces.is_empty(),
+            "no-active-workRoot policy prunes unavailable-only workspaces"
+        );
 
         remove_temp(&parent);
     }
 
     #[cfg(unix)]
     #[test]
-    fn local_provider_reports_unreadable_directory_as_inaccessible() {
+    fn local_provider_prunes_unreadable_directory_without_active_child() {
         let root = temp_path("inaccessible");
         fs::create_dir_all(&root).expect("create inaccessible root");
         let original = fs::metadata(&root)
@@ -460,17 +651,17 @@ mod tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(original))
             .expect("restore permissions");
 
-        let work_root = &view.workspaces[0].work_roots[0];
-        assert_eq!(work_root.status, WorkRootStatus::Inaccessible);
-        assert_eq!(work_root.state.status, "inaccessible");
-        assert_eq!(work_root.state.error.as_deref(), Some("permission denied"));
+        assert!(
+            view.workspaces.is_empty(),
+            "unreadable root-only workspace has no active workRoot to show"
+        );
 
         remove_temp(&root);
     }
 
     #[cfg(unix)]
     #[test]
-    fn local_provider_keeps_work_root_id_stable_when_symlink_target_disappears() {
+    fn local_provider_prunes_symlink_when_target_disappears() {
         let base = temp_path("symlink");
         let target = base.join("target");
         let link = base.join("link");
@@ -486,10 +677,9 @@ mod tests {
         let missing =
             LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(&link)])
                 .dashboard_resources();
-        let missing_root = &missing.workspaces[0].work_roots[0];
 
-        assert_eq!(online_id, missing_root.id);
-        assert_eq!(missing_root.status, WorkRootStatus::Moved);
+        assert!(online_id.as_str().starts_with("root-local-"));
+        assert!(missing.workspaces.is_empty());
 
         remove_temp(&base);
     }
@@ -536,6 +726,56 @@ mod tests {
             .work_roots
             .iter()
             .all(|root| root.status == WorkRootStatus::Online));
+
+        remove_temp(&base);
+    }
+
+    #[test]
+    fn local_provider_discovers_linked_worktrees_from_primary_root() {
+        if !git_available() {
+            return;
+        }
+
+        let base = temp_path("git-discover-linked");
+        let primary = base.join("primary");
+        let linked = base.join("linked");
+        fs::create_dir_all(&primary).expect("create primary");
+        git(&primary, &["init"]);
+        git(
+            &primary,
+            &["config", "user.email", "ws-dashboard@example.local"],
+        );
+        git(&primary, &["config", "user.name", "ws dashboard"]);
+        fs::write(primary.join("README.md"), "dashboard\n").expect("write readme");
+        git(&primary, &["add", "README.md"]);
+        git(&primary, &["commit", "-m", "seed"]);
+        git(
+            &primary,
+            &["worktree", "add", linked.to_str().expect("linked path")],
+        );
+
+        let sync =
+            LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(&primary)])
+                .dashboard_resources_with_registry_sync();
+
+        assert_eq!(sync.view.workspaces.len(), 1);
+        assert_eq!(sync.view.workspaces[0].work_roots.len(), 2);
+        let kinds: Vec<_> = sync.view.workspaces[0]
+            .work_roots
+            .iter()
+            .map(|root| root.kind)
+            .collect();
+        assert!(kinds.contains(&WorkRootKind::GitPrimaryRoot));
+        assert!(kinds.contains(&WorkRootKind::GitLinkedWorktree));
+        assert_eq!(sync.discovered_registry_roots.len(), 1);
+        assert!(paths_equivalent(
+            &sync.discovered_registry_roots[0].path,
+            &linked
+        ));
+        assert_eq!(
+            sync.discovered_registry_roots[0].provenance,
+            WorkRootProvenance::Discovered
+        );
 
         remove_temp(&base);
     }

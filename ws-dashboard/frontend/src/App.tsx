@@ -1,9 +1,99 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, FormEvent, Key, ReactNode, RefObject, SetStateAction } from "react";
+import {
+  Activity,
+  BriefcaseBusiness,
+  CirclePower,
+  Eye,
+  File,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  KeyRound,
+  Languages,
+  Plus,
+  PlugZap,
+  LayoutPanelTop,
+  ListTodo,
+  MoreHorizontal,
+  PanelsTopLeft,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Server,
+  SquareTerminal,
+  Stethoscope,
+  Trash2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  Dialog,
+  GridList,
+  GridListItem,
+  Heading,
+  Modal,
+  ModalOverlay,
+} from "react-aria-components";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
+import {
+  DocumentViewer,
+  buildDocumentTranslationRequestPayload,
+  fetchTranslationProviders,
+  isMarkdownDocumentSource,
+  overlayFromTranslationResponse,
+  requestDocumentTranslation,
+  type DocumentTranslationOverlay,
+} from "./documentViewer";
+import { DocumentRawEditor } from "./documentRawEditor";
+import {
+  buildDashboardRefreshCommand,
+  buildDocumentModeSetCommand,
+  buildDocumentRevertCommand,
+  buildDocumentSaveCommand,
+  buildDocumentTranslationToggleCommand,
+  buildFileExplorerOpenFileCommand,
+  buildFileExplorerRefreshCommand,
+  buildFileExplorerSelectEntryCommand,
+  buildFileExplorerToggleDirectoryCommand,
+  buildGitWorktreeAddCloseCommand,
+  buildGitWorktreeAddOpenCommand,
+  buildGitBranchCreateCloseCommand,
+  buildGitBranchCreateOpenCommand,
+  buildGitBranchCreateSubmitCommand,
+  buildGitBranchMenuOpenCommand,
+  buildGitBranchSwitchCommand,
+  buildGitFetchCommand,
+  buildGitPullFfOnlyCommand,
+  buildGitPushCommand,
+  buildGitRefreshCommand,
+  buildGitWorktreeAddSubmitCommand,
+  buildRootPickerCloseCommand,
+  buildRootPickerCreateDirectoryCommand,
+  buildRootPickerNavigateCommand,
+  buildRootPickerOpenCommand,
+  buildRootPickerPinDirectoryCommand,
+  buildRootPickerSelectDirectoryCommand,
+  buildRootPickerUnpinDirectoryCommand,
+  buildTerminalCreateCommand,
+  buildWorkbenchOpenActivityCommand,
+  buildWorkspaceMenuOpenCommand,
+  buildWorkspaceRemoveCommand,
+  buildWorkRootActivationCommand,
+  buildWorkRootOpenCommand,
+  dashboardCommandLabel,
+  dispatchDashboardCommand,
+  type DashboardCommand,
+  type DashboardCommandDispatcher,
+  type DashboardCommandEntry,
+  type DashboardCommandHandlers,
+  type DashboardCommandPayload,
+} from "./commands";
 import {
   decideSurfaceClose,
   decideWorkbenchTabClosePresentation,
@@ -25,16 +115,28 @@ import {
 import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
+  applyReadOnlyFilePaneSavedContent,
+  applyReadOnlyFilePaneSourceContent,
+  applyReadOnlyFilePaneSourceError,
   createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
   flattenWorkRootFileTree,
   idleDirectoryLoadState,
+  loadReadOnlyFilePaneRestoreSnapshot,
   toggleExpandedPath,
+  saveReadOnlyFilePaneRestoreSnapshot,
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
+  documentDraftContentChangeDecision,
+  documentSaveStateForError,
+  parseWorkRootDocumentEvent,
+  workRootDocumentEventsEndpoint,
+  readOnlyFilePaneSourceKey,
+  writeWorkRootTextFile,
   type DirectoryLoadState,
+  type DocumentSaveState,
   readOnlyFilePaneLogicalKey,
   readOnlyFilePaneModeForOpenGesture,
   type ReadOnlyFileOpenGesture,
@@ -52,28 +154,38 @@ import {
   listTerminals,
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
+  loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  replaceTerminalRestoreIntentsForWorkRoot,
   resizeTerminal,
   sendTerminalInput,
+  saveTerminalRestoreIntents,
   shouldPollTerminalOutput,
   terminalOutputPollChangedState,
   terminalPaneFromSession,
+  terminalRestoreIntentsForWorkRoot,
+  terminalRestoreIntentsFromPanes,
   terminalPaneLogicalKey,
   terminalWebSocketCursor,
   terminalWebSocketUrl,
+  type TerminalCreateOptions,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
 } from "./terminals";
 import {
+  compactWorkspaceWorkRoot,
+  compactWorkspaceWorkRootTitle,
   flattenEntities,
   reconcileSelectedId,
   type ActionHint,
   type DashboardResourcesView,
+  type DashboardServersView,
   type InstanceView,
   type ResourceEntity,
   type ResourcePath,
+  type ServerConnectionView,
   type ServerView,
   type ViewState,
   type WorkRootView,
@@ -81,25 +193,78 @@ import {
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
+  createRootPickerDirectory,
+  fetchRootPicker,
+  pinRootPickerDirectory,
+  rootPickerHistoryBack,
+  rootPickerHistoryForward,
+  rootPickerHistoryInitial,
+  rootPickerHistoryPush,
+  rootPickerEntryLabel,
+  rootPickerInsertEntry,
+  rootPickerModifiedTimeLabel,
+  rootPickerPinnedPathSet,
+  rootPickerVisibleEntries,
+  rootPickerVisiblePlaces,
+  unpinRootPickerDirectory,
+  type RootPickerNavigationHistory,
+  type RootPickerView,
+} from "./rootPicker";
+import {
+  fetchGitWorktreeAddOptions,
+  previewGitWorktreeAdd,
+  GitWorktreeAddSubmitError,
+  submitGitWorktreeAdd,
+  type GitWorktreeAddOptions,
+  type GitWorktreeAddPreview,
+  type GitWorktreeAddPreviewRequest,
+} from "./gitWorktreeAdd";
+import {
+  createWorkRootGitBranch,
+  fetchWorkRootGit,
+  fetchWorkRootGitBranches,
+  fetchWorkRootGitStatus,
+  gitChangeStatusSegments,
+  gitSyncStatusSegments,
+  gitStatusSegments,
+  pullWorkRootGitFfOnly,
+  pushWorkRootGit,
+  startGitRefreshScheduler,
+  switchWorkRootGitBranch,
+  type GitBranchList,
+  type GitStatusSegment,
+  type WorkRootGitStatus,
+} from "./gitToolbar";
+import {
+  defaultLinkedServerId,
+  linkEndpointServer,
+  linkServerPassphrase,
+  reconnectServerTunnel,
+} from "./linkedServers";
+import { ActivityConsole } from "./ActivityConsole";
+import {
+  createResourceRefreshCoordinator,
+  requestDashboardResources,
+  requestDashboardServers,
+  resourceAvailabilityPollIntervalMs,
+  type ResourceRefreshCoordinator,
+} from "./resourceRefresh";
+import {
+  applyActivityConsoleEvent,
   fetchWorkRootActivity,
   mergeWorkRootActivityViews,
+  parseActivityConsoleEvent,
+  shouldApplyActivityStreamRequest,
   workRootActivityBadge,
-  type NamedAgentActivityView,
+  workRootActivityEventsEndpoint,
+  type ActivityConsoleEvent,
+  type ActivityConsoleStreamRequest,
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
-  type WorkRootActivityView,
 } from "./workRootActivity";
 
-type CommandPayload =
-  | { type: "select"; entityId: string }
-  | { type: "action"; label: string; entityId: string }
-  | { type: "refresh" };
-
-type CommandEntry = {
-  id: number;
-  commandId: string;
-  label: string;
-};
+type CommandPayload = DashboardCommandPayload;
+type CommandEntry = DashboardCommandEntry;
 
 type WorkRootExplorerSnapshot = {
   expandedPaths: Set<string>;
@@ -114,7 +279,40 @@ type WorkbenchSelection = {
   selectedInstance: InstanceView | null;
 };
 
-const resourceEndpoint = "/api/dashboard/resources";
+type ServerModalState =
+  | { mode: "add" }
+  | { mode: "auth"; server: ServerConnectionView };
+
+async function requestWorkRootActivation(
+  workRootId: string,
+  activation: "online" | "offline",
+): Promise<DashboardResourcesView> {
+  const response = await fetch(
+    `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activation`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ activation }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as DashboardResourcesView;
+}
+
+async function requestWorkspaceRemoval(
+  workspaceId: string,
+): Promise<DashboardResourcesView> {
+  const response = await fetch(
+    `/api/dashboard/workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: "DELETE", headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as DashboardResourcesView;
+}
 
 // Terminal output is short-polled over HTTP (the daemon output route returns
 // immediately). A snappy interval keeps keystroke echo latency low; idle polls
@@ -131,20 +329,29 @@ export function App() {
   const [resources, setResources] = useState<DashboardResourcesView | null>(
     null,
   );
+  const [serversView, setServersView] = useState<DashboardServersView | null>(
+    null,
+  );
+  const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<string | null>(null);
+  const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
+  const [initialReadOnlyFilePaneRestore] = useState(() =>
+    loadReadOnlyFilePaneRestoreSnapshot(),
+  );
   const [readOnlyFilePanes, setReadOnlyFilePanes] = useState<
     Record<string, ReadOnlyFilePane>
-  >({});
+  >(initialReadOnlyFilePaneRestore.panes);
   const [activeReadOnlyFilePaneRequest, setActiveReadOnlyFilePaneRequest] =
     useState<{
       paneId: string;
       sequence: number;
     } | null>(null);
   const [readOnlyFilePaneOrderByGroup, setReadOnlyFilePaneOrderByGroup] =
-    useState<WorkbenchPaneOrder>({});
+    useState<WorkbenchPaneOrder>(initialReadOnlyFilePaneRestore.orderByGroup);
   const [workbenchGroupsByRoot, setWorkbenchGroupsByRoot] = useState<
     Record<string, ReadonlyArray<{ id: string; label: string }>>
   >({});
@@ -153,37 +360,71 @@ export function App() {
   >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
+  const restoredReadOnlyPaneKeys = useRef(
+    new Set(Object.keys(initialReadOnlyFilePaneRestore.panes)),
+  );
+  const resourceRefreshCoordinatorRef =
+    useRef<ResourceRefreshCoordinator | null>(null);
+  const selectedServerIdRef = useRef(selectedServerId);
 
-  const loadResources = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  if (!resourceRefreshCoordinatorRef.current) {
+    resourceRefreshCoordinatorRef.current = createResourceRefreshCoordinator({
+      fetchResources: () => requestDashboardResources(selectedServerIdRef.current),
+      applyResources: setResources,
+      setLoading,
+      setError,
+    });
+  }
 
+  const loadResources = useCallback(
+    (reason: "initial" | "explicit" | "poll" | "open" = "explicit") =>
+      resourceRefreshCoordinatorRef.current?.refresh(reason),
+    [],
+  );
+
+  const loadServers = useCallback(async () => {
     try {
-      const response = await fetch(resourceEndpoint, {
-        headers: { Accept: "application/json" },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const nextResources = (await response.json()) as DashboardResourcesView;
-      setResources(nextResources);
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "request failed",
-      );
-    } finally {
-      setLoading(false);
+      setServersView(await requestDashboardServers());
+    } catch {
+      // The selected server resource request already owns the visible error
+      // surface; keep the last server list rather than blanking the nav.
     }
   }, []);
 
+  const serverConnections = useMemo(
+    () =>
+      serversView?.servers ??
+      (resources ? [serverViewToConnection(resources.server)] : []),
+    [resources, serversView],
+  );
+  const activeResources =
+    resources?.server.id === selectedServerId ? resources : null;
+
   useEffect(() => {
-    void loadResources();
-  }, [loadResources]);
+    selectedServerIdRef.current = selectedServerId;
+  }, [selectedServerId]);
+
+  useEffect(() => {
+    resourceRefreshCoordinatorRef.current?.resume();
+    void loadServers();
+    void loadResources("initial");
+  }, [loadResources, loadServers]);
+
+  useEffect(() => {
+    resourceRefreshCoordinatorRef.current?.resume();
+    const interval = window.setInterval(() => {
+      void loadServers();
+      void loadResources("poll");
+    }, resourceAvailabilityPollIntervalMs);
+
+    return () => {
+      window.clearInterval(interval);
+      resourceRefreshCoordinatorRef.current?.dispose();
+    };
+  }, [loadResources, loadServers]);
 
   const handleWorkRootOpened = useCallback(
-    (openedView: DashboardResourcesView) => {
+    (openedView: DashboardResourcesView, requestedWorkRootId?: string) => {
       // Identify the just-opened workRoot: the workRoot present in the
       // aggregated open response but absent from the prior resource view.
       const priorWorkRootIds = new Set(
@@ -191,7 +432,7 @@ export function App() {
           .filter((entity) => entity.type === "workRoot")
           .map((entity) => entity.id),
       );
-      const openedWorkRootId = flattenEntities(openedView).find(
+      const openedWorkRootId = requestedWorkRootId ?? flattenEntities(openedView).find(
         (entity) =>
           entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
       )?.id;
@@ -199,13 +440,16 @@ export function App() {
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
       // source of truth for refresh and re-entry.
-      setResources(openedView);
+      selectedServerIdRef.current = openedView.server.id;
+      setSelectedServerId(openedView.server.id);
+      resourceRefreshCoordinatorRef.current?.applyExternalResources(openedView);
       if (openedWorkRootId) {
         setSelectedId(openedWorkRootId);
       }
-      void loadResources();
+      void loadServers();
+      void loadResources("open");
     },
-    [loadResources, resources],
+    [loadResources, loadServers, resources],
   );
 
   useEffect(() => {
@@ -213,26 +457,144 @@ export function App() {
       return;
     }
 
+    if (resources.server.id !== selectedServerIdRef.current) {
+      selectedServerIdRef.current = resources.server.id;
+      setSelectedServerId(resources.server.id);
+    }
     normalizeServerRoute(resources.server.id);
   }, [resources]);
 
-  const entities = useMemo(() => flattenEntities(resources), [resources]);
+  const handleServerSelected = useCallback(
+    (server: ServerConnectionView) => {
+      selectedServerIdRef.current = server.id;
+      setSelectedServerId(server.id);
+      setSelectedId(server.id);
+      if (server.status === "connected") {
+        void loadResources("explicit");
+      }
+    },
+    [loadResources],
+  );
+
+  const applyServerConnection = useCallback(
+    (server: ServerConnectionView) => {
+      setServersView((current) => {
+        const servers = current?.servers ?? serverConnections;
+        const nextServers = servers.some((candidate) => candidate.id === server.id)
+          ? servers.map((candidate) => candidate.id === server.id ? server : candidate)
+          : [...servers, server];
+        return { servers: nextServers };
+      });
+      selectedServerIdRef.current = server.id;
+      setSelectedServerId(server.id);
+      setSelectedId(server.id);
+      void loadServers();
+      if (server.status === "connected") {
+        void loadResources("explicit");
+      }
+    },
+    [loadResources, loadServers, serverConnections],
+  );
+
+  const reconnectServer = useCallback(
+    (server: ServerConnectionView) => {
+      void reconnectServerTunnel(server.id)
+        .then(applyServerConnection)
+        .catch((nextError) => {
+          setError(nextError instanceof Error ? nextError.message : "server reconnect failed");
+        });
+    },
+    [applyServerConnection],
+  );
+
+  const entities = useMemo(
+    () => flattenEntities(activeResources),
+    [activeResources],
+  );
 
   useEffect(() => {
     // Reconcile after every resource change so a selection that left the
     // entity set (the mock workspace once the tree turns live) cannot remain
     // active.
+    const serverIds = new Set(serverConnections.map((server) => server.id));
+    if (selectedId && serverIds.has(selectedId)) {
+      return;
+    }
+    if (entities.length === 0) {
+      const nextSelectedId = selectedId ?? selectedServerId;
+      if (nextSelectedId !== selectedId) {
+        setSelectedId(nextSelectedId);
+      }
+      return;
+    }
     const nextSelectedId = reconcileSelectedId(entities, selectedId);
     if (nextSelectedId !== selectedId) {
       setSelectedId(nextSelectedId);
     }
-  }, [entities, selectedId]);
+  }, [entities, selectedId, selectedServerId, serverConnections]);
+
+  useEffect(() => {
+    saveReadOnlyFilePaneRestoreSnapshot(
+      Object.values(readOnlyFilePanes),
+      readOnlyFilePaneOrderByGroup,
+    );
+  }, [readOnlyFilePanes, readOnlyFilePaneOrderByGroup]);
+
+  useEffect(() => {
+    if (!resources || restoredReadOnlyPaneKeys.current.size === 0) {
+      return;
+    }
+    const knownWorkRootIds = new Set(
+      resources.workspaces.flatMap((workspace) =>
+        workspace.workRoots.map((root) => root.id),
+      ),
+    );
+    for (const logicalKey of Array.from(restoredReadOnlyPaneKeys.current)) {
+      const pane = readOnlyFilePanes[logicalKey];
+      if (!pane || pane.status !== "loading") {
+        restoredReadOnlyPaneKeys.current.delete(logicalKey);
+        continue;
+      }
+      if (!knownWorkRootIds.has(pane.workRootId)) {
+        continue;
+      }
+      restoredReadOnlyPaneKeys.current.delete(logicalKey);
+      void fetchWorkRootTextFile(pane.workRootId, pane.path)
+        .then((file) => {
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [logicalKey]: applyReadOnlyFilePaneContent(currentPane, file),
+            };
+          });
+        })
+        .catch((error) => {
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [logicalKey]: applyReadOnlyFilePaneError(
+                currentPane,
+                error instanceof Error ? error.message : "file read failed",
+              ),
+            };
+          });
+        });
+    }
+  }, [readOnlyFilePanes, resources]);
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
   const workbenchSelection = useMemo(
-    () => resolveWorkbenchSelection(resources, selectedId),
-    [resources, selectedId],
+    () => resolveWorkbenchSelection(activeResources, selectedId),
+    [activeResources, selectedId],
   );
 
   const openReadOnlyFile = useCallback(
@@ -369,70 +731,180 @@ export function App() {
     ],
   );
 
-  const executeCommand = useCallback(
-    (commandId: string, payload: CommandPayload) => {
-      if (payload.type === "select") {
-        setSelectedId(payload.entityId);
+  const executeCommand = useCallback<DashboardCommandDispatcher>(
+    (command: DashboardCommand, handlers: DashboardCommandHandlers = {}) => {
+      const executableHandlers: DashboardCommandHandlers = { ...handlers };
+      if (command.payload.type === "select") {
+        const { entityId } = command.payload;
+        executableHandlers[command.commandId] = () => setSelectedId(entityId);
+      } else if (command.payload.type === "refresh") {
+        executableHandlers[command.commandId] = () => {
+          void loadServers();
+          void loadResources("explicit");
+        };
+      } else if (command.payload.type === "workRoot.activation.set") {
+        const { workRootId, activation } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          void requestWorkRootActivation(workRootId, activation)
+            .then((nextResources) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "activation failed");
+            });
+        };
+      } else if (command.payload.type === "gitWorktreeAdd.open") {
+        const { workspaceId } = command.payload;
+        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(workspaceId);
+      } else if (command.payload.type === "gitWorktreeAdd.close") {
+        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(null);
+      } else if (command.payload.type === "workspace.remove") {
+        const { workspaceId } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          const workspace = activeResources?.workspaces.find(
+            (candidate) => candidate.id === workspaceId,
+          );
+          if (
+            !window.confirm(
+              "Remove this workspace from the dashboard? Files and Git worktrees on disk will not be deleted.",
+            )
+          ) {
+            return;
+          }
+          const removedRootIds = new Set(
+            workspace?.workRoots.map((root) => root.id) ?? [],
+          );
+          void requestWorkspaceRemoval(workspaceId)
+            .then((nextResources) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+              if (removedRootIds.size > 0) {
+                setReadOnlyFilePanes((current) =>
+                  Object.fromEntries(
+                    Object.entries(current).filter(
+                      ([, pane]) => !removedRootIds.has(pane.workRootId),
+                    ),
+                  ),
+                );
+                setReadOnlyFilePaneOrderByGroup((current) =>
+                  removePanesFromOrder(
+                    current,
+                    Object.values(readOnlyFilePanes)
+                      .filter((pane) => removedRootIds.has(pane.workRootId))
+                      .map((pane) => pane.id),
+                  ),
+                );
+                setPaneOrderByRoot((current) =>
+                  Object.fromEntries(
+                    Object.entries(current).filter(
+                      ([rootId]) => !removedRootIds.has(rootId),
+                    ),
+                  ),
+                );
+                setWorkbenchGroupsByRoot((current) =>
+                  Object.fromEntries(
+                    Object.entries(current).filter(
+                      ([rootId]) => !removedRootIds.has(rootId),
+                    ),
+                  ),
+                );
+              }
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "workspace removal failed");
+            });
+        };
       }
 
-      if (payload.type === "refresh") {
-        void loadResources();
-      }
+      dispatchDashboardCommand(command, {
+        handlers: executableHandlers,
+        observer: (observedCommand) => {
+          setCommandLog((entries) =>
+            [
+              {
+                id: commandSequence.current++,
+                commandId: observedCommand.commandId,
+                label: dashboardCommandLabel(observedCommand),
+              },
+              ...entries,
+            ].slice(0, 6),
+          );
+        },
+      });
+    },
+    [activeResources, loadResources, loadServers, readOnlyFilePanes],
+  );
 
-      setCommandLog((entries) =>
-        [
-          {
-            id: commandSequence.current++,
-            commandId,
-            label:
-              payload.type === "action"
-                ? payload.label
-                : payload.type === "refresh"
-                  ? "Refresh"
-                  : "Select",
-          },
-          ...entries,
-        ].slice(0, 6),
+  const applyDocumentSaved = useCallback(
+    (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => {
+      setReadOnlyFilePanes((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([key, pane]) => [
+            key,
+            pane.workRootId === source.workRootId && pane.path === source.path
+              ? applyReadOnlyFilePaneSavedContent(
+                  pane,
+                  source.content,
+                  source.contentHash,
+                  source.sizeBytes,
+                )
+              : pane,
+          ]),
+        ),
       );
     },
-    [loadResources],
+    [],
   );
 
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
-        <aside className="shell-panel shell-panel-nav" aria-label="Resources">
-          <PanelHeader
-            title={resources?.server.label ?? "ws dashboard"}
-            state={resources?.server.state}
-            actions={resources?.server.actions ?? []}
-            entityId={resources?.server.id ?? "server"}
-            onCommand={executeCommand}
-          />
-          <OpenWorkRootControl
-            onOpened={handleWorkRootOpened}
-            onCommand={executeCommand}
-          />
+        <aside className="shell-panel shell-panel-nav ws-panel" aria-label="Resources">
           <ResourceNavigation
-            resources={resources}
+            resources={activeResources}
+            servers={serverConnections}
+            selectedServerId={selectedServerId}
             loading={loading}
             error={error}
-            selectedId={selectedEntity?.id ?? null}
+            selectedId={selectedId}
             selectedWorkRoot={workbenchSelection?.root ?? null}
+            onOpenWorkRoot={handleWorkRootOpened}
+            onOpenAddServer={() => setServerModal({ mode: "add" })}
+            onOpenServerAuth={(server) => setServerModal({ mode: "auth", server })}
+            onReconnectServer={reconnectServer}
+            onSelectServer={handleServerSelected}
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
+          />
+          <GitWorktreeAddModal
+            workspaceId={gitWorktreeWorkspaceId}
+            onCommand={executeCommand}
+            onClose={() => setGitWorktreeWorkspaceId(null)}
+            onCreated={(response) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(response.resources);
+              if (response.createdWorkRootId) {
+                setSelectedId(response.createdWorkRootId);
+              }
+              setGitWorktreeWorkspaceId(null);
+            }}
+          />
+          <LinkedServerModal
+            state={serverModal}
+            onClose={() => setServerModal(null)}
+            onLinked={(server) => {
+              applyServerConnection(server);
+            }}
           />
         </aside>
 
         <section
-          className="shell-panel shell-panel-workbench"
+          className="shell-panel shell-panel-workbench ws-panel"
           aria-label="WorkRoot workbench"
         >
           <WorkbenchShell
             commandLog={commandLog}
             error={error}
             loading={loading}
-            resources={resources}
+            resources={activeResources}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
             workbenchGroupsByRoot={workbenchGroupsByRoot}
@@ -445,11 +917,136 @@ export function App() {
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
             onReadOnlyFilePanesChange={setReadOnlyFilePanes}
             onReadOnlyFilePaneOrderByGroupChange={setReadOnlyFilePaneOrderByGroup}
+            onDocumentSaved={applyDocumentSaved}
           />
         </section>
       </div>
     </main>
   );
+}
+
+function useDismissableMenu(
+  open: boolean,
+  containerRef: RefObject<HTMLElement | null>,
+  onDismiss: () => void,
+) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const dismissIfOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || containerRef.current?.contains(target)) {
+        return;
+      }
+      onDismiss();
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onDismiss();
+      }
+    };
+    document.addEventListener("click", dismissIfOutside);
+    document.addEventListener("keydown", dismissOnEscape, true);
+    return () => {
+      document.removeEventListener("click", dismissIfOutside);
+      document.removeEventListener("keydown", dismissOnEscape, true);
+    };
+  }, [containerRef, onDismiss, open]);
+}
+
+function ChromeIconButton({
+  icon: Icon,
+  label,
+  className = "",
+  commandId,
+  disabled = false,
+  tone = "default",
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  className?: string;
+  commandId: string;
+  disabled?: boolean;
+  tone?: "default" | "primary" | "danger";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={`icon-button icon-button-${tone} ${className}`.trim()}
+      data-command-id={commandId}
+      disabled={disabled}
+      title={label}
+      type="button"
+      onClick={onClick}
+    >
+      <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+    </button>
+  );
+}
+
+function ResourceGlyph({
+  presentation,
+}: {
+  presentation: "compactWorkRoot" | "workspace" | "workRoot";
+}) {
+  if (presentation === "compactWorkRoot") {
+    return (
+      <span
+        className="resource-row-icon resource-row-icon-compact"
+        aria-hidden="true"
+      >
+        <FolderOpen size={15} strokeWidth={1.8} />
+      </span>
+    );
+  }
+
+  const Icon = presentation === "workspace" ? BriefcaseBusiness : FolderGit2;
+  return (
+    <span className="resource-row-icon" aria-hidden="true">
+      <Icon size={15} strokeWidth={1.8} />
+    </span>
+  );
+}
+
+function WorkRootKindIcon({ kind }: { kind: WorkRootView["kind"] }) {
+  const Icon = kind === "plainDirectory" ? Folder : kind === "gitLinkedWorktree" ? GitBranch : FolderGit2;
+  return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
+}
+
+function serverViewToConnection(server: ServerView): ServerConnectionView {
+  return {
+    id: server.id,
+    label: server.label,
+    kind: "local",
+    status: "connected",
+    state: server.state,
+    actions: server.actions,
+  };
+}
+
+function serverConnectionStatusLabel(server: ServerConnectionView): string {
+  switch (server.status) {
+    case "connected":
+      return "connected";
+    case "authRequired":
+      return "auth required";
+    case "tunnelRequired":
+      return "tunnel required";
+    case "staleEndpoint":
+      return "stale endpoint";
+    case "starting":
+      return "starting";
+    case "unreachable":
+      return "unreachable";
+  }
+}
+
+function ToggleIcon({ toggle }: { toggle: WorkbenchToggle }) {
+  const Icon = workbenchToggleIcon(toggle);
+  return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
 }
 
 function PanelHeader({
@@ -463,10 +1060,10 @@ function PanelHeader({
   state?: ViewState;
   actions?: ActionHint[];
   entityId?: string;
-  onCommand?: (commandId: string, payload: CommandPayload) => void;
+  onCommand?: DashboardCommandDispatcher;
 }) {
   return (
-    <div className="panel-header">
+    <div className="panel-header ws-toolbar">
       <div className="panel-title-block">
         <div className="panel-title">{title}</div>
         {state ? <StateLine state={state} /> : null}
@@ -474,23 +1071,27 @@ function PanelHeader({
       {actions.length > 0 && onCommand ? (
         <div className="action-strip">
           {actions.map((action) => (
-            <button
-              className="action-button"
-              data-command-id={`resource.action.${action.id}`}
-              disabled={!action.enabled}
-              key={action.id}
-              title={action.label}
-              type="button"
-              onClick={() =>
-                onCommand(`resource.action.${action.id}`, {
-                  type: action.id === "refresh" ? "refresh" : "action",
-                  label: action.label,
-                  entityId,
-                })
+            <ChromeIconButton
+              commandId={
+                action.id === "refresh"
+                  ? "dashboard.refresh"
+                  : `resource.action.${action.id}`
               }
-            >
-              {action.label}
-            </button>
+              disabled={!action.enabled}
+              icon={action.id === "refresh" ? RefreshCw : PanelsTopLeft}
+              key={action.id}
+              label={action.label}
+              onClick={() =>
+                onCommand(
+                  action.id === "refresh"
+                    ? buildDashboardRefreshCommand()
+                    : {
+                        commandId: `resource.action.${action.id}`,
+                        payload: { type: "action", label: action.label, entityId },
+                      },
+                )
+              }
+            />
           ))}
         </div>
       ) : null}
@@ -501,129 +1102,1033 @@ function PanelHeader({
 function OpenWorkRootControl({
   onOpened,
   onCommand,
+  variant = "section",
+  disabled = false,
 }: {
-  onOpened: (view: DashboardResourcesView) => void;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onOpened: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onCommand: DashboardCommandDispatcher;
+  variant?: "section" | "icon";
+  disabled?: boolean;
 }) {
-  const [path, setPath] = useState("");
-  const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [pickerView, setPickerView] = useState<RootPickerView | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [addressPath, setAddressPath] = useState("");
+  const [exactPath, setExactPath] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [history, setHistory] = useState<RootPickerNavigationHistory>(() =>
+    rootPickerHistoryInitial(),
+  );
+  const [loading, setLoading] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [pinningPath, setPinningPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const wasOpenRef = useRef(false);
 
-  const submit = async () => {
-    const requestedPath = path.trim();
-    if (requestedPath.length === 0 || pending) {
+  const loadPicker = useCallback(
+    async (path: string | null, historyMode: "push" | "replace" = "push") => {
+      setLoading(true);
+      setError(null);
+      try {
+        const view = await fetchRootPicker(path);
+        setPickerView(view);
+        setSelectedPath(view.currentPath);
+        setAddressPath(view.currentPath);
+        setExactPath(view.currentPath);
+        if (historyMode === "push") {
+          setHistory((current) => rootPickerHistoryPush(current, view.currentPath));
+        }
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : "picker load failed");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!open || pickerView || loading) {
       return;
     }
+    void loadPicker(null);
+  }, [loadPicker, loading, open, pickerView]);
 
-    onCommand("workRoot.open", {
-      type: "action",
-      label: "Open workRoot",
-      entityId: "",
+  useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      openerRef.current?.focus();
+    }
+    wasOpenRef.current = open;
+  }, [open]);
+
+  const closePicker = () => {
+    onCommand(buildRootPickerCloseCommand(), {
+      "rootPicker.close": () => {
+        setOpen(false);
+      },
     });
-    setPending(true);
-    setError(null);
+  };
 
-    try {
-      const openedView = await requestOpenWorkRoot(requestedPath);
-      setPath("");
-      onOpened(openedView);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "open failed");
-    } finally {
-      setPending(false);
+  const openPicker = () => {
+    onCommand(buildRootPickerOpenCommand(), {
+      "rootPicker.open": () => {
+        setError(null);
+        setOpen(true);
+      },
+    });
+  };
+
+  const navigateTo = (path: string, historyMode: "push" | "replace" = "push") => {
+    onCommand(buildRootPickerNavigateCommand(path), {
+      "rootPicker.navigate": () => {
+        void loadPicker(path, historyMode);
+      },
+    });
+  };
+
+  const selectDirectory = (path: string) => {
+    onCommand(buildRootPickerSelectDirectoryCommand(path), {
+      "rootPicker.selectDirectory": () => {
+        setSelectedPath(path);
+        setExactPath(path);
+      },
+    });
+  };
+
+  const navigateBack = () => {
+    const transition = rootPickerHistoryBack(history);
+    if (!transition.targetPath) {
+      return;
+    }
+    setHistory(transition.history);
+    navigateTo(transition.targetPath, "replace");
+  };
+
+  const navigateForward = () => {
+    const transition = rootPickerHistoryForward(history);
+    if (!transition.targetPath) {
+      return;
+    }
+    setHistory(transition.history);
+    navigateTo(transition.targetPath, "replace");
+  };
+
+  const handleGridSelection = (keys: "all" | Set<Key>) => {
+    if (keys === "all") {
+      return;
+    }
+    const nextPath = Array.from(keys).at(0);
+    if (typeof nextPath === "string") {
+      selectDirectory(nextPath);
     }
   };
 
-  return (
-    <form
-      className="open-work-root"
+  const submitPath = (submittedPath: string) => {
+    const requestedPath = submittedPath.trim();
+    if (requestedPath.length === 0 || pendingOpen) {
+      return;
+    }
+
+    onCommand(
+      buildWorkRootOpenCommand(requestedPath),
+      {
+        "workRoot.open": () => {
+          setPendingOpen(true);
+          setError(null);
+          void requestOpenWorkRoot(requestedPath)
+            .then((result) => {
+              setOpen(false);
+              setPickerView(null);
+              setSelectedPath(null);
+              setAddressPath("");
+              setExactPath("");
+              setCreateName("");
+              setHistory(rootPickerHistoryInitial());
+              onOpened(result.view, result.openedWorkRootId ?? undefined);
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "open failed");
+            })
+            .finally(() => {
+              setPendingOpen(false);
+            });
+        },
+      },
+    );
+  };
+
+  const createDirectory = () => {
+    const parentPath = pickerView?.currentPath;
+    const name = createName.trim();
+    if (!parentPath || name.length === 0 || creating) {
+      return;
+    }
+    onCommand(buildRootPickerCreateDirectoryCommand(parentPath, name), {
+      "rootPicker.createDirectory": () => {
+        setCreating(true);
+        setError(null);
+        void createRootPickerDirectory(parentPath, name)
+          .then((entry) => {
+            setPickerView((current) =>
+              current
+                ? {
+                    ...current,
+                    entries: rootPickerInsertEntry(current.entries, entry),
+                  }
+                : current,
+            );
+            setSelectedPath(entry.path);
+            setExactPath(entry.path);
+            setCreateName("");
+          })
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "create failed");
+          })
+          .finally(() => {
+            setCreating(false);
+          });
+      },
+    });
+  };
+
+  const updatePickerPlaces = (places: RootPickerView["places"]) => {
+    setPickerView((current) => (current ? { ...current, places } : current));
+  };
+
+  const pinDirectory = (path: string) => {
+    if (pinningPath) {
+      return;
+    }
+    onCommand(buildRootPickerPinDirectoryCommand(path), {
+      "rootPicker.pinDirectory": () => {
+        setPinningPath(path);
+        setError(null);
+        void pinRootPickerDirectory(path)
+          .then((view) => updatePickerPlaces(view.places))
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "pin failed");
+          })
+          .finally(() => setPinningPath(null));
+      },
+    });
+  };
+
+  const unpinDirectory = (path: string) => {
+    if (pinningPath) {
+      return;
+    }
+    onCommand(buildRootPickerUnpinDirectoryCommand(path), {
+      "rootPicker.unpinDirectory": () => {
+        setPinningPath(path);
+        setError(null);
+        void unpinRootPickerDirectory(path)
+          .then((view) => updatePickerPlaces(view.places))
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "unpin failed");
+          })
+          .finally(() => setPinningPath(null));
+      },
+    });
+  };
+
+  const selectedLabel = selectedPath ? rootPickerEntryLabel(selectedPath) : "None";
+  const selectedEntry = pickerView?.entries.find((entry) => entry.path === selectedPath);
+  const visibleEntries = rootPickerVisibleEntries(pickerView?.entries ?? []);
+  const visiblePlaces = rootPickerVisiblePlaces(pickerView);
+  const pinnedPaths = rootPickerPinnedPathSet(pickerView);
+  const selectedPathIsPinned = selectedPath ? pinnedPaths.has(selectedPath) : false;
+
+  const openerButton = (
+    <button
+      ref={openerRef}
       aria-label="Open workRoot"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
+      className="icon-button icon-button-primary"
+      data-command-id="rootPicker.open"
+      disabled={disabled}
+      title={disabled ? "Open workRoot is local-only in this build" : "Open workRoot"}
+      type="button"
+      onClick={openPicker}
+    >
+      <FolderOpen aria-hidden="true" size={15} strokeWidth={1.8} />
+    </button>
+  );
+
+  return (
+    <div
+      className={
+        variant === "icon" ? "open-work-root open-work-root-icon" : "open-work-root"
+      }
+      aria-label="Open workRoot"
+    >
+      {variant === "section" ? (
+        <div className="open-work-root-row">
+          <div>
+            <div className="section-label">Open workRoot</div>
+            <div className="open-work-root-summary">Choose a directory from this host</div>
+          </div>
+          {openerButton}
+        </div>
+      ) : (
+        openerButton
+      )}
+      <ModalOverlay
+        className="root-picker-backdrop"
+        isDismissable
+        isOpen={open}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && open) {
+            closePicker();
+          }
+        }}
+      >
+        <Modal className="root-picker-modal">
+          <Dialog aria-label="Open workRoot" className="root-picker-dialog">
+            <div className="root-picker-titlebar">
+              <Heading className="root-picker-title" slot="title">
+                Open workRoot
+              </Heading>
+              <div className="root-picker-window-actions">
+                <ChromeIconButton
+                  className="root-picker-close-button"
+                  commandId="rootPicker.close"
+                  icon={X}
+                  label="Close"
+                  onClick={closePicker}
+                />
+              </div>
+            </div>
+            <div className="root-picker-current root-picker-context" title={pickerView?.currentPath ?? ""}>
+              {pickerView?.currentPath ?? "Loading host directories"}
+            </div>
+
+            <form
+              className="root-picker-toolbar"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (addressPath.trim().length > 0) {
+                  navigateTo(addressPath.trim());
+                }
+              }}
+            >
+              <div className="root-picker-toolbar-buttons">
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={history.backStack.length === 0 || loading}
+                  type="button"
+                  onClick={navigateBack}
+                >
+                  Back
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={history.forwardStack.length === 0 || loading}
+                  type="button"
+                  onClick={navigateForward}
+                >
+                  Forward
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!pickerView?.parentPath || loading}
+                  type="button"
+                  onClick={() => {
+                    if (pickerView?.parentPath) {
+                      navigateTo(pickerView.parentPath);
+                    }
+                  }}
+                >
+                  Up
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!pickerView || loading}
+                  type="button"
+                  onClick={() => {
+                    if (pickerView) {
+                      navigateTo(pickerView.currentPath, "replace");
+                    }
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+              <input
+                aria-label="Address"
+                className="root-picker-input root-picker-address"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={addressPath}
+                onChange={(event) => setAddressPath(event.target.value)}
+              />
+            </form>
+
+            <div className="root-picker-content">
+              <aside className="root-picker-places" aria-label="Known places">
+                <div className="root-picker-places-header">
+                  <div className="root-picker-column-label">Places</div>
+                  <button
+                    className="action-button action-button-compact"
+                    data-command-id={
+                      selectedPathIsPinned
+                        ? "rootPicker.unpinDirectory"
+                        : "rootPicker.pinDirectory"
+                    }
+                    disabled={!selectedPath || Boolean(pinningPath)}
+                    type="button"
+                    onClick={() => {
+                      if (!selectedPath) {
+                        return;
+                      }
+                      if (selectedPathIsPinned) {
+                        unpinDirectory(selectedPath);
+                      } else {
+                        pinDirectory(selectedPath);
+                      }
+                    }}
+                  >
+                    {selectedPathIsPinned ? "Unpin" : "Pin"}
+                  </button>
+                </div>
+                {visiblePlaces.length === 0 ? (
+                  <div className="root-picker-state root-picker-state-compact">
+                    No known places
+                  </div>
+                ) : (
+                  visiblePlaces.map((place) => (
+                    <div
+                      className={`root-picker-place-row ${
+                        place.source === "pin" ? "root-picker-place-row-pinned" : ""
+                      }`}
+                      key={place.id}
+                    >
+                      <button
+                        className="root-picker-place"
+                        data-command-id="rootPicker.navigate"
+                        data-root-picker-place-kind={place.kind}
+                        disabled={!place.available}
+                        title={place.path}
+                        type="button"
+                        onClick={() => navigateTo(place.path)}
+                      >
+                        <span className="root-picker-place-label">{place.label}</span>
+                        <span className="root-picker-place-path">
+                          {place.available ? place.path : "Unavailable"}
+                        </span>
+                      </button>
+                      {place.source === "pin" ? (
+                        <button
+                          aria-label={`Unpin ${place.label}`}
+                          className="root-picker-place-unpin"
+                          data-command-id="rootPicker.unpinDirectory"
+                          disabled={Boolean(pinningPath)}
+                          type="button"
+                          onClick={() => unpinDirectory(place.path)}
+                        >
+                          x
+                        </button>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </aside>
+
+              <section className="root-picker-list-region" aria-label="Current folder">
+                <div className="root-picker-list-heading" aria-hidden="true">
+                  <span>Name</span>
+                  <span>Kind</span>
+                  <span>Modified</span>
+                </div>
+                {loading && !pickerView ? (
+                  <div className="root-picker-state">Loading directories</div>
+                ) : visibleEntries.length === 0 ? (
+                  <div className="root-picker-state">No child directories</div>
+                ) : (
+                  <GridList
+                    aria-label="Directories"
+                    className="root-picker-grid-list"
+                    disabledKeys={visibleEntries
+                      .filter((entry) => !entry.selectable)
+                      .map((entry) => entry.path)}
+                    keyboardNavigationBehavior="arrow"
+                    layout="stack"
+                    onAction={(key) => navigateTo(String(key))}
+                    onSelectionChange={handleGridSelection}
+                    selectedKeys={selectedPath ? new Set([selectedPath]) : new Set()}
+                    selectionBehavior="replace"
+                    selectionMode="single"
+                  >
+                    {visibleEntries.map((entry) => (
+                      <GridListItem
+                        className="root-picker-row"
+                        data-command-id="rootPicker.selectDirectory"
+                        id={entry.path}
+                        key={entry.path}
+                        textValue={entry.name}
+                        onDoubleClick={() => navigateTo(entry.path)}
+                      >
+                        <span className="root-picker-row-icon" aria-hidden="true">
+                          /
+                        </span>
+                        <span className="root-picker-row-name" title={entry.path}>
+                          {entry.name}
+                        </span>
+                        <span className="root-picker-row-kind">
+                          {entry.kindLabel ?? "Directory"}
+                        </span>
+                        <span className="root-picker-row-modified">
+                          {rootPickerModifiedTimeLabel(entry.modifiedTime)}
+                        </span>
+                      </GridListItem>
+                    ))}
+                  </GridList>
+                )}
+              </section>
+            </div>
+
+            {error ? <InlineNotice tone="error" title="Root picker" detail={error} /> : null}
+
+            <div className="root-picker-create">
+              <label className="section-label" htmlFor="root-picker-create-name">
+                Create empty folder
+              </label>
+              <div className="root-picker-create-row">
+                <input
+                  id="root-picker-create-name"
+                  className="root-picker-input"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="folder-name"
+                  value={createName}
+                  onChange={(event) => setCreateName(event.target.value)}
+                />
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.createDirectory"
+                  disabled={!pickerView || createName.trim().length === 0 || creating}
+                  type="button"
+                  onClick={createDirectory}
+                >
+                  {creating ? "Creating" : "Create"}
+                </button>
+              </div>
+            </div>
+
+            <form
+              className="root-picker-footer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitPath(exactPath);
+              }}
+            >
+              <label className="root-picker-selection" htmlFor="root-picker-exact-path">
+                Selected: {selectedLabel}
+              </label>
+              <input
+                id="root-picker-exact-path"
+                className="root-picker-input"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={exactPath}
+                onChange={(event) => setExactPath(event.target.value)}
+              />
+              <div className="root-picker-footer-actions">
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!selectedEntry || loading}
+                  type="button"
+                  onClick={() => {
+                    if (selectedEntry) {
+                      navigateTo(selectedEntry.path);
+                    }
+                  }}
+                >
+                  Open folder
+                </button>
+                <button
+                  className="action-button action-button-primary"
+                  data-command-id="workRoot.open"
+                  disabled={exactPath.trim().length === 0 || pendingOpen}
+                  type="submit"
+                >
+                  {pendingOpen ? "Opening" : "Open"}
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.close"
+                  type="button"
+                  onClick={closePicker}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+    </div>
+  );
+}
+
+
+function GitWorktreeAddModal({
+  workspaceId,
+  onCommand,
+  onClose,
+  onCreated,
+}: {
+  workspaceId: string | null;
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+  onCreated: (response: { resources: DashboardResourcesView; createdWorkRootId?: string }) => void;
+}) {
+  const [options, setOptions] = useState<GitWorktreeAddOptions | null>(null);
+  const [worktreeName, setWorktreeName] = useState("");
+  const [branchMode, setBranchMode] = useState<"auto" | "manual">("auto");
+  const [manualBranch, setManualBranch] = useState("");
+  const [pathMode, setPathMode] = useState<"auto" | "custom">("auto");
+  const [customPath, setCustomPath] = useState("");
+  const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null);
+  const previewSequenceRef = useRef(0);
+  const currentRequestKeyRef = useRef<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setOptions(null);
+      setPreview(null);
+      setPreviewRequestKey(null);
+      setError(null);
+      return;
+    }
+    setWorktreeName("");
+    setBranchMode("auto");
+    setManualBranch("");
+    setPathMode("auto");
+    setCustomPath("");
+    setPreview(null);
+    setPreviewRequestKey(null);
+    setError(null);
+    setLoading(true);
+    void fetchGitWorktreeAddOptions(workspaceId)
+      .then(setOptions)
+      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree options failed"))
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  const request = useMemo<GitWorktreeAddPreviewRequest | null>(() => {
+    if (!workspaceId) {
+      return null;
+    }
+    return {
+      worktreeName,
+      branch: branchMode === "auto" ? { mode: "auto" } : { mode: "manual", name: manualBranch },
+      path: pathMode === "auto" ? { mode: "auto" } : { mode: "custom", targetPath: customPath },
+    };
+  }, [branchMode, customPath, manualBranch, pathMode, worktreeName, workspaceId]);
+
+  const requestKey = request ? JSON.stringify(request) : null;
+
+  useEffect(() => {
+    currentRequestKeyRef.current = requestKey;
+  }, [requestKey]);
+
+  useEffect(() => {
+    if (!workspaceId || !request || !requestKey || worktreeName.trim().length === 0) {
+      setPreview(null);
+      setPreviewRequestKey(null);
+      return;
+    }
+    const sequence = previewSequenceRef.current + 1;
+    previewSequenceRef.current = sequence;
+    setPreview(null);
+    setPreviewRequestKey(null);
+    const timer = window.setTimeout(() => {
+      void previewGitWorktreeAdd(workspaceId, request)
+        .then((nextPreview) => {
+          if (previewSequenceRef.current !== sequence) {
+            return;
+          }
+          setPreview(nextPreview);
+          setPreviewRequestKey(requestKey);
+        })
+        .catch((nextError) => {
+          if (previewSequenceRef.current !== sequence) {
+            return;
+          }
+          setError(nextError instanceof Error ? nextError.message : "worktree preview failed");
+        });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [request, requestKey, worktreeName, workspaceId]);
+
+  if (!workspaceId) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildGitWorktreeAddCloseCommand(workspaceId), {
+      "gitWorktreeAdd.close": onClose,
+    });
+  };
+  const submitDisabled =
+    submitting ||
+    !request ||
+    worktreeName.trim().length === 0 ||
+    (branchMode === "manual" && manualBranch.trim().length === 0) ||
+    (pathMode === "custom" && customPath.trim().length === 0) ||
+    !preview ||
+    previewRequestKey !== requestKey ||
+    preview.status === "blocked" ||
+    options?.git.available === false;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!request || submitDisabled) {
+      return;
+    }
+    onCommand(buildGitWorktreeAddSubmitCommand(workspaceId), {
+      "gitWorktreeAdd.submit": () => {
+        const submittedRequestKey = requestKey;
+        setSubmitting(true);
+        setError(null);
+        void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
+          .then(onCreated)
+          .catch((nextError) => {
+            if (nextError instanceof GitWorktreeAddSubmitError && nextError.preview) {
+              if (currentRequestKeyRef.current !== submittedRequestKey) {
+                return;
+              }
+              setPreview(nextError.preview);
+              setPreviewRequestKey(submittedRequestKey);
+              setError("Submit blocked by current server validation");
+              return;
+            }
+            setError(nextError instanceof Error ? nextError.message : "worktree add failed");
+          })
+          .finally(() => setSubmitting(false));
+      },
+    });
+  };
+
+  const severity = preview?.status ?? "blocked";
+  const manualBranchOptions = (options?.branches ?? []).filter((branch) => !branch.checkedOut);
+  const autoBranchDisplay = preview?.branchName ?? worktreeName.trim();
+  const autoPathDisplay = preview?.targetPathLabel ?? (worktreeName.trim() ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}` : "");
+  return (
+    <ModalOverlay className="root-picker-backdrop" isDismissable isOpen onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
+      <Modal className="root-picker-modal git-worktree-modal">
+        <Dialog aria-label="Add Git worktree" className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">Add worktree</Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="gitWorktreeAdd.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
+            </div>
+          </div>
+          <div className="root-picker-current root-picker-context">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
+          <form className="git-worktree-form" onSubmit={submit}>
+            <label className="git-worktree-field">
+              <span className="section-label">Worktree name</span>
+              <input className="root-picker-input" autoComplete="off" value={worktreeName} onChange={(event) => setWorktreeName(event.target.value)} placeholder="feature-name" />
+            </label>
+            <fieldset className="git-worktree-fieldset">
+              <legend className="section-label">Branch</legend>
+              <div className="git-worktree-radio-grid">
+                <label><input type="radio" checked={branchMode === "auto"} onChange={() => setBranchMode("auto")} /> Auto from name</label>
+                <label><input type="radio" checked={branchMode === "manual"} onChange={() => setBranchMode("manual")} /> Existing/manual</label>
+              </div>
+              {branchMode === "auto" ? (
+                <input className="root-picker-input git-worktree-derived-input" readOnly value={autoBranchDisplay} placeholder="derived from worktree name" />
+              ) : (
+                <label className="git-worktree-select-wrap" aria-label="Existing or manual branch">
+                  <select className="root-picker-input git-worktree-select" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)}>
+                    <option value="">Select or type below…</option>
+                    {manualBranchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}
+                  </select>
+                  <input className="root-picker-input" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)} placeholder="or type branch-name" />
+                </label>
+              )}
+            </fieldset>
+            <fieldset className="git-worktree-fieldset">
+              <legend className="section-label">Path</legend>
+              <div className="git-worktree-radio-grid">
+                <label><input type="radio" checked={pathMode === "auto"} onChange={() => setPathMode("auto")} /> Auto path</label>
+                <label><input type="radio" checked={pathMode === "custom"} onChange={() => setPathMode("custom")} /> Custom path</label>
+              </div>
+              <input className="root-picker-input" readOnly={pathMode === "auto"} value={pathMode === "auto" ? autoPathDisplay : customPath} onChange={(event) => setCustomPath(event.target.value)} placeholder={pathMode === "auto" ? "derived from worktree name" : "/path/to/worktree"} />
+            </fieldset>
+            {options && !options.git.available ? <InlineNotice tone="error" title="Git unavailable" detail={options.git.reason ?? "workspace is not Git-capable"} /> : null}
+            {preview ? (
+              <div className={`git-worktree-preview git-worktree-preview-${severity}`} role="status">
+                <strong>{preview.message}</strong>
+                <span>{preview.branchName ? `Branch: ${preview.branchName}` : "Branch pending"}</span>
+                <span>{preview.targetPathLabel ? `Target: ${preview.targetPathLabel}` : "Target pending"}</span>
+                {preview.blockers.map((blocker) => <span key={`${blocker.code}:${blocker.field ?? ""}`}>{blocker.message}</span>)}
+              </div>
+            ) : loading ? <InlineNotice tone="info" title="Loading" detail="Git worktree options" /> : null}
+            {error ? <InlineNotice tone="error" title="Add worktree" detail={error} /> : null}
+            <div className="root-picker-footer-actions">
+              <button className="action-button action-button-primary" data-command-id="gitWorktreeAdd.submit" disabled={submitDisabled} type="submit">{submitting ? "Creating" : "Create worktree"}</button>
+              <button className="action-button" data-command-id="gitWorktreeAdd.close" type="button" onClick={close}>Cancel</button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
+function LinkedServerModal({
+  state,
+  onClose,
+  onLinked,
+}: {
+  state: ServerModalState | null;
+  onClose: () => void;
+  onLinked: (server: ServerConnectionView) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [endpoint, setEndpoint] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+    setError(null);
+    setSubmitting(false);
+    setPassphrase("");
+    if (state.mode === "add") {
+      setLabel("");
+      setEndpoint("");
+    } else {
+      setLabel(state.server.label);
+      setEndpoint("");
+    }
+  }, [state]);
+
+  if (!state) {
+    return null;
+  }
+
+  const addMode = state.mode === "add";
+  const title = addMode ? "Add server" : `Authenticate ${state.server.label}`;
+  const submitDisabled =
+    submitting ||
+    (addMode && (label.trim().length === 0 || endpoint.trim().length === 0)) ||
+    (!addMode && passphrase.trim().length === 0);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (submitDisabled) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const passphraseValue = passphrase.trim();
+    const request = addMode
+      ? linkEndpointServer({
+          serverId: defaultLinkedServerId(label, endpoint),
+          label: label.trim(),
+          endpoint: endpoint.trim(),
+          ...(passphraseValue ? { passphrase: passphraseValue } : {}),
+        })
+      : linkServerPassphrase(state.server.id, passphraseValue);
+    void request
+      .then((server) => {
+        onLinked(server);
+        if (server.status === "connected") {
+          onClose();
+          return;
+        }
+        if (addMode && passphraseValue.length === 0) {
+          onClose();
+          return;
+        }
+        setError("Passphrase was not accepted; the server is saved and still requires authentication.");
+      })
+      .catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : "server link failed");
+      })
+      .finally(() => setSubmitting(false));
+  };
+
+  return (
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onClose();
+        }
       }}
     >
-      <label className="section-label" htmlFor="open-work-root-path">
-        Open workRoot
-      </label>
-      <div className="open-work-root-row">
-        <input
-          id="open-work-root-path"
-          className="open-work-root-input"
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="/path/to/workRoot"
-          value={path}
-          disabled={pending}
-          onChange={(event) => setPath(event.target.value)}
-        />
-        <button
-          className="action-button action-button-primary"
-          data-command-id="workRoot.open"
-          disabled={pending || path.trim().length === 0}
-          type="submit"
-        >
-          {pending ? "Opening" : "Open"}
-        </button>
-      </div>
-      {error ? (
-        <InlineNotice tone="error" title="Open failed" detail={error} />
-      ) : null}
-    </form>
+      <Modal className="root-picker-modal linked-server-modal">
+        <Dialog aria-label={title} className="root-picker-dialog">
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">
+              {title}
+            </Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="resource.action.server.modal.close"
+                icon={X}
+                label="Close"
+                onClick={onClose}
+              />
+            </div>
+          </div>
+          <form className="linked-server-form" onSubmit={submit}>
+            {addMode ? (
+              <>
+                <label className="linked-server-field">
+                  <span className="section-label">Name</span>
+                  <input
+                    className="root-picker-input"
+                    autoComplete="off"
+                    value={label}
+                    onChange={(event) => setLabel(event.target.value)}
+                    placeholder="Remote dev"
+                  />
+                </label>
+                <label className="linked-server-field">
+                  <span className="section-label">Endpoint</span>
+                  <input
+                    className="root-picker-input"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={endpoint}
+                    onChange={(event) => setEndpoint(event.target.value)}
+                    placeholder="http://127.0.0.1:49170"
+                  />
+                </label>
+                <div className="linked-server-hint">
+                  Use an endpoint already reachable from this host, including a
+                  loopback tunnel you created outside the dashboard.
+                </div>
+              </>
+            ) : (
+              <div className="linked-server-hint">
+                Enter the daemon-lifetime passphrase printed by the remote
+                dashboard daemon.
+              </div>
+            )}
+            <label className="linked-server-field">
+              <span className="section-label">Passphrase</span>
+              <input
+                className="root-picker-input"
+                autoComplete="off"
+                spellCheck={false}
+                type="password"
+                value={passphrase}
+                onChange={(event) => setPassphrase(event.target.value)}
+                placeholder={addMode ? "Optional" : "Required"}
+              />
+            </label>
+            {error ? <InlineNotice tone="error" title="Server link" detail={error} /> : null}
+            <div className="root-picker-footer-actions">
+              <button
+                className="action-button action-button-primary"
+                data-command-id="resource.action.server.link.submit"
+                disabled={submitDisabled}
+                type="submit"
+              >
+                {submitting ? "Connecting" : addMode ? "Connect" : "Authenticate"}
+              </button>
+              <button
+                className="action-button"
+                data-command-id="resource.action.server.modal.close"
+                type="button"
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
   );
 }
 
 function ResourceNavigation({
   resources,
+  servers,
+  selectedServerId,
   loading,
   error,
   selectedId,
   selectedWorkRoot,
+  onOpenWorkRoot,
+  onOpenAddServer,
+  onOpenServerAuth,
+  onReconnectServer,
+  onSelectServer,
   onCommand,
   onOpenFile,
 }: {
   resources: DashboardResourcesView | null;
+  servers: ServerConnectionView[];
+  selectedServerId: string;
   loading: boolean;
   error: string | null;
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpenAddServer: () => void;
+  onOpenServerAuth: (server: ServerConnectionView) => void;
+  onReconnectServer: (server: ServerConnectionView) => void;
+  onSelectServer: (server: ServerConnectionView) => void;
+  onCommand: DashboardCommandDispatcher;
   onOpenFile: (
     workRoot: WorkRootView,
     entry: WorkRootFileEntryView,
     gesture: ReadOnlyFileOpenGesture,
   ) => void;
 }) {
-  if (loading && !resources) {
-    return <StatusPane title="Loading" detail="resources" />;
-  }
-
-  if (error && !resources) {
-    return (
-      <StatusPane
-        title="Fetch failed"
-        detail={error}
-        action={
-          <button
-            className="action-button action-button-primary"
-            data-command-id="dashboard.refresh"
-            type="button"
-            onClick={() => onCommand("dashboard.refresh", { type: "refresh" })}
-          >
-            Refresh
-          </button>
-        }
-      />
-    );
-  }
-
-  if (!resources || resources.workspaces.length === 0) {
-    return <StatusPane title="Empty" detail="no workspaces" />;
-  }
+  const selectedServer = servers.find((server) => server.id === selectedServerId);
+  const serverStatusDetail = selectedServer
+    ? serverConnectionStatusLabel(selectedServer)
+    : "server not listed";
 
   return (
     <div className="nav-stack">
+      <div className="server-nav-toolbar">
+        <div className="server-nav-title">Servers</div>
+        <ChromeIconButton
+          commandId="resource.action.server.add"
+          icon={Plus}
+          label="Add server"
+          onClick={() =>
+            onCommand({
+              commandId: "resource.action.server.add",
+              payload: { type: "action", label: "Add server", entityId: "servers" },
+            }, { "resource.action.server.add": onOpenAddServer })
+          }
+        />
+      </div>
       <div className="resource-list resource-list-region">
         {error ? (
           <InlineNotice tone="error" title="Refresh failed" detail={error} />
@@ -631,14 +2136,33 @@ function ResourceNavigation({
         {loading ? (
           <InlineNotice tone="info" title="Refreshing" detail="resources" />
         ) : null}
-        {resources.workspaces.map((workspace) => (
-          <WorkspaceRows
-            key={workspace.id}
-            workspace={workspace}
+        {servers.length === 0 ? (
+          <InlineNotice tone="info" title="Servers" detail="no linked servers" />
+        ) : null}
+        {servers.map((server) => (
+          <ServerRows
+            key={server.id}
+            server={server}
+            selected={server.id === selectedServerId}
             selectedId={selectedId}
+            resources={server.id === selectedServerId ? resources : null}
             onCommand={onCommand}
+            onOpenWorkRoot={onOpenWorkRoot}
+            onOpenServerAuth={onOpenServerAuth}
+            onReconnectServer={onReconnectServer}
+            onSelectServer={onSelectServer}
           />
         ))}
+        {!loading && !resources && selectedServer ? (
+          <div className="server-empty-state">
+            {selectedServer.status === "connected"
+              ? "No workspace tree loaded"
+              : serverStatusDetail}
+          </div>
+        ) : null}
+        {!loading && resources && resources.workspaces.length === 0 ? (
+          <div className="server-empty-state">No workspaces</div>
+        ) : null}
       </div>
       <WorkRootFileExplorer
         workRoot={selectedWorkRoot}
@@ -649,13 +2173,167 @@ function ResourceNavigation({
   );
 }
 
+function ServerRows({
+  server,
+  selected,
+  selectedId,
+  resources,
+  onCommand,
+  onOpenWorkRoot,
+  onOpenServerAuth,
+  onReconnectServer,
+  onSelectServer,
+}: {
+  server: ServerConnectionView;
+  selected: boolean;
+  selectedId: string | null;
+  resources: DashboardResourcesView | null;
+  onCommand: DashboardCommandDispatcher;
+  onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpenServerAuth: (server: ServerConnectionView) => void;
+  onReconnectServer: (server: ServerConnectionView) => void;
+  onSelectServer: (server: ServerConnectionView) => void;
+}) {
+  const actions = server.actions.length > 0 ? server.actions : [];
+  return (
+    <div className="server-group">
+      <div
+        className={`server-row ws-row${selected ? " server-row-selected ws-row-selected" : ""}`}
+        data-server-kind={server.kind}
+        data-server-status={server.status}
+        title={[server.label, server.kind, server.status, server.state.status].join(" · ")}
+      >
+        <button
+          aria-label={`Select server ${server.label}`}
+          className="server-row-select"
+          data-command-id="server.select"
+          type="button"
+          onClick={() => onSelectServer(server)}
+        >
+          <span className="server-row-main">
+            <Server aria-hidden="true" size={15} strokeWidth={1.8} />
+            <span className="server-row-title">{server.label}</span>
+          </span>
+          <span className={`server-status-chip server-status-chip-${server.status}`}>
+            {serverConnectionStatusLabel(server)}
+          </span>
+        </button>
+        <span className="server-row-actions">
+          {actions.map((action) => (
+            <ServerActionButton
+              key={action.id}
+              action={action}
+              server={server}
+              onCommand={onCommand}
+              onOpenServerAuth={onOpenServerAuth}
+              onReconnectServer={onReconnectServer}
+            />
+          ))}
+          {server.actions.some((action) => action.id === "openRoot" && action.enabled) ? (
+            <OpenWorkRootControl
+              variant="icon"
+              onOpened={onOpenWorkRoot}
+              onCommand={onCommand}
+            />
+          ) : null}
+        </span>
+      </div>
+      {selected && resources ? (
+        <div className="server-workspaces">
+          {resources.workspaces.map((workspace) => (
+            <WorkspaceRows
+              key={workspace.id}
+              workspace={workspace}
+              selectedId={selectedId}
+              onCommand={onCommand}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ServerActionButton({
+  action,
+  server,
+  onCommand,
+  onOpenServerAuth,
+  onReconnectServer,
+}: {
+  action: ActionHint;
+  server: ServerConnectionView;
+  onCommand: DashboardCommandDispatcher;
+  onOpenServerAuth: (server: ServerConnectionView) => void;
+  onReconnectServer: (server: ServerConnectionView) => void;
+}) {
+  if (action.id === "openRoot") {
+    return null;
+  }
+
+  const commandId: DashboardCommand["commandId"] = `resource.action.server.${action.id}`;
+  if (action.id === "refresh") {
+    return (
+      <ChromeIconButton
+        className="server-row-action"
+        commandId={commandId}
+        disabled={!action.enabled}
+        icon={RefreshCw}
+        label={action.label}
+        onClick={() =>
+          onCommand(
+            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            { [commandId]: () => onCommand(buildDashboardRefreshCommand()) },
+          )
+        }
+      />
+    );
+  }
+  if (action.id === "enterPassphrase") {
+    return (
+      <ChromeIconButton
+        className="server-row-action"
+        commandId={commandId}
+        disabled={!action.enabled}
+        icon={KeyRound}
+        label={action.label}
+        onClick={() =>
+          onCommand(
+            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            { [commandId]: () => onOpenServerAuth(server) },
+          )
+        }
+      />
+    );
+  }
+  if (action.id === "reconnectTunnel") {
+    return (
+      <ChromeIconButton
+        className="server-row-action"
+        commandId={commandId}
+        disabled={!action.enabled}
+        icon={PlugZap}
+        label={action.label}
+        onClick={() =>
+          onCommand(
+            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            { [commandId]: () => onReconnectServer(server) },
+          )
+        }
+      />
+    );
+  }
+
+  return null;
+}
+
 function WorkRootFileExplorer({
   workRoot,
   onCommand,
   onOpenFile,
 }: {
   workRoot: WorkRootView | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   onOpenFile: (
     workRoot: WorkRootView,
     entry: WorkRootFileEntryView,
@@ -757,63 +2435,71 @@ function WorkRootFileExplorer({
   });
 
   const selectEntry = (entry: WorkRootFileEntryView) => {
-    updateSnapshot(workRoot.id, (current) => ({
-      ...current,
-      selectedPath: entry.path,
-    }));
-    onCommand("fileExplorer.selectEntry", {
-      type: "action",
-      label: entry.name,
-      entityId: workRoot.id,
-    });
+    onCommand(
+      buildFileExplorerSelectEntryCommand(workRoot.id, entry.path),
+      {
+        "fileExplorer.selectEntry": () => {
+          updateSnapshot(workRoot.id, (current) => ({
+            ...current,
+            selectedPath: entry.path,
+          }));
+        },
+      },
+    );
   };
 
   const toggleDirectory = (entry: WorkRootFileEntryView) => {
     const isExpanded = snapshot?.expandedPaths.has(entry.path) ?? false;
-    updateSnapshot(workRoot.id, (current) => ({
-      ...current,
-      expandedPaths: toggleExpandedPath(current.expandedPaths, entry.path),
-      selectedPath: entry.path,
-    }));
-    onCommand("fileExplorer.toggleDirectory", {
-      type: "action",
-      label: entry.name,
-      entityId: workRoot.id,
-    });
+    onCommand(
+      buildFileExplorerToggleDirectoryCommand(workRoot.id, entry.path),
+      {
+        "fileExplorer.toggleDirectory": () => {
+          updateSnapshot(workRoot.id, (current) => ({
+            ...current,
+            expandedPaths: toggleExpandedPath(current.expandedPaths, entry.path),
+            selectedPath: entry.path,
+          }));
 
-    if (workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)) {
-      void loadDirectory(workRoot.id, entry.path);
-    }
+          if (workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)) {
+            void loadDirectory(workRoot.id, entry.path);
+          }
+        },
+      },
+    );
   };
 
   const openFile = (
     entry: WorkRootFileEntryView,
     gesture: ReadOnlyFileOpenGesture = "singleClick",
   ) => {
-    updateSnapshot(workRoot.id, (current) => ({
-      ...current,
-      selectedPath: entry.path,
-    }));
-    onCommand("fileExplorer.openFile", {
-      type: "action",
-      label: entry.name,
-      entityId: workRoot.id,
-    });
-    onOpenFile(workRoot, entry, gesture);
+    onCommand(
+      buildFileExplorerOpenFileCommand(workRoot.id, entry.path, gesture),
+      {
+        "fileExplorer.openFile": () => {
+          updateSnapshot(workRoot.id, (current) => ({
+            ...current,
+            selectedPath: entry.path,
+          }));
+          onOpenFile(workRoot, entry, gesture);
+        },
+      },
+    );
   };
 
   const refreshExplorer = () => {
-    onCommand("fileExplorer.refresh", {
-      type: "action",
-      label: "Refresh files",
-      entityId: workRoot.id,
-    });
-    const paths = workRootExplorerRefreshPaths(
-      snapshot?.expandedPaths ?? new Set([""]),
+    onCommand(
+      buildFileExplorerRefreshCommand(workRoot.id),
+      {
+        "fileExplorer.refresh": () => {
+          const paths = workRootExplorerRefreshPaths(
+            snapshot?.expandedPaths ?? new Set([""]),
+          );
+          for (const path of paths) {
+            void loadDirectory(workRoot.id, path);
+          }
+        },
+      },
     );
-    for (const path of paths) {
-      void loadDirectory(workRoot.id, path);
-    }
   };
 
   return (
@@ -828,14 +2514,13 @@ function WorkRootFileExplorer({
             {workRoot.label}
           </div>
         </div>
-        <button
-          className="action-button file-explorer-refresh"
-          data-command-id="fileExplorer.refresh"
-          type="button"
+        <ChromeIconButton
+          className="file-explorer-refresh"
+          commandId="fileExplorer.refresh"
+          icon={RefreshCw}
+          label="Refresh files"
           onClick={refreshExplorer}
-        >
-          Refresh
-        </button>
+        />
       </div>
       <div
         className="file-explorer-body"
@@ -944,6 +2629,13 @@ function FileExplorerRow({
       <span className="file-explorer-twisty" aria-hidden="true">
         {isDirectory ? (expanded ? "▾" : "▸") : ""}
       </span>
+      <span className="file-explorer-icon" aria-hidden="true">
+        {isDirectory ? (
+          <Folder size={14} strokeWidth={1.8} />
+        ) : (
+          <File size={14} strokeWidth={1.8} />
+        )}
+      </span>
       <span className="file-explorer-name">
         {entry.name}
         {isDirectory ? "/" : ""}
@@ -1002,6 +2694,7 @@ function WorkbenchShell({
   onPaneOrderByRootChange,
   onReadOnlyFilePanesChange,
   onReadOnlyFilePaneOrderByGroupChange,
+  onDocumentSaved,
 }: {
   resources: DashboardResourcesView | null;
   selection: WorkbenchSelection | null;
@@ -1009,7 +2702,7 @@ function WorkbenchShell({
   commandLog: CommandEntry[];
   loading: boolean;
   error: string | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   readOnlyFilePanes: ReadOnlyFilePane[];
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
@@ -1030,6 +2723,7 @@ function WorkbenchShell({
   onReadOnlyFilePaneOrderByGroupChange: Dispatch<
     SetStateAction<WorkbenchPaneOrder>
   >;
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
   const [activePaneByRoot, setActivePaneByRoot] = useState<
     Record<string, Record<string, string>>
@@ -1056,6 +2750,7 @@ function WorkbenchShell({
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
+  const restoredTerminalIntentRoots = useRef<Set<string>>(new Set());
   const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<
     string | null
   >(null);
@@ -1068,6 +2763,21 @@ function WorkbenchShell({
     rootId: string | null;
     activity: WorkRootActivityBadgeInput;
   }>({ rootId: null, activity: { phase: "loading" } });
+  const workRootActivityStateRef = useRef(workRootActivityState);
+  workRootActivityStateRef.current = workRootActivityState;
+  const activityStreamRequestSeq = useRef(0);
+  const currentActivityStreamRequest = useRef<ActivityConsoleStreamRequest>({
+    workRootId: "",
+    requestId: 0,
+  });
+  const activitySnapshotRequestSeq = useRef(0);
+  const [activityPollFallbackRootId, setActivityPollFallbackRootId] = useState<string | null>(null);
+  const [activityTranscriptRefresh, setActivityTranscriptRefresh] = useState<{
+    rootId: string;
+    activityId: string;
+    cursor: string | null;
+    sequence: number;
+  } | null>(null);
   // Whether the reversible WorkRoot Activity pane is open, scoped per workRoot
   // like terminal/read-only pane state. The badge entrypoint toggles this on;
   // immediate close toggles it off.
@@ -1087,6 +2797,63 @@ function WorkbenchShell({
   const activityPaneOpenForSelected = selectedWorkRootId
     ? (activityPaneOpenByRoot[selectedWorkRootId] ?? false)
     : false;
+  const readOnlyFilePanesRef = useRef(readOnlyFilePanes);
+  readOnlyFilePanesRef.current = readOnlyFilePanes;
+  const documentRefreshSequence = useRef<Record<string, number>>({});
+
+  const refreshOpenDocument = useCallback(
+    (workRootId: string, path: string, expectedContentHash?: string) => {
+      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path);
+      const requestSequence = (documentRefreshSequence.current[sourceKey] ?? 0) + 1;
+      documentRefreshSequence.current[sourceKey] = requestSequence;
+      if (
+        !readOnlyFilePanesRef.current.some(
+          (pane) =>
+            pane.workRootId === workRootId &&
+            pane.path === path &&
+            (!expectedContentHash || pane.contentHash !== expectedContentHash),
+        )
+      ) {
+        return;
+      }
+      void fetchWorkRootTextFile(workRootId, path)
+        .then((file) => {
+          if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
+            return;
+          }
+          onReadOnlyFilePanesChange((current) =>
+            applyReadOnlyFilePaneSourceContent(current, file),
+          );
+        })
+        .catch((error) => {
+          if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
+            return;
+          }
+          const message = error instanceof Error ? error.message : "file read failed";
+          onReadOnlyFilePanesChange((current) =>
+            applyReadOnlyFilePaneSourceError(current, workRootId, path, message),
+          );
+        });
+    },
+    [onReadOnlyFilePanesChange],
+  );
+
+  const refreshVisibleDocuments = useCallback(() => {
+    const rootId = selectedWorkRootId;
+    if (!rootId) {
+      return;
+    }
+    const paths = [
+      ...new Set(
+        readOnlyFilePanesRef.current
+          .filter((pane) => pane.workRootId === rootId && pane.status === "loaded")
+          .map((pane) => pane.path),
+      ),
+    ];
+    for (const path of paths) {
+      refreshOpenDocument(rootId, path);
+    }
+  }, [refreshOpenDocument, selectedWorkRootId]);
 
   const setActivePaneByGroupForSelected = (
     next:
@@ -1105,6 +2872,7 @@ function WorkbenchShell({
     });
   };
 
+
   const workbenchModel =
     resources && selection
       ? (() => {
@@ -1120,6 +2888,7 @@ function WorkbenchShell({
               supportEntity,
               readOnlyFilePanes,
               readOnlyFilePaneOrderByGroup,
+              paneOrderByGroup,
               Object.values(terminalPanes),
               terminalPaneOrderByGroup,
               {
@@ -1138,6 +2907,11 @@ function WorkbenchShell({
               workRootActivityState.rootId === root.id
                 ? workRootActivityState.activity
                 : { phase: "loading" },
+              activityTranscriptRefresh?.rootId === root.id
+                ? activityTranscriptRefresh
+                : null,
+              onCommand,
+              onDocumentSaved,
             ),
             paneOrderByGroup,
           );
@@ -1156,15 +2930,40 @@ function WorkbenchShell({
     if (!workbenchModel) {
       return;
     }
+    const rootId = workbenchModel.root.id;
     const listStartedAtMs = Date.now();
-    void listTerminals(workbenchModel.root.id)
+    void listTerminals(rootId)
       .then((sessions) => {
+        const restoreIntents = terminalRestoreIntentsForWorkRoot(
+          loadTerminalRestoreIntents(),
+          rootId,
+        );
+        if (
+          sessions.length === 0 &&
+          restoreIntents.length > 0 &&
+          !restoredTerminalIntentRoots.current.has(rootId)
+        ) {
+          restoredTerminalIntentRoots.current.add(rootId);
+          for (const intent of restoreIntents) {
+            onCommand(buildTerminalCreateCommand(rootId), {
+              "terminal.create": () =>
+                createTerminalPane({
+                  title: intent.title,
+                  cwdHint: intent.cwdHint,
+                }),
+            });
+          }
+          return;
+        }
         setTerminalPanes((current) =>
-          reconcileListedTerminalSessions(
-            current,
-            workbenchModel.root.id,
-            sessions,
-            listStartedAtMs,
+          persistTerminalPanesForWorkRoot(
+            rootId,
+            reconcileListedTerminalSessions(
+              current,
+              rootId,
+              sessions,
+              listStartedAtMs,
+            ),
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
@@ -1190,32 +2989,192 @@ function WorkbenchShell({
     }
     let cancelled = false;
     setWorkRootActivityState({ rootId, activity: { phase: "loading" } });
-    void fetchWorkRootActivity(rootId)
-      .then((view) => {
-        if (!cancelled) {
-          setWorkRootActivityState({
-            rootId,
-            activity: { phase: "ready", view },
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorkRootActivityState({ rootId, activity: { phase: "error" } });
-        }
-      });
+    const timer = window.setTimeout(() => {
+      void fetchWorkRootActivity(rootId)
+        .then((view) => {
+          if (!cancelled) {
+            setWorkRootActivityState({
+              rootId,
+              activity: { phase: "ready", view },
+            });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setWorkRootActivityState({ rootId, activity: { phase: "error" } });
+          }
+        });
+    }, 300);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [workbenchModel?.root.id]);
 
-  // Hotfix live refresh: while the Activity pane is open, poll only recently
-  // modified agent records and merge them into the full initial projection.
-  // This keeps newly registered/called agents visible without re-fetching a
-  // monotonically growing full list on every interval.
+  // Activity Console live stream: while the pane is open, subscribe to the
+  // daemon-owned source-neutral event stream for the selected workRoot. The
+  // older recent-list polling remains a bounded fallback only when the stream
+  // cannot be established or the daemon explicitly switches to pollFallback.
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
     if (!rootId || !activityPaneOpenForSelected) {
+      currentActivityStreamRequest.current = {
+        workRootId: rootId ?? "",
+        requestId: activityStreamRequestSeq.current + 1,
+      };
+      activityStreamRequestSeq.current = currentActivityStreamRequest.current.requestId;
+      setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+      return;
+    }
+
+    const requestId = activityStreamRequestSeq.current + 1;
+    activityStreamRequestSeq.current = requestId;
+    const expected = { workRootId: rootId, requestId };
+    currentActivityStreamRequest.current = expected;
+    setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+
+    let cancelled = false;
+    let streamOpened = false;
+    let fallbackTimer: number | null = null;
+    const after =
+      workRootActivityStateRef.current.rootId === rootId &&
+      workRootActivityStateRef.current.activity.phase === "ready"
+        ? workRootActivityStateRef.current.activity.view.feedCursor
+        : null;
+    const source = new EventSource(workRootActivityEventsEndpoint(rootId, { after }));
+
+    const requestSnapshot = () => {
+      const snapshotRequestId = activitySnapshotRequestSeq.current + 1;
+      activitySnapshotRequestSeq.current = snapshotRequestId;
+      void fetchWorkRootActivity(rootId)
+        .then((view) => {
+          if (
+            cancelled ||
+            snapshotRequestId !== activitySnapshotRequestSeq.current ||
+            !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current) ||
+            view.workRootId !== rootId
+          ) {
+            return;
+          }
+          setWorkRootActivityState({ rootId, activity: { phase: "ready", view } });
+        })
+        .catch(() => {
+          if (
+            !cancelled &&
+            snapshotRequestId === activitySnapshotRequestSeq.current &&
+            shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+          ) {
+            setActivityPollFallbackRootId(rootId);
+          }
+        });
+    };
+
+    const applyStreamEvent = (event: ActivityConsoleEvent) => {
+      if (
+        cancelled ||
+        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+      ) {
+        return;
+      }
+      if (event.type === "snapshotInvalidated") {
+        requestSnapshot();
+      }
+      if (event.type === "transcriptUpdated") {
+        setActivityTranscriptRefresh((current) => ({
+          rootId,
+          activityId: event.activityId,
+          cursor: event.transcriptCursor,
+          sequence: (current?.sequence ?? 0) + 1,
+        }));
+      } else if (event.type === "modeChanged" && event.updateMode === "pollFallback") {
+        setActivityPollFallbackRootId(rootId);
+      } else if (
+        event.type === "modeChanged" &&
+        (event.updateMode === "watch" || event.updateMode === "snapshot")
+      ) {
+        if (fallbackTimer !== null) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        setActivityPollFallbackRootId((fallbackRootId) =>
+          fallbackRootId === rootId ? null : fallbackRootId,
+        );
+      }
+      setWorkRootActivityState((current) => {
+        if (current.rootId !== rootId || current.activity.phase !== "ready") {
+          return current;
+        }
+        const result = applyActivityConsoleEvent(current.activity.view, event);
+        return { rootId, activity: { phase: "ready", view: result.view } };
+      });
+    };
+
+    source.onopen = () => {
+      streamOpened = true;
+      if (shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)) {
+        if (fallbackTimer !== null) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+      }
+    };
+    const handleActivityMessage = (message: MessageEvent) => {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        setActivityPollFallbackRootId(rootId);
+        return;
+      }
+      const event = parseActivityConsoleEvent(payload);
+      if (!event) {
+        setActivityPollFallbackRootId(rootId);
+        return;
+      }
+      applyStreamEvent(event);
+    };
+    source.addEventListener("activity", handleActivityMessage);
+    source.onmessage = handleActivityMessage;
+    source.onerror = () => {
+      if (
+        cancelled ||
+        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+      ) {
+        return;
+      }
+      if (!streamOpened) {
+        setActivityPollFallbackRootId(rootId);
+        requestSnapshot();
+        return;
+      }
+      if (fallbackTimer !== null) {
+        window.clearTimeout(fallbackTimer);
+      }
+      fallbackTimer = window.setTimeout(() => {
+        if (
+          !cancelled &&
+          shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+        ) {
+          setActivityPollFallbackRootId(rootId);
+        }
+      }, 1_000);
+    };
+
+    return () => {
+      cancelled = true;
+      if (fallbackTimer !== null) {
+        window.clearTimeout(fallbackTimer);
+      }
+      source.removeEventListener("activity", handleActivityMessage);
+      source.close();
+      setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+    };
+  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
+
+  useEffect(() => {
+    const rootId = workbenchModel?.root.id;
+    if (!rootId || !activityPaneOpenForSelected || activityPollFallbackRootId !== rootId) {
       return;
     }
 
@@ -1226,15 +3185,17 @@ function WorkbenchShell({
         return;
       }
       inFlight = true;
+      const snapshotRequestId = activitySnapshotRequestSeq.current + 1;
+      activitySnapshotRequestSeq.current = snapshotRequestId;
       void fetchWorkRootActivity(rootId, {
         recentLimit: workRootActivityRecentRefreshLimit,
       })
         .then((view) => {
-          if (cancelled) {
+          if (cancelled || snapshotRequestId !== activitySnapshotRequestSeq.current) {
             return;
           }
           setWorkRootActivityState((current) => {
-            if (current.rootId !== rootId) {
+            if (current.rootId !== rootId || view.workRootId !== rootId) {
               return current;
             }
             if (current.activity.phase !== "ready") {
@@ -1271,7 +3232,60 @@ function WorkbenchShell({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
+  }, [workbenchModel?.root.id, activityPaneOpenForSelected, activityPollFallbackRootId]);
+
+  // Document content events are source-neutral invalidations for open file panes.
+  // A save from one pane fans out by re-reading the daemon view for matching
+  // clean panes, while pane-local edit state marks dirty drafts stale when the
+  // content prop changes underneath them. Browser focus/visibility re-reads are
+  // the bounded fallback when the SSE stream is unavailable.
+  useEffect(() => {
+    const rootId = selectedWorkRootId;
+    if (!rootId) {
+      return;
+    }
+
+    let cancelled = false;
+    const source = new EventSource(workRootDocumentEventsEndpoint(rootId));
+    const handleDocumentMessage = (message: MessageEvent) => {
+      if (cancelled) {
+        return;
+      }
+      let payload: unknown;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      const event = parseWorkRootDocumentEvent(payload);
+      if (!event || event.workRootId !== rootId) {
+        return;
+      }
+      refreshOpenDocument(event.workRootId, event.path, event.contentHash);
+    };
+    source.addEventListener("document", handleDocumentMessage);
+    source.onmessage = handleDocumentMessage;
+    return () => {
+      cancelled = true;
+      source.removeEventListener("document", handleDocumentMessage);
+      source.close();
+    };
+  }, [refreshOpenDocument, selectedWorkRootId]);
+
+  useEffect(() => {
+    const onFocus = () => refreshVisibleDocuments();
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshVisibleDocuments();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshVisibleDocuments]);
 
   // The output poll reads live terminal sessions from a ref so the polling
   // interval stays stable across renders. Depending the interval on
@@ -1419,17 +3433,39 @@ function WorkbenchShell({
     );
   }, [activeTerminalPaneRequest, editorGroups]);
 
-  function createTerminalPane() {
+  function persistTerminalPanesForWorkRoot(
+    workRootId: string,
+    nextPanes: Record<string, TerminalPaneState>,
+  ): Record<string, TerminalPaneState> {
+    const nextIntents = terminalRestoreIntentsFromPanes(
+      Object.values(nextPanes).filter(
+        (pane) => pane.session.workRootId === workRootId,
+      ),
+    );
+    saveTerminalRestoreIntents(
+      replaceTerminalRestoreIntentsForWorkRoot(
+        loadTerminalRestoreIntents(),
+        workRootId,
+        nextIntents,
+      ),
+    );
+    return nextPanes;
+  }
+
+  function createTerminalPane(options: TerminalCreateOptions = {}) {
     if (!workbenchModel) {
       return;
     }
-    void createTerminal(workbenchModel.root.id)
+    const rootId = workbenchModel.root.id;
+    void createTerminal(rootId, options)
       .then((session) => {
         const pane = terminalPaneFromSession(session);
-        setTerminalPanes((current) => ({
-          ...current,
-          [pane.logicalKey]: pane,
-        }));
+        setTerminalPanes((current) =>
+          persistTerminalPanesForWorkRoot(rootId, {
+            ...current,
+            [pane.logicalKey]: pane,
+          }),
+        );
         setTerminalPaneOrderByGroup((current) =>
           placeTerminalSessions(
             current,
@@ -1553,7 +3589,10 @@ function WorkbenchShell({
     void closeTerminal(pane.session.terminalId)
       .then(() =>
         setTerminalPanes((current) =>
-          removeClosedTerminalPane(current, pane.logicalKey),
+          persistTerminalPanesForWorkRoot(
+            pane.session.workRootId,
+            removeClosedTerminalPane(current, pane.logicalKey),
+          ),
         ),
       )
       .catch((error) => {
@@ -1578,14 +3617,14 @@ function WorkbenchShell({
     );
   }
 
-  function closeAgentPane(paneId: string) {
-    if (!selectedWorkRootId) {
+  function closeAgentPane(paneId: string, workRootId: string | null | undefined) {
+    if (!workRootId) {
       return;
     }
     setClosedAgentPaneByRoot((current) => ({
       ...current,
-      [selectedWorkRootId]: [
-        ...new Set([...(current[selectedWorkRootId] ?? []), paneId]),
+      [workRootId]: [
+        ...new Set([...(current[workRootId] ?? []), paneId]),
       ],
     }));
   }
@@ -1594,6 +3633,9 @@ function WorkbenchShell({
     request: DockviewTabCloseRequest & { readonly workRootId?: string },
   ) {
     if (request.workRootId && request.workRootId !== selectedWorkRootId) {
+      if (request.surfaceKind === "agent") {
+        closeAgentPane(request.paneId, request.workRootId);
+      }
       return;
     }
     const pane = editorGroups
@@ -1614,7 +3656,7 @@ function WorkbenchShell({
     } else if (pane.kind === "editor") {
       closeReadOnlyFilePane(pane.id);
     } else if (pane.kind === "agent") {
-      closeAgentPane(pane.id);
+      closeAgentPane(pane.id, request.workRootId ?? selectedWorkRootId);
     } else if (pane.kind === "workRootActivity") {
       closeActivityPane(pane.id);
     }
@@ -1635,19 +3677,25 @@ function WorkbenchShell({
     );
   }
 
+  // Phase 1 command-spine audit: workbench close/select/move stay on the
+  // Dockview lifecycle callbacks for now. They carry confirmation anchors,
+  // drag placement details, and active-pane reconciliation state that would make
+  // this slice a larger lifecycle refactor; Activity Console is not blocked by
+  // these local callbacks.
   function requestWorkbenchPaneClose(request: DockviewTabCloseRequest) {
     const decision = decideWorkbenchTabClosePresentation(request.surfaceKind, {
       clientX: request.clientX,
       clientY: request.clientY,
     });
     if (decision.type === "requestConfirmation") {
-      if (!selectedWorkRootId) {
+      const requestWorkRootId = workbenchModel?.root.id ?? selectedWorkRootId;
+      if (!requestWorkRootId) {
         return;
       }
       setPendingCloseRequest({
         ...request,
         anchor: decision.anchor,
-        workRootId: selectedWorkRootId,
+        workRootId: requestWorkRootId,
       });
       return;
     }
@@ -1709,8 +3757,8 @@ function WorkbenchShell({
     // CONTRACT: The top-bar Activity badge is the selected-workRoot entrypoint
     // for one reversible WorkRoot Activity pane. Routing through
     // decideSurfaceOpenWithDynamicGroups keeps duplicate opens focusing the
-    // existing pane and new opens using policy-owned group-1 placement instead
-    // of a raw Dockview handle.
+    // existing pane and new opens using policy-owned support-split placement
+    // instead of a raw Dockview handle.
     const rootId = workbenchModel.root.id;
     const paneId = workRootActivityPaneId(rootId);
     const decision = decideSurfaceOpenWithDynamicGroups(
@@ -1723,7 +3771,24 @@ function WorkbenchShell({
       },
     );
     if (decision.type === "openNew") {
+      if (decision.createdGroupId) {
+        onWorkbenchGroupsByRootChange((current) => ({
+          ...current,
+          [rootId]: reconcileDashboardGroupsForPlacement(
+            current[rootId] ?? workbenchGroups,
+            decision,
+          ),
+        }));
+      }
       setActivityPaneOpenByRoot((current) => ({ ...current, [rootId]: true }));
+      onPaneOrderByRootChange((current) => ({
+        ...current,
+        [rootId]: addPaneToGroupOrder(
+          current[rootId] ?? {},
+          paneId,
+          String(decision.groupId),
+        ),
+      }));
     }
     setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(current, decision.groupId, paneId),
@@ -1863,6 +3928,8 @@ function WorkbenchClosePopover({
   );
 }
 
+type WorkbenchToggle = "viewer" | "task" | "diagnostics" | "events" | "layout";
+
 function WorkbenchToolbar({
   server,
   workspace,
@@ -1880,100 +3947,406 @@ function WorkbenchToolbar({
   selectedEntity: ResourceEntity | null;
   commandLog: CommandEntry[];
   activity: WorkRootActivityBadgeView;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   onOpenActivity: () => void;
   onCreateTerminal: () => void;
 }) {
-  const toggles = [
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(overflowOpen, overflowRef, () => setOverflowOpen(false));
+  const toggles: WorkbenchToggle[] = [
     "viewer",
     "task",
     "diagnostics",
     "events",
     "layout",
-  ] as const;
+  ];
+  const actions = toolbarActions(root, selectedEntity);
+  const activationAction = actions.find((entry) => activationForAction(entry.action.id));
+  const activation = activationAction
+    ? activationForAction(activationAction.action.id)
+    : null;
+  const openRootAction = actions.find(({ action }) =>
+    action.id === "openRoot" || action.id === "reconnect",
+  );
+  const secondaryActions = actions.filter(
+    ({ action }) =>
+      !activationForAction(action.id) &&
+      action.id !== "openRoot" &&
+      action.id !== "reconnect",
+  );
+  const rootMetadataTitle = [
+    kindLabel(root.kind),
+    `availability: ${root.availability}`,
+    `activation: ${root.activation}`,
+    commandLog[0] ? `last: ${commandLog[0].commandId}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const runResourceAction = (action: ActionHint, entityId: string) => {
+    onCommand({
+      commandId: `resource.action.${action.id}`,
+      payload: { type: "action", label: action.label, entityId },
+    });
+  };
 
   return (
-    <div className="workbench-toolbar">
-      <div className="workbench-breadcrumb" aria-label="Workbench breadcrumb">
-        <span>{server.label}</span>
-        <span>{workspace.label}</span>
-        <strong>{root.label}</strong>
-      </div>
-      <div className="workbench-toolbar-meta">
-        <StateBadge state={root.state} />
-        <WorkbenchActivityBadge
-          activity={activity}
-          onOpenActivity={() => {
-            onCommand("workbench.openActivity", {
-              type: "action",
-              label: "Open WorkRoot Activity",
-              entityId: root.id,
-            });
-            onOpenActivity();
-          }}
-        />
-        <span className="meta-chip">{kindLabel(root.kind)}</span>
-        <span className="meta-chip">{root.status}</span>
-        {commandLog[0] ? (
-          <span className="meta-chip">last: {commandLog[0].commandId}</span>
-        ) : null}
+    <div
+      className="workbench-toolbar ws-toolbar"
+      data-last-command-id={commandLog[0]?.commandId ?? ""}
+    >
+      <ChromeIconButton
+        className={`workbench-power-button workbench-power-button-${root.activation}`}
+        commandId="workRoot.activation.set"
+        disabled={!activationAction || !activationAction.action.enabled || !activation}
+        icon={CirclePower}
+        label={activationAction?.action.label ?? "Set workRoot activation"}
+        onClick={() => {
+          if (!activationAction || !activation) {
+            return;
+          }
+          onCommand(buildWorkRootActivationCommand(activationAction.entityId, activation));
+        }}
+      />
+      <div className="workbench-toolbar-center" title={rootMetadataTitle}>
+        <div className="workbench-breadcrumb" aria-label="Workbench breadcrumb">
+          <span>{server.label}</span>
+          <span>{workspace.label}</span>
+          <strong>{root.label}</strong>
+        </div>
+        <div className="workbench-toolbar-meta" title={rootMetadataTitle}>
+          <StateBadge state={root.state} />
+          <WorkbenchActivityBadge
+            activity={activity}
+            onOpenActivity={() => {
+              onCommand(
+                buildWorkbenchOpenActivityCommand(root.id),
+                { "workbench.openActivity": onOpenActivity },
+              );
+            }}
+          />
+          <WorkRootGitToolbar root={root} onCommand={onCommand} />
+          {root.availability !== "available" ? (
+            <span className="meta-chip ws-chip">{root.availability}</span>
+          ) : null}
+          {root.activation !== "online" ? (
+            <span className="meta-chip ws-chip">{root.activation}</span>
+          ) : null}
+        </div>
       </div>
       <div
         className="workbench-toolbar-actions"
-        aria-label="Workbench toggles and actions"
+        aria-label="Workbench primary actions"
       >
-        {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
-          <button
-            className="action-button"
-            data-command-id={`resource.action.${action.id}`}
-            disabled={!action.enabled}
-            key={`${entityId}:${action.id}`}
-            type="button"
-            onClick={() =>
-              onCommand(`resource.action.${action.id}`, {
-                type: action.id === "refresh" ? "refresh" : "action",
-                label: action.label,
-                entityId,
-              })
-            }
-          >
-            {action.label}
-          </button>
-        ))}
-        <button
-          className="action-button workbench-toggle"
-          data-command-id="terminal.create"
-          type="button"
+        {openRootAction ? (
+          <ChromeIconButton
+            commandId={`resource.action.${openRootAction.action.id}`}
+            disabled={!openRootAction.action.enabled}
+            icon={FolderOpen}
+            label={openRootAction.action.label}
+            onClick={() => runResourceAction(openRootAction.action, openRootAction.entityId)}
+          />
+        ) : null}
+        <ChromeIconButton
+          commandId="dashboard.refresh"
+          icon={RefreshCw}
+          label="Refresh dashboard"
+          onClick={() => onCommand(buildDashboardRefreshCommand())}
+        />
+        <ChromeIconButton
+          commandId="terminal.create"
+          disabled={root.activation !== "online" || root.availability !== "available"}
+          icon={SquareTerminal}
+          label="New terminal"
           onClick={() => {
-            onCommand("terminal.create", {
-              type: "action",
-              label: "Create terminal",
-              entityId: root.id,
-            });
-            onCreateTerminal();
+            onCommand(
+              buildTerminalCreateCommand(root.id),
+              { "terminal.create": onCreateTerminal },
+            );
           }}
-        >
-          New terminal
-        </button>
-        {toggles.map((toggle) => (
+        />
+        <div className="workbench-overflow" ref={overflowRef}>
           <button
-            className="action-button workbench-toggle"
-            data-command-id={`workbench.toggle.${toggle}`}
-            key={toggle}
+            aria-expanded={overflowOpen}
+            aria-haspopup="menu"
+            aria-label="More workbench actions"
+            className="icon-button"
+            title="More workbench actions"
             type="button"
-            onClick={() =>
-              onCommand(`workbench.toggle.${toggle}`, {
-                type: "action",
-                label: toggle,
-                entityId: root.id,
-              })
-            }
+            onClick={() => setOverflowOpen((current) => !current)}
           >
-            {toggle}
+            <MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
           </button>
-        ))}
+          {overflowOpen ? (
+            <div className="workbench-overflow-menu" role="menu">
+              {secondaryActions.map(({ action, entityId }) => (
+                <button
+                  className="workbench-overflow-item"
+                  data-command-id={`resource.action.${action.id}`}
+                  disabled={!action.enabled}
+                  key={`${entityId}:${action.id}`}
+                  role="menuitem"
+                  title={action.label}
+                  type="button"
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    runResourceAction(action, entityId);
+                  }}
+                >
+                  <PanelsTopLeft aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>{action.label}</span>
+                </button>
+              ))}
+              {toggles.map((toggle) => (
+                <button
+                  className="workbench-overflow-item"
+                  data-command-id={`workbench.toggle.${toggle}`}
+                  key={toggle}
+                  role="menuitem"
+                  title={`Toggle ${toggle}`}
+                  type="button"
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    onCommand({
+                      commandId: `workbench.toggle.${toggle}`,
+                      payload: { type: "action", label: toggle, entityId: root.id },
+                    });
+                  }}
+                >
+                  <ToggleIcon toggle={toggle} />
+                  <span>{toggle}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
+  );
+}
+
+
+function WorkRootGitToolbar({
+  root,
+  onCommand,
+}: {
+  root: WorkRootView;
+  onCommand: DashboardCommandDispatcher;
+}) {
+  const gitCapable =
+    (root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree") &&
+    root.activation === "online" &&
+    root.availability === "available";
+  const [statusState, setStatusState] = useState<{ workRootId: string; status: WorkRootGitStatus } | null>(null);
+  const [branchesState, setBranchesState] = useState<{ workRootId: string; branches: GitBranchList } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const branchMenuRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(menuOpen, branchMenuRef, () => setMenuOpen(false));
+  const [pendingGitAction, setPendingGitAction] = useState<"fetch" | "push" | "pull" | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [baseBranchName, setBaseBranchName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+  const currentRootId = useRef(root.id);
+  currentRootId.current = root.id;
+
+  const status = statusState?.workRootId === root.id ? statusState.status : null;
+  const branches = branchesState?.workRootId === root.id ? branchesState.branches : null;
+
+  const refreshGit = useCallback((reason: string) => {
+    if (!gitCapable) {
+      requestSeq.current += 1;
+      setStatusState(null);
+      setBranchesState(null);
+      return;
+    }
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
+    const requestedRootId = root.id;
+    void Promise.all([
+      fetchWorkRootGitStatus(requestedRootId),
+      fetchWorkRootGitBranches(requestedRootId),
+    ])
+      .then(([nextStatus, nextBranches]) => {
+        if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
+        setStatusState(nextStatus.available ? { workRootId: requestedRootId, status: nextStatus } : null);
+        setBranchesState({ workRootId: requestedRootId, branches: nextBranches });
+        setError(null);
+      })
+      .catch((nextError) => {
+        if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
+        setStatusState(null);
+        setBranchesState(null);
+        setMenuOpen(false);
+        setModalOpen(false);
+        setError(nextError instanceof Error ? nextError.message : `${reason} failed`);
+      });
+  }, [gitCapable, root.id]);
+
+  useEffect(() => {
+    refreshGit("git status");
+  }, [refreshGit]);
+
+  useEffect(() => {
+    if (!gitCapable) return;
+    return startGitRefreshScheduler(refreshGit, {
+      isDocumentHidden: () => document.hidden,
+      addDocumentListener: (event, listener) => document.addEventListener(event, listener),
+      removeDocumentListener: (event, listener) => document.removeEventListener(event, listener),
+      addWindowListener: (event, listener) => window.addEventListener(event, listener),
+      removeWindowListener: (event, listener) => window.removeEventListener(event, listener),
+      setInterval: (listener, ms) => window.setInterval(listener, ms),
+      clearInterval: (handle) => window.clearInterval(handle),
+    });
+  }, [gitCapable, refreshGit]);
+
+  if (!gitCapable) return null;
+  if (!status) {
+    return error ? (
+      <div className="git-toolbar" aria-label="Git toolbar">
+        <span className="meta-chip ws-chip git-error-chip">{error}</span>
+      </div>
+    ) : null;
+  }
+
+  const branchLabel = status.branch?.name ?? (status.branch?.detachedOid ? `HEAD ${status.branch.detachedOid}` : "Git");
+  const branchOptions = branches?.branches ?? [];
+  const defaultBaseBranch = branches?.current ?? branchOptions.find((branch) => branch.current)?.name ?? branchOptions[0]?.name ?? "";
+  const selectedBaseBranch = baseBranchName || defaultBaseBranch;
+  const closeBranchModal = () => {
+    setModalOpen(false);
+    setNewBranchName("");
+    setBaseBranchName("");
+  };
+  const mutate = (command: ReturnType<typeof buildGitRefreshCommand>, run: () => Promise<WorkRootGitStatus>, pendingAction: "fetch" | "push" | "pull" | null = null) => {
+    const targetRootId = root.id;
+    onCommand(command, {
+      [command.commandId]: () => {
+        if (pendingAction) setPendingGitAction(pendingAction);
+        void run()
+          .then((nextStatus) => {
+            if (currentRootId.current !== targetRootId) return;
+            setStatusState(nextStatus.available ? { workRootId: targetRootId, status: nextStatus } : null);
+            refreshGit("git mutation refresh");
+          })
+          .catch((nextError) => {
+            if (currentRootId.current !== targetRootId) return;
+            setError(nextError instanceof Error ? nextError.message : "git action failed");
+            refreshGit("git mutation failure refresh");
+          })
+          .finally(() => {
+            if (currentRootId.current === targetRootId && pendingAction) setPendingGitAction(null);
+          });
+      },
+    });
+  };
+
+  const runBranchCreateCloseCommand = () =>
+    onCommand(buildGitBranchCreateCloseCommand(root.id), {
+      "git.branchCreate.close": closeBranchModal,
+    });
+
+  return (
+    <div className="git-toolbar" aria-label="Git toolbar">
+      <div className="git-branch-menu-wrap" ref={branchMenuRef}>
+        <button
+          className="meta-chip ws-chip git-branch-chip"
+          data-command-id="git.branchMenu.open"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => onCommand(buildGitBranchMenuOpenCommand(root.id), { "git.branchMenu.open": () => setMenuOpen((open) => !open) })}
+        >
+          <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+          <span>{branchLabel}</span>
+        </button>
+        {menuOpen ? (
+          <div className="workbench-overflow-menu git-branch-menu" role="menu">
+            <button className="workbench-overflow-item" data-command-id="git.branchCreate.open" role="menuitem" type="button" onClick={() => { setMenuOpen(false); onCommand(buildGitBranchCreateOpenCommand(root.id), { "git.branchCreate.open": () => setModalOpen(true) }); }}>
+              <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>+ New branch...</span>
+            </button>
+            {branchOptions.map((branch) => (
+              <button key={branch.name} className="workbench-overflow-item" data-command-id="git.branch.switch" disabled={branch.current || (branch.checkedOut && !branch.current)} role="menuitem" type="button" title={branch.disabledReason ?? branch.name} onClick={() => { setMenuOpen(false); mutate(buildGitBranchSwitchCommand(root.id, branch.name), () => switchWorkRootGitBranch(root.id, branch.name)); }}>
+                <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>{branch.name}{branch.current ? " ✓" : ""}{branch.checkedOut && !branch.current ? " (checked out)" : ""}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <GitStatusPill
+        status={status}
+        pendingAction={pendingGitAction}
+        onFetch={() => mutate(buildGitFetchCommand(root.id), () => fetchWorkRootGit(root.id), "fetch")}
+        onPush={() => mutate(buildGitPushCommand(root.id), () => pushWorkRootGit(root.id), "push")}
+        onPull={() => mutate(buildGitPullFfOnlyCommand(root.id), () => pullWorkRootGitFfOnly(root.id), "pull")}
+      />
+      {error ? <span className="meta-chip ws-chip git-error-chip">{error}</span> : null}
+      <ModalOverlay className="root-picker-backdrop" isDismissable isOpen={modalOpen} onOpenChange={(open) => { if (!open) runBranchCreateCloseCommand(); }}>
+        <Modal className="root-picker-modal git-branch-modal">
+          <Dialog aria-label="New Git branch" className="root-picker-dialog">
+            <div className="root-picker-titlebar">
+              <Heading className="root-picker-title" slot="title">New branch</Heading>
+              <div className="root-picker-window-actions">
+                <ChromeIconButton
+                  className="root-picker-close-button"
+                  commandId="git.branchCreate.close"
+                  icon={X}
+                  label="Close"
+                  onClick={runBranchCreateCloseCommand}
+                />
+              </div>
+            </div>
+            <form className="git-branch-create-form" onSubmit={(event) => { event.preventDefault(); const branchName = newBranchName.trim(); const baseBranch = selectedBaseBranch.trim(); if (!branchName) return; const targetRootId = root.id; onCommand(buildGitBranchCreateSubmitCommand(root.id, branchName, baseBranch || undefined), { "git.branchCreate.submit": () => { void createWorkRootGitBranch(root.id, branchName, baseBranch || undefined).then((nextStatus) => { if (currentRootId.current !== targetRootId) return; setStatusState({ workRootId: targetRootId, status: nextStatus }); closeBranchModal(); refreshGit("git branch create refresh"); }).catch((nextError) => { if (currentRootId.current !== targetRootId) return; setError(nextError instanceof Error ? nextError.message : "branch create failed"); refreshGit("git branch create failure refresh"); }); } }); }}>
+              <label className="git-worktree-field"><span className="section-label">Branch name</span><input className="root-picker-input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} placeholder="feature-name" /></label>
+              <label className="git-worktree-field"><span className="section-label">Base branch</span><select className="root-picker-input" value={selectedBaseBranch} onChange={(event) => setBaseBranchName(event.target.value)}>{branchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}</select></label>
+              <div className="root-picker-footer-actions"><button className="action-button action-button-primary" data-command-id="git.branchCreate.submit" type="submit" disabled={!newBranchName.trim() || !selectedBaseBranch}>Create and switch</button><button className="action-button" data-command-id="git.branchCreate.close" type="button" onClick={runBranchCreateCloseCommand}>Cancel</button></div>
+            </form>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+    </div>
+  );
+}
+
+function GitStatusPill({
+  status,
+  pendingAction,
+  onFetch,
+  onPush,
+  onPull,
+}: {
+  status: WorkRootGitStatus;
+  pendingAction: "fetch" | "push" | "pull" | null;
+  onFetch: () => void;
+  onPush: () => void;
+  onPull: () => void;
+}) {
+  const changeSegments = gitChangeStatusSegments(status);
+  const syncSegments = gitSyncStatusSegments(status);
+  const renderSegment = (segment: GitStatusSegment) => {
+    const className = `git-status-segment git-status-segment-${segment.tone}`;
+    if (segment.commandId === "git.push") {
+      return <button key={segment.key} className={className} data-command-id="git.push" type="button" disabled={segment.disabled || pendingAction === "push"} aria-label={pendingAction === "push" ? "Pushing Git changes" : undefined} onClick={onPush}>{pendingAction === "push" ? <RefreshCw className="git-spinner" aria-hidden="true" size={12} strokeWidth={1.9} /> : segment.label}</button>;
+    }
+    if (segment.commandId === "git.pullFfOnly") {
+      return <button key={segment.key} className={className} data-command-id="git.pullFfOnly" type="button" disabled={segment.disabled} onClick={onPull}>{segment.label}</button>;
+    }
+    return <span key={segment.key} className={className}>{segment.label}</span>;
+  };
+
+  return (
+    <span className="meta-chip ws-chip git-status-pill" title={status.branch?.upstream ?? "Git status"} aria-label={`Git status ${gitStatusSegments(status)}`}>
+      <button className="git-status-refresh" data-command-id="git.fetch" type="button" aria-label={pendingAction === "fetch" ? "Fetching Git status" : "Fetch Git status"} disabled={pendingAction === "fetch"} onClick={onFetch}>
+        <RefreshCw className={pendingAction === "fetch" ? "git-spinner" : undefined} aria-hidden="true" size={12} strokeWidth={1.9} />
+      </button>
+      {changeSegments.length ? changeSegments.map(renderSegment) : <span className="git-status-segment git-status-segment-clean">clean</span>}
+      {syncSegments.length ? <span className="git-status-separator" aria-hidden="true">|</span> : null}
+      {syncSegments.map(renderSegment)}
+    </span>
   );
 }
 
@@ -1993,7 +4366,7 @@ function WorkbenchActivityBadge({
   // pane reversible/read-only.
   return (
     <button
-      className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
+      className={`meta-chip ws-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
       data-command-id="workbench.openActivity"
       data-activity-tone={activity.tone}
       type="button"
@@ -2001,6 +4374,9 @@ function WorkbenchActivityBadge({
       aria-label={`Open WorkRoot Activity: ${activity.title}`}
       onClick={onOpenActivity}
     >
+      <span className="workbench-activity-badge-icon" aria-hidden="true">
+        <Activity size={13} strokeWidth={1.8} />
+      </span>
       <span className="workbench-activity-badge-dot" aria-hidden="true" />
       <span className="workbench-activity-badge-label">{activity.label}</span>
       {activity.summary ? (
@@ -2023,7 +4399,7 @@ function workRootActivityPaneId(workRootId: string) {
 // Build the placement state the WorkRoot Activity badge feeds into
 // decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
 // duplicate open focuses the pane in whatever group it currently occupies,
-// while a first open resolves to the policy-owned group-1 exception.
+// while a first open resolves through the policy-owned support-split target.
 function workRootActivityPlacementState(
   groups: ReadonlyArray<{ id: string; label: string }>,
   editorGroups: WorkbenchEditorGroupModel[],
@@ -2056,6 +4432,8 @@ function workRootActivityPlacementState(
 function workRootActivityWorkbenchPane(
   root: WorkRootView,
   activity: WorkRootActivityBadgeInput,
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
+  onCommand: DashboardCommandDispatcher,
 ): WorkbenchPane {
   const ready = activity.phase === "ready" ? activity.view : null;
   const state: ViewState = {
@@ -2082,21 +4460,39 @@ function workRootActivityWorkbenchPane(
     kind: "workRootActivity",
     category: "opened",
     title: "WorkRoot Activity",
-    detail: `${root.label} named-agent activity`,
+    detail: `${root.label} activity console`,
     state,
     meta,
-    body: <WorkRootActivityPane activity={activity} />,
+    contentRevision: workRootActivityPaneRevision(activity, transcriptRefresh),
+    body: (
+      <WorkRootActivityPane
+        activity={activity}
+        onCommand={onCommand}
+        transcriptRefresh={transcriptRefresh}
+      />
+    ),
   };
 }
 
+type ActivityTranscriptRefreshSignal = {
+  readonly rootId: string;
+  readonly activityId: string;
+  readonly cursor: string | null;
+  readonly sequence: number;
+};
+
 function WorkRootActivityPane({
   activity,
+  onCommand,
+  transcriptRefresh,
 }: {
   activity: WorkRootActivityBadgeInput;
+  onCommand: DashboardCommandDispatcher;
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null;
 }) {
-  // CONTRACT: A reversible read-only projection of the Phase 1 named-agent
-  // activity API. It never exposes host cache paths, stream paths, pids, or
-  // session ids, and offers no agent control actions.
+  // CONTRACT: A reversible read-only Activity Console projection. It consumes
+  // source-neutral feed items/transcripts, exposes command-routed controls, and
+  // offers no agent/exec control actions or daemon-side acknowledgement.
   return (
     <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
       {activity.phase === "loading" ? (
@@ -2108,118 +4504,56 @@ function WorkRootActivityPane({
           WorkRoot activity is unavailable
         </div>
       ) : (
-        <WorkRootActivityDetail view={activity.view} />
-      )}
-      {/* CONTRACT: Running command rows stay explicitly empty until
-          260513-feat-async-exec-output-reader provides the async exec source. */}
-      <section
-        className="workroot-activity-section"
-        data-running-commands-state="empty"
-      >
-        <h3 className="workroot-activity-section-title">Running commands</h3>
-        <p className="workroot-activity-empty">
-          No running commands. Command activity arrives with the async exec
-          output reader.
-        </p>
-      </section>
-    </section>
-  );
-}
-
-function WorkRootActivityDetail({ view }: { view: WorkRootActivityView }) {
-  const { summary, agents } = view;
-  return (
-    <section className="workroot-activity-section">
-      <div className="workroot-activity-section-head">
-        <h3 className="workroot-activity-section-title">Named agents</h3>
-        <span className="meta-chip">{view.status}</span>
-      </div>
-      <div className="workroot-activity-summary">
-        <span className="meta-chip">{summary.total} total</span>
-        <span className="meta-chip">{summary.active} active</span>
-        <span className="meta-chip">{summary.blocked} blocked</span>
-        <span className="meta-chip">{summary.failed} failed</span>
-        <span className="meta-chip">{summary.unavailable} unavailable</span>
-      </div>
-      {agents.length === 0 ? (
-        <p
-          className="workroot-activity-empty"
-          data-named-agents-state="empty"
-        >
-          No named agents for this workRoot.
-        </p>
-      ) : (
-        <ul className="workroot-activity-agents">
-          {agents.map((agent) => (
-            <WorkRootActivityAgentRow agent={agent} key={agent.agentId} />
-          ))}
-        </ul>
+        <ActivityConsole
+          view={activity.view}
+          onCommand={onCommand}
+          transcriptRefresh={transcriptRefresh}
+        />
       )}
     </section>
   );
 }
 
-function WorkRootActivityAgentRow({
-  agent,
-}: {
-  agent: NamedAgentActivityView;
-}) {
-  const metaParts = [
-    agent.backend,
-    agent.harness,
-    agent.model ?? agent.tier,
-    agent.effort,
-  ].filter((part): part is string => Boolean(part));
-  const call = agent.currentCall;
-  return (
-    <li className="workroot-activity-agent" data-agent-status={agent.status}>
-      <div className="workroot-activity-agent-head">
-        <span className="workroot-activity-agent-name">
-          {agent.name ?? agent.agentId}
-        </span>
-        <span className="meta-chip">{agent.status}</span>
-        {agent.sessionPresent ? (
-          <span className="meta-chip">session</span>
-        ) : null}
-      </div>
-      {metaParts.length > 0 ? (
-        <div className="workroot-activity-agent-meta">
-          {metaParts.join(" · ")}
-        </div>
-      ) : null}
-      {call ? (
-        <div className="workroot-activity-agent-call">
-          <span className="meta-chip">call {call.status}</span>
-          {call.executionId ? <span>exec {call.executionId}</span> : null}
-          {call.startedAt ? <span>started {call.startedAt}</span> : null}
-          {call.updatedAt ? <span>updated {call.updatedAt}</span> : null}
-          {call.finishedAt ? <span>finished {call.finishedAt}</span> : null}
-        </div>
-      ) : null}
-      {call?.error ? (
-        <div className="workroot-activity-agent-error">{call.error}</div>
-      ) : null}
-      {agent.lastCallAt ? (
-        <div className="workroot-activity-agent-timing">
-          last call {agent.lastCallAt}
-        </div>
-      ) : null}
-      {agent.detailHints.length > 0 ? (
-        <ul className="workroot-activity-hints">
-          {agent.detailHints.map((hint, index) => (
-            <li key={`hint-${index}`}>{hint}</li>
-          ))}
-        </ul>
-      ) : null}
-      {agent.diagnostics.length > 0 ? (
-        <ul className="workroot-activity-diagnostics">
-          {agent.diagnostics.map((diagnostic, index) => (
-            <li key={`diagnostic-${index}`}>{diagnostic}</li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
+function workRootActivityPaneRevision(
+  activity: WorkRootActivityBadgeInput,
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
+) {
+  if (activity.phase !== "ready") {
+    return `activity:${activity.phase}`;
+  }
+  const view = activity.view;
+  return [
+    "activity",
+    view.status,
+    view.updateMode,
+    view.feedCursor ?? "",
+    view.selectedItemId ?? "",
+    view.items.length,
+    transcriptRefresh?.activityId ?? "",
+    transcriptRefresh?.cursor ?? "",
+    transcriptRefresh?.sequence ?? 0,
+  ].join(":");
+}
+
+function readOnlyFilePaneRevision(pane: ReadOnlyFilePane) {
+  return [
+    "readonly",
+    pane.status,
+    pane.path,
+    pane.sizeBytes ?? "",
+    pane.languageHint ?? "",
+    pane.extension ?? "",
+    pane.error ?? "",
+    hashText(pane.content),
+  ].join(":");
+}
+
+function hashText(value: string) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`;
 }
 
 function toolbarActions(
@@ -2240,6 +4574,31 @@ function toolbarActions(
   return actions;
 }
 
+function workbenchToggleIcon(toggle: WorkbenchToggle): LucideIcon {
+  switch (toggle) {
+    case "viewer":
+      return Eye;
+    case "task":
+      return ListTodo;
+    case "diagnostics":
+      return Stethoscope;
+    case "events":
+      return Activity;
+    case "layout":
+      return LayoutPanelTop;
+  }
+}
+
+function activationForAction(actionId: string): "online" | "offline" | null {
+  if (actionId === "workRoot.activation.online") {
+    return "online";
+  }
+  if (actionId === "workRoot.activation.offline") {
+    return "offline";
+  }
+  return null;
+}
+
 type WorkbenchPane = {
   readonly id: string;
   readonly kind: SurfaceKind;
@@ -2248,6 +4607,7 @@ type WorkbenchPane = {
   readonly detail: string;
   readonly state: ViewState;
   readonly meta: readonly string[];
+  readonly contentRevision?: string;
   readonly body?: ReactNode;
 };
 
@@ -2265,12 +4625,16 @@ function buildWorkbenchEditorGroups(
   supportEntity: ResourceEntity | null,
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
+  activityPaneOrderByGroup: WorkbenchPaneOrder,
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
   closedAgentPaneIds: readonly string[] = [],
   activityPaneOpen = false,
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
+  activityTranscriptRefresh: ActivityTranscriptRefreshSignal | null,
+  onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -2280,6 +4644,8 @@ function buildWorkbenchEditorGroups(
     readOnlyFilePanes,
     readOnlyFilePaneOrderByGroup,
     dashboardGroups,
+    onCommand,
+    onDocumentSaved,
   );
   const terminalPanesByGroup = terminalWorkbenchPanesByGroup(
     root,
@@ -2308,12 +4674,21 @@ function buildWorkbenchEditorGroups(
         ]
       : [];
 
-  // CONTRACT: The WorkRoot Activity pane is the one reversible opened
-  // projection that defaults into group 1 (the agent/terminal-side split)
-  // rather than the group-2 editor/read-only column.
-  const activityPane: WorkbenchPane[] = activityPaneOpen
-    ? [workRootActivityWorkbenchPane(root, activityState)]
-    : [];
+  const activityPane = activityPaneOpen
+    ? workRootActivityWorkbenchPane(
+        root,
+        activityState,
+        activityTranscriptRefresh,
+        onCommand,
+      )
+    : null;
+  const activityGroupId = activityPane
+    ? activityPaneGroupIdFromOrder(
+        activityPane.id,
+        activityPaneOrderByGroup,
+        dashboardGroups,
+      )
+    : null;
 
   return dashboardGroups.map((group, index) => ({
     id: group.id,
@@ -2321,7 +4696,7 @@ function buildWorkbenchEditorGroups(
     panes: [
       ...(index === 0 ? agentPane : []),
       ...(terminalPanesByGroup[group.id] ?? []),
-      ...(index === 0 ? activityPane : []),
+      ...(activityPane && activityGroupId === group.id ? [activityPane] : []),
       ...(readOnlyPanesByGroup[group.id] ?? []),
     ],
   }));
@@ -2484,6 +4859,7 @@ function terminalWorkbenchPane(
       pane.socketStatus,
       `${pane.session.columns}x${pane.session.rows}`,
     ],
+    contentRevision: `terminal:${pane.paneId}`,
     body: <TerminalPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
@@ -2953,6 +5329,18 @@ function sameReadOnlyOpenRequest(
   );
 }
 
+function addPaneToGroupOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneId: string,
+  groupId: string,
+): WorkbenchPaneOrder {
+  const withoutPane = removePaneFromOrder(orderByGroup, paneId);
+  return {
+    ...withoutPane,
+    [groupId]: [...(withoutPane[groupId] ?? []), paneId],
+  };
+}
+
 function removePaneFromOrder(
   orderByGroup: WorkbenchPaneOrder,
   paneId: string | undefined,
@@ -2965,6 +5353,32 @@ function removePaneFromOrder(
       groupId,
       paneIds.filter((candidate) => candidate !== paneId),
     ]),
+  );
+}
+
+function removePanesFromOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneIds: readonly string[],
+): WorkbenchPaneOrder {
+  const paneIdSet = new Set(paneIds);
+  return Object.fromEntries(
+    Object.entries(orderByGroup).map(([groupId, orderedPaneIds]) => [
+      groupId,
+      orderedPaneIds.filter((paneId) => !paneIdSet.has(paneId)),
+    ]),
+  );
+}
+
+function activityPaneGroupIdFromOrder(
+  paneId: string,
+  orderByGroup: WorkbenchPaneOrder,
+  groups: ReadonlyArray<{ id: string }>,
+): string {
+  return groupIdForPaneOrder(
+    paneId,
+    orderByGroup,
+    {},
+    groups[1]?.id ?? groups[0]?.id ?? "group-1",
   );
 }
 
@@ -2990,10 +5404,12 @@ function readOnlyWorkbenchPanesByGroup(
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
   groups: ReadonlyArray<{ id: string; label: string }>,
+  onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
     .filter((pane) => pane.workRootId === root.id)
-    .map((pane) => readOnlyWorkbenchPane(root, pane));
+    .map((pane) => readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
   const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
@@ -3022,6 +5438,8 @@ function readOnlyWorkbenchPanesByGroup(
 function readOnlyWorkbenchPane(
   root: WorkRootView,
   pane: ReadOnlyFilePane,
+  onCommand: DashboardCommandDispatcher,
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
 ): WorkbenchPane {
   const state: ViewState = {
     status: pane.status,
@@ -3046,44 +5464,317 @@ function readOnlyWorkbenchPane(
     detail: pane.path,
     state,
     meta,
-    body: <ReadOnlyTextPane pane={pane} root={root} />,
+    contentRevision: readOnlyFilePaneRevision(pane),
+    body: (
+      <ReadOnlyDocumentPane
+        pane={pane}
+        root={root}
+        renderMarkdown={isMarkdownDocumentSource(pane)}
+        onCommand={onCommand}
+        onDocumentSaved={onDocumentSaved}
+      />
+    ),
   };
 }
 
-function ReadOnlyTextPane({
+function ReadOnlyDocumentPane({
   pane,
   root,
+  renderMarkdown,
+  onCommand,
+  onDocumentSaved,
 }: {
   pane: ReadOnlyFilePane;
   root: WorkRootView;
+  renderMarkdown: boolean;
+  onCommand: DashboardCommandDispatcher;
+  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [translationStatus, setTranslationStatus] = useState<
+    "idle" | "loading" | "ready" | "unavailable" | "error"
+  >("idle");
+  const [translationMessage, setTranslationMessage] = useState<string | null>(null);
+  const [translationOverlay, setTranslationOverlay] = useState<DocumentTranslationOverlay | undefined>();
+  const [documentMode, setDocumentMode] = useState<"view" | "edit">("view");
+  const [draft, setDraft] = useState(pane.content);
+  const [baseContentHash, setBaseContentHash] = useState(pane.contentHash);
+  const [saveState, setSaveState] = useState<DocumentSaveState>("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const decision = documentDraftContentChangeDecision(saveState);
+    if (decision.action === "preserveDraft") {
+      setSaveState(decision.saveState);
+      setSaveMessage(decision.message);
+      return;
+    }
+    setDraft(pane.content);
+    setBaseContentHash(pane.contentHash);
+    setTranslationOverlay(undefined);
+  }, [pane.content, pane.contentHash]);
+
+  const setModeCommand = (mode: "view" | "edit") => {
+    const command = buildDocumentModeSetCommand(pane.workRootId, pane.path, mode);
+    onCommand(command, { [command.commandId]: () => setDocumentMode(mode) });
+  };
+
+  const revertDraft = () => {
+    const command = buildDocumentRevertCommand(pane.workRootId, pane.path);
+    onCommand(command, {
+      [command.commandId]: () => {
+        setDraft(pane.content);
+        setBaseContentHash(pane.contentHash);
+        setSaveState("idle");
+        setSaveMessage(null);
+      },
+    });
+  };
+
+  const saveDraft = () => {
+    const command = buildDocumentSaveCommand(pane.workRootId, pane.path);
+    onCommand(command, {
+      [command.commandId]: () => {
+        if (!baseContentHash) {
+          setSaveState("error");
+          setSaveMessage("Missing base content hash");
+          return;
+        }
+        setSaveState("saving");
+        setSaveMessage("Saving");
+        void writeWorkRootTextFile(pane.workRootId, {
+          path: pane.path,
+          baseContentHash,
+          content: draft,
+        })
+          .then((response) => {
+            setBaseContentHash(response.contentHash);
+            setSaveState("saved");
+            setSaveMessage("Saved");
+            setTranslationOverlay(undefined);
+            onDocumentSaved({
+              workRootId: pane.workRootId,
+              path: pane.path,
+              content: draft,
+              contentHash: response.contentHash,
+              sizeBytes: response.sizeBytes,
+            });
+          })
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : "Save failed";
+            setSaveState(documentSaveStateForError(message));
+            setSaveMessage(message);
+          });
+      },
+    });
+  };
+
+  useEffect(() => {
+    if (!renderMarkdown || !translationEnabled || pane.status !== "loaded") {
+      return;
+    }
+    let cancelled = false;
+    setTranslationStatus("loading");
+    setTranslationMessage("Requesting document translation");
+    const payload = buildDocumentTranslationRequestPayload({
+      markdown: pane.content,
+      workRootId: pane.workRootId,
+      path: pane.path,
+      title: pane.title,
+      targetLocale: "ko",
+    });
+    void fetchTranslationProviders()
+      .then((providers) => {
+        const provider = providers.providers.find((candidate) => candidate.configured);
+        if (!provider) {
+          throw new Error("No translation provider configured");
+        }
+        return requestDocumentTranslation({
+          ...payload,
+          provider: {
+            id: provider.id,
+            model: provider.defaultModel ?? provider.models[0]?.id,
+          },
+        });
+      })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setTranslationOverlay(overlayFromTranslationResponse(response));
+        setTranslationStatus(response.status === "failed" ? "error" : "ready");
+        setTranslationMessage(
+          response.status === "completed"
+            ? `Translated to ${response.targetLocale}`
+            : `Translation ${response.status}`
+        );
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setTranslationOverlay(undefined);
+        setTranslationStatus("unavailable");
+        setTranslationMessage(error instanceof Error ? error.message : "Translation unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, renderMarkdown, translationEnabled]);
+
+  const documentFormatLabel = renderMarkdown ? "markdown" : (pane.languageHint ?? pane.extension ?? "text");
+  const translationButtonLabel = translationEnabled
+    ? "Disable Korean translation"
+    : "Enable Korean translation";
+  const translationStatusVisible =
+    translationStatus === "loading" ||
+    translationStatus === "ready" ||
+    translationStatus === "unavailable" ||
+    translationStatus === "error";
+  const documentPathLabel = pane.path;
+  const documentPathTitle = pane.path.startsWith("/") ? pane.path : `${root.label} / ${pane.path}`;
+  const saveStatusLabel =
+    saveState === "idle"
+      ? draft === pane.content
+        ? "clean"
+        : "dirty"
+      : saveState;
+  const showSaveStatusChip = documentMode === "edit" && pane.status === "loaded";
+
   return (
-    <div className="readonly-text-pane">
-      <div className="readonly-text-pane-header">
-        <div className="readonly-text-pane-title-block">
-          <div className="readonly-text-pane-title">{pane.title}</div>
-          <div className="readonly-text-pane-path" title={pane.path}>
-            {root.label} / {pane.path}
+    <div className="readonly-text-pane document-pane ws-pane">
+      <div className="readonly-text-pane-header readonly-text-pane-ribbon ws-toolbar">
+        <div className="document-ribbon-file">
+          <div className="readonly-text-pane-path" title={documentPathTitle}>
+            {documentPathLabel}
+          </div>
+          <div className="readonly-text-pane-badges">
+            <span className="meta-chip ws-chip">{pane.mode}</span>
+            <span className="meta-chip ws-chip">{documentFormatLabel}</span>
+            {showSaveStatusChip ? (
+              <span
+                className={`meta-chip ws-chip document-save-chip document-save-chip-${saveStatusLabel}`}
+                data-document-save-state={saveState}
+                title={saveMessage ?? saveStatusLabel}
+              >
+                {saveStatusLabel}
+              </span>
+            ) : null}
           </div>
         </div>
-        <div className="readonly-text-pane-badges">
-          <span className="meta-chip">{pane.mode}</span>
-          <span className="meta-chip">read-only</span>
-          <span className="meta-chip">
-            {pane.languageHint ?? pane.extension ?? "text"}
-          </span>
+        <div className="document-ribbon-controls">
+          {pane.status === "loaded" ? (
+            <div className="document-viewer-segmented" role="group" aria-label="Document mode">
+              <button
+                type="button"
+                className={`document-viewer-segment${documentMode === "view" ? " is-active" : ""}`}
+                aria-label="View document"
+                title="View"
+                data-command-id="document.mode.set"
+                data-document-mode="view"
+                onClick={() => setModeCommand("view")}
+              >
+                <Eye aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className={`document-viewer-segment${documentMode === "edit" ? " is-active" : ""}`}
+                aria-label="Edit document"
+                title="Edit"
+                data-command-id="document.mode.set"
+                data-document-mode="edit"
+                onClick={() => setModeCommand("edit")}
+              >
+                <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+            </div>
+          ) : null}
+          {pane.status === "loaded" && renderMarkdown && documentMode === "view" ? (
+            <button
+              type="button"
+              className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
+              aria-label={translationButtonLabel}
+              aria-pressed={translationEnabled}
+              title={`${translationButtonLabel}; target: Korean`}
+              data-command-id="document.translation.toggle"
+              onClick={() => {
+                const command = buildDocumentTranslationToggleCommand(pane.workRootId, pane.path);
+                onCommand(command, {
+                  [command.commandId]: () => {
+                    setTranslationEnabled((current) => !current);
+                    setTranslationOverlay(undefined);
+                    setTranslationStatus("idle");
+                    setTranslationMessage(null);
+                  },
+                });
+              }}
+            >
+              <Languages aria-hidden="true" size={13} strokeWidth={1.8} />
+            </button>
+          ) : null}
+          {translationStatusVisible ? (
+            <span className="document-translation-status" data-translation-status={translationStatus}>
+              {translationMessage ?? translationStatus}
+            </span>
+          ) : null}
+          {documentMode === "edit" && pane.status === "loaded" ? (
+            <div className="document-edit-actions">
+              <button
+                type="button"
+                className="icon-button document-edit-icon-button"
+                data-command-id="document.save"
+                disabled={saveState === "saving" || draft === pane.content}
+                title="Save"
+                aria-label="Save document"
+                onClick={saveDraft}
+              >
+                <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className="icon-button document-edit-icon-button"
+                data-command-id="document.revert"
+                disabled={saveState === "saving" || draft === pane.content}
+                title="Revert"
+                aria-label="Revert document draft"
+                onClick={revertDraft}
+              >
+                <RotateCcw aria-hidden="true" size={13} strokeWidth={1.8} />
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
       {pane.status === "loading" ? (
-        <div className="readonly-text-pane-state">Loading file content</div>
+        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
       ) : pane.status === "error" ? (
-        <div className="readonly-text-pane-state readonly-text-pane-error">
+        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
           {pane.error ?? "file read failed"}
         </div>
       ) : (
-        <pre className="readonly-text-content">
-          <code>{pane.content}</code>
-        </pre>
+        <>
+          {documentMode === "edit" ? (
+            <DocumentRawEditor
+              value={draft}
+              source={pane}
+              ariaLabel={`Raw editor for ${pane.path}`}
+              onChange={(nextDraft) => {
+                setDraft(nextDraft);
+                setSaveState("dirty");
+                setSaveMessage("Unsaved changes");
+              }}
+            />
+          ) : renderMarkdown ? (
+            <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+          ) : (
+            <DocumentRawEditor
+              value={pane.content}
+              source={pane}
+              ariaLabel={`Read-only source viewer for ${pane.path}`}
+              editable={false}
+            />
+          )}
+        </>
       )}
     </div>
   );
@@ -3136,24 +5827,38 @@ function WorkspaceRows({
 }: {
   workspace: WorkspaceView;
   selectedId: string | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
 }) {
-  const compactMain = compactMainInstance(workspace);
+  const compactRoot = compactWorkspaceWorkRoot(workspace);
+  const childWorkRoots = workspace.workRoots.filter(isWorkspaceNavChildWorkRoot);
+  const selectedChildWorkRootIds = new Set(childWorkRoots.map((root) => root.id));
+  const selectedWorkspace =
+    selectedId === workspace.id ||
+    workspace.workRoots.some(
+      (root) => root.id === selectedId && !selectedChildWorkRootIds.has(root.id),
+    );
 
-  if (compactMain) {
+  if (compactRoot) {
     return (
       <div className="resource-group">
         <ResourceRow
-          id={compactMain.root.id}
-          title={`${workspace.label} / ${compactMain.root.label}`}
-          eyebrow="compact workRoot"
-          state={compactMain.root.state}
+          id={compactRoot.id}
+          title={compactWorkspaceWorkRootTitle(workspace, compactRoot)}
+          presentation="compactWorkRoot"
+          state={compactRoot.state}
           depth={0}
-          selected={selectedId === compactMain.root.id}
-          meta={[
-            kindLabel(compactMain.root.kind),
-            compactMain.root.status,
-            compactMain.instance.kind,
+          selected={selectedId === compactRoot.id}
+          actions={workspace.actions}
+          actionEntityId={workspace.id}
+          kind={compactRoot.kind}
+          availability={compactRoot.availability}
+          activation={compactRoot.activation}
+          canAddWorktree={compactRoot.kind === "gitPrimaryRoot" || compactRoot.kind === "gitLinkedWorktree"}
+          debugMeta={[
+            "compact workRoot",
+            kindLabel(compactRoot.kind),
+            `availability: ${compactRoot.availability}`,
+            `activation: ${compactRoot.activation}`,
           ]}
           onCommand={onCommand}
         />
@@ -3166,23 +5871,36 @@ function WorkspaceRows({
       <ResourceRow
         id={workspace.id}
         title={workspace.label}
-        eyebrow="workspace"
+        presentation="workspace"
         state={workspace.state}
         depth={0}
-        selected={selectedId === workspace.id}
-        meta={[`${workspace.workRoots.length} roots`]}
+        selected={selectedWorkspace}
+        actions={workspace.actions}
+        actionEntityId={workspace.id}
+        canAddWorktree={workspace.workRoots.some((root) => root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree")}
+        debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
-      {workspace.workRoots.map((root) => (
+      {childWorkRoots.map((root) => (
         <div key={root.id}>
           <ResourceRow
             id={root.id}
             title={root.label}
-            eyebrow="workRoot"
+            presentation="workRoot"
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
-            meta={[kindLabel(root.kind), root.status]}
+            actions={[]}
+            actionEntityId={root.id}
+            kind={root.kind}
+            availability={root.availability}
+            activation={root.activation}
+            debugMeta={[
+              "workRoot",
+              kindLabel(root.kind),
+              `availability: ${root.availability}`,
+              `activation: ${root.activation}`,
+            ]}
             onCommand={onCommand}
           />
           {root.mainInstances.length > 0 ? (
@@ -3197,48 +5915,129 @@ function WorkspaceRows({
   );
 }
 
+function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
+  return root.kind === "gitLinkedWorktree";
+}
+
 function ResourceRow({
   id,
   title,
-  eyebrow,
+  presentation,
   state,
   depth,
   selected,
-  meta,
+  actions = [],
+  actionEntityId = id,
+  kind,
+  availability,
+  activation,
+  canAddWorktree = false,
+  debugMeta,
   onCommand,
 }: {
   id: string;
   title: string;
-  eyebrow: string;
+  presentation: "compactWorkRoot" | "workspace" | "workRoot";
   state: ViewState;
   depth: number;
   selected: boolean;
-  meta: string[];
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  actions?: ActionHint[];
+  actionEntityId?: string;
+  kind?: WorkRootView["kind"];
+  availability?: WorkRootView["availability"];
+  activation?: WorkRootView["activation"];
+  canAddWorktree?: boolean;
+  debugMeta: string[];
+  onCommand: DashboardCommandDispatcher;
 }) {
+  const hasWorkspaceRemove = actions.some(
+    (action) => action.enabled && action.id === "workspace.remove",
+  );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLSpanElement | null>(null);
+  useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
+  const tone = resourceRowTone(state, availability, activation);
+  const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
   return (
-    <button
-      className={`resource-row${selected ? " resource-row-selected" : ""}`}
+    <div
+      className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
       data-command-id="resource.select"
+      data-resource-id={id}
+      data-resource-presentation={presentation}
+      data-resource-kind={kind ?? presentation}
+      data-resource-activation={activation ?? ""}
+      data-resource-availability={availability ?? ""}
       style={{ "--depth": depth } as CSSProperties}
-      type="button"
-      onClick={() =>
-        onCommand("resource.select", { type: "select", entityId: id })
-      }
+      title={metadataTitle}
     >
-      <span className="resource-row-main">
-        <span className="row-eyebrow">{eyebrow}</span>
-        <span className="row-title">{title}</span>
-      </span>
-      <span className="resource-row-meta">
-        {meta.map((value) => (
-          <span className="meta-chip" key={value}>
-            {value}
-          </span>
-        ))}
-        <StateBadge state={state} />
-      </span>
-    </button>
+      <button
+        aria-label={`Select ${resourcePresentationLabel(presentation)} ${title}`}
+        className="resource-row-select"
+        data-command-id="resource.select"
+        title={metadataTitle}
+        type="button"
+        onClick={() =>
+          onCommand({ commandId: "resource.select", payload: { type: "select", entityId: id } })
+        }
+      >
+        <span className="resource-row-main">
+          <ResourceGlyph presentation={presentation} />
+          <span className="row-title">{title}</span>
+          {kind ? (
+            <span className="resource-kind-glyph" title={kindLabel(kind)}>
+              <WorkRootKindIcon kind={kind} />
+            </span>
+          ) : null}
+        </span>
+      </button>
+      {hasWorkspaceRemove ? (
+        <span className="resource-row-actions workspace-row-menu-wrap" ref={menuRef}>
+          <ChromeIconButton
+            className="resource-row-action"
+            commandId="workspace.menu.open"
+            icon={MoreHorizontal}
+            label={`More actions for ${title}`}
+            onClick={() =>
+              onCommand(buildWorkspaceMenuOpenCommand(actionEntityId), {
+                "workspace.menu.open": () => setMenuOpen((current) => !current),
+              })
+            }
+          />
+          {menuOpen ? (
+            <div className="workbench-overflow-menu workspace-row-menu" role="menu">
+              {canAddWorktree ? (
+              <button
+                className="workbench-overflow-item"
+                data-command-id="gitWorktreeAdd.open"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCommand(buildGitWorktreeAddOpenCommand(actionEntityId));
+                }}
+              >
+                <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Add worktree...</span>
+              </button>
+              ) : null}
+              <button
+                className="workbench-overflow-item workbench-overflow-item-danger"
+                data-command-id="workspace.remove"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCommand(buildWorkspaceRemoveCommand(actionEntityId));
+                }}
+              >
+                <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Remove workspace...</span>
+              </button>
+            </div>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -3293,6 +6092,8 @@ function ResourceDetail({
         {entity.type === "workRoot" ? (
           <>
             <DetailItem label="kind" value={kindLabel(entity.kind)} />
+            <DetailItem label="availability" value={entity.availability} />
+            <DetailItem label="activation" value={entity.activation} />
             <DetailItem label="workRootStatus" value={entity.status} />
             <DetailItem
               label="instances"
@@ -3369,7 +6170,7 @@ function StatusPane({
   action?: ReactNode;
 }) {
   return (
-    <div className="status-pane">
+    <div className="status-pane ws-state-surface">
       <div className="status-title">{title}</div>
       <div className="status-detail">{detail}</div>
       {action ? <div className="status-action">{action}</div> : null}
@@ -3400,7 +6201,7 @@ function StateLine({ state }: { state: ViewState }) {
 function StateBadge({ state }: { state: ViewState }) {
   return (
     <span
-      className={`state-badge ${state.loading ? "state-loading" : ""} ${
+      className={`state-badge ws-badge ${state.loading ? "state-loading" : ""} ${
         state.stale ? "state-stale" : ""
       } ${state.error ? "state-error" : ""}`}
     >
@@ -3413,7 +6214,7 @@ function StateBadge({ state }: { state: ViewState }) {
 function StateDot({ state }: { state: ViewState }) {
   return (
     <span
-      className={`state-dot ${state.loading ? "state-loading" : ""} ${
+      className={`state-dot ws-state-dot ${state.loading ? "state-loading" : ""} ${
         state.stale ? "state-stale" : ""
       } ${state.error ? "state-error" : ""}`}
       aria-hidden="true"
@@ -3446,6 +6247,20 @@ function resolveWorkbenchSelection(
   let fallback: WorkbenchSelection | null = null;
 
   for (const workspace of resources.workspaces) {
+    const workspaceRoot =
+      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
+      workspace.workRoots[0] ??
+      null;
+    if (selectedId === workspace.id && workspaceRoot) {
+      const mainInstance = workspaceRoot.mainInstances[0] ?? null;
+      return {
+        workspace,
+        root: workspaceRoot,
+        mainInstance,
+        selectedInstance: mainInstance,
+      };
+    }
+
     for (const root of workspace.workRoots) {
       const mainInstance = root.mainInstances[0] ?? null;
       const rootSelection = {
@@ -3456,7 +6271,7 @@ function resolveWorkbenchSelection(
       };
       fallback ??= rootSelection;
 
-      if (selectedId === workspace.id || selectedId === root.id) {
+      if (selectedId === root.id) {
         return rootSelection;
       }
 
@@ -3504,6 +6319,8 @@ function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
     compactable: root.compactable,
     path: root.resourcePath,
     kind: root.kind,
+    activation: root.activation,
+    availability: root.availability,
     status: root.status,
     instanceCount: root.mainInstances.length,
   };
@@ -3517,22 +6334,31 @@ function closeContractLabel(kind: SurfaceKind) {
   return `close: ${decideSurfaceClose(kind).behavior}`;
 }
 
-function compactMainInstance(workspace: WorkspaceView) {
-  if (!workspace.compactable || workspace.workRoots.length !== 1) {
-    return null;
+function resourcePresentationLabel(
+  presentation: "compactWorkRoot" | "workspace" | "workRoot",
+) {
+  switch (presentation) {
+    case "compactWorkRoot":
+      return "compact workRoot";
+    case "workspace":
+      return "workspace";
+    case "workRoot":
+      return "workRoot";
   }
+}
 
-  const root = workspace.workRoots[0];
-  if (!root.compactable || root.mainInstances.length !== 1) {
-    return null;
+function resourceRowTone(
+  state: ViewState,
+  availability?: WorkRootView["availability"],
+  activation?: WorkRootView["activation"],
+) {
+  if (state.error || availability === "inaccessible" || availability === "missing") {
+    return "error";
   }
-
-  const instance = root.mainInstances[0];
-  if (instance.subInstances.length > 0) {
-    return null;
+  if (state.stale || availability === "moved" || activation === "offline") {
+    return "muted";
   }
-
-  return { id: instance.id, root, instance };
+  return "ready";
 }
 
 function kindLabel(kind: WorkRootView["kind"]) {

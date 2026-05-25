@@ -4,6 +4,10 @@ import {
   type DockviewBridgePort,
 } from "./dockviewBridge.js";
 import {
+  dockviewPanelIsSelectedWithinGroup,
+  shouldUpdateDockviewWorkbenchPanelParams,
+} from "./dockviewLayoutModel.js";
+import {
   defaultSurfaceKinds,
   defaultSurfaceRegistry,
 } from "./surfaceRegistry.js";
@@ -644,6 +648,79 @@ assertDeepEqual(
   "bridge serialization returns the sanitized dashboard workbench layout",
 );
 
+assert(
+  dockviewPanelIsSelectedWithinGroup({
+    id: "pane-in-inactive-group",
+    group: { activePanel: { id: "pane-in-inactive-group" } },
+    api: { isActive: false },
+  }),
+  "Dockview sync treats a group's selected tab as active even when another split group has focus",
+);
+assert(
+  !dockviewPanelIsSelectedWithinGroup({
+    id: "inactive-tab",
+    group: { activePanel: { id: "selected-tab" } },
+    api: { isActive: false },
+  }),
+  "Dockview sync can still activate a non-selected tab in its group",
+);
+assert(
+  !shouldUpdateDockviewWorkbenchPanelParams(
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      body: { render: "old" },
+      contentRevision: "activity:1",
+    },
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      body: { render: "new" },
+      contentRevision: "activity:1",
+    },
+  ),
+  "Dockview pane params ignore React body identity churn when the content revision is unchanged",
+);
+assert(
+  shouldUpdateDockviewWorkbenchPanelParams(
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      contentRevision: "activity:1",
+    },
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      contentRevision: "activity:2",
+    },
+  ),
+  "Dockview pane params update when the stable content revision changes",
+);
+
 const groupOne = workbenchGroupId("group-1");
 const groupTwo = workbenchGroupId("group-2");
 const agentKey = surfaceLogicalKey(
@@ -744,7 +821,7 @@ assertDeepEqual(
   {
     type: "openNew",
     attachmentId: "att-workroot-activity",
-    groupId: "group-1",
+    groupId: "group-2",
     logicalKey: "workRootActivity/workroot-devenv",
     rowPolicy: "opened",
     nextState: {
@@ -753,7 +830,7 @@ assertDeepEqual(
         ...placementState.attachments,
         {
           attachmentId: "att-workroot-activity",
-          groupId: "group-1",
+          groupId: "group-2",
           surfaceKind: "workRootActivity",
           logicalKey: "workRootActivity/workroot-devenv",
         },
@@ -761,7 +838,7 @@ assertDeepEqual(
     },
     createdGroupId: null,
   },
-  "WorkRoot Activity is the opened-row exception that defaults new panes to group 1",
+  "WorkRoot Activity uses opened-row support-split placement for new panes",
 );
 
 assertDeepEqual(
@@ -985,6 +1062,90 @@ assertDeepEqual(
   "group-2",
   "dynamic placement excludes group 3 from automatic editor placement",
 );
+
+const activityLogicalKey = surfaceLogicalKey("workRootActivity", "root-local-abc");
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    { groups: [{ groupId: groupOne }, { groupId: groupTwo }], attachments: [] },
+    {
+      surfaceKind: "workRootActivity",
+      logicalKey: activityLogicalKey,
+      attachmentId: attachmentId("att-activity"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-activity",
+    groupId: "group-2",
+    logicalKey: "workRootActivity/root-local-abc",
+    rowPolicy: "opened",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      attachments: [
+        {
+          attachmentId: "att-activity",
+          groupId: "group-2",
+          surfaceKind: "workRootActivity",
+          logicalKey: "workRootActivity/root-local-abc",
+        },
+      ],
+    },
+    createdGroupId: null,
+  },
+  "dynamic placement sends a new WorkRoot Activity pane to the support split",
+);
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    { groups: [{ groupId: groupOne }], attachments: [] },
+    {
+      surfaceKind: "workRootActivity",
+      logicalKey: activityLogicalKey,
+      attachmentId: attachmentId("att-activity"),
+    },
+  ).createdGroupId,
+  "group-2",
+  "dynamic placement creates the support split for WorkRoot Activity when needed",
+);
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    {
+      groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+      attachments: [
+        {
+          attachmentId: attachmentId("att-activity"),
+          groupId: groupTwo,
+          surfaceKind: "workRootActivity",
+          logicalKey: activityLogicalKey,
+        },
+      ],
+    },
+    {
+      surfaceKind: "workRootActivity",
+      logicalKey: activityLogicalKey,
+      attachmentId: attachmentId("att-activity-duplicate"),
+    },
+  ),
+  {
+    type: "focusExisting",
+    attachmentId: "att-activity",
+    groupId: "group-2",
+    logicalKey: "workRootActivity/root-local-abc",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      attachments: [
+        {
+          attachmentId: "att-activity",
+          groupId: "group-2",
+          surfaceKind: "workRootActivity",
+          logicalKey: "workRootActivity/root-local-abc",
+        },
+      ],
+    },
+    createdGroupId: null,
+  },
+  "dynamic placement focuses an existing WorkRoot Activity pane in its support group",
+);
+
 assert(
   readmeFileKey !== nestedFileKey,
   "different read-only file paths open distinct logical panes",

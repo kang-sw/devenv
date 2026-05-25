@@ -31,6 +31,21 @@ export type ServerView = {
   actions: ActionHint[];
 };
 
+export type ServerConnectionView = {
+  id: string;
+  label: string;
+  kind: "local" | "sshRemote" | "wsl" | "manual";
+  status:
+    | "connected"
+    | "authRequired"
+    | "unreachable"
+    | "starting"
+    | "staleEndpoint"
+    | "tunnelRequired";
+  state: ViewState;
+  actions: ActionHint[];
+};
+
 export type WorkspaceView = {
   id: string;
   label: string;
@@ -45,6 +60,8 @@ export type WorkRootView = {
   resourcePath: ResourcePath;
   label: string;
   kind: "plainDirectory" | "gitPrimaryRoot" | "gitLinkedWorktree";
+  activation: "online" | "offline";
+  availability: "available" | "missing" | "moved" | "inaccessible" | "unknown";
   status: "online" | "offline" | "moved" | "inaccessible";
   state: ViewState;
   compactable: boolean;
@@ -77,6 +94,10 @@ export type DashboardResourcesView = {
   workspaces: WorkspaceView[];
 };
 
+export type DashboardServersView = {
+  servers: ServerConnectionView[];
+};
+
 export type ResourceEntity =
   | {
       id: string;
@@ -103,6 +124,8 @@ export type ResourceEntity =
       compactable: boolean;
       path: ResourcePath;
       kind: WorkRootView["kind"];
+      activation: WorkRootView["activation"];
+      availability: WorkRootView["availability"];
       status: WorkRootView["status"];
       instanceCount: number;
     }
@@ -118,6 +141,29 @@ export type ResourceEntity =
       interactionMode: InstanceView["interactionMode"];
       subInstanceCount: number;
     };
+
+// A workspace containing exactly one workRoot is rendered as one compact
+// workRoot row in the browser left nav. The selected location remains the
+// concrete workRoot id; main/sub instances are workbench surfaces and do not
+// participate in this presentation decision.
+export function compactWorkspaceWorkRoot(workspace: WorkspaceView): WorkRootView | null {
+  if (workspace.workRoots.length !== 1) {
+    return null;
+  }
+
+  return workspace.workRoots[0];
+}
+
+export function compactWorkspaceWorkRootTitle(
+  workspace: WorkspaceView,
+  workRoot: WorkRootView,
+): string {
+  if (workspace.label === workRoot.label) {
+    return workspace.label;
+  }
+
+  return `${workspace.label} / ${workRoot.label}`;
+}
 
 // Flatten the resource hierarchy into the left-nav entity rows.
 //
@@ -161,6 +207,8 @@ export function flattenEntities(
         compactable: root.compactable,
         path: root.resourcePath,
         kind: root.kind,
+        activation: root.activation,
+        availability: root.availability,
         status: root.status,
         instanceCount: root.mainInstances.length,
       });

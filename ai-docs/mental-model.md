@@ -17,7 +17,7 @@ source, and tests for behavioral truth.
 | Named agents, actor-scoped registry metadata, subqueries, backend behavior | `spec/named-agent-runtime.md` | `mental-model/named-agent-runtime.md`, `ref/ws-agent-runtime.md` |
 | API documentation cache and manager sessions | `spec/api-documentation-cache.md` | `mental-model/api-documentation-cache.md` |
 | Personal shell/editor/tmux/Claude dashboard tooling | `spec/developer-environment-tools.md` | `mental-model/developer-environment-tools.md` |
-| Dashboard daemon, browser UI, owner auth, resource view-model API/fixtures, host-control boundary | `spec/ws-web-dashboard/index.md` | `mental-model/ws-web-dashboard.md` |
+| Dashboard daemon, browser UI, owner auth, Activity Console streams, resource view-model API/fixtures, host-control boundary | `spec/ws-web-dashboard/index.md` | `mental-model/ws-web-dashboard.md` |
 
 ## Domains
 
@@ -33,7 +33,7 @@ source, and tests for behavioral truth.
 | claude-compatibility | `mental-model/claude-compatibility.md` | Claude shim, agents-plugin compatibility metadata, installer snapshot, retired legacy boundaries |
 | developer-environment-tools | `mental-model/developer-environment-tools.md` | install.sh, shell/editor config, tmux helpers, Claude TUIs |
 | prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt discovery, resolution, delegate orientation, bundle metadata |
-| ws-web-dashboard | `mental-model/ws-web-dashboard.md` | Personal ws dashboard daemon, owner-auth boundary, UI serving, resource view-model API/fixtures, and host-control separation |
+| ws-web-dashboard | `mental-model/ws-web-dashboard.md` | Personal ws dashboard daemon, owner-auth boundary, UI serving, Activity Console streams, resource view-model API/fixtures, and host-control separation |
 
 ## Directory Hierarchy
 

@@ -24,6 +24,8 @@ export type WorkRootTextFileView = {
   name: string;
   status: "ok" | string;
   readOnly: true;
+  editable: boolean;
+  contentHash: string;
   content: string;
   sizeBytes: number;
   languageHint: string | null;
@@ -44,9 +46,89 @@ export type ReadOnlyFilePane = {
   content: string;
   error: string | null;
   readOnly: true;
+  editable: boolean;
+  contentHash: string | null;
   sizeBytes: number | null;
   languageHint: string | null;
   extension: string | null;
+};
+
+export type ReadOnlyFilePaneOrder = Record<string, readonly string[]>;
+
+export type ReadOnlyFilePaneRestoreSnapshot = {
+  panes: Record<string, ReadOnlyFilePane>;
+  orderByGroup: Record<string, string[]>;
+};
+
+export type DocumentSaveState =
+  | "idle"
+  | "dirty"
+  | "saving"
+  | "saved"
+  | "stale"
+  | "conflict"
+  | "error";
+
+export type DocumentDraftContentChangeDecision =
+  | { action: "preserveDraft"; saveState: "stale"; message: string }
+  | { action: "syncDraft" };
+
+export function documentDraftContentChangeDecision(
+  saveState: DocumentSaveState,
+): DocumentDraftContentChangeDecision {
+  if (saveState === "dirty" || saveState === "stale") {
+    return {
+      action: "preserveDraft",
+      saveState: "stale",
+      message: "File changed while this draft has unsaved edits",
+    };
+  }
+  return { action: "syncDraft" };
+}
+
+export function documentSaveStateForError(message: string): "conflict" | "error" {
+  return message.toLowerCase().includes("content hash") ? "conflict" : "error";
+}
+
+export function readOnlyFilePaneSourceKey(workRootId: string, path: string) {
+  return `${workRootId}\0${path}`;
+}
+
+export function applyReadOnlyFilePaneSourceContent(
+  panes: Record<string, ReadOnlyFilePane>,
+  file: WorkRootTextFileView,
+): Record<string, ReadOnlyFilePane> {
+  return Object.fromEntries(
+    Object.entries(panes).map(([key, pane]) => [
+      key,
+      pane.workRootId === file.workRootId && pane.path === file.path
+        ? applyReadOnlyFilePaneContent(pane, file)
+        : pane,
+    ]),
+  );
+}
+
+export function applyReadOnlyFilePaneSourceError(
+  panes: Record<string, ReadOnlyFilePane>,
+  workRootId: string,
+  path: string,
+  message: string,
+): Record<string, ReadOnlyFilePane> {
+  return Object.fromEntries(
+    Object.entries(panes).map(([key, pane]) => [
+      key,
+      pane.workRootId === workRootId && pane.path === path
+        ? applyReadOnlyFilePaneError(pane, message)
+        : pane,
+    ]),
+  );
+}
+
+type ReadOnlyFilePaneDescriptor = {
+  workRootId: string;
+  path: string;
+  mode: ReadOnlyFilePaneMode;
+  title: string;
 };
 
 export type DirectoryLoadState = {
@@ -109,6 +191,95 @@ export async function fetchWorkRootTextFile(
   return (await response.json()) as WorkRootTextFileView;
 }
 
+export type WorkRootFileWriteRequest = {
+  path: string;
+  baseContentHash: string;
+  content: string;
+};
+
+export type WorkRootFileWriteResponse = {
+  contentHash: string;
+  sizeBytes: number;
+  savedAtMs: number;
+};
+
+export type WorkRootDocumentEvent = {
+  type: "document.contentChanged";
+  workRootId: string;
+  path: string;
+  contentHash: string;
+  source: "dashboard" | "filesystem" | string;
+  savedAtMs: number;
+};
+
+export function workRootDocumentEventsEndpoint(workRootId: string) {
+  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/documents/events`;
+}
+
+export function parseWorkRootDocumentEvent(value: unknown): WorkRootDocumentEvent | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const source = record.source as Record<string, unknown> | undefined;
+  if (
+    record.type !== "document.contentChanged" ||
+    !source ||
+    typeof source !== "object" ||
+    typeof source.workRootId !== "string" ||
+    typeof source.path !== "string" ||
+    typeof record.contentHash !== "string" ||
+    typeof record.changedAtMs !== "number"
+  ) {
+    return null;
+  }
+  return {
+    type: record.type,
+    workRootId: source.workRootId,
+    path: source.path,
+    contentHash: record.contentHash,
+    source: "dashboard",
+    savedAtMs: record.changedAtMs,
+  };
+}
+
+export function workRootFileWriteEndpoint(workRootId: string) {
+  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/files/write`;
+}
+
+export async function writeWorkRootTextFile(
+  workRootId: string,
+  request: WorkRootFileWriteRequest,
+): Promise<WorkRootFileWriteResponse> {
+  const response = await fetch(workRootFileWriteEndpoint(workRootId), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorDetail(response));
+  }
+
+  return (await response.json()) as WorkRootFileWriteResponse;
+}
+
+export function applyReadOnlyFilePaneSavedContent(
+  pane: ReadOnlyFilePane,
+  content: string,
+  contentHash: string,
+  sizeBytes: number,
+): ReadOnlyFilePane {
+  return {
+    ...pane,
+    status: "loaded",
+    content,
+    contentHash,
+    sizeBytes,
+    error: null,
+  };
+}
+
 export function readOnlyFilePaneModeForOpenGesture(
   gesture: ReadOnlyFileOpenGesture,
 ): ReadOnlyFilePaneMode {
@@ -159,6 +330,8 @@ export function createLoadingReadOnlyFilePane(
     content: "",
     error: null,
     readOnly: true,
+    editable: false,
+    contentHash: null,
     sizeBytes: null,
     languageHint: null,
     extension: null,
@@ -175,6 +348,8 @@ export function applyReadOnlyFilePaneContent(
     status: "loaded",
     content: file.content,
     error: null,
+    editable: file.editable,
+    contentHash: file.contentHash,
     sizeBytes: file.sizeBytes,
     languageHint: file.languageHint,
     extension: file.extension,
@@ -188,6 +363,102 @@ export function applyReadOnlyFilePaneError(pane: ReadOnlyFilePane, error: string
     content: "",
     error,
   };
+}
+
+export function readOnlyFilePaneRestoreSnapshot(
+  panes: readonly ReadOnlyFilePane[],
+  orderByGroup: ReadOnlyFilePaneOrder = {},
+): ReadOnlyFilePaneRestoreSnapshot {
+  return {
+    panes: Object.fromEntries(
+      panes.map((pane) => [
+        pane.logicalKey,
+        createRestoredReadOnlyFilePane({
+          workRootId: pane.workRootId,
+          path: pane.path,
+          mode: pane.mode,
+          title: pane.title,
+        }),
+      ]),
+    ),
+    orderByGroup: pruneReadOnlyFilePaneOrder(
+      orderByGroup,
+      new Set(panes.map((pane) => pane.id)),
+    ),
+  };
+}
+
+export function loadReadOnlyFilePaneRestoreSnapshot(
+  storage: Pick<Storage, "getItem"> | null = browserStorage(),
+): ReadOnlyFilePaneRestoreSnapshot {
+  if (!storage) {
+    return { panes: {}, orderByGroup: {} };
+  }
+  try {
+    const raw = storage.getItem(readOnlyFilePaneRestoreStorageKey);
+    if (!raw) {
+      return { panes: {}, orderByGroup: {} };
+    }
+    const parsed = JSON.parse(raw) as {
+      version?: unknown;
+      panes?: unknown;
+      orderByGroup?: unknown;
+    };
+    if (parsed.version !== 1 || !Array.isArray(parsed.panes)) {
+      return { panes: {}, orderByGroup: {} };
+    }
+    const panes = Object.fromEntries(
+      parsed.panes.flatMap((value): Array<[string, ReadOnlyFilePane]> => {
+        const descriptor = parseReadOnlyFilePaneDescriptor(value);
+        if (!descriptor) {
+          return [];
+        }
+        const pane = createRestoredReadOnlyFilePane(descriptor);
+        return [[pane.logicalKey, pane]];
+      }),
+    );
+    return {
+      panes,
+      orderByGroup: parseReadOnlyFilePaneOrder(
+        parsed.orderByGroup,
+        new Set(Object.values(panes).map((pane) => pane.id)),
+      ),
+    };
+  } catch {
+    return { panes: {}, orderByGroup: {} };
+  }
+}
+
+export function saveReadOnlyFilePaneRestoreSnapshot(
+  panes: readonly ReadOnlyFilePane[],
+  orderByGroup: ReadOnlyFilePaneOrder = {},
+  storage: Pick<Storage, "setItem" | "removeItem"> | null = browserStorage(),
+) {
+  if (!storage) {
+    return;
+  }
+  try {
+    if (panes.length === 0) {
+      storage.removeItem(readOnlyFilePaneRestoreStorageKey);
+      return;
+    }
+    const paneIds = new Set(panes.map((pane) => pane.id));
+    storage.setItem(
+      readOnlyFilePaneRestoreStorageKey,
+      JSON.stringify({
+        version: 1,
+        panes: panes.map((pane): ReadOnlyFilePaneDescriptor => ({
+          workRootId: pane.workRootId,
+          path: pane.path,
+          mode: pane.mode,
+          title: pane.title,
+        })),
+        orderByGroup: pruneReadOnlyFilePaneOrder(orderByGroup, paneIds),
+      }),
+    );
+  } catch {
+    // Browser persistence is best-effort; live pane state remains canonical.
+  }
 }
 
 export async function fetchWorkRootFiles(
@@ -256,6 +527,90 @@ export function flattenWorkRootFileTree({
   return rows;
 }
 
+function createRestoredReadOnlyFilePane(
+  descriptor: ReadOnlyFilePaneDescriptor,
+): ReadOnlyFilePane {
+  return {
+    ...createLoadingReadOnlyFilePane(
+      descriptor.workRootId,
+      descriptor.path,
+      descriptor.mode,
+    ),
+    title: descriptor.title.trim() || fileNameFromPath(descriptor.path),
+  };
+}
+
+function parseReadOnlyFilePaneDescriptor(
+  value: unknown,
+): ReadOnlyFilePaneDescriptor | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.workRootId !== "string" ||
+    typeof record.path !== "string" ||
+    typeof record.title !== "string" ||
+    (record.mode !== "preview" && record.mode !== "pinned")
+  ) {
+    return null;
+  }
+  const workRootId = record.workRootId.trim();
+  const path = record.path.trim();
+  const pathSegments = path.split("/");
+  if (
+    !workRootId ||
+    !path ||
+    path.startsWith("/") ||
+    pathSegments.some((segment) => segment === "." || segment === "..")
+  ) {
+    return null;
+  }
+  return {
+    workRootId,
+    path,
+    mode: record.mode,
+    title: record.title,
+  };
+}
+
+function parseReadOnlyFilePaneOrder(
+  value: unknown,
+  paneIds: ReadonlySet<string>,
+): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const order: Record<string, string[]> = {};
+  for (const [groupId, paneOrder] of Object.entries(value)) {
+    if (!Array.isArray(paneOrder)) {
+      continue;
+    }
+    const ids = paneOrder.filter(
+      (paneId): paneId is string =>
+        typeof paneId === "string" && paneIds.has(paneId),
+    );
+    if (ids.length > 0) {
+      order[groupId] = [...new Set(ids)];
+    }
+  }
+  return order;
+}
+
+function pruneReadOnlyFilePaneOrder(
+  orderByGroup: ReadOnlyFilePaneOrder,
+  paneIds: ReadonlySet<string>,
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(orderByGroup)
+      .map(([groupId, paneOrder]) => [
+        groupId,
+        paneOrder.filter((paneId) => paneIds.has(paneId)),
+      ])
+      .filter(([, paneOrder]) => paneOrder.length > 0),
+  );
+}
+
 function fileNameFromPath(path: string) {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
@@ -304,5 +659,15 @@ function appendDirectoryRows(
     if (expanded) {
       appendDirectoryRows(rows, entry.path, depth + 1, expandedPaths, directories, selectedPath);
     }
+  }
+}
+
+const readOnlyFilePaneRestoreStorageKey = "ws-dashboard.readOnlyFilePanes.v1";
+
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
   }
 }

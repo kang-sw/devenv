@@ -1,6 +1,9 @@
 ---
 title: ws dashboard Activity Console transcript expansion
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260522-ws-dashboard-activity-console-transcript-expansion
+completed: 2026-05-22
 related:
   260518-feat-ws-dashboard-activity-read-model: supplies the MVP transcript backfill and resolver boundary
   260518-feat-ws-dashboard-activity-watch-stream: supplies transcript invalidation events
@@ -86,3 +89,24 @@ Verification should cover fixture-backed native transcript parsing, missing or
 unreadable session files, malformed event lines, degraded source status,
 private-field redaction, optional block-level append cursor behavior, and no
 requirement for a live backend invocation.
+
+### Result (9d978796) - 2026-05-22
+
+Implemented fixture-backed Codex native session JSONL transcript parsing behind
+daemon-private Activity Console transcript resolver logic. The public
+`ActivityTranscript` and `TranscriptBlock` shapes stayed stable, existing
+`output.md` backfill remains available, and Claude/Gemini native parsing, exec
+source integration, frontend redesign, controls, and block-level transcript
+events were not added.
+
+The implementation parses supported Codex session records into bounded
+source-neutral transcript blocks, degrades malformed/unsupported records without
+leaking raw native values, bounds native session lookup, handles missing or
+unreadable native sessions, and preserves private-field redaction for session
+ids, native transcript paths, host/cache paths, stdout/stderr paths, pids, and
+raw JSONL records. Feed-level `transcriptUpdated` invalidations cover native
+session mutations in place of a selected block-level transcript stream.
+
+Verification passed core activity tests, daemon WorkRoot Activity tests,
+targeted Codex parser/route tests, full `ws-dashboard` cargo tests, and
+partitioned correctness/fit/test review relay.

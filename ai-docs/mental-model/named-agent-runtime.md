@@ -8,6 +8,7 @@ sources:
 related:
   mcp-runtime: "agents.* MCP and CLI handlers are thin wrappers around wsagent.Manager."
   prompt-bundle: "registration resolves embedded prompts into each agent system prompt."
+  ws-web-dashboard: "Activity Console reads agent metadata/current state/output/session records as daemon-private projection inputs."
 ---
 
 # Named Agent Runtime
@@ -50,7 +51,7 @@ related:
 - MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces and actor-scoped variants where public names may collide with global compatibility registrations.
 - Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced, and `agents run-current` must receive the hidden actor id for actor-scoped calls so worker state matches parent MCP dispatch.
 - `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
-- Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
+- Worktree scoping is shared by agents, generated review paths, orchestrator locks, and dashboard Activity Console projection; changing cache layout, `agent.json` metadata semantics, or Codex `session_id` persistence affects dashboard feed/transcript behavior as well as agent tools.
 - The SQLite state-store is authoritative for role pointers, instance metadata, path indexes, and retention fences, but not for `current/state.json`, `events.jsonl`, or payload bodies. Preserve file-backed diagnostics and result consumption semantics: path fields such as `state_path`, `system_prompt_path`, and `last_output_path` are SQLite metadata indexes, while prompt/stdout/stderr/runtime-log/event/final-output bytes remain file-backed payloads. {#260525-named-agent-runtime-metadata-inventory}
 - Agent-instance cleanup participates in prune-run diagnostics but keeps retry metadata on `agent_instances`, not artifact tombstones; instance cleanup deletes directories and must not imply artifact payload ownership or retry semantics.
 - Root-omitted MCP `agents.*` lifecycle tools and `subquery` depend on a current lead actor binding from `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")` or recovery through `ws.setup(id: "<actor-id>")`; hidden explicit-root arguments deliberately route to the unbound global compatibility namespace.

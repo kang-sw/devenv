@@ -1,10 +1,34 @@
 import {
+  acknowledgeActivityItem,
+  activityItemRevisionToken,
+  activityRibbonSourceLabel,
+  activityRibbonStatusLine,
+  applyActivityConsoleEvent,
+  defaultActivitySelection,
   fetchWorkRootActivity,
+  fetchWorkRootActivityTranscript,
+  initializeActivityDirtyItems,
   mergeWorkRootActivityViews,
+  orderActivityItems,
+  parseActivityConsoleEvent,
+  preserveActivitySelection,
+  shouldApplyActivityStreamRequest,
+  activityTranscriptDistanceFromTail,
+  isActivityTranscriptAtTail,
+  shouldApplyActivityTranscriptResponse,
+  shouldApplyActivityTranscriptRequest,
+  shouldFollowActivityTranscriptTail,
+  shouldLoadMoreActivityTranscript,
+  transcriptBlockView,
   workRootActivityBadge,
   workRootActivityEndpoint,
+  workRootActivityEventsEndpoint,
+  workRootActivityTranscriptEndpoint,
+  type ActivityItem,
   type NamedAgentActivityView,
   type WorkRootActivitySummary,
+  type ActivityTranscript,
+  type TranscriptBlock,
   type WorkRootActivityView,
 } from "./workRootActivity.js";
 
@@ -46,6 +70,26 @@ assertEqual(
   "/api/dashboard/work-roots/root-local-abc/activity?recentLimit=30",
   "activity endpoint encodes a recent-limit refresh query",
 );
+assertEqual(
+  workRootActivityTranscriptEndpoint("root/local test", "agent:reviewer", {
+    cursor: "2",
+    before: "8",
+    limit: 10,
+  }),
+  "/api/dashboard/work-roots/root%2Flocal%20test/activity/items/agent%3Areviewer/transcript?cursor=2&before=8&limit=10",
+  "transcript endpoint addresses encoded opaque ids and bounded query options",
+);
+
+assertEqual(
+  workRootActivityEventsEndpoint("root/local test", { after: "cursor:1/2" }),
+  "/api/dashboard/work-roots/root%2Flocal%20test/activity/events?after=cursor%3A1%2F2",
+  "activity event endpoint addresses an encoded opaque workRoot id and after cursor",
+);
+assertEqual(
+  workRootActivityEventsEndpoint("root-local-abc"),
+  "/api/dashboard/work-roots/root-local-abc/activity/events",
+  "activity event endpoint omits the after query when no cursor exists",
+);
 
 const originalFetch = globalThis.fetch;
 try {
@@ -63,7 +107,11 @@ try {
     const view: WorkRootActivityView = {
       workRootId: "root-local-abc",
       status: "ok",
+      updateMode: "snapshot",
+      feedCursor: "snapshot:0:",
+      selectedItemId: null,
       summary: { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0 },
+      items: [],
       agents: [],
     };
     return new Response(JSON.stringify(view), {
@@ -78,6 +126,63 @@ try {
   assertEqual(activity.workRootId, "root-local-abc", "fetch helper returns the daemon view");
   assertEqual(activity.summary.total, 0, "Phase 1 no-agent summary can be consumed");
 
+  globalThis.fetch = (async (input, init) => {
+    assertEqual(
+      String(input),
+      "/api/dashboard/work-roots/root-local-abc/activity/items/agent%3Areviewer/transcript?cursor=1&limit=1",
+      "transcript fetch helper uses the transcript endpoint",
+    );
+    assertEqual(
+      (init?.headers as Record<string, string>).Accept,
+      "application/json",
+      "transcript fetch helper requests JSON",
+    );
+    const transcript: ActivityTranscript = {
+      workRootId: "root-local-abc",
+      activityId: "agent:reviewer",
+      status: "available",
+      sourceStatus: "ok",
+      live: false,
+      source: {
+        kind: "namedAgent",
+        label: "reviewer",
+        backend: "codex",
+        harness: null,
+        tier: null,
+        model: null,
+      },
+      blocks: [
+        {
+          cursor: "1",
+          timestamp: null,
+          renderKind: "markdown",
+          title: null,
+          text: "done without host paths",
+          data: null,
+          degraded: false,
+        },
+      ],
+      nextCursor: "2",
+      hasMore: false,
+      diagnostics: [],
+    };
+    return new Response(JSON.stringify(transcript), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  const transcript = await fetchWorkRootActivityTranscript(
+    "root-local-abc",
+    "agent:reviewer",
+    { cursor: "1", limit: 1 },
+  );
+  assertEqual(transcript.blocks[0]?.renderKind, "markdown", "transcript shape is consumed");
+  assertEqual(
+    JSON.stringify(transcript).includes("/Users/"),
+    false,
+    "transcript helper shape does not require host paths",
+  );
+
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ error: "unknown workRoot" }), {
       status: 404,
@@ -87,6 +192,17 @@ try {
     () => fetchWorkRootActivity("root-local-missing"),
     /unknown workRoot/,
     "fetch helper surfaces bounded backend JSON errors",
+  );
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "unknown activity" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootActivityTranscript("root-local-abc", "agent:missing"),
+    /unknown activity/,
+    "transcript fetch helper surfaces bounded backend JSON errors",
   );
 } finally {
   globalThis.fetch = originalFetch;
@@ -108,10 +224,225 @@ function activityView(
   return {
     workRootId: partial.workRootId ?? "root-local-abc",
     status: partial.status ?? "ok",
+    updateMode: partial.updateMode ?? "snapshot",
+    feedCursor: partial.feedCursor ?? "snapshot:0:",
+    selectedItemId: partial.selectedItemId ?? null,
     summary: activitySummary(partial.summary),
+    items: partial.items ?? [],
     agents: partial.agents ?? [],
   };
 }
+
+function activityItem(partial: Partial<ActivityItem> & { id: string }): ActivityItem {
+  return {
+    id: partial.id,
+    kind: partial.kind ?? "namedAgent",
+    label: partial.label ?? partial.id,
+    status: partial.status ?? "idle",
+    live: partial.live ?? false,
+    attention: partial.attention ?? false,
+    startedAt: partial.startedAt ?? null,
+    updatedAt: partial.updatedAt ?? null,
+    finishedAt: partial.finishedAt ?? null,
+    source: partial.source ?? {
+      kind: "namedAgent",
+      label: partial.label ?? partial.id,
+      backend: null,
+      harness: null,
+      tier: null,
+      model: null,
+    },
+    transcript: partial.transcript ?? {
+      status: "empty",
+      available: false,
+      cursor: null,
+    },
+    diagnostics: partial.diagnostics ?? [],
+    metadata: partial.metadata ?? {},
+  };
+}
+
+
+const parsedUpsert = parseActivityConsoleEvent({
+  type: "itemUpserted",
+  cursor: "event:1",
+  item: activityItem({ id: "agent:streamed", updatedAt: "2026-05-21T12:05:00Z" }),
+});
+assertEqual(parsedUpsert?.type, "itemUpserted", "itemUpserted events parse with source-neutral payloads");
+assertEqual(
+  parseActivityConsoleEvent({ type: "itemRemoved", cursor: "event:2", path: "/Users/nope" }),
+  null,
+  "activity events reject payloads without source-neutral activity ids",
+);
+assertEqual(
+  parseActivityConsoleEvent({
+    type: "modeChanged",
+    cursor: "event:mode",
+    updateMode: "pollFallback",
+  })?.type,
+  "modeChanged",
+  "modeChanged pollFallback events parse",
+);
+
+const eventBase = activityView({
+  selectedItemId: "agent:keep",
+  summary: { total: 2 },
+  items: [
+    activityItem({ id: "agent:keep", label: "keep", updatedAt: "2026-05-21T12:00:00Z" }),
+    activityItem({ id: "agent:remove", label: "remove", updatedAt: "2026-05-21T11:00:00Z" }),
+  ],
+});
+const upsertedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemUpserted",
+  cursor: "event:upsert",
+  item: activityItem({
+    id: "agent:new",
+    label: "new",
+    live: true,
+    updatedAt: "2026-05-21T12:10:00Z",
+  }),
+});
+assertDeepEqual(
+  upsertedEvent.view.items.map((item) => item.id),
+  ["agent:new", "agent:keep", "agent:remove"],
+  "itemUpserted merges the item into the ordered feed",
+);
+assertEqual(upsertedEvent.view.selectedItemId, "agent:keep", "itemUpserted preserves existing selection");
+assertEqual(upsertedEvent.view.summary.total, 2, "itemUpserted preserves authoritative source-neutral summary totals");
+assertEqual(upsertedEvent.refetchSnapshot, false, "itemUpserted does not request snapshot refetch");
+
+const removedUnselectedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemRemoved",
+  cursor: "event:remove-unselected",
+  activityId: "agent:remove",
+});
+assertDeepEqual(
+  removedUnselectedEvent.view.items.map((item) => item.id),
+  ["agent:keep"],
+  "itemRemoved removes unselected feed items",
+);
+assertEqual(
+  removedUnselectedEvent.view.selectedItemId,
+  "agent:keep",
+  "itemRemoved preserves selection when selected item still exists",
+);
+const removedSelectedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemRemoved",
+  cursor: "event:remove-selected",
+  activityId: "agent:keep",
+});
+assertEqual(
+  removedSelectedEvent.view.selectedItemId,
+  "agent:remove",
+  "itemRemoved reconciles selection when selected item disappears",
+);
+
+const invalidatedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "snapshotInvalidated",
+  cursor: "event:invalidated",
+  reason: "watchReset",
+});
+assertEqual(invalidatedEvent.refetchSnapshot, true, "snapshotInvalidated requests a read-model refetch");
+assertEqual(invalidatedEvent.view.feedCursor, "event:invalidated", "snapshotInvalidated advances the event cursor");
+
+const transcriptEvent = applyActivityConsoleEvent(eventBase, {
+  type: "transcriptUpdated",
+  cursor: "event:transcript",
+  activityId: "agent:keep",
+  transcriptCursor: "transcript:2",
+});
+assertEqual(
+  transcriptEvent.transcriptActivityId,
+  "agent:keep",
+  "transcriptUpdated exposes the activity id for selected-transcript refresh decisions",
+);
+assertEqual(
+  transcriptEvent.view.items.find((item) => item.id === "agent:keep")?.transcript.cursor,
+  "transcript:2",
+  "transcriptUpdated backfills the item transcript cursor without rebuilding transcript blocks",
+);
+
+const pollFallbackEvent = applyActivityConsoleEvent(eventBase, {
+  type: "modeChanged",
+  cursor: "event:poll",
+  updateMode: "pollFallback",
+});
+assertEqual(pollFallbackEvent.updateMode, "pollFallback", "modeChanged pollFallback activates fallback decisions");
+assertEqual(pollFallbackEvent.view.updateMode, "pollFallback", "modeChanged records the daemon update mode");
+const watchEvent = applyActivityConsoleEvent(eventBase, {
+  type: "modeChanged",
+  cursor: "event:watch",
+  updateMode: "watch",
+});
+assertEqual(watchEvent.updateMode, "watch", "modeChanged watch suppresses fallback polling decisions");
+const locallyAcknowledged = acknowledgeActivityItem({}, eventBase.items[0]!);
+const dirtyAfterStreamMerge = initializeActivityDirtyItems(
+  upsertedEvent.view.items,
+  locallyAcknowledged,
+  { "agent:keep": activityItemRevisionToken(eventBase.items[0]!) },
+);
+assertDeepEqual(
+  Array.from(dirtyAfterStreamMerge),
+  ["agent:new"],
+  "local dirty acknowledgements survive stream feed merges",
+);
+const selectedRevisionEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemUpserted",
+  cursor: "event:selected-revision",
+  item: activityItem({
+    id: "agent:keep",
+    label: "keep",
+    updatedAt: "2026-05-21T12:30:00Z",
+  }),
+});
+assertDeepEqual(
+  Array.from(
+    initializeActivityDirtyItems(selectedRevisionEvent.view.items, locallyAcknowledged, {
+      "agent:keep": activityItemRevisionToken(eventBase.items[0]!),
+    }),
+  ),
+  ["agent:keep"],
+  "a streamed revision change for the selected item remains dirty until explicit acknowledgement",
+);
+
+assertEqual(
+  shouldApplyActivityStreamRequest(
+    { workRootId: "root-a", requestId: 1 },
+    { workRootId: "root-a", requestId: 1 },
+  ),
+  true,
+  "matching activity stream request may update state",
+);
+assertEqual(
+  shouldApplyActivityStreamRequest(
+    { workRootId: "root-a", requestId: 1 },
+    { workRootId: "root-b", requestId: 2 },
+  ),
+  false,
+  "stale workRoot stream completions are ignored after root switch",
+);
+
+assertEqual(
+  activityTranscriptDistanceFromTail({ scrollTop: 240, clientHeight: 160, scrollHeight: 400 }),
+  0,
+  "transcript scroll metrics report zero distance at the tail",
+);
+assertEqual(
+  isActivityTranscriptAtTail({ scrollTop: 230, clientHeight: 160, scrollHeight: 400 }, 12),
+  true,
+  "transcript follow policy treats near-tail scroll as following",
+);
+assertEqual(
+  shouldFollowActivityTranscriptTail({ scrollTop: 120, clientHeight: 160, scrollHeight: 400 }, 12),
+  false,
+  "transcript follow policy pauses when the user scrolls away from the tail",
+);
+assertEqual(
+  shouldFollowActivityTranscriptTail({ scrollTop: 240, clientHeight: 160, scrollHeight: 400 }, 12),
+  true,
+  "transcript follow policy resumes when the user returns to the tail",
+);
+
 
 function activityAgent(
   partial: Partial<NamedAgentActivityView> & { agentId: string },
@@ -133,16 +464,63 @@ function activityAgent(
   };
 }
 
+const fullAgentActivityWithBoundedItems = activityView({
+  summary: { total: 51, active: 2 },
+  agents: Array.from({ length: 51 }, (_, index) =>
+    activityAgent({
+      agentId: `agent-${String(index + 1).padStart(2, "0")}`,
+      status: index < 2 ? "running" : "idle",
+    }),
+  ),
+  items: Array.from({ length: 30 }, (_, index) =>
+    activityItem({
+      id: `agent:agent-${String(index + 1).padStart(2, "0")}`,
+      status: index < 2 ? "running" : "idle",
+      live: index < 2,
+    }),
+  ),
+});
+const streamedAgentActivity = applyActivityConsoleEvent(
+  fullAgentActivityWithBoundedItems,
+  {
+    type: "itemUpserted",
+    cursor: "watch:after-upsert",
+    item: activityItem({
+      id: "agent:agent-31",
+      status: "running",
+      live: true,
+    }),
+  },
+);
+assertEqual(
+  streamedAgentActivity.view.summary.total,
+  51,
+  "stream item updates preserve authoritative full activity summary totals",
+);
+assertEqual(
+  workRootActivityBadge({ phase: "ready", view: streamedAgentActivity.view }).label,
+  "51 agents",
+  "top-bar activity badge does not collapse to bounded recent item count after stream updates",
+);
+
 const mergedActivity = mergeWorkRootActivityViews(
   activityView({
+    updateMode: "snapshot",
+    feedCursor: "snapshot:old",
+    selectedItemId: "agent:agent-a",
     summary: { total: 2, active: 1 },
+    items: [activityItem({ id: "agent:agent-a", status: "running", live: true })],
     agents: [
       activityAgent({ agentId: "agent-a", status: "running" }),
       activityAgent({ agentId: "agent-b", status: "idle" }),
     ],
   }),
   activityView({
+    updateMode: "snapshot",
+    feedCursor: "snapshot:new",
+    selectedItemId: "agent:agent-b",
     summary: { total: 2, blocked: 1, unavailable: 1 },
+    items: [activityItem({ id: "agent:agent-b", status: "blocked", attention: true })],
     agents: [
       activityAgent({ agentId: "agent-b", status: "blocked" }),
       activityAgent({
@@ -167,10 +545,30 @@ assertDeepEqual(
   { total: 3, active: 1, blocked: 1, failed: 0, unavailable: 1 },
   "recent activity refresh recomputes the merged summary",
 );
+assertDeepEqual(
+  mergedActivity.items.map((item) => item.id),
+  ["agent:agent-a", "agent:agent-b"],
+  "recent activity refresh preserves older activity rows when a bounded update only returns recent rows",
+);
 assertEqual(
   mergedActivity.status,
   "degraded",
   "recent activity refresh preserves degraded status from merged diagnostics",
+);
+assertEqual(
+  mergedActivity.feedCursor,
+  "snapshot:new",
+  "recent activity refresh carries the feed cursor from the latest update",
+);
+assertEqual(
+  mergedActivity.selectedItemId,
+  "agent:agent-b",
+  "recent activity refresh carries the selected item hint from the latest update",
+);
+assertEqual(
+  mergedActivity.updateMode,
+  "snapshot",
+  "recent activity refresh carries the update mode from the latest update",
 );
 
 const loadingBadge = workRootActivityBadge({ phase: "loading" });
@@ -306,4 +704,278 @@ assertEqual(
   longTitleBadge.title.endsWith("…"),
   true,
   "an over-limit activity badge title ends with an ellipsis",
+);
+
+const orderedItems = orderActivityItems([
+  activityItem({ id: "old-live", live: true, updatedAt: "2026-05-21T10:00:00Z" }),
+  activityItem({ id: "new-idle", updatedAt: "2026-05-21T12:00:00Z" }),
+  activityItem({ id: "attention", attention: true, updatedAt: "2026-05-21T09:00:00Z" }),
+  activityItem({ id: "same-a", updatedAt: "2026-05-21T08:00:00Z" }),
+  activityItem({ id: "same-b", updatedAt: "2026-05-21T08:00:00Z" }),
+]);
+assertDeepEqual(
+  orderedItems.map((item) => item.id),
+  ["old-live", "attention", "new-idle", "same-a", "same-b"],
+  "activity ribbon ordering prefers live/attention, then latest, then stable id",
+);
+assertEqual(
+  defaultActivitySelection(orderedItems),
+  "old-live",
+  "default selection prefers the first live/attention item",
+);
+assertEqual(
+  activityRibbonSourceLabel(
+    activityItem({
+      id: "agent-source",
+      kind: "namedAgent",
+      source: {
+        kind: "namedAgent",
+        label: "Codex",
+        backend: "codex",
+        harness: "codex",
+        tier: "core",
+        model: null,
+      },
+    }),
+  ),
+  "agent.codex",
+  "named-agent ribbon source label uses the backend discriminator",
+);
+assertEqual(
+  activityRibbonSourceLabel(
+    activityItem({
+      id: "exec-source",
+      kind: "exec",
+      source: {
+        kind: "exec",
+        label: "exec",
+        backend: null,
+        harness: null,
+        tier: null,
+        model: null,
+      },
+    }),
+  ),
+  "cmd.exec",
+  "exec ribbon source label uses the command discriminator",
+);
+assertEqual(
+  activityRibbonStatusLine(
+    activityItem({
+      id: "timed-completed",
+      status: "completed",
+      startedAt: "2026-05-21T10:00:00Z",
+      updatedAt: "2026-05-21T11:04:00Z",
+      finishedAt: "2026-05-21T11:04:00Z",
+    }),
+    Date.parse("2026-05-21T12:05:00Z"),
+  ),
+  "completed / 1 hr ago / 1 hr 4 mins",
+  "ribbon status line combines status, relative update time, and completed duration",
+);
+assertEqual(
+  activityRibbonStatusLine(
+    activityItem({
+      id: "just-now-running",
+      status: "running",
+      updatedAt: "2026-05-21T12:05:00Z",
+    }),
+    Date.parse("2026-05-21T12:05:30Z"),
+  ),
+  "running / just now",
+  "ribbon status line does not append ago to just now",
+);
+assertEqual(
+  preserveActivitySelection(orderedItems, "new-idle"),
+  "new-idle",
+  "selection is preserved when the item still exists",
+);
+assertEqual(
+  preserveActivitySelection(orderedItems, "missing"),
+  "old-live",
+  "selection falls back to default when the selected item disappears",
+);
+
+const ackSource = activityItem({
+  id: "ackable",
+  updatedAt: "2026-05-21T12:00:00Z",
+  transcript: { status: "available", available: true, cursor: "cursor:1" },
+});
+const acknowledgements = acknowledgeActivityItem({}, ackSource);
+assertDeepEqual(
+  Array.from(initializeActivityDirtyItems([ackSource], acknowledgements)),
+  [],
+  "local acknowledgement clears dirty state for the acknowledged item revision",
+);
+assertDeepEqual(
+  Array.from(
+    initializeActivityDirtyItems(
+      [
+        { ...ackSource, updatedAt: "2026-05-21T12:01:00Z" },
+        activityItem({ id: "attention-dirty", attention: true }),
+        activityItem({ id: "first-load-idle", updatedAt: "2026-05-21T12:02:00Z" }),
+      ],
+      acknowledgements,
+      { ackable: "2026-05-21T12:00:00Z", "first-load-idle": "2026-05-21T12:02:00Z" },
+    ),
+  ),
+  ["ackable", "attention-dirty"],
+  "dirty initialization compares local acknowledgements and seen revisions without marking every first-load item dirty",
+);
+
+assertEqual(
+  shouldApplyActivityTranscriptResponse(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+  ),
+  true,
+  "matching transcript response may update selected transcript state",
+);
+assertEqual(
+  shouldApplyActivityTranscriptResponse(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+    { workRootId: "root-b", activityId: "agent:b", requestId: 3 },
+  ),
+  false,
+  "stale transcript response for an old root or request is ignored",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-b", activityId: "agent:a", requestId: 2 },
+  ),
+  false,
+  "error paths also require the expected workRoot/activity/request tuple",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 1 },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+  ),
+  false,
+  "an unavailable same-activity state with a newer request id rejects an older successful response",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 1 },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+  ),
+  false,
+  "an unavailable same-activity state with a newer request id rejects an older rejection",
+);
+assertEqual(
+  shouldLoadMoreActivityTranscript(
+    { scrollTop: 4, clientHeight: 500, scrollHeight: 1_000 },
+    true,
+    false,
+  ),
+  true,
+  "top transcript scroll triggers load-more when older blocks exist",
+);
+assertEqual(
+  shouldLoadMoreActivityTranscript(
+    { scrollTop: 12, clientHeight: 500, scrollHeight: 1_000 },
+    true,
+    false,
+  ),
+  false,
+  "near-top but outside threshold transcript scroll does not trigger load-more",
+);
+assertEqual(
+  shouldLoadMoreActivityTranscript(
+    { scrollTop: 492, clientHeight: 500, scrollHeight: 1_000 },
+    true,
+    false,
+  ),
+  false,
+  "tail transcript scroll does not trigger older load-more",
+);
+
+function block(partial: Partial<TranscriptBlock>): TranscriptBlock {
+  return {
+    cursor: partial.cursor ?? "1",
+    timestamp: partial.timestamp ?? null,
+    renderKind: partial.renderKind ?? "markdown",
+    title: partial.title ?? null,
+    text: partial.text ?? "hello",
+    data: partial.data ?? null,
+    degraded: partial.degraded ?? false,
+  };
+}
+
+assertEqual(
+  transcriptBlockView(block({ renderKind: "markdown", text: "assistant output" }), "namedAgent").mode,
+  "expanded",
+  "assistant/output-like transcript blocks expand by default",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "json", title: "tool call", data: { ok: true } }), "namedAgent").tone,
+  "tool",
+  "tool-like transcript blocks default to compact tool summaries",
+);
+assertEqual(
+  transcriptBlockView(
+    block({
+      renderKind: "toolCall",
+      title: "Tool call",
+      text: "Called functions.exec_command",
+      data: { name: "functions.exec_command", argumentsBytes: 128 },
+    }),
+    "namedAgent",
+  ).summary,
+  "functions.exec_command · 128 arg bytes",
+  "tool call compact summaries include the safe tool name and argument size",
+);
+assertEqual(
+  transcriptBlockView(
+    block({
+      renderKind: "toolResult",
+      title: "Tool output",
+      text: "Tool output captured",
+      data: { outputBytes: 4_096 },
+    }),
+    "namedAgent",
+  ).summary,
+  "Tool output · 4096 bytes",
+  "tool result compact summaries include bounded output size",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "status", title: "running" }), "namedAgent").mode,
+  "compact",
+  "status transcript blocks default to compact summaries",
+);
+assertEqual(
+  transcriptBlockView(
+    block({ renderKind: "status", title: "Task started", text: "Agent turn started" }),
+    "namedAgent",
+  ).summary,
+  "Agent turn started",
+  "status compact summaries prefer meaningful text over category titles",
+);
+assertEqual(
+  transcriptBlockView(
+    block({
+      renderKind: "status",
+      title: "Unsupported transcript record",
+      text: "Skipped unsupported native transcript record",
+      data: { eventType: "unsupported", payloadType: "unsupported" },
+      degraded: true,
+    }),
+    "namedAgent",
+  ).summary,
+  "Skipped unsupported native transcript record",
+  "degraded unsupported-like compact summaries avoid repeating the generic title",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "error", title: "failed", degraded: true }), "namedAgent").tone,
+  "error",
+  "error transcript blocks use error tone",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "text", title: "exec", text: "$ echo ok\nok" }), "exec").mode,
+  "terminal",
+  "exec transcript blocks render with terminal mode",
 );

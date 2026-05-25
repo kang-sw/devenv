@@ -13,6 +13,10 @@ import {
   dockviewBridgeOptions,
   type WorkbenchDockviewPanelParams,
 } from "./dockviewBridge.js";
+import {
+  dockviewPanelIsSelectedWithinGroup,
+  shouldUpdateDockviewWorkbenchPanelParams,
+} from "./dockviewLayoutModel.js";
 import type { WorkbenchPaneCategory } from "./editorGroupModel.js";
 import { defaultSurfaceRegistry, type SurfaceKind } from "./surfaceRegistry.js";
 
@@ -23,6 +27,7 @@ export type DockviewWorkbenchPane = {
   readonly title: string;
   readonly detail: string;
   readonly meta: readonly string[];
+  readonly contentRevision?: string;
   readonly body?: ReactNode;
   readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
@@ -66,6 +71,7 @@ type DockviewWorkbenchPanelParams = WorkbenchDockviewPanelParams & {
   readonly title: string;
   readonly detail: string;
   readonly meta: readonly string[];
+  readonly contentRevision?: string;
   readonly body?: ReactNode;
   readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
@@ -409,7 +415,10 @@ function syncDockviewWorkbench(
         firstDockGroup ??= existingPanel.group;
       }
 
-      if (pane.id === activePaneId && !existingPanel.api.isActive) {
+      if (
+        pane.id === activePaneId &&
+        !dockviewPanelIsSelectedWithinGroup(existingPanel)
+      ) {
         existingPanel.api.setActive();
       }
     }
@@ -420,37 +429,6 @@ function syncDockviewWorkbench(
     workbenchGroupByDockGroup.set(dockGroup.id, workbenchGroupId);
   }
   return workbenchGroupByDockGroup;
-}
-
-function shouldUpdateDockviewWorkbenchPanelParams(
-  current: DockviewWorkbenchPanelParams | undefined,
-  next: DockviewWorkbenchPanelParams,
-) {
-  if (!current) {
-    return true;
-  }
-  if (
-    current.groupId !== next.groupId ||
-    current.groupLabel !== next.groupLabel ||
-    current.paneId !== next.paneId ||
-    current.category !== next.category ||
-    current.surfaceKind !== next.surfaceKind ||
-    current.title !== next.title ||
-    current.detail !== next.detail
-  ) {
-    return true;
-  }
-  // Connected terminals stream directly into their mounted xterm instance.
-  // Avoid Dockview parameter churn for output/socket metadata so ordinary
-  // command output does not blur the emulator between keystrokes.
-  if (next.surfaceKind === "persistentTerminal") {
-    const socketStatus = next.meta[1];
-    return socketStatus !== "connecting" && socketStatus !== "connected";
-  }
-  return (
-    current.body !== next.body ||
-    current.meta.join("\0") !== next.meta.join("\0")
-  );
 }
 
 function toDockviewWorkbenchPanelParams(
@@ -468,6 +446,7 @@ function toDockviewWorkbenchPanelParams(
     title: pane.title,
     detail: pane.detail,
     meta: pane.meta,
+    contentRevision: pane.contentRevision,
     body: pane.body,
     onRequestClosePane,
   };

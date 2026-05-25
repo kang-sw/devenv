@@ -11,6 +11,7 @@ related:
   260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
   260516-feat-ws-web-minimal-frontend-shell: inspectable frontend child of the visible substrate milestone
 related-mental-model:
+  - ws-web-dashboard
   - developer-environment-tools
   - named-agent-runtime
   - mcp-runtime
@@ -52,72 +53,128 @@ The MVP should cover:
 
 ## Child Tickets
 
+Completed milestone boards and foundation children:
+
 - `260514-feat-ws-web-daemon-foundation` - done; daemon shell, owner auth,
-  WebSocket auth, local/tunnel/public bind-mode guards, and foundation security
-  smoke. First substrate.
-- `260514-research-ws-web-dashboard-direction` - research holding the absorbed
-  provisional child backlog, refined resource model, document viewer ideas,
-  keyboard/navigation direction, and future harness-library split points.
-  Recreate implementation children from that research only when the boundaries
-  are ready.
-- `260515-epic-ws-web-dashboard-first-visible-substrate` - done; first
-  hybrid milestone for resource/view-model APIs, mock/live data boundaries, a
-  minimal authenticated frontend shell, local workspace discovery, and event
-  stream substrate.
-- `260516-feat-ws-web-resource-view-model-contract` - done; first child of the
-  first visible substrate and next implementation-order blocker for stable
-  dashboard resource APIs, mock fixtures, and workRoot vocabulary.
-- `260516-feat-ws-web-minimal-frontend-shell` - done; child of the first
-  visible substrate for the first inspectable authenticated browser shell.
-- `260516-feat-ws-web-local-workspace-discovery` - done; child of the first
-  visible substrate for live local plain-directory, Git-primary-root, and
-  Git-linked-worktree discovery.
-- `260516-feat-ws-web-instance-event-stream` - done; child of the first visible
-  substrate for a shared authenticated instance event envelope and
-  fixture-backed stream scaffold.
-- Planned: next dashboard epic should start with a dark-first frontend visual
-  system step that turns `ai-docs/ref/design.md` into a dashboard-specific
-  `DESIGN.md`-style theme guideline under `ws-dashboard/frontend/` before
-  deeper UI feature work.
-- `260516-epic-ws-web-dashboard-workbench-substrate` - done; frontend milestone
-  for dark-first theme setup, token-free stable browser entry after pairing,
-  server-scoped route identity, and a constrained VS Code-inspired workbench
-  substrate.
-- `260516-epic-ws-web-dashboard-workroot-io-substrate` - done; opened
-  workRoots now drive the primary dashboard resource API and browser resource
-  model, with file, read-only pane, terminal, refresh, and dogfood coverage.
-- `260516-bug-ws-web-dashboard-ui-acceptance-recovery` - done; recovered
-  browser-level dashboard usability before merging workRoot IO UI work,
-  including terminal tabs, live initial terminal state, real xterm behavior,
-  pane fill, file explorer affordance, and visual/browser acceptance evidence.
-- `260516-bug-ws-web-terminal-websocket-transport` - done; replaced polling
-  terminal I/O with an owner-authenticated WebSocket live path and recover
-  interactive input fidelity before considering dashboard terminal quality
-  mergeable.
-- `260516-bug-ws-web-terminal-cross-platform-portability` - done; make
-  dashboard terminal shell selection, PTY commands, browser harness behavior,
-  and acceptance evidence honestly cross-platform or explicitly OS-scoped.
-- `260517-bug-ws-dashboard-dockview-workbench-parity` - done; corrective
-  substrate work to make Dockview the visible workbench layout owner while
-  preserving recovered file and terminal pane behavior.
-- `260517-bug-ws-dashboard-dockview-dynamic-groups` - done; make Dockview split
-  drops create durable dynamic dashboard groups, with initial two-group defaults
-  and constrained automatic placement policy.
-- `260517-feat-ws-dashboard-workbench-tab-polish` - done; polish workbench tab
-  close affordances, insertion/focus policy, empty-state cleanup, and
-  preview-to-pinned read-only file behavior after Dockview workbench parity is
-  restored and before introducing a richer editor library.
-- `260517-bug-ws-dashboard-editor-scroll-ime-verification` - done; follow up
-  read-only editor scroll containment plus terminal IME and shell control-key
-  fidelity after the tab polish hotfix.
-- `260517-feat-ws-dashboard-workroot-activity` - done; add a workRoot-owned
-  runtime activity projection with a compact top-bar badge and group-1
-  reversible detail pane, starting with read-only named-agent state and
-  reserving running commands for the async exec job surface.
-- `260518-epic-ws-dashboard-activity-console` - todo; promote WorkRoot Activity
-  from a named-agent list into a reusable read-only Activity Console with a
-  live/latest ribbon, selected transcript blocks, cross-platform watcher-backed
-  feed updates, and backend-owned transcript source resolution.
+  bind-mode guards, protected routes, and serving foundation.
+- `260515-epic-ws-web-dashboard-first-visible-substrate` - done; resource
+  vocabulary, view-model API, mock/live provider boundary, authenticated
+  frontend shell, local discovery, and event envelope substrate.
+- `260516-epic-ws-web-dashboard-workbench-substrate` - done; dark-first
+  frontend setup, token-free paired routes, server-scoped route identity, and
+  constrained Dockview-backed workbench substrate.
+- `260516-epic-ws-web-dashboard-workroot-io-substrate` - done; opened workRoots
+  drive resource APIs, file explorer/read-only panes, terminals, refresh, and
+  browser dogfood coverage.
+- `260518-epic-ws-dashboard-activity-console` - done; WorkRoot Activity became
+  a reusable read-only Activity Console with live ribbon, selected transcript
+  blocks, stream-backed updates, and backend-owned transcript resolution.
+
+Completed follow-up clusters:
+
+- Workbench and terminal recovery: UI acceptance recovery, WebSocket terminal
+  transport, cross-platform terminal evidence, Dockview parity/dynamic groups,
+  tab polish, scroll/IME verification, split-scroll reset, and bounded daemon
+  shutdown behavior are done.
+- WorkRoot continuity: persisted open workRoots, terminal tab restore,
+  registry activation, workspace root pruning, linked-worktree discovery,
+  read-only file pane restore, and explicit workspace forget/remove UI are
+  done.
+- Root picker and visual polish: explorer-style root picker, React Aria root
+  picker pilot, visual building blocks, icon-first navigation/topbar polish,
+  icon chrome refinement, and context surface hierarchy are done.
+
+Active or planned product tracks:
+
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - done; editor
+  implementation track. Completed reusable Markdown/document viewing,
+  daemon-backed translation overlay, raw-text edit/save fan-out, and document
+  events.
+- `260525-feat-ws-dashboard-markdown-renderer-polish` - done; follow-up
+  viewer polish to restore semantic list context, ordered numbering, nested
+  list rhythm, task-list alignment, and conventional inline-code styling while
+  preserving block selection, translation overlays, and pathrefs.
+- `260525-feat-ws-dashboard-codemirror-edit-mode` - done; replaced the raw
+  edit-mode textarea with a CodeMirror 6 substrate for syntax highlighting,
+  line numbers, search, bracket matching, keybinding room, internal scrolling,
+  and dashboard theme integration while keeping LSP/completion outside the MVP
+  scope.
+- `260525-feat-ws-dashboard-codemirror-source-viewer` - done; uses read-only
+  CodeMirror for source files without custom viewers, remove noisy CodeMirror
+  focus border chrome, and broaden lazy-loaded syntax highlighting coverage
+  while preserving the document pane's view/edit lifecycle.
+- `260525-feat-ws-dashboard-document-polishing-backlog` - todo; non-critical
+  document viewer/editor quality work after the MVP document substrate is
+  considered complete enough for the current milestone.
+- WorkRoot management - MVP-complete child track. Registry/root-picker/
+  workspace continuity, practical owner operations, Git worktree creation, and
+  selected-workRoot Git controls are implemented enough for the current
+  milestone. Remaining quality work is tracked as polishing rather than a
+  blocker.
+  `260524-feat-ws-dashboard-add-git-worktree-ui` is done:
+  move workspace removal behind an overflow menu and add Git worktree creation
+  with daemon-resolved branch/path preview.
+  `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is done:
+  add selected-workRoot branch/status chips plus fetch, push, and
+  fast-forward-only pull controls.
+  `260525-feat-ws-dashboard-workroot-polishing-backlog` is todo for
+  on-demand WorkRoot lifecycle and Git toolbar polish.
+- Agent view panel - planned child track. Promote read-only Activity Console
+  foundations into a dedicated agent-oriented panel for named-agent/main-
+  session/subtask visibility while keeping control actions such as interrupt,
+  cancel, erase, retry, or terminate behind separate high-friction tickets.
+  `260525-feat-ws-dashboard-sqlite-agent-activity-source` is ready for
+  aligning the backend Activity projection with ws-mcp's SQLite role/instance
+  registry while keeping frontend routes and rendering stable.
+- Multi-server management - active child track.
+  `260525-feat-ws-dashboard-multi-server-gateway` is done for
+  linked-server registry, selected-server resource forwarding, passphrase
+  link-auth, SSH start/reconnect dogfood, and server-first left navigation.
+  `260525-feat-ws-dashboard-endpoint-linked-server-add` is done for the
+  endpoint-first add-server API and browser modal.
+  `260525-feat-ws-dashboard-server-scoped-operation-forwarding` is todo for
+  making root picker, open WorkRoot, files/documents, Activity, Git, workspace
+  mutations, and terminals transparent across linked servers. Broader remote
+  hardening, automatic deployment, credential persistence, and server
+  federation remain future scope.
+- Dashboard persistence map - research track.
+  `260523-research-ws-dashboard-persistable-ui-state-map` remains the backlog
+  map for selected resources,
+  file explorer state, workbench layout, Activity Console acknowledgement and
+  scroll state, command preferences, chrome preferences, and privacy-sensitive
+  root-picker history.
+- Diagnostics, events, and task surfaces - planned support track. Keep these as
+  system-observation panels that can share Activity/document/workbench
+  primitives without becoming separate top-level navigation roots.
+- Terminal UX - deferred track. Existing command-based terminal workflow remains
+  usable, but native-Windows control-key behavior and browser focus regression
+  tickets remain open stabilization work before a larger terminal UX redesign.
+- React Aria and visual system refresh - research track.
+  `260524-research-ws-dashboard-react-aria-ui-primitives` and
+  `260524-research-ws-dashboard-visual-design-system-refresh` remain future
+  component-system quality work after the root-picker pilot and first
+  visual-polishing line.
+
+Implementation sequence:
+
+1. Agent view panel: dedicated agent-oriented visibility over Activity Console
+   and future main-session/subtask sources. Keep custom harness versus deeper
+   Codex integration as an explicit unresolved design choice until the panel
+   scope clarifies.
+2. Multi-server management: local dashboard as gateway for local, WSL, and
+   remote linked daemons, including remote Windows dogfood deployment and
+   seamless resource integration under `serverId`.
+3. Editor/document and WorkRoot management polishing continue on demand through
+   backlog tickets, but they no longer block the MVP sequence.
+4. Diagnostics/task panels, persistence expansion, terminal UX redesign, and
+   broader visual-system research should be split into child tickets when their
+   boundaries are ready.
+
+Longer-range product direction stays in
+`260514-research-ws-web-dashboard-direction`: harness/runtime library
+directions, remote hardening, keyboard model, rich document platform ideas,
+server federation, and other future scope should be promoted from that research
+ticket only when they become implementation-ready.
 
 ## Cross-Child Decisions
 
@@ -140,16 +197,18 @@ The MVP should cover:
   editor path because Windows PTY behavior is a known stability concern.
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
-- Model dashboard resources around one main user interaction point per
-  workRoot:
+- Model dashboard resources around one owner-managed workspace root and one main
+  user interaction point per workRoot:
   `server -> workspace -> workRoot -> mainInstance -> subInstance`. A server is
   a physical or logical host environment such as local machine, WSL distro, or
-  remote host. A workspace is a daemon-discovered project group, not a
-  user-created category. A workRoot is the concrete physical open, spawn, and
-  run directory and can be online, offline, moved, or inaccessible. A main
-  instance is the user-facing conversation or control point; sub instances are
-  delegated or auxiliary work such as ws agents, exec jobs, document viewers,
-  translation tasks, diagnostics, or subprocesses.
+  remote host. A workspace is an owner-managed root scope anchored by a root
+  workRoot. A workRoot is the concrete physical open, spawn, and run directory
+  and can be online, offline, moved, or inaccessible. Derived workRoots such as
+  linked Git worktrees belong under their owning workspace until an explicit
+  derive/promote operation creates a new workspace. A main instance is the
+  user-facing conversation or control point; sub instances are delegated or
+  auxiliary work such as ws agents, exec jobs, document viewers, translation
+  tasks, diagnostics, or subprocesses.
 - Reserve `session` for auth/browser sessions and external protocol sessions
   such as MCP or model backend sessions. Do not use `session` for dashboard
   terminal/editor/agent resources.
@@ -168,6 +227,11 @@ The MVP should cover:
   then concrete workRoot entries without hiding offline or inaccessible
   workRoots that remain useful recent context. Singleton chains may render as
   compact rows, but the API model remains fully hierarchical.
+- If a workspace's root workRoot is unavailable while at least one child
+  workRoot remains active, keep the workspace visible in a disabled or
+  recovery-needed state. Automatically prune a workspace only when it has no
+  active workRoots. This automatic empty-workspace cleanup is distinct from
+  explicit owner forget/remove UI.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen
@@ -219,12 +283,27 @@ The MVP should cover:
   interrupt, cancel, erase, and retry stay out of the dashboard Activity
   Console; any future terminate affordance requires a separate high-friction
   control ticket.
+- Persisted dashboard state should store logical, user-visible descriptors and
+  preferences, then revalidate through daemon/resource/file APIs on restore.
+  Browser state must not become authority for daemon resources, and persistence
+  should avoid raw output, transcripts, host paths, cache paths, backend
+  session paths, process ids, or stale daemon terminal ids unless a child ticket
+  explicitly defines a bounded privacy-reviewed format.
+- WorkRoot resource modeling separates durable membership, live-derived
+  availability, and user-controlled activation. Existing `WorkRootStatus`
+  online/offline vocabulary is reachability-flavored and must not be reused as
+  the activation layer without a public model split. Known workRoots remain
+  visible while their workspace remains visible even when missing, inaccessible,
+  prunable, or offline; there is no invisible discovered-worktree state.
+  Explicit refresh and bounded polling recompute filesystem/Git availability
+  and may trigger the automatic no-active-workRoot workspace prune policy, while
+  future filesystem watchers may only act as refresh-needed hints.
 
 ## Completion Criteria
 
 - Done: child tickets deliver a usable authenticated local/tunnel web dashboard
-  with PTY terminals, browser-native modal editing, workspace selection, and ws
-  named-agent visibility.
+  with PTY terminals, document viewing/raw-text editing, workspace and workRoot
+  management, and ws named-agent visibility.
 - Dropped: a different host UI direction replaces the web dashboard approach or
   the MVP proves impractical for the intended personal workflow.
 - Deferred: multi-user access, full public deployment hardening, desktop shell
