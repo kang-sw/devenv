@@ -25,6 +25,7 @@ Write MCP calls as `ws/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
+Write prompts sent to `ws/subquery` and `ws/agents.call` in English.
 
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
@@ -42,6 +43,18 @@ include only local arguments that affect the current step.
 - Use full sentences when compression could blur order, ownership, or safety.
 
 ## Available
+
+### Session setup
+
+`ws/setup`
+
+At the start of any lead workflow session, call
+`ws/setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`.
+Pass the repository's absolute filesystem path as `root`; the MCP server cannot
+infer the agent's current directory from placeholders or relative paths. Record
+the returned `actor_id`; if MCP restarts, recover with
+`ws/setup(id: "<actor-id>")` before any agent or subquery call that omits
+`root`.
 
 ### Async one-turn query
 
@@ -69,6 +82,12 @@ uses delegate orientation and the default `core` model alias. Use
 `model: "light" | "core" | "deep"` for portable model selection and concrete
 provider model names only for intentional one-off overrides. `tier` remains a
 compatibility input. Call the agent for each continuity turn.
+Bundled prompt stems are registered through `prompts: ["<prompt-stem>"]`.
+`project-survey` is a prompt stem, not a workflow skill; when a skill asks for
+`project-survey`, register it with
+`ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, call
+it with a self-contained survey brief, and collect the result through
+`ws/agents.result`.
 `ws/agents.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,
@@ -108,7 +127,7 @@ lookup before shell search. Use native file reads after a discovery tool returns
 the path to inspect or edit.
 
 Prefer:
-- `ws/tickets.list(status: "ready")` for implementation queue discovery; use `status: "todo"` for accepted backlog.
+- `ws/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
 - `ws/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `ws/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `ws/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
@@ -131,7 +150,7 @@ Prefer:
 Use `ws/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves plus
 `### Result` and `#### Edition` headings, and avoids shell quoting drift.
-For ticket status moves, use native `git mv` between status directories and commit through `ws/git.commit`; `ready/` is the implementation queue and `todo/` is accepted backlog.
+For ticket status moves, use native `git mv` between status directories and commit through `ws/git.commit`; `ready/` is implementation-ready and `todo/` is accepted backlog.
 
 Prefer:
 - `ws/git.status()` for branch, staged state, and changed-file discovery.

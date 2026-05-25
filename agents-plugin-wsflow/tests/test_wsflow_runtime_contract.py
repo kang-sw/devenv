@@ -33,6 +33,14 @@ HIDDEN_TOOLS = {
     "api.result",
     "api.cancel",
     "ws.setup",
+    "exec.spawn",
+    "exec.shell",
+    "exec.status",
+    "exec.result",
+    "exec.abort",
+    "exec.raw.tail",
+    "exec.raw.read",
+    "exec.raw.grep",
 }
 
 HIDDEN_COMMANDS = {

@@ -5,6 +5,7 @@ related:
   260517-feat-ws-dashboard-workroot-activity: dogfood run where Phase 2 browser evidence was blocked by this baseline failure
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # ws dashboard terminal focus browser gate regression
@@ -26,3 +27,10 @@ pressure path rather than a dedicated terminal-focus slice. Stabilize the
 terminal focus model and its Playwright coverage so the watchdog cannot steal
 focus after intentional outside focus movement, and so future terminal changes
 do not rely on an incidental acceptance-gate fix.
+
+## Closeout
+
+Closed after current-main verification that
+`481a404e fix(ws-dashboard): stabilize terminal focus watchdog` is an ancestor
+of `HEAD`. Reopen as a new focused bug if the terminal browser gate regresses
+again.

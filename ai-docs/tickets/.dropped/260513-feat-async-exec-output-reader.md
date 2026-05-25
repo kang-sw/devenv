@@ -127,3 +127,14 @@ preserving partial output, process timeout behavior, reader-agent reuse, fresh
 reader contexts, and profile visibility. Update MCP, named-agent, plugin
 runtime, and prompt-bundle documentation as needed before promoting this ticket
 to `ready/`.
+
+## Drop Reason
+
+Dropped on 2026-05-24 because the ticket mixed epic-level decomposition with
+multiple implementation contracts. The scope was absorbed by
+`260524-epic-async-exec-job-surface`.
+
+The first actionable child is `260524-feat-exec-job-core-text-readers`, covering
+the non-model exec job core and bounded text readers. The model-backed
+`exec.ask` design is intentionally deferred for follow-up discussion and a later
+child ticket.

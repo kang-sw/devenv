@@ -50,6 +50,13 @@ declared plugin patch version, tool list, command list, or prompt bundle hash.
 Development binaries such as `X.Y.Z-dev` are compatible with plugin version
 `X.Y.Z`; older or newer patch releases are not reused from cache.
 
+The full ws runtime contract includes the `exec.*` MCP job surface, so launcher
+compatibility checks reject stale runtimes that lack the accepted
+command-execution tools. The wsflow no-agent contract omits those tools from
+advertised capabilities and rejects explicit `exec.*` calls with the same
+disabled-surface behavior used for other hidden agent-backed surfaces.
+{#260524-exec-runtime-contract-surface}
+
 ## wsflow Runtime Contract Mode {#260513-wsflow-runtime-contract-mode}
 
 The shared runtime capability probe supports validating a reduced wsflow
@@ -97,13 +104,20 @@ install path. `install.sh` does not install wsflow into Claude.
 ## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
 
 The plugin launcher resolves the current operating system and architecture,
-selects the matching cache-local `ws-mcp` binary path, and ensures an executable
-compatible runtime is present before delegating to it.
+selects a cache-local runtime binary path derived from `plugin_version` plus the
+`runtime.json` content hash, and ensures an executable compatible runtime is
+present before delegating to it.
 
 When the binary is missing or incompatible, the launcher can install a runtime
 from an explicit bootstrap binary, a bootstrap URL, a local devenv runtime, or
 the release asset URL declared in the runtime contract. Downloaded release
 assets are verified against `SHA256SUMS` before becoming executable.
+
+Install and repair paths use process-unique temporary files and best-effort
+atomic replacement. If replacing the final cache-local binary fails because
+another process already installed or is using that target, the launcher rechecks
+the target and proceeds only when it is compatible with the current runtime
+contract.
 
 For plugin-managed Codex sessions, the launcher detects the caller project root
 from the parent process environment when possible and exports it as

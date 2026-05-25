@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,8 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
@@ -52,6 +55,30 @@ func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testi
 	text = formatSpecFind("absent phrase", nil)
 	if !strings.Contains(text, "0 candidate specs") || !strings.Contains(text, "retry with shorter noun phrases") {
 		t.Fatalf("zero-result text = %q", text)
+	}
+}
+
+func TestRawPublicAgentToolSchemasOmitRoot(t *testing.T) {
+	agentTools := 0
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if strings.HasPrefix(name, "agents.") {
+			agentTools++
+			if _, ok := properties["root"]; ok {
+				t.Fatalf("raw public agent tool %s advertises root", name)
+			}
+			continue
+		}
+		if name == "git.status" {
+			if _, ok := properties["root"]; !ok {
+				t.Fatalf("non-agent root-aware tool %s no longer advertises root", name)
+			}
+		}
+	}
+	if agentTools == 0 {
+		t.Fatal("raw tools list has no public agent tools")
 	}
 }
 
@@ -376,12 +403,15 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"survey","tier":"light"}}}`+"\n",
-	), &out); err != nil {
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q}}}`+"\n", root)), &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"survey","tier":"light"}}}`+"\n"), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
-	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "survey")
+	status, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, "survey", server.currentActorID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,6 +603,8 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"format":"json"}}}`,
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tickets.list","arguments":{"root":%q}}}`, rootB),
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"session-agent","model":"light"}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"explicit-agent","model":"light"}}}`, rootB),
 	}, "\n")
 
 	out.Reset()
@@ -597,6 +629,235 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	}
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
 		t.Fatalf("explicit root did not override session default: %s", byID["4"])
+	}
+	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") || !strings.Contains(toolText(t, byID["5"]), `root: "<absolute-working-directory>"`) {
+		t.Fatalf("root-omitted agents.register without actor was not setup-gated: %s", byID["5"])
+	}
+	if toolIsError(t, byID["6"]) {
+		t.Fatalf("explicit-root agents.register compatibility failed: %s", byID["6"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootB, "explicit-agent"); err != nil {
+		t.Fatalf("explicit-root agents.register did not use explicit root: %v", err)
+	}
+}
+
+func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
+	useLeadProfile(t)
+	rootA := initTicketRepo(t, "260524-feat-actor-alpha")
+	rootB := initTicketRepo(t, "260524-feat-actor-beta")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(rootB, "test")
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"before-setup","model":"light"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var stateBefore struct {
+		ActorID  string `json:"actor_id"`
+		HasActor bool   `json:"has_actor"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &stateBefore); err != nil {
+		t.Fatalf("setup state before bootstrap is not JSON: %v\n%s", err, byID["1"])
+	}
+	if stateBefore.HasActor || stateBefore.ActorID != "" {
+		t.Fatalf("id-less setup minted actor authority: %s", byID["1"])
+	}
+	if !toolIsError(t, byID["2"]) || !strings.Contains(toolText(t, byID["2"]), "setup required") {
+		t.Fatalf("root-omitted agent call before actor was not gated: %s", byID["2"])
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", rootA)), &out); err != nil {
+		t.Fatalf("ServeStdio bootstrap returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var setup struct {
+		Root             string `json:"root"`
+		ActorID          string `json:"actor_id"`
+		HasActor         bool   `json:"has_actor"`
+		ActorAuthority   string `json:"actor_authority"`
+		RecoveryGuidance string `json:"recovery_guidance"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &setup); err != nil {
+		t.Fatalf("bootstrap setup is not JSON: %v\n%s", err, byID["3"])
+	}
+	if setup.Root != canonicalTestPath(t, rootA) || !setup.HasActor || setup.ActorID == "" || setup.ActorAuthority != "lead" || !strings.Contains(setup.RecoveryGuidance, setup.ActorID) {
+		t.Fatalf("bootstrap setup response mismatch: %s", byID["3"])
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"after-setup","model":"light"}}}`+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio after setup returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if toolIsError(t, byID["4"]) {
+		t.Fatalf("root-omitted agents.register after actor setup failed: %s", byID["4"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(rootA, "after-setup", server.currentActorID()); err != nil {
+		t.Fatalf("root-omitted agents.register did not use actor root: %v", err)
+	}
+
+	out.Reset()
+	recoveryServer := NewServer(rootB, "test")
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"fresh-before-recovery","model":"light"}}}`+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio pre-recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") {
+		t.Fatalf("fresh server did not require actor recovery before root-omitted agent call: %s", byID["5"])
+	}
+	out.Reset()
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ws.setup","arguments":{"id":%q,"format":"json"}}}`+"\n", setup.ActorID)), &out); err != nil {
+		t.Fatalf("ServeStdio recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var recovered struct {
+		Root           string `json:"root"`
+		ActorID        string `json:"actor_id"`
+		HasActor       bool   `json:"has_actor"`
+		ActorAuthority string `json:"actor_authority"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["6"])), &recovered); err != nil {
+		t.Fatalf("recovery setup is not JSON: %v\n%s", err, byID["6"])
+	}
+	if recovered.Root != canonicalTestPath(t, rootA) || recovered.ActorID != setup.ActorID || !recovered.HasActor || recovered.ActorAuthority != "lead" {
+		t.Fatalf("recovery setup response mismatch: %s", byID["6"])
+	}
+	out.Reset()
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"fresh-after-recovery","model":"light"}}}`+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio post-recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if toolIsError(t, byID["7"]) {
+		t.Fatalf("root-omitted agents.register after actor recovery failed: %s", byID["7"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(rootA, "fresh-after-recovery", recovered.ActorID); err != nil {
+		t.Fatalf("recovered actor did not bind root for agent register: %v", err)
+	}
+}
+
+func TestServeStdioActorSetupRejectsCWDPlaceholder(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":"<cwd>"}}}` + "\n"
+	var out bytes.Buffer
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) || !strings.Contains(toolText(t, byID["1"]), "absolute repository path") {
+		t.Fatalf("cwd placeholder was not rejected with actionable guidance: %s", byID["1"])
+	}
+}
+
+func TestServeStdioSetupFencesFollowingBatchRequest(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260524-feat-actor-batch")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`, root),
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"batch-after-setup","model":"light"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"id":1`) || !strings.Contains(lines[1], `"id":2`) {
+		t.Fatalf("setup fence did not preserve setup-before-register response order:\n%s", out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("batched agents.register after setup failed: %s", byID["2"])
+	}
+	var setup struct {
+		ActorID string `json:"actor_id"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &setup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, "batch-after-setup", setup.ActorID); err != nil {
+		t.Fatalf("batched register did not use actor-bound root: %v", err)
+	}
+}
+
+func TestServeStdioChildActorPromptInjection(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260524-feat-child-actor")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	var out bytes.Buffer
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", root)
+	if err := server.ServeStdio(context.Background(), strings.NewReader(setupInput), &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	registerInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"child-worker","model":"light"}}}` + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(registerInput), &out); err != nil {
+		t.Fatalf("ServeStdio register returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("actor-bound agents.register failed: %s", byID["2"])
+	}
+	agent, err := wsagent.NewManager(wsagent.Options{}).AgentScoped(root, "child-worker", server.currentActorID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(agent.ChildActorID, "delegate-") || agent.ChildActorAuthority != "delegate" {
+		t.Fatalf("child actor metadata mismatch: id=%q authority=%q", agent.ChildActorID, agent.ChildActorAuthority)
+	}
+	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(layout.AgentsDir, "*", agent.SystemPromptPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var system string
+	for _, systemPath := range matches {
+		raw, err := os.ReadFile(systemPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), agent.ChildActorID) {
+			system = string(raw)
+			break
+		}
+	}
+	if system == "" {
+		t.Fatalf("system prompt for child-worker not found under %s", layout.AgentsDir)
+	}
+	if !strings.Contains(system, `ws.setup`) || !strings.Contains(system, agent.ChildActorID) {
+		t.Fatalf("system prompt missing child actor setup instruction:\n%s", system)
+	}
+	if strings.Contains(system, "lead-workflow-bootstrap") {
+		t.Fatalf("child system prompt exposed lead bootstrap method:\n%s", system)
+	}
+
+	out.Reset()
+	recoverInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"id":%q,"format":"json"}}}`+"\n", agent.ChildActorID)
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(recoverInput), &out); err != nil {
+		t.Fatalf("ServeStdio child recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var recovered struct {
+		ActorID        string `json:"actor_id"`
+		ActorAuthority string `json:"actor_authority"`
+		Root           string `json:"root"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &recovered); err != nil {
+		t.Fatalf("child recovery setup is not JSON: %v\n%s", err, byID["3"])
+	}
+	if recovered.ActorID != agent.ChildActorID || recovered.ActorAuthority != "delegate" || recovered.Root != canonicalTestPath(t, root) {
+		t.Fatalf("child recovery mismatch: %s", byID["3"])
 	}
 }
 
@@ -1010,8 +1271,8 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["1"]), "ephemeral answer") {
 		t.Fatalf("agents.result response mismatch: %s", byID["1"])
 	}
-	if _, err := os.Stat(layout.AgentDir); !os.IsNotExist(err) {
-		t.Fatalf("ephemeral agent dir still exists after MCP result: %v", err)
+	if _, err := os.Stat(layout.AgentDir); err != nil {
+		t.Fatalf("ephemeral agent dir should remain after MCP result for retention cleanup: %v", err)
 	}
 }
 
@@ -1634,5 +1895,377 @@ func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 	fake.mu.Unlock()
 	if max != 1 {
 		t.Fatalf("same-domain calls were not serialized; max active = %d", max)
+	}
+}
+
+func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	mustWrite(t, root, "sub/.keep", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		toolCallLine(t, 2, "exec.spawn", map[string]any{"cmd": os.Args[0], "args": []string{"-test.run=TestMCPExecHelperProcess", "--", "flow"}, "env": map[string]string{"GO_WANT_MCP_EXEC_HELPER": "1"}, "working_dir": "sub"}),
+		toolCallLine(t, 9, "exec.shell", mcpShellShapeArgs()),
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for _, name := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+		if !strings.Contains(byID["1"], name) {
+			t.Fatalf("tools/list missing %s: %s", name, byID["1"])
+		}
+	}
+	text := toolText(t, byID["2"])
+	shellText := toolText(t, byID["9"])
+	if !strings.Contains(shellText, "shell-shape") || !strings.Contains(shellText, execToolJSONPath(root)) {
+		t.Fatalf("shell response = %s", byID["9"])
+	}
+	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, execToolJSONPath(filepath.Join(root, "sub"))) || !strings.Contains(text, `"stderr":"err`) {
+		t.Fatalf("spawn response = %s", byID["2"])
+	}
+	var launch execToolResponse
+	if err := json.Unmarshal([]byte(text), &launch); err != nil {
+		t.Fatal(err)
+	}
+
+	input = strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":%q,"stream":"stdout","lines":1}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"exec.raw.read","arguments":{"exec_key":%q,"stream":"stderr","offset":0,"limit":20}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta42"}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta[0-9]+","regex":true}}}`, launch.ExecKey),
+	}, "\n") + "\n"
+	out.Reset()
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for id, want := range map[string]string{"3": "result_ready", "4": "beta42", "5": "beta42", "6": "err", "7": "beta42", "8": "beta42"} {
+		if !strings.Contains(byID[id], want) {
+			t.Fatalf("response %s missing %s: %s", id, want, byID[id])
+		}
+	}
+
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	out.Reset()
+	input = `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"echo"}}}` + "\n" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":"exec-1-0000000000000000"}}}` + "\n"
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], "exec.spawn") || strings.Contains(byID["1"], "exec.raw.tail") {
+		t.Fatalf("no-agent listed exec tools: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "agentless mode disables") || !strings.Contains(byID["3"], "agentless mode disables") {
+		t.Fatalf("no-agent calls not rejected: %s\n%s", byID["2"], byID["3"])
+	}
+}
+
+func TestExecMCPRunningLargeAndAbort(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	input := toolCallLine(t, 1, "exec.shell", mcpLongShellArgs()) + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	text := toolText(t, byID["1"])
+	if !strings.Contains(text, `"status":"running"`) || !strings.Contains(text, "exec.ask") || strings.Contains(text, "done") {
+		t.Fatalf("running launch response = %s", byID["1"])
+	}
+	var running execToolResponse
+	if err := json.Unmarshal([]byte(text), &running); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var abortText string
+	for time.Now().Before(deadline) {
+		out.Reset()
+		input = fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+			t.Fatal(err)
+		}
+		abortText = toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+		if strings.Contains(abortText, `"status":"cancelled"`) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(abortText, `"status":"cancelled"`) {
+		t.Fatalf("abort status = %s", abortText)
+	}
+
+	out.Reset()
+	input = toolCallLine(t, 4, "exec.shell", mcpLargeShellArgs()) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
+	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, `"combined_bytes":5000`) || !strings.Contains(largeText, "exec.raw.*") {
+		t.Fatalf("large response = %s", largeText)
+	}
+}
+
+type execToolResponse struct {
+	ExecKey string `json:"exec_key"`
+}
+
+func toolCallLine(t *testing.T, id int, name string, arguments map[string]any) string {
+	t.Helper()
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      name,
+			"arguments": arguments,
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func mcpShellShapeArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "cd && echo shell-shape"}
+	}
+	return map[string]any{"command": "pwd; printf shell-shape"}
+}
+
+func mcpLongShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "echo start & ping -n 7 127.0.0.1 >NUL & echo done"}
+	}
+	return map[string]any{"command": "echo start; sleep 6; echo done"}
+}
+
+func mcpLargeShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"shell": "powershell", "command": "[Console]::Out.Write(('x' * 5000))"}
+	}
+	return map[string]any{"command": "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"}
+}
+
+func execToolJSONPath(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ReplaceAll(path, `\`, `\\`)
+	}
+	return path
+}
+
+func TestMCPExecHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_MCP_EXEC_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			switch args[i+1] {
+			case "flow":
+				wd, _ := os.Getwd()
+				_, _ = os.Stdout.WriteString(wd + "\nalpha\nbeta42\n")
+				_, _ = os.Stderr.WriteString("err\n")
+			default:
+				_, _ = os.Stdout.WriteString(args[i+1] + "\n")
+			}
+			os.Exit(0)
+		}
+	}
+	os.Exit(2)
+}
+
+func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260524-feat-actor-lifecycle")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	call := func(id int, payload string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := server.ServeStdio(context.Background(), strings.NewReader(payload+"\n"), &out); err != nil {
+			t.Fatalf("ServeStdio id %d returned error: %v", id, err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		line := byID[fmt.Sprint(id)]
+		if toolIsError(t, line) {
+			t.Fatalf("tool id %d returned error: %s", id, line)
+		}
+		return toolText(t, line)
+	}
+
+	call(1, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`, root))
+	call(2, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"same","backend":"bogus","model":"global-model"}}}`, root))
+	call(3, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"same","backend":"bogus","model":"actor-model"}}}`)
+	manager := wsagent.NewManager(wsagent.Options{})
+	actorID := server.currentActorID()
+	state, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorSameKey, err := wsstore.AgentInternalKey(actorID, "same")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldActorSame, ok, err := store.AgentDefinition(context.Background(), actorSameKey)
+	if err != nil || !ok {
+		t.Fatalf("actor same definition ok=%t err=%v", ok, err)
+	}
+	oldActorSameDir := filepath.Join(state.AgentsDir, oldActorSame.StatePath)
+	if err := os.WriteFile(filepath.Join(oldActorSameDir, "history-marker"), []byte("old actor history"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	call(13, `{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"same","backend":"bogus","model":"actor-model-new"}}}`)
+	newActorSame, ok, err := store.AgentDefinition(context.Background(), actorSameKey)
+	if err != nil || !ok {
+		t.Fatalf("new actor same definition ok=%t err=%v", ok, err)
+	}
+	if newActorSame.StatePath == oldActorSame.StatePath {
+		t.Fatalf("actor re-register reused state path %q", newActorSame.StatePath)
+	}
+	if _, err := os.Stat(filepath.Join(oldActorSameDir, "history-marker")); err != nil {
+		t.Fatalf("old actor same history should remain: %v", err)
+	}
+	globalSameKey, err := wsstore.AgentInternalKey("", "same")
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalSame, ok, err := store.AgentDefinition(context.Background(), globalSameKey)
+	if err != nil || !ok {
+		t.Fatalf("global same definition ok=%t err=%v", ok, err)
+	}
+	if err := os.WriteFile(filepath.Join(state.AgentsDir, globalSame.StatePath, "output.md"), []byte("global same output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newActorSameDir := filepath.Join(state.AgentsDir, newActorSame.StatePath)
+	if err := os.WriteFile(filepath.Join(newActorSameDir, "output.md"), []byte("actor same output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sameCompleted := wsagent.CurrentCall{
+		SchemaVersion: 1,
+		AgentName:     "same",
+		CallSeq:       1,
+		ExecutionID:   "same-completed",
+		Status:        wsagent.CallStatusCompleted,
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		FinishedAt:    time.Now().UTC().Format(time.RFC3339),
+		StdoutPath:    "current/stdout",
+		StderrPath:    "current/stderr",
+	}
+	if err := os.WriteFile(filepath.Join(newActorSameDir, "current", "state.json"), mustMarshalForTest(t, sameCompleted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	globalReady, globalReadyLayout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "ready", Backend: "bogus", Model: "global-ready-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalReadyCall, err := manager.BeginCurrentCall(globalReadyLayout, globalReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalReadyCall.Status = wsagent.CallStatusCompleted
+	if err := os.WriteFile(globalReadyLayout.CurrentStateFile, mustMarshalForTest(t, globalReadyCall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globalReadyLayout.OutputFile, []byte("global ready output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actorReady, actorReadyLayout, err := manager.Register(wsagent.RegisterOptions{Root: root, ActorID: actorID, Name: "ready", Backend: "bogus", Model: "actor-ready-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorReadyCall, err := manager.BeginCurrentCall(actorReadyLayout, actorReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorReadyCall.Status = wsagent.CallStatusCompleted
+	if err := os.WriteFile(actorReadyLayout.CurrentStateFile, mustMarshalForTest(t, actorReadyCall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(actorReadyLayout.OutputFile, []byte("actor ready output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actorStatus := call(4, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"same"}}}`)
+	globalStatus := call(5, fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
+	actorPrint := call(14, `{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"agents.print","arguments":{"name":"same"}}}`)
+	globalPrint := call(15, fmt.Sprintf(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"agents.print","arguments":{"root":%q,"name":"same"}}}`, root))
+	sameWaitText := call(16, `{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"same","timeout_seconds":5}}}`)
+	sameResultText := call(17, `{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"same"}}}`)
+	callText := call(6, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"same","prompt":"do work"}}}`)
+	waitText := call(7, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"ready","timeout_seconds":5}}}`)
+	resultText := call(8, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"ready"}}}`)
+	tailText := call(9, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"agents.tail","arguments":{"name":"same","lines":20}}}`)
+	cancelText := call(10, `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"agents.cancel","arguments":{"name":"same"}}}`)
+	call(11, `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"agents.erase","arguments":{"name":"same"}}}`)
+	globalAfterErase := call(12, fmt.Sprintf(`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
+
+	if !strings.Contains(actorStatus, "model: actor-model-new") || strings.Contains(actorStatus, "global-model") {
+		t.Fatalf("root-omitted status did not use actor scope:\n%s", actorStatus)
+	}
+	if !strings.Contains(globalStatus, "model: global-model") || strings.Contains(globalStatus, "actor-model") {
+		t.Fatalf("explicit-root status did not use global compatibility scope:\n%s", globalStatus)
+	}
+	if !strings.Contains(actorPrint, "actor same output") || strings.Contains(actorPrint, "global same output") {
+		t.Fatalf("root-omitted print did not use actor scope:\n%s", actorPrint)
+	}
+	if !strings.Contains(globalPrint, "global same output") || strings.Contains(globalPrint, "actor same output") {
+		t.Fatalf("explicit-root print did not use global compatibility scope:\n%s", globalPrint)
+	}
+	if !strings.Contains(sameWaitText, "agent: same") ||
+		!strings.Contains(sameWaitText, "call_status: completed") ||
+		!strings.Contains(sameWaitText, "ready: true") {
+		t.Fatalf("actor-scoped wait did not read re-registered current instance:\n%s", sameWaitText)
+	}
+	if !strings.Contains(sameResultText, "actor same output") || strings.Contains(sameResultText, "global same output") {
+		t.Fatalf("actor-scoped result did not read re-registered current instance:\n%s", sameResultText)
+	}
+	if !strings.Contains(callText, "same\trunning") {
+		t.Fatalf("actor-scoped call did not start:\n%s", callText)
+	}
+	if !strings.Contains(waitText, "agent: ready") ||
+		!strings.Contains(waitText, "call_status: completed") ||
+		!strings.Contains(waitText, "ready: true") ||
+		!strings.Contains(waitText, "result_available: true") {
+		t.Fatalf("actor-scoped wait mismatch:\n%s", waitText)
+	}
+	if !strings.Contains(resultText, "actor ready output") || strings.Contains(resultText, "global ready output") {
+		t.Fatalf("actor-scoped result status mismatch:\n%s", resultText)
+	}
+	if !strings.Contains(tailText, "call.started_async") {
+		t.Fatalf("actor-scoped tail did not read scoped diagnostics:\n%s", tailText)
+	}
+	if !strings.Contains(cancelText, "model: actor-model-new") {
+		t.Fatalf("actor-scoped cancel/status mismatch:\n%s", cancelText)
+	}
+	if !strings.Contains(globalAfterErase, "model: global-model") {
+		t.Fatalf("actor erase removed or shadowed explicit global agent:\n%s", globalAfterErase)
 	}
 }

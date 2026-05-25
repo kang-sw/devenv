@@ -41,3 +41,16 @@ cache so relative `.mcp.json` paths resolve.
 Do not guess arbitrary Windows home directories. Prefer a host-provided root
 contract if available. If none exists, document explicit `root` as mandatory for
 plugin-managed MCP calls whose launcher cannot set `WS_MCP_PROJECT_ROOT`.
+
+## Dropped
+
+This stale backlog item is superseded by completed session-root work and a
+narrower follow-up:
+
+- `260505-feat-mcp-session-default-root` implemented the intended recovery path:
+  callers can set the current MCP server process root once with `ws.setup(root)`
+  and omit `root` from later root-aware tool calls.
+- `260523-bug-agents-root-schema-visible` now tracks the remaining problem:
+  `agents.*` root arguments still leak into public/generated host tool schemas
+  and encourage callers to pass root repeatedly instead of using the session
+  setup surface.

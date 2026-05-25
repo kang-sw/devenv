@@ -10,6 +10,12 @@ than host-specific shell commands or repository-local paths. Tool outputs are
 plain MCP text content that callers can use from Codex, Claude, or another
 MCP-capable host.
 
+This spec owns stable caller-visible behavior, not a copied tool schema
+inventory. The runtime-owned MCP registry and `tools/list` response own input
+schemas, and `runtime capabilities` owns the launcher-facing surface inventory.
+When those runtime-discoverable fields change without changing caller-visible
+behavior, update code and tests rather than copying field lists into this spec.
+
 ## MCP Server Protocol Surface {#260505-mcp-server-protocol-surface}
 
 The `ws-mcp serve --stdio` process implements a stdio JSON-RPC MCP server. It
@@ -19,6 +25,12 @@ protocol version `2025-03-26`, and declares tool capability.
 Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
+
+Setup calls are request-order fences. When `ws.setup` or the advertised setup
+alias appears in the stdio stream, the server completes earlier in-flight
+requests, applies setup synchronously, writes that setup response, and only then
+accepts later requests from the same stream. This preserves batch-safe
+setup-then-call behavior for session and actor state.
 
 Read-only tools whose primary consumer is an LLM prefer compact readable text
 defaults over JSON serialized into text content. Tools that need stable machine
@@ -57,19 +69,33 @@ server session before falling back to startup state. The priority is:
 5. `WS_MCP_PROJECT_ROOT`.
 6. Server startup root.
 
-`ws.setup` is the public setup surface for volatile session state. When called
-with `root`, it validates that the path is inside a Git worktree, stores the
+`ws.setup` is the public setup surface for session state. When called with
+`root`, it validates that the path is inside a Git worktree, stores the
 canonical worktree root in the current server process, and returns setup state.
-The value is volatile and does not write user config, ws cache config, or
-repository files. Calling `ws.setup` without `root` reports the current setup
-state, including the detected session harness when one has been observed. The
-default response is compact labeled text; callers can request structured JSON
-for compatibility. Legacy `session.*` root tools may remain callable as hidden
-compatibility dispatch, but they are not advertised as canonical tools.
+The root-only value is volatile and does not write user config, ws cache config,
+or repository files. Calling `ws.setup` without `root`, `method`, or `id`
+reports current setup state, including the detected session harness when one has
+been observed, and does not mint lead authority. The default response is compact
+labeled text; callers can request structured JSON for compatibility. Legacy
+`session.*` root tools may remain callable as hidden compatibility dispatch, but
+they are not advertised as canonical tools.
+
+`ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
+creates a cooperative lead actor for a workflow session and returns an actor id
+with explicit recovery guidance. Callers must pass the absolute repository path
+as a filesystem path; the MCP server cannot infer the agent's current directory
+from placeholders or relative paths.
+`ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
+and binds the current session root to the actor root. Root-omitted actor-owned
+tools such as agent registration, agent calls, and subqueries require either a
+current actor binding or a hidden explicit-root compatibility argument. The
+actor model is a cooperative workflow guard, not a hard security boundary.
+{#260524-mcp-actor-setup-bootstrap}
 
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
-to pass `root` explicitly or call `ws.setup` with the current directory.
+to pass the absolute repository path explicitly or call `ws.setup` with that
+absolute path.
 
 An explicit non-dot server startup root is treated as authoritative before the
 launcher-provided project-root environment fallback. If that explicit startup
@@ -101,7 +127,7 @@ model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active
-ticket queue for the current repository.
+ticket inventory for the current repository.
 
 `infra.read` reads bundled ws infra documents shipped with the runtime by bare
 stem or filename.
@@ -142,8 +168,8 @@ line-level match evidence. Convention lookup accepts common aliases such as
 `tickets.list` returns ticket paths and structured status metadata across ticket
 status directories. Active discovery includes `ready/`, `todo/`, and `idea/` by
 default; archived `.done/` and `.dropped/` tickets are omitted unless explicitly
-requested. `ready/` identifies spec-gated implementation work, while `todo/`
-remains accepted backlog.
+requested. `ready/` identifies spec-addressed implementation work, while
+`todo/` remains accepted backlog.
 
 `tickets.find` locates tickets by text query, exact ticket stem, mentioned
 ticket stem, and optional status filters. `tickets.status` returns structured
@@ -262,9 +288,26 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 `agents.register` creates or updates an agent record with backend, model alias
 or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
-immediately. Public `agents.*` schemas do not advertise `root`; callers should
-use `ws.setup` for session root selection, while explicit root arguments may
-remain accepted as a hidden compatibility override.
+immediately. Public named-agent workflows use `ws.setup` for session root
+selection; explicit root arguments may remain accepted as a hidden compatibility
+override. Public and generated `agents.*` schemas omit `root` end-to-end,
+including raw advertised schema metadata and host-visible generated metadata,
+while preserving intentional hidden explicit-root dispatch compatibility.
+{#260523-agents-root-schema-invisibility}
+
+When the parent MCP session is bound to an actor and the call targets that actor
+root, named-agent registration/calls receive a persistent delegated child actor
+id in agent metadata plus a child setup instruction in the system prompt.
+Subqueries receive ephemeral reader child actors with the same recovery
+instruction shape and do not receive the lead bootstrap method.
+
+Root-omitted `agents.*` lifecycle tools in an actor-bound MCP session resolve
+named agents through the current actor scope. This includes registration, call,
+wait, result, status, tail, interrupt, cancel, print, and erase. Hidden
+explicit-root compatibility calls use the unbound global namespace, so an
+actor-bound session can still inspect or manage a global compatibility
+registration explicitly without shadowing the actor-local agent of the same
+public name.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
@@ -296,8 +339,10 @@ through `agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
 `agents.debug.runtime_log`, and `agents.debug.events`.
 
 `agents.interrupt` queues a redirect message for a running agent. `agents.print`
-remains a deprecated compatibility reader, and `agents.erase` removes an agent
-directory for the current worktree.
+remains a deprecated compatibility reader over the resolved current instance.
+`agents.erase` removes or hides the resolved role pointer for the current
+worktree and actor scope; historical instance payloads are removed later by the
+named-agent retention cleanup policy rather than synchronously during erase.
 
 ## API Documentation MCP Tools {#260505-api-documentation-mcp-tools}
 
@@ -315,6 +360,66 @@ that can outlive the host tool-call timeout. `api.ask_async` starts a job and
 returns an `api_job_key`; `api.status` reports routing and per-domain progress;
 `api.result` returns the final answer when available; and `api.cancel` stops
 active work on a best-effort basis. {#260508-api-documentation-async-mcp-tools}
+
+## Exec Job MCP Tools {#260524-exec-job-mcp-tools}
+
+The `exec.*` tool family exposes durable command execution jobs for trusted lead
+workflows. `exec.spawn` runs structured argv commands with `cmd`, optional
+`args`, optional `working_dir`, optional environment overlays, and optional
+textual stdin. `exec.shell` runs an explicit shell command string with optional
+`working_dir`, environment overlays, textual stdin, and shell selection. Omitted
+`working_dir` resolves to the current ws worktree root. Relative values resolve
+beneath that root rather than the plugin cache process cwd, and resolved working
+directories must stay inside the worktree root.
+
+Launch tools create an `exec_key`, start the process, persist stdout and stderr
+under job-owned files, and wait up to a fixed short foreground window before
+returning. That foreground wait is not a caller-configurable timeout. When a job
+finishes during the window and combined stdout plus stderr is within the fixed
+4096-byte inline budget, the launch response may include the output, exit
+status, `exec_key`, and metadata. Running jobs or larger outputs return compact
+metadata, stream sizes, and follow-up guidance without inline raw output.
+
+Exec lifecycle metadata is SQLite-backed while stream payload bytes remain in
+job-owned files. SQLite stores job identity, command and working-directory
+metadata, lifecycle state, process or lost-worker state, timestamps, exit
+status, stream paths, stream byte counts, and retention/prune metadata. Existing
+file-backed exec state is imported when possible; corrupt or unimportable legacy
+state returns bounded recovery metadata rather than silently disappearing.
+
+`exec.status` reports job lifecycle state and stream metadata. `exec.result`
+returns terminal job metadata and at most the fixed 4096-byte inline output
+budget; larger results guide callers to the future `exec.ask` path first and
+the raw fallback readers second. `exec.abort` best-effort terminates a running
+job while preserving partial output and terminal state metadata.
+
+If a process-local worker is lost while a persisted job still appears running,
+later status/result calls reconcile the record from process liveness and mark a
+missing worker terminal rather than leaving the job indefinitely running.
+
+Raw fallback readers are named under `exec.raw.*`. `exec.raw.tail` returns a
+bounded tail from a selected stream. `exec.raw.read` reads by byte offset and
+returns `next_offset`. `exec.raw.grep` searches selected streams, defaults to
+literal matching, and uses regular expressions only when the caller explicitly
+sets `regex: true`. If a stored stream path is missing, raw readers report a
+recoverable file-backed payload consistency state instead of treating the stream
+as empty.
+
+## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
+
+The ws runtime has a SQLite metadata migration gate for moving named-agent and
+exec runtime metadata into SQLite authority. The gate keeps public `agents.*`
+and `exec.*` MCP APIs stable while separating lifecycle metadata from
+file-backed payload bodies. Named-agent registry metadata and exec job metadata
+are SQLite-backed. SQLite metadata may track identities, lifecycle state,
+actor/session binding, path indexes, byte counts, retention visibility, leases,
+tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
+transcripts, backend raw output, and final output bodies remain file-backed.
+
+SQLite state-store configure, migration, and short write paths use bounded
+retry for `SQLITE_BUSY` and `SQLITE_LOCKED` conditions while retaining
+process-local write serialization. Runtime migrations must keep transactions
+short and must not hold a transaction across subprocess or model execution.
 
 ## Tool Profile Gating {#260505-tool-profile-gating}
 

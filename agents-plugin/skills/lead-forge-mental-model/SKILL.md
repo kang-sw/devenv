@@ -13,13 +13,13 @@ Target: user request
 - All survey and verifier queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
-- Domain task names use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Renaming tasks breaks cross-compact resume detection.
+- Domain task labels use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Keep labels stable for resume scanning.
 - All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls; store returned keys and wait on all keys before synthesizing.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
 
-1. Call the visible task list and scan for tasks whose name begins with `forge-mental-model-`.
+1. Inspect the current visible task list, if present, for labels beginning with `forge-mental-model-`.
 2. If matching tasks exist -> skip to **On: per-domain** with the first task whose status is not `completed`.
 3. If no matching tasks exist -> proceed to **On: cold-start**.
 
@@ -90,17 +90,10 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the task list
 
-Call `TaskCreate` once per confirmed domain, in confirmed order:
+Create or refresh the visible Markdown task list with one entry per confirmed domain, in confirmed order:
 
-```
-TaskCreate(
-  name = "forge-mental-model-<domain>",
-  description = """
-    Mental-model authoring for domain: <domain>
-    Source paths: <inferred module paths for this domain>
-    Spec available: <yes | no>
-  """
-)
+```markdown
+- [ ] forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
@@ -111,7 +104,7 @@ For each domain task in order, skipping tasks with status `completed`:
 
 ### 1. Mark in-progress
 
-Call `TaskUpdate` to set the domain task status to `in_progress`.
+Update the visible task list entry for this domain to in-progress.
 
 ### 2. Domain survey
 
@@ -183,7 +176,7 @@ Write the verified draft to `ai-docs/mental-model/<domain>.md`. Commit with `(me
 
 ### 7. Complete domain
 
-1. Call `TaskUpdate` to set the domain task status to `completed`.
+1. Mark the domain task complete in the visible task list.
 2. If more domain tasks remain, continue with the next incomplete task.
 3. When all domain tasks are `completed`, proceed to **On: wrap-up**.
 

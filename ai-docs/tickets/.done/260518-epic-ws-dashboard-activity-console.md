@@ -5,7 +5,7 @@ completed: 2026-05-22
 related:
   260517-feat-ws-dashboard-workroot-activity: completed first read-only named-agent projection, badge, and pane substrate
   260517-feat-ws-dashboard-workroot-activity-live-refresh: narrow polling-replacement idea absorbed into Activity Console live update children
-  260513-feat-async-exec-output-reader: future exec jobs should become feed items and transcript sources
+  260524-epic-async-exec-job-surface: future exec jobs should become feed items and transcript sources
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -39,7 +39,7 @@ The milestone covers:
 - Agent start, interrupt, cancel, erase, retry, or other control actions.
 - Making the dashboard the ws MCP or named-agent session authority.
 - Full async exec job implementation; exec work may reserve feed item kinds but
-  remains blocked on `260513-feat-async-exec-output-reader`.
+  remains blocked on `260524-epic-async-exec-job-surface`.
 - Writable editor, terminal control, or generic file-manager behavior.
 - Public internet or multi-user authorization semantics.
 

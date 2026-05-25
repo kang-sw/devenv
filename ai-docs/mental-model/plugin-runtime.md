@@ -19,7 +19,7 @@ related:
 - `agents-plugin/.claude-plugin/plugin.json` is a Claude-facing compatibility manifest for the Codex-first candidate and should start the same Python launcher path, not the POSIX shell wrapper, so native Windows does not require `/bin/sh`. {#260505-plugin-local-mcp-server-config}
 - `agents-plugin-wsflow/` is the scaffolded agentless derivative package; its `.mcp.json` selects `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and `WS_MCP_SETUP_TOOL=setup`. {#260513-wsflow-agentless-plugin-package}
 - `.agents/plugins/marketplace.json` exposes separate local Codex marketplace entries for `ws` and `wsflow`; `.claude-plugin/marketplace.json` exposes separate manual Claude marketplace entries for the same packages while `install.sh` installs only `ws`. Keep source paths and product identities distinct. {#260513-wsflow-marketplace-install}
-- `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff. {#260505-runtime-launcher-repair-project-root}
+- `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff; cache-local runtime binary names are derived from plugin version plus `runtime.json` content hash, and repair uses process-unique temporary files with compatible-target fallback after replace failure. {#260505-runtime-launcher-repair-project-root}
 - `agents-plugin/runtime.json` is active compatibility data, not descriptive metadata. {#260505-runtime-contract-metadata}
 
 ## Module Contracts
@@ -36,10 +36,12 @@ related:
 - Version changes are multi-file and should use the bump helper rather than editing manifests manually. {#260505-runtime-version-bump-helper}
 - Runtime install/repair has explicit override env vars: `WS_MCP_RUNTIME_DIR`, release repository/tag/base URL overrides, and bootstrap binary/URL/checksum overrides.
 - The launcher exports `WS_MCP_RUNTIME_BINARY`; named-agent async workers use it to avoid spawning from stale plugin-cache executables after a plugin refresh.
+- `ai-docs/ref/ws-mcp.md` is a launcher and operations runbook, not the plugin runtime contract; update `spec/plugin-runtime.md`, `runtime.json`, and `runtime.capabilities` when caller-visible compatibility behavior changes. {#260524-reference-document-ownership}
 
 ## Coupling
 
 - Add or rename an MCP tool: update `internal/mcp/server.go` dispatch, `tools()` schema, tests, `agents-plugin/runtime.json`, and any skill guidance that names the tool; the capabilities fast path will compare `runtime.json` against the lead tool registry.
+- Change the exec job surface or runtime contract: include the full `exec.*` MCP tool set in the full ws runtime contract, keep it out of the wsflow no-agent contract, and verify explicit hidden-tool calls fail rather than starting command jobs. `exec.*` is an MCP surface; do not add launcher-required exec CLI mirrors unless the CLI contract is explicitly revised. {#260524-exec-runtime-contract-surface}
 - Add or rename a CLI command: update `cmd/ws-mcp/main.go`, `runtimeCapabilityCommandNames`, command tests, `runtime.json.commands`, launcher command probing assumptions, and docs. {#260505-runtime-cli-entrypoints}
 - Edit embedded prompts: update `agents-plugin/runtime.json` prompt bundle hash/list or build release assets so the script rewrites it.
 - Change `.mcp.json` timeouts or command path: verify installed plugin cache startup, not only source-tree execution.

@@ -40,6 +40,7 @@ Included:
 - `lead-add-rule`
 - `lead-ship`
 - `lead-sprint`
+- `lead-verify-design`
 - `lead-verify-discussion`
 - `lead-forge-spec`
 - `lead-forge-mental-model`
@@ -82,6 +83,10 @@ Excluded:
 The wsflow distributed skill bundle has package tests that fail when shipped
 skill files contain forbidden full-ws references, excluded skills, or inventory
 drift.
+
+`lead-edit` is the only intentional wsflow-only shipped skill while wsflow keeps
+source execution `lead-edit`-mediated. Any additional wsflow-only skill must be
+documented here and in the package test before release.
 
 Run:
 

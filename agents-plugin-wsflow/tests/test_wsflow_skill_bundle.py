@@ -21,10 +21,15 @@ EXPECTED_SKILLS = {
     "lead-ship",
     "lead-sprint",
     "lead-update-spec",
+    "lead-verify-design",
     "lead-verify-discussion",
     "lead-workflow-manual",
     "lead-write-spec",
     "lead-write-ticket",
+}
+
+EXPECTED_WSFLOW_ONLY_SKILLS = {
+    "lead-edit",
 }
 
 FORBIDDEN_PATTERNS = {
@@ -48,12 +53,13 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_full_skill_inventory_drift_is_visible(self):
         full_skills = {path.name for path in FULL_PLUGIN_SKILLS_DIR.iterdir() if path.is_dir()}
-        missing_full_counterparts = sorted(EXPECTED_SKILLS - full_skills)
+        missing_full_counterparts = sorted(EXPECTED_SKILLS - EXPECTED_WSFLOW_ONLY_SKILLS - full_skills)
         unexpected_wsflow_skills = sorted(
             {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()} - EXPECTED_SKILLS
         )
 
         self.assertEqual(missing_full_counterparts, [])
+        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), ["lead-edit"])
         self.assertEqual(unexpected_wsflow_skills, [])
 
     def test_skill_files_do_not_reference_full_ws_agent_surface(self):
@@ -70,14 +76,20 @@ class WsflowSkillBundleTest(unittest.TestCase):
     def test_workflow_manual_documents_subagent_guidance(self):
         text = (SKILLS_DIR / "lead-workflow-manual" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("Use subagents when a task benefits from scoped exploration", text)
+        self.assertIn("Write subagent prompts in English.", text)
         self.assertIn("The lead owns integration, verification, final judgment, and commits.", text)
 
-    def test_proceed_reads_implement_for_wsflow_verdict(self):
+    def test_proceed_uses_single_next_verdict(self):
         text = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("read `wsflow:lead-implement` skill text", text)
-        self.assertIn("**Implementation Verdict**", text)
-        self.assertIn("**Verdict Basis**", text)
+        self.assertIn("## Routing Verdict", text)
+        self.assertIn("NEXT: <wsflow:lead-discuss | wsflow:lead-write-ticket | wsflow:lead-implement | stop>", text)
+        self.assertIn("Invoke exactly that skill", text)
+        self.assertNotIn("## Pipeline:", text)
+        self.assertNotIn("**Implementation Route**", text)
+        self.assertNotIn("read `wsflow:lead-implement` skill text", text)
+        self.assertNotIn("**Implementation Verdict**", text)
+        self.assertNotIn("**Verdict Basis**", text)
         self.assertNotIn("**Complexity Flag**", text)
 
     def test_implement_keeps_wsflow_route_contract_owner(self):
@@ -89,7 +101,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
         text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version: v0003 -->", text)
+        self.assertIn("<!-- Template Version: v0004 -->", text)
         self.assertIn("This template has package-local version history", text)
         self.assertNotIn("<!-- Template Version: v0038 -->", text)
         self.assertNotIn("- v0038:", text)

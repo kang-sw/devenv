@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.26.8`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.26.8`).
+Active plugin package: `agents-plugin/` (`ws@0.29.1`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.29.1`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -66,7 +66,7 @@ history.
 | `agents-plugin/skills/lead-skill-authoring/SKILL.md` | Skill/agent/prompt/convention authoring rules |
 | `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
-| `ai-docs/ref/ws-mcp.md` | MCP process, tools, CLI fallbacks, verification levels |
+| `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
 | `ws/infra.read("impl-playbook")` | Implementation discipline |
@@ -84,17 +84,20 @@ surface may drift.
 
 ## Runtime Surfaces
 
-MCP contract and current tool inventory live in `ai-docs/ref/ws-mcp.md`; use
-`ws/runtime.info` and `ws/project_tree` for runtime state instead of copying the
-tool list here. Shared `agents-plugin` skill text uses MCP names, not repo-local
-paths. Infra and convention text are bundled into the runtime and read through
+MCP behavior contracts live in `ai-docs/spec/mcp-tools.md`,
+`ai-docs/spec/plugin-runtime.md`, and related mental models. Current tool
+schemas and inventory are runtime-discoverable through `tools/list` and
+`runtime capabilities`; do not copy them into project memory or reference docs.
+Shared `agents-plugin` skill text uses MCP names, not repo-local paths. Infra
+and convention text are bundled into the runtime and read through
 `ws/infra.read` and `ws/convention.read`.
 
 ## MCP Runtime Notes
 
-Runtime and launcher contracts are maintained in `ai-docs/ref/ws-mcp.md`,
-`ai-docs/spec/plugin-runtime.md`, and the source under `agents-plugin-tool/` and
-`agents-plugin/bin/`.
+Runtime and launcher contracts are maintained in `ai-docs/spec/plugin-runtime.md`,
+`ai-docs/spec/mcp-tools.md`, and the source under `agents-plugin-tool/` and
+`agents-plugin/bin/`. `ai-docs/ref/ws-mcp.md` is the operational runbook for
+launcher environment, release, and verification steps.
 
 Windows plugin-managed startup uses the same Python launcher. Native Windows
 needs a working `python3` command; if the Windows Store alias is present without
@@ -115,10 +118,10 @@ Use the source tree and plugin manifest/tests for the current inventory.
 ## Canonical Flows
 
 ```text
-Full ceremony:  discuss -> proceed -> implement -> (write-skeleton? -> write-code | edit)
+Full ceremony:  discuss -> proceed -> implement -> review/docs/final gate
 Direct:         implement <description>
 Auto-route:     proceed <ticket-path>
-Sprint:         sprint -> write-code | edit per task -> wrap-up
+Sprint:         sprint -> discuss/explore -> sprint-edit episode? -> episode closure or normal handoff
 Review:         review [branch] -> verdict -> (discuss -> fix | comment | merge)
 Recovery:       salvage -> research report -> recovery epic? -> child tickets
 ```
@@ -153,13 +156,15 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-sqlite-agent-activity-source` | todo | Migrate WorkRoot Activity agent projection from legacy `agent.json` scans to read-only wsstore SQLite role and instance metadata |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
-| `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
-| `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
-| `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
-| `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
+| `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
+| `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
+| `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
-| `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
-| `260520-refactor-lead-skill-cascade` | todo | Prune lead skill procedural sophistication via skill-authoring doctrine cascade (R3'/R6 phased, R1/R2/R4/R5 batched) |
+| `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from recovered run-substrate research |
+| `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
+| `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
+| `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
+| `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260525-bug-ws-dashboard-agent-tab-close-confirmation-sticky` | idea | Investigate sticky agent tab close confirmation in browser acceptance |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
@@ -167,18 +172,26 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
-| `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
-| `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
-| `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
-| `260517-bug-lead-proceed-overbroad-slice` | todo | Investigate conservative lead-proceed implementation slice routing when phase blast radii differ |
-| `260517-bug-ws-dashboard-terminal-focus-browser-gate-regression` | todo | Investigate terminal helper textarea focus loss blocking dashboard browser gate |
+| `260521-research-libws-harness-agent-substrate` | idea | Research a JSONL-first libws-harness run substrate with canonical run records, ToolHost composition, compaction, and dashboard/MCP/CLI adapters |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
-| `260505-bug-plugin-managed-default-root-discovery` | todo | Investigate plugin-managed default root discovery |
+| `260523-bug-worktree-local-index-missing` | idea | Explore dashboard-managed propagation of ignored local workflow context across worktrees |
+| `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
+| `260523-bug-ws-mcp-launcher-runtime-repair-race` | idea | Investigate ws-mcp launcher runtime repair race behavior |
+| `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
+| `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
+| `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
+| `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
+| `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
+| `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
+| `260524-bug-codex-plugin-cache-refresh-mcp-startup-race` | idea | Investigate Codex plugin cache refresh and MCP startup race behavior |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
-| `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
+
+## Ticket Focus
+
+None.
 
 ## Session Notes
 

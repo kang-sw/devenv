@@ -15,12 +15,12 @@ Target: user request
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `ws/spec_index.verify()` after every spec file write or update.
-- Domain task names use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
+- Domain task labels use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
 - All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls; store returned keys and wait on all keys before synthesizing.
 
 ## On: invoke
 
-1. Call the visible task list and scan for tasks whose name begins with `forge-spec-`.
+1. Inspect the current visible task list, if present, for labels beginning with `forge-spec-`.
 2. If matching tasks exist -> skip to **On: per-domain** with the first task whose status is not `completed`.
 3. If no matching tasks exist -> proceed to **On: cold-start**.
 
@@ -99,17 +99,10 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the task list
 
-Call `TaskCreate` once - one task per confirmed domain, in confirmed order:
+Create or refresh the visible Markdown task list with one entry per confirmed domain, in confirmed order:
 
-```
-TaskCreate(
-  name = "forge-spec-<domain>",
-  description = """
-    Spec authoring for domain: <domain>
-    Source paths: <inferred module paths for this domain>
-    Old spec files: <archived spec files that covered this domain, or none>
-  """
-)
+```markdown
+- [ ] forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
@@ -120,7 +113,7 @@ For each domain task in order, skipping tasks with status `completed`:
 
 ### 1. Mark in-progress
 
-Call `TaskUpdate` to set the domain task status to `in_progress`.
+Update the visible task list entry for this domain to in-progress.
 
 ### 2. Parallel domain survey
 
@@ -144,7 +137,7 @@ Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
 Use `ws/tickets.find(query: "<domain>")`; filter by module paths when needed.
-Return features -> ticket status. todo items are `🚧` candidates.
+Return features -> ticket status. Only contract-first ready implementation items, plus epic/research/workset planned decomposition, investigation text, or operating context, are `🚧` candidates; todo items are ticket-intent evidence.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -183,7 +176,7 @@ classification (implemented / planned), and uncertainty flags.
 Present the behavior brief to the user. For each item, establish:
 
 1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`. Ask on every ambiguous item.
-2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned -> `## 🚧 Feature {#slug}`.
+2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Contract-first planned implementation behavior -> `## 🚧 Feature {#slug}` only when backed by a non-`epic`, non-`research`, non-`workset` `ready/` ticket. Epic, research, or workset tickets may back only planned decomposition, investigation text, or operating context. Other planned work stays in ticket `## Spec Impact` or the survey report.
 
 Ask on every ambiguous item. Do not classify without confirmation. Collect the
 confirmed list before writing anything.
@@ -231,7 +224,7 @@ For each ticket:
 
 ### 7. Complete domain
 
-1. Call `TaskUpdate` to set the domain task status to `completed`.
+1. Mark the domain task complete in the visible task list.
 2. If more domain tasks remain, continue with the next incomplete task from step 1 of **On: per-domain**.
 3. When all domain tasks are `completed`, proceed to **On: wrap-up**.
 
@@ -258,7 +251,7 @@ Total stems generated: <count>
 ### 3. Suggested next steps
 
 - Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
-- Review `🚧` entries with open tickets - confirm each has an active todo ticket or drop the marker.
+- Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.
 - Run `ws:lead-write-spec` for any domain surfaces discovered after wrap-up.
 
 ## Judgments
@@ -282,17 +275,10 @@ ws/spec_index.verify()
 
 No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once after any spec write or update in this session.
 
-### Task registration
+### Task list entry
 
-```
-TaskCreate(
-  name = "forge-spec-<domain>",
-  description = """
-    Spec authoring for domain: <domain>
-    Source paths: <comma-separated module paths>
-    Old spec files: <comma-separated archived spec paths, or none>
-  """
-)
+```markdown
+- [ ] forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>
 ```
 
 ## Doctrine

@@ -14,7 +14,7 @@ source, and tests for behavioral truth.
 | MCP tools, wsdoc discovery, convention access, CLI mirrors | `spec/mcp-tools.md` | `mental-model/mcp-runtime.md`, `mental-model/documentation-system.md` |
 | Workflow skills, routing, sprint/review/proceed behavior | `spec/workflow-skills.md` | `mental-model/workflow-skills.md`, `ref/wsflow-mirroring.md` when wsflow mirrors may change |
 | Specs, tickets, mental models, project memory, references | `spec/documentation-system.md` | `mental-model/documentation-system.md` |
-| Named agents, subqueries, backend behavior | `spec/named-agent-runtime.md` | `mental-model/named-agent-runtime.md`, `ref/ws-agent-runtime.md` |
+| Named agents, actor-scoped registry metadata, subqueries, backend behavior | `spec/named-agent-runtime.md` | `mental-model/named-agent-runtime.md`, `ref/ws-agent-runtime.md` |
 | API documentation cache and manager sessions | `spec/api-documentation-cache.md` | `mental-model/api-documentation-cache.md` |
 | Personal shell/editor/tmux/Claude dashboard tooling | `spec/developer-environment-tools.md` | `mental-model/developer-environment-tools.md` |
 | Dashboard daemon, browser UI, owner auth, Activity Console streams, resource view-model API/fixtures, host-control boundary | `spec/ws-web-dashboard/index.md` | `mental-model/ws-web-dashboard.md` |
@@ -25,7 +25,7 @@ source, and tests for behavioral truth.
 |--------|------|-------|
 | plugin-runtime | `mental-model/plugin-runtime.md` | Codex plugin manifests, launcher repair, runtime metadata, release assets |
 | mcp-runtime | `mental-model/mcp-runtime.md` | ws-mcp stdio server, tool registry, CLI mirror, concurrency, profile gates |
-| named-agent-runtime | `mental-model/named-agent-runtime.md` | File-backed agents, async calls, locks, subqueries, Codex backend handling |
+| named-agent-runtime | `mental-model/named-agent-runtime.md` | SQLite-backed agent registry metadata, file-backed payloads, async calls, subqueries, Codex backend handling |
 | workflow-skills | `mental-model/workflow-skills.md` | Codex lead skills, workflow prompt orchestration |
 | documentation-system | `mental-model/documentation-system.md` | Project memory, conventions, specs, tickets, mental models, reference tracing |
 | git-workflow-tools | `mental-model/git-workflow-tools.md` | Constrained Git MCP/CLI tools and structured commit behavior |

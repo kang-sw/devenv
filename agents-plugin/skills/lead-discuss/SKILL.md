@@ -21,6 +21,7 @@ Evidence
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 
 Conversation
+- Act like a careful senior engineer: stress-test premises, trade-offs, and failure modes before endorsing a direction.
 - Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
 - Use the user's active conversation language for discussion responses.
 - Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
@@ -30,7 +31,7 @@ Conversation
 
 1. Invoke `ws:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
 2. Call `ws/project_tree()` to load the current project map.
-3. Call `ws/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:lead-sprint` provides session continuity."
+3. Call `ws/git.status()`.
 4. If `user request` references a ticket, read it.
 5. Enter user-message handling.
 
@@ -45,7 +46,7 @@ Conversation
 
 ### 2. Route Intent
 
-1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
+1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`.
 2. Apply `judge: needs-intent-frame`; if it fires, emit an Intent Frame before advice.
 3. Apply `judge: needs-interview`; if it fires, enter Interview Workflow before proposing a settled direction.
 
@@ -73,10 +74,10 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 1. Read the ticket file. Extract any `spec:` frontmatter field and body references to `{#YYMMDD-slug}` anchors.
 2. **Triage (idea/ -> todo/)**:
    a. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
-   b. Do not require spec creation; `todo/` is accepted backlog, not the implementation queue.
+   b. Do not require spec creation; `todo/` is accepted backlog, not implementation-ready status.
 3. **Ready promotion (todo/ -> ready/)**:
    a. Invoke `ws:lead-write-ticket` (Edit path) for the `todo/` -> `ready/` promotion.
-   b. `ws:lead-write-ticket` owns spec coverage, frontmatter population, the `git mv`, queue update, and commit.
+   b. `ws:lead-write-ticket` owns spec addressing, frontmatter population, the `git mv`, focus update, and commit.
    c. Stop this handler after `ws:lead-write-ticket` returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
@@ -87,23 +88,13 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 
 ## On: user signals done
 
-1. If the user wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
-2. For persistence without implementation, always suggest `ws:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
+1. If the user wants implementation to start, continue through `ws:lead-proceed`.
+2. For persistence without implementation, suggest `ws:lead-write-spec` as the next route; that skill owns whether spec changes are needed.
 3. Then offer ticket persistence:
    - **New ticket** - invoke `ws:lead-write-ticket`.
    - **Ticket update** - invoke `ws:lead-write-ticket`, then append design notes to an existing ticket phase.
 4. Apply **judge: needs-integration-tests** to ticket writes.
 5. Write only what the user approves. No artifact needed for exploratory discussions.
-
-## Context To Carry
-
-Discussion outputs feed downstream skills:
-- Continue through `ws:lead-write-spec`; carry approach direction.
-- Continue through `ws:lead-write-ticket`; carry scope, phases, and acceptance criteria.
-- Continue through `ws:lead-proceed`; carry implementation intent and settled discussion context.
-- Carry type shapes, module boundaries, and public API notes into implementation routing.
-
-Frame conclusions as directives the downstream consumer can execute.
 
 ## Judgments
 

@@ -15,11 +15,11 @@ through MCP discovery tools and convention documents.
 `ai-docs/_index.md` is the project memory and active inventory document. It
 records the repository purpose, plugin topology, read-before-edit references,
 implemented runtime surfaces, prompt and skill inventory, current spec list,
-active ticket list, ticket queue, and compact session notes.
+active ticket list, ticket focus, and compact session notes.
 
 The index is intentionally bounded: completed and dropped ticket history lives
 in the ticket archive directories and Git history, while the index keeps the
-current queue and context a future session should not have to re-derive.
+current focus and context a future session should not have to re-derive.
 
 ## Project Old Archive {#260511-project-old-archive}
 
@@ -44,16 +44,33 @@ Workflow skills read these conventions before editing the matching document
 system. Shared skill text uses this MCP surface instead of hard-coded
 repository-local convention paths.
 
+## Reference Document Ownership {#260524-reference-document-ownership}
+
+Reference documents under `ai-docs/ref/` are operational runbooks, stable
+external notes, or link hubs. They do not own caller-visible behavior contracts,
+current implementation inventory, or source-derived schemas. Specs own
+observable behavior, mental models own non-obvious modification coupling, and
+runtime/source discovery owns facts that can be read directly from code-backed
+surfaces.
+
+A reference may point to runtime-discoverable inventory such as MCP
+`tools/list`, `runtime capabilities`, source registries, or generated metadata,
+but it should not duplicate that inventory unless the duplicate is generated or
+is itself a public artifact. When a reference contains operational commands, the
+commands are examples or runbook steps rather than the behavioral source of
+truth.
+
 ## Spec Document System {#260505-spec-document-system}
 
 Specs describe caller-visible project behavior. They live under
 `ai-docs/spec/`, use English content, carry stable `{#YYMMDD-slug}` anchors, and
 avoid implementation detail that would drift under behavior-preserving refactors.
 
-Planned spec behavior uses `🚧` markers: a planned new feature is a heading such
-as `## 🚧 Feature Name {#YYMMDD-slug}`, and a planned change to an existing
-feature uses a `> [!note] Planned 🚧` callout. Entries without `🚧` are treated
-as implemented and must be verified before committing.
+Contract-first planned spec behavior uses `🚧` markers only when planned
+behavior must be visible and stable before implementation begins: a planned new
+feature is a heading such as `## 🚧 Feature Name {#YYMMDD-slug}`, and a planned
+change to an existing feature uses a `> [!note] Planned 🚧` callout. Entries
+without `🚧` are treated as implemented and must be verified before committing.
 
 `ws/spec_stem.generate` creates collision-free anchor stems. `ws/spec_index.verify`
 checks the spec corpus for duplicate anchors. `ws/specs.list`,
@@ -66,9 +83,11 @@ stem.
 Tickets track workflow work under `ai-docs/tickets/` with directory-based
 status. Active status directories are `ready/`, `todo/`, and `idea/`: `idea/`
 captures rough ideas before triage, `todo/` holds accepted backlog with
-recoverable ticket intent, and `ready/` holds spec-gated implementation work.
-Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Queue`
-lists `ready/` work only.
+recoverable ticket intent, and `ready/` holds spec-addressed implementation
+work.
+Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Focus`
+lists selected active attention items; only `ready/` entries are direct
+implementation targets.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
@@ -89,6 +108,19 @@ done/drop/defer criteria; detailed discussion and implementation phases move
 into child tickets. Epics remain decomposition artifacts exempt from ready spec
 gating. {#260508-lightweight-epic-ticket-conventions}
 
+Workset tickets are documented as non-hierarchical operating-context boards.
+Workset bodies keep the context, included ticket list, current focus, and exit
+criteria for a session, goal, sprint, or temporary focus area. Included tickets
+are listed by stem or path with status and role; planned-but-not-created items
+go under `## Planned References` with provisional labels and creation
+conditions, not status or path. Workset inclusion never changes `parent:`,
+and worksets do not own decomposition, cross-child invariants, implementation
+phases, or spec-ready behavior. If a grouping starts owning scope decomposition
+or invariant decisions, it becomes epic-shaped instead. Worksets remain
+coordination artifacts exempt from ready spec gating and normally stay in
+`idea/` or `todo/`, not `ready/`.
+{#260524-workset-ticket-conventions}
+
 `ws/tickets.list`, `ws/tickets.find`, and `ws/tickets.status` provide structured
 ticket discovery across active and archived statuses, including phase/result
 state, snippets, relationships, spec links, plans, skeletons, and status
@@ -105,7 +137,7 @@ The root `ai-docs/mental-model.md` may include a compact project reading map
 that routes common task or discussion topics to relevant specs, mental-model
 documents, stable references, or lookup guidance. The map is routing metadata,
 not project truth: it must not duplicate feature descriptions, active ticket
-queues, implementation status, source paraphrases, or behavioral claims owned by
+focus, implementation status, source paraphrases, or behavioral claims owned by
 specs.
 
 Domain documents may include `## Domain Rules`, which are persistent
@@ -169,22 +201,22 @@ without loading the full documentation corpus into context.
 
 `lead-write-spec` creates or updates spec entries for caller-visible behavior.
 It reads spec conventions, chooses a file layout, generates stems, writes
-implemented or `🚧` entries, verifies duplicate anchors, performs accuracy
-checks, and commits the spec update.
+implemented entries or contract-first `🚧` entries, verifies duplicate anchors,
+performs accuracy checks, and commits the spec update.
 
 `lead-update-spec` audits commit ranges for caller-visible behavior changes. It
 adds missing implemented entries, strips `🚧` markers when implementation has
 landed, handles removed spec stems, verifies duplicate anchors, and commits all
 spec changes together.
 
-`lead-write-ticket` creates or updates tickets. It applies the spec gate when a
-non-`epic`, non-`research` ticket enters `ready/`, reads ticket conventions,
-invokes `lead-write-spec` when ready-ticket coverage is missing, re-checks
-coverage before finalizing the ticket, updates queue entries for `ready/` work,
-preserves stable ticket stems, and commits ticket changes. Creating or promoting
-accepted backlog into `todo/` preserves intent without requiring immediate spec
-linkage; optional `todo/` `spec:` links are recovery hints and promotion
-candidates.
+`lead-write-ticket` creates or updates tickets. It applies the spec-address gate
+when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads ticket
+conventions, verifies existing stems or ticket-local `## Spec Impact`, invokes
+`lead-write-spec` only for contract-first planned spec entries, updates
+`## Ticket Focus` for selected active attention items, preserves stable ticket
+stems, and commits ticket changes. Creating or promoting accepted backlog into
+`todo/` preserves intent without requiring immediate spec linkage; optional
+`todo/` `spec:` links are recovery hints and promotion candidates.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 

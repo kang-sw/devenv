@@ -3,6 +3,8 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,23 +17,27 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/execjob"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 type Server struct {
-	root           string
-	version        string
-	sourceCommit   string
-	role           toolRole
-	api            apiRuntime
-	rootMu         sync.RWMutex
-	sessionRoot    string
-	sessionHarness string
+	root                  string
+	version               string
+	sourceCommit          string
+	role                  toolRole
+	api                   apiRuntime
+	rootMu                sync.RWMutex
+	sessionRoot           string
+	sessionHarness        string
+	sessionActorID        string
+	sessionActorAuthority string
 }
 
 type toolRole string
@@ -69,6 +75,8 @@ type rpcError struct {
 const ProtocolVersion = "2025-03-26"
 
 const maxDebugEvents = 256
+
+const leadWorkflowBootstrapMethod = "lead-workflow-bootstrap"
 
 const (
 	envNoAgent   = "WS_MCP_NO_AGENT"
@@ -130,6 +138,18 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		reqCtx, cancel := context.WithCancel(ctx)
 		id := rawMessageString(req.ID)
+		if isSetupFenceRequest(req) {
+			wg.Wait()
+			requests.Store(id, cancel)
+			resp := s.handle(reqCtx, req)
+			cancel()
+			requests.Delete(id)
+			if err := writeResponse(resp); err != nil {
+				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+				return err
+			}
+			continue
+		}
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
@@ -144,6 +164,19 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	err := scanner.Err()
 	wg.Wait()
 	return err
+}
+
+func isSetupFenceRequest(req request) bool {
+	if req.Method != "tools/call" {
+		return false
+	}
+	var params struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return false
+	}
+	return params.Name == "ws.setup" || params.Name == setupToolName()
 }
 
 func (s *Server) handleNotification(req request, requests *sync.Map) {
@@ -317,6 +350,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if setupToolName() != "ws.setup" && params.Name == setupToolName() {
 		params.Name = "ws.setup"
 	}
+	if err := s.actorGate(params.Name, params.Arguments); err != nil {
+		return toolTextResponse(req.ID, "", err)
+	}
 
 	switch params.Name {
 	case "runtime.info":
@@ -332,14 +368,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
 	case "ws.setup":
-		if root, _ := params.Arguments["root"].(string); strings.TrimSpace(root) != "" {
-			canonical, err := canonicalGitRoot(root)
-			if err != nil {
-				return toolTextResponse(req.ID, "", err)
-			}
-			s.rootMu.Lock()
-			s.sessionRoot = canonical
-			s.rootMu.Unlock()
+		if err := s.applySetup(ctx, params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		state := s.setupState(requestedToolName)
 		if wantsJSON(params.Arguments) {
@@ -419,6 +449,80 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		key, _ := params.Arguments["api_job_key"].(string)
 		result, err := s.cancelAPIJob(ctx, root, key)
+		return toolJSONResponse(req.ID, result, err)
+
+	case "exec.spawn":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		cmd, _ := params.Arguments["cmd"].(string)
+		workingDir, _ := params.Arguments["working_dir"].(string)
+		stdin, _ := params.Arguments["stdin"].(string)
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin})
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.shell":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		command, _ := params.Arguments["command"].(string)
+		workingDir, _ := params.Arguments["working_dir"].(string)
+		stdin, _ := params.Arguments["stdin"].(string)
+		shell, _ := params.Arguments["shell"].(string)
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true})
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.status":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		result, err := execjob.Status(root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.result":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		result, err := execjob.Result(root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.abort":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		result, err := execjob.Abort(root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.raw.tail":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		stream, _ := params.Arguments["stream"].(string)
+		result, err := execjob.Tail(root, key, stream, intFromArgument(params.Arguments["lines"], 0))
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.raw.read":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		stream, _ := params.Arguments["stream"].(string)
+		result, err := execjob.Read(root, key, stream, int64FromArgument(params.Arguments["offset"], 0), int64FromArgument(params.Arguments["limit"], 0))
+		return toolJSONResponse(req.ID, result, err)
+	case "exec.raw.grep":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["exec_key"].(string)
+		stream, _ := params.Arguments["stream"].(string)
+		pattern, _ := params.Arguments["pattern"].(string)
+		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return toolJSONResponse(req.ID, result, err)
 	case "config.show":
 		view, err := wsconfig.Show(wsconfig.Options{})
@@ -710,11 +814,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			question, _ = params.Arguments["prompt"].(string)
 		}
 		deepResearch, _ := params.Arguments["deep_research"].(bool)
+		child, err := s.childActorSetupForSubquery(ctx, root)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
-			Root:         root,
-			Question:     question,
-			DeepResearch: deepResearch,
-			Harness:      s.currentHarness(),
+			Root:                  root,
+			ActorID:               s.actorScopeForAgentTool(root, params.Arguments),
+			Question:              question,
+			DeepResearch:          deepResearch,
+			Harness:               s.currentHarness(),
+			ChildActorID:          child.ActorID,
+			ChildActorAuthority:   child.Authority,
+			ChildSetupInstruction: child.Instruction,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
@@ -737,21 +849,30 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
 		tier, _ := params.Arguments["tier"].(string)
 		model, _ := params.Arguments["model"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
+		child, err := s.childActorSetupForAgent(ctx, root, name, actorID, false)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-			Root:             root,
-			Name:             name,
-			Backend:          backend,
-			Harness:          s.currentHarness(),
-			Tier:             tier,
-			Model:            model,
-			Prompts:          stringList(params.Arguments["prompts"]),
-			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
-			SystemPromptText: systemPromptText,
+			Root:                  root,
+			ActorID:               actorID,
+			Name:                  name,
+			Backend:               backend,
+			Harness:               s.currentHarness(),
+			Tier:                  tier,
+			Model:                 model,
+			Prompts:               stringList(params.Arguments["prompts"]),
+			PromptRefs:            stringList(params.Arguments["prompt_refs"]),
+			SystemPromptText:      systemPromptText,
+			ChildActorID:          child.ActorID,
+			ChildActorAuthority:   child.Authority,
+			ChildSetupInstruction: child.Instruction,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
 	case "agents.call":
@@ -759,12 +880,21 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
+		child, err := s.childActorSetupForAgent(ctx, root, name, actorID, true)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
+			Root:                  root,
+			ActorID:               actorID,
+			Name:                  name,
+			Prompt:                prompt,
+			ChildActorID:          child.ActorID,
+			ChildActorAuthority:   child.Authority,
+			ChildSetupInstruction: child.Instruction,
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -775,10 +905,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		names := stringList(params.Arguments["names"])
 		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
 			Root:    root,
+			ActorID: actorID,
 			Name:    name,
 			Names:   names,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
@@ -790,12 +922,17 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
 			Root:    root,
+			ActorID: actorID,
 			Name:    name,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
 			Context: ctx,
+			OnEphemeralErased: func(agent wsagent.Agent) {
+				s.markActorInactive(context.Background(), root, agent.ChildActorID)
+			},
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.status":
@@ -803,18 +940,21 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
+		text, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, name, actorID)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.interrupt":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		message, _ := params.Arguments["message"].(string)
 		result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
 			Root:    root,
+			ActorID: actorID,
 			Name:    name,
 			Message: message,
 		})
@@ -827,12 +967,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Lines:   lines,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.tail":
@@ -840,13 +982,15 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:  root,
-			Name:  name,
-			Lines: lines,
-			Raw:   true,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Lines:   lines,
+			Raw:     true,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
@@ -854,14 +998,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		stream := strings.TrimPrefix(params.Name, "agents.debug.")
 		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
-			Root:   root,
-			Name:   name,
-			Stream: stream,
-			Lines:  lines,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Stream:  stream,
+			Lines:   lines,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.cancel":
@@ -869,20 +1015,23 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
+		text, err := wsagent.NewManager(wsagent.Options{}).CancelScoped(root, name, actorID)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.recall":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
+			Root:    root,
+			ActorID: actorID,
+			Name:    name,
+			Prompt:  prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.print":
@@ -890,16 +1039,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
+		text, err := wsagent.NewManager(wsagent.Options{}).PrintScoped(root, name, actorID)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.erase":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		err = wsagent.NewManager(wsagent.Options{}).Erase(root, name)
+		err = wsagent.NewManager(wsagent.Options{}).EraseScoped(root, name, actorID)
 		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -992,10 +1143,16 @@ func (s *Server) setupState(source string) map[string]any {
 	s.rootMu.RLock()
 	sessionRoot := s.sessionRoot
 	sessionHarness := s.sessionHarness
+	actorID := s.sessionActorID
+	actorAuthority := s.sessionActorAuthority
 	s.rootMu.RUnlock()
 	return map[string]any{
 		"root":                 sessionRoot,
 		"has_root":             sessionRoot != "",
+		"actor_id":             actorID,
+		"has_actor":            actorID != "",
+		"actor_authority":      actorAuthority,
+		"recovery_guidance":    recoveryGuidance(actorID),
 		"session_default_root": sessionRoot,
 		"has_session_default":  sessionRoot != "",
 		"session_harness":      sessionHarness,
@@ -1009,10 +1166,311 @@ func formatSetupState(values map[string]any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "root: %s\n", displayString(values["root"]))
 	fmt.Fprintf(&b, "has_root: %t\n", boolValue(values["has_root"]))
+	fmt.Fprintf(&b, "actor_id: %s\n", displayString(values["actor_id"]))
+	fmt.Fprintf(&b, "has_actor: %t\n", boolValue(values["has_actor"]))
+	fmt.Fprintf(&b, "actor_authority: %s\n", displayString(values["actor_authority"]))
+	if guidance := displayString(values["recovery_guidance"]); guidance != "" {
+		fmt.Fprintf(&b, "recovery_guidance: %s\n", guidance)
+	}
 	fmt.Fprintf(&b, "session_harness: %s\n", displayString(values["session_harness"]))
 	fmt.Fprintf(&b, "server_root: %s\n", displayString(values["server_root"]))
 	fmt.Fprintf(&b, "env_project_root: %s\n", displayString(values["env_project_root"]))
 	return b.String()
+}
+
+func recoveryGuidance(actorID string) string {
+	if actorID == "" {
+		return fmt.Sprintf("Lead bootstrap requires %s(method: %q, root: \"<absolute-working-directory>\").", setupToolName(), leadWorkflowBootstrapMethod)
+	}
+	return fmt.Sprintf("Do not forget this actor_id. If MCP restarts, call %s(id: %q).", setupToolName(), actorID)
+}
+
+func (s *Server) applySetup(ctx context.Context, arguments map[string]any) error {
+	if id, _ := arguments["id"].(string); strings.TrimSpace(id) != "" {
+		return s.restoreActor(ctx, strings.TrimSpace(id))
+	}
+	method, _ := arguments["method"].(string)
+	method = strings.TrimSpace(method)
+	if method != "" {
+		if method != leadWorkflowBootstrapMethod {
+			return fmt.Errorf("unsupported setup method %q", method)
+		}
+		return s.bootstrapLeadActor(ctx, arguments)
+	}
+	if root, _ := arguments["root"].(string); strings.TrimSpace(root) != "" {
+		canonical, err := canonicalSetupRoot(root)
+		if err != nil {
+			return err
+		}
+		s.rootMu.Lock()
+		s.sessionRoot = canonical
+		s.rootMu.Unlock()
+	}
+	return nil
+}
+
+func (s *Server) bootstrapLeadActor(ctx context.Context, arguments map[string]any) error {
+	root, _ := arguments["root"].(string)
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fmt.Errorf("root is required for setup method %q; pass the repository's absolute filesystem path", leadWorkflowBootstrapMethod)
+	}
+	if root == "<cwd>" {
+		return fmt.Errorf("root for setup method %q must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", leadWorkflowBootstrapMethod, root)
+	}
+	if !filepath.IsAbs(root) {
+		return fmt.Errorf("root for setup method %q must be an absolute repository path", leadWorkflowBootstrapMethod)
+	}
+	canonical, err := canonicalSetupRoot(root)
+	if err != nil {
+		return err
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(canonical)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	worktreeKey := store.Layout().WorktreeKey
+	actorID, err := mintActorID("lead", worktreeKey)
+	if err != nil {
+		return err
+	}
+	actor := wsstore.Actor{
+		ActorID:     actorID,
+		Authority:   "lead",
+		RootPath:    canonical,
+		WorktreeKey: worktreeKey,
+		Status:      "active",
+		Pinned:      true,
+	}
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		return err
+	}
+	s.bindActor(actor)
+	return nil
+}
+
+func canonicalSetupRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "<cwd>" {
+		return "", fmt.Errorf("root must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", root)
+	}
+	return canonicalGitRoot(root)
+}
+
+func (s *Server) restoreActor(ctx context.Context, actorID string) error {
+	worktreeKey, err := actorWorktreeKey(actorID)
+	if err != nil {
+		return err
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).OpenWorktreeKey(worktreeKey)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	actor, ok, err := store.Actor(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<absolute-working-directory>\") to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
+	}
+	if actor.Status != "" && actor.Status != "active" {
+		return fmt.Errorf("actor id %q is not active: %s", actorID, actor.Status)
+	}
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		return err
+	}
+	s.bindActor(actor)
+	return nil
+}
+
+func (s *Server) bindActor(actor wsstore.Actor) {
+	s.rootMu.Lock()
+	defer s.rootMu.Unlock()
+	s.sessionRoot = actor.RootPath
+	s.sessionActorID = actor.ActorID
+	s.sessionActorAuthority = actor.Authority
+}
+
+func mintActorID(authority, worktreeKey string) (string, error) {
+	var suffix [12]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	return authority + "-" + worktreeKey + "-" + hex.EncodeToString(suffix[:]), nil
+}
+
+func actorWorktreeKey(actorID string) (string, error) {
+	authority, rest, ok := strings.Cut(actorID, "-")
+	if !ok || !validActorAuthority(authority) {
+		return "", fmt.Errorf("invalid actor id %q", actorID)
+	}
+	idx := strings.LastIndex(rest, "-")
+	if idx <= 0 || idx == len(rest)-1 {
+		return "", fmt.Errorf("invalid actor id %q", actorID)
+	}
+	worktreeKey := rest[:idx]
+	if _, err := wsstate.LayoutForWorktreeKey("", worktreeKey); err != nil {
+		return "", fmt.Errorf("invalid actor id %q: %w", actorID, err)
+	}
+	return worktreeKey, nil
+}
+
+func validActorAuthority(value string) bool {
+	switch value {
+	case "lead", "delegate", "reader":
+		return true
+	default:
+		return false
+	}
+}
+
+func blankDefault(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+type childActorSetup struct {
+	ActorID     string
+	Authority   string
+	Instruction string
+}
+
+func (s *Server) actorScopeForAgentTool(root string, arguments map[string]any) string {
+	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
+		return ""
+	}
+	if !s.actorBoundToRoot(root) {
+		return ""
+	}
+	return s.currentActorID()
+}
+
+func (s *Server) childActorSetupForAgent(ctx context.Context, root, name, actorID string, requireExisting bool) (childActorSetup, error) {
+	if strings.TrimSpace(actorID) == "" {
+		return childActorSetup{}, nil
+	}
+	if agent, err := wsagent.NewManager(wsagent.Options{}).AgentScoped(root, name, actorID); err == nil {
+		if strings.TrimSpace(agent.ChildActorID) != "" {
+			return s.ensureChildActor(ctx, root, strings.TrimSpace(agent.ChildActorID), blankDefault(agent.ChildActorAuthority, "delegate"))
+		}
+	} else if requireExisting {
+		return childActorSetup{}, err
+	}
+	return s.ensureChildActor(ctx, root, "", "delegate")
+}
+
+func (s *Server) childActorSetupForSubquery(ctx context.Context, root string) (childActorSetup, error) {
+	if !s.actorBoundToRoot(root) {
+		return childActorSetup{}, nil
+	}
+	return s.ensureChildActor(ctx, root, "", "reader")
+}
+
+func (s *Server) actorBoundToRoot(root string) bool {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	return s.sessionActorID != "" && s.sessionRoot == root
+}
+
+func (s *Server) currentActorID() string {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	return s.sessionActorID
+}
+
+func (s *Server) ensureChildActor(ctx context.Context, root, actorID, authority string) (childActorSetup, error) {
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		return childActorSetup{}, err
+	}
+	defer store.Close()
+	authority = blankDefault(authority, "delegate")
+	if actorID == "" {
+		actorID, err = mintActorID(authority, store.Layout().WorktreeKey)
+		if err != nil {
+			return childActorSetup{}, err
+		}
+	}
+	actor := wsstore.Actor{
+		ActorID:       actorID,
+		Authority:     authority,
+		RootPath:      root,
+		WorktreeKey:   store.Layout().WorktreeKey,
+		ParentActorID: s.currentActorID(),
+		Status:        "active",
+		Pinned:        authority == "delegate",
+	}
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		return childActorSetup{}, err
+	}
+	return childActorSetup{
+		ActorID:     actorID,
+		Authority:   authority,
+		Instruction: childActorInstruction(actorID),
+	}, nil
+}
+
+func childActorInstruction(actorID string) string {
+	if strings.TrimSpace(actorID) == "" {
+		return ""
+	}
+	return fmt.Sprintf("Before root-omitted ws MCP tool calls in this child process, call MCP tool `ws.setup` with `id: %q` to recover your assigned actor context.", actorID)
+}
+
+func (s *Server) markActorInactive(ctx context.Context, root, actorID string) {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		appendDebugEvent("actor.inactive.error", map[string]any{"actor_id": actorID, "error": err.Error()})
+		return
+	}
+	defer store.Close()
+	actor, ok, err := store.Actor(ctx, actorID)
+	if err != nil || !ok {
+		fields := map[string]any{"actor_id": actorID}
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		appendDebugEvent("actor.inactive.missing", fields)
+		return
+	}
+	actor.Status = "inactive"
+	actor.Pinned = false
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		appendDebugEvent("actor.inactive.error", map[string]any{"actor_id": actorID, "error": err.Error()})
+	}
+}
+
+func (s *Server) actorGate(name string, arguments map[string]any) error {
+	if !rootOmittedActorTool(name) {
+		return nil
+	}
+	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
+		return nil
+	}
+	s.rootMu.RLock()
+	hasActor := s.sessionActorID != ""
+	s.rootMu.RUnlock()
+	if hasActor {
+		return nil
+	}
+	return fmt.Errorf("setup required before root-omitted %s: call %s(method: %q, root: \"<absolute-working-directory>\") from lead-workflow-manual, or recover with %s(id: \"<actor-id>\")", name, setupToolName(), leadWorkflowBootstrapMethod, setupToolName())
+}
+
+func rootOmittedActorTool(name string) bool {
+	switch name {
+	case "agents.register", "agents.call", "subquery":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatStringLines(values []string) string {
@@ -1655,11 +2113,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.setup",
-			"description": "Configure volatile ws MCP session state such as the repository root for this server process.",
+			"description": "Configure ws MCP session state, including lead actor bootstrap and repository root recovery for this server process.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Git worktree root to store for later root-omitted ws MCP tool calls."),
+					"method": stringProperty(`Optional setup method. Use "lead-workflow-bootstrap" to create a recoverable lead actor.`),
+					"id":     stringProperty("Recover a previously returned actor_id and bind it to this MCP server process."),
+					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass the repository's absolute filesystem path.`),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -1736,6 +2196,46 @@ func tools() []map[string]any {
 				},
 				"required": []string{"api_job_key"},
 			},
+		},
+		{
+			"name":        "exec.spawn",
+			"description": "Start a durable structured command job using argv, with bounded inline output when it completes quickly.",
+			"inputSchema": execLaunchSchema(false),
+		},
+		{
+			"name":        "exec.shell",
+			"description": "Start a durable explicit shell command job, with bounded inline output when it completes quickly.",
+			"inputSchema": execLaunchSchema(true),
+		},
+		{
+			"name":        "exec.status",
+			"description": "Return lifecycle status and stream sizes for a durable exec job.",
+			"inputSchema": execKeySchema(),
+		},
+		{
+			"name":        "exec.result",
+			"description": "Return terminal exec job metadata and at most the fixed 4096-byte inline output budget.",
+			"inputSchema": execKeySchema(),
+		},
+		{
+			"name":        "exec.abort",
+			"description": "Best-effort terminate a running exec job while preserving partial output.",
+			"inputSchema": execKeySchema(),
+		},
+		{
+			"name":        "exec.raw.tail",
+			"description": "Read bounded tail text from a persisted exec stdout, stderr, or combined stream.",
+			"inputSchema": execRawTailSchema(),
+		},
+		{
+			"name":        "exec.raw.read",
+			"description": "Read bytes from a persisted exec stream with offset continuation.",
+			"inputSchema": execRawReadSchema(),
+		},
+		{
+			"name":        "exec.raw.grep",
+			"description": "Search persisted exec streams with literal matching by default and opt-in regex mode.",
+			"inputSchema": execRawGrepSchema(),
 		},
 		{
 			"name":        "config.show",
@@ -1837,7 +2337,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "project_tree",
-			"description": "Render the ws project document map, spec inventory, and active ticket queue.",
+			"description": "Render the ws project document map, spec inventory, and active ticket inventory.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2067,7 +2567,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":               stringProperty("Repository root. Defaults to the server root."),
 					"name":               stringProperty("Agent name."),
 					"backend":            stringProperty("Optional backend name. Model aliases use the detected harness when omitted."),
 					"tier":               stringProperty("Deprecated compatibility alias selector: light, core, or deep."),
@@ -2085,7 +2584,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"name":   stringProperty("Agent name."),
 					"prompt": stringProperty("Prompt to send to the agent."),
 				},
@@ -2098,7 +2596,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"name":            stringProperty("Agent name. Compatibility alias for a single name."),
 					"names":           stringArrayProperty("Agent names to wait for."),
 					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
@@ -2111,7 +2608,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"name":            stringProperty("Agent name."),
 					"timeout_seconds": numberProperty("Maximum seconds to wait. Omit or set 0 for a non-blocking read."),
 				},
@@ -2124,7 +2620,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2136,7 +2631,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":    stringProperty("Repository root. Defaults to the server root."),
 					"name":    stringProperty("Agent name."),
 					"message": stringProperty("Interrupt or redirect message to deliver to the agent."),
 				},
@@ -2149,7 +2643,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":  stringProperty("Repository root. Defaults to the server root."),
 					"name":  stringProperty("Agent name."),
 					"lines": integerProperty("Number of lines per section. Defaults to 40."),
 				},
@@ -2187,7 +2680,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2199,7 +2691,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2211,7 +2702,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2395,6 +2885,9 @@ func namespaceValue(value any) any {
 }
 
 func noAgentHiddenTool(name string) bool {
+	if strings.HasPrefix(name, "exec.") {
+		return true
+	}
 	if strings.HasPrefix(name, "agents.") {
 		return true
 	}
@@ -2450,12 +2943,61 @@ func agentDebugSchema(linesDescription string) map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"root":  stringProperty("Repository root. Defaults to the server root."),
 			"name":  stringProperty("Agent name."),
 			"lines": integerProperty(linesDescription),
 		},
 		"required": []string{"name"},
 	}
+}
+
+func execLaunchSchema(shell bool) map[string]any {
+	props := map[string]any{
+		"working_dir": stringProperty("Command working directory. Defaults to the resolved ws worktree root; relative paths resolve beneath that root."),
+		"env":         map[string]any{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "Environment variable overlay."},
+		"stdin":       stringProperty("Text stdin for the process."),
+	}
+	required := []string{"cmd"}
+	if shell {
+		props["command"] = stringProperty("Shell command string to execute.")
+		props["shell"] = stringProperty("Optional explicit shell executable. Defaults to the platform shell.")
+		required = []string{"command"}
+	} else {
+		props["cmd"] = stringProperty("Executable argv0 to run; not a shell command line.")
+		props["args"] = stringArrayProperty("Optional argv arguments.")
+	}
+	return map[string]any{"type": "object", "properties": props, "required": required}
+}
+
+func execKeySchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{"exec_key": stringProperty("Durable exec job key.")}, "required": []string{"exec_key"}}
+}
+
+func execRawTailSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["stream"] = enumStringProperty("Stream to read. Defaults to stdout.", []string{"stdout", "stderr", "combined"})
+	props["lines"] = integerProperty("Number of tail lines. Defaults to 40 and is capped.")
+	return s
+}
+func execRawReadSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["stream"] = enumStringProperty("Stream to read. Defaults to stdout.", []string{"stdout", "stderr", "combined"})
+	props["offset"] = integerProperty("Byte offset. Defaults to 0.")
+	props["limit"] = integerProperty("Maximum bytes to read. Defaults to 4096 and is capped.")
+	return s
+}
+func execRawGrepSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["stream"] = enumStringProperty("Stream to search. Defaults to stdout.", []string{"stdout", "stderr", "combined"})
+	props["pattern"] = stringProperty("Search pattern. Literal unless regex is true.")
+	props["before"] = integerProperty("Context lines before each match.")
+	props["after"] = integerProperty("Context lines after each match.")
+	props["max_matches"] = integerProperty("Maximum matches to return.")
+	props["regex"] = boolProperty("Treat pattern as a regular expression when true.")
+	s["required"] = []string{"exec_key", "pattern"}
+	return s
 }
 
 func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
@@ -2473,6 +3015,35 @@ func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 		schema["required"] = []string{"ticket_stem"}
 	}
 	return schema
+}
+
+func stringMapArgument(value any) map[string]string {
+	items, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(items))
+	for key, value := range items {
+		if text, ok := value.(string); ok {
+			out[key] = text
+		}
+	}
+	return out
+}
+
+func int64FromArgument(value any, fallback int64) int64 {
+	switch v := value.(type) {
+	case float64:
+		return int64(v)
+	case int:
+		return int64(v)
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func stringList(value any) []string {

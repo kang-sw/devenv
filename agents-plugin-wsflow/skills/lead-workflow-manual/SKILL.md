@@ -50,8 +50,14 @@ and expected output.
 `wsflow/config.show`
 
 Use `wsflow/runtime.info` for runtime compatibility checks and feature
-detection. Use `wsflow/setup(root: "<path>")` to set the current server process
-root when plugin-managed startup did not infer the intended repository.
+detection; when a package declares a required runtime version, compare the
+returned metadata against that requirement. If startup did not already bind the
+server to the correct repository, call
+`wsflow/setup(root: "<absolute-working-directory>")` with the repository's
+absolute filesystem path. The MCP server cannot infer the agent's current
+directory from placeholders or relative paths. Verify the returned `root`
+matches the intended repository, and rerun setup with the correct absolute path
+if it does not.
 
 ### Project Context
 
@@ -81,7 +87,7 @@ shell search. Use native file reads after a discovery tool returns the path to
 inspect or edit.
 
 Prefer:
-- `wsflow/tickets.list(status: "ready")` for implementation queue discovery.
+- `wsflow/tickets.list(status: "ready")` for implementation-ready discovery.
 - `wsflow/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `wsflow/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `wsflow/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
@@ -137,6 +143,7 @@ Use subagents when a task benefits from scoped exploration, implementation,
 verification, audit, or review.
 
 Subagent prompts must be self-contained:
+- Write subagent prompts in English.
 - State the exact question and expected output.
 - State scope, permissions, and any writable paths or modules.
 - Tell exploration, verification, audit, and review workers to stay read-only.

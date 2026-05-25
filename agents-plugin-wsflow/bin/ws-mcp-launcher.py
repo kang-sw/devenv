@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 import urllib.request
 from pathlib import Path
 
@@ -75,6 +76,16 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def runtime_binary_name(contract: dict, contract_path: Path, os_name: str) -> str:
+    version = str(contract.get("plugin_version", "")).strip()
+    if not version:
+        version = "unknown"
+    safe_version = "".join(char if char.isalnum() or char in ".-" else "-" for char in version)
+    contract_hash = sha256_file(contract_path)[:12]
+    suffix = ".exe" if os_name == "windows" else ""
+    return f"ws-mcp-{safe_version}-{contract_hash}{suffix}"
 
 
 def download_file(url: str, destination: Path) -> None:
@@ -233,6 +244,10 @@ def compatibility_stamp_path(runtime_dir: Path) -> Path:
     return runtime_dir / ".compatibility.json"
 
 
+def unique_runtime_temp_path(runtime_dir: Path, label: str) -> Path:
+    return runtime_dir / f".{label}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+
+
 def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path) -> dict | None:
     try:
         stat = binary.stat()
@@ -271,7 +286,7 @@ def write_compatibility_stamp(binary: Path, contract: dict, contract_path: Path,
     try:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         stamp = compatibility_stamp_path(runtime_dir)
-        tmp = stamp.with_suffix(".json.tmp")
+        tmp = unique_runtime_temp_path(runtime_dir, "compatibility")
         tmp.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
         os.replace(tmp, stamp)
     except Exception as exc:
@@ -295,24 +310,29 @@ def install_downloaded_runtime(binary: Path, runtime_dir: Path, asset: str, cont
         base_url = f"https://github.com/{repository}/releases/download/{tag}"
 
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    tmp = runtime_dir / f"{binary.name}.download"
-    sums_tmp = runtime_dir / "SHA256SUMS.download"
-    for path in (tmp, sums_tmp):
-        path.unlink(missing_ok=True)
+    tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.download")
+    sums_tmp = unique_runtime_temp_path(runtime_dir, "SHA256SUMS.download")
 
-    download_file(f"{base_url}/{asset}", tmp)
-    download_file(f"{base_url}/SHA256SUMS", sums_tmp)
-    expected = expected_checksum(sums_tmp, asset)
-    actual = sha256_file(tmp)
-    if actual != expected:
-        fail(f"checksum mismatch for downloaded {asset}")
-    os.replace(tmp, binary)
-    sums_tmp.unlink(missing_ok=True)
     try:
-        binary.chmod(0o755)
-    except OSError:
-        pass
-    note(f"downloaded runtime binary into {binary}")
+        download_file(f"{base_url}/{asset}", tmp)
+        download_file(f"{base_url}/SHA256SUMS", sums_tmp)
+        expected = expected_checksum(sums_tmp, asset)
+        actual = sha256_file(tmp)
+        if actual != expected:
+            fail(f"checksum mismatch for downloaded {asset}")
+        try:
+            tmp.chmod(0o755)
+        except OSError:
+            pass
+        installed = install_tmp_runtime(tmp, binary, contract, runtime_dir, f"downloaded runtime binary into {binary}")
+    finally:
+        tmp.unlink(missing_ok=True)
+        sums_tmp.unlink(missing_ok=True)
+    if installed:
+        try:
+            binary.chmod(0o755)
+        except OSError:
+            pass
 
 
 def copy_runtime(source: Path, destination: Path) -> None:
@@ -324,6 +344,18 @@ def copy_runtime(source: Path, destination: Path) -> None:
         pass
 
 
+def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Path, message: str) -> bool:
+    try:
+        os.replace(tmp, binary)
+    except OSError as exc:
+        if runtime_fully_compatible(binary, contract, runtime_dir):
+            note(f"using compatible runtime already installed at {binary} after replace failed: {exc}")
+            return False
+        fail(f"failed to install runtime at {binary}: {exc}")
+    note(message)
+    return True
+
+
 def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str) -> bool:
     home = Path.home()
     try:
@@ -333,17 +365,17 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
     if not (plugin_dir / ".local-devenv-runtime").is_file() or os_name == "windows":
         return False
 
-    tmp = runtime_dir / f"{binary.name}.local"
+    tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
     candidates = [
         home / "devenv" / "agents-plugin-tool" / "dist" / asset,
         home / "devenv" / "agents-plugin" / ".runtime" / platform_name / binary.name,
+        home / "devenv" / "agents-plugin" / ".runtime" / platform_name / ("ws-mcp.exe" if os_name == "windows" else "ws-mcp"),
     ]
     for candidate in candidates:
         if candidate.is_file():
             copy_runtime(candidate, tmp)
             if runtime_fully_compatible(tmp, contract, runtime_dir):
-                os.replace(tmp, binary)
-                note(f"installed local devenv runtime from {candidate}")
+                install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed local devenv runtime from {candidate}")
                 return True
             tmp.unlink(missing_ok=True)
             note(f"local devenv runtime candidate is incompatible: {candidate}")
@@ -352,8 +384,7 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
     if tool_dir.is_dir() and shutil.which("go"):
         proc = subprocess.run(["go", "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
         if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
-            os.replace(tmp, binary)
-            note(f"built local devenv runtime from {tool_dir}")
+            install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
             return True
         tmp.unlink(missing_ok=True)
         note("local devenv build produced incompatible runtime")
@@ -367,21 +398,29 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
         source = Path(bootstrap_binary)
         if not source.is_file():
             fail(f"bootstrap binary not found: {source}")
-        copy_runtime(source, binary)
-        note(f"installed bootstrap binary into {binary}")
+        tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.bootstrap")
+        copy_runtime(source, tmp)
+        install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed bootstrap binary into {binary}")
     elif bootstrap_url:
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        tmp = runtime_dir / f"{binary.name}.download"
-        download_file(bootstrap_url, tmp)
-        expected = os.environ.get("WS_MCP_BOOTSTRAP_SHA256")
-        if expected and sha256_file(tmp) != expected:
-            fail("checksum mismatch for downloaded ws-mcp")
-        os.replace(tmp, binary)
+        tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.download")
         try:
-            binary.chmod(0o755)
-        except OSError:
-            pass
-        note(f"downloaded runtime binary into {binary}")
+            download_file(bootstrap_url, tmp)
+            expected = os.environ.get("WS_MCP_BOOTSTRAP_SHA256")
+            if expected and sha256_file(tmp) != expected:
+                fail("checksum mismatch for downloaded ws-mcp")
+            try:
+                tmp.chmod(0o755)
+            except OSError:
+                pass
+            installed = install_tmp_runtime(tmp, binary, contract, runtime_dir, f"downloaded runtime binary into {binary}")
+        finally:
+            tmp.unlink(missing_ok=True)
+        if installed:
+            try:
+                binary.chmod(0o755)
+            except OSError:
+                pass
     elif install_local_devenv_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name):
         return
     else:
@@ -516,7 +555,7 @@ def main() -> int:
     arch_name = host_arch()
     platform_name = f"{os_name}-{arch_name}"
     runtime_dir = Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name)))
-    binary_name = "ws-mcp.exe" if os_name == "windows" else "ws-mcp"
+    binary_name = runtime_binary_name(contract, contract_path, os_name)
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 

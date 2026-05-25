@@ -40,3 +40,8 @@ review/doc pipeline manually.
 - A useful fix would expose a clearer status such as `waiting-for-tool`,
   `backend-ended-with-tool-use`, or `empty-final-result`, and preserve enough
   recent tool/output diagnostics for the lead to recover without guessing.
+- Dogfood note 2026-05-23: a fresh-reader named-agent audit tried to register
+  and wait on a nested named agent instead of auditing the supplied text, then
+  produced repeated `getcwd` errors and no final output until cancelled. This is
+  another recovery case for agent tool-use loops that do not yield a usable
+  lead-facing result.

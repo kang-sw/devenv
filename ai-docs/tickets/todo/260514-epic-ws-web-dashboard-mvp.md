@@ -3,7 +3,7 @@ title: ws web dashboard MVP
 related:
   260427-chore-claude-dash-windows: prior PTY dashboard surface and Windows stability motivation
   260513-research-streamable-http-mcp-transport: adjacent long-running daemon and remote transport research
-  260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
+  260524-epic-async-exec-job-surface: adjacent persisted process output and reader pattern
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
   260516-epic-ws-web-dashboard-workbench-substrate: next frontend workbench substrate milestone

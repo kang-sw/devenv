@@ -10,7 +10,7 @@ host-neutral Agents/open-conventions workflow. Treat these as authoritative unti
 a ticket replaces them:
 
 - `AGENTS.md` - root behavioral rules and project-specific invariants.
-- `ai-docs/_index.md` - project memory, inventory, specs, tickets, queue.
+- `ai-docs/_index.md` - project memory, inventory, specs, tickets, focus.
 - `agents-plugin/` - Codex-first plugin distribution candidate.
 - `agents-plugin-tool/` - native MCP/tooling source tree.
 - Root `CLAUDE.md` - compatibility shim whose body is `@AGENTS.md`.
@@ -145,14 +145,16 @@ not stage it unless explicitly requested.
 
 ## Documentation System
 
-- Project memory and queue: `ai-docs/_index.md`
+- Project memory and focus: `ai-docs/_index.md`
 - Tickets: `ai-docs/tickets/`
 - Specs: `ai-docs/spec/`
 - Mental models: `ai-docs/mental-model/`
 - Static references: `ai-docs/ref/`
 - Skill/agent authoring: `agents-plugin/skills/lead-skill-authoring/SKILL.md`
 - Codex behavior notes: `ai-docs/ref/codex-integration.md`
-- MCP runtime contract: `ai-docs/ref/ws-mcp.md`
+- MCP behavior contracts: `ai-docs/spec/mcp-tools.md` and
+  `ai-docs/spec/plugin-runtime.md`
+- MCP operational runbook: `ai-docs/ref/ws-mcp.md`
 
 Before editing:
 
@@ -180,14 +182,14 @@ ai-docs/tickets/.dropped/
 - Reference tickets by stem, not path: `260429-research-host-neutral-ws-plugin`.
 - Creation-date prefixes are stable; never rename to change the date.
 - Move status with `git mv` when possible.
-- `todo/` is accepted backlog; `ready/` is the spec-gated implementation queue.
+- `todo/` is accepted backlog; `ready/` is the spec-addressed implementation-ready status.
 - Research tickets use freeform topic sections and no phases.
 - Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
 - Do not edit phase plan text after it has a `### Result` section; append
   `#### Edition (<short-hash>) - YYYY-MM-DD` for later implementation tweaks.
 - To check ticket completion or prior phase results, use
   `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
-- Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
+- Check `## Ticket Focus` in `ai-docs/_index.md` before starting implementation; it may include non-ready attention items, but only `ready/` entries are direct implementation targets.
 - All AI-authored ticket content must be English.
 
 ## Project Knowledge
@@ -211,4 +213,4 @@ ai-docs/tickets/.dropped/
      `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
      Context goes in `_index.md`; process goes in skills. -->
 
-<!-- Template Version: v0040 -->
+<!-- Template Version: v0041 -->

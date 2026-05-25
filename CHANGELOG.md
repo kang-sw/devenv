@@ -1,5 +1,95 @@
 # Changelog
 
+## v0.29.1 - 2026-05-24
+
+### Fixed
+- Avoid same-process SQLite write contention in `wsstore` when multiple handles
+  open one state database, including CI release runners that hit `SQLITE_BUSY`
+  during concurrent actor setup metadata writes.
+
+## v0.29.0 - 2026-05-24
+
+### Added
+- Add durable exec job MCP tools with persisted stdout/stderr readers and
+  lifecycle controls.
+- Add SQLite-backed ws state-store foundations for actor setup metadata and
+  future runtime metadata pruning.
+
+### Changed
+- Replace ticket queue project memory with ticket focus, add workset ticket
+  categorization, and add design verification workflow guidance.
+- Require implementation branch isolation in `lead-implement` and refine merge
+  guidance for single-commit, multi-commit, and noisy implementation branches.
+- Split static ws MCP reference ownership across specs and mental models while
+  keeping the reference document focused on operations.
+
+### Fixed
+- Fence `ws.setup` requests so batched setup-then-call sequences observe the
+  updated session and actor state.
+- Require absolute setup roots instead of the ambiguous `<cwd>` placeholder.
+- Harden exec job lifecycle edges and bounded text-reader behavior.
+
+## v0.28.1 - 2026-05-23
+
+### Fixed
+- Harden plugin-managed MCP startup when concurrent launcher repair attempts
+  share a runtime directory, including contract-addressed cache binaries,
+  process-unique temporary files, and compatible-target reuse after replace
+  failure.
+
+## v0.28.0 - 2026-05-23
+
+### Changed
+- Redefine ready-ticket workflow as spec-addressed readiness while keeping
+  planned spec markers only for contract-first exceptions.
+- Make `lead-proceed` emit a single `NEXT:` Routing Verdict and stop cleanly on
+  route blockers before any implementation handoff.
+- Restructure sprint work into episode shells with guarded documentation commits
+  and recovery for open edit episodes.
+- Simplify `lead-skill-authoring` fresh-reader audits around target-only
+  reviewer prompts, lead-side finding classification, and bounded audit loops.
+- Require `lead-discuss` to stress-test premises, trade-offs, and failure modes
+  before endorsing a direction.
+
+### Fixed
+- Hide `root` from public and raw `agents.*` MCP schemas while preserving
+  explicit-root dispatch compatibility.
+- Clarify fresh-reader and doc-closeout compaction wording across workflow
+  guidance.
+- Align the main plugin proceed dispatch contract test with the current Routing
+  Verdict wording.
+
+## v0.27.0 - 2026-05-21
+
+### Added
+- Add explicit wsflow mirroring follow-up tracking for the remaining
+  `lead-implement` / `lead-edit` divergence.
+- Add libws harness research and MVP planning tickets for the future
+  JSONL-first agent run substrate.
+
+### Changed
+- Restructure `lead-implement` into the canonical unified implementation
+  spine, absorbing full ws `lead-edit` and `lead-write-code` behavior into
+  direct and delegated modes with one review stage.
+- Remove same-actor carry blocks from lead skill handoffs; skill-to-skill
+  transitions now rely on the shared active conversation.
+- Make `lead-proceed` route-only for implementation handoff, with lead-owned
+  ticket freshness and no pre-application of `lead-implement` judges.
+- Add fresh-reader audit and downstream consistency sweep gates to
+  `lead-skill-authoring`, including responsibility-based handler structure for
+  dense `On:` handlers.
+- Tighten `lead-write-ticket` recoverability so tickets preserve enough
+  settled product, workflow, API, and verification detail for fresh sessions.
+- Document wsflow as intentionally `lead-edit`-mediated until the follow-up
+  mirroring gap is resolved.
+
+### Fixed
+- Preserve add/delete ticket moves in `git.commit` summaries so ticket status
+  changes retain merge evidence.
+- Support mental-model commit notes in `git.commit`.
+- Make wsflow bundle verification tolerate only the documented wsflow-only
+  `lead-edit` surface.
+
 ## v0.26.8 - 2026-05-19
 
 ### Added

@@ -1,0 +1,148 @@
+---
+title: Exec job core and raw text readers
+parent: 260524-epic-async-exec-job-surface
+spec:
+  - 260524-exec-job-mcp-tools
+  - 260524-exec-runtime-contract-surface
+related:
+  260513-feat-async-exec-output-reader: original broad ticket absorbed by parent epic
+  260513-research-streamable-http-mcp-transport: adjacent daemon and reconnect lifecycle discussion
+related-mental-model:
+  - mcp-runtime
+  - named-agent-runtime
+  - plugin-runtime
+plans:
+  phase-1: 2026-05/24-260524-feat-exec-job-core-text-readers.brief
+completed: 2026-05-24
+---
+
+# Exec job core and raw text readers
+
+## Background
+
+The first async-exec slice should deliver the usable non-model core: launch
+commands, preserve stdout and stderr in durable job-owned files, return small
+completed outputs inline when safe, and expose raw fallback readers for direct
+inspection. `exec.ask` is the primary large-output UX and is owned by a separate
+child; this child provides the durable job substrate and fallback raw access it
+depends on.
+
+## Decisions
+
+- Expose separate launch tools:
+  - `exec.spawn(cmd, args?, working_dir?, env?, stdin?)`
+  - `exec.shell(command, working_dir?, env?, stdin?, shell?)`
+- Launch tools are always job-backed. They create an `exec_key`, start the
+  process, and wait up to a fixed 5-second foreground window before returning.
+- The 5-second foreground window is not caller-configurable and is not named as
+  a timeout. Long-running jobs continue asynchronously and are inspected through
+  `exec.status`, `exec.result`, `exec.abort`, and raw readers.
+- If a job exits during the foreground window and combined stdout plus stderr is
+  at most 4096 bytes, the launch response may include the completed output
+  inline with the `exec_key`, exit status, and metadata.
+- If the job is still running after the foreground window, or if output exceeds
+  4096 bytes, the launch response returns compact metadata, stream sizes, and
+  follow-up guidance without raw output. Guidance should name the future
+  `exec.ask` path as the preferred large-output UX and the `exec.raw.*` readers
+  as raw fallback tools.
+- `exec.result(exec_key)` uses the same fixed 4096-byte inline budget and has
+  no `max_output_bytes` parameter. Larger results return metadata and guidance
+  for text readers.
+- Keep `exec.abort` as the process/job termination verb. It is distinct from
+  MCP request cancellation and from result retrieval cancellation.
+- Provide raw fallback text-reader tools in this first slice:
+  - `exec.raw.tail(exec_key, stream?, lines?)`
+  - `exec.raw.read(exec_key, stream?, offset?, limit?)`
+  - `exec.raw.grep(exec_key, pattern, stream?, before?, after?, max_matches?, regex?)`
+- `exec.raw.grep` defaults to literal matching. Regex behavior requires
+  `regex: true`.
+- `exec.raw.read` is byte-offset based and returns `next_offset` so callers can
+  continue without rereading large files.
+
+## Constraints
+
+- Omitted `working_dir` resolves to the current ws worktree root through the
+  existing ws root resolver. Relative `working_dir` values resolve beneath that
+  root, not beneath the plugin cache cwd.
+- `env` overlays the inherited environment. Replacement or deletion semantics
+  are out of scope for this child unless implementation discovers they are
+  needed for a coherent minimum surface.
+- `stdin` is textual input for this child. Binary stdin support is out of scope.
+- Persist raw stdout and stderr under a durable job-owned directory in the
+  current worktree state. Normal MCP responses expose only bounded excerpts and
+  metadata.
+- Implement the file reading and searching logic as reusable internal helpers.
+  The `exec.raw.*` tools should primarily map `exec_key` to persisted stream
+  file paths and call those helpers, so later agent logs, transcripts, or other
+  text-backed surfaces can reuse them.
+- Hide every introduced `exec.*` tool in wsflow no-agent mode for both
+  `tools/list` and explicit `tools/call`.
+- Update runtime capabilities, runtime manifests, CLI mirrors where included,
+  and tests in the same implementation slice as the MCP tool surface.
+
+## Prior Art
+
+- `api.ask_async` provides the closest durable async job precedent: persisted
+  job records, status/result/cancel surfaces, restart reconciliation, and
+  process-local live-worker cancellation hints.
+- `wsagent` already contains cross-platform async process setup and best-effort
+  process tree cancellation helpers.
+- Existing agent tail/debug stream tools show the local bounded-output pattern,
+  but exec readers should be implemented as generic reusable text-file helpers
+  rather than agent-specific code.
+
+## Phases
+
+### Phase 1: Implement exec job core and raw text readers
+
+Add a durable exec job manager, MCP tools, optional CLI mirrors, runtime
+metadata, wsflow no-agent hiding, and tests for:
+
+- spawn vs shell command shapes;
+- default worktree-root `working_dir` resolution and relative working
+  directories;
+- foreground-window completed small output;
+- foreground-window running handoff;
+- large-output metadata without inline raw output;
+- fixed 4096-byte `exec.result` budget;
+- stdout and stderr persistence;
+- `exec.raw.tail`, `exec.raw.read`, and literal/regex `exec.raw.grep`;
+- `exec.abort` preserving partial output and terminal state;
+- Unix process-group behavior and best-effort Windows behavior;
+- runtime capability and manifest drift.
+
+Update `mcp-tools`, `plugin-runtime`, and relevant mental-model docs before
+promoting this child to `ready`.
+
+### Result (d8f1865) - 2026-05-24
+
+Implemented the durable exec job core and raw text-reader surface:
+`exec.spawn`, `exec.shell`, `exec.status`, `exec.result`, `exec.abort`,
+`exec.raw.tail`, `exec.raw.read`, and `exec.raw.grep`.
+
+The implementation stores job records and stdout/stderr/combined streams under
+the wsstate worktree layout, keeps launch/result inline output to the fixed
+4096-byte budget, uses a fixed 5-second foreground window, preserves `working_dir`
+as the public command-location parameter, rejects resolved working directories
+outside the worktree root, and reconciles lost running workers to a terminal
+state instead of leaving jobs indefinitely running.
+
+Raw reader helpers live in reusable internal text-reader code, and wsflow
+no-agent mode omits/rejects the entire `exec.*` surface while the full ws
+runtime manifest includes the new MCP tools. CLI mirrors were intentionally not
+added in this child.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./internal/execjob ./internal/textreader ./internal/mcp ./cmd/ws-mcp`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+
+Full `cd agents-plugin-tool && go test ./...` was attempted and failed in the
+pre-existing unrelated `internal/wsagent` Gemini runner test
+`TestGeminiRunnerSessionCallbackErrorCancelsProcess`, which is outside this
+child's changed files.
+
+#### Verification Update - 2026-05-24
+
+A current-head rerun of `cd agents-plugin-tool && go test ./...` passed after
+the earlier unrelated Gemini runner failure did not reproduce.

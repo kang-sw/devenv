@@ -27,6 +27,10 @@ Bump rules:
   tools, runtime, launcher, docs, or packaging with no new public entry point.
 - **Major** (`X.0.0`): breaking change to canonical workflow, plugin layout,
   MCP protocol expectations, or install/repair contract.
+- **Pre-1.0 policy**: while the latest released major is `0`, breaking changes
+  stay on the `0.x` line and bump the minor version. Do not ship `v1.0.0`
+  unless the user explicitly requests a formal 1.0 release or changes this
+  config first.
 
 At ship time:
 1. Run `git tag --list 'v*' --sort=-v:refname | head -n1`.

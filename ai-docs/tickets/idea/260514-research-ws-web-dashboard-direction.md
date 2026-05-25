@@ -7,7 +7,7 @@ related:
   260516-feat-ws-web-resource-view-model-contract: recreated first visible substrate child
   260427-chore-claude-dash-windows: prior PTY dashboard surface and Windows stability motivation
   260513-research-streamable-http-mcp-transport: adjacent daemon and remote transport research
-  260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
+  260524-epic-async-exec-job-surface: adjacent persisted process output and reader pattern
 related-mental-model:
   - developer-environment-tools
   - named-agent-runtime

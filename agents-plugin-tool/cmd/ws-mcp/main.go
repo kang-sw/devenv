@@ -20,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.26.8-dev"
+var version = "0.29.1-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -987,9 +987,10 @@ func agentsRunCurrent(args []string) {
 	fs := flag.NewFlagSet("agents run-current", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
+	actorID := fs.String("actor-id", "", "hidden actor-scoped registry id")
 	_ = fs.Parse(args)
 
-	if err := wsagent.NewManager(wsagent.Options{}).RunCurrent(defaultRoot(*root), *name); err != nil {
+	if err := wsagent.NewManager(wsagent.Options{}).RunCurrentScoped(defaultRoot(*root), *name, *actorID); err != nil {
 		fatal("agents run-current", err)
 	}
 }
@@ -1071,9 +1072,10 @@ func agentsCheckInbox(args []string) {
 	fs := flag.NewFlagSet("agents check-inbox", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
+	actorID := fs.String("actor-id", "", "hidden actor-scoped registry id")
 	_ = fs.Parse(args)
 
-	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInbox(defaultRoot(*root), *name, "hook")
+	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInboxScoped(defaultRoot(*root), *name, *actorID, "hook")
 	if err != nil {
 		fatal("agents check-inbox", err)
 	}

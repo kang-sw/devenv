@@ -92,7 +92,7 @@ Mode: user request
 | Modification knowledge | `wsflow:lead-forge-mental-model` |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
 | Project reading map | `wsflow:lead-forge-mental-model` or `wsflow:lead-discuss` when mixed with status claims |
-| Queue or ticket ordering | `wsflow:lead-write-ticket` |
+| Focus or ticket ordering | `wsflow:lead-write-ticket` |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |
 | Duplicated doc map | Compact to start-here pointers |
 | Ambiguous project direction | `wsflow:lead-discuss` |
@@ -101,7 +101,7 @@ Mode: user request
 
 1. Re-read `ai-docs/_index.md`.
 2. Preserve the memory-policy comment.
-3. Keep summary, stack, workspace, build/test commands, read-before-edit pointers, active inventory, `ready/` queue, and compact notes.
+3. Keep summary, stack, workspace, build/test commands, read-before-edit pointers, active inventory, `Ticket Focus`, and compact notes.
 4. Compact deep sections into links only when a clear owning document already exists.
 5. Leave unique project direction, active priorities, and unresolved operational caveats in place.
 6. Do not author or semantically update specs, mental models, tickets, or refs.

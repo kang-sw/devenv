@@ -8,7 +8,7 @@ related:
   260518-feat-ws-dashboard-activity-read-model: supplies feed item and transcript cursor contracts consumed by stream events
   260518-feat-ws-dashboard-activity-live-ux: consumes this backend stream in the frontend console
   260517-feat-ws-dashboard-workroot-activity-live-refresh: absorbed narrow SSE/filewatch follow-up
-  260513-feat-async-exec-output-reader: future exec activity may share feed invalidation and fallback behavior
+  260524-epic-async-exec-job-surface: future exec activity may share feed invalidation and fallback behavior
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime

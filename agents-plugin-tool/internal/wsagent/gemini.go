@@ -80,12 +80,16 @@ func (GeminiRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	var callbackErr geminiSessionCallbackError
 	if errors.As(parseErr, &callbackErr) {
 		cancel()
+		if cmd.Cancel != nil {
+			_ = cmd.Cancel()
+		} else if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
 		_ = stdout.Close()
-	}
-	waitErr := cmd.Wait()
-	if errors.As(parseErr, &callbackErr) {
+		go func() { _ = cmd.Wait() }()
 		return RunnerResult{}, parseErr
 	}
+	waitErr := cmd.Wait()
 	if waitErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return RunnerResult{}, fmt.Errorf("gemini timed out after %s", req.Timeout)
