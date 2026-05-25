@@ -9,6 +9,7 @@ spec:
   - 260525-ws-dashboard-server-scoped-operation-forwarding
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-26
 ---
 
 # ws dashboard server-scoped operation forwarding
@@ -530,3 +531,42 @@ Verification should include endpoint helper tests, daemon forwarding tests for
 WebSocket upgrade refusal states, browser or integration evidence that
 WebSocket output and input flow through the local gateway for a remote Windows
 terminal, and cleanup checks for close/disconnect on either side of the relay.
+
+### Result (82b8666) - 2026-05-26
+
+Implemented remote terminal WebSocket gatewaying through the explicit
+`/api/dashboard/servers/{serverId}/terminals/{terminalId}/socket` route.
+`server-local` aliases dispatch to the existing local terminal WebSocket
+handler. Linked-server sockets resolve through the existing server-scoped
+refusal machinery, connect upstream to the legacy terminal socket with bearer
+auth, preserve endpoint base paths, relay text, binary, ping, pong, and close
+frames without terminal protocol translation, and clean up when either side
+closes.
+
+Frontend terminal WebSocket helpers and pane wiring now have browser evidence
+that linked terminals open the local server-scoped gateway socket, receive live
+output, and send typed input plus resize frames through that socket without
+falling back to legacy local terminal routes.
+
+Deferred scope remains larger terminal UX redesign, native-Windows control-key
+polish, agent controls, document translation forwarding, credential
+persistence, deployment automation, and public endpoint hardening. No native
+Windows endpoint dogfood was run for this phase; automated coverage uses daemon
+route tests with a mock linked upstream socket plus daemon-served browser tests
+for the local gateway route and visible terminal behavior.
+
+Review outcome: fit review was clean. Correctness review found endpoint base
+paths were dropped when constructing upstream WebSocket URLs. Test review found
+browser input assertions and non-text frame relay coverage gaps. Both findings
+were fixed, and correctness/test re-review returned clean.
+
+Verification passed:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml server_scoped`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml linked_server`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml terminal`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml`
+- `npm --prefix ws-dashboard/frontend run test:terminals`
+- `npm --prefix ws-dashboard/frontend run test:commands`
+- `npm --prefix ws-dashboard/frontend run build`
+- `npm --prefix ws-dashboard/frontend run test:browser -- -g "linked server terminal WebSocket"`

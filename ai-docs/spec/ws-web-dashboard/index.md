@@ -309,22 +309,24 @@ from one server from updating another server's same-id WorkRoot. Workspace
 removal cleanup removes panes and layout state only for WorkRoots on the
 targeted server.
 
-Terminal create, list, output polling, input, resize, and close requests also
-use explicit server-scoped gateway routes for linked-server WorkRoots and
-terminal ids. For `server-local`, the aliases dispatch in-process to the
-existing terminal lifecycle handlers and preserve local JSON content-type,
-workRoot access, size validation, output cursor, and close-as-terminate
-semantics. For linked servers, ordinary terminal HTTP requests forward through
-the allowlisted one-shot gateway with upstream bearer auth, bounded refusal
-states, and upstream status/body/content-type preservation. Terminal ids remain
-daemon-local opaque ids; frontend terminal command creation, session panes,
-restore descriptors, output polling, input, resize, and close state carry
+Terminal create, list, output polling, input, resize, close, and live
+WebSocket requests also use explicit server-scoped gateway routes for
+linked-server WorkRoots and terminal ids. For `server-local`, the aliases
+dispatch in-process to the existing terminal lifecycle and WebSocket handlers
+and preserve local JSON content-type, workRoot access, size validation, output
+cursor, close-as-terminate, and upgrade semantics. For linked servers,
+ordinary terminal HTTP requests forward through the allowlisted one-shot
+gateway with upstream bearer auth, bounded refusal states, and upstream
+status/body/content-type preservation. Linked terminal WebSocket requests use
+the explicit
+`/api/dashboard/servers/{serverId}/terminals/{terminalId}/socket` route; the
+gateway resolves linked-server refusal states before upgrade where possible,
+connects upstream to the legacy terminal socket with bearer auth, preserves
+endpoint base paths, and relays text, binary, ping, pong, and close frames
+without translating the terminal protocol. Terminal ids remain daemon-local
+opaque ids; frontend terminal command creation, session panes, restore
+descriptors, output polling, input, resize, close, and WebSocket state carry
 `serverId` so same bare terminal ids on different servers do not collide.
-
-> [!note] Planned 🚧
-> A later phase will attach terminal WebSocket operations to the server-scoped
-> route model. Terminal WebSockets require upgrade proxy behavior rather than
-> the one-shot JSON forwarding helper.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 

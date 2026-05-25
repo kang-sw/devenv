@@ -154,7 +154,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
-| `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | ready | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -192,8 +191,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-`260525-feat-ws-dashboard-server-scoped-operation-forwarding` - ready for Phase
-7 remote terminal WebSocket gatewaying after terminal HTTP lifecycle forwarding.
+No active ready ticket focus.
 
 ## Session Notes
 
