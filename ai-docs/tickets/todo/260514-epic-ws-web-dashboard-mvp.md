@@ -123,6 +123,9 @@ Active or planned product tracks:
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
+  `260525-feat-ws-dashboard-sqlite-agent-activity-source` is todo for aligning
+  the backend Activity projection with ws-mcp's SQLite role/instance registry
+  while keeping frontend routes and rendering stable.
 - Multi-server management - active child track.
   `260525-feat-ws-dashboard-multi-server-gateway` is done for
   linked-server registry, selected-server resource forwarding, passphrase
