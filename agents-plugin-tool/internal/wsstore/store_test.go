@@ -719,8 +719,14 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	active.AgentKey = activeKey
 	active.PublicName = "active"
 	active.StatePath = "active"
-	active.Status = "running"
+	active.Status = "idle"
 	if err := store.UpsertAgentDefinition(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(activeDir, "current"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeDir, "current", "state.json"), []byte(`{"status":"running"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	recoveryKey, err := AgentInternalKey("", "recovery")
@@ -755,9 +761,6 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET status = 'running' WHERE agent_key = ?`, activeKey); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := store.db.ExecContext(ctx, `UPDATE agent_instances SET cleanup_state = 'recovery' WHERE agent_key = ?`, recoveryKey); err != nil {
 		t.Fatal(err)
 	}
@@ -771,8 +774,8 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Deleted != 1 || res.Scanned != 1 {
-		t.Fatalf("cleanup result = %+v, want one recorded due deletion", res)
+	if res.Deleted != 1 || res.Scanned != 2 || res.Skipped != 1 {
+		t.Fatalf("cleanup result = %+v, want one deletion and one active-state skip", res)
 	}
 	if _, err := os.Stat(dueDir); !os.IsNotExist(err) {
 		t.Fatalf("due dir still present/stat err=%v", err)

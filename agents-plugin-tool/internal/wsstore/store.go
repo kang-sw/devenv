@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -961,13 +962,28 @@ LIMIT ?`, now, now, limit)
 		if absPath != "" && !filepath.IsAbs(absPath) {
 			absPath = filepath.Join(s.layout.AgentsDir, absPath)
 		}
+		active, activeErr := agentInstanceHasActiveCurrentState(absPath)
+		if activeErr != nil {
+			result.Skipped++
+			next := s.now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+			if _, err := s.execWrite(ctx, `UPDATE agent_instances SET retention_checked_at = ?, retention_next_check_at = ?, cleanup_error = ?, updated_at = ? WHERE instance_id = ?`, now, next, activeErr.Error(), now, c.id); err != nil {
+				_ = finish(result, err)
+				return result, err
+			}
+			continue
+		}
+		if active {
+			result.Skipped++
+			next := s.now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+			if _, err := s.execWrite(ctx, `UPDATE agent_instances SET retention_checked_at = ?, retention_next_check_at = ?, cleanup_error = ?, updated_at = ? WHERE instance_id = ?`, now, next, "active current call state", now, c.id); err != nil {
+				_ = finish(result, err)
+				return result, err
+			}
+			continue
+		}
 		if err := os.RemoveAll(absPath); err != nil {
 			result.Failed++
 			next := s.now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
-			if tombErr := s.recordTombstone(ctx, "agent_instance:"+c.id, absPath, "agent_instance_prune", err); tombErr != nil {
-				_ = finish(result, tombErr)
-				return result, tombErr
-			}
 			if _, err := s.execWrite(ctx, `UPDATE agent_instances SET cleanup_state = 'cleanup_failed', cleanup_attempted_at = ?, retention_checked_at = ?, retention_next_check_at = ?, cleanup_error = ?, updated_at = ? WHERE instance_id = ?`, now, now, next, err.Error(), now, c.id); err != nil {
 				_ = finish(result, err)
 				return result, err
@@ -981,6 +997,34 @@ LIMIT ?`, now, now, limit)
 		result.Deleted++
 	}
 	return result, finish(result, nil)
+}
+
+func agentInstanceHasActiveCurrentState(agentDir string) (bool, error) {
+	if agentDir == "" {
+		return false, nil
+	}
+	if strings.ContainsRune(agentDir, 0) {
+		return false, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(agentDir, "current", "state.json"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	var state struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return false, err
+	}
+	switch state.Status {
+	case "queued", "running":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func (s *Store) Count(ctx context.Context, table string) (int, error) {

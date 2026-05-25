@@ -2162,7 +2162,22 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	if err := os.WriteFile(filepath.Join(state.AgentsDir, globalSame.StatePath, "output.md"), []byte("global same output\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(state.AgentsDir, newActorSame.StatePath, "output.md"), []byte("actor same output\n"), 0o644); err != nil {
+	newActorSameDir := filepath.Join(state.AgentsDir, newActorSame.StatePath)
+	if err := os.WriteFile(filepath.Join(newActorSameDir, "output.md"), []byte("actor same output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sameCompleted := wsagent.CurrentCall{
+		SchemaVersion: 1,
+		AgentName:     "same",
+		CallSeq:       1,
+		ExecutionID:   "same-completed",
+		Status:        wsagent.CallStatusCompleted,
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		FinishedAt:    time.Now().UTC().Format(time.RFC3339),
+		StdoutPath:    "current/stdout",
+		StderrPath:    "current/stderr",
+	}
+	if err := os.WriteFile(filepath.Join(newActorSameDir, "current", "state.json"), mustMarshalForTest(t, sameCompleted), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -2202,6 +2217,8 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	globalStatus := call(5, fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
 	actorPrint := call(14, `{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"agents.print","arguments":{"name":"same"}}}`)
 	globalPrint := call(15, fmt.Sprintf(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"agents.print","arguments":{"root":%q,"name":"same"}}}`, root))
+	sameWaitText := call(16, `{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"same","timeout_seconds":5}}}`)
+	sameResultText := call(17, `{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"same"}}}`)
 	callText := call(6, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"same","prompt":"do work"}}}`)
 	waitText := call(7, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"ready","timeout_seconds":5}}}`)
 	resultText := call(8, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"ready"}}}`)
@@ -2221,6 +2238,14 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	}
 	if !strings.Contains(globalPrint, "global same output") || strings.Contains(globalPrint, "actor same output") {
 		t.Fatalf("explicit-root print did not use global compatibility scope:\n%s", globalPrint)
+	}
+	if !strings.Contains(sameWaitText, "agent: same") ||
+		!strings.Contains(sameWaitText, "call_status: completed") ||
+		!strings.Contains(sameWaitText, "ready: true") {
+		t.Fatalf("actor-scoped wait did not read re-registered current instance:\n%s", sameWaitText)
+	}
+	if !strings.Contains(sameResultText, "actor same output") || strings.Contains(sameResultText, "global same output") {
+		t.Fatalf("actor-scoped result did not read re-registered current instance:\n%s", sameResultText)
 	}
 	if !strings.Contains(callText, "same\trunning") {
 		t.Fatalf("actor-scoped call did not start:\n%s", callText)
