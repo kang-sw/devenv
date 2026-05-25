@@ -317,7 +317,13 @@ export function documentBlockVisibleText(
   contentHash: string,
 ) {
   const translation = translationForBlock(overlay, contentHash, block.blockId);
-  return translation?.status === "ok" ? translation.translatedMarkdown : block.plainText;
+  if (translation?.status === "ok") {
+    return translation.translatedMarkdown;
+  }
+  if (isMarkdownSourceCopyBlock(block)) {
+    return block.markdown.trimEnd();
+  }
+  return block.plainText;
 }
 
 export function documentBlocksVisibleText(
@@ -325,7 +331,42 @@ export function documentBlocksVisibleText(
   overlay: DocumentTranslationOverlay | undefined,
   contentHash: string,
 ) {
-  return blocks.map((block) => documentBlockVisibleText(block, overlay, contentHash)).join("\n\n");
+  return blocks.reduce((copyText, block, index) => {
+    const blockText = documentBlockVisibleText(block, overlay, contentHash);
+    if (index === 0) {
+      return blockText;
+    }
+    const previousBlock = blocks[index - 1];
+    const separator = shouldCompactVisibleCopyBoundary(previousBlock, block) ? "\n" : "\n\n";
+    return `${copyText}${separator}${blockText}`;
+  }, "");
+}
+
+function isMarkdownSourceCopyBlock(block: DocumentBlock) {
+  return block.kind === "listItem" || block.kind === "taskItem" || block.kind === "code";
+}
+
+function shouldCompactVisibleCopyBoundary(previousBlock: DocumentBlock, block: DocumentBlock) {
+  if (previousBlock.ordinal + 1 !== block.ordinal) {
+    return false;
+  }
+  const previousListFamily = markdownListFamily(previousBlock);
+  const currentListFamily = markdownListFamily(block);
+  return Boolean(previousListFamily && previousListFamily === currentListFamily);
+}
+
+function markdownListFamily(block: DocumentBlock) {
+  if (block.kind !== "listItem" && block.kind !== "taskItem") {
+    return undefined;
+  }
+  const firstContentLine = block.markdown.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "";
+  if (/^\s*\d+[.)]\s+/.test(firstContentLine)) {
+    return "ordered";
+  }
+  if (/^\s*[-+*]\s+/.test(firstContentLine)) {
+    return "unordered";
+  }
+  return undefined;
 }
 
 export function canCopyTranslatedBlocks(
