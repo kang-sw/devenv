@@ -194,7 +194,10 @@ export async function createTerminal(
   if (!response.ok) {
     throw new Error(await terminalErrorMessage(response));
   }
-  return (await response.json()) as TerminalSessionView;
+  return {
+    ...((await response.json()) as TerminalSessionView),
+    serverId: serverId ?? LOCAL_DASHBOARD_SERVER_ID,
+  };
 }
 
 export async function listTerminals(
@@ -210,7 +213,10 @@ export async function listTerminals(
   if (!response.ok) {
     throw new Error(await terminalErrorMessage(response));
   }
-  return (await response.json()) as TerminalSessionView[];
+  return ((await response.json()) as TerminalSessionView[]).map((session) => ({
+    ...session,
+    serverId: session.serverId ?? serverId ?? LOCAL_DASHBOARD_SERVER_ID,
+  }));
 }
 
 export async function fetchTerminalOutput(
@@ -449,6 +455,7 @@ export function reconcileListedTerminalSessions(
   workRootId: string,
   sessions: TerminalSessionView[],
   pruneStartedAtMs = Number.POSITIVE_INFINITY,
+  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
 ) {
   const liveKeys = new Set(
     sessions.map((session) =>
@@ -463,6 +470,8 @@ export function reconcileListedTerminalSessions(
     Object.entries(current).filter(
       ([key, pane]) =>
         pane.session.workRootId !== workRootId ||
+        (pane.session.serverId ?? LOCAL_DASHBOARD_SERVER_ID) !==
+          (serverId || LOCAL_DASHBOARD_SERVER_ID) ||
         liveKeys.has(key) ||
         pane.localCreatedAtMs > pruneStartedAtMs,
     ),

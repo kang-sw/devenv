@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, FormEvent, Key, ReactNode, RefObject, SetStateAction } from "react";
+import type {
+  CSSProperties,
+  Dispatch,
+  FormEvent,
+  Key,
+  ReactNode,
+  RefObject,
+  SetStateAction,
+} from "react";
 import {
   Activity,
   BriefcaseBusiness,
@@ -179,6 +187,7 @@ import {
   compactWorkspaceWorkRootTitle,
   flattenEntities,
   reconcileSelectedId,
+  serverScopedIdentity,
   workRootActivationEndpoint,
   workspaceEndpoint,
   type ActionHint,
@@ -254,6 +263,7 @@ import {
 import {
   applyActivityConsoleEvent,
   fetchWorkRootActivity,
+  fetchWorkRootActivityTranscript,
   mergeWorkRootActivityViews,
   parseActivityConsoleEvent,
   shouldApplyActivityStreamRequest,
@@ -294,7 +304,10 @@ async function requestWorkRootActivation(
     workRootActivationEndpoint(workRootId, serverId),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
       body: JSON.stringify({ activation }),
     },
   );
@@ -308,10 +321,10 @@ async function requestWorkspaceRemoval(
   workspaceId: string,
   serverId: string | null | undefined,
 ): Promise<DashboardResourcesView> {
-  const response = await fetch(
-    workspaceEndpoint(workspaceId, serverId),
-    { method: "DELETE", headers: { Accept: "application/json" } },
-  );
+  const response = await fetch(workspaceEndpoint(workspaceId, serverId), {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
@@ -338,7 +351,9 @@ export function App() {
   );
   const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<string | null>(null);
+  const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<
+    string | null
+  >(null);
   const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -373,7 +388,8 @@ export function App() {
 
   if (!resourceRefreshCoordinatorRef.current) {
     resourceRefreshCoordinatorRef.current = createResourceRefreshCoordinator({
-      fetchResources: () => requestDashboardResources(selectedServerIdRef.current),
+      fetchResources: () =>
+        requestDashboardResources(selectedServerIdRef.current),
       applyResources: setResources,
       setLoading,
       setError,
@@ -436,10 +452,12 @@ export function App() {
           .filter((entity) => entity.type === "workRoot")
           .map((entity) => entity.id),
       );
-      const openedWorkRootId = requestedWorkRootId ?? flattenEntities(openedView).find(
-        (entity) =>
-          entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
-      )?.id;
+      const openedWorkRootId =
+        requestedWorkRootId ??
+        flattenEntities(openedView).find(
+          (entity) =>
+            entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
+        )?.id;
 
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
@@ -484,8 +502,12 @@ export function App() {
     (server: ServerConnectionView) => {
       setServersView((current) => {
         const servers = current?.servers ?? serverConnections;
-        const nextServers = servers.some((candidate) => candidate.id === server.id)
-          ? servers.map((candidate) => candidate.id === server.id ? server : candidate)
+        const nextServers = servers.some(
+          (candidate) => candidate.id === server.id,
+        )
+          ? servers.map((candidate) =>
+              candidate.id === server.id ? server : candidate,
+            )
           : [...servers, server];
         return { servers: nextServers };
       });
@@ -505,7 +527,11 @@ export function App() {
       void reconnectServerTunnel(server.id)
         .then(applyServerConnection)
         .catch((nextError) => {
-          setError(nextError instanceof Error ? nextError.message : "server reconnect failed");
+          setError(
+            nextError instanceof Error
+              ? nextError.message
+              : "server reconnect failed",
+          );
         });
     },
     [applyServerConnection],
@@ -550,7 +576,9 @@ export function App() {
     }
     const knownWorkRootIds = new Set(
       resources.workspaces.flatMap((workspace) =>
-        workspace.workRoots.map((root) => root.id),
+        workspace.workRoots.map((root) =>
+          serverScopedIdentity(root.resourcePath.serverId, root.id),
+        ),
       ),
     );
     for (const logicalKey of Array.from(restoredReadOnlyPaneKeys.current)) {
@@ -559,11 +587,15 @@ export function App() {
         restoredReadOnlyPaneKeys.current.delete(logicalKey);
         continue;
       }
-      if (!knownWorkRootIds.has(pane.workRootId)) {
+      if (
+        !knownWorkRootIds.has(
+          serverScopedIdentity(pane.serverId, pane.workRootId),
+        )
+      ) {
         continue;
       }
       restoredReadOnlyPaneKeys.current.delete(logicalKey);
-      void fetchWorkRootTextFile(pane.workRootId, pane.path)
+      void fetchWorkRootTextFile(pane.workRootId, pane.path, pane.serverId)
         .then((file) => {
           setReadOnlyFilePanes((current) => {
             const currentPane = current[logicalKey];
@@ -608,20 +640,25 @@ export function App() {
       gesture: ReadOnlyFileOpenGesture = "singleClick",
     ) => {
       const mode = readOnlyFilePaneModeForOpenGesture(gesture);
+      const serverId = workRoot.resourcePath.serverId;
+      const workRootStateKey = serverScopedIdentity(serverId, workRoot.id);
       const pane = createLoadingReadOnlyFilePane(
         workRoot.id,
         entry.path,
         mode,
+        serverId,
       );
       const pinnedLogicalKey = readOnlyFilePaneLogicalKey(
         workRoot.id,
         entry.path,
         "pinned",
+        serverId,
       );
       const previewLogicalKey = readOnlyFilePaneLogicalKey(
         workRoot.id,
         entry.path,
         "preview",
+        serverId,
       );
       const existingPinnedPane = readOnlyFilePanes[pinnedLogicalKey];
       const focusPane = (paneId: string) =>
@@ -637,19 +674,22 @@ export function App() {
           return next;
         });
         setReadOnlyFilePaneOrderByGroup((current) =>
-          removePaneFromOrder(current, readOnlyFilePanes[previewLogicalKey]?.id),
+          removePaneFromOrder(
+            current,
+            readOnlyFilePanes[previewLogicalKey]?.id,
+          ),
         );
         focusPane(existingPinnedPane.id);
         return;
       }
 
       const groupsForPlacement =
-        workbenchGroupsByRoot[workRoot.id] ?? initialWorkbenchGroups;
+        workbenchGroupsByRoot[workRootStateKey] ?? initialWorkbenchGroups;
       const placement = decideSurfaceOpenWithDynamicGroups(
         readOnlyFilePlacementState(
           readOnlyFilePanes,
           groupsForPlacement,
-          paneOrderByRoot[workRoot.id] ?? {},
+          paneOrderByRoot[workRootStateKey] ?? {},
           readOnlyFilePaneOrderByGroup,
         ),
         {
@@ -663,8 +703,8 @@ export function App() {
       if (placement.type === "openNew" && placement.createdGroupId) {
         setWorkbenchGroupsByRoot((current) => ({
           ...current,
-          [workRoot.id]: reconcileDashboardGroupsForPlacement(
-            current[workRoot.id] ?? groupsForPlacement,
+          [workRootStateKey]: reconcileDashboardGroupsForPlacement(
+            current[workRootStateKey] ?? groupsForPlacement,
             placement,
           ),
         }));
@@ -679,9 +719,13 @@ export function App() {
         return next;
       });
       setReadOnlyFilePaneOrderByGroup((current) => {
-        let next = mode === "pinned"
-          ? removePaneFromOrder(current, readOnlyFilePanes[previewLogicalKey]?.id)
-          : current;
+        let next =
+          mode === "pinned"
+            ? removePaneFromOrder(
+                current,
+                readOnlyFilePanes[previewLogicalKey]?.id,
+              )
+            : current;
         if (placement.type === "openNew") {
           next = {
             ...next,
@@ -695,7 +739,7 @@ export function App() {
       });
       focusPane(pane.id);
 
-      void fetchWorkRootTextFile(workRoot.id, entry.path)
+      void fetchWorkRootTextFile(workRoot.id, entry.path, serverId)
         .then((file) => {
           setReadOnlyFilePanes((current) => {
             const currentPane = current[pane.logicalKey];
@@ -751,17 +795,25 @@ export function App() {
         executableHandlers[command.commandId] = () => {
           void requestWorkRootActivation(workRootId, activation, serverId)
             .then((nextResources) => {
-              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(
+                nextResources,
+              );
             })
             .catch((nextError) => {
-              setError(nextError instanceof Error ? nextError.message : "activation failed");
+              setError(
+                nextError instanceof Error
+                  ? nextError.message
+                  : "activation failed",
+              );
             });
         };
       } else if (command.payload.type === "gitWorktreeAdd.open") {
         const { workspaceId } = command.payload;
-        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(workspaceId);
+        executableHandlers[command.commandId] = () =>
+          setGitWorktreeWorkspaceId(workspaceId);
       } else if (command.payload.type === "gitWorktreeAdd.close") {
-        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(null);
+        executableHandlers[command.commandId] = () =>
+          setGitWorktreeWorkspaceId(null);
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId, serverId } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -780,7 +832,9 @@ export function App() {
           );
           void requestWorkspaceRemoval(workspaceId, serverId)
             .then((nextResources) => {
-              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(
+                nextResources,
+              );
               if (removedRootIds.size > 0) {
                 setReadOnlyFilePanes((current) =>
                   Object.fromEntries(
@@ -814,7 +868,11 @@ export function App() {
               }
             })
             .catch((nextError) => {
-              setError(nextError instanceof Error ? nextError.message : "workspace removal failed");
+              setError(
+                nextError instanceof Error
+                  ? nextError.message
+                  : "workspace removal failed",
+              );
             });
         };
       }
@@ -839,12 +897,21 @@ export function App() {
   );
 
   const applyDocumentSaved = useCallback(
-    (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => {
+    (source: {
+      serverId?: string;
+      workRootId: string;
+      path: string;
+      content: string;
+      contentHash: string;
+      sizeBytes: number;
+    }) => {
       setReadOnlyFilePanes((current) =>
         Object.fromEntries(
           Object.entries(current).map(([key, pane]) => [
             key,
-            pane.workRootId === source.workRootId && pane.path === source.path
+            pane.serverId === (source.serverId ?? "server-local") &&
+            pane.workRootId === source.workRootId &&
+            pane.path === source.path
               ? applyReadOnlyFilePaneSavedContent(
                   pane,
                   source.content,
@@ -862,7 +929,10 @@ export function App() {
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
-        <aside className="shell-panel shell-panel-nav ws-panel" aria-label="Resources">
+        <aside
+          className="shell-panel shell-panel-nav ws-panel"
+          aria-label="Resources"
+        >
           <ResourceNavigation
             resources={activeResources}
             servers={serverConnections}
@@ -873,7 +943,9 @@ export function App() {
             selectedWorkRoot={workbenchSelection?.root ?? null}
             onOpenWorkRoot={handleWorkRootOpened}
             onOpenAddServer={() => setServerModal({ mode: "add" })}
-            onOpenServerAuth={(server) => setServerModal({ mode: "auth", server })}
+            onOpenServerAuth={(server) =>
+              setServerModal({ mode: "auth", server })
+            }
             onReconnectServer={reconnectServer}
             onSelectServer={handleServerSelected}
             onCommand={executeCommand}
@@ -884,7 +956,9 @@ export function App() {
             onCommand={executeCommand}
             onClose={() => setGitWorktreeWorkspaceId(null)}
             onCreated={(response) => {
-              resourceRefreshCoordinatorRef.current?.applyExternalResources(response.resources);
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(
+                response.resources,
+              );
               if (response.createdWorkRootId) {
                 setSelectedId(response.createdWorkRootId);
               }
@@ -920,7 +994,9 @@ export function App() {
             readOnlyFilePaneOrderByGroup={readOnlyFilePaneOrderByGroup}
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
             onReadOnlyFilePanesChange={setReadOnlyFilePanes}
-            onReadOnlyFilePaneOrderByGroupChange={setReadOnlyFilePaneOrderByGroup}
+            onReadOnlyFilePaneOrderByGroupChange={
+              setReadOnlyFilePaneOrderByGroup
+            }
             onDocumentSaved={applyDocumentSaved}
           />
         </section>
@@ -1016,7 +1092,12 @@ function ResourceGlyph({
 }
 
 function WorkRootKindIcon({ kind }: { kind: WorkRootView["kind"] }) {
-  const Icon = kind === "plainDirectory" ? Folder : kind === "gitLinkedWorktree" ? GitBranch : FolderGit2;
+  const Icon =
+    kind === "plainDirectory"
+      ? Folder
+      : kind === "gitLinkedWorktree"
+        ? GitBranch
+        : FolderGit2;
   return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
 }
 
@@ -1091,7 +1172,11 @@ function PanelHeader({
                     ? buildDashboardRefreshCommand()
                     : {
                         commandId: `resource.action.${action.id}`,
-                        payload: { type: "action", label: action.label, entityId },
+                        payload: {
+                          type: "action",
+                          label: action.label,
+                          entityId,
+                        },
                       },
                 )
               }
@@ -1109,7 +1194,10 @@ function OpenWorkRootControl({
   variant = "section",
   disabled = false,
 }: {
-  onOpened: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpened: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
   onCommand: DashboardCommandDispatcher;
   variant?: "section" | "icon";
   disabled?: boolean;
@@ -1142,10 +1230,14 @@ function OpenWorkRootControl({
         setAddressPath(view.currentPath);
         setExactPath(view.currentPath);
         if (historyMode === "push") {
-          setHistory((current) => rootPickerHistoryPush(current, view.currentPath));
+          setHistory((current) =>
+            rootPickerHistoryPush(current, view.currentPath),
+          );
         }
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "picker load failed");
+        setError(
+          nextError instanceof Error ? nextError.message : "picker load failed",
+        );
       } finally {
         setLoading(false);
       }
@@ -1184,7 +1276,10 @@ function OpenWorkRootControl({
     });
   };
 
-  const navigateTo = (path: string, historyMode: "push" | "replace" = "push") => {
+  const navigateTo = (
+    path: string,
+    historyMode: "push" | "replace" = "push",
+  ) => {
     onCommand(buildRootPickerNavigateCommand(path), {
       "rootPicker.navigate": () => {
         void loadPicker(path, historyMode);
@@ -1235,32 +1330,31 @@ function OpenWorkRootControl({
       return;
     }
 
-    onCommand(
-      buildWorkRootOpenCommand(requestedPath),
-      {
-        "workRoot.open": () => {
-          setPendingOpen(true);
-          setError(null);
-          void requestOpenWorkRoot(requestedPath)
-            .then((result) => {
-              setOpen(false);
-              setPickerView(null);
-              setSelectedPath(null);
-              setAddressPath("");
-              setExactPath("");
-              setCreateName("");
-              setHistory(rootPickerHistoryInitial());
-              onOpened(result.view, result.openedWorkRootId ?? undefined);
-            })
-            .catch((nextError) => {
-              setError(nextError instanceof Error ? nextError.message : "open failed");
-            })
-            .finally(() => {
-              setPendingOpen(false);
-            });
-        },
+    onCommand(buildWorkRootOpenCommand(requestedPath), {
+      "workRoot.open": () => {
+        setPendingOpen(true);
+        setError(null);
+        void requestOpenWorkRoot(requestedPath)
+          .then((result) => {
+            setOpen(false);
+            setPickerView(null);
+            setSelectedPath(null);
+            setAddressPath("");
+            setExactPath("");
+            setCreateName("");
+            setHistory(rootPickerHistoryInitial());
+            onOpened(result.view, result.openedWorkRootId ?? undefined);
+          })
+          .catch((nextError) => {
+            setError(
+              nextError instanceof Error ? nextError.message : "open failed",
+            );
+          })
+          .finally(() => {
+            setPendingOpen(false);
+          });
       },
-    );
+    });
   };
 
   const createDirectory = () => {
@@ -1288,7 +1382,9 @@ function OpenWorkRootControl({
             setCreateName("");
           })
           .catch((nextError) => {
-            setError(nextError instanceof Error ? nextError.message : "create failed");
+            setError(
+              nextError instanceof Error ? nextError.message : "create failed",
+            );
           })
           .finally(() => {
             setCreating(false);
@@ -1312,7 +1408,9 @@ function OpenWorkRootControl({
         void pinRootPickerDirectory(path)
           .then((view) => updatePickerPlaces(view.places))
           .catch((nextError) => {
-            setError(nextError instanceof Error ? nextError.message : "pin failed");
+            setError(
+              nextError instanceof Error ? nextError.message : "pin failed",
+            );
           })
           .finally(() => setPinningPath(null));
       },
@@ -1330,19 +1428,27 @@ function OpenWorkRootControl({
         void unpinRootPickerDirectory(path)
           .then((view) => updatePickerPlaces(view.places))
           .catch((nextError) => {
-            setError(nextError instanceof Error ? nextError.message : "unpin failed");
+            setError(
+              nextError instanceof Error ? nextError.message : "unpin failed",
+            );
           })
           .finally(() => setPinningPath(null));
       },
     });
   };
 
-  const selectedLabel = selectedPath ? rootPickerEntryLabel(selectedPath) : "None";
-  const selectedEntry = pickerView?.entries.find((entry) => entry.path === selectedPath);
+  const selectedLabel = selectedPath
+    ? rootPickerEntryLabel(selectedPath)
+    : "None";
+  const selectedEntry = pickerView?.entries.find(
+    (entry) => entry.path === selectedPath,
+  );
   const visibleEntries = rootPickerVisibleEntries(pickerView?.entries ?? []);
   const visiblePlaces = rootPickerVisiblePlaces(pickerView);
   const pinnedPaths = rootPickerPinnedPathSet(pickerView);
-  const selectedPathIsPinned = selectedPath ? pinnedPaths.has(selectedPath) : false;
+  const selectedPathIsPinned = selectedPath
+    ? pinnedPaths.has(selectedPath)
+    : false;
 
   const openerButton = (
     <button
@@ -1351,7 +1457,9 @@ function OpenWorkRootControl({
       className="icon-button icon-button-primary"
       data-command-id="rootPicker.open"
       disabled={disabled}
-      title={disabled ? "Open workRoot is local-only in this build" : "Open workRoot"}
+      title={
+        disabled ? "Open workRoot is local-only in this build" : "Open workRoot"
+      }
       type="button"
       onClick={openPicker}
     >
@@ -1362,7 +1470,9 @@ function OpenWorkRootControl({
   return (
     <div
       className={
-        variant === "icon" ? "open-work-root open-work-root-icon" : "open-work-root"
+        variant === "icon"
+          ? "open-work-root open-work-root-icon"
+          : "open-work-root"
       }
       aria-label="Open workRoot"
     >
@@ -1370,7 +1480,9 @@ function OpenWorkRootControl({
         <div className="open-work-root-row">
           <div>
             <div className="section-label">Open workRoot</div>
-            <div className="open-work-root-summary">Choose a directory from this host</div>
+            <div className="open-work-root-summary">
+              Choose a directory from this host
+            </div>
           </div>
           {openerButton}
         </div>
@@ -1403,7 +1515,10 @@ function OpenWorkRootControl({
                 />
               </div>
             </div>
-            <div className="root-picker-current root-picker-context" title={pickerView?.currentPath ?? ""}>
+            <div
+              className="root-picker-current root-picker-context"
+              title={pickerView?.currentPath ?? ""}
+            >
               {pickerView?.currentPath ?? "Loading host directories"}
             </div>
 
@@ -1508,7 +1623,9 @@ function OpenWorkRootControl({
                   visiblePlaces.map((place) => (
                     <div
                       className={`root-picker-place-row ${
-                        place.source === "pin" ? "root-picker-place-row-pinned" : ""
+                        place.source === "pin"
+                          ? "root-picker-place-row-pinned"
+                          : ""
                       }`}
                       key={place.id}
                     >
@@ -1521,7 +1638,9 @@ function OpenWorkRootControl({
                         type="button"
                         onClick={() => navigateTo(place.path)}
                       >
-                        <span className="root-picker-place-label">{place.label}</span>
+                        <span className="root-picker-place-label">
+                          {place.label}
+                        </span>
                         <span className="root-picker-place-path">
                           {place.available ? place.path : "Unavailable"}
                         </span>
@@ -1543,7 +1662,10 @@ function OpenWorkRootControl({
                 )}
               </aside>
 
-              <section className="root-picker-list-region" aria-label="Current folder">
+              <section
+                className="root-picker-list-region"
+                aria-label="Current folder"
+              >
                 <div className="root-picker-list-heading" aria-hidden="true">
                   <span>Name</span>
                   <span>Kind</span>
@@ -1564,7 +1686,9 @@ function OpenWorkRootControl({
                     layout="stack"
                     onAction={(key) => navigateTo(String(key))}
                     onSelectionChange={handleGridSelection}
-                    selectedKeys={selectedPath ? new Set([selectedPath]) : new Set()}
+                    selectedKeys={
+                      selectedPath ? new Set([selectedPath]) : new Set()
+                    }
                     selectionBehavior="replace"
                     selectionMode="single"
                   >
@@ -1577,10 +1701,16 @@ function OpenWorkRootControl({
                         textValue={entry.name}
                         onDoubleClick={() => navigateTo(entry.path)}
                       >
-                        <span className="root-picker-row-icon" aria-hidden="true">
+                        <span
+                          className="root-picker-row-icon"
+                          aria-hidden="true"
+                        >
                           /
                         </span>
-                        <span className="root-picker-row-name" title={entry.path}>
+                        <span
+                          className="root-picker-row-name"
+                          title={entry.path}
+                        >
                           {entry.name}
                         </span>
                         <span className="root-picker-row-kind">
@@ -1596,10 +1726,15 @@ function OpenWorkRootControl({
               </section>
             </div>
 
-            {error ? <InlineNotice tone="error" title="Root picker" detail={error} /> : null}
+            {error ? (
+              <InlineNotice tone="error" title="Root picker" detail={error} />
+            ) : null}
 
             <div className="root-picker-create">
-              <label className="section-label" htmlFor="root-picker-create-name">
+              <label
+                className="section-label"
+                htmlFor="root-picker-create-name"
+              >
                 Create empty folder
               </label>
               <div className="root-picker-create-row">
@@ -1616,7 +1751,9 @@ function OpenWorkRootControl({
                 <button
                   className="action-button"
                   data-command-id="rootPicker.createDirectory"
-                  disabled={!pickerView || createName.trim().length === 0 || creating}
+                  disabled={
+                    !pickerView || createName.trim().length === 0 || creating
+                  }
                   type="button"
                   onClick={createDirectory}
                 >
@@ -1632,7 +1769,10 @@ function OpenWorkRootControl({
                 submitPath(exactPath);
               }}
             >
-              <label className="root-picker-selection" htmlFor="root-picker-exact-path">
+              <label
+                className="root-picker-selection"
+                htmlFor="root-picker-exact-path"
+              >
                 Selected: {selectedLabel}
               </label>
               <input
@@ -1683,7 +1823,6 @@ function OpenWorkRootControl({
   );
 }
 
-
 function GitWorktreeAddModal({
   workspaceId,
   onCommand,
@@ -1693,7 +1832,10 @@ function GitWorktreeAddModal({
   workspaceId: string | null;
   onCommand: DashboardCommandDispatcher;
   onClose: () => void;
-  onCreated: (response: { resources: DashboardResourcesView; createdWorkRootId?: string }) => void;
+  onCreated: (response: {
+    resources: DashboardResourcesView;
+    createdWorkRootId?: string;
+  }) => void;
 }) {
   const [options, setOptions] = useState<GitWorktreeAddOptions | null>(null);
   const [worktreeName, setWorktreeName] = useState("");
@@ -1702,7 +1844,9 @@ function GitWorktreeAddModal({
   const [pathMode, setPathMode] = useState<"auto" | "custom">("auto");
   const [customPath, setCustomPath] = useState("");
   const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
-  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null);
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(
+    null,
+  );
   const previewSequenceRef = useRef(0);
   const currentRequestKeyRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1728,7 +1872,13 @@ function GitWorktreeAddModal({
     setLoading(true);
     void fetchGitWorktreeAddOptions(workspaceId)
       .then(setOptions)
-      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree options failed"))
+      .catch((nextError) =>
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "worktree options failed",
+        ),
+      )
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
@@ -1738,10 +1888,23 @@ function GitWorktreeAddModal({
     }
     return {
       worktreeName,
-      branch: branchMode === "auto" ? { mode: "auto" } : { mode: "manual", name: manualBranch },
-      path: pathMode === "auto" ? { mode: "auto" } : { mode: "custom", targetPath: customPath },
+      branch:
+        branchMode === "auto"
+          ? { mode: "auto" }
+          : { mode: "manual", name: manualBranch },
+      path:
+        pathMode === "auto"
+          ? { mode: "auto" }
+          : { mode: "custom", targetPath: customPath },
     };
-  }, [branchMode, customPath, manualBranch, pathMode, worktreeName, workspaceId]);
+  }, [
+    branchMode,
+    customPath,
+    manualBranch,
+    pathMode,
+    worktreeName,
+    workspaceId,
+  ]);
 
   const requestKey = request ? JSON.stringify(request) : null;
 
@@ -1750,7 +1913,12 @@ function GitWorktreeAddModal({
   }, [requestKey]);
 
   useEffect(() => {
-    if (!workspaceId || !request || !requestKey || worktreeName.trim().length === 0) {
+    if (
+      !workspaceId ||
+      !request ||
+      !requestKey ||
+      worktreeName.trim().length === 0
+    ) {
       setPreview(null);
       setPreviewRequestKey(null);
       return;
@@ -1772,7 +1940,11 @@ function GitWorktreeAddModal({
           if (previewSequenceRef.current !== sequence) {
             return;
           }
-          setError(nextError instanceof Error ? nextError.message : "worktree preview failed");
+          setError(
+            nextError instanceof Error
+              ? nextError.message
+              : "worktree preview failed",
+          );
         });
     }, 150);
     return () => window.clearTimeout(timer);
@@ -1811,7 +1983,10 @@ function GitWorktreeAddModal({
         void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
           .then(onCreated)
           .catch((nextError) => {
-            if (nextError instanceof GitWorktreeAddSubmitError && nextError.preview) {
+            if (
+              nextError instanceof GitWorktreeAddSubmitError &&
+              nextError.preview
+            ) {
               if (currentRequestKeyRef.current !== submittedRequestKey) {
                 return;
               }
@@ -1820,7 +1995,11 @@ function GitWorktreeAddModal({
               setError("Submit blocked by current server validation");
               return;
             }
-            setError(nextError instanceof Error ? nextError.message : "worktree add failed");
+            setError(
+              nextError instanceof Error
+                ? nextError.message
+                : "worktree add failed",
+            );
           })
           .finally(() => setSubmitting(false));
       },
@@ -1828,15 +2007,30 @@ function GitWorktreeAddModal({
   };
 
   const severity = preview?.status ?? "blocked";
-  const manualBranchOptions = (options?.branches ?? []).filter((branch) => !branch.checkedOut);
+  const manualBranchOptions = (options?.branches ?? []).filter(
+    (branch) => !branch.checkedOut,
+  );
   const autoBranchDisplay = preview?.branchName ?? worktreeName.trim();
-  const autoPathDisplay = preview?.targetPathLabel ?? (worktreeName.trim() ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}` : "");
+  const autoPathDisplay =
+    preview?.targetPathLabel ??
+    (worktreeName.trim()
+      ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}`
+      : "");
   return (
-    <ModalOverlay className="root-picker-backdrop" isDismissable isOpen onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
+    <ModalOverlay
+      className="root-picker-backdrop"
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) close();
+      }}
+    >
       <Modal className="root-picker-modal git-worktree-modal">
         <Dialog aria-label="Add Git worktree" className="root-picker-dialog">
           <div className="root-picker-titlebar">
-            <Heading className="root-picker-title" slot="title">Add worktree</Heading>
+            <Heading className="root-picker-title" slot="title">
+              Add worktree
+            </Heading>
             <div className="root-picker-window-actions">
               <ChromeIconButton
                 className="root-picker-close-button"
@@ -1847,51 +2041,162 @@ function GitWorktreeAddModal({
               />
             </div>
           </div>
-          <div className="root-picker-current root-picker-context">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
+          <div className="root-picker-current root-picker-context">
+            {options?.git.rootLabel ?? "Loading Git workspace"}
+          </div>
           <form className="git-worktree-form" onSubmit={submit}>
             <label className="git-worktree-field">
               <span className="section-label">Worktree name</span>
-              <input className="root-picker-input" autoComplete="off" value={worktreeName} onChange={(event) => setWorktreeName(event.target.value)} placeholder="feature-name" />
+              <input
+                className="root-picker-input"
+                autoComplete="off"
+                value={worktreeName}
+                onChange={(event) => setWorktreeName(event.target.value)}
+                placeholder="feature-name"
+              />
             </label>
             <fieldset className="git-worktree-fieldset">
               <legend className="section-label">Branch</legend>
               <div className="git-worktree-radio-grid">
-                <label><input type="radio" checked={branchMode === "auto"} onChange={() => setBranchMode("auto")} /> Auto from name</label>
-                <label><input type="radio" checked={branchMode === "manual"} onChange={() => setBranchMode("manual")} /> Existing/manual</label>
+                <label>
+                  <input
+                    type="radio"
+                    checked={branchMode === "auto"}
+                    onChange={() => setBranchMode("auto")}
+                  />{" "}
+                  Auto from name
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    checked={branchMode === "manual"}
+                    onChange={() => setBranchMode("manual")}
+                  />{" "}
+                  Existing/manual
+                </label>
               </div>
               {branchMode === "auto" ? (
-                <input className="root-picker-input git-worktree-derived-input" readOnly value={autoBranchDisplay} placeholder="derived from worktree name" />
+                <input
+                  className="root-picker-input git-worktree-derived-input"
+                  readOnly
+                  value={autoBranchDisplay}
+                  placeholder="derived from worktree name"
+                />
               ) : (
-                <label className="git-worktree-select-wrap" aria-label="Existing or manual branch">
-                  <select className="root-picker-input git-worktree-select" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)}>
+                <label
+                  className="git-worktree-select-wrap"
+                  aria-label="Existing or manual branch"
+                >
+                  <select
+                    className="root-picker-input git-worktree-select"
+                    value={manualBranch}
+                    onChange={(event) => setManualBranch(event.target.value)}
+                  >
                     <option value="">Select or type below…</option>
-                    {manualBranchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}
+                    {manualBranchOptions.map((branch) => (
+                      <option key={branch.name} value={branch.name}>
+                        {branch.name}
+                        {branch.current ? " (current)" : ""}
+                      </option>
+                    ))}
                   </select>
-                  <input className="root-picker-input" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)} placeholder="or type branch-name" />
+                  <input
+                    className="root-picker-input"
+                    value={manualBranch}
+                    onChange={(event) => setManualBranch(event.target.value)}
+                    placeholder="or type branch-name"
+                  />
                 </label>
               )}
             </fieldset>
             <fieldset className="git-worktree-fieldset">
               <legend className="section-label">Path</legend>
               <div className="git-worktree-radio-grid">
-                <label><input type="radio" checked={pathMode === "auto"} onChange={() => setPathMode("auto")} /> Auto path</label>
-                <label><input type="radio" checked={pathMode === "custom"} onChange={() => setPathMode("custom")} /> Custom path</label>
+                <label>
+                  <input
+                    type="radio"
+                    checked={pathMode === "auto"}
+                    onChange={() => setPathMode("auto")}
+                  />{" "}
+                  Auto path
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    checked={pathMode === "custom"}
+                    onChange={() => setPathMode("custom")}
+                  />{" "}
+                  Custom path
+                </label>
               </div>
-              <input className="root-picker-input" readOnly={pathMode === "auto"} value={pathMode === "auto" ? autoPathDisplay : customPath} onChange={(event) => setCustomPath(event.target.value)} placeholder={pathMode === "auto" ? "derived from worktree name" : "/path/to/worktree"} />
+              <input
+                className="root-picker-input"
+                readOnly={pathMode === "auto"}
+                value={pathMode === "auto" ? autoPathDisplay : customPath}
+                onChange={(event) => setCustomPath(event.target.value)}
+                placeholder={
+                  pathMode === "auto"
+                    ? "derived from worktree name"
+                    : "/path/to/worktree"
+                }
+              />
             </fieldset>
-            {options && !options.git.available ? <InlineNotice tone="error" title="Git unavailable" detail={options.git.reason ?? "workspace is not Git-capable"} /> : null}
+            {options && !options.git.available ? (
+              <InlineNotice
+                tone="error"
+                title="Git unavailable"
+                detail={options.git.reason ?? "workspace is not Git-capable"}
+              />
+            ) : null}
             {preview ? (
-              <div className={`git-worktree-preview git-worktree-preview-${severity}`} role="status">
+              <div
+                className={`git-worktree-preview git-worktree-preview-${severity}`}
+                role="status"
+              >
                 <strong>{preview.message}</strong>
-                <span>{preview.branchName ? `Branch: ${preview.branchName}` : "Branch pending"}</span>
-                <span>{preview.targetPathLabel ? `Target: ${preview.targetPathLabel}` : "Target pending"}</span>
-                {preview.blockers.map((blocker) => <span key={`${blocker.code}:${blocker.field ?? ""}`}>{blocker.message}</span>)}
+                <span>
+                  {preview.branchName
+                    ? `Branch: ${preview.branchName}`
+                    : "Branch pending"}
+                </span>
+                <span>
+                  {preview.targetPathLabel
+                    ? `Target: ${preview.targetPathLabel}`
+                    : "Target pending"}
+                </span>
+                {preview.blockers.map((blocker) => (
+                  <span key={`${blocker.code}:${blocker.field ?? ""}`}>
+                    {blocker.message}
+                  </span>
+                ))}
               </div>
-            ) : loading ? <InlineNotice tone="info" title="Loading" detail="Git worktree options" /> : null}
-            {error ? <InlineNotice tone="error" title="Add worktree" detail={error} /> : null}
+            ) : loading ? (
+              <InlineNotice
+                tone="info"
+                title="Loading"
+                detail="Git worktree options"
+              />
+            ) : null}
+            {error ? (
+              <InlineNotice tone="error" title="Add worktree" detail={error} />
+            ) : null}
             <div className="root-picker-footer-actions">
-              <button className="action-button action-button-primary" data-command-id="gitWorktreeAdd.submit" disabled={submitDisabled} type="submit">{submitting ? "Creating" : "Create worktree"}</button>
-              <button className="action-button" data-command-id="gitWorktreeAdd.close" type="button" onClick={close}>Cancel</button>
+              <button
+                className="action-button action-button-primary"
+                data-command-id="gitWorktreeAdd.submit"
+                disabled={submitDisabled}
+                type="submit"
+              >
+                {submitting ? "Creating" : "Create worktree"}
+              </button>
+              <button
+                className="action-button"
+                data-command-id="gitWorktreeAdd.close"
+                type="button"
+                onClick={close}
+              >
+                Cancel
+              </button>
             </div>
           </form>
         </Dialog>
@@ -1969,10 +2274,14 @@ function LinkedServerModal({
           onClose();
           return;
         }
-        setError("Passphrase was not accepted; the server is saved and still requires authentication.");
+        setError(
+          "Passphrase was not accepted; the server is saved and still requires authentication.",
+        );
       })
       .catch((nextError) => {
-        setError(nextError instanceof Error ? nextError.message : "server link failed");
+        setError(
+          nextError instanceof Error ? nextError.message : "server link failed",
+        );
       })
       .finally(() => setSubmitting(false));
   };
@@ -2051,7 +2360,9 @@ function LinkedServerModal({
                 placeholder={addMode ? "Optional" : "Required"}
               />
             </label>
-            {error ? <InlineNotice tone="error" title="Server link" detail={error} /> : null}
+            {error ? (
+              <InlineNotice tone="error" title="Server link" detail={error} />
+            ) : null}
             <div className="root-picker-footer-actions">
               <button
                 className="action-button action-button-primary"
@@ -2059,7 +2370,11 @@ function LinkedServerModal({
                 disabled={submitDisabled}
                 type="submit"
               >
-                {submitting ? "Connecting" : addMode ? "Connect" : "Authenticate"}
+                {submitting
+                  ? "Connecting"
+                  : addMode
+                    ? "Connect"
+                    : "Authenticate"}
               </button>
               <button
                 className="action-button"
@@ -2100,7 +2415,10 @@ function ResourceNavigation({
   error: string | null;
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
-  onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpenWorkRoot: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
   onOpenAddServer: () => void;
   onOpenServerAuth: (server: ServerConnectionView) => void;
   onReconnectServer: (server: ServerConnectionView) => void;
@@ -2112,7 +2430,9 @@ function ResourceNavigation({
     gesture: ReadOnlyFileOpenGesture,
   ) => void;
 }) {
-  const selectedServer = servers.find((server) => server.id === selectedServerId);
+  const selectedServer = servers.find(
+    (server) => server.id === selectedServerId,
+  );
   const serverStatusDetail = selectedServer
     ? serverConnectionStatusLabel(selectedServer)
     : "server not listed";
@@ -2126,10 +2446,17 @@ function ResourceNavigation({
           icon={Plus}
           label="Add server"
           onClick={() =>
-            onCommand({
-              commandId: "resource.action.server.add",
-              payload: { type: "action", label: "Add server", entityId: "servers" },
-            }, { "resource.action.server.add": onOpenAddServer })
+            onCommand(
+              {
+                commandId: "resource.action.server.add",
+                payload: {
+                  type: "action",
+                  label: "Add server",
+                  entityId: "servers",
+                },
+              },
+              { "resource.action.server.add": onOpenAddServer },
+            )
           }
         />
       </div>
@@ -2141,7 +2468,11 @@ function ResourceNavigation({
           <InlineNotice tone="info" title="Refreshing" detail="resources" />
         ) : null}
         {servers.length === 0 ? (
-          <InlineNotice tone="info" title="Servers" detail="no linked servers" />
+          <InlineNotice
+            tone="info"
+            title="Servers"
+            detail="no linked servers"
+          />
         ) : null}
         {servers.map((server) => (
           <ServerRows
@@ -2193,7 +2524,10 @@ function ServerRows({
   selectedId: string | null;
   resources: DashboardResourcesView | null;
   onCommand: DashboardCommandDispatcher;
-  onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onOpenWorkRoot: (
+    view: DashboardResourcesView,
+    requestedWorkRootId?: string,
+  ) => void;
   onOpenServerAuth: (server: ServerConnectionView) => void;
   onReconnectServer: (server: ServerConnectionView) => void;
   onSelectServer: (server: ServerConnectionView) => void;
@@ -2205,7 +2539,12 @@ function ServerRows({
         className={`server-row ws-row${selected ? " server-row-selected ws-row-selected" : ""}`}
         data-server-kind={server.kind}
         data-server-status={server.status}
-        title={[server.label, server.kind, server.status, server.state.status].join(" · ")}
+        title={[
+          server.label,
+          server.kind,
+          server.status,
+          server.state.status,
+        ].join(" · ")}
       >
         <button
           aria-label={`Select server ${server.label}`}
@@ -2218,7 +2557,9 @@ function ServerRows({
             <Server aria-hidden="true" size={15} strokeWidth={1.8} />
             <span className="server-row-title">{server.label}</span>
           </span>
-          <span className={`server-status-chip server-status-chip-${server.status}`}>
+          <span
+            className={`server-status-chip server-status-chip-${server.status}`}
+          >
             {serverConnectionStatusLabel(server)}
           </span>
         </button>
@@ -2233,7 +2574,9 @@ function ServerRows({
               onReconnectServer={onReconnectServer}
             />
           ))}
-          {server.actions.some((action) => action.id === "openRoot" && action.enabled) ? (
+          {server.actions.some(
+            (action) => action.id === "openRoot" && action.enabled,
+          ) ? (
             <OpenWorkRootControl
               variant="icon"
               onOpened={onOpenWorkRoot}
@@ -2286,7 +2629,14 @@ function ServerActionButton({
         label={action.label}
         onClick={() =>
           onCommand(
-            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            {
+              commandId,
+              payload: {
+                type: "action",
+                label: action.label,
+                entityId: server.id,
+              },
+            },
             { [commandId]: () => onCommand(buildDashboardRefreshCommand()) },
           )
         }
@@ -2303,7 +2653,14 @@ function ServerActionButton({
         label={action.label}
         onClick={() =>
           onCommand(
-            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            {
+              commandId,
+              payload: {
+                type: "action",
+                label: action.label,
+                entityId: server.id,
+              },
+            },
             { [commandId]: () => onOpenServerAuth(server) },
           )
         }
@@ -2320,7 +2677,14 @@ function ServerActionButton({
         label={action.label}
         onClick={() =>
           onCommand(
-            { commandId, payload: { type: "action", label: action.label, entityId: server.id } },
+            {
+              commandId,
+              payload: {
+                type: "action",
+                label: action.label,
+                entityId: server.id,
+              },
+            },
             { [commandId]: () => onReconnectServer(server) },
           )
         }
@@ -2348,26 +2712,36 @@ function WorkRootFileExplorer({
     Record<string, WorkRootExplorerSnapshot>
   >({});
 
-  const snapshot = workRoot
-    ? (snapshots[workRoot.id] ?? initialExplorerSnapshot())
+  const workRootStateKey = workRoot
+    ? serverScopedIdentity(workRoot.resourcePath.serverId, workRoot.id)
+    : null;
+  const snapshot = workRootStateKey
+    ? (snapshots[workRootStateKey ?? ""] ?? initialExplorerSnapshot())
     : null;
 
   const updateSnapshot = useCallback(
     (
-      workRootId: string,
+      workRootKey: string,
       updater: (snapshot: WorkRootExplorerSnapshot) => WorkRootExplorerSnapshot,
     ) => {
       setSnapshots((current) => ({
         ...current,
-        [workRootId]: updater(current[workRootId] ?? initialExplorerSnapshot()),
+        [workRootKey]: updater(
+          current[workRootKey] ?? initialExplorerSnapshot(),
+        ),
       }));
     },
     [],
   );
 
   const loadDirectory = useCallback(
-    async (workRootId: string, path: string) => {
-      updateSnapshot(workRootId, (current) => ({
+    async (
+      workRootId: string,
+      path: string,
+      serverId: string,
+      workRootKey: string,
+    ) => {
+      updateSnapshot(workRootKey, (current) => ({
         ...current,
         directories: {
           ...current.directories,
@@ -2376,8 +2750,8 @@ function WorkRootFileExplorer({
       }));
 
       try {
-        const listing = await fetchWorkRootFiles(workRootId, path);
-        updateSnapshot(workRootId, (current) => ({
+        const listing = await fetchWorkRootFiles(workRootId, path, serverId);
+        updateSnapshot(workRootKey, (current) => ({
           ...current,
           directories: {
             ...current.directories,
@@ -2389,7 +2763,7 @@ function WorkRootFileExplorer({
           },
         }));
       } catch (error) {
-        updateSnapshot(workRootId, (current) => ({
+        updateSnapshot(workRootKey, (current) => ({
           ...current,
           directories: {
             ...current.directories,
@@ -2410,11 +2784,18 @@ function WorkRootFileExplorer({
       return;
     }
 
-    const initialPath = workRootExplorerInitialLoadPath(snapshots[workRoot.id]);
+    const initialPath = workRootExplorerInitialLoadPath(
+      snapshots[workRootStateKey ?? ""],
+    );
     if (initialPath !== null) {
-      void loadDirectory(workRoot.id, initialPath);
+      void loadDirectory(
+        workRoot.id,
+        initialPath,
+        workRoot.resourcePath.serverId,
+        currentWorkRootStateKey,
+      );
     }
-  }, [loadDirectory, snapshots, workRoot]);
+  }, [loadDirectory, snapshots, workRoot, workRootStateKey]);
 
   if (!workRoot) {
     return (
@@ -2432,6 +2813,8 @@ function WorkRootFileExplorer({
     );
   }
 
+  const currentWorkRootStateKey = workRootStateKey ?? "";
+
   const rows = flattenWorkRootFileTree({
     expandedPaths: snapshot?.expandedPaths ?? new Set([""]),
     directories: snapshot?.directories ?? {},
@@ -2440,10 +2823,14 @@ function WorkRootFileExplorer({
 
   const selectEntry = (entry: WorkRootFileEntryView) => {
     onCommand(
-      buildFileExplorerSelectEntryCommand(workRoot.id, entry.path),
+      buildFileExplorerSelectEntryCommand(
+        workRoot.id,
+        entry.path,
+        workRoot.resourcePath.serverId,
+      ),
       {
         "fileExplorer.selectEntry": () => {
-          updateSnapshot(workRoot.id, (current) => ({
+          updateSnapshot(currentWorkRootStateKey, (current) => ({
             ...current,
             selectedPath: entry.path,
           }));
@@ -2455,17 +2842,31 @@ function WorkRootFileExplorer({
   const toggleDirectory = (entry: WorkRootFileEntryView) => {
     const isExpanded = snapshot?.expandedPaths.has(entry.path) ?? false;
     onCommand(
-      buildFileExplorerToggleDirectoryCommand(workRoot.id, entry.path),
+      buildFileExplorerToggleDirectoryCommand(
+        workRoot.id,
+        entry.path,
+        workRoot.resourcePath.serverId,
+      ),
       {
         "fileExplorer.toggleDirectory": () => {
-          updateSnapshot(workRoot.id, (current) => ({
+          updateSnapshot(currentWorkRootStateKey, (current) => ({
             ...current,
-            expandedPaths: toggleExpandedPath(current.expandedPaths, entry.path),
+            expandedPaths: toggleExpandedPath(
+              current.expandedPaths,
+              entry.path,
+            ),
             selectedPath: entry.path,
           }));
 
-          if (workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)) {
-            void loadDirectory(workRoot.id, entry.path);
+          if (
+            workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)
+          ) {
+            void loadDirectory(
+              workRoot.id,
+              entry.path,
+              workRoot.resourcePath.serverId,
+              currentWorkRootStateKey,
+            );
           }
         },
       },
@@ -2477,10 +2878,15 @@ function WorkRootFileExplorer({
     gesture: ReadOnlyFileOpenGesture = "singleClick",
   ) => {
     onCommand(
-      buildFileExplorerOpenFileCommand(workRoot.id, entry.path, gesture),
+      buildFileExplorerOpenFileCommand(
+        workRoot.id,
+        entry.path,
+        gesture,
+        workRoot.resourcePath.serverId,
+      ),
       {
         "fileExplorer.openFile": () => {
-          updateSnapshot(workRoot.id, (current) => ({
+          updateSnapshot(currentWorkRootStateKey, (current) => ({
             ...current,
             selectedPath: entry.path,
           }));
@@ -2492,14 +2898,22 @@ function WorkRootFileExplorer({
 
   const refreshExplorer = () => {
     onCommand(
-      buildFileExplorerRefreshCommand(workRoot.id),
+      buildFileExplorerRefreshCommand(
+        workRoot.id,
+        workRoot.resourcePath.serverId,
+      ),
       {
         "fileExplorer.refresh": () => {
           const paths = workRootExplorerRefreshPaths(
             snapshot?.expandedPaths ?? new Set([""]),
           );
           for (const path of paths) {
-            void loadDirectory(workRoot.id, path);
+            void loadDirectory(
+              workRoot.id,
+              path,
+              workRoot.resourcePath.serverId,
+              currentWorkRootStateKey,
+            );
           }
         },
       },
@@ -2577,7 +2991,10 @@ function FileExplorerRow({
   selected: boolean;
   onSelect: (entry: WorkRootFileEntryView) => void;
   onToggleDirectory: (entry: WorkRootFileEntryView) => void;
-  onOpenFile: (entry: WorkRootFileEntryView, gesture: ReadOnlyFileOpenGesture) => void;
+  onOpenFile: (
+    entry: WorkRootFileEntryView,
+    gesture: ReadOnlyFileOpenGesture,
+  ) => void;
 }) {
   const isDirectory = entry.kind === "directory";
   const isOk = entry.status === "ok";
@@ -2727,7 +3144,14 @@ function WorkbenchShell({
   onReadOnlyFilePaneOrderByGroupChange: Dispatch<
     SetStateAction<WorkbenchPaneOrder>
   >;
-  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
+  onDocumentSaved: (source: {
+    serverId?: string;
+    workRootId: string;
+    path: string;
+    content: string;
+    contentHash: string;
+    sizeBytes: number;
+  }) => void;
 }) {
   const [activePaneByRoot, setActivePaneByRoot] = useState<
     Record<string, Record<string, string>>
@@ -2765,19 +3189,24 @@ function WorkbenchShell({
   // renders the previous root's activity for a frame before the effect resets.
   const [workRootActivityState, setWorkRootActivityState] = useState<{
     rootId: string | null;
+    serverId: string | null;
     activity: WorkRootActivityBadgeInput;
-  }>({ rootId: null, activity: { phase: "loading" } });
+  }>({ rootId: null, serverId: null, activity: { phase: "loading" } });
   const workRootActivityStateRef = useRef(workRootActivityState);
   workRootActivityStateRef.current = workRootActivityState;
   const activityStreamRequestSeq = useRef(0);
   const currentActivityStreamRequest = useRef<ActivityConsoleStreamRequest>({
+    serverId: "server-local",
     workRootId: "",
     requestId: 0,
   });
   const activitySnapshotRequestSeq = useRef(0);
-  const [activityPollFallbackRootId, setActivityPollFallbackRootId] = useState<string | null>(null);
+  const [activityPollFallbackRootId, setActivityPollFallbackRootId] = useState<
+    string | null
+  >(null);
   const [activityTranscriptRefresh, setActivityTranscriptRefresh] = useState<{
     rootId: string;
+    serverId?: string | null;
     activityId: string;
     cursor: string | null;
     sequence: number;
@@ -2789,30 +3218,47 @@ function WorkbenchShell({
     Record<string, boolean>
   >({});
   const selectedWorkRootId = selection?.root.id ?? null;
+  const selectedWorkRootServerId =
+    selection?.root.resourcePath.serverId ?? null;
+  const selectedWorkRootStateKey = selection
+    ? serverScopedIdentity(
+        selection.root.resourcePath.serverId,
+        selection.root.id,
+      )
+    : null;
   const workbenchGroups = selectedWorkRootId
-    ? (workbenchGroupsByRoot[selectedWorkRootId] ?? initialWorkbenchGroups)
+    ? (workbenchGroupsByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
+      initialWorkbenchGroups)
     : initialWorkbenchGroups;
   const paneOrderByGroup = selectedWorkRootId
-    ? (paneOrderByRoot[selectedWorkRootId] ?? {})
+    ? (paneOrderByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ?? {})
     : {};
   const activePaneByGroup = selectedWorkRootId
-    ? (activePaneByRoot[selectedWorkRootId] ?? {})
+    ? (activePaneByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ?? {})
     : {};
   const activityPaneOpenForSelected = selectedWorkRootId
-    ? (activityPaneOpenByRoot[selectedWorkRootId] ?? false)
+    ? (activityPaneOpenByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
+      false)
     : false;
   const readOnlyFilePanesRef = useRef(readOnlyFilePanes);
   readOnlyFilePanesRef.current = readOnlyFilePanes;
   const documentRefreshSequence = useRef<Record<string, number>>({});
 
   const refreshOpenDocument = useCallback(
-    (workRootId: string, path: string, expectedContentHash?: string) => {
-      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path);
-      const requestSequence = (documentRefreshSequence.current[sourceKey] ?? 0) + 1;
+    (
+      workRootId: string,
+      path: string,
+      expectedContentHash?: string,
+      serverId: string | null | undefined = selectedWorkRootServerId,
+    ) => {
+      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path, serverId);
+      const requestSequence =
+        (documentRefreshSequence.current[sourceKey] ?? 0) + 1;
       documentRefreshSequence.current[sourceKey] = requestSequence;
       if (
         !readOnlyFilePanesRef.current.some(
           (pane) =>
+            pane.serverId === (serverId ?? "server-local") &&
             pane.workRootId === workRootId &&
             pane.path === path &&
             (!expectedContentHash || pane.contentHash !== expectedContentHash),
@@ -2820,7 +3266,7 @@ function WorkbenchShell({
       ) {
         return;
       }
-      void fetchWorkRootTextFile(workRootId, path)
+      void fetchWorkRootTextFile(workRootId, path, serverId)
         .then((file) => {
           if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
             return;
@@ -2833,13 +3279,20 @@ function WorkbenchShell({
           if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
             return;
           }
-          const message = error instanceof Error ? error.message : "file read failed";
+          const message =
+            error instanceof Error ? error.message : "file read failed";
           onReadOnlyFilePanesChange((current) =>
-            applyReadOnlyFilePaneSourceError(current, workRootId, path, message),
+            applyReadOnlyFilePaneSourceError(
+              current,
+              workRootId,
+              path,
+              message,
+              serverId,
+            ),
           );
         });
     },
-    [onReadOnlyFilePanesChange],
+    [onReadOnlyFilePanesChange, selectedWorkRootServerId],
   );
 
   const refreshVisibleDocuments = useCallback(() => {
@@ -2850,14 +3303,19 @@ function WorkbenchShell({
     const paths = [
       ...new Set(
         readOnlyFilePanesRef.current
-          .filter((pane) => pane.workRootId === rootId && pane.status === "loaded")
+          .filter(
+            (pane) =>
+              pane.serverId === (selectedWorkRootServerId ?? "server-local") &&
+              pane.workRootId === rootId &&
+              pane.status === "loaded",
+          )
           .map((pane) => pane.path),
       ),
     ];
     for (const path of paths) {
-      refreshOpenDocument(rootId, path);
+      refreshOpenDocument(rootId, path, undefined, selectedWorkRootServerId);
     }
-  }, [refreshOpenDocument, selectedWorkRootId]);
+  }, [refreshOpenDocument, selectedWorkRootId, selectedWorkRootServerId]);
 
   const setActivePaneByGroupForSelected = (
     next:
@@ -2868,14 +3326,14 @@ function WorkbenchShell({
       return;
     }
     setActivePaneByRoot((currentByRoot) => {
-      const current = currentByRoot[selectedWorkRootId] ?? {};
+      const rootKey = selectedWorkRootStateKey ?? selectedWorkRootId;
+      const current = currentByRoot[rootKey] ?? {};
       return {
         ...currentByRoot,
-        [selectedWorkRootId]: typeof next === "function" ? next(current) : next,
+        [rootKey]: typeof next === "function" ? next(current) : next,
       };
     });
   };
-
 
   const workbenchModel =
     resources && selection
@@ -2935,21 +3393,24 @@ function WorkbenchShell({
       return;
     }
     const rootId = workbenchModel.root.id;
+    const serverId = workbenchModel.root.resourcePath.serverId;
+    const rootKey = serverScopedIdentity(serverId, rootId);
     const listStartedAtMs = Date.now();
-    void listTerminals(rootId)
+    void listTerminals(rootId, serverId)
       .then((sessions) => {
         const restoreIntents = terminalRestoreIntentsForWorkRoot(
           loadTerminalRestoreIntents(),
           rootId,
+          serverId,
         );
         if (
           sessions.length === 0 &&
           restoreIntents.length > 0 &&
-          !restoredTerminalIntentRoots.current.has(rootId)
+          !restoredTerminalIntentRoots.current.has(rootKey)
         ) {
-          restoredTerminalIntentRoots.current.add(rootId);
+          restoredTerminalIntentRoots.current.add(rootKey);
           for (const intent of restoreIntents) {
-            onCommand(buildTerminalCreateCommand(rootId), {
+            onCommand(buildTerminalCreateCommand(rootId, serverId), {
               "terminal.create": () =>
                 createTerminalPane({
                   title: intent.title,
@@ -2967,6 +3428,7 @@ function WorkbenchShell({
               rootId,
               sessions,
               listStartedAtMs,
+              serverId,
             ),
           ),
         );
@@ -2981,31 +3443,41 @@ function WorkbenchShell({
         );
       })
       .catch(() => undefined);
-  }, [workbenchModel?.root.id]);
+  }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
 
   // Fetch named-agent activity for the selected workRoot through the Phase 1
   // protected route. Loading/error are bounded badge states; a failure never
   // breaks the workbench.
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
-    if (!rootId) {
+    const serverId = workbenchModel?.root.resourcePath.serverId;
+    if (!rootId || !serverId) {
       return;
     }
     let cancelled = false;
-    setWorkRootActivityState({ rootId, activity: { phase: "loading" } });
+    setWorkRootActivityState({
+      rootId,
+      serverId,
+      activity: { phase: "loading" },
+    });
     const timer = window.setTimeout(() => {
-      void fetchWorkRootActivity(rootId)
+      void fetchWorkRootActivity(rootId, { serverId })
         .then((view) => {
           if (!cancelled) {
             setWorkRootActivityState({
               rootId,
+              serverId,
               activity: { phase: "ready", view },
             });
           }
         })
         .catch(() => {
           if (!cancelled) {
-            setWorkRootActivityState({ rootId, activity: { phase: "error" } });
+            setWorkRootActivityState({
+              rootId,
+              serverId,
+              activity: { phase: "error" },
+            });
           }
         });
     }, 300);
@@ -3013,7 +3485,7 @@ function WorkbenchShell({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [workbenchModel?.root.id]);
+  }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
 
   // Activity Console live stream: while the pane is open, subscribe to the
   // daemon-owned source-neutral event stream for the selected workRoot. The
@@ -3021,52 +3493,72 @@ function WorkbenchShell({
   // cannot be established or the daemon explicitly switches to pollFallback.
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
-    if (!rootId || !activityPaneOpenForSelected) {
+    const serverId = workbenchModel?.root.resourcePath.serverId;
+    if (!rootId || !serverId || !activityPaneOpenForSelected) {
       currentActivityStreamRequest.current = {
+        serverId: serverId ?? "server-local",
         workRootId: rootId ?? "",
         requestId: activityStreamRequestSeq.current + 1,
       };
-      activityStreamRequestSeq.current = currentActivityStreamRequest.current.requestId;
-      setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+      activityStreamRequestSeq.current =
+        currentActivityStreamRequest.current.requestId;
+      setActivityPollFallbackRootId((current) =>
+        current === rootId ? null : current,
+      );
       return;
     }
 
     const requestId = activityStreamRequestSeq.current + 1;
     activityStreamRequestSeq.current = requestId;
-    const expected = { workRootId: rootId, requestId };
+    const expected = { serverId, workRootId: rootId, requestId };
     currentActivityStreamRequest.current = expected;
-    setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+    setActivityPollFallbackRootId((current) =>
+      current === rootId ? null : current,
+    );
 
     let cancelled = false;
     let streamOpened = false;
     let fallbackTimer: number | null = null;
     const after =
       workRootActivityStateRef.current.rootId === rootId &&
+      workRootActivityStateRef.current.serverId === serverId &&
       workRootActivityStateRef.current.activity.phase === "ready"
         ? workRootActivityStateRef.current.activity.view.feedCursor
         : null;
-    const source = new EventSource(workRootActivityEventsEndpoint(rootId, { after }));
+    const source = new EventSource(
+      workRootActivityEventsEndpoint(rootId, { after, serverId }),
+    );
 
     const requestSnapshot = () => {
       const snapshotRequestId = activitySnapshotRequestSeq.current + 1;
       activitySnapshotRequestSeq.current = snapshotRequestId;
-      void fetchWorkRootActivity(rootId)
+      void fetchWorkRootActivity(rootId, { serverId })
         .then((view) => {
           if (
             cancelled ||
             snapshotRequestId !== activitySnapshotRequestSeq.current ||
-            !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current) ||
+            !shouldApplyActivityStreamRequest(
+              expected,
+              currentActivityStreamRequest.current,
+            ) ||
             view.workRootId !== rootId
           ) {
             return;
           }
-          setWorkRootActivityState({ rootId, activity: { phase: "ready", view } });
+          setWorkRootActivityState({
+            rootId,
+            serverId,
+            activity: { phase: "ready", view },
+          });
         })
         .catch(() => {
           if (
             !cancelled &&
             snapshotRequestId === activitySnapshotRequestSeq.current &&
-            shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+            shouldApplyActivityStreamRequest(
+              expected,
+              currentActivityStreamRequest.current,
+            )
           ) {
             setActivityPollFallbackRootId(rootId);
           }
@@ -3076,7 +3568,10 @@ function WorkbenchShell({
     const applyStreamEvent = (event: ActivityConsoleEvent) => {
       if (
         cancelled ||
-        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+        !shouldApplyActivityStreamRequest(
+          expected,
+          currentActivityStreamRequest.current,
+        )
       ) {
         return;
       }
@@ -3086,11 +3581,15 @@ function WorkbenchShell({
       if (event.type === "transcriptUpdated") {
         setActivityTranscriptRefresh((current) => ({
           rootId,
+          serverId,
           activityId: event.activityId,
           cursor: event.transcriptCursor,
           sequence: (current?.sequence ?? 0) + 1,
         }));
-      } else if (event.type === "modeChanged" && event.updateMode === "pollFallback") {
+      } else if (
+        event.type === "modeChanged" &&
+        event.updateMode === "pollFallback"
+      ) {
         setActivityPollFallbackRootId(rootId);
       } else if (
         event.type === "modeChanged" &&
@@ -3109,18 +3608,29 @@ function WorkbenchShell({
           return current;
         }
         const result = applyActivityConsoleEvent(current.activity.view, event);
-        return { rootId, activity: { phase: "ready", view: result.view } };
+        return {
+          rootId,
+          serverId,
+          activity: { phase: "ready", view: result.view },
+        };
       });
     };
 
     source.onopen = () => {
       streamOpened = true;
-      if (shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)) {
+      if (
+        shouldApplyActivityStreamRequest(
+          expected,
+          currentActivityStreamRequest.current,
+        )
+      ) {
         if (fallbackTimer !== null) {
           window.clearTimeout(fallbackTimer);
           fallbackTimer = null;
         }
-        setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+        setActivityPollFallbackRootId((current) =>
+          current === rootId ? null : current,
+        );
       }
     };
     const handleActivityMessage = (message: MessageEvent) => {
@@ -3143,7 +3653,10 @@ function WorkbenchShell({
     source.onerror = () => {
       if (
         cancelled ||
-        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+        !shouldApplyActivityStreamRequest(
+          expected,
+          currentActivityStreamRequest.current,
+        )
       ) {
         return;
       }
@@ -3158,7 +3671,10 @@ function WorkbenchShell({
       fallbackTimer = window.setTimeout(() => {
         if (
           !cancelled &&
-          shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+          shouldApplyActivityStreamRequest(
+            expected,
+            currentActivityStreamRequest.current,
+          )
         ) {
           setActivityPollFallbackRootId(rootId);
         }
@@ -3172,13 +3688,21 @@ function WorkbenchShell({
       }
       source.removeEventListener("activity", handleActivityMessage);
       source.close();
-      setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+      setActivityPollFallbackRootId((current) =>
+        current === rootId ? null : current,
+      );
     };
   }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
 
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
-    if (!rootId || !activityPaneOpenForSelected || activityPollFallbackRootId !== rootId) {
+    const serverId = workbenchModel?.root.resourcePath.serverId;
+    if (
+      !rootId ||
+      !serverId ||
+      !activityPaneOpenForSelected ||
+      activityPollFallbackRootId !== rootId
+    ) {
       return;
     }
 
@@ -3193,9 +3717,13 @@ function WorkbenchShell({
       activitySnapshotRequestSeq.current = snapshotRequestId;
       void fetchWorkRootActivity(rootId, {
         recentLimit: workRootActivityRecentRefreshLimit,
+        serverId,
       })
         .then((view) => {
-          if (cancelled || snapshotRequestId !== activitySnapshotRequestSeq.current) {
+          if (
+            cancelled ||
+            snapshotRequestId !== activitySnapshotRequestSeq.current
+          ) {
             return;
           }
           setWorkRootActivityState((current) => {
@@ -3203,10 +3731,11 @@ function WorkbenchShell({
               return current;
             }
             if (current.activity.phase !== "ready") {
-              return { rootId, activity: { phase: "ready", view } };
+              return { rootId, serverId, activity: { phase: "ready", view } };
             }
             return {
               rootId,
+              serverId,
               activity: {
                 phase: "ready",
                 view: mergeWorkRootActivityViews(current.activity.view, view),
@@ -3236,7 +3765,12 @@ function WorkbenchShell({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [workbenchModel?.root.id, activityPaneOpenForSelected, activityPollFallbackRootId]);
+  }, [
+    workbenchModel?.root.id,
+    activityPaneOpenForSelected,
+    activityPollFallbackRootId,
+    workbenchModel?.root.resourcePath.serverId,
+  ]);
 
   // Document content events are source-neutral invalidations for open file panes.
   // A save from one pane fans out by re-reading the daemon view for matching
@@ -3250,7 +3784,9 @@ function WorkbenchShell({
     }
 
     let cancelled = false;
-    const source = new EventSource(workRootDocumentEventsEndpoint(rootId));
+    const source = new EventSource(
+      workRootDocumentEventsEndpoint(rootId, selectedWorkRootServerId),
+    );
     const handleDocumentMessage = (message: MessageEvent) => {
       if (cancelled) {
         return;
@@ -3265,7 +3801,12 @@ function WorkbenchShell({
       if (!event || event.workRootId !== rootId) {
         return;
       }
-      refreshOpenDocument(event.workRootId, event.path, event.contentHash);
+      refreshOpenDocument(
+        event.workRootId,
+        event.path,
+        event.contentHash,
+        selectedWorkRootServerId,
+      );
     };
     source.addEventListener("document", handleDocumentMessage);
     source.onmessage = handleDocumentMessage;
@@ -3274,7 +3815,7 @@ function WorkbenchShell({
       source.removeEventListener("document", handleDocumentMessage);
       source.close();
     };
-  }, [refreshOpenDocument, selectedWorkRootId]);
+  }, [refreshOpenDocument, selectedWorkRootId, selectedWorkRootServerId]);
 
   useEffect(() => {
     const onFocus = () => refreshVisibleDocuments();
@@ -3295,7 +3836,12 @@ function WorkbenchShell({
   // interval stays stable across renders. Depending the interval on
   // `terminalPanes` would tear down and recreate it on every output delta.
   const livePollPanesRef = useRef<
-    Array<{ terminalId: string; logicalKey: string; nextSequence: number }>
+    Array<{
+      terminalId: string;
+      logicalKey: string;
+      nextSequence: number;
+      serverId?: string | null;
+    }>
   >([]);
   livePollPanesRef.current = workbenchModel
     ? Object.values(terminalPanes)
@@ -3306,6 +3852,7 @@ function WorkbenchShell({
         )
         .map((pane) => ({
           terminalId: pane.session.terminalId,
+          serverId: pane.session.serverId,
           logicalKey: pane.logicalKey,
           nextSequence: pane.nextSequence,
         }))
@@ -3326,7 +3873,11 @@ function WorkbenchShell({
           continue;
         }
         inFlight.add(pane.terminalId);
-        void fetchTerminalOutput(pane.terminalId, pane.nextSequence)
+        void fetchTerminalOutput(
+          pane.terminalId,
+          pane.nextSequence,
+          pane.serverId,
+        )
           .then((output) => {
             if (cancelled) {
               return;
@@ -3380,7 +3931,7 @@ function WorkbenchShell({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [workbenchModel?.root.id]);
+  }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
 
   useEffect(() => {
     if (
@@ -3440,10 +3991,14 @@ function WorkbenchShell({
   function persistTerminalPanesForWorkRoot(
     workRootId: string,
     nextPanes: Record<string, TerminalPaneState>,
+    serverId: string | null | undefined = "server-local",
   ): Record<string, TerminalPaneState> {
     const nextIntents = terminalRestoreIntentsFromPanes(
       Object.values(nextPanes).filter(
-        (pane) => pane.session.workRootId === workRootId,
+        (pane) =>
+          pane.session.workRootId === workRootId &&
+          (pane.session.serverId ?? "server-local") ===
+            (serverId ?? "server-local"),
       ),
     );
     saveTerminalRestoreIntents(
@@ -3451,6 +4006,7 @@ function WorkbenchShell({
         loadTerminalRestoreIntents(),
         workRootId,
         nextIntents,
+        serverId,
       ),
     );
     return nextPanes;
@@ -3461,14 +4017,19 @@ function WorkbenchShell({
       return;
     }
     const rootId = workbenchModel.root.id;
-    void createTerminal(rootId, options)
+    const serverId = workbenchModel.root.resourcePath.serverId;
+    void createTerminal(rootId, options, serverId)
       .then((session) => {
         const pane = terminalPaneFromSession(session);
         setTerminalPanes((current) =>
-          persistTerminalPanesForWorkRoot(rootId, {
-            ...current,
-            [pane.logicalKey]: pane,
-          }),
+          persistTerminalPanesForWorkRoot(
+            rootId,
+            {
+              ...current,
+              [pane.logicalKey]: pane,
+            },
+            serverId,
+          ),
         );
         setTerminalPaneOrderByGroup((current) =>
           placeTerminalSessions(
@@ -3548,7 +4109,11 @@ function WorkbenchShell({
   function sendTerminalData(pane: TerminalPaneState, data: string) {
     // Raw emulator input flows straight to the daemon terminal session; the
     // emulator already delivers Enter as `\r`, so no line buffering is needed.
-    void sendTerminalInput(pane.session.terminalId, data).catch((error) => {
+    void sendTerminalInput(
+      pane.session.terminalId,
+      data,
+      pane.session.serverId,
+    ).catch((error) => {
       setTerminalPanes((current) =>
         current[pane.logicalKey]
           ? {
@@ -3575,27 +4140,31 @@ function WorkbenchShell({
     // calling this, so logical PTY columns/rows are not rewritten on every
     // visual drag frame. The rejection is propagated (not swallowed) so the
     // caller does not record a failed resize as the last forwarded size.
-    return resizeTerminal(pane.session.terminalId, columns, rows).then(
-      (session) => {
-        setTerminalPanes((current) =>
-          current[pane.logicalKey]
-            ? {
-                ...current,
-                [pane.logicalKey]: { ...current[pane.logicalKey], session },
-              }
-            : current,
-        );
-      },
-    );
+    return resizeTerminal(
+      pane.session.terminalId,
+      columns,
+      rows,
+      pane.session.serverId,
+    ).then((session) => {
+      setTerminalPanes((current) =>
+        current[pane.logicalKey]
+          ? {
+              ...current,
+              [pane.logicalKey]: { ...current[pane.logicalKey], session },
+            }
+          : current,
+      );
+    });
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
-    void closeTerminal(pane.session.terminalId)
+    void closeTerminal(pane.session.terminalId, pane.session.serverId)
       .then(() =>
         setTerminalPanes((current) =>
           persistTerminalPanesForWorkRoot(
             pane.session.workRootId,
             removeClosedTerminalPane(current, pane.logicalKey),
+            pane.session.serverId,
           ),
         ),
       )
@@ -3621,15 +4190,16 @@ function WorkbenchShell({
     );
   }
 
-  function closeAgentPane(paneId: string, workRootId: string | null | undefined) {
+  function closeAgentPane(
+    paneId: string,
+    workRootId: string | null | undefined,
+  ) {
     if (!workRootId) {
       return;
     }
     setClosedAgentPaneByRoot((current) => ({
       ...current,
-      [workRootId]: [
-        ...new Set([...(current[workRootId] ?? []), paneId]),
-      ],
+      [workRootId]: [...new Set([...(current[workRootId] ?? []), paneId])],
     }));
   }
 
@@ -3966,12 +4536,14 @@ function WorkbenchToolbar({
     "layout",
   ];
   const actions = toolbarActions(root, selectedEntity);
-  const activationAction = actions.find((entry) => activationForAction(entry.action.id));
+  const activationAction = actions.find((entry) =>
+    activationForAction(entry.action.id),
+  );
   const activation = activationAction
     ? activationForAction(activationAction.action.id)
     : null;
-  const openRootAction = actions.find(({ action }) =>
-    action.id === "openRoot" || action.id === "reconnect",
+  const openRootAction = actions.find(
+    ({ action }) => action.id === "openRoot" || action.id === "reconnect",
   );
   const secondaryActions = actions.filter(
     ({ action }) =>
@@ -4003,14 +4575,21 @@ function WorkbenchToolbar({
       <ChromeIconButton
         className={`workbench-power-button workbench-power-button-${root.activation}`}
         commandId="workRoot.activation.set"
-        disabled={!activationAction || !activationAction.action.enabled || !activation}
+        disabled={
+          !activationAction || !activationAction.action.enabled || !activation
+        }
         icon={CirclePower}
         label={activationAction?.action.label ?? "Set workRoot activation"}
         onClick={() => {
           if (!activationAction || !activation) {
             return;
           }
-          onCommand(buildWorkRootActivationCommand(activationAction.entityId, activation));
+          onCommand(
+            buildWorkRootActivationCommand(
+              activationAction.entityId,
+              activation,
+            ),
+          );
         }}
       />
       <div className="workbench-toolbar-center" title={rootMetadataTitle}>
@@ -4024,10 +4603,9 @@ function WorkbenchToolbar({
           <WorkbenchActivityBadge
             activity={activity}
             onOpenActivity={() => {
-              onCommand(
-                buildWorkbenchOpenActivityCommand(root.id),
-                { "workbench.openActivity": onOpenActivity },
-              );
+              onCommand(buildWorkbenchOpenActivityCommand(root.id), {
+                "workbench.openActivity": onOpenActivity,
+              });
             }}
           />
           <WorkRootGitToolbar root={root} onCommand={onCommand} />
@@ -4049,7 +4627,9 @@ function WorkbenchToolbar({
             disabled={!openRootAction.action.enabled}
             icon={FolderOpen}
             label={openRootAction.action.label}
-            onClick={() => runResourceAction(openRootAction.action, openRootAction.entityId)}
+            onClick={() =>
+              runResourceAction(openRootAction.action, openRootAction.entityId)
+            }
           />
         ) : null}
         <ChromeIconButton
@@ -4060,14 +4640,15 @@ function WorkbenchToolbar({
         />
         <ChromeIconButton
           commandId="terminal.create"
-          disabled={root.activation !== "online" || root.availability !== "available"}
+          disabled={
+            root.activation !== "online" || root.availability !== "available"
+          }
           icon={SquareTerminal}
           label="New terminal"
           onClick={() => {
-            onCommand(
-              buildTerminalCreateCommand(root.id),
-              { "terminal.create": onCreateTerminal },
-            );
+            onCommand(buildTerminalCreateCommand(root.id), {
+              "terminal.create": onCreateTerminal,
+            });
           }}
         />
         <div className="workbench-overflow" ref={overflowRef}>
@@ -4098,7 +4679,11 @@ function WorkbenchToolbar({
                     runResourceAction(action, entityId);
                   }}
                 >
-                  <PanelsTopLeft aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <PanelsTopLeft
+                    aria-hidden="true"
+                    size={14}
+                    strokeWidth={1.8}
+                  />
                   <span>{action.label}</span>
                 </button>
               ))}
@@ -4114,7 +4699,11 @@ function WorkbenchToolbar({
                     setOverflowOpen(false);
                     onCommand({
                       commandId: `workbench.toggle.${toggle}`,
-                      payload: { type: "action", label: toggle, entityId: root.id },
+                      payload: {
+                        type: "action",
+                        label: toggle,
+                        entityId: root.id,
+                      },
                     });
                   }}
                 >
@@ -4130,7 +4719,6 @@ function WorkbenchToolbar({
   );
 }
 
-
 function WorkRootGitToolbar({
   root,
   onCommand,
@@ -4142,12 +4730,20 @@ function WorkRootGitToolbar({
     (root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree") &&
     root.activation === "online" &&
     root.availability === "available";
-  const [statusState, setStatusState] = useState<{ workRootId: string; status: WorkRootGitStatus } | null>(null);
-  const [branchesState, setBranchesState] = useState<{ workRootId: string; branches: GitBranchList } | null>(null);
+  const [statusState, setStatusState] = useState<{
+    workRootId: string;
+    status: WorkRootGitStatus;
+  } | null>(null);
+  const [branchesState, setBranchesState] = useState<{
+    workRootId: string;
+    branches: GitBranchList;
+  } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   useDismissableMenu(menuOpen, branchMenuRef, () => setMenuOpen(false));
-  const [pendingGitAction, setPendingGitAction] = useState<"fetch" | "push" | "pull" | null>(null);
+  const [pendingGitAction, setPendingGitAction] = useState<
+    "fetch" | "push" | "pull" | null
+  >(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [baseBranchName, setBaseBranchName] = useState("");
@@ -4155,39 +4751,62 @@ function WorkRootGitToolbar({
   const requestSeq = useRef(0);
   const currentRootId = useRef(root.id);
   currentRootId.current = root.id;
+  const serverId = root.resourcePath.serverId;
 
-  const status = statusState?.workRootId === root.id ? statusState.status : null;
-  const branches = branchesState?.workRootId === root.id ? branchesState.branches : null;
+  const status =
+    statusState?.workRootId === root.id ? statusState.status : null;
+  const branches =
+    branchesState?.workRootId === root.id ? branchesState.branches : null;
 
-  const refreshGit = useCallback((reason: string) => {
-    if (!gitCapable) {
-      requestSeq.current += 1;
-      setStatusState(null);
-      setBranchesState(null);
-      return;
-    }
-    const seq = requestSeq.current + 1;
-    requestSeq.current = seq;
-    const requestedRootId = root.id;
-    void Promise.all([
-      fetchWorkRootGitStatus(requestedRootId),
-      fetchWorkRootGitBranches(requestedRootId),
-    ])
-      .then(([nextStatus, nextBranches]) => {
-        if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
-        setStatusState(nextStatus.available ? { workRootId: requestedRootId, status: nextStatus } : null);
-        setBranchesState({ workRootId: requestedRootId, branches: nextBranches });
-        setError(null);
-      })
-      .catch((nextError) => {
-        if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
+  const refreshGit = useCallback(
+    (reason: string) => {
+      if (!gitCapable) {
+        requestSeq.current += 1;
         setStatusState(null);
         setBranchesState(null);
-        setMenuOpen(false);
-        setModalOpen(false);
-        setError(nextError instanceof Error ? nextError.message : `${reason} failed`);
-      });
-  }, [gitCapable, root.id]);
+        return;
+      }
+      const seq = requestSeq.current + 1;
+      requestSeq.current = seq;
+      const requestedRootId = root.id;
+      void Promise.all([
+        fetchWorkRootGitStatus(requestedRootId, serverId),
+        fetchWorkRootGitBranches(requestedRootId, serverId),
+      ])
+        .then(([nextStatus, nextBranches]) => {
+          if (
+            requestSeq.current !== seq ||
+            currentRootId.current !== requestedRootId
+          )
+            return;
+          setStatusState(
+            nextStatus.available
+              ? { workRootId: requestedRootId, status: nextStatus }
+              : null,
+          );
+          setBranchesState({
+            workRootId: requestedRootId,
+            branches: nextBranches,
+          });
+          setError(null);
+        })
+        .catch((nextError) => {
+          if (
+            requestSeq.current !== seq ||
+            currentRootId.current !== requestedRootId
+          )
+            return;
+          setStatusState(null);
+          setBranchesState(null);
+          setMenuOpen(false);
+          setModalOpen(false);
+          setError(
+            nextError instanceof Error ? nextError.message : `${reason} failed`,
+          );
+        });
+    },
+    [gitCapable, root.id, serverId],
+  );
 
   useEffect(() => {
     refreshGit("git status");
@@ -4197,10 +4816,14 @@ function WorkRootGitToolbar({
     if (!gitCapable) return;
     return startGitRefreshScheduler(refreshGit, {
       isDocumentHidden: () => document.hidden,
-      addDocumentListener: (event, listener) => document.addEventListener(event, listener),
-      removeDocumentListener: (event, listener) => document.removeEventListener(event, listener),
-      addWindowListener: (event, listener) => window.addEventListener(event, listener),
-      removeWindowListener: (event, listener) => window.removeEventListener(event, listener),
+      addDocumentListener: (event, listener) =>
+        document.addEventListener(event, listener),
+      removeDocumentListener: (event, listener) =>
+        document.removeEventListener(event, listener),
+      addWindowListener: (event, listener) =>
+        window.addEventListener(event, listener),
+      removeWindowListener: (event, listener) =>
+        window.removeEventListener(event, listener),
       setInterval: (listener, ms) => window.setInterval(listener, ms),
       clearInterval: (handle) => window.clearInterval(handle),
     });
@@ -4215,16 +4838,26 @@ function WorkRootGitToolbar({
     ) : null;
   }
 
-  const branchLabel = status.branch?.name ?? (status.branch?.detachedOid ? `HEAD ${status.branch.detachedOid}` : "Git");
+  const branchLabel =
+    status.branch?.name ??
+    (status.branch?.detachedOid ? `HEAD ${status.branch.detachedOid}` : "Git");
   const branchOptions = branches?.branches ?? [];
-  const defaultBaseBranch = branches?.current ?? branchOptions.find((branch) => branch.current)?.name ?? branchOptions[0]?.name ?? "";
+  const defaultBaseBranch =
+    branches?.current ??
+    branchOptions.find((branch) => branch.current)?.name ??
+    branchOptions[0]?.name ??
+    "";
   const selectedBaseBranch = baseBranchName || defaultBaseBranch;
   const closeBranchModal = () => {
     setModalOpen(false);
     setNewBranchName("");
     setBaseBranchName("");
   };
-  const mutate = (command: ReturnType<typeof buildGitRefreshCommand>, run: () => Promise<WorkRootGitStatus>, pendingAction: "fetch" | "push" | "pull" | null = null) => {
+  const mutate = (
+    command: ReturnType<typeof buildGitRefreshCommand>,
+    run: () => Promise<WorkRootGitStatus>,
+    pendingAction: "fetch" | "push" | "pull" | null = null,
+  ) => {
     const targetRootId = root.id;
     onCommand(command, {
       [command.commandId]: () => {
@@ -4232,23 +4865,32 @@ function WorkRootGitToolbar({
         void run()
           .then((nextStatus) => {
             if (currentRootId.current !== targetRootId) return;
-            setStatusState(nextStatus.available ? { workRootId: targetRootId, status: nextStatus } : null);
+            setStatusState(
+              nextStatus.available
+                ? { workRootId: targetRootId, status: nextStatus }
+                : null,
+            );
             refreshGit("git mutation refresh");
           })
           .catch((nextError) => {
             if (currentRootId.current !== targetRootId) return;
-            setError(nextError instanceof Error ? nextError.message : "git action failed");
+            setError(
+              nextError instanceof Error
+                ? nextError.message
+                : "git action failed",
+            );
             refreshGit("git mutation failure refresh");
           })
           .finally(() => {
-            if (currentRootId.current === targetRootId && pendingAction) setPendingGitAction(null);
+            if (currentRootId.current === targetRootId && pendingAction)
+              setPendingGitAction(null);
           });
       },
     });
   };
 
   const runBranchCreateCloseCommand = () =>
-    onCommand(buildGitBranchCreateCloseCommand(root.id), {
+    onCommand(buildGitBranchCreateCloseCommand(root.id, serverId), {
       "git.branchCreate.close": closeBranchModal,
     });
 
@@ -4261,21 +4903,58 @@ function WorkRootGitToolbar({
           type="button"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          onClick={() => onCommand(buildGitBranchMenuOpenCommand(root.id), { "git.branchMenu.open": () => setMenuOpen((open) => !open) })}
+          onClick={() =>
+            onCommand(buildGitBranchMenuOpenCommand(root.id, serverId), {
+              "git.branchMenu.open": () => setMenuOpen((open) => !open),
+            })
+          }
         >
           <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
           <span>{branchLabel}</span>
         </button>
         {menuOpen ? (
           <div className="workbench-overflow-menu git-branch-menu" role="menu">
-            <button className="workbench-overflow-item" data-command-id="git.branchCreate.open" role="menuitem" type="button" onClick={() => { setMenuOpen(false); onCommand(buildGitBranchCreateOpenCommand(root.id), { "git.branchCreate.open": () => setModalOpen(true) }); }}>
+            <button
+              className="workbench-overflow-item"
+              data-command-id="git.branchCreate.open"
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onCommand(buildGitBranchCreateOpenCommand(root.id, serverId), {
+                  "git.branchCreate.open": () => setModalOpen(true),
+                });
+              }}
+            >
               <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>+ New branch...</span>
             </button>
             {branchOptions.map((branch) => (
-              <button key={branch.name} className="workbench-overflow-item" data-command-id="git.branch.switch" disabled={branch.current || (branch.checkedOut && !branch.current)} role="menuitem" type="button" title={branch.disabledReason ?? branch.name} onClick={() => { setMenuOpen(false); mutate(buildGitBranchSwitchCommand(root.id, branch.name), () => switchWorkRootGitBranch(root.id, branch.name)); }}>
+              <button
+                key={branch.name}
+                className="workbench-overflow-item"
+                data-command-id="git.branch.switch"
+                disabled={
+                  branch.current || (branch.checkedOut && !branch.current)
+                }
+                role="menuitem"
+                type="button"
+                title={branch.disabledReason ?? branch.name}
+                onClick={() => {
+                  setMenuOpen(false);
+                  mutate(
+                    buildGitBranchSwitchCommand(root.id, branch.name, serverId),
+                    () =>
+                      switchWorkRootGitBranch(root.id, branch.name, serverId),
+                  );
+                }}
+              >
                 <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>{branch.name}{branch.current ? " ✓" : ""}{branch.checkedOut && !branch.current ? " (checked out)" : ""}</span>
+                <span>
+                  {branch.name}
+                  {branch.current ? " ✓" : ""}
+                  {branch.checkedOut && !branch.current ? " (checked out)" : ""}
+                </span>
               </button>
             ))}
           </div>
@@ -4284,16 +4963,45 @@ function WorkRootGitToolbar({
       <GitStatusPill
         status={status}
         pendingAction={pendingGitAction}
-        onFetch={() => mutate(buildGitFetchCommand(root.id), () => fetchWorkRootGit(root.id), "fetch")}
-        onPush={() => mutate(buildGitPushCommand(root.id), () => pushWorkRootGit(root.id), "push")}
-        onPull={() => mutate(buildGitPullFfOnlyCommand(root.id), () => pullWorkRootGitFfOnly(root.id), "pull")}
+        onFetch={() =>
+          mutate(
+            buildGitFetchCommand(root.id, serverId),
+            () => fetchWorkRootGit(root.id, serverId),
+            "fetch",
+          )
+        }
+        onPush={() =>
+          mutate(
+            buildGitPushCommand(root.id, serverId),
+            () => pushWorkRootGit(root.id, serverId),
+            "push",
+          )
+        }
+        onPull={() =>
+          mutate(
+            buildGitPullFfOnlyCommand(root.id, serverId),
+            () => pullWorkRootGitFfOnly(root.id, serverId),
+            "pull",
+          )
+        }
       />
-      {error ? <span className="meta-chip ws-chip git-error-chip">{error}</span> : null}
-      <ModalOverlay className="root-picker-backdrop" isDismissable isOpen={modalOpen} onOpenChange={(open) => { if (!open) runBranchCreateCloseCommand(); }}>
+      {error ? (
+        <span className="meta-chip ws-chip git-error-chip">{error}</span>
+      ) : null}
+      <ModalOverlay
+        className="root-picker-backdrop"
+        isDismissable
+        isOpen={modalOpen}
+        onOpenChange={(open) => {
+          if (!open) runBranchCreateCloseCommand();
+        }}
+      >
         <Modal className="root-picker-modal git-branch-modal">
           <Dialog aria-label="New Git branch" className="root-picker-dialog">
             <div className="root-picker-titlebar">
-              <Heading className="root-picker-title" slot="title">New branch</Heading>
+              <Heading className="root-picker-title" slot="title">
+                New branch
+              </Heading>
               <div className="root-picker-window-actions">
                 <ChromeIconButton
                   className="root-picker-close-button"
@@ -4304,10 +5012,94 @@ function WorkRootGitToolbar({
                 />
               </div>
             </div>
-            <form className="git-branch-create-form" onSubmit={(event) => { event.preventDefault(); const branchName = newBranchName.trim(); const baseBranch = selectedBaseBranch.trim(); if (!branchName) return; const targetRootId = root.id; onCommand(buildGitBranchCreateSubmitCommand(root.id, branchName, baseBranch || undefined), { "git.branchCreate.submit": () => { void createWorkRootGitBranch(root.id, branchName, baseBranch || undefined).then((nextStatus) => { if (currentRootId.current !== targetRootId) return; setStatusState({ workRootId: targetRootId, status: nextStatus }); closeBranchModal(); refreshGit("git branch create refresh"); }).catch((nextError) => { if (currentRootId.current !== targetRootId) return; setError(nextError instanceof Error ? nextError.message : "branch create failed"); refreshGit("git branch create failure refresh"); }); } }); }}>
-              <label className="git-worktree-field"><span className="section-label">Branch name</span><input className="root-picker-input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} placeholder="feature-name" /></label>
-              <label className="git-worktree-field"><span className="section-label">Base branch</span><select className="root-picker-input" value={selectedBaseBranch} onChange={(event) => setBaseBranchName(event.target.value)}>{branchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}</select></label>
-              <div className="root-picker-footer-actions"><button className="action-button action-button-primary" data-command-id="git.branchCreate.submit" type="submit" disabled={!newBranchName.trim() || !selectedBaseBranch}>Create and switch</button><button className="action-button" data-command-id="git.branchCreate.close" type="button" onClick={runBranchCreateCloseCommand}>Cancel</button></div>
+            <form
+              className="git-branch-create-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const branchName = newBranchName.trim();
+                const baseBranch = selectedBaseBranch.trim();
+                if (!branchName) return;
+                const targetRootId = root.id;
+                onCommand(
+                  buildGitBranchCreateSubmitCommand(
+                    root.id,
+                    branchName,
+                    baseBranch || undefined,
+                    serverId,
+                  ),
+                  {
+                    "git.branchCreate.submit": () => {
+                      void createWorkRootGitBranch(
+                        root.id,
+                        branchName,
+                        baseBranch || undefined,
+                        serverId,
+                      )
+                        .then((nextStatus) => {
+                          if (currentRootId.current !== targetRootId) return;
+                          setStatusState({
+                            workRootId: targetRootId,
+                            status: nextStatus,
+                          });
+                          closeBranchModal();
+                          refreshGit("git branch create refresh");
+                        })
+                        .catch((nextError) => {
+                          if (currentRootId.current !== targetRootId) return;
+                          setError(
+                            nextError instanceof Error
+                              ? nextError.message
+                              : "branch create failed",
+                          );
+                          refreshGit("git branch create failure refresh");
+                        });
+                    },
+                  },
+                );
+              }}
+            >
+              <label className="git-worktree-field">
+                <span className="section-label">Branch name</span>
+                <input
+                  className="root-picker-input"
+                  value={newBranchName}
+                  onChange={(event) => setNewBranchName(event.target.value)}
+                  placeholder="feature-name"
+                />
+              </label>
+              <label className="git-worktree-field">
+                <span className="section-label">Base branch</span>
+                <select
+                  className="root-picker-input"
+                  value={selectedBaseBranch}
+                  onChange={(event) => setBaseBranchName(event.target.value)}
+                >
+                  {branchOptions.map((branch) => (
+                    <option key={branch.name} value={branch.name}>
+                      {branch.name}
+                      {branch.current ? " (current)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="root-picker-footer-actions">
+                <button
+                  className="action-button action-button-primary"
+                  data-command-id="git.branchCreate.submit"
+                  type="submit"
+                  disabled={!newBranchName.trim() || !selectedBaseBranch}
+                >
+                  Create and switch
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="git.branchCreate.close"
+                  type="button"
+                  onClick={runBranchCreateCloseCommand}
+                >
+                  Cancel
+                </button>
+              </div>
             </form>
           </Dialog>
         </Modal>
@@ -4334,21 +5126,87 @@ function GitStatusPill({
   const renderSegment = (segment: GitStatusSegment) => {
     const className = `git-status-segment git-status-segment-${segment.tone}`;
     if (segment.commandId === "git.push") {
-      return <button key={segment.key} className={className} data-command-id="git.push" type="button" disabled={segment.disabled || pendingAction === "push"} aria-label={pendingAction === "push" ? "Pushing Git changes" : undefined} onClick={onPush}>{pendingAction === "push" ? <RefreshCw className="git-spinner" aria-hidden="true" size={12} strokeWidth={1.9} /> : segment.label}</button>;
+      return (
+        <button
+          key={segment.key}
+          className={className}
+          data-command-id="git.push"
+          type="button"
+          disabled={segment.disabled || pendingAction === "push"}
+          aria-label={
+            pendingAction === "push" ? "Pushing Git changes" : undefined
+          }
+          onClick={onPush}
+        >
+          {pendingAction === "push" ? (
+            <RefreshCw
+              className="git-spinner"
+              aria-hidden="true"
+              size={12}
+              strokeWidth={1.9}
+            />
+          ) : (
+            segment.label
+          )}
+        </button>
+      );
     }
     if (segment.commandId === "git.pullFfOnly") {
-      return <button key={segment.key} className={className} data-command-id="git.pullFfOnly" type="button" disabled={segment.disabled} onClick={onPull}>{segment.label}</button>;
+      return (
+        <button
+          key={segment.key}
+          className={className}
+          data-command-id="git.pullFfOnly"
+          type="button"
+          disabled={segment.disabled}
+          onClick={onPull}
+        >
+          {segment.label}
+        </button>
+      );
     }
-    return <span key={segment.key} className={className}>{segment.label}</span>;
+    return (
+      <span key={segment.key} className={className}>
+        {segment.label}
+      </span>
+    );
   };
 
   return (
-    <span className="meta-chip ws-chip git-status-pill" title={status.branch?.upstream ?? "Git status"} aria-label={`Git status ${gitStatusSegments(status)}`}>
-      <button className="git-status-refresh" data-command-id="git.fetch" type="button" aria-label={pendingAction === "fetch" ? "Fetching Git status" : "Fetch Git status"} disabled={pendingAction === "fetch"} onClick={onFetch}>
-        <RefreshCw className={pendingAction === "fetch" ? "git-spinner" : undefined} aria-hidden="true" size={12} strokeWidth={1.9} />
+    <span
+      className="meta-chip ws-chip git-status-pill"
+      title={status.branch?.upstream ?? "Git status"}
+      aria-label={`Git status ${gitStatusSegments(status)}`}
+    >
+      <button
+        className="git-status-refresh"
+        data-command-id="git.fetch"
+        type="button"
+        aria-label={
+          pendingAction === "fetch" ? "Fetching Git status" : "Fetch Git status"
+        }
+        disabled={pendingAction === "fetch"}
+        onClick={onFetch}
+      >
+        <RefreshCw
+          className={pendingAction === "fetch" ? "git-spinner" : undefined}
+          aria-hidden="true"
+          size={12}
+          strokeWidth={1.9}
+        />
       </button>
-      {changeSegments.length ? changeSegments.map(renderSegment) : <span className="git-status-segment git-status-segment-clean">clean</span>}
-      {syncSegments.length ? <span className="git-status-separator" aria-hidden="true">|</span> : null}
+      {changeSegments.length ? (
+        changeSegments.map(renderSegment)
+      ) : (
+        <span className="git-status-segment git-status-segment-clean">
+          clean
+        </span>
+      )}
+      {syncSegments.length ? (
+        <span className="git-status-separator" aria-hidden="true">
+          |
+        </span>
+      ) : null}
       {syncSegments.map(renderSegment)}
     </span>
   );
@@ -4473,6 +5331,7 @@ function workRootActivityWorkbenchPane(
         activity={activity}
         onCommand={onCommand}
         transcriptRefresh={transcriptRefresh}
+        serverId={root.resourcePath.serverId}
       />
     ),
   };
@@ -4480,6 +5339,7 @@ function workRootActivityWorkbenchPane(
 
 type ActivityTranscriptRefreshSignal = {
   readonly rootId: string;
+  readonly serverId?: string | null;
   readonly activityId: string;
   readonly cursor: string | null;
   readonly sequence: number;
@@ -4489,10 +5349,12 @@ function WorkRootActivityPane({
   activity,
   onCommand,
   transcriptRefresh,
+  serverId,
 }: {
   activity: WorkRootActivityBadgeInput;
   onCommand: DashboardCommandDispatcher;
   transcriptRefresh: ActivityTranscriptRefreshSignal | null;
+  serverId: string;
 }) {
   // CONTRACT: A reversible read-only Activity Console projection. It consumes
   // source-neutral feed items/transcripts, exposes command-routed controls, and
@@ -4500,9 +5362,7 @@ function WorkRootActivityPane({
   return (
     <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
       {activity.phase === "loading" ? (
-        <div className="workroot-activity-state">
-          Loading workRoot activity
-        </div>
+        <div className="workroot-activity-state">Loading workRoot activity</div>
       ) : activity.phase === "error" ? (
         <div className="workroot-activity-state workroot-activity-state-error">
           WorkRoot activity is unavailable
@@ -4511,6 +5371,12 @@ function WorkRootActivityPane({
         <ActivityConsole
           view={activity.view}
           onCommand={onCommand}
+          loadTranscript={(workRootId, activityId, options) =>
+            fetchWorkRootActivityTranscript(workRootId, activityId, {
+              ...options,
+              serverId,
+            })
+          }
           transcriptRefresh={transcriptRefresh}
         />
       )}
@@ -4638,7 +5504,14 @@ function buildWorkbenchEditorGroups(
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
   activityTranscriptRefresh: ActivityTranscriptRefreshSignal | null,
   onCommand: DashboardCommandDispatcher,
-  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
+  onDocumentSaved: (source: {
+    serverId?: string;
+    workRootId: string;
+    path: string;
+    content: string;
+    contentHash: string;
+    sizeBytes: number;
+  }) => void,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -4978,7 +5851,11 @@ function TerminalPaneBody({
     container.addEventListener("focusin", markFocusedTerminal);
     container.addEventListener("pointerdown", markFocusedTerminal);
     window.addEventListener("pointerdown", clearFocusedTerminal, true);
-    window.addEventListener("focusin", clearFocusedTerminalOnOutsideFocus, true);
+    window.addEventListener(
+      "focusin",
+      clearFocusedTerminalOnOutsideFocus,
+      true,
+    );
 
     const keydownFallback = (event: KeyboardEvent) => {
       if (!container.offsetParent) {
@@ -5177,6 +6054,8 @@ function TerminalPaneBody({
       terminalWebSocketUrl(
         terminalId,
         terminalWebSocketCursor(liveRef.current.pane),
+        window.location,
+        liveRef.current.pane.session.serverId,
       ),
     );
     socketRef.current = socket;
@@ -5409,11 +6288,20 @@ function readOnlyWorkbenchPanesByGroup(
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
   groups: ReadonlyArray<{ id: string; label: string }>,
   onCommand: DashboardCommandDispatcher,
-  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
+  onDocumentSaved: (source: {
+    serverId?: string;
+    workRootId: string;
+    path: string;
+    content: string;
+    contentHash: string;
+    sizeBytes: number;
+  }) => void,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
     .filter((pane) => pane.workRootId === root.id)
-    .map((pane) => readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved));
+    .map((pane) =>
+      readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved),
+    );
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
   const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
@@ -5443,7 +6331,14 @@ function readOnlyWorkbenchPane(
   root: WorkRootView,
   pane: ReadOnlyFilePane,
   onCommand: DashboardCommandDispatcher,
-  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void,
+  onDocumentSaved: (source: {
+    serverId?: string;
+    workRootId: string;
+    path: string;
+    content: string;
+    contentHash: string;
+    sizeBytes: number;
+  }) => void,
 ): WorkbenchPane {
   const state: ViewState = {
     status: pane.status,
@@ -5492,14 +6387,25 @@ function ReadOnlyDocumentPane({
   root: WorkRootView;
   renderMarkdown: boolean;
   onCommand: DashboardCommandDispatcher;
-  onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
+  onDocumentSaved: (source: {
+    serverId?: string;
+    workRootId: string;
+    path: string;
+    content: string;
+    contentHash: string;
+    sizeBytes: number;
+  }) => void;
 }) {
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationStatus, setTranslationStatus] = useState<
     "idle" | "loading" | "ready" | "unavailable" | "error"
   >("idle");
-  const [translationMessage, setTranslationMessage] = useState<string | null>(null);
-  const [translationOverlay, setTranslationOverlay] = useState<DocumentTranslationOverlay | undefined>();
+  const [translationMessage, setTranslationMessage] = useState<string | null>(
+    null,
+  );
+  const [translationOverlay, setTranslationOverlay] = useState<
+    DocumentTranslationOverlay | undefined
+  >();
   const [documentMode, setDocumentMode] = useState<"view" | "edit">("view");
   const [draft, setDraft] = useState(pane.content);
   const [baseContentHash, setBaseContentHash] = useState(pane.contentHash);
@@ -5519,12 +6425,21 @@ function ReadOnlyDocumentPane({
   }, [pane.content, pane.contentHash]);
 
   const setModeCommand = (mode: "view" | "edit") => {
-    const command = buildDocumentModeSetCommand(pane.workRootId, pane.path, mode);
+    const command = buildDocumentModeSetCommand(
+      pane.workRootId,
+      pane.path,
+      mode,
+      pane.serverId,
+    );
     onCommand(command, { [command.commandId]: () => setDocumentMode(mode) });
   };
 
   const revertDraft = () => {
-    const command = buildDocumentRevertCommand(pane.workRootId, pane.path);
+    const command = buildDocumentRevertCommand(
+      pane.workRootId,
+      pane.path,
+      pane.serverId,
+    );
     onCommand(command, {
       [command.commandId]: () => {
         setDraft(pane.content);
@@ -5536,7 +6451,11 @@ function ReadOnlyDocumentPane({
   };
 
   const saveDraft = () => {
-    const command = buildDocumentSaveCommand(pane.workRootId, pane.path);
+    const command = buildDocumentSaveCommand(
+      pane.workRootId,
+      pane.path,
+      pane.serverId,
+    );
     onCommand(command, {
       [command.commandId]: () => {
         if (!baseContentHash) {
@@ -5546,17 +6465,22 @@ function ReadOnlyDocumentPane({
         }
         setSaveState("saving");
         setSaveMessage("Saving");
-        void writeWorkRootTextFile(pane.workRootId, {
-          path: pane.path,
-          baseContentHash,
-          content: draft,
-        })
+        void writeWorkRootTextFile(
+          pane.workRootId,
+          {
+            path: pane.path,
+            baseContentHash,
+            content: draft,
+          },
+          pane.serverId,
+        )
           .then((response) => {
             setBaseContentHash(response.contentHash);
             setSaveState("saved");
             setSaveMessage("Saved");
             setTranslationOverlay(undefined);
             onDocumentSaved({
+              serverId: pane.serverId,
               workRootId: pane.workRootId,
               path: pane.path,
               content: draft,
@@ -5565,7 +6489,8 @@ function ReadOnlyDocumentPane({
             });
           })
           .catch((error) => {
-            const message = error instanceof Error ? error.message : "Save failed";
+            const message =
+              error instanceof Error ? error.message : "Save failed";
             setSaveState(documentSaveStateForError(message));
             setSaveMessage(message);
           });
@@ -5589,7 +6514,9 @@ function ReadOnlyDocumentPane({
     });
     void fetchTranslationProviders()
       .then((providers) => {
-        const provider = providers.providers.find((candidate) => candidate.configured);
+        const provider = providers.providers.find(
+          (candidate) => candidate.configured,
+        );
         if (!provider) {
           throw new Error("No translation provider configured");
         }
@@ -5610,7 +6537,7 @@ function ReadOnlyDocumentPane({
         setTranslationMessage(
           response.status === "completed"
             ? `Translated to ${response.targetLocale}`
-            : `Translation ${response.status}`
+            : `Translation ${response.status}`,
         );
       })
       .catch((error) => {
@@ -5619,14 +6546,27 @@ function ReadOnlyDocumentPane({
         }
         setTranslationOverlay(undefined);
         setTranslationStatus("unavailable");
-        setTranslationMessage(error instanceof Error ? error.message : "Translation unavailable");
+        setTranslationMessage(
+          error instanceof Error ? error.message : "Translation unavailable",
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, renderMarkdown, translationEnabled]);
+  }, [
+    pane.content,
+    pane.path,
+    pane.status,
+    pane.title,
+    pane.workRootId,
+    pane.serverId,
+    renderMarkdown,
+    translationEnabled,
+  ]);
 
-  const documentFormatLabel = renderMarkdown ? "markdown" : (pane.languageHint ?? pane.extension ?? "text");
+  const documentFormatLabel = renderMarkdown
+    ? "markdown"
+    : (pane.languageHint ?? pane.extension ?? "text");
   const translationButtonLabel = translationEnabled
     ? "Disable Korean translation"
     : "Enable Korean translation";
@@ -5636,14 +6576,17 @@ function ReadOnlyDocumentPane({
     translationStatus === "unavailable" ||
     translationStatus === "error";
   const documentPathLabel = pane.path;
-  const documentPathTitle = pane.path.startsWith("/") ? pane.path : `${root.label} / ${pane.path}`;
+  const documentPathTitle = pane.path.startsWith("/")
+    ? pane.path
+    : `${root.label} / ${pane.path}`;
   const saveStatusLabel =
     saveState === "idle"
       ? draft === pane.content
         ? "clean"
         : "dirty"
       : saveState;
-  const showSaveStatusChip = documentMode === "edit" && pane.status === "loaded";
+  const showSaveStatusChip =
+    documentMode === "edit" && pane.status === "loaded";
 
   return (
     <div className="readonly-text-pane document-pane ws-pane">
@@ -5668,7 +6611,11 @@ function ReadOnlyDocumentPane({
         </div>
         <div className="document-ribbon-controls">
           {pane.status === "loaded" ? (
-            <div className="document-viewer-segmented" role="group" aria-label="Document mode">
+            <div
+              className="document-viewer-segmented"
+              role="group"
+              aria-label="Document mode"
+            >
               <button
                 type="button"
                 className={`document-viewer-segment${documentMode === "view" ? " is-active" : ""}`}
@@ -5693,7 +6640,9 @@ function ReadOnlyDocumentPane({
               </button>
             </div>
           ) : null}
-          {pane.status === "loaded" && renderMarkdown && documentMode === "view" ? (
+          {pane.status === "loaded" &&
+          renderMarkdown &&
+          documentMode === "view" ? (
             <button
               type="button"
               className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
@@ -5702,7 +6651,11 @@ function ReadOnlyDocumentPane({
               title={`${translationButtonLabel}; target: Korean`}
               data-command-id="document.translation.toggle"
               onClick={() => {
-                const command = buildDocumentTranslationToggleCommand(pane.workRootId, pane.path);
+                const command = buildDocumentTranslationToggleCommand(
+                  pane.workRootId,
+                  pane.path,
+                  pane.serverId,
+                );
                 onCommand(command, {
                   [command.commandId]: () => {
                     setTranslationEnabled((current) => !current);
@@ -5717,7 +6670,10 @@ function ReadOnlyDocumentPane({
             </button>
           ) : null}
           {translationStatusVisible ? (
-            <span className="document-translation-status" data-translation-status={translationStatus}>
+            <span
+              className="document-translation-status"
+              data-translation-status={translationStatus}
+            >
               {translationMessage ?? translationStatus}
             </span>
           ) : null}
@@ -5750,7 +6706,9 @@ function ReadOnlyDocumentPane({
         </div>
       </div>
       {pane.status === "loading" ? (
-        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
+        <div className="readonly-text-pane-state ws-state-surface">
+          Loading file content
+        </div>
       ) : pane.status === "error" ? (
         <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
           {pane.error ?? "file read failed"}
@@ -5769,7 +6727,11 @@ function ReadOnlyDocumentPane({
               }}
             />
           ) : renderMarkdown ? (
-            <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+            <DocumentViewer
+              markdown={pane.content}
+              path={pane.path}
+              overlay={translationOverlay}
+            />
           ) : (
             <DocumentRawEditor
               value={pane.content}
@@ -5834,12 +6796,17 @@ function WorkspaceRows({
   onCommand: DashboardCommandDispatcher;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
-  const childWorkRoots = workspace.workRoots.filter(isWorkspaceNavChildWorkRoot);
-  const selectedChildWorkRootIds = new Set(childWorkRoots.map((root) => root.id));
+  const childWorkRoots = workspace.workRoots.filter(
+    isWorkspaceNavChildWorkRoot,
+  );
+  const selectedChildWorkRootIds = new Set(
+    childWorkRoots.map((root) => root.id),
+  );
   const selectedWorkspace =
     selectedId === workspace.id ||
     workspace.workRoots.some(
-      (root) => root.id === selectedId && !selectedChildWorkRootIds.has(root.id),
+      (root) =>
+        root.id === selectedId && !selectedChildWorkRootIds.has(root.id),
     );
 
   if (compactRoot) {
@@ -5857,7 +6824,10 @@ function WorkspaceRows({
           kind={compactRoot.kind}
           availability={compactRoot.availability}
           activation={compactRoot.activation}
-          canAddWorktree={compactRoot.kind === "gitPrimaryRoot" || compactRoot.kind === "gitLinkedWorktree"}
+          canAddWorktree={
+            compactRoot.kind === "gitPrimaryRoot" ||
+            compactRoot.kind === "gitLinkedWorktree"
+          }
           debugMeta={[
             "compact workRoot",
             kindLabel(compactRoot.kind),
@@ -5881,7 +6851,10 @@ function WorkspaceRows({
         selected={selectedWorkspace}
         actions={workspace.actions}
         actionEntityId={workspace.id}
-        canAddWorktree={workspace.workRoots.some((root) => root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree")}
+        canAddWorktree={workspace.workRoots.some(
+          (root) =>
+            root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree",
+        )}
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
@@ -5961,7 +6934,9 @@ function ResourceRow({
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
   const tone = resourceRowTone(state, availability, activation);
-  const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
+  const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(
+    " · ",
+  );
   return (
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
@@ -5981,7 +6956,10 @@ function ResourceRow({
         title={metadataTitle}
         type="button"
         onClick={() =>
-          onCommand({ commandId: "resource.select", payload: { type: "select", entityId: id } })
+          onCommand({
+            commandId: "resource.select",
+            payload: { type: "select", entityId: id },
+          })
         }
       >
         <span className="resource-row-main">
@@ -5995,7 +6973,10 @@ function ResourceRow({
         </span>
       </button>
       {hasWorkspaceRemove ? (
-        <span className="resource-row-actions workspace-row-menu-wrap" ref={menuRef}>
+        <span
+          className="resource-row-actions workspace-row-menu-wrap"
+          ref={menuRef}
+        >
           <ChromeIconButton
             className="resource-row-action"
             commandId="workspace.menu.open"
@@ -6008,21 +6989,24 @@ function ResourceRow({
             }
           />
           {menuOpen ? (
-            <div className="workbench-overflow-menu workspace-row-menu" role="menu">
+            <div
+              className="workbench-overflow-menu workspace-row-menu"
+              role="menu"
+            >
               {canAddWorktree ? (
-              <button
-                className="workbench-overflow-item"
-                data-command-id="gitWorktreeAdd.open"
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onCommand(buildGitWorktreeAddOpenCommand(actionEntityId));
-                }}
-              >
-                <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>Add worktree...</span>
-              </button>
+                <button
+                  className="workbench-overflow-item"
+                  data-command-id="gitWorktreeAdd.open"
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onCommand(buildGitWorktreeAddOpenCommand(actionEntityId));
+                  }}
+                >
+                  <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>Add worktree...</span>
+                </button>
               ) : null}
               <button
                 className="workbench-overflow-item workbench-overflow-item-danger"
@@ -6356,7 +7340,11 @@ function resourceRowTone(
   availability?: WorkRootView["availability"],
   activation?: WorkRootView["activation"],
 ) {
-  if (state.error || availability === "inaccessible" || availability === "missing") {
+  if (
+    state.error ||
+    availability === "inaccessible" ||
+    availability === "missing"
+  ) {
     return "error";
   }
   if (state.stale || availability === "moved" || activation === "offline") {
