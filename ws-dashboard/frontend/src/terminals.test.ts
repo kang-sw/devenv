@@ -267,6 +267,19 @@ assertEqual(
   "websocket URL uses wss for https",
 );
 assertEqual(
+  terminalWebSocketUrl(
+    "term/abc",
+    12,
+    {
+      protocol: "http:",
+      host: "127.0.0.1:1234",
+    } as Location,
+    "server remote/1",
+  ),
+  "ws://127.0.0.1:1234/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/socket?after=12",
+  "websocket URL uses local gateway server-scoped route for linked servers",
+);
+assertEqual(
   terminalPaneLogicalKey("root-local-abc", "term_abc"),
   "persistentTerminal/server-local/root-local-abc/term_abc",
   "logical key uses workRoot and terminal id",

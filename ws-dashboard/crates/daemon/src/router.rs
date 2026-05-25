@@ -41,7 +41,7 @@ use crate::servers::{
     server_scoped_read_work_root_file, server_scoped_remove_workspace, server_scoped_root_picker,
     server_scoped_root_picker_pins, server_scoped_set_work_root_activation,
     server_scoped_terminal_input, server_scoped_terminal_output, server_scoped_terminal_resize,
-    server_scoped_terminals, server_scoped_work_root_activity,
+    server_scoped_terminal_websocket, server_scoped_terminals, server_scoped_work_root_activity,
     server_scoped_work_root_activity_events, server_scoped_work_root_activity_transcript,
     server_scoped_work_root_files, server_scoped_write_work_root_file, start_ssh_dashboard_server,
     LinkedServerSessions, LinkedServerTunnels,
@@ -195,6 +195,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_id}/terminals/{terminal_id}/output",
             get(server_scoped_terminal_output),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/terminals/{terminal_id}/socket",
+            get(server_scoped_terminal_websocket),
         )
         .route(
             "/api/dashboard/servers/{server_id}/terminals/{terminal_id}/input",

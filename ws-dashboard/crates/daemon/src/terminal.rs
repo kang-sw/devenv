@@ -323,7 +323,7 @@ pub struct TerminalOutputQuery {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct TerminalWebSocketQuery {
     #[serde(default)]
-    after: u64,
+    pub after: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

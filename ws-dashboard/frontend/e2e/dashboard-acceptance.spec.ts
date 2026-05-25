@@ -3086,6 +3086,143 @@ test("linked server terminal HTTP lifecycle uses server-scoped local gateway rou
   expect(localTerminalHits).toBe(0);
 });
 
+test("linked server terminal WebSocket uses local gateway server-scoped route", async ({ page }) => {
+  const remoteTerminalRequests: string[] = [];
+  const terminalSocketMessages: string[] = [];
+  let terminalSocketRouteMatched = false;
+  let localTerminalHits = 0;
+  let remoteTerminals: unknown[] = [];
+
+  await page.routeWebSocket(
+    /\/api\/dashboard\/servers\/server-remote\/terminals\/remote-term-ws\/socket\?after=/,
+    (ws) => {
+      terminalSocketRouteMatched = true;
+      ws.onMessage((message) => {
+        terminalSocketMessages.push(
+          typeof message === "string" ? message : message.toString("utf8"),
+        );
+      });
+      ws.send(
+        JSON.stringify({
+          type: "output",
+          terminalId: "remote-term-ws",
+          chunk: { sequence: 1, data: "REMOTE-WS-OUTPUT", stream: "pty" },
+        }),
+      );
+    },
+  );
+  await page.route("**/api/dashboard/servers", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserServers()),
+    });
+  });
+  await page.route("**/api/dashboard/resources", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserResources("server-local")),
+    });
+  });
+  await page.route(
+    "**/api/dashboard/servers/server-remote/resources",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(linkedServerBrowserResources("server-remote", "remote-root-opened")),
+      });
+    },
+  );
+  await page.route("**/api/dashboard/work-roots/remote-root-opened/terminals", async (route) => {
+    localTerminalHits += 1;
+    await route.fulfill({ status: 500, body: "" });
+  });
+  await page.route("**/api/dashboard/terminals/remote-term-ws**", async (route) => {
+    localTerminalHits += 1;
+    await route.fulfill({ status: 500, body: "" });
+  });
+  await page.route(
+    "**/api/dashboard/servers/server-remote/work-roots/remote-root-opened/terminals",
+    async (route) => {
+      const url = new URL(route.request().url());
+      remoteTerminalRequests.push(`${route.request().method()} ${url.pathname}`);
+      if (route.request().method() === "POST") {
+        remoteTerminals = [
+          {
+            terminalId: "remote-term-ws",
+            workRootId: "remote-root-opened",
+            title: "Terminal",
+            status: "running",
+            columns: 80,
+            rows: 24,
+            createdAtMs: 1,
+            cwdHint: null,
+          },
+        ];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(remoteTerminals[0]),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(remoteTerminals),
+      });
+    },
+  );
+  await page.route(
+    "**/api/dashboard/servers/server-remote/terminals/remote-term-ws/output**",
+    async (route) => {
+      const url = new URL(route.request().url());
+      remoteTerminalRequests.push(`${route.request().method()} ${url.pathname}`);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          terminalId: "remote-term-ws",
+          status: "running",
+          nextSequence: 1,
+          chunks: [],
+        }),
+      });
+    },
+  );
+
+  await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-shell")).toBeVisible();
+  await page
+    .locator(".server-row", { hasText: "Remote fixture" })
+    .locator('[data-command-id="server.select"]')
+    .click();
+  await expect(page.locator('[data-resource-id="remote-root-opened"]')).toBeVisible();
+  await page.locator('[data-command-id="terminal.create"]').click();
+  await expect(
+    page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id="terminal:server-remote%2Fremote-term-ws"]',
+    ),
+  ).toBeVisible();
+  await expect(page.locator(".xterm-rows")).toContainText("REMOTE-WS-OUTPUT");
+  await terminalInputTarget(page);
+  await page.locator(".terminal-surface").click({ position: { x: 20, y: 20 } });
+  await expectTerminalInputFocused(page);
+  await page.keyboard.type("remote ws input");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => terminalSocketMessages.some((message) => message.includes('"type":"resize"')))
+    .toBe(true);
+
+  expect(remoteTerminalRequests).toContain(
+    "POST /api/dashboard/servers/server-remote/work-roots/remote-root-opened/terminals",
+  );
+  expect(terminalSocketRouteMatched).toBe(true);
+  expect(localTerminalHits).toBe(0);
+});
+
 test("linked server root picker uses server-scoped local gateway routes", async ({ page }) => {
   const remoteGatewayRequests: string[] = [];
   let localRootPickerHits = 0;

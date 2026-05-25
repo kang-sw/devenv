@@ -7,15 +7,22 @@ use std::thread;
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{OriginalUri, Path as AxumPath, Query, State};
+use axum::extract::{
+    ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
+    OriginalUri, Path as AxumPath, Query, State,
+};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use futures_util::Stream;
+use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::{
+    client::IntoClientRequest, protocol::frame::CloseFrame as TungsteniteCloseFrame,
+    Error as TungsteniteError, Message as TungsteniteMessage,
+};
 use ws_dashboard_core::{
     ActionHint, DashboardResourcesView, DashboardServersView, InstanceView, ServerConnectionStatus,
     ServerConnectionView, ServerId, ServerKind, ViewState,
@@ -41,8 +48,8 @@ use crate::root_picker::{
 use crate::router::AppState;
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_resize, CreateTerminalRequest, TerminalInputRequest, TerminalOutputQuery,
-    TerminalResizeRequest,
+    terminal_resize, terminal_websocket, CreateTerminalRequest, TerminalInputRequest,
+    TerminalOutputQuery, TerminalResizeRequest, TerminalWebSocketQuery,
 };
 use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
@@ -1233,6 +1240,38 @@ pub async fn server_scoped_terminal_resize(
     forward_server_scoped_operation(state, server_id, operation, headers, body).await
 }
 
+pub async fn server_scoped_terminal_websocket(
+    State(state): State<AppState>,
+    AxumPath((server_id, terminal_id)): AxumPath<(String, String)>,
+    Query(query): Query<TerminalWebSocketQuery>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    if server_id == LOCAL_SERVER_ID {
+        return terminal_websocket(State(state), AxumPath(terminal_id), Query(query), upgrade).await;
+    }
+
+    match resolve_server_scoped_forwarding(&state, &server_id).await {
+        ServerScopedResolution::Local => server_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server-local dispatch should be handled in-process",
+        ),
+        ServerScopedResolution::Refusal { status, message } => server_error(status, message),
+        ServerScopedResolution::Linked {
+            endpoint, token, ..
+        } => match connect_remote_terminal_websocket(&endpoint, &token, &terminal_id, &query).await {
+            Ok(upstream) => upgrade
+                .on_upgrade(move |browser| terminal_websocket_relay(browser, upstream))
+                .into_response(),
+            Err(TerminalWebSocketForwardError::Rejected(status)) => {
+                server_error(status, "linked server terminal websocket rejected")
+            }
+            Err(TerminalWebSocketForwardError::Unavailable) => {
+                server_error(StatusCode::BAD_GATEWAY, "linked server unreachable")
+            }
+        },
+    }
+}
+
 pub async fn server_scoped_close_terminal(
     State(state): State<AppState>,
     AxumPath((server_id, terminal_id)): AxumPath<(String, String)>,
@@ -1270,6 +1309,135 @@ async fn forward_server_scoped_operation(
                 server_error(StatusCode::BAD_GATEWAY, "linked server unreachable")
             }
         },
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum TerminalWebSocketForwardError {
+    Rejected(StatusCode),
+    Unavailable,
+}
+
+async fn connect_remote_terminal_websocket(
+    endpoint: &str,
+    token: &BearerAuthToken,
+    terminal_id: &str,
+    query: &TerminalWebSocketQuery,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    TerminalWebSocketForwardError,
+> {
+    let url = remote_terminal_websocket_url(endpoint, terminal_id, query.after)?;
+    let mut request = url
+        .into_client_request()
+        .map_err(|_| TerminalWebSocketForwardError::Unavailable)?;
+    request.headers_mut().insert(
+        tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
+        token
+            .as_authorization_header()
+            .parse()
+            .map_err(|_| TerminalWebSocketForwardError::Unavailable)?,
+    );
+    tokio_tungstenite::connect_async(request)
+        .await
+        .map(|(socket, _)| socket)
+        .map_err(|error| match error {
+            TungsteniteError::Http(response) => {
+                TerminalWebSocketForwardError::Rejected(response.status())
+            }
+            _ => TerminalWebSocketForwardError::Unavailable,
+        })
+}
+
+fn remote_terminal_websocket_url(
+    endpoint: &str,
+    terminal_id: &str,
+    after: u64,
+) -> Result<String, TerminalWebSocketForwardError> {
+    let mut url = Url::parse(endpoint).map_err(|_| TerminalWebSocketForwardError::Unavailable)?;
+    let scheme = match url.scheme() {
+        "http" => "ws",
+        "https" => "wss",
+        "ws" => "ws",
+        "wss" => "wss",
+        _ => return Err(TerminalWebSocketForwardError::Unavailable),
+    };
+    url.set_scheme(scheme)
+        .map_err(|_| TerminalWebSocketForwardError::Unavailable)?;
+    url.set_path(&format!("/api/dashboard/terminals/{terminal_id}/socket"));
+    url.query_pairs_mut().clear().append_pair("after", &after.to_string());
+    Ok(url.to_string())
+}
+
+async fn terminal_websocket_relay(
+    browser: WebSocket,
+    upstream: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) {
+    let (mut browser_sender, mut browser_receiver) = browser.split();
+    let (mut upstream_sender, mut upstream_receiver) = upstream.split();
+
+    loop {
+        tokio::select! {
+            browser_message = browser_receiver.next() => {
+                let Some(Ok(message)) = browser_message else { break; };
+                let is_close = matches!(message, Message::Close(_));
+                if upstream_sender.send(axum_to_tungstenite_message(message)).await.is_err() {
+                    break;
+                }
+                if is_close {
+                    break;
+                }
+            }
+            upstream_message = upstream_receiver.next() => {
+                let Some(Ok(message)) = upstream_message else { break; };
+                let Some(message) = tungstenite_to_axum_message(message) else {
+                    continue;
+                };
+                let is_close = matches!(message, Message::Close(_));
+                if browser_sender.send(message).await.is_err() {
+                    break;
+                }
+                if is_close {
+                    break;
+                }
+            }
+        }
+    }
+
+    let _ = upstream_sender.send(TungsteniteMessage::Close(None)).await;
+    let _ = browser_sender.send(Message::Close(None)).await;
+}
+
+fn axum_to_tungstenite_message(message: Message) -> TungsteniteMessage {
+    match message {
+        Message::Text(text) => TungsteniteMessage::Text(text.as_str().to_owned().into()),
+        Message::Binary(bytes) => TungsteniteMessage::Binary(bytes),
+        Message::Ping(bytes) => TungsteniteMessage::Ping(bytes),
+        Message::Pong(bytes) => TungsteniteMessage::Pong(bytes),
+        Message::Close(frame) => TungsteniteMessage::Close(frame.map(|frame| {
+            TungsteniteCloseFrame {
+                code: frame.code.into(),
+                reason: frame.reason.as_str().to_owned().into(),
+            }
+        })),
+    }
+}
+
+fn tungstenite_to_axum_message(message: TungsteniteMessage) -> Option<Message> {
+    match message {
+        TungsteniteMessage::Text(text) => Some(Message::Text(text.as_str().to_owned().into())),
+        TungsteniteMessage::Binary(bytes) => Some(Message::Binary(bytes)),
+        TungsteniteMessage::Ping(bytes) => Some(Message::Ping(bytes)),
+        TungsteniteMessage::Pong(bytes) => Some(Message::Pong(bytes)),
+        TungsteniteMessage::Close(frame) => Some(Message::Close(frame.map(|frame| CloseFrame {
+            code: frame.code.into(),
+            reason: frame.reason.as_str().to_owned().into(),
+        }))),
+        TungsteniteMessage::Frame(_) => None,
     }
 }
 
