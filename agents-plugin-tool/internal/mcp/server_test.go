@@ -2056,11 +2056,43 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	call(1, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`, root))
 	call(2, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"same","backend":"bogus","model":"global-model"}}}`, root))
 	call(3, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"same","backend":"bogus","model":"actor-model"}}}`)
+	manager := wsagent.NewManager(wsagent.Options{})
+	actorID := server.currentActorID()
+	globalReady, globalReadyLayout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "ready", Backend: "bogus", Model: "global-ready-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalReadyCall, err := manager.BeginCurrentCall(globalReadyLayout, globalReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalReadyCall.Status = wsagent.CallStatusCompleted
+	if err := os.WriteFile(globalReadyLayout.CurrentStateFile, mustMarshalForTest(t, globalReadyCall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globalReadyLayout.OutputFile, []byte("global ready output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actorReady, actorReadyLayout, err := manager.Register(wsagent.RegisterOptions{Root: root, ActorID: actorID, Name: "ready", Backend: "bogus", Model: "actor-ready-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorReadyCall, err := manager.BeginCurrentCall(actorReadyLayout, actorReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorReadyCall.Status = wsagent.CallStatusCompleted
+	if err := os.WriteFile(actorReadyLayout.CurrentStateFile, mustMarshalForTest(t, actorReadyCall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(actorReadyLayout.OutputFile, []byte("actor ready output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	actorStatus := call(4, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"same"}}}`)
 	globalStatus := call(5, fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
 	callText := call(6, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"same","prompt":"do work"}}}`)
-	waitText := call(7, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"same","timeout_seconds":5}}}`)
-	resultText := call(8, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"same"}}}`)
+	waitText := call(7, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"ready","timeout_seconds":5}}}`)
+	resultText := call(8, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"ready"}}}`)
 	tailText := call(9, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"agents.tail","arguments":{"name":"same","lines":20}}}`)
 	cancelText := call(10, `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"agents.cancel","arguments":{"name":"same"}}}`)
 	call(11, `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"agents.erase","arguments":{"name":"same"}}}`)
@@ -2075,12 +2107,13 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	if !strings.Contains(callText, "same\trunning") {
 		t.Fatalf("actor-scoped call did not start:\n%s", callText)
 	}
-	if !strings.Contains(waitText, "agent: same") ||
-		!strings.Contains(waitText, "call_status: running") ||
-		!strings.Contains(waitText, "wait_timeout: true") {
+	if !strings.Contains(waitText, "agent: ready") ||
+		!strings.Contains(waitText, "call_status: completed") ||
+		!strings.Contains(waitText, "ready: true") ||
+		!strings.Contains(waitText, "result_available: true") {
 		t.Fatalf("actor-scoped wait mismatch:\n%s", waitText)
 	}
-	if !strings.Contains(resultText, "result_available: false") {
+	if !strings.Contains(resultText, "actor ready output") || strings.Contains(resultText, "global ready output") {
 		t.Fatalf("actor-scoped result status mismatch:\n%s", resultText)
 	}
 	if !strings.Contains(tailText, "call.started_async") {
