@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::{Path as AxumPath, Query, Request, State};
-use axum::http::{header, HeaderMap, StatusCode};
-use axum::middleware::{from_fn_with_state, Next};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::Router;
 use tokio::fs;
 use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::document_translation::{
-    translate_document, translation_providers, DocumentTranslationService,
+    DocumentTranslationService, translate_document, translation_providers,
 };
 use crate::events::instance_events;
 use crate::git_toolbar::{
@@ -31,21 +31,21 @@ use crate::root_picker::{
     remove_workspace, set_work_root_activation, unpin_root_picker_directory,
 };
 use crate::servers::{
-    dashboard_server_resources, dashboard_servers, link_dashboard_server,
-    reconnect_dashboard_server_tunnel, remote_link_auth, start_ssh_dashboard_server,
-    LinkedServerSessions, LinkedServerTunnels,
+    LinkedServerSessions, LinkedServerTunnels, dashboard_server_resources, dashboard_servers,
+    link_dashboard_server, link_endpoint_server, reconnect_dashboard_server_tunnel,
+    remote_link_auth, start_ssh_dashboard_server,
 };
 use crate::terminal::{
-    close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_resize, terminal_websocket, TerminalRegistry,
+    TerminalRegistry, close_terminal, create_terminal, list_terminals, terminal_input,
+    terminal_output, terminal_resize, terminal_websocket,
 };
 use crate::work_root_activity::{
-    work_root_activity, work_root_activity_events, work_root_activity_transcript,
-    WorkRootActivityProjector,
+    WorkRootActivityProjector, work_root_activity, work_root_activity_events,
+    work_root_activity_transcript,
 };
 use crate::work_root_files::{
-    document_events, list_work_root_files, read_work_root_file, write_work_root_file,
-    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots,
+    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots, document_events, list_work_root_files,
+    read_work_root_file, write_work_root_file,
 };
 
 #[derive(Clone)]
@@ -76,6 +76,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/dashboard/servers/ssh/start",
             post(start_ssh_dashboard_server),
         )
+        .route("/api/dashboard/servers/link", post(link_endpoint_server))
         .route(
             "/api/dashboard/servers/{server_id}/resources",
             get(dashboard_server_resources),

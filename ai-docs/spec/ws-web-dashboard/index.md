@@ -188,24 +188,24 @@ Once the tunnel exists but no memory-only link token is present, the linked
 server becomes `authRequired` and the owner must re-enter the remote
 daemon-lifetime passphrase through the link-auth route.
 
-## 🚧 Endpoint-First Linked Server Add {#260525-ws-dashboard-endpoint-linked-server-add}
+## Endpoint-First Linked Server Add {#260525-ws-dashboard-endpoint-linked-server-add}
 
-The local dashboard will let an authenticated owner register a linked dashboard
+The local dashboard lets an authenticated owner register a linked dashboard
 server from an owner-provided endpoint without asking the dashboard to manage
 SSH. The endpoint may be a user-managed loopback tunnel, VPN/private network
 route, port forward, or other reachable dashboard daemon URL. The browser
 submits the endpoint and optional daemon-lifetime link passphrase to the local
 daemon; the browser does not call the remote endpoint directly.
 
-The local daemon will normalize and validate the endpoint, reject unsupported
-schemes, probe enough to distinguish unreachable or incompatible targets, and
-persist only non-secret linked-server metadata such as opaque server id,
+The local daemon normalizes and validates the endpoint, rejects unsupported
+schemes, probes enough to distinguish unreachable or incompatible targets, and
+persists only non-secret linked-server metadata such as opaque server id,
 display label, kind, and endpoint hint. If a passphrase is supplied, the local
-daemon will exchange it with the remote `/api/dashboard/link-auth` endpoint and
-store the returned bearer token only in memory. Without a memory-only token, the
-server remains visible in a bounded auth-required or unreachable state.
+daemon exchanges it with the remote `/api/dashboard/link-auth` endpoint and
+stores the returned bearer token only in memory. Without a memory-only token,
+the server remains visible in a bounded auth-required or unreachable state.
 
-The left navigation's add-server affordance will open a compact endpoint-first
+The left navigation's add-server affordance opens a compact endpoint-first
 modal. SSH-managed start or reconnect remains an advanced or agent-operated
 path and is not required by the default add-server flow.
 
