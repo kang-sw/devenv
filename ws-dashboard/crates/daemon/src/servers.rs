@@ -22,14 +22,27 @@ use ws_dashboard_core::{
 };
 
 use crate::auth::BearerAuthToken;
+use crate::git_toolbar::{
+    git_branches, git_create_branch, git_fetch, git_pull_ff_only, git_push, git_status,
+    git_switch_branch, CreateBranchRequest, SwitchBranchRequest,
+};
+use crate::git_worktree::{
+    git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
+    AddGitWorktreeRequest, AddGitWorktreeResponse, GitWorktreeAddPreviewRequest,
+};
 use crate::persistent_state::PersistedLinkedServer;
 use crate::resources::local_dashboard_resources_view;
 use crate::root_picker::{
     create_empty_directory, list_root_picker, open_work_root, pin_root_picker_directory,
-    set_work_root_activation, unpin_root_picker_directory, CreateEmptyDirectoryRequest,
-    OpenWorkRootRequest, RootPickerPinRequest, SetWorkRootActivationRequest,
+    remove_workspace, set_work_root_activation, unpin_root_picker_directory,
+    CreateEmptyDirectoryRequest, OpenWorkRootRequest, RootPickerPinRequest,
+    SetWorkRootActivationRequest,
 };
 use crate::router::AppState;
+use crate::work_root_activity::{
+    work_root_activity, work_root_activity_events, work_root_activity_transcript,
+    ActivityEventsQuery, ActivityTranscriptQuery, WorkRootActivityQuery,
+};
 use crate::work_root_files::{
     document_events, list_work_root_files, read_work_root_file, write_work_root_file,
     WorkRootFileListQuery, WorkRootFileWriteRequest,
@@ -484,7 +497,14 @@ pub async fn dashboard_server_resources(
 struct ServerScopedForwardOperation {
     method: Method,
     legacy_path: String,
-    rewrite_resources: bool,
+    rewrite: ForwardResponseRewrite,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ForwardResponseRewrite {
+    None,
+    Resources,
+    GitWorktreeAdd,
 }
 
 impl ServerScopedForwardOperation {
@@ -492,7 +512,7 @@ impl ServerScopedForwardOperation {
         Self {
             method: Method::GET,
             legacy_path: legacy_path_with_query("/api/dashboard/root-picker", &uri),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
         }
     }
 
@@ -500,7 +520,7 @@ impl ServerScopedForwardOperation {
         Self {
             method: Method::POST,
             legacy_path: "/api/dashboard/root-picker/directories".to_owned(),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
         }
     }
 
@@ -508,7 +528,7 @@ impl ServerScopedForwardOperation {
         matches!(method, Method::POST | Method::DELETE).then(|| Self {
             method,
             legacy_path: "/api/dashboard/root-picker/pins".to_owned(),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
         })
     }
 
@@ -516,7 +536,7 @@ impl ServerScopedForwardOperation {
         Self {
             method: Method::POST,
             legacy_path: "/api/dashboard/work-roots/open".to_owned(),
-            rewrite_resources: true,
+            rewrite: ForwardResponseRewrite::Resources,
         }
     }
 
@@ -524,7 +544,7 @@ impl ServerScopedForwardOperation {
         Self {
             method: Method::POST,
             legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/activation"),
-            rewrite_resources: true,
+            rewrite: ForwardResponseRewrite::Resources,
         }
     }
 
@@ -535,7 +555,7 @@ impl ServerScopedForwardOperation {
                 &format!("/api/dashboard/work-roots/{work_root_id}/files"),
                 &uri,
             ),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
         }
     }
 
@@ -546,7 +566,7 @@ impl ServerScopedForwardOperation {
                 &format!("/api/dashboard/work-roots/{work_root_id}/files/read"),
                 &uri,
             ),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
         }
     }
 
@@ -554,7 +574,7 @@ impl ServerScopedForwardOperation {
         Self {
             method: Method::POST,
             legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/files/write"),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
         }
     }
 
@@ -562,7 +582,111 @@ impl ServerScopedForwardOperation {
         Self {
             method: Method::GET,
             legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/documents/events"),
-            rewrite_resources: false,
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn remove_workspace(workspace_id: &str) -> Self {
+        Self {
+            method: Method::DELETE,
+            legacy_path: format!("/api/dashboard/workspaces/{workspace_id}"),
+            rewrite: ForwardResponseRewrite::Resources,
+        }
+    }
+
+    fn git_worktree_add_options(workspace_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!("/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options"),
+                &uri,
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn git_worktree_add_preview(workspace_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!(
+                "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn git_worktree_add_submit(workspace_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/workspaces/{workspace_id}/git-worktree-add"),
+            rewrite: ForwardResponseRewrite::GitWorktreeAdd,
+        }
+    }
+
+    fn activity(work_root_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+                &uri,
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn activity_transcript(work_root_id: &str, activity_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!(
+                    "/api/dashboard/work-roots/{work_root_id}/activity/items/{activity_id}/transcript"
+                ),
+                &uri,
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn activity_events(work_root_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!("/api/dashboard/work-roots/{work_root_id}/activity/events"),
+                &uri,
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn git_status(work_root_id: &str) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/git/status"),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn git_branches(work_root_id: &str, method: Method) -> Option<Self> {
+        matches!(method, Method::GET | Method::POST).then(|| Self {
+            method,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/git/branches"),
+            rewrite: ForwardResponseRewrite::None,
+        })
+    }
+
+    fn git_switch_branch(work_root_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/git/switch-branch"),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn git_mutation(work_root_id: &str, action: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/git/{action}"),
+            rewrite: ForwardResponseRewrite::None,
         }
     }
 }
@@ -734,6 +858,239 @@ pub async fn server_scoped_document_events(
     forward_server_scoped_document_events(state, server_id, operation).await
 }
 
+pub async fn server_scoped_remove_workspace(
+    State(state): State<AppState>,
+    AxumPath((server_id, workspace_id)): AxumPath<(String, String)>,
+) -> Response {
+    let operation = ServerScopedForwardOperation::remove_workspace(&workspace_id);
+    if server_id == LOCAL_SERVER_ID {
+        return remove_workspace(State(state), AxumPath(workspace_id)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_git_worktree_add_options(
+    State(state): State<AppState>,
+    AxumPath((server_id, workspace_id)): AxumPath<(String, String)>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_worktree_add_options(&workspace_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return git_worktree_add_options(State(state), AxumPath(workspace_id)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_git_worktree_add_preview(
+    State(state): State<AppState>,
+    AxumPath((server_id, workspace_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_worktree_add_preview(&workspace_id);
+    if server_id == LOCAL_SERVER_ID {
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<GitWorktreeAddPreviewRequest>(&body) {
+            Ok(request) => {
+                git_worktree_add_preview(State(state), AxumPath(workspace_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_git_worktree_add_submit(
+    State(state): State<AppState>,
+    AxumPath((server_id, workspace_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_worktree_add_submit(&workspace_id);
+    if server_id == LOCAL_SERVER_ID {
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<AddGitWorktreeRequest>(&body) {
+            Ok(request) => {
+                git_worktree_add_submit(State(state), AxumPath(workspace_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_work_root_activity(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    Query(query): Query<WorkRootActivityQuery>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::activity(&work_root_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return work_root_activity(State(state), AxumPath(work_root_id), Query(query)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_work_root_activity_transcript(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id, activity_id)): AxumPath<(String, String, String)>,
+    Query(query): Query<ActivityTranscriptQuery>,
+    uri: OriginalUri,
+) -> Response {
+    let operation =
+        ServerScopedForwardOperation::activity_transcript(&work_root_id, &activity_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return work_root_activity_transcript(
+            State(state),
+            AxumPath((work_root_id, activity_id)),
+            Query(query),
+        )
+        .await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_work_root_activity_events(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    Query(query): Query<ActivityEventsQuery>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::activity_events(&work_root_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return work_root_activity_events(State(state), AxumPath(work_root_id), Query(query)).await;
+    }
+    forward_server_scoped_activity_events(state, server_id, operation).await
+}
+
+pub async fn server_scoped_git_status(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_status(&work_root_id);
+    if server_id == LOCAL_SERVER_ID {
+        return git_status(State(state), AxumPath(work_root_id)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_git_branches(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(operation) = ServerScopedForwardOperation::git_branches(&work_root_id, method.clone())
+    else {
+        return server_error(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "unsupported server-scoped operation",
+        );
+    };
+    if server_id == LOCAL_SERVER_ID {
+        if method == Method::GET {
+            return git_branches(State(state), AxumPath(work_root_id)).await;
+        }
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<CreateBranchRequest>(&body) {
+            Ok(request) => {
+                git_create_branch(State(state), AxumPath(work_root_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_git_switch_branch(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_switch_branch(&work_root_id);
+    if server_id == LOCAL_SERVER_ID {
+        if !has_json_content_type(&headers) {
+            return server_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json request body",
+            );
+        }
+        return match serde_json::from_slice::<SwitchBranchRequest>(&body) {
+            Ok(request) => {
+                git_switch_branch(State(state), AxumPath(work_root_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_git_fetch(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+) -> Response {
+    server_scoped_git_no_body_mutation(state, server_id, work_root_id, "fetch").await
+}
+
+pub async fn server_scoped_git_push(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+) -> Response {
+    server_scoped_git_no_body_mutation(state, server_id, work_root_id, "push").await
+}
+
+pub async fn server_scoped_git_pull_ff_only(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+) -> Response {
+    server_scoped_git_no_body_mutation(state, server_id, work_root_id, "pull-ff-only").await
+}
+
+async fn server_scoped_git_no_body_mutation(
+    state: AppState,
+    server_id: String,
+    work_root_id: String,
+    action: &'static str,
+) -> Response {
+    let operation = ServerScopedForwardOperation::git_mutation(&work_root_id, action);
+    if server_id == LOCAL_SERVER_ID {
+        return match action {
+            "fetch" => git_fetch(State(state), AxumPath(work_root_id)).await,
+            "push" => git_push(State(state), AxumPath(work_root_id)).await,
+            "pull-ff-only" => git_pull_ff_only(State(state), AxumPath(work_root_id)).await,
+            _ => server_error(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "unsupported server-scoped operation",
+            ),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
 async fn forward_server_scoped_operation(
     state: AppState,
     server_id: String,
@@ -767,6 +1124,35 @@ async fn forward_server_scoped_document_events(
     server_id: String,
     operation: ServerScopedForwardOperation,
 ) -> Response {
+    forward_server_scoped_sse(
+        state,
+        server_id,
+        operation,
+        "linked server document events stream unavailable",
+    )
+    .await
+}
+
+async fn forward_server_scoped_activity_events(
+    state: AppState,
+    server_id: String,
+    operation: ServerScopedForwardOperation,
+) -> Response {
+    forward_server_scoped_sse(
+        state,
+        server_id,
+        operation,
+        "linked server activity events stream unavailable",
+    )
+    .await
+}
+
+async fn forward_server_scoped_sse(
+    state: AppState,
+    server_id: String,
+    operation: ServerScopedForwardOperation,
+    invalid_stream_message: &'static str,
+) -> Response {
     match resolve_server_scoped_forwarding(&state, &server_id).await {
         ServerScopedResolution::Local => server_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -775,21 +1161,18 @@ async fn forward_server_scoped_document_events(
         ServerScopedResolution::Refusal { status, message } => server_error(status, message),
         ServerScopedResolution::Linked {
             endpoint, token, ..
-        } => match request_remote_document_events(&endpoint, &token, &operation).await {
-            Ok(RemoteDocumentEventsResponse::Stream { content_type, body }) => {
+        } => match request_remote_sse(&endpoint, &token, &operation).await {
+            Ok(RemoteSseResponse::Stream { content_type, body }) => {
                 let mut response = Body::from_stream(body).into_response();
                 response
                     .headers_mut()
                     .insert(header::CONTENT_TYPE, content_type);
                 response
             }
-            Ok(RemoteDocumentEventsResponse::UpstreamError(response)) => {
-                response.into_plain_response()
+            Ok(RemoteSseResponse::UpstreamError(response)) => response.into_plain_response(),
+            Ok(RemoteSseResponse::InvalidStream) => {
+                server_error(StatusCode::BAD_GATEWAY, invalid_stream_message)
             }
-            Ok(RemoteDocumentEventsResponse::InvalidStream) => server_error(
-                StatusCode::BAD_GATEWAY,
-                "linked server document events stream unavailable",
-            ),
             Err(ForwardOperationError::Unavailable) => {
                 server_error(StatusCode::BAD_GATEWAY, "linked server unreachable")
             }
@@ -854,17 +1237,38 @@ impl ForwardedDashboardResponse {
         operation: &ServerScopedForwardOperation,
         server: &PersistedLinkedServer,
     ) -> Response {
-        if self.status.is_success() && operation.rewrite_resources {
-            if let Ok(view) = serde_json::from_slice::<DashboardResourcesView>(&self.body) {
-                let mut response =
-                    Json(rewrite_resources_for_linked_server(view, server)).into_response();
-                *response.status_mut() = self.status;
-                if let Some(value) = self.opened_work_root_id {
-                    response
-                        .headers_mut()
-                        .insert("x-ws-dashboard-opened-work-root-id", value);
+        if self.status.is_success() {
+            match operation.rewrite {
+                ForwardResponseRewrite::Resources => {
+                    if let Ok(view) = serde_json::from_slice::<DashboardResourcesView>(&self.body) {
+                        let mut response =
+                            Json(rewrite_resources_for_linked_server(view, server)).into_response();
+                        *response.status_mut() = self.status;
+                        if let Some(value) = self.opened_work_root_id {
+                            response
+                                .headers_mut()
+                                .insert("x-ws-dashboard-opened-work-root-id", value);
+                        }
+                        return response;
+                    }
                 }
-                return response;
+                ForwardResponseRewrite::GitWorktreeAdd => {
+                    if let Ok(mut response_body) =
+                        serde_json::from_slice::<AddGitWorktreeResponse>(&self.body)
+                    {
+                        response_body.resources =
+                            rewrite_resources_for_linked_server(response_body.resources, server);
+                        let mut response = Json(response_body).into_response();
+                        *response.status_mut() = self.status;
+                        if let Some(value) = self.opened_work_root_id {
+                            response
+                                .headers_mut()
+                                .insert("x-ws-dashboard-opened-work-root-id", value);
+                        }
+                        return response;
+                    }
+                }
+                ForwardResponseRewrite::None => {}
             }
         }
 
@@ -890,22 +1294,22 @@ enum ForwardOperationError {
     Unavailable,
 }
 
-type RemoteDocumentEventStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+type RemoteSseStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
-enum RemoteDocumentEventsResponse {
+enum RemoteSseResponse {
     Stream {
         content_type: HeaderValue,
-        body: RemoteDocumentEventStream,
+        body: RemoteSseStream,
     },
     UpstreamError(ForwardedDashboardResponse),
     InvalidStream,
 }
 
-async fn request_remote_document_events(
+async fn request_remote_sse(
     endpoint: &str,
     token: &BearerAuthToken,
     operation: &ServerScopedForwardOperation,
-) -> Result<RemoteDocumentEventsResponse, ForwardOperationError> {
+) -> Result<RemoteSseResponse, ForwardOperationError> {
     let response = reqwest::Client::new()
         .get(remote_url(endpoint, &operation.legacy_path))
         .header(
@@ -924,7 +1328,7 @@ async fn request_remote_document_events(
             .bytes()
             .await
             .map_err(|_| ForwardOperationError::Unavailable)?;
-        return Ok(RemoteDocumentEventsResponse::UpstreamError(
+        return Ok(RemoteSseResponse::UpstreamError(
             ForwardedDashboardResponse {
                 status,
                 content_type,
@@ -935,17 +1339,17 @@ async fn request_remote_document_events(
     }
 
     let Some(content_type) = content_type else {
-        return Ok(RemoteDocumentEventsResponse::InvalidStream);
+        return Ok(RemoteSseResponse::InvalidStream);
     };
     let is_event_stream = content_type
         .to_str()
         .map(|value| value.starts_with("text/event-stream"))
         .unwrap_or(false);
     if !is_event_stream {
-        return Ok(RemoteDocumentEventsResponse::InvalidStream);
+        return Ok(RemoteSseResponse::InvalidStream);
     }
 
-    Ok(RemoteDocumentEventsResponse::Stream {
+    Ok(RemoteSseResponse::Stream {
         content_type,
         body: Box::pin(response.bytes_stream()),
     })

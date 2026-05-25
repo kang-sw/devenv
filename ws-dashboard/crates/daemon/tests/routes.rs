@@ -2774,6 +2774,231 @@ async fn server_scoped_work_root_files_and_document_routes_dispatch_equivalent_l
 }
 
 #[tokio::test]
+async fn server_scoped_activity_git_and_workspace_routes_dispatch_local_aliases() {
+    let root = temp_fixture_path("server-scoped-phase5-local-root");
+    fs::create_dir_all(&root).expect("create phase5 local root");
+    if !skip_without_git("server_scoped_activity_git_and_workspace_routes_dispatch_local_aliases") {
+        init_git_repo(&root);
+        fs::write(root.join("README.md"), "# local\n").expect("write git fixture");
+        run_git(&root, &["add", "README.md"]);
+        run_git(&root, &["commit", "-m", "initial"]);
+    }
+
+    let state = app_state_with_opened_and_store(
+        OpenedWorkRoots::from_paths(vec![root.clone()]),
+        DashboardStateStore::disabled(),
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let legacy_activity = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=3"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy activity request"),
+        )
+        .await
+        .expect("legacy activity response");
+    let scoped_activity = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/activity?recentLimit=3"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped activity request"),
+        )
+        .await
+        .expect("scoped activity response");
+    assert_eq!(legacy_activity.status(), StatusCode::OK);
+    assert_eq!(scoped_activity.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(scoped_activity.into_body(), 64 * 1024)
+            .await
+            .expect("scoped activity body"),
+        axum::body::to_bytes(legacy_activity.into_body(), 64 * 1024)
+            .await
+            .expect("legacy activity body")
+    );
+
+    let legacy_events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/activity/events?after=1"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy activity events request"),
+        )
+        .await
+        .expect("legacy activity events response");
+    let scoped_events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/activity/events?after=1"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped activity events request"),
+        )
+        .await
+        .expect("scoped activity events response");
+    assert_eq!(legacy_events.status(), StatusCode::OK);
+    assert_eq!(scoped_events.status(), StatusCode::OK);
+    assert_eq!(
+        scoped_events
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("text/event-stream")),
+        Some(true)
+    );
+
+    if !skip_without_git("server_scoped_activity_git_and_workspace_routes_dispatch_local_aliases") {
+        let legacy_status = git_toolbar_get_json(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/work-roots/{work_root_id}/git/status"),
+            StatusCode::OK,
+        )
+        .await;
+        let scoped_status = git_toolbar_get_json(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/git/status"),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(legacy_status["available"], scoped_status["available"]);
+        assert_eq!(legacy_status["branch"], scoped_status["branch"]);
+
+        let legacy_branches = git_toolbar_get_json(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/work-roots/{work_root_id}/git/branches"),
+            StatusCode::OK,
+        )
+        .await;
+        let scoped_branches = git_toolbar_get_json(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/git/branches"),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(legacy_branches["current"], scoped_branches["current"]);
+        assert_eq!(legacy_branches["branches"], scoped_branches["branches"]);
+
+        let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+        let workspace_id = resources["workspaces"]
+            .as_array()
+            .expect("workspaces array")
+            .iter()
+            .find(|workspace| {
+                workspace["workRoots"]
+                    .as_array()
+                    .expect("workRoots array")
+                    .iter()
+                    .any(|root| root["id"] == work_root_id)
+            })
+            .and_then(|workspace| workspace["id"].as_str())
+            .expect("workspace id")
+            .to_owned();
+        let legacy_options =
+            git_worktree_options_json(app.clone(), cookie.as_str(), &workspace_id).await;
+        let scoped_options_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/servers/server-local/workspaces/{workspace_id}/git-worktree-add/options"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("scoped git worktree options request"),
+            )
+            .await
+            .expect("scoped git worktree options response");
+        assert_eq!(scoped_options_response.status(), StatusCode::OK);
+        let scoped_options_body =
+            axum::body::to_bytes(scoped_options_response.into_body(), 64 * 1024)
+                .await
+                .expect("scoped git worktree options body");
+        let scoped_options: serde_json::Value =
+            serde_json::from_slice(&scoped_options_body).expect("scoped git worktree options JSON");
+        assert_eq!(legacy_options, scoped_options);
+
+        let scoped_create_branch = git_toolbar_post_json(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/git/branches"),
+            serde_json::json!({
+                "branchName": "server-scoped-local-alias",
+                "baseBranch": null,
+                "switchTo": true,
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(
+            scoped_create_branch["branch"]["name"],
+            "server-scoped-local-alias"
+        );
+    }
+
+    let resources_before_remove = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources_before_remove["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .find(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("workRoots array")
+                .iter()
+                .any(|root| root["id"] == work_root_id)
+        })
+        .and_then(|workspace| workspace["id"].as_str())
+        .expect("workspace id before remove")
+        .to_owned();
+    let removed = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/workspaces/{workspace_id}"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped workspace remove request"),
+        )
+        .await
+        .expect("scoped workspace remove response");
+    assert_eq!(removed.status(), StatusCode::OK);
+    let removed_body = axum::body::to_bytes(removed.into_body(), 64 * 1024)
+        .await
+        .expect("scoped workspace remove body");
+    let removed_json: serde_json::Value =
+        serde_json::from_slice(&removed_body).expect("scoped workspace remove JSON");
+    assert!(!body_contains_workspace(&removed_json, &workspace_id));
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
 async fn server_scoped_one_shot_routes_return_bounded_refusals() {
     let state_file_root = temp_fixture_path("server-scoped-one-shot-refusal-state");
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
@@ -2843,6 +3068,12 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         "/api/dashboard/servers/server-windows/work-roots/root-test/files",
         "/api/dashboard/servers/server-windows/work-roots/root-test/files/read?path=README.md",
         "/api/dashboard/servers/server-windows/work-roots/root-test/documents/events",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/items/activity-1/transcript",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/git/branches",
+        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
     ] {
         let auth_required = app
             .clone()
@@ -2872,12 +3103,10 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
 
     for uri in [
         "/api/dashboard/servers/server-windows/terminals/terminal-1/socket",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
         "/api/dashboard/servers/server-windows/work-roots/root-test/terminals",
         "/api/dashboard/servers/server-windows/terminals/terminal-1/input",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
-        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/agents/agent-1/cancel",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/document-translation/translate",
         "/api/dashboard/servers/server-windows/document-translation/providers",
     ] {
         let not_forwarded = app
@@ -3277,6 +3506,69 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
+    async fn activity_events_error() -> axum::response::Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"activity unavailable"}"#),
+        )
+            .into_response()
+    }
+    async fn activity_events_invalid_content_type() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"not":"sse"}"#),
+        )
+            .into_response()
+    }
+    async fn git_status_error() -> axum::response::Response {
+        (
+            StatusCode::IM_A_TEAPOT,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"git failed"}"#),
+        )
+            .into_response()
+    }
+    async fn rewritten_resources_response() -> axum::response::Response {
+        axum::Json(serde_json::json!({
+            "resources": {
+                "server": {
+                    "id": "server-local",
+                    "label": "Remote upstream",
+                    "state": { "status": "online", "loading": false, "stale": false, "error": null },
+                    "actions": []
+                },
+                "workspaces": [{
+                    "id": "workspace-remote",
+                    "label": "workspace",
+                    "state": { "status": "ready", "loading": false, "stale": false, "error": null },
+                    "compactable": false,
+                    "workRoots": [{
+                        "id": "root-created",
+                        "resourcePath": {
+                            "serverId": "server-local",
+                            "workspaceId": "workspace-remote",
+                            "workRootId": "root-created",
+                            "instanceId": null
+                        },
+                        "label": "created",
+                        "kind": "gitLinkedWorktree",
+                        "activation": "online",
+                        "availability": "available",
+                        "status": "online",
+                        "state": { "status": "ready", "loading": false, "stale": false, "error": null },
+                        "compactable": true,
+                        "mainInstances": [],
+                        "actions": []
+                    }],
+                    "actions": []
+                }]
+            },
+            "createdWorkRootId": "root-created"
+        }))
+        .into_response()
+    }
 
     let remote_app = axum::Router::new()
         .route("/api/dashboard/link-auth", axum::routing::post(link_auth))
@@ -3299,6 +3591,22 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         .route(
             "/api/dashboard/work-roots/root-events-invalid/documents/events",
             axum::routing::get(document_events_invalid_content_type),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-events-error/activity/events",
+            axum::routing::get(activity_events_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-events-invalid/activity/events",
+            axum::routing::get(activity_events_invalid_content_type),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/git/status",
+            axum::routing::get(git_status_error),
+        )
+        .route(
+            "/api/dashboard/workspaces/workspace-remote/git-worktree-add",
+            axum::routing::post(rewritten_resources_response),
         );
     let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
 
@@ -3370,6 +3678,20 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
             "application/json",
             "events unavailable",
         ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-events-error/activity/events",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            "activity unavailable",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/git/status",
+            StatusCode::IM_A_TEAPOT,
+            "application/json",
+            "git failed",
+        ),
     ] {
         let response = local_app
             .clone()
@@ -3408,25 +3730,60 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         assert_eq!(value["error"], expected_error, "{uri}");
     }
 
-    let invalid_sse = local_app
-        .oneshot(
-            Request::builder()
-                .uri("/api/dashboard/servers/server-errors/work-roots/root-events-invalid/documents/events")
-                .header(header::COOKIE, cookie.as_str())
-                .body(Body::empty())
-                .expect("invalid upstream SSE content-type request"),
-        )
-        .await
-        .expect("invalid upstream SSE content-type response");
-    assert_eq!(invalid_sse.status(), StatusCode::BAD_GATEWAY);
-    let invalid_body = axum::body::to_bytes(invalid_sse.into_body(), 4096)
-        .await
-        .expect("invalid SSE response body");
-    let invalid_value: serde_json::Value =
-        serde_json::from_slice(&invalid_body).expect("invalid SSE response JSON");
+    for (uri, expected_error) in [
+        (
+            "/api/dashboard/servers/server-errors/work-roots/root-events-invalid/documents/events",
+            "linked server document events stream unavailable",
+        ),
+        (
+            "/api/dashboard/servers/server-errors/work-roots/root-events-invalid/activity/events",
+            "linked server activity events stream unavailable",
+        ),
+    ] {
+        let invalid_sse = local_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("invalid upstream SSE content-type request"),
+            )
+            .await
+            .expect("invalid upstream SSE content-type response");
+        assert_eq!(invalid_sse.status(), StatusCode::BAD_GATEWAY, "{uri}");
+        let invalid_body = axum::body::to_bytes(invalid_sse.into_body(), 4096)
+            .await
+            .expect("invalid SSE response body");
+        let invalid_value: serde_json::Value =
+            serde_json::from_slice(&invalid_body).expect("invalid SSE response JSON");
+        assert_eq!(invalid_value["error"], expected_error, "{uri}");
+    }
+
+    let rewritten_submit = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-errors/workspaces/workspace-remote/git-worktree-add"
+            .to_owned(),
+        &cookie,
+        serde_json::json!({
+            "worktreeName": "created",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+    )
+    .await;
+    assert_eq!(rewritten_submit.0, StatusCode::OK);
+    assert_eq!(rewritten_submit.2["createdWorkRootId"], "root-created");
     assert_eq!(
-        invalid_value["error"],
-        "linked server document events stream unavailable"
+        rewritten_submit.2["resources"]["server"]["id"],
+        "server-errors"
+    );
+    assert_eq!(
+        rewritten_submit.2["resources"]["workspaces"][0]["workRoots"][0]["resourcePath"]
+            ["serverId"],
+        "server-errors"
     );
 
     remote_server.abort();

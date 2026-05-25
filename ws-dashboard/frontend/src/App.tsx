@@ -4805,10 +4805,12 @@ function WorkRootGitToolbar({
     root.activation === "online" &&
     root.availability === "available";
   const [statusState, setStatusState] = useState<{
+    serverId: string;
     workRootId: string;
     status: WorkRootGitStatus;
   } | null>(null);
   const [branchesState, setBranchesState] = useState<{
+    serverId: string;
     workRootId: string;
     branches: GitBranchList;
   } | null>(null);
@@ -4823,14 +4825,24 @@ function WorkRootGitToolbar({
   const [baseBranchName, setBaseBranchName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const requestSeq = useRef(0);
-  const currentRootId = useRef(root.id);
-  currentRootId.current = root.id;
+  const currentRootIdentity = useRef({
+    serverId: root.resourcePath.serverId,
+    workRootId: root.id,
+  });
+  currentRootIdentity.current = {
+    serverId: root.resourcePath.serverId,
+    workRootId: root.id,
+  };
   const serverId = root.resourcePath.serverId;
 
   const status =
-    statusState?.workRootId === root.id ? statusState.status : null;
+    statusState?.workRootId === root.id && statusState.serverId === serverId
+      ? statusState.status
+      : null;
   const branches =
-    branchesState?.workRootId === root.id ? branchesState.branches : null;
+    branchesState?.workRootId === root.id && branchesState.serverId === serverId
+      ? branchesState.branches
+      : null;
 
   const refreshGit = useCallback(
     (reason: string) => {
@@ -4850,15 +4862,17 @@ function WorkRootGitToolbar({
         .then(([nextStatus, nextBranches]) => {
           if (
             requestSeq.current !== seq ||
-            currentRootId.current !== requestedRootId
+            currentRootIdentity.current.workRootId !== requestedRootId ||
+            currentRootIdentity.current.serverId !== serverId
           )
             return;
           setStatusState(
             nextStatus.available
-              ? { workRootId: requestedRootId, status: nextStatus }
+              ? { serverId, workRootId: requestedRootId, status: nextStatus }
               : null,
           );
           setBranchesState({
+            serverId,
             workRootId: requestedRootId,
             branches: nextBranches,
           });
@@ -4867,7 +4881,8 @@ function WorkRootGitToolbar({
         .catch((nextError) => {
           if (
             requestSeq.current !== seq ||
-            currentRootId.current !== requestedRootId
+            currentRootIdentity.current.workRootId !== requestedRootId ||
+            currentRootIdentity.current.serverId !== serverId
           )
             return;
           setStatusState(null);
@@ -4938,16 +4953,24 @@ function WorkRootGitToolbar({
         if (pendingAction) setPendingGitAction(pendingAction);
         void run()
           .then((nextStatus) => {
-            if (currentRootId.current !== targetRootId) return;
+            if (
+              currentRootIdentity.current.workRootId !== targetRootId ||
+              currentRootIdentity.current.serverId !== serverId
+            )
+              return;
             setStatusState(
               nextStatus.available
-                ? { workRootId: targetRootId, status: nextStatus }
+                ? { serverId, workRootId: targetRootId, status: nextStatus }
                 : null,
             );
             refreshGit("git mutation refresh");
           })
           .catch((nextError) => {
-            if (currentRootId.current !== targetRootId) return;
+            if (
+              currentRootIdentity.current.workRootId !== targetRootId ||
+              currentRootIdentity.current.serverId !== serverId
+            )
+              return;
             setError(
               nextError instanceof Error
                 ? nextError.message
@@ -4956,7 +4979,11 @@ function WorkRootGitToolbar({
             refreshGit("git mutation failure refresh");
           })
           .finally(() => {
-            if (currentRootId.current === targetRootId && pendingAction)
+            if (
+              currentRootIdentity.current.workRootId === targetRootId &&
+              currentRootIdentity.current.serverId === serverId &&
+              pendingAction
+            )
               setPendingGitAction(null);
           });
       },
@@ -5110,8 +5137,13 @@ function WorkRootGitToolbar({
                         serverId,
                       )
                         .then((nextStatus) => {
-                          if (currentRootId.current !== targetRootId) return;
+                          if (
+                            currentRootIdentity.current.workRootId !== targetRootId ||
+                            currentRootIdentity.current.serverId !== serverId
+                          )
+                            return;
                           setStatusState({
+                            serverId,
                             workRootId: targetRootId,
                             status: nextStatus,
                           });
@@ -5119,7 +5151,11 @@ function WorkRootGitToolbar({
                           refreshGit("git branch create refresh");
                         })
                         .catch((nextError) => {
-                          if (currentRootId.current !== targetRootId) return;
+                          if (
+                            currentRootIdentity.current.workRootId !== targetRootId ||
+                            currentRootIdentity.current.serverId !== serverId
+                          )
+                            return;
                           setError(
                             nextError instanceof Error
                               ? nextError.message

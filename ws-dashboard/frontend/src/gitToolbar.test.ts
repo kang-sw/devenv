@@ -50,12 +50,20 @@ const status = {
   operations: { canFetch: true, canPush: true, canPullFfOnly: true },
   refreshedAtMs: 1,
 };
+const branches = {
+  current: "main",
+  branches: [{ name: "main", current: true, checkedOut: true }],
+};
 const responses: unknown[] = [
   status,
-  {
-    current: "main",
-    branches: [{ name: "main", current: true, checkedOut: true }],
-  },
+  branches,
+  status,
+  status,
+  status,
+  status,
+  status,
+  status,
+  branches,
   status,
   status,
   status,
@@ -79,6 +87,19 @@ await fetchWorkRootGit("root-local-private");
 await pushWorkRootGit("root-local-private");
 await pullWorkRootGitFfOnly("root-local-private");
 
+await fetchWorkRootGitStatus("root-same", "server remote/1");
+await fetchWorkRootGitBranches("root-same", "server remote/1");
+await switchWorkRootGitBranch("root-same", "feature/private", "server remote/1");
+await createWorkRootGitBranch(
+  "root-same",
+  "new-private",
+  "main",
+  "server remote/1",
+);
+await fetchWorkRootGit("root-same", "server remote/1");
+await pushWorkRootGit("root-same", "server remote/1");
+await pullWorkRootGitFfOnly("root-same", "server remote/1");
+
 assertEqual(
   calls[0].url,
   "/api/dashboard/work-roots/root-local-private/git/status",
@@ -98,6 +119,26 @@ assertEqual(
   calls[6].url,
   "/api/dashboard/work-roots/root-local-private/git/pull-ff-only",
   "ff-only pull URL",
+);
+assertEqual(
+  calls[7].url,
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root-same/git/status",
+  "remote status URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[8].url,
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root-same/git/branches",
+  "remote branches URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[9].url,
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root-same/git/switch-branch",
+  "remote switch URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[13].url,
+  "/api/dashboard/servers/server%20remote%2F1/work-roots/root-same/git/pull-ff-only",
+  "remote pull URL stays on local gateway server-scoped route",
 );
 for (const call of calls)
   assertNotContains(
