@@ -94,6 +94,10 @@ Active or planned product tracks:
   viewer polish to restore semantic list context, ordered numbering, nested
   list rhythm, task-list alignment, and conventional inline-code styling while
   preserving block selection, translation overlays, and pathrefs.
+- `260525-feat-ws-dashboard-codemirror-edit-mode` - todo; replace the raw
+  edit-mode textarea with a CodeMirror 6 substrate for syntax highlighting,
+  line numbers, search, bracket matching, keybinding room, and dashboard theme
+  integration while keeping LSP/completion outside the MVP scope.
 - WorkRoot management - planned child track. Continue from the completed
   registry/root-picker/workspace policies into practical owner operations for
   managing active, unavailable, linked, remembered, pinned, and recoverable
