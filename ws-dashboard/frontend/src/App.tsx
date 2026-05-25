@@ -185,7 +185,9 @@ import {
 import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
+  dashboardServerId,
   flattenEntities,
+  isLocalDashboardServerId,
   reconcileSelectedId,
   serverScopedIdentity,
   workRootActivationEndpoint,
@@ -1189,11 +1191,13 @@ function PanelHeader({
 }
 
 function OpenWorkRootControl({
+  server,
   onOpened,
   onCommand,
   variant = "section",
   disabled = false,
 }: {
+  server?: Pick<ServerConnectionView, "id" | "label"> | null;
   onOpened: (
     view: DashboardResourcesView,
     requestedWorkRootId?: string,
@@ -1218,13 +1222,19 @@ function OpenWorkRootControl({
   const [error, setError] = useState<string | null>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
+  const pickerServerId = dashboardServerId(server?.id);
+  const pickerServerLabel = server?.label ?? "Local ws dashboard";
+  const pickerIsLocal = isLocalDashboardServerId(pickerServerId);
+  const pickerContextLabel = pickerIsLocal
+    ? "this host"
+    : `${pickerServerLabel}`;
 
   const loadPicker = useCallback(
     async (path: string | null, historyMode: "push" | "replace" = "push") => {
       setLoading(true);
       setError(null);
       try {
-        const view = await fetchRootPicker(path);
+        const view = await fetchRootPicker(path, pickerServerId);
         setPickerView(view);
         setSelectedPath(view.currentPath);
         setAddressPath(view.currentPath);
@@ -1242,8 +1252,22 @@ function OpenWorkRootControl({
         setLoading(false);
       }
     },
-    [],
+    [pickerServerId],
   );
+
+  useEffect(() => {
+    setPickerView(null);
+    setSelectedPath(null);
+    setAddressPath("");
+    setExactPath("");
+    setCreateName("");
+    setHistory(rootPickerHistoryInitial());
+    setLoading(false);
+    setPendingOpen(false);
+    setCreating(false);
+    setPinningPath(null);
+    setError(null);
+  }, [pickerServerId]);
 
   useEffect(() => {
     if (!open || pickerView || loading) {
@@ -1334,7 +1358,7 @@ function OpenWorkRootControl({
       "workRoot.open": () => {
         setPendingOpen(true);
         setError(null);
-        void requestOpenWorkRoot(requestedPath)
+        void requestOpenWorkRoot(requestedPath, pickerServerId)
           .then((result) => {
             setOpen(false);
             setPickerView(null);
@@ -1367,7 +1391,7 @@ function OpenWorkRootControl({
       "rootPicker.createDirectory": () => {
         setCreating(true);
         setError(null);
-        void createRootPickerDirectory(parentPath, name)
+        void createRootPickerDirectory(parentPath, name, pickerServerId)
           .then((entry) => {
             setPickerView((current) =>
               current
@@ -1405,7 +1429,7 @@ function OpenWorkRootControl({
       "rootPicker.pinDirectory": () => {
         setPinningPath(path);
         setError(null);
-        void pinRootPickerDirectory(path)
+        void pinRootPickerDirectory(path, pickerServerId)
           .then((view) => updatePickerPlaces(view.places))
           .catch((nextError) => {
             setError(
@@ -1425,7 +1449,7 @@ function OpenWorkRootControl({
       "rootPicker.unpinDirectory": () => {
         setPinningPath(path);
         setError(null);
-        void unpinRootPickerDirectory(path)
+        void unpinRootPickerDirectory(path, pickerServerId)
           .then((view) => updatePickerPlaces(view.places))
           .catch((nextError) => {
             setError(
@@ -1458,7 +1482,9 @@ function OpenWorkRootControl({
       data-command-id="rootPicker.open"
       disabled={disabled}
       title={
-        disabled ? "Open workRoot is local-only in this build" : "Open workRoot"
+        disabled
+          ? `Open workRoot is unavailable for ${pickerServerLabel}`
+          : `Open workRoot on ${pickerContextLabel}`
       }
       type="button"
       onClick={openPicker}
@@ -1481,7 +1507,7 @@ function OpenWorkRootControl({
           <div>
             <div className="section-label">Open workRoot</div>
             <div className="open-work-root-summary">
-              Choose a directory from this host
+              Choose a directory from {pickerContextLabel}
             </div>
           </div>
           {openerButton}
@@ -1503,7 +1529,7 @@ function OpenWorkRootControl({
           <Dialog aria-label="Open workRoot" className="root-picker-dialog">
             <div className="root-picker-titlebar">
               <Heading className="root-picker-title" slot="title">
-                Open workRoot
+                Open workRoot on {pickerContextLabel}
               </Heading>
               <div className="root-picker-window-actions">
                 <ChromeIconButton
@@ -1519,7 +1545,8 @@ function OpenWorkRootControl({
               className="root-picker-current root-picker-context"
               title={pickerView?.currentPath ?? ""}
             >
-              {pickerView?.currentPath ?? "Loading host directories"}
+              {pickerView?.currentPath ??
+                `Loading directories from ${pickerContextLabel}`}
             </div>
 
             <form
@@ -2578,6 +2605,7 @@ function ServerRows({
             (action) => action.id === "openRoot" && action.enabled,
           ) ? (
             <OpenWorkRootControl
+              server={server}
               variant="icon"
               onOpened={onOpenWorkRoot}
               onCommand={onCommand}
