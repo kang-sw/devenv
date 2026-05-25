@@ -182,15 +182,35 @@ paths run checks without publishing.
 
 Local development has one repository-specific repair exception. When the
 installed plugin path is under
-`~/.codex/plugins/cache/kang-sw-devenv/ws/` and the installed cache contains
-`.local-devenv-runtime`, the launcher forces local runtime repair before
-accepting an already compatible cache-local binary. The forced local path builds
-`~/devenv/agents-plugin-tool/cmd/ws-mcp` from source first so pre-release
-dogfood exercises the current checkout. Non-forced repair may copy a local
-runtime binary from `~/devenv/agents-plugin-tool/dist/` or
-`~/devenv/agents-plugin/.runtime/` before building.
+`~/.codex/plugins/cache/kang-sw-devenv/ws/` or
+`~/.codex/plugins/cache/kang-sw-devenv/wsflow/` and the installed cache
+contains a valid `.local-devenv-runtime` contract, the launcher forces local
+runtime repair before accepting an already compatible cache-local binary.
 
-If no compatible local runtime can be installed while the marker is present,
+The contract format is:
+
+```json
+{
+  "schema_version": 1,
+  "source_root": "/Users/kang-sw/devenv",
+  "tool_dir": "/Users/kang-sw/devenv/agents-plugin-tool",
+  "go": "/opt/homebrew/bin/go"
+}
+```
+
+All paths must be absolute. `source_root` and `tool_dir` must exist, `tool_dir`
+must contain `cmd/ws-mcp`, and `go` must be an executable file. If the marker is
+missing, invalid JSON, missing required fields, references missing paths, or is
+installed on Windows, local repair is inactive and the launcher uses the normal
+cache/release path.
+
+When the contract is valid, the forced local path builds
+`<tool_dir>/cmd/ws-mcp` with the declared Go executable first so pre-release
+dogfood exercises the current checkout. Non-forced repair may copy a local
+runtime binary from `<tool_dir>/dist/` or `<source_root>/agents-plugin/.runtime/`
+before building.
+
+If no compatible local runtime can be installed while a valid marker is active,
 startup fails instead of falling back to the published release asset.
 
 This path exists only for the repository-local Codex plugin development loop.

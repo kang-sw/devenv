@@ -356,42 +356,90 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
     return True
 
 
-def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
+def local_devenv_cache_package(plugin_dir: Path) -> str | None:
     home = Path.home()
     try:
-        plugin_dir.relative_to(home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws")
+        rel = plugin_dir.relative_to(home / ".codex" / "plugins" / "cache" / "kang-sw-devenv")
     except ValueError:
-        return False
-    return (plugin_dir / ".local-devenv-runtime").is_file() and os_name != "windows"
+        return None
+    parts = rel.parts
+    if len(parts) < 2 or parts[0] not in {"ws", "wsflow"}:
+        return None
+    return parts[0]
 
 
-def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict) -> bool:
-    tool_dir = Path.home() / "devenv" / "agents-plugin-tool"
-    if not tool_dir.is_dir() or not shutil.which("go"):
-        return False
+def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
+    if os_name == "windows" or local_devenv_cache_package(plugin_dir) is None:
+        return None
+    marker = plugin_dir / ".local-devenv-runtime"
+    if not marker.is_file():
+        return None
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except Exception as exc:
+        note(f"local devenv runtime contract is inactive: invalid JSON in {marker}: {exc}")
+        return None
+    if not isinstance(payload, dict):
+        note(f"local devenv runtime contract is inactive: expected object in {marker}")
+        return None
+    if payload.get("schema_version") != 1:
+        note("local devenv runtime contract is inactive: unsupported schema_version")
+        return None
+    resolved = {}
+    for key in ("source_root", "tool_dir", "go"):
+        value = payload.get(key)
+        if not isinstance(value, str) or not value:
+            note(f"local devenv runtime contract is inactive: missing {key}")
+            return None
+        path = Path(value)
+        if not path.is_absolute():
+            note(f"local devenv runtime contract is inactive: {key} is not absolute")
+            return None
+        resolved[key] = path
+    if not resolved["source_root"].is_dir():
+        note("local devenv runtime contract is inactive: source_root does not exist")
+        return None
+    if not resolved["tool_dir"].is_dir() or not (resolved["tool_dir"] / "cmd" / "ws-mcp").is_dir():
+        note("local devenv runtime contract is inactive: tool_dir is not a ws-mcp module")
+        return None
+    if not resolved["go"].is_file() or not os.access(resolved["go"], os.X_OK):
+        note("local devenv runtime contract is inactive: go is not executable")
+        return None
+    return resolved
+
+
+def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
+    return read_local_devenv_contract(plugin_dir, os_name) is not None
+
+
+def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict) -> bool:
+    tool_dir = local_contract["tool_dir"]
+    go_binary = local_contract["go"]
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
-    proc = subprocess.run(["go", "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
+    proc = subprocess.run([str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
     if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
         install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
         return True
     tmp.unlink(missing_ok=True)
-    note("local devenv build produced incompatible runtime")
+    note(f"local devenv build failed or produced incompatible runtime: exit={proc.returncode}")
     return False
 
 
 def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, prefer_build: bool = False) -> bool:
-    if not local_devenv_runtime_enabled(plugin_dir, os_name):
+    local_contract = read_local_devenv_contract(plugin_dir, os_name)
+    if local_contract is None:
         return False
 
     if prefer_build:
-        return build_local_devenv_runtime(runtime_dir, binary, contract)
+        return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
 
-    home = Path.home()
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
+    source_root = local_contract["source_root"]
+    tool_dir = local_contract["tool_dir"]
     candidates = [
-        home / "devenv" / "agents-plugin-tool" / "dist" / asset,
-        home / "devenv" / "agents-plugin" / ".runtime" / platform_name / binary.name,
-        home / "devenv" / "agents-plugin" / ".runtime" / platform_name / ("ws-mcp.exe" if os_name == "windows" else "ws-mcp"),
+        tool_dir / "dist" / asset,
+        source_root / "agents-plugin" / ".runtime" / platform_name / binary.name,
+        source_root / "agents-plugin" / ".runtime" / platform_name / ("ws-mcp.exe" if os_name == "windows" else "ws-mcp"),
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -402,7 +450,7 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
             tmp.unlink(missing_ok=True)
             note(f"local devenv runtime candidate is incompatible: {candidate}")
 
-    return build_local_devenv_runtime(runtime_dir, binary, contract)
+    return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
 
 
 def runtime_install_forced(plugin_dir: Path, os_name: str) -> bool:

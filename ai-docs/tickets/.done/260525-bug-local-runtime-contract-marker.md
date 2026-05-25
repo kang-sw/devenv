@@ -61,3 +61,20 @@ Verification:
   build precedence over local distribution assets.
 - Run `python3 -m unittest discover agents-plugin/tests`.
 - Run `python3 -m unittest discover agents-plugin-wsflow/tests`.
+
+### Result
+
+Implemented. `.local-devenv-runtime` is now a JSON contract that activates local
+dogfood only when it names absolute `source_root`, `tool_dir`, and executable
+`go` paths. Invalid or stale contracts are inactive and fall back to the normal
+cache/release path. Valid active contracts force a local source build and fail
+startup rather than silently using release assets when the build cannot produce
+a compatible runtime.
+
+Verification run:
+
+- `python3 -m unittest discover agents-plugin/tests`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `python3 -m py_compile agents-plugin/bin/ws-mcp-launcher.py agents-plugin-wsflow/bin/ws-mcp-launcher.py`
+- `cmp -s agents-plugin/bin/ws-mcp-launcher.py agents-plugin-wsflow/bin/ws-mcp-launcher.py`
+- Installed-cache launcher smoke with `WS_MCP_LAUNCHER_DEBUG=1 ... runtime info`
