@@ -3048,6 +3048,11 @@ test("linked server root picker uses server-scoped local gateway routes", async 
     "data-workbench-pane-id",
     /server-remote%2Fremote-root-opened/,
   );
+  const localFileRouteHitsAfterRemotePhase = localFileRouteHits;
+  expect(
+    localFileRouteHitsAfterRemotePhase,
+    "remote file/document phase must not hit legacy local file routes",
+  ).toBe(0);
 
   await page.locator(".server-row", { hasText: "Local ws dashboard" }).click();
   const localSameIdRow = page.locator(".file-explorer-row", {
@@ -3077,7 +3082,7 @@ test("linked server root picker uses server-scoped local gateway routes", async 
   await expect(remotePane.locator(".cm-content")).not.toContainText(
     "local same-id document",
   );
-  expect(localFileRouteHits).toBeGreaterThan(0);
+  expect(localFileRouteHits).toBeGreaterThan(localFileRouteHitsAfterRemotePhase);
   expect(localRootPickerHits).toBe(0);
   expect(remoteResourcesRefreshes).toBeGreaterThanOrEqual(1);
   expect(remoteGatewayRequests).toEqual(
