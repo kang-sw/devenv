@@ -53,6 +53,31 @@ Tracked docs should keep that target generic; machine-local details belong in
 - Server ids remain opaque dashboard ids; host paths, SSH secrets, passphrases,
   and cache paths must not leak into browser routes.
 
+## Implementation Order
+
+Implement this ticket in reviewable slices rather than as one broad feature.
+Although the phase numbers describe the final dependency shape, the recommended
+implementation order is:
+
+1. Phase 3 first: add the CLI remote deployment guide so later human or AI-agent
+   dogfood has a stable reference for SSH tunneling, passphrase boundaries, and
+   reconnect expectations.
+2. Phase 1 next: add the linked-server registry and gateway skeleton after
+   deciding whether the frontend consumes a selected-server resource view plus a
+   separate server list or a full multi-server tree. Prefer the smaller
+   selected-server resource view plus server-list approach unless implementation
+   evidence points elsewhere.
+3. Phase 2 next: add the memory-only remote link-auth handshake and state
+   transitions.
+4. Phase 4 next: add SSH start/reconnect and tunnel lifecycle using an owner-
+   provided remote Windows SSH host as the concrete dogfood target.
+5. Phase 5 last: refactor the left nav to server-first hierarchy once backend
+   state, auth, and remote reachability are real enough to render.
+
+Before moving implementation slices to `ready/`, add or update spec anchors for
+the API shape, resource view choice, remote link-auth handshake, and tunnel
+lifecycle being implemented by that slice.
+
 ## Phases
 
 ### Phase 1: Linked server registry and gateway skeleton
