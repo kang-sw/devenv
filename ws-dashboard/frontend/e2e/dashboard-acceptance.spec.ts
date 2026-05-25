@@ -2957,6 +2957,71 @@ test("linked server root picker uses server-scoped local gateway routes", async 
     .filter({ hasText: "Cancel" })
     .click();
 
+  await page.unroute("**/api/dashboard/servers/server-remote/root-picker**");
+  let releaseOpenRacePicker: ((value: void) => void) | null = null;
+  let openRacePickerRequests = 0;
+  await page.route("**/api/dashboard/servers/server-remote/root-picker**", async (route) => {
+    openRacePickerRequests += 1;
+    if (openRacePickerRequests === 1) {
+      await new Promise<void>((resolve) => {
+        releaseOpenRacePicker = resolve;
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(linkedServerPickerView("/remote/stale-after-open")),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerPickerView("/remote/fresh-after-open")),
+    });
+  });
+
+  await remoteRow.locator('[data-command-id="rootPicker.open"]').click();
+  staleModal = page.locator(".root-picker-modal");
+  await expect(staleModal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on Remote fixture",
+  );
+  await expect(staleModal.locator(".root-picker-current")).toContainText("/remote/fresh");
+  await staleModal.locator(".root-picker-address").fill("/remote/open-race");
+  await staleModal.locator(".root-picker-address").press("Enter");
+  await expect.poll(() => openRacePickerRequests).toBe(1);
+  await staleModal.locator("#root-picker-exact-path").fill("/remote/opened-after-stale");
+  const openWhileLoadingResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === "/api/dashboard/servers/server-remote/work-roots/open" &&
+      response.request().method() === "POST"
+    );
+  });
+  await staleModal
+    .locator('[data-command-id="workRoot.open"]')
+    .filter({ hasText: "Open" })
+    .click();
+  await openWhileLoadingResponse;
+  releaseOpenRacePicker?.();
+  await expect(staleModal).toHaveCount(0);
+  await page.waitForTimeout(100);
+
+  await remoteRow.locator('[data-command-id="rootPicker.open"]').click();
+  staleModal = page.locator(".root-picker-modal");
+  await expect(staleModal.locator(".root-picker-title")).toHaveText(
+    "Open workRoot on Remote fixture",
+  );
+  await expect(staleModal.locator(".root-picker-current")).toContainText(
+    "/remote/fresh-after-open",
+  );
+  await expect(staleModal.locator(".root-picker-current")).not.toContainText(
+    "/remote/stale-after-open",
+  );
+  await staleModal
+    .locator('[data-command-id="rootPicker.close"]')
+    .filter({ hasText: "Cancel" })
+    .click();
+
   await page
     .locator(".server-row", { hasText: "Other remote" })
     .locator('[data-command-id="rootPicker.open"]')

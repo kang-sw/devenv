@@ -1383,6 +1383,9 @@ function OpenWorkRootControl({
         setError(null);
         void requestOpenWorkRoot(requestedPath, pickerServerId)
           .then((result) => {
+            pickerRequestSequence.current += 1;
+            pickerOpenRef.current = false;
+            setLoading(false);
             setOpen(false);
             setPickerView(null);
             setSelectedPath(null);
