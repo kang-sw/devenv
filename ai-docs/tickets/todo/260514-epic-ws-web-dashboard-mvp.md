@@ -90,7 +90,7 @@ Active or planned product tracks:
   implementation track. Completed reusable Markdown/document viewing,
   daemon-backed translation overlay, raw-text edit/save fan-out, and document
   events.
-- `260525-feat-ws-dashboard-markdown-renderer-polish` - todo; follow-up
+- `260525-feat-ws-dashboard-markdown-renderer-polish` - done; follow-up
   viewer polish to restore semantic list context, ordered numbering, nested
   list rhythm, task-list alignment, and conventional inline-code styling while
   preserving block selection, translation overlays, and pathrefs.

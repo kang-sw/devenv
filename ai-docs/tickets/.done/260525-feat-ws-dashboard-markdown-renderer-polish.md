@@ -9,6 +9,7 @@ spec:
   - 260524-ws-dashboard-document-translation-overlay
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-25
 ---
 
 # Polish dashboard Markdown renderer context
@@ -74,6 +75,20 @@ frontend tests or fixtures for inline code, unordered lists, nested lists,
 ordered lists including non-default starts when available, and task lists, plus
 browser evidence for a representative Markdown pane.
 
+### Result (3eb29bc) - 2026-05-25
+
+Implemented a Markdown render grouping layer that keeps adjacent top-level
+list-item blocks in shared semantic `ul` or `ol` containers while preserving
+each item's block id, ordinal, pathref, translation lookup, and selection
+state. The renderer now supports nested lists, task-list checkboxes, ordered
+list `start` metadata, compact list spacing, and conventional inline-code
+token styling. Raw HTML remains inert.
+
+Focused document-viewer tests now cover inline code, unordered and nested
+lists, task lists, non-default ordered-list starts, inert raw HTML, and list
+unit grouping. Browser acceptance fixture Markdown was expanded to exercise
+inline code, nested lists, ordered lists, and task lists.
+
 ### Phase 2: Move block selection into an interaction rail
 
 Replace body-click block selection with a left-side Markdown block rail that
@@ -90,3 +105,25 @@ Markdown layout stable and avoid stealing space from list markers or nested
 list indentation. Verification should include text selection behavior, block
 range selection through the rail, pathref copy from selected blocks, and
 translation-overlay action availability when translated blocks are present.
+
+### Result (3eb29bc) - 2026-05-25
+
+Moved Markdown block selection and block copy actions from body-click behavior
+into a left-side interaction rail on each rendered block. The body no longer
+has a block-toggle click handler, so rendered Markdown remains normal
+text-selectable document content while the rail owns select/deselect,
+shift-range selection, visible-text copy, translated-copy availability, and
+pathref copy. The rail appears through subtle hover/focus/selected chrome and
+keeps block actions outside the document text flow.
+
+Tests cover rail selection toggling, shift-range selection, and the absence of
+the old global action strip. Browser acceptance verifies that body clicks do
+not select a block, rail selection does select it, and pathref copy still
+returns a workRoot-relative reference.
+
+#### Edition (b34f1fe) - 2026-05-25
+
+Tightened the browser acceptance nested-list assertion after semantic list
+rendering made both the outer and nested unordered lists match the same class.
+The test now scopes the assertion to the nested unordered-list descendant and
+keeps the renderer implementation unchanged.
