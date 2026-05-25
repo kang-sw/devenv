@@ -2785,6 +2785,7 @@ button {
 }
 
 .document-viewer {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
@@ -2841,28 +2842,46 @@ button {
   opacity: 0.45;
 }
 
-.document-viewer-action-strip {
+.document-selected-toolbar {
+  position: absolute;
+  z-index: 4;
+  top: var(--ws-space-08);
+  left: calc(var(--ws-space-10) + var(--ws-space-09));
   display: flex;
   align-items: center;
   gap: var(--ws-space-04);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
-  background: var(--ws-color-notice-info);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-surface-editor-chrome);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   color: var(--ws-color-text-secondary);
-  padding: var(--ws-space-04) var(--ws-space-08);
+  padding: var(--ws-space-03) var(--ws-space-05);
   font-size: var(--ws-font-size-02);
+  user-select: none;
 }
 
-.document-viewer-action-strip button {
+.document-selected-toolbar-count {
+  color: var(--ws-color-text-tertiary);
+}
+
+.document-selected-toolbar button {
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
   background: var(--ws-color-panel-raised);
   color: var(--ws-color-text-primary);
   padding: var(--ws-space-02) var(--ws-space-05);
   font: inherit;
+  cursor: pointer;
+  user-select: none;
 }
 
-.document-viewer-action-strip button:disabled {
+.document-selected-toolbar button:hover:not(:disabled),
+.document-selected-toolbar button:focus-visible:not(:disabled) {
+  border-color: var(--ws-color-action);
+}
+
+.document-selected-toolbar button:disabled {
   color: var(--ws-color-text-tertiary);
   cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .document-viewer-scroll {
@@ -2906,6 +2925,7 @@ button {
   border-radius: 999px;
   opacity: 0.34;
   transition: opacity 120ms ease, background 120ms ease;
+  user-select: none;
 }
 
 .document-block:hover > .document-block-rail,
@@ -2915,25 +2935,30 @@ button {
   opacity: 1;
 }
 
-.document-block-rail-select,
-.document-block-rail-actions button {
+.document-block-rail-select {
   display: inline-flex;
+  width: 14px;
+  height: 22px;
   align-items: center;
   justify-content: center;
+  margin-top: var(--ws-space-01);
   border: var(--ws-border-width-hairline) solid transparent;
   border-radius: 999px;
-  background: transparent;
+  background: rgba(120, 169, 255, 0.08);
   color: var(--ws-color-text-secondary);
   padding: 0;
   font: inherit;
   cursor: pointer;
+  user-select: none;
 }
 
-.document-block-rail-select {
-  width: 14px;
-  height: 22px;
-  margin-top: var(--ws-space-01);
-  background: rgba(120, 169, 255, 0.08);
+.document-block-rail-select::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+  opacity: 0.42;
 }
 
 .document-block-rail-select[aria-pressed="true"] {
@@ -2942,41 +2967,8 @@ button {
   color: var(--ws-color-action-hover);
 }
 
-.document-block-rail-actions {
-  position: absolute;
-  top: 24px;
-  left: -2px;
-  display: none;
-  flex-direction: column;
-  gap: var(--ws-space-01);
-  padding: var(--ws-space-01);
-}
-
-.document-block:hover > .document-block-rail .document-block-rail-actions,
-.document-block:focus-within > .document-block-rail .document-block-rail-actions,
-.document-block.is-selected > .document-block-rail .document-block-rail-actions {
-  display: flex;
-}
-
-.document-block-rail-actions button {
-  width: 18px;
-  height: 18px;
-  border-color: var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-raised);
-  color: var(--ws-color-text-tertiary);
-  font-size: var(--ws-font-size-01);
-  line-height: 1;
-}
-
-.document-block-rail-actions button:hover:not(:disabled),
-.document-block-rail-actions button:focus-visible:not(:disabled) {
-  border-color: var(--ws-color-action);
-  color: var(--ws-color-text-primary);
-}
-
-.document-block-rail-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.document-block-rail-select[aria-pressed="true"]::before {
+  opacity: 1;
 }
 
 .document-block h1,
@@ -3073,11 +3065,11 @@ button {
 }
 
 .document-block code {
-  border: var(--ws-border-width-hairline) solid rgba(241, 194, 27, 0.25);
-  border-radius: var(--ws-radius-square);
-  background: rgba(241, 194, 27, 0.09);
-  color: #ffd98a;
-  padding: 0 var(--ws-space-02);
+  border: 0;
+  border-radius: 3px;
+  background: rgba(241, 194, 27, 0.075);
+  color: #f8d58c;
+  padding: 0 3px;
   font-family: var(--ws-font-family-mono);
   font-size: 0.92em;
 }

@@ -1851,14 +1851,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
 
     const paragraphBlock = pane.locator('[data-document-block-kind="paragraph"]').first();
+    const taskBlock = pane.locator('[data-document-block-kind="taskItem"]').first();
     await paragraphBlock.click();
     await expect(pane.locator(".document-viewer-action-strip")).toHaveCount(0);
+    await expect(pane.locator(".document-selected-toolbar")).toHaveCount(0);
     await expect(paragraphBlock).not.toHaveClass(/is-selected/);
     await paragraphBlock.locator(".document-block-rail-select").click();
+    await taskBlock.locator(".document-block-rail-select").click({ modifiers: ["Shift"] });
     await expect(paragraphBlock).toHaveClass(/is-selected/);
-    await paragraphBlock.locator('.document-block-rail-actions button[aria-label="Copy pathref"]').click();
+    await expect(taskBlock).toHaveClass(/is-selected/);
+    const selectedToolbar = pane.locator(".document-selected-toolbar");
+    await expect(selectedToolbar).toContainText("2 blocks selected");
+    await expect(paragraphBlock.locator(".document-block-rail-actions")).toHaveCount(0);
+    await selectedToolbar.locator('button[aria-label="Copy selected pathrefs"]').click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(
-      "@gate-document.md#L3-L4",
+      ["@gate-document.md#L3-L4", "@gate-document.md#L6"].join("\n"),
     );
 
     await expectDockviewWorkbench(page);

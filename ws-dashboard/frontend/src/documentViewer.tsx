@@ -408,8 +408,6 @@ export function DocumentViewer({
   const copyText = (text: string) => {
     void navigator.clipboard?.writeText(text);
   };
-  const blocksForRailAction = (block: DocumentBlock) =>
-    selectedBlockIds.has(block.blockId) && selectedBlocks.length > 0 ? selectedBlocks : [block];
   const toggleBlockFromRail = (block: DocumentBlock, event: { shiftKey?: boolean }) => {
     setSelectedBlockIds((current) => nextRailSelectedBlockIds({
       current,
@@ -421,50 +419,19 @@ export function DocumentViewer({
     }));
     setLastSelectedOrdinal(block.ordinal);
   };
-  const renderRail = (block: RenderBlock, selected: boolean) => {
-    const actionBlocks = blocksForRailAction(block);
-    return (
-      <div className="document-block-rail" aria-label={`Block actions for ${block.kind}`}>
-        <button
-          type="button"
-          className="document-block-rail-select"
-          aria-label={selected ? "Deselect block" : "Select block"}
-          aria-pressed={selected}
-          onClick={(event) => toggleBlockFromRail(block, event)}
-        >
-          <span aria-hidden="true">{selected ? "✓" : ""}</span>
-        </button>
-        <div className="document-block-rail-actions" aria-label="Copy block actions">
-          <button
-            type="button"
-            title="Copy visible text"
-            aria-label="Copy visible text"
-            onClick={() => copyText(documentBlocksVisibleText(actionBlocks, overlay, model.contentHash))}
-          >
-            V
-          </button>
-          <button
-            type="button"
-            title="Copy translated text"
-            aria-label="Copy translated text"
-            disabled={!canCopyTranslatedBlocks(actionBlocks, overlay, model.contentHash)}
-            onClick={() => copyText(documentBlocksTranslatedText(actionBlocks, overlay, model.contentHash))}
-          >
-            T
-          </button>
-          <button
-            type="button"
-            title="Copy pathref"
-            aria-label="Copy pathref"
-            disabled={!actionBlocks.some((actionBlock) => actionBlock.pathref)}
-            onClick={() => copyText(actionBlocks.map((actionBlock) => actionBlock.pathref).filter(Boolean).join("\n"))}
-          >
-            @
-          </button>
-        </div>
-      </div>
-    );
-  };
+  const renderRail = (block: RenderBlock, selected: boolean) => (
+    <div className="document-block-rail" aria-label={`Block selection for ${block.kind}`}>
+      <button
+        type="button"
+        className="document-block-rail-select"
+        aria-label={selected ? "Deselect block" : "Select block"}
+        aria-pressed={selected}
+        onClick={(event) => toggleBlockFromRail(block, event)}
+      >
+        <span aria-hidden="true" />
+      </button>
+    </div>
+  );
   const renderBlockContent = (block: RenderBlock) => {
     const translation = translationForBlock(overlay, model.contentHash, block.blockId);
     return translation?.status === "ok" ? (
@@ -517,6 +484,36 @@ export function DocumentViewer({
 
   return (
     <div className="document-viewer" data-content-hash={model.contentHash}>
+      {selectedBlocks.length > 0 ? (
+        <div className="document-selected-toolbar" data-selected-block-count={selectedBlocks.length}>
+          <span className="document-selected-toolbar-count">
+            {selectedBlocks.length} block{selectedBlocks.length === 1 ? "" : "s"} selected
+          </span>
+          <button
+            type="button"
+            aria-label="Copy selected visible text"
+            onClick={() => copyText(documentBlocksVisibleText(selectedBlocks, overlay, model.contentHash))}
+          >
+            Copy visible
+          </button>
+          <button
+            type="button"
+            aria-label="Copy selected translated text"
+            disabled={!canCopyTranslatedBlocks(selectedBlocks, overlay, model.contentHash)}
+            onClick={() => copyText(documentBlocksTranslatedText(selectedBlocks, overlay, model.contentHash))}
+          >
+            Copy translation
+          </button>
+          <button
+            type="button"
+            aria-label="Copy selected pathrefs"
+            disabled={!selectedBlocks.some((block) => block.pathref)}
+            onClick={() => copyText(selectedBlocks.map((block) => block.pathref).filter(Boolean).join("\n"))}
+          >
+            Copy pathref
+          </button>
+        </div>
+      ) : null}
       <div className="document-viewer-scroll ws-doc-surface">
         {renderUnits.map((unit) => {
           if (unit.type === "list") {
