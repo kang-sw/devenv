@@ -151,6 +151,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
+| `260525-feat-named-agent-instance-history` | ready | Preserve named-agent history with role pointers, immutable instances, and seven-day retention cleanup |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
 | `260518-feat-ws-dashboard-activity-read-model` | todo | Implement the backend Activity Feed snapshot plus selected transcript backfill read model |
@@ -182,6 +183,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 
 ## Ticket Focus
+
+- `260525-feat-named-agent-instance-history` - ready; implement role pointers, accumulated named-agent instances, erase-as-pointer-removal, and bounded seven-day retention cleanup.
 
 ## Session Notes
 
