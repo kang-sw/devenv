@@ -137,10 +137,11 @@ details. Unknown server ids return a bounded not-found response.
 
 Remote dashboard daemons expose a link-auth handshake for local gateway
 daemons. The remote daemon owns a daemon-lifetime link passphrase that is
-separate from the one-time browser pairing URL. A caller that knows the
-passphrase can exchange it for a bearer token suitable for daemon-to-daemon
-gateway requests. Wrong passphrases fail without consuming browser pairing
-state or installing browser cookies.
+separate from the one-time browser pairing URL and exposes it through startup
+info/output for the owner or an owner-directed AI agent to record. A caller
+that knows the passphrase can exchange it for a bearer token suitable for
+daemon-to-daemon gateway requests. Wrong passphrases fail without consuming
+browser pairing state or installing browser cookies.
 
 The local gateway accepts a passphrase for a remembered linked server through
 an owner-authenticated local route. It forwards the passphrase to the linked

@@ -6,8 +6,8 @@
 //   intent.
 // - public bind attempts require explicit public mode.
 // - public bind mode cannot start without owner authentication enabled.
-// - startup info builds a local owner pairing URL after the listener address is
-//   known.
+// - startup info builds a local owner pairing URL and remote link passphrase
+//   after the listener address is known.
 // - shutdown hooks can terminate the server without leaving a background task.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
@@ -88,7 +88,7 @@ fn public_bind_mode_requires_owner_auth() {
 }
 
 #[test]
-fn startup_info_builds_local_pairing_url() {
+fn startup_info_builds_local_pairing_url_and_remote_link_passphrase() {
     let auth = OwnerAuthState::new_ephemeral();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
 
@@ -99,6 +99,10 @@ fn startup_info_builds_local_pairing_url() {
     assert!(info
         .pairing_url
         .contains(auth.pairing_token().expose_for_owner_url()));
+    assert_eq!(
+        info.link_passphrase,
+        auth.link_passphrase().expose_for_owner_record()
+    );
 }
 
 #[tokio::test]

@@ -20,6 +20,7 @@ use crate::work_root_files::{OpenedWorkRoots, RegisteredWorkRoot};
 pub struct StartupInfo {
     pub bound_addr: SocketAddr,
     pub pairing_url: String,
+    pub link_passphrase: String,
 }
 
 pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
@@ -55,6 +56,10 @@ where
     let info = startup_info(bound_addr, &auth);
 
     eprintln!("ws-dashboard owner pairing URL: {}", info.pairing_url);
+    eprintln!(
+        "ws-dashboard remote link passphrase: {}",
+        info.link_passphrase
+    );
     info!(bound_addr = %info.bound_addr, "ws-dashboard daemon listening");
 
     let dashboard_state = DashboardStateStore::default_local();
@@ -117,6 +122,7 @@ pub fn startup_info(bound_addr: SocketAddr, auth: &OwnerAuthState) -> StartupInf
             display_addr(bound_addr),
             auth.pairing_token().expose_for_owner_url()
         ),
+        link_passphrase: auth.link_passphrase().expose_for_owner_record().to_owned(),
     }
 }
 
