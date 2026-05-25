@@ -193,8 +193,8 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Focus
 
 `260525-feat-ws-dashboard-server-scoped-operation-forwarding` - ready for Phase
-4 remote files, documents, and document events after linked-server root
-picker/open WorkRoot behavior.
+5 remote Activity, Git, workspace, and WorkRoot mutations after remote
+file/document forwarding.
 
 ## Session Notes
 

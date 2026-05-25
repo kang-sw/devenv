@@ -349,6 +349,44 @@ Verification should include pure endpoint tests, daemon forwarding tests for
 list/read/write, SSE proxy tests or browser smoke coverage for document events,
 and remote Windows dogfood opening/editing a small markdown or text file.
 
+### Result (1201cf8) - 2026-05-25
+
+Implemented remote file listing, file read, file write, and document-event SSE
+forwarding through explicit server-scoped gateway routes. Server-local aliases
+preserve legacy local validation, including JSON content-type and optimistic
+content-hash conflict behavior. Linked-server file list/read/write routes use
+the allowlisted one-shot forwarding path, while `documents/events` uses a
+route-specific SSE gateway with upstream bearer auth instead of body-buffered
+or generic stream proxying.
+
+Frontend file/document call sites were already server-scoped; browser coverage
+now proves linked-server file list/read/write/document-event operations use
+`/api/dashboard/servers/{serverId}/...` routes and that same bare
+`workRootId`/path local-vs-remote documents stay isolated by server identity.
+
+Deferred scope remains document translation provider forwarding, Activity,
+Git, workspace mutation, terminal HTTP lifecycle, terminal WebSocket
+forwarding, credential persistence, deployment automation, and public endpoint
+hardening. No native Windows endpoint dogfood was run; automated coverage uses
+route tests and daemon-served browser tests with mocked linked-server routes.
+
+Review outcome: fit was clean on first pass. Correctness and test reviews found
+content-type equivalence and coverage gaps; both were fixed and re-reviewed
+clean.
+
+Verification passed:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml server_scoped`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml forwarding`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml work_root_files`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml document`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml`
+- `npm --prefix ws-dashboard/frontend run test:work-root-files`
+- `npm --prefix ws-dashboard/frontend run test:open-work-root`
+- `npm --prefix ws-dashboard/frontend run test:commands`
+- `npm --prefix ws-dashboard/frontend run build`
+- `cd ws-dashboard/frontend && npx playwright test -g "linked server root picker"`
+
 ### Phase 5: Remote Activity, Git, workspace, and WorkRoot mutations
 
 Forward WorkRoot Activity snapshots, transcript reads, Activity event SSE,

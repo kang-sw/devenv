@@ -271,12 +271,23 @@ picker responses after close, server-context reset, or successful open are
 ignored so stale remote directory state cannot repopulate a later picker
 session.
 
+File listing, file read, file write, and document content-change events also
+use explicit server-scoped gateway routes for linked-server WorkRoots. Ordinary
+file list/read/write requests use the allowlisted one-shot forwarding path and
+preserve local validation, optimistic content-hash conflict semantics, upstream
+status/body behavior, and same-source document fan-out. Document content-change
+events use a route-specific SSE gateway that forwards only
+`documents/events` streams with upstream bearer auth; it is not a generic stream
+proxy. File panes, source keys, event subscriptions, save fan-out, stale/conflict
+state, and same bare `workRootId` plus path collisions remain scoped by
+`serverId`.
+
 > [!note] Planned 🚧
-> Later phases will attach the remaining file, document, Activity, Git,
-> workspace, terminal HTTP lifecycle, document-event SSE, Activity-event SSE,
-> and terminal WebSocket operations to the server-scoped route model. SSE
-> streams and terminal WebSockets require stream or upgrade proxy behavior
-> rather than the one-shot JSON forwarding helper.
+> Later phases will attach the remaining Activity, Git, workspace mutation,
+> terminal HTTP lifecycle, Activity-event SSE, and terminal WebSocket operations
+> to the server-scoped route model. Activity SSE streams and terminal WebSockets
+> require stream or upgrade proxy behavior rather than the one-shot JSON
+> forwarding helper.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
