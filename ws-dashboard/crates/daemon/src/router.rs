@@ -33,8 +33,10 @@ use crate::root_picker::{
 use crate::servers::{
     dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
     reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_create_empty_directory,
-    server_scoped_open_work_root, server_scoped_root_picker, server_scoped_root_picker_pins,
-    server_scoped_set_work_root_activation, start_ssh_dashboard_server, LinkedServerSessions,
+    server_scoped_document_events, server_scoped_open_work_root, server_scoped_read_work_root_file,
+    server_scoped_root_picker, server_scoped_root_picker_pins,
+    server_scoped_set_work_root_activation, server_scoped_work_root_files,
+    server_scoped_write_work_root_file, start_ssh_dashboard_server, LinkedServerSessions,
     LinkedServerTunnels,
 };
 use crate::terminal::{
@@ -110,6 +112,22 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/activation",
             post(server_scoped_set_work_root_activation),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/files",
+            get(server_scoped_work_root_files),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/files/read",
+            get(server_scoped_read_work_root_file),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/files/write",
+            post(server_scoped_write_work_root_file),
+        )
+        .route(
+            "/api/dashboard/servers/{server_id}/work-roots/{work_root_id}/documents/events",
+            get(server_scoped_document_events),
         )
         .route(
             "/api/dashboard/document-translation/providers",

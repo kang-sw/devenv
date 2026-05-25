@@ -2760,7 +2760,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 test("linked server root picker uses server-scoped local gateway routes", async ({ page }) => {
   const remoteGatewayRequests: string[] = [];
   let localRootPickerHits = 0;
+  let localFileRouteHits = 0;
   let remoteResourcesRefreshes = 0;
+  let remoteFileContent = "remote linked document\n";
+  let remoteFileHash = "sha256:remote-initial";
+  const remoteFileRequests: string[] = [];
 
   await page.route("**/api/dashboard/servers", async (route) => {
     await route.fulfill({
@@ -2784,6 +2788,22 @@ test("linked server root picker uses server-scoped local gateway routes", async 
       body: JSON.stringify({ error: "local root picker should not be used" }),
     });
   });
+  await page.route("**/api/dashboard/work-roots/**/files**", async (route) => {
+    localFileRouteHits += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "local file routes should not be used" }),
+    });
+  });
+  await page.route("**/api/dashboard/work-roots/**/documents/events", async (route) => {
+    localFileRouteHits += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: "",
+    });
+  });
   await page.route("**/api/dashboard/servers/server-remote/resources", async (route) => {
     remoteResourcesRefreshes += 1;
     await route.fulfill({
@@ -2792,6 +2812,74 @@ test("linked server root picker uses server-scoped local gateway routes", async 
       body: JSON.stringify(
         linkedServerBrowserResources("server-remote", "remote-root-opened"),
       ),
+    });
+  });
+  await page.route("**/api/dashboard/servers/server-remote/work-roots/remote-root-opened/files**", async (route) => {
+    const url = new URL(route.request().url());
+    remoteFileRequests.push(`${route.request().method()} ${url.pathname}${url.search}`);
+    if (url.pathname.endsWith("/files/read")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          workRootId: "remote-root-opened",
+          path: "remote-note.txt",
+          name: "remote-note.txt",
+          status: "ok",
+          readOnly: true,
+          editable: true,
+          contentHash: remoteFileHash,
+          content: remoteFileContent,
+          sizeBytes: remoteFileContent.length,
+          languageHint: "text",
+          extension: "txt",
+        }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/files/write")) {
+      const request = route.request();
+      const payload = JSON.parse(request.postData() ?? "{}");
+      remoteFileContent = String(payload.content ?? "");
+      remoteFileHash = "sha256:remote-updated";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          contentHash: remoteFileHash,
+          sizeBytes: remoteFileContent.length,
+          savedAtMs: 42,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        workRootId: "remote-root-opened",
+        path: url.searchParams.get("path") ?? "",
+        status: "ok",
+        entries: [
+          {
+            name: "remote-note.txt",
+            path: "remote-note.txt",
+            kind: "file",
+            status: "ok",
+            readable: true,
+            previewEligible: true,
+          },
+        ],
+      }),
+    });
+  });
+  await page.route("**/api/dashboard/servers/server-remote/work-roots/remote-root-opened/documents/events", async (route) => {
+    const url = new URL(route.request().url());
+    remoteFileRequests.push(`${route.request().method()} ${url.pathname}`);
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: "",
     });
   });
   await page.route("**/api/dashboard/servers/server-remote/root-picker**", async (route) => {
@@ -2886,6 +2974,36 @@ test("linked server root picker uses server-scoped local gateway routes", async 
   await expect(remoteRow).toHaveClass(/server-row-selected/);
   await expect(page.locator('[data-resource-id="remote-root-opened"]')).toHaveClass(
     /resource-row-selected/,
+  );
+
+  const remoteFileRow = page.locator(".file-explorer-row", {
+    hasText: "remote-note.txt",
+  });
+  await expect(remoteFileRow).toBeVisible();
+  await remoteFileRow.click();
+  const remotePane = page.locator(".document-pane", { hasText: "remote-note.txt" });
+  await expect(remotePane.locator('.document-source-viewer[data-editor-read-only="true"]')).toBeVisible();
+  await expect(remotePane.locator(".cm-content")).toContainText(
+    "remote linked document",
+  );
+  await remotePane
+    .locator('[data-command-id="document.mode.set"][data-document-mode="edit"]')
+    .click();
+  const remoteEditor = remotePane.locator('.document-raw-editor[data-editor-read-only="false"]');
+  await remoteEditor.locator(".cm-content").click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.insertText("remote linked document saved\n");
+  await remotePane.locator('[data-command-id="document.save"]').click();
+  await expect(remotePane.locator('[data-document-save-state="saved"]')).toContainText(/saved/i);
+  expect(localRootPickerHits).toBe(0);
+  expect(localFileRouteHits).toBe(0);
+  expect(remoteFileRequests).toEqual(
+    expect.arrayContaining([
+      "GET /api/dashboard/servers/server-remote/work-roots/remote-root-opened/files",
+      "GET /api/dashboard/servers/server-remote/work-roots/remote-root-opened/documents/events",
+      "GET /api/dashboard/servers/server-remote/work-roots/remote-root-opened/files/read?path=remote-note.txt",
+      "POST /api/dashboard/servers/server-remote/work-roots/remote-root-opened/files/write",
+    ]),
   );
   expect(localRootPickerHits).toBe(0);
   expect(remoteResourcesRefreshes).toBeGreaterThanOrEqual(1);

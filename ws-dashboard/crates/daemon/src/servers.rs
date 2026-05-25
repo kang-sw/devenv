@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::TcpListener;
+use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -10,6 +11,7 @@ use axum::extract::{OriginalUri, Path as AxumPath, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use futures_util::Stream;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -28,6 +30,10 @@ use crate::root_picker::{
     OpenWorkRootRequest, RootPickerPinRequest, SetWorkRootActivationRequest,
 };
 use crate::router::AppState;
+use crate::work_root_files::{
+    document_events, list_work_root_files, read_work_root_file, write_work_root_file,
+    WorkRootFileListQuery, WorkRootFileWriteRequest,
+};
 
 const LOCAL_SERVER_ID: &str = "server-local";
 const SSH_TUNNEL_STARTUP_GRACE: Duration = Duration::from_millis(150);
@@ -521,6 +527,44 @@ impl ServerScopedForwardOperation {
             rewrite_resources: true,
         }
     }
+
+    fn work_root_files(work_root_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!("/api/dashboard/work-roots/{work_root_id}/files"),
+                &uri,
+            ),
+            rewrite_resources: false,
+        }
+    }
+
+    fn read_work_root_file(work_root_id: &str, uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query(
+                &format!("/api/dashboard/work-roots/{work_root_id}/files/read"),
+                &uri,
+            ),
+            rewrite_resources: false,
+        }
+    }
+
+    fn write_work_root_file(work_root_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/files/write"),
+            rewrite_resources: false,
+        }
+    }
+
+    fn document_events(work_root_id: &str) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/documents/events"),
+            rewrite_resources: false,
+        }
+    }
 }
 
 enum ServerScopedResolution {
@@ -627,6 +671,63 @@ pub async fn server_scoped_set_work_root_activation(
     forward_server_scoped_operation(state, server_id, operation, headers, body).await
 }
 
+pub async fn server_scoped_work_root_files(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    Query(query): Query<WorkRootFileListQuery>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::work_root_files(&work_root_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return list_work_root_files(State(state), AxumPath(work_root_id), Query(query)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_read_work_root_file(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    Query(query): Query<WorkRootFileListQuery>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::read_work_root_file(&work_root_id, uri);
+    if server_id == LOCAL_SERVER_ID {
+        return read_work_root_file(State(state), AxumPath(work_root_id), Query(query)).await;
+    }
+    forward_server_scoped_operation(state, server_id, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_write_work_root_file(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::write_work_root_file(&work_root_id);
+    if server_id == LOCAL_SERVER_ID {
+        return match serde_json::from_slice::<WorkRootFileWriteRequest>(&body) {
+            Ok(request) => {
+                write_work_root_file(State(state), AxumPath(work_root_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_id, operation, headers, body).await
+}
+
+pub async fn server_scoped_document_events(
+    State(state): State<AppState>,
+    AxumPath((server_id, work_root_id)): AxumPath<(String, String)>,
+) -> Response {
+    let operation = ServerScopedForwardOperation::document_events(&work_root_id);
+    if server_id == LOCAL_SERVER_ID {
+        return document_events(State(state), AxumPath(work_root_id)).await;
+    }
+    forward_server_scoped_document_events(state, server_id, operation).await
+}
+
 async fn forward_server_scoped_operation(
     state: AppState,
     server_id: String,
@@ -648,6 +749,41 @@ async fn forward_server_scoped_operation(
             .await
         {
             Ok(response) => response.into_response_for(&operation, &server),
+            Err(ForwardOperationError::Unavailable) => {
+                server_error(StatusCode::BAD_GATEWAY, "linked server unreachable")
+            }
+        },
+    }
+}
+
+async fn forward_server_scoped_document_events(
+    state: AppState,
+    server_id: String,
+    operation: ServerScopedForwardOperation,
+) -> Response {
+    match resolve_server_scoped_forwarding(&state, &server_id).await {
+        ServerScopedResolution::Local => server_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server-local dispatch should be handled in-process",
+        ),
+        ServerScopedResolution::Refusal { status, message } => server_error(status, message),
+        ServerScopedResolution::Linked {
+            endpoint, token, ..
+        } => match request_remote_document_events(&endpoint, &token, &operation).await {
+            Ok(RemoteDocumentEventsResponse::Stream { content_type, body }) => {
+                let mut response = Body::from_stream(body).into_response();
+                response
+                    .headers_mut()
+                    .insert(header::CONTENT_TYPE, content_type);
+                response
+            }
+            Ok(RemoteDocumentEventsResponse::UpstreamError(response)) => {
+                response.into_plain_response()
+            }
+            Ok(RemoteDocumentEventsResponse::InvalidStream) => server_error(
+                StatusCode::BAD_GATEWAY,
+                "linked server document events stream unavailable",
+            ),
             Err(ForwardOperationError::Unavailable) => {
                 server_error(StatusCode::BAD_GATEWAY, "linked server unreachable")
             }
@@ -726,6 +862,10 @@ impl ForwardedDashboardResponse {
             }
         }
 
+        self.into_plain_response()
+    }
+
+    fn into_plain_response(self) -> Response {
         let mut response = (self.status, Body::from(self.body)).into_response();
         if let Some(value) = self.content_type {
             response.headers_mut().insert(header::CONTENT_TYPE, value);
@@ -742,6 +882,67 @@ impl ForwardedDashboardResponse {
 #[derive(Debug, Eq, PartialEq)]
 enum ForwardOperationError {
     Unavailable,
+}
+
+type RemoteDocumentEventStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+
+enum RemoteDocumentEventsResponse {
+    Stream {
+        content_type: HeaderValue,
+        body: RemoteDocumentEventStream,
+    },
+    UpstreamError(ForwardedDashboardResponse),
+    InvalidStream,
+}
+
+async fn request_remote_document_events(
+    endpoint: &str,
+    token: &BearerAuthToken,
+    operation: &ServerScopedForwardOperation,
+) -> Result<RemoteDocumentEventsResponse, ForwardOperationError> {
+    let response = reqwest::Client::new()
+        .get(remote_url(endpoint, &operation.legacy_path))
+        .header(
+            header::AUTHORIZATION.as_str(),
+            token.as_authorization_header(),
+        )
+        .header(header::ACCEPT.as_str(), "text/event-stream")
+        .send()
+        .await
+        .map_err(|_| ForwardOperationError::Unavailable)?;
+    let status = response.status();
+    let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
+
+    if !status.is_success() {
+        let body = response
+            .bytes()
+            .await
+            .map_err(|_| ForwardOperationError::Unavailable)?;
+        return Ok(RemoteDocumentEventsResponse::UpstreamError(
+            ForwardedDashboardResponse {
+                status,
+                content_type,
+                opened_work_root_id: None,
+                body,
+            },
+        ));
+    }
+
+    let Some(content_type) = content_type else {
+        return Ok(RemoteDocumentEventsResponse::InvalidStream);
+    };
+    let is_event_stream = content_type
+        .to_str()
+        .map(|value| value.starts_with("text/event-stream"))
+        .unwrap_or(false);
+    if !is_event_stream {
+        return Ok(RemoteDocumentEventsResponse::InvalidStream);
+    }
+
+    Ok(RemoteDocumentEventsResponse::Stream {
+        content_type,
+        body: Box::pin(response.bytes_stream()),
+    })
 }
 
 async fn request_remote_dashboard_operation(
