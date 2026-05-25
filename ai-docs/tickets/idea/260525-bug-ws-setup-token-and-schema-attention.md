@@ -31,6 +31,9 @@ output and encourages more verbose setup calls.
 - Should `ws.setup` actor ids become short actor-scope tokens, such as
   `lead-<8ch>`, with worktree lookup handled by runtime state instead of the
   visible token shape?
+- Should short actor token payloads use only case-insensitive, low-confusion
+  characters from `a-z0-9-_`, avoiding uppercase recovery tokens because agents
+  and humans may need to remember and re-enter them?
 - What collision budget is appropriate for active actors in one worktree, given
   that global uniqueness is not the goal?
 - Should `format` remain accepted by `ws.setup` dispatch but be hidden from the
