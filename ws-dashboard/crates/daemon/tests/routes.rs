@@ -31,7 +31,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use rusqlite::{params, Connection};
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::http::{header, Method, Request, StatusCode};
 use axum::response::IntoResponse;
 use tokio::net::TcpListener;
@@ -3434,6 +3434,23 @@ async fn linked_server_terminal_http_lifecycle_forwards_through_local_gateway() 
         .expect("server scoped terminal output response");
     assert_eq!(output.status(), StatusCode::OK);
 
+    let input = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/terminals/{remote_terminal_id}/input"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "data": "" }).to_string()))
+                .expect("server scoped terminal input request"),
+        )
+        .await
+        .expect("server scoped terminal input response");
+    assert_eq!(input.status(), StatusCode::NO_CONTENT);
+
     let resize = local_app
         .clone()
         .oneshot(
@@ -3520,6 +3537,227 @@ async fn linked_server_terminal_http_lifecycle_forwards_through_local_gateway() 
     remote_server.abort();
     remove_static_fixture(&remote_root);
     remove_static_fixture(&local_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[derive(Clone, Default)]
+struct TerminalForwardingProbe {
+    calls: Arc<Mutex<Vec<ObservedTerminalForwardingCall>>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ObservedTerminalForwardingCall {
+    method: String,
+    path_and_query: String,
+    authorization: Option<String>,
+    content_type: Option<String>,
+    body: String,
+}
+
+async fn mock_terminal_link_auth() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({ "bearerToken": "linked-terminal-token" }).to_string(),
+    )
+}
+
+async fn mock_terminal_input_forwarding(
+    axum::extract::State(probe): axum::extract::State<TerminalForwardingProbe>,
+    method: Method,
+    uri: axum::extract::OriginalUri,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    probe
+        .calls
+        .lock()
+        .await
+        .push(ObservedTerminalForwardingCall {
+            method: method.to_string(),
+            path_and_query: uri.to_string(),
+            authorization: headers
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            content_type: headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            body: String::from_utf8(body.to_vec()).expect("forwarded input body is UTF-8"),
+        });
+    StatusCode::NO_CONTENT
+}
+
+async fn mock_terminal_output_upstream_error(
+    axum::extract::State(probe): axum::extract::State<TerminalForwardingProbe>,
+    method: Method,
+    uri: axum::extract::OriginalUri,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    probe
+        .calls
+        .lock()
+        .await
+        .push(ObservedTerminalForwardingCall {
+            method: method.to_string(),
+            path_and_query: uri.to_string(),
+            authorization: headers
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            content_type: headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            body: String::new(),
+        });
+    (
+        StatusCode::IM_A_TEAPOT,
+        [(header::CONTENT_TYPE, "application/problem+json")],
+        serde_json::json!({ "error": "upstream terminal missing" }).to_string(),
+    )
+}
+
+#[tokio::test]
+async fn linked_server_terminal_input_forwards_bearer_body_and_preserves_upstream_errors() {
+    let probe = TerminalForwardingProbe::default();
+    let remote_app = axum::Router::new()
+        .route(
+            "/api/dashboard/link-auth",
+            axum::routing::post(mock_terminal_link_auth),
+        )
+        .route(
+            "/api/dashboard/terminals/term-input/input",
+            axum::routing::post(mock_terminal_input_forwarding),
+        )
+        .route(
+            "/api/dashboard/terminals/term-error/output",
+            axum::routing::get(mock_terminal_output_upstream_error),
+        )
+        .with_state(probe.clone());
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-terminal-input-forwarding-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": "mock-passphrase" }).to_string(),
+                ))
+                .expect("mock terminal link auth request"),
+        )
+        .await
+        .expect("mock terminal link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    let input = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/terminals/term-input/input")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+                .body(Body::from(
+                    serde_json::json!({ "data": "echo forwarded-input\n" }).to_string(),
+                ))
+                .expect("server scoped terminal input forwarding request"),
+        )
+        .await
+        .expect("server scoped terminal input forwarding response");
+    assert_eq!(input.status(), StatusCode::NO_CONTENT);
+
+    let input_call = probe
+        .calls
+        .lock()
+        .await
+        .iter()
+        .find(|call| call.path_and_query == "/api/dashboard/terminals/term-input/input")
+        .cloned()
+        .expect("terminal input forwarding call");
+    assert_eq!(input_call.method, "POST");
+    assert_eq!(
+        input_call.authorization.as_deref(),
+        Some("Bearer linked-terminal-token")
+    );
+    assert_eq!(
+        input_call.content_type.as_deref(),
+        Some("application/json; charset=utf-8")
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&input_call.body)
+            .expect("forwarded input JSON body"),
+        serde_json::json!({ "data": "echo forwarded-input\n" })
+    );
+
+    let upstream_error = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/terminals/term-error/output?after=9")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("server scoped terminal output upstream error request"),
+        )
+        .await
+        .expect("server scoped terminal output upstream error response");
+    assert_eq!(upstream_error.status(), StatusCode::IM_A_TEAPOT);
+    assert_eq!(
+        upstream_error
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/problem+json")
+    );
+    let error_body = axum::body::to_bytes(upstream_error.into_body(), 4096)
+        .await
+        .expect("upstream terminal error body");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&error_body)
+            .expect("upstream terminal error JSON"),
+        serde_json::json!({ "error": "upstream terminal missing" })
+    );
+    let output_call = probe
+        .calls
+        .lock()
+        .await
+        .iter()
+        .find(|call| call.path_and_query == "/api/dashboard/terminals/term-error/output?after=9")
+        .cloned()
+        .expect("terminal output error forwarding call");
+    assert_eq!(output_call.method, "GET");
+    assert_eq!(
+        output_call.authorization.as_deref(),
+        Some("Bearer linked-terminal-token")
+    );
+
+    remote_server.abort();
     remove_static_fixture(&state_file_root);
 }
 
@@ -10598,10 +10836,183 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
 
 #[tokio::test]
 async fn server_scoped_terminal_http_routes_dispatch_local_aliases_and_defer_socket() {
+    let root = temp_fixture_path("server-scoped-local-terminal-root");
+    fs::create_dir_all(&root).expect("create server-local terminal root");
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
     let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Server-local terminal" })
+                        .to_string(),
+                ))
+                .expect("server-local terminal create request"),
+        )
+        .await
+        .expect("server-local terminal create response");
+    assert_eq!(create.status(), StatusCode::OK);
+    let create_body = axum::body::to_bytes(create.into_body(), 4096)
+        .await
+        .expect("server-local terminal create body");
+    let created: serde_json::Value =
+        serde_json::from_slice(&create_body).expect("server-local terminal create JSON");
+    let terminal_id = created["terminalId"]
+        .as_str()
+        .expect("server-local terminal id")
+        .to_owned();
+    assert_eq!(created["workRootId"], work_root_id);
+
+    let list = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server-local terminal list request"),
+        )
+        .await
+        .expect("server-local terminal list response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list.into_body(), 4096)
+        .await
+        .expect("server-local terminal list body");
+    let listed: serde_json::Value =
+        serde_json::from_slice(&list_body).expect("server-local terminal list JSON");
+    assert_eq!(
+        listed.as_array().expect("server-local terminal list").len(),
+        1
+    );
+    assert_eq!(listed[0]["terminalId"], terminal_id);
+
+    let initial_output = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{terminal_id}/output?after=0"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server-local terminal output request"),
+        )
+        .await
+        .expect("server-local terminal output response");
+    assert_eq!(initial_output.status(), StatusCode::OK);
+
+    let resize = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{terminal_id}/resize"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 100, "rows": 30 }).to_string(),
+                ))
+                .expect("server-local terminal resize request"),
+        )
+        .await
+        .expect("server-local terminal resize response");
+    assert_eq!(resize.status(), StatusCode::OK);
+    let resize_body = axum::body::to_bytes(resize.into_body(), 4096)
+        .await
+        .expect("server-local terminal resize body");
+    let resized: serde_json::Value =
+        serde_json::from_slice(&resize_body).expect("server-local terminal resize JSON");
+    assert_eq!(resized["columns"], 100);
+    assert_eq!(resized["rows"], 30);
+
+    let input = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{terminal_id}/input"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": terminal_test_commands_for_current_platform("server-local-alias").echo_and_exit })
+                        .to_string(),
+                ))
+                .expect("server-local terminal input request"),
+        )
+        .await
+        .expect("server-local terminal input response");
+    assert_eq!(input.status(), StatusCode::NO_CONTENT);
+
+    let mut output_text = String::new();
+    for _ in 0..40 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/servers/server-local/terminals/{terminal_id}/output?after=0"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("server-local terminal output poll request"),
+            )
+            .await
+            .expect("server-local terminal output poll response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("server-local terminal output body");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("server-local terminal output JSON");
+        output_text = value["chunks"]
+            .as_array()
+            .expect("chunks array")
+            .iter()
+            .filter_map(|chunk| chunk["data"].as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        if output_text.contains("server-local-alias") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        output_text.contains("server-local-alias"),
+        "{output_text:?}"
+    );
+
+    let close = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{terminal_id}"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server-local terminal close request"),
+        )
+        .await
+        .expect("server-local terminal close response");
+    assert_eq!(close.status(), StatusCode::NO_CONTENT);
 
     for (uri, body) in [
         (
@@ -10692,6 +11103,7 @@ async fn server_scoped_terminal_http_routes_dispatch_local_aliases_and_defer_soc
         .await
         .expect("server-scoped terminal socket response");
     assert_eq!(socket_deferred.status(), StatusCode::NOT_FOUND);
+    remove_static_fixture(&root);
 }
 
 #[tokio::test]
