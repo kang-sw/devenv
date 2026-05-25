@@ -56,6 +56,14 @@ non-loopback host only while owner authentication is enabled; bind-mode
 acceptance does not relax browser cookie auth, bearer auth, Host/Origin checks,
 or WebSocket pre-upgrade auth.
 
+The `ws-dashboard --remote-guide` CLI surface prints an AI-agent-readable
+remote deployment guide and exits without starting the daemon. The guide
+describes the local-dashboard-as-gateway model, remote loopback serving,
+SSH tunneling, daemon-lifetime passphrase handling, non-persisted credentials,
+reconnect expectations, and safe troubleshooting checks. The guide is human and
+agent documentation, not a machine protocol, and does not grant authentication
+or start remote processes by itself. {#260525-ws-dashboard-remote-deployment-guide}
+
 The initial UI route serves a minimal placeholder surface behind owner
 authentication. Health output is the exact minimal body `ok\n`; host paths,
 cache paths, Git roots, pairing tokens, session values, diagnostics, and wsstate
