@@ -680,9 +680,10 @@ func TestExecArtifactsPruneEligibilityAndTombstones(t *testing.T) {
 	jobs := []ExecJob{
 		{ExecKey: "exec-1-0000000000000101", Status: "running", StdoutPath: touch("running"), ExpiresAt: expired},
 		{ExecKey: "exec-1-0000000000000102", Status: "cancel_requested", StdoutPath: touch("cancel"), ExpiresAt: expired},
-		{ExecKey: "exec-1-0000000000000103", Status: "running", LeaseID: "lease-1", StdoutPath: touch("leased"), ExpiresAt: expired},
+		{ExecKey: "exec-1-0000000000000103", Status: "running", LeaseID: "lease-running", StdoutPath: touch("leased-running"), ExpiresAt: expired},
 		{ExecKey: "exec-1-0000000000000104", Status: "succeeded", Pinned: true, StdoutPath: touch("pinned"), ExpiresAt: expired},
 		{ExecKey: "exec-1-0000000000000105", Status: "succeeded", StdoutPath: touch("completed"), ExpiresAt: expired},
+		{ExecKey: "exec-1-0000000000000106", Status: "succeeded", LeaseID: "lease-terminal", StdoutPath: touch("leased-terminal"), ExpiresAt: expired},
 	}
 	for _, job := range jobs {
 		job.SchemaVersion = 1
@@ -701,7 +702,7 @@ func TestExecArtifactsPruneEligibilityAndTombstones(t *testing.T) {
 	if result.Deleted != 1 {
 		t.Fatalf("prune result = %#v", result)
 	}
-	for _, name := range []string{"running", "cancel", "leased", "pinned"} {
+	for _, name := range []string{"running", "cancel", "leased-running", "leased-terminal", "pinned"} {
 		if _, err := os.Stat(filepath.Join(payloadDir, name)); err != nil {
 			t.Fatalf("guarded exec payload %s was pruned: %v", name, err)
 		}
