@@ -4403,7 +4403,10 @@ fn write_agent_metadata(agents_dir: &Path, agent_key: &str, agent_json: &serde_j
     fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
     upsert_agent_def(
         agents_dir,
-        agent_key,
+        agent_json
+            .get("state_path")
+            .and_then(|value| value.as_str())
+            .unwrap_or(agent_key),
         agent_json
             .get("name")
             .and_then(|value| value.as_str())
@@ -4538,13 +4541,29 @@ fn delete_agent_def(agents_dir: &Path, agent_key: &str) {
 }
 
 fn write_current_call(agents_dir: &Path, agent_key: &str, raw: &str) {
-    let current_dir = agents_dir.join(agent_key).join("current");
+    write_current_call_at_state_path(agents_dir, agent_key, raw);
+}
+
+fn write_current_call_at_state_path(agents_dir: &Path, state_path: &str, raw: &str) {
+    assert!(
+        !state_path.contains('/') && !state_path.contains('\\'),
+        "test fixture state_path must stay simple"
+    );
+    let current_dir = agents_dir.join(state_path).join("current");
     fs::create_dir_all(&current_dir).expect("create current fixture dir");
     fs::write(current_dir.join("state.json"), raw).expect("write state.json fixture");
 }
 
 fn write_agent_output(agents_dir: &Path, agent_key: &str, raw: &str) {
-    let agent_dir = agents_dir.join(agent_key);
+    write_agent_output_at_state_path(agents_dir, agent_key, raw);
+}
+
+fn write_agent_output_at_state_path(agents_dir: &Path, state_path: &str, raw: &str) {
+    assert!(
+        !state_path.contains('/') && !state_path.contains('\\'),
+        "test fixture state_path must stay simple"
+    );
+    let agent_dir = agents_dir.join(state_path);
     fs::create_dir_all(&agent_dir).expect("create agent output fixture dir");
     fs::write(agent_dir.join("output.md"), raw).expect("write output.md fixture");
 }
@@ -4903,6 +4922,101 @@ async fn work_root_activity_route_projects_named_agent_records() {
         assert!(
             !body_text.contains(&forbidden),
             "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_resolves_payloads_by_registry_state_path() {
+    if skip_without_git("work_root_activity_route_resolves_payloads_by_registry_state_path") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-state-path");
+    let cache_home = temp_fixture_path("work-root-activity-state-path-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    upsert_agent_def(
+        &agents_dir,
+        "reviewer-role",
+        "reviewer role",
+        "payload-reviewer",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "state-path-private-session",
+        "running",
+        "2026-05-17T10:00:00Z",
+        "/private/cache/output.md",
+    );
+    write_current_call_at_state_path(
+        &agents_dir,
+        "payload-reviewer",
+        r#"{"status":"running","execution_id":"state-path-run","started_at":"2026-05-17T10:00:00Z","updated_at":"2026-05-17T10:01:00Z"}"#,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-reviewer",
+        "state path transcript line\n",
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("state_path activity JSON");
+
+    assert_eq!(value["summary"]["total"], 1);
+    assert_eq!(value["agents"][0]["agentId"], "reviewer-role");
+    assert_eq!(
+        value["agents"][0]["currentCall"]["executionId"],
+        "state-path-run"
+    );
+    assert_eq!(value["items"][0]["id"], "agent:reviewer-role");
+    assert_eq!(value["items"][0]["transcript"]["available"], true);
+
+    let (transcript_status, transcript_body) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:reviewer-role",
+        "",
+    )
+    .await;
+    assert_eq!(transcript_status, StatusCode::OK);
+    let transcript: serde_json::Value =
+        serde_json::from_str(&transcript_body).expect("state_path transcript JSON");
+    assert_eq!(transcript["status"], "available");
+    assert_eq!(
+        transcript["blocks"][0]["text"],
+        "state path transcript line"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "state-path-private-session".to_owned(),
+        "payload-reviewer".to_owned(),
+        "agent.json".to_owned(),
+        "state.sqlite".to_owned(),
+        "/private/cache/output.md".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden) && !transcript_body.contains(&forbidden),
+            "state_path activity responses must not leak {forbidden}"
         );
     }
 
@@ -5840,6 +5954,75 @@ async fn work_root_activity_route_returns_empty_for_incompatible_registry_state(
     assert!(!body_text.contains("state.sqlite"));
     assert!(!body_text.contains(&cache_home.display().to_string()));
 
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_soft_degrades_when_registry_is_locked() {
+    if skip_without_git("work_root_activity_route_soft_degrades_when_registry_is_locked") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-locked-registry");
+    let cache_home = temp_fixture_path("work-root-activity-locked-registry-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    upsert_agent_def(
+        &agents_dir,
+        "locked",
+        "locked",
+        "locked-payload",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "locked-private-session",
+        "running",
+        "2026-05-17T10:00:00Z",
+        "",
+    );
+    let state_dir = agents_dir.parent().expect("agents dir parent");
+    let lock_connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open lock fixture registry");
+    lock_connection
+        .execute_batch(
+            "PRAGMA locking_mode=EXCLUSIVE;
+             BEGIN EXCLUSIVE;
+             UPDATE agent_defs SET updated_at = '2026-05-17T10:01:00Z' WHERE agent_key = 'locked';",
+        )
+        .expect("hold exclusive registry lock");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("locked registry activity JSON");
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["summary"]["total"], 0);
+    assert_eq!(value["agents"].as_array().expect("agents").len(), 0);
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "state.sqlite".to_owned(),
+        "locked-private-session".to_owned(),
+        "locked-payload".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "locked registry response must not leak {forbidden}"
+        );
+    }
+
+    drop(lock_connection);
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
 }

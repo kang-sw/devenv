@@ -10,7 +10,6 @@ use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::stream::{self, Stream};
-use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
     ActivityConsoleEvent, ActivityFeed, ActivityItem, ActivitySnapshotInvalidationReason,
@@ -20,6 +19,9 @@ use ws_dashboard_core::{
 };
 
 use crate::router::AppState;
+use crate::work_root_activity_registry::{
+    read_activity_agent_records, ActivityRegistryAgentRecord,
+};
 use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 /// Upper bound applied to the wsagent-reported backend-error string so an
@@ -531,17 +533,14 @@ fn activity_item_versions(
     };
 
     let mut versions = BTreeMap::new();
-    for record in read_agent_def_records(&state_dir).unwrap_or_default() {
+    for record in read_activity_agent_records(&state_dir).unwrap_or_default() {
         let Some(agent_dir) = record.payload_dir(&state_dir) else {
             continue;
         };
+        let metadata = AgentMetadata::from(&record);
         versions.insert(
             named_agent_activity_id(&record.agent_key),
-            system_time_version(agent_record_modified_at(
-                &agent_dir,
-                codex_home,
-                &record.metadata,
-            )),
+            system_time_version(agent_record_modified_at(&agent_dir, codex_home, &metadata)),
         );
     }
     versions
@@ -581,7 +580,7 @@ fn registry_named_agents(
     codex_home: Option<&Path>,
     recent_limit: Option<usize>,
 ) -> Vec<NamedAgentProjection> {
-    let Ok(records) = read_agent_def_records(state_dir) else {
+    let Ok(records) = read_activity_agent_records(state_dir) else {
         // Missing, locked, incompatible, or otherwise unreadable registry
         // state soft-degrades to an empty healthy projection.
         return Vec::new();
@@ -591,12 +590,11 @@ fn registry_named_agents(
         .into_iter()
         .map(|record| {
             let agent_dir = record.payload_dir(state_dir);
+            let metadata = AgentMetadata::from(&record);
             RecentAgentDir {
                 modified_at: agent_dir
                     .as_deref()
-                    .map(|agent_dir| {
-                        agent_record_modified_at(agent_dir, codex_home, &record.metadata)
-                    })
+                    .map(|agent_dir| agent_record_modified_at(agent_dir, codex_home, &metadata))
                     .unwrap_or(UNIX_EPOCH),
                 record,
                 agent_dir,
@@ -627,87 +625,8 @@ fn registry_named_agents(
     rows
 }
 
-fn read_agent_def_records(state_dir: &Path) -> rusqlite::Result<Vec<AgentDefRecord>> {
-    let db_path = state_dir.join("state.sqlite");
-    if !db_path.is_file() {
-        return Ok(Vec::new());
-    }
-
-    let connection = Connection::open_with_flags(
-        db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_URI,
-    )?;
-    connection.busy_timeout(Duration::from_millis(50))?;
-    let mut statement = connection.prepare(
-        "SELECT agent_key, public_name, state_path, backend, harness, tier, model, effort, \
-         session_id, status, updated_at, last_seen_at, last_call_at, last_output_path \
-         FROM agent_defs ORDER BY agent_key",
-    )?;
-    let rows = statement.query_map([], |row| {
-        let agent_key: String = row.get(0)?;
-        Ok(AgentDefRecord {
-            agent_key,
-            state_path: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            metadata: AgentMetadata {
-                name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                backend: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                harness: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                tier: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                model: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                effort: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                session_id: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
-                status: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
-                updated_at: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
-                last_seen_at: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
-                last_call_at: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
-                last_output_path: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
-            },
-        })
-    })?;
-
-    let mut records = Vec::new();
-    for row in rows {
-        let record = row?;
-        if !record.agent_key.is_empty() {
-            records.push(record);
-        }
-    }
-    Ok(records)
-}
-
-#[derive(Clone, Debug)]
-struct AgentDefRecord {
-    agent_key: String,
-    state_path: String,
-    metadata: AgentMetadata,
-}
-
-impl AgentDefRecord {
-    fn payload_dir(&self, state_dir: &Path) -> Option<PathBuf> {
-        safe_relative_payload_path(&self.state_path)
-            .map(|relative| state_dir.join("agents").join(relative))
-    }
-}
-
-fn safe_relative_payload_path(value: &str) -> Option<PathBuf> {
-    let path = Path::new(value);
-    if value.is_empty() || path.is_absolute() {
-        return None;
-    }
-    let mut clean = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::Normal(part) => clean.push(part),
-            _ => return None,
-        }
-    }
-    (!clean.as_os_str().is_empty()).then_some(clean)
-}
-
 struct RecentAgentDir {
-    record: AgentDefRecord,
+    record: ActivityRegistryAgentRecord,
     agent_dir: Option<PathBuf>,
     modified_at: SystemTime,
 }
@@ -755,10 +674,10 @@ fn modified_at(path: &Path) -> SystemTime {
 
 fn registry_named_agent_projection(
     agent_dir: Option<&Path>,
-    record: AgentDefRecord,
+    record: ActivityRegistryAgentRecord,
     codex_home: Option<&Path>,
 ) -> NamedAgentProjection {
-    let metadata = record.metadata;
+    let metadata = AgentMetadata::from(&record);
     let output_available = agent_dir
         .map(|agent_dir| agent_dir.join("output.md").is_file())
         .unwrap_or(false);
@@ -1014,7 +933,7 @@ fn named_agent_transcript_blocking(
             "activity source unavailable",
         );
     };
-    let Some(record) = read_agent_def_records(&state_dir)
+    let Some(record) = read_activity_agent_records(&state_dir)
         .unwrap_or_default()
         .into_iter()
         .find(|record| record.agent_key == agent_key)
@@ -2168,6 +2087,25 @@ struct AgentMetadata {
     last_seen_at: String,
     #[serde(default)]
     last_output_path: String,
+}
+
+impl From<&ActivityRegistryAgentRecord> for AgentMetadata {
+    fn from(record: &ActivityRegistryAgentRecord) -> Self {
+        Self {
+            name: record.public_name.clone(),
+            backend: record.backend.clone(),
+            harness: record.harness.clone(),
+            tier: record.tier.clone(),
+            model: record.model.clone(),
+            effort: record.effort.clone(),
+            session_id: record.session_id.clone(),
+            status: record.status.clone(),
+            last_call_at: record.last_call_at.clone(),
+            updated_at: record.updated_at.clone(),
+            last_seen_at: record.last_seen_at.clone(),
+            last_output_path: record.last_output_path.clone(),
+        }
+    }
 }
 
 /// Subset of `wsagent` `current/state.json` the projection needs. PID, stream
