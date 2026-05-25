@@ -300,10 +300,11 @@ assert(listHtml.includes("type=\"checkbox\""), "task list renders a disabled che
 assert(listHtml.includes("<ol") && listHtml.includes("start=\"5\""), "ordered list renders semantic ol with non-default start");
 assert(!listHtml.includes("ignored html"), "raw HTML remains inert in rendered markup");
 assert(listHtml.includes("document-block-rail-select"), "selection control is exposed through the rail");
-assert(listHtml.includes("Copy visible text"), "visible copy action is exposed through the rail");
-assert(listHtml.includes("Copy translated text"), "translated copy action is exposed through the rail");
-assert(listHtml.includes("Copy pathref"), "pathref copy action is exposed through the rail");
-assert(!listHtml.includes("document-viewer-action-strip"), "block actions no longer live in a body-click selection strip");
+assert(!listHtml.includes("document-block-rail-actions"), "rail no longer renders per-block copy actions");
+assert(!listHtml.includes(">V<") && !listHtml.includes(">T<") && !listHtml.includes(">@<"), "rail no longer renders V/T/@ glyph labels");
+assert(!listHtml.includes("✓"), "rail selected-state glyph text is absent from static markup");
+assert(!listHtml.includes("Copy visible text"), "copy actions are absent until the selected-block toolbar is shown");
+assert(!listHtml.includes("document-viewer-action-strip"), "block actions no longer live in the legacy body-click selection strip");
 
 const railBlocks = listPolishModel.blocks.slice(0, 4);
 const selectedFirst = nextRailSelectedBlockIds({

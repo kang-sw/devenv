@@ -127,3 +127,19 @@ Tightened the browser acceptance nested-list assertion after semantic list
 rendering made both the outer and nested unordered lists match the same class.
 The test now scopes the assertion to the nested unordered-list descendant and
 keeps the renderer implementation unchanged.
+
+#### Edition (422bdbd) - 2026-05-25
+
+Moved Markdown copy actions out of the per-block rail after dogfood text
+selection showed rail glyphs such as `V`, `T`, and `@` could be copied with the
+document body. The rail now only owns block selection and range selection, while
+a single selected-block toolbar near the document surface owns visible-text,
+translated-text, and pathref copy actions for the selected block set.
+
+The follow-up also removed selected-state glyph text from the rail, marked rail
+and toolbar chrome as non-selectable, and softened inline-code styling by
+removing the visible border and using a subtler warm background. Verification
+covered document-viewer tests, e2e TypeScript compilation, and frontend build.
+The full Playwright gate passed in the implementer run, while a later local
+rerun hit the separately tracked sticky agent tab close confirmation issue
+before reaching the Markdown step.
