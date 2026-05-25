@@ -615,3 +615,85 @@ func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
 		t.Fatalf("persisted agent definition mismatch: ok=%t def=%+v", ok, got)
 	}
 }
+
+func TestExecJobMetadataRoundTripAndConcurrentWrites(t *testing.T) {
+	ctx := context.Background()
+	root := initRepo(t)
+	store, err := NewManager(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	job := ExecJob{ExecKey: "exec-1-0000000000000001", Status: "running", SchemaVersion: 1, Root: root, WorkingDir: root, Argv: []string{"echo", "ok"}, EnvJSON: `{"A":"B"}`, StdinPresent: true, StdinBytes: 3, PID: 123, StartedAt: "2026-05-25T00:00:00Z", UpdatedAt: "2026-05-25T00:00:00Z", StdoutPath: filepath.Join(root, "stdout"), StderrPath: filepath.Join(root, "stderr"), CombinedPath: filepath.Join(root, "combined"), CleanupState: ArtifactStateRunning}
+	if err := store.UpsertExecJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.ExecJob(ctx, job.ExecKey)
+	if err != nil || !ok {
+		t.Fatalf("ExecJob ok=%t err=%v", ok, err)
+	}
+	if got.Argv[0] != "echo" || !got.StdinPresent || got.StdoutPath == "" || got.CleanupState != ArtifactStateRunning {
+		t.Fatalf("round trip = %#v", got)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			j := job
+			j.ExecKey = fmt.Sprintf("exec-1-%016x", i+2)
+			j.StdoutBytes = int64(i)
+			if err := store.UpsertExecJob(ctx, j); err != nil {
+				t.Errorf("concurrent upsert: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	count, err := store.Count(ctx, "exec_jobs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 9 {
+		t.Fatalf("exec_jobs count = %d, want 9", count)
+	}
+}
+
+func TestExecArtifactsPruneSkipsActiveAndDeletesExpiredCompleted(t *testing.T) {
+	ctx := context.Background()
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	active := filepath.Join(t.TempDir(), "active.payload")
+	completed := filepath.Join(t.TempDir(), "completed.payload")
+	if err := os.WriteFile(active, []byte("active"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(completed, []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expired := time.Now().Add(-time.Hour)
+	if err := store.UpsertArtifact(ctx, Artifact{ArtifactID: "exec-active", Kind: "exec.stdout", Path: active, State: ArtifactStateRunning, ExpiresAt: expired}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertArtifact(ctx, Artifact{ArtifactID: "exec-completed", Kind: "exec.stdout", Path: completed, State: ArtifactStateCompleted, ExpiresAt: expired}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.PruneExpired(ctx, PruneOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deleted != 1 {
+		t.Fatalf("prune result = %#v", result)
+	}
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active payload was pruned: %v", err)
+	}
+	if _, err := os.Stat(completed); !os.IsNotExist(err) {
+		t.Fatalf("completed payload still exists or unexpected err: %v", err)
+	}
+}

@@ -1,6 +1,7 @@
 package execjob
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/textreader"
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 const (
@@ -46,24 +48,27 @@ type LaunchOptions struct {
 	ShellMode        bool
 }
 type Record struct {
-	SchemaVersion   int      `json:"schema_version"`
-	ExecKey         string   `json:"exec_key"`
-	Status          string   `json:"status"`
-	Root            string   `json:"root"`
-	WorkingDir      string   `json:"working_dir"`
-	Argv            []string `json:"argv,omitempty"`
-	Command         string   `json:"command,omitempty"`
-	Shell           string   `json:"shell,omitempty"`
-	PID             int      `json:"pid,omitempty"`
-	StartedAt       string   `json:"started_at"`
-	UpdatedAt       string   `json:"updated_at"`
-	CompletedAt     string   `json:"completed_at,omitempty"`
-	ExitCode        int      `json:"exit_code,omitempty"`
-	Error           string   `json:"error,omitempty"`
-	CancelRequested bool     `json:"cancel_requested,omitempty"`
-	StdoutBytes     int64    `json:"stdout_bytes"`
-	StderrBytes     int64    `json:"stderr_bytes"`
-	CombinedBytes   int64    `json:"combined_bytes"`
+	SchemaVersion   int               `json:"schema_version"`
+	ExecKey         string            `json:"exec_key"`
+	Status          string            `json:"status"`
+	Root            string            `json:"root"`
+	WorkingDir      string            `json:"working_dir"`
+	Argv            []string          `json:"argv,omitempty"`
+	Command         string            `json:"command,omitempty"`
+	Shell           string            `json:"shell,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	StdinPresent    bool              `json:"stdin_present,omitempty"`
+	StdinBytes      int64             `json:"stdin_bytes,omitempty"`
+	PID             int               `json:"pid,omitempty"`
+	StartedAt       string            `json:"started_at"`
+	UpdatedAt       string            `json:"updated_at"`
+	CompletedAt     string            `json:"completed_at,omitempty"`
+	ExitCode        int               `json:"exit_code,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	CancelRequested bool              `json:"cancel_requested,omitempty"`
+	StdoutBytes     int64             `json:"stdout_bytes"`
+	StderrBytes     int64             `json:"stderr_bytes"`
+	CombinedBytes   int64             `json:"combined_bytes"`
 }
 type Response struct {
 	ExecKey       string `json:"exec_key"`
@@ -139,7 +144,8 @@ func Launch(opts LaunchOptions) (Response, error) {
 		return Response{}, err
 	}
 	var cmd *exec.Cmd
-	rec := Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateRunning, Root: filepath.Clean(opts.Root), WorkingDir: wd, StartedAt: ts(), UpdatedAt: ts()}
+	now := ts()
+	rec := Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateRunning, Root: filepath.Clean(opts.Root), WorkingDir: wd, StartedAt: now, UpdatedAt: now}
 	if opts.ShellMode {
 		shell, argv := shellCommand(opts.Shell, opts.Command)
 		if opts.Command == "" {
@@ -164,8 +170,11 @@ func Launch(opts LaunchOptions) (Response, error) {
 	}
 	cmd.Dir = wd
 	cmd.Env = overlayEnv(opts.Env)
+	rec.Env = opts.Env
 	if opts.Stdin != "" {
 		cmd.Stdin = strings.NewReader(opts.Stdin)
+		rec.StdinPresent = true
+		rec.StdinBytes = int64(len(opts.Stdin))
 	}
 	lockedCombined := &lockedWriter{w: combined}
 	cmd.Stdout = io.MultiWriter(stdout, lockedCombined)
@@ -350,6 +359,9 @@ func reconcile(root, key string) (Record, error) {
 
 func responseFor(root string, rec Record, include bool) Response {
 	r := Response{ExecKey: rec.ExecKey, Status: rec.Status, PID: rec.PID, StartedAt: rec.StartedAt, UpdatedAt: rec.UpdatedAt, CompletedAt: rec.CompletedAt, ExitCode: rec.ExitCode, Error: rec.Error, ResultReady: terminal(rec.Status), StdoutBytes: rec.StdoutBytes, StderrBytes: rec.StderrBytes, CombinedBytes: rec.CombinedBytes}
+	if warning := payloadConsistencyWarning(root, rec.ExecKey); warning != "" {
+		r.Error = appendError(r.Error, warning)
+	}
 	if !include {
 		if !terminal(rec.Status) {
 			r.Guidance = guidance()
@@ -360,12 +372,46 @@ func responseFor(root string, rec Record, include bool) Response {
 		r.Guidance = guidance()
 		return r
 	}
-	dir, _ := jobDir(root, rec.ExecKey)
-	out, _ := os.ReadFile(filepath.Join(dir, "stdout"))
-	er, _ := os.ReadFile(filepath.Join(dir, "stderr"))
+	outPath, _, _ := streamPathFromStore(root, rec.ExecKey, "stdout")
+	errPath, _, _ := streamPathFromStore(root, rec.ExecKey, "stderr")
+	out, outErr := os.ReadFile(outPath)
+	er, erErr := os.ReadFile(errPath)
+	if outErr != nil {
+		r.Error = appendError(r.Error, fmt.Sprintf("stdout file-backed payload unavailable: %v", outErr))
+	}
+	if erErr != nil {
+		r.Error = appendError(r.Error, fmt.Sprintf("stderr file-backed payload unavailable: %v", erErr))
+	}
 	r.Stdout = string(out)
 	r.Stderr = string(er)
 	return r
+}
+
+func payloadConsistencyWarning(root, key string) string {
+	var missing []string
+	for _, stream := range []string{"stdout", "stderr", "combined"} {
+		p, _, err := streamPathFromStore(root, key, stream)
+		if err != nil || strings.TrimSpace(p) == "" {
+			continue
+		}
+		if wsstore.ClassifyFileBackedPayload(p) == wsstore.PayloadConsistencyMissingPayload {
+			missing = append(missing, stream)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return "file-backed exec payload missing (recoverable consistency state): " + strings.Join(missing, ",")
+}
+
+func appendError(base, extra string) string {
+	if extra == "" {
+		return base
+	}
+	if base == "" {
+		return extra
+	}
+	return base + "; " + extra
 }
 func guidance() string {
 	return "Large or running output is available to future exec.ask first; use exec.raw.* fallback readers for raw stdout/stderr text."
@@ -444,19 +490,11 @@ func streamPath(root, key, stream string) (string, string, error) {
 	return paths[0], st, nil
 }
 func streamPaths(root, key, stream string) ([]string, string, error) {
-	if strings.TrimSpace(stream) == "" {
-		stream = "stdout"
-	}
-	dir, err := jobDir(root, key)
+	p, st, err := streamPathFromStore(root, key, stream)
 	if err != nil {
-		return nil, "", err
+		return nil, st, err
 	}
-	switch stream {
-	case "stdout", "stderr", "combined":
-		return []string{filepath.Join(dir, stream)}, stream, nil
-	default:
-		return nil, "", fmt.Errorf("invalid stream %q", stream)
-	}
+	return []string{p}, st, nil
 }
 func statePath(root, key string) (string, error) {
 	dir, err := jobDir(root, key)
@@ -465,7 +503,32 @@ func statePath(root, key string) (string, error) {
 	}
 	return filepath.Join(dir, "state.json"), nil
 }
+
 func readRecord(root, key string) (Record, error) {
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err == nil {
+		defer store.Close()
+		job, ok, storeErr := store.ExecJob(context.Background(), key)
+		if storeErr != nil {
+			return Record{}, storeErr
+		}
+		if ok {
+			return recordFromStore(job), nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Record{}, err
+	}
+	rec, err := readLegacyRecord(root, key)
+	if err != nil {
+		return rec, err
+	}
+	if err := writeRecordLocked(root, rec); err != nil {
+		return rec, fmt.Errorf("import legacy exec metadata: %w", err)
+	}
+	return rec, nil
+}
+
+func readLegacyRecord(root, key string) (Record, error) {
 	p, err := statePath(root, key)
 	if err != nil {
 		return Record{}, err
@@ -479,10 +542,22 @@ func readRecord(root, key string) (Record, error) {
 	}
 	var rec Record
 	if err := json.Unmarshal(raw, &rec); err != nil {
-		return rec, err
+		return legacyRecoveryRecord(root, key, fmt.Sprintf("legacy exec metadata cannot be migrated: %v", err)), nil
+	}
+	if rec.ExecKey == "" {
+		rec.ExecKey = key
+	}
+	if rec.Status == "" || rec.Root == "" || rec.WorkingDir == "" {
+		return legacyRecoveryRecord(root, key, "legacy exec metadata cannot be migrated: missing required metadata"), nil
 	}
 	return rec, nil
 }
+
+func legacyRecoveryRecord(root, key, msg string) Record {
+	now := ts()
+	return Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateFailed, Root: filepath.Clean(root), WorkingDir: filepath.Clean(root), StartedAt: now, UpdatedAt: now, CompletedAt: now, Error: msg}
+}
+
 func writeRecord(root string, rec Record) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -492,37 +567,92 @@ func writeRecordLocked(root string, rec Record) error {
 	if rec.SchemaVersion == 0 {
 		rec.SchemaVersion = schemaVersion
 	}
-	p, err := statePath(root, rec.ExecKey)
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(rec, "", "  ")
+	defer store.Close()
+	job, err := storeFromRecord(root, rec)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), "state.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, p); err != nil {
-		os.Remove(p)
-		return os.Rename(tmpPath, p)
-	}
-	return nil
+	return store.UpsertExecJob(context.Background(), job)
 }
+
+func storeFromRecord(root string, rec Record) (wsstore.ExecJob, error) {
+	dir, err := jobDir(root, rec.ExecKey)
+	if err != nil {
+		return wsstore.ExecJob{}, err
+	}
+	envJSON := "{}"
+	if rec.Env != nil {
+		raw, err := json.Marshal(rec.Env)
+		if err != nil {
+			return wsstore.ExecJob{}, fmt.Errorf("marshal exec env metadata: %w", err)
+		}
+		envJSON = string(raw)
+	}
+	cleanupState := "active"
+	if terminal(rec.Status) {
+		cleanupState = "completed"
+	} else if rec.Status == stateCancelRequested {
+		cleanupState = wsstore.ArtifactStateCancelRequested
+	} else if rec.Status == stateRunning {
+		cleanupState = wsstore.ArtifactStateRunning
+	}
+	return wsstore.ExecJob{
+		ExecKey: rec.ExecKey, Status: rec.Status, SchemaVersion: rec.SchemaVersion,
+		Root: rec.Root, WorkingDir: rec.WorkingDir, Argv: rec.Argv, Command: rec.Command, Shell: rec.Shell,
+		EnvJSON: envJSON, StdinPresent: rec.StdinPresent, StdinBytes: rec.StdinBytes, PID: rec.PID, StartedAt: rec.StartedAt, UpdatedAt: rec.UpdatedAt, CompletedAt: rec.CompletedAt,
+		ExitCode: rec.ExitCode, Error: rec.Error, CancelRequested: rec.CancelRequested,
+		StdoutPath: filepath.Join(dir, "stdout"), StderrPath: filepath.Join(dir, "stderr"), CombinedPath: filepath.Join(dir, "combined"),
+		StdoutBytes: rec.StdoutBytes, StderrBytes: rec.StderrBytes, CombinedBytes: rec.CombinedBytes,
+		LostWorker: strings.Contains(rec.Error, "worker is no longer active"), CleanupState: cleanupState,
+	}, nil
+}
+
+func recordFromStore(job wsstore.ExecJob) Record {
+	rec := Record{SchemaVersion: job.SchemaVersion, ExecKey: job.ExecKey, Status: job.Status, Root: job.Root, WorkingDir: job.WorkingDir, Argv: job.Argv, Command: job.Command, Shell: job.Shell, StdinPresent: job.StdinPresent, StdinBytes: job.StdinBytes, PID: job.PID, StartedAt: job.StartedAt, UpdatedAt: job.UpdatedAt, CompletedAt: job.CompletedAt, ExitCode: job.ExitCode, Error: job.Error, CancelRequested: job.CancelRequested, StdoutBytes: job.StdoutBytes, StderrBytes: job.StderrBytes, CombinedBytes: job.CombinedBytes}
+	if strings.TrimSpace(job.EnvJSON) != "" {
+		_ = json.Unmarshal([]byte(job.EnvJSON), &rec.Env)
+	}
+	return rec
+}
+
+func streamPathFromStore(root, key, stream string) (string, string, error) {
+	if strings.TrimSpace(stream) == "" {
+		stream = "stdout"
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err == nil {
+		defer store.Close()
+		if job, ok, storeErr := store.ExecJob(context.Background(), key); storeErr != nil {
+			return "", stream, storeErr
+		} else if ok {
+			switch stream {
+			case "stdout":
+				return job.StdoutPath, stream, nil
+			case "stderr":
+				return job.StderrPath, stream, nil
+			case "combined":
+				return job.CombinedPath, stream, nil
+			default:
+				return "", "", fmt.Errorf("invalid stream %q", stream)
+			}
+		}
+	}
+	dir, err := jobDir(root, key)
+	if err != nil {
+		return "", "", err
+	}
+	switch stream {
+	case "stdout", "stderr", "combined":
+		return filepath.Join(dir, stream), stream, nil
+	default:
+		return "", "", fmt.Errorf("invalid stream %q", stream)
+	}
+}
+
 func updateSizes(rec *Record, root, key string) {
 	dir, err := jobDir(root, key)
 	if err != nil {

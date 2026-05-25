@@ -1,6 +1,8 @@
 package execjob
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 func mustRun(t *testing.T, dir, name string, args ...string) {
@@ -146,5 +150,142 @@ func TestReconcileLostRunningWorker(t *testing.T) {
 	}
 	if got.Status != stateFailed || !strings.Contains(got.Error, "worker is no longer active") || got.StdoutBytes == 0 {
 		t.Fatalf("reconciled status = %#v", got)
+	}
+}
+
+func TestSQLiteMetadataSurvivesRestartAndNoStateJSONAuthority(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	res, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "execjob-sqlite"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}, Stdin: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != stateSucceeded || !strings.Contains(res.Stdout, "execjob-sqlite") {
+		t.Fatalf("launch = %#v", res)
+	}
+	state, err := statePath(root, res.ExecKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("state.json write authority still present, stat err=%v", err)
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok, err := store.ExecJob(context.Background(), res.ExecKey)
+	store.Close()
+	if err != nil || !ok {
+		t.Fatalf("sqlite exec job ok=%t err=%v", ok, err)
+	}
+	if job.EnvJSON == "" || !job.StdinPresent || job.StdinBytes != 3 || job.StdoutPath == "" || job.CleanupState != "completed" {
+		t.Fatalf("stored job = %#v", job)
+	}
+	active.Delete(activeKey(root, res.ExecKey))
+	got, err := Result(root, res.ExecKey)
+	if err != nil || !strings.Contains(got.Stdout, "execjob-sqlite") {
+		t.Fatalf("result after restart = %#v err=%v", got, err)
+	}
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			_, _ = os.Stdout.WriteString(args[i+1] + "\n")
+			os.Exit(0)
+		}
+	}
+	os.Exit(2)
+}
+
+func TestLegacyFileBackedImportAndCorruptRecovery(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	key := "exec-1-00000000000000aa"
+	now := ts()
+	rec := Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateSucceeded, Root: root, WorkingDir: root, StartedAt: now, UpdatedAt: now, CompletedAt: now, StdoutBytes: 7, CombinedBytes: 7}
+	writeLegacyState(t, root, key, rec, []byte("legacy\n"), nil, []byte("legacy\n"))
+	got, err := Result(root, key)
+	if err != nil || got.Stdout != "legacy\n" {
+		t.Fatalf("legacy result = %#v err=%v", got, err)
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ok, err := store.ExecJob(context.Background(), key)
+	store.Close()
+	if err != nil || !ok {
+		t.Fatalf("legacy not imported ok=%t err=%v", ok, err)
+	}
+
+	badKey := "exec-1-00000000000000bb"
+	badDir, err := jobDir(root, badKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "state.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad, err := Status(root, badKey)
+	if err != nil || bad.Status != stateFailed || !strings.Contains(bad.Error, "cannot be migrated") {
+		t.Fatalf("corrupt legacy status = %#v err=%v", bad, err)
+	}
+}
+
+func TestMissingPayloadReportedAsRecoverableConsistencyState(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	res, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "payload"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := streamPathFromStore(root, res.ExecKey, "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Result(root, res.ExecKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Error, "recoverable consistency state") || got.Stdout != "" {
+		t.Fatalf("missing payload result = %#v", got)
+	}
+}
+
+func writeLegacyState(t *testing.T, root, key string, rec Record, stdout, stderr, combined []byte) {
+	t.Helper()
+	dir, err := jobDir(root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"stdout": stdout, "stderr": stderr, "combined": combined} {
+		if data == nil {
+			data = []byte{}
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

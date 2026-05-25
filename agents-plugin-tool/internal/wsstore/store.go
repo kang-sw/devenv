@@ -86,6 +86,39 @@ type AgentDefinition struct {
 	Ephemeral           bool
 }
 
+type ExecJob struct {
+	ExecKey         string
+	OwnerActorID    string
+	Status          string
+	LeaseID         string
+	SchemaVersion   int
+	Root            string
+	WorkingDir      string
+	Argv            []string
+	Command         string
+	Shell           string
+	EnvJSON         string
+	StdinPresent    bool
+	StdinBytes      int64
+	PID             int
+	StartedAt       string
+	UpdatedAt       string
+	CompletedAt     string
+	ExitCode        int
+	Error           string
+	CancelRequested bool
+	LostWorker      bool
+	StdoutPath      string
+	StderrPath      string
+	CombinedPath    string
+	StdoutBytes     int64
+	StderrBytes     int64
+	CombinedBytes   int64
+	Pinned          bool
+	ExpiresAt       string
+	CleanupState    string
+}
+
 type Artifact struct {
 	ArtifactID     string
 	Kind           string
@@ -245,6 +278,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err := migrateAgentDefsColumns(ctx, tx); err != nil {
 			return err
 		}
+		if err := migrateExecJobsColumns(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)`, schemaVersion, now); err != nil {
 			return err
 		}
@@ -303,6 +339,63 @@ var agentDefColumnMigrations = []struct{ name, sql string }{
 	{"child_actor_authority", `child_actor_authority TEXT NOT NULL DEFAULT ''`},
 	{"capabilities_json", `capabilities_json TEXT NOT NULL DEFAULT '{}'`},
 	{"ephemeral", `ephemeral INTEGER NOT NULL DEFAULT 0`},
+}
+
+func migrateExecJobsColumns(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(exec_jobs)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, column := range execJobColumnMigrations {
+		if columns[column.name] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE exec_jobs ADD COLUMN `+column.sql); err != nil {
+			return fmt.Errorf("migrate exec_jobs.%s: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+var execJobColumnMigrations = []struct{ name, sql string }{
+	{"schema_version", `schema_version INTEGER NOT NULL DEFAULT 0`},
+	{"root_path", `root_path TEXT NOT NULL DEFAULT ''`},
+	{"working_dir", `working_dir TEXT NOT NULL DEFAULT ''`},
+	{"argv_json", `argv_json TEXT NOT NULL DEFAULT '[]'`},
+	{"command", `command TEXT NOT NULL DEFAULT ''`},
+	{"shell", `shell TEXT NOT NULL DEFAULT ''`},
+	{"env_json", `env_json TEXT NOT NULL DEFAULT '{}'`},
+	{"stdin_present", `stdin_present INTEGER NOT NULL DEFAULT 0`},
+	{"stdin_bytes", `stdin_bytes INTEGER NOT NULL DEFAULT 0`},
+	{"pid", `pid INTEGER NOT NULL DEFAULT 0`},
+	{"started_at", `started_at TEXT NOT NULL DEFAULT ''`},
+	{"completed_at", `completed_at TEXT NOT NULL DEFAULT ''`},
+	{"exit_code", `exit_code INTEGER NOT NULL DEFAULT 0`},
+	{"error", `error TEXT NOT NULL DEFAULT ''`},
+	{"cancel_requested", `cancel_requested INTEGER NOT NULL DEFAULT 0`},
+	{"lost_worker", `lost_worker INTEGER NOT NULL DEFAULT 0`},
+	{"stdout_bytes", `stdout_bytes INTEGER NOT NULL DEFAULT 0`},
+	{"stderr_bytes", `stderr_bytes INTEGER NOT NULL DEFAULT 0`},
+	{"combined_bytes", `combined_bytes INTEGER NOT NULL DEFAULT 0`},
+	{"pinned", `pinned INTEGER NOT NULL DEFAULT 0`},
+	{"expires_at", `expires_at TEXT NOT NULL DEFAULT ''`},
+	{"cleanup_state", `cleanup_state TEXT NOT NULL DEFAULT ''`},
 }
 
 func (s *Store) UpsertActor(ctx context.Context, actor Actor) error {
@@ -416,6 +509,84 @@ func (s *Store) AgentDefinition(ctx context.Context, agentKey string) (AgentDefi
 func (s *Store) DeleteAgentDefinition(ctx context.Context, agentKey string) error {
 	_, err := s.execWrite(ctx, `DELETE FROM agent_defs WHERE agent_key = ?`, agentKey)
 	return err
+}
+
+func (s *Store) UpsertExecJob(ctx context.Context, job ExecJob) error {
+	if job.ExecKey == "" {
+		return errors.New("exec_key is required")
+	}
+	if job.Status == "" {
+		return errors.New("exec status is required")
+	}
+	argv, err := json.Marshal(job.Argv)
+	if err != nil {
+		return fmt.Errorf("marshal exec argv: %w", err)
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	createdAt := job.StartedAt
+	if createdAt == "" {
+		createdAt = now
+	}
+	updatedAt := job.UpdatedAt
+	if updatedAt == "" {
+		updatedAt = now
+	}
+	_, err = s.execWrite(ctx, `
+INSERT INTO exec_jobs(exec_key, owner_actor_id, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(exec_key) DO UPDATE SET
+  owner_actor_id=excluded.owner_actor_id,
+  status=excluded.status,
+  lease_id=excluded.lease_id,
+  schema_version=excluded.schema_version,
+  root_path=excluded.root_path,
+  working_dir=excluded.working_dir,
+  argv_json=excluded.argv_json,
+  command=excluded.command,
+  shell=excluded.shell,
+  env_json=excluded.env_json,
+  stdin_present=excluded.stdin_present,
+  stdin_bytes=excluded.stdin_bytes,
+  pid=excluded.pid,
+  started_at=excluded.started_at,
+  completed_at=excluded.completed_at,
+  exit_code=excluded.exit_code,
+  error=excluded.error,
+  cancel_requested=excluded.cancel_requested,
+  lost_worker=excluded.lost_worker,
+  stdout_path=excluded.stdout_path,
+  stderr_path=excluded.stderr_path,
+  combined_path=excluded.combined_path,
+  stdout_bytes=excluded.stdout_bytes,
+  stderr_bytes=excluded.stderr_bytes,
+  combined_bytes=excluded.combined_bytes,
+  pinned=excluded.pinned,
+  expires_at=excluded.expires_at,
+  cleanup_state=excluded.cleanup_state,
+  updated_at=excluded.updated_at`,
+		job.ExecKey, job.OwnerActorID, job.Status, job.LeaseID, job.SchemaVersion, job.Root, job.WorkingDir, string(argv), job.Command, job.Shell, blankDefault(job.EnvJSON, "{}"), boolInt(job.StdinPresent), job.StdinBytes, job.PID, job.StartedAt, job.CompletedAt, job.ExitCode, job.Error, boolInt(job.CancelRequested), boolInt(job.LostWorker), job.StdoutPath, job.StderrPath, job.CombinedPath, job.StdoutBytes, job.StderrBytes, job.CombinedBytes, boolInt(job.Pinned), job.ExpiresAt, job.CleanupState, createdAt, updatedAt)
+	return err
+}
+
+func (s *Store) ExecJob(ctx context.Context, key string) (ExecJob, bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT exec_key, owner_actor_id, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, updated_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state FROM exec_jobs WHERE exec_key = ?`, key)
+	var job ExecJob
+	var argvJSON string
+	var stdinPresent, cancelRequested, lostWorker, pinned int
+	if err := row.Scan(&job.ExecKey, &job.OwnerActorID, &job.Status, &job.LeaseID, &job.SchemaVersion, &job.Root, &job.WorkingDir, &argvJSON, &job.Command, &job.Shell, &job.EnvJSON, &stdinPresent, &job.StdinBytes, &job.PID, &job.StartedAt, &job.UpdatedAt, &job.CompletedAt, &job.ExitCode, &job.Error, &cancelRequested, &lostWorker, &job.StdoutPath, &job.StderrPath, &job.CombinedPath, &job.StdoutBytes, &job.StderrBytes, &job.CombinedBytes, &pinned, &job.ExpiresAt, &job.CleanupState); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ExecJob{}, false, nil
+		}
+		return ExecJob{}, false, err
+	}
+	if err := json.Unmarshal([]byte(blankDefault(argvJSON, "[]")), &job.Argv); err != nil {
+		return ExecJob{}, false, fmt.Errorf("parse exec argv: %w", err)
+	}
+	job.StdinPresent = stdinPresent != 0
+	job.CancelRequested = cancelRequested != 0
+	job.LostWorker = lostWorker != 0
+	job.Pinned = pinned != 0
+	return job, true, nil
 }
 
 func (s *Store) UpsertArtifact(ctx context.Context, artifact Artifact) error {
@@ -546,7 +717,7 @@ LIMIT ?`,
 
 func (s *Store) Count(ctx context.Context, table string) (int, error) {
 	switch table {
-	case "artifacts", "artifact_tombstones", "actors", "prune_runs", "retention_policies":
+	case "artifacts", "artifact_tombstones", "actors", "prune_runs", "retention_policies", "exec_jobs":
 	default:
 		return 0, fmt.Errorf("unsupported count table %q", table)
 	}
@@ -760,9 +931,31 @@ var schemaStatements = []string{
 		owner_actor_id TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL,
 		lease_id TEXT NOT NULL DEFAULT '',
+		schema_version INTEGER NOT NULL DEFAULT 0,
+		root_path TEXT NOT NULL DEFAULT '',
+		working_dir TEXT NOT NULL DEFAULT '',
+		argv_json TEXT NOT NULL DEFAULT '[]',
+		command TEXT NOT NULL DEFAULT '',
+		shell TEXT NOT NULL DEFAULT '',
+		env_json TEXT NOT NULL DEFAULT '{}',
+		stdin_present INTEGER NOT NULL DEFAULT 0,
+		stdin_bytes INTEGER NOT NULL DEFAULT 0,
+		pid INTEGER NOT NULL DEFAULT 0,
+		started_at TEXT NOT NULL DEFAULT '',
+		completed_at TEXT NOT NULL DEFAULT '',
+		exit_code INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '',
+		cancel_requested INTEGER NOT NULL DEFAULT 0,
+		lost_worker INTEGER NOT NULL DEFAULT 0,
 		stdout_path TEXT NOT NULL DEFAULT '',
 		stderr_path TEXT NOT NULL DEFAULT '',
 		combined_path TEXT NOT NULL DEFAULT '',
+		stdout_bytes INTEGER NOT NULL DEFAULT 0,
+		stderr_bytes INTEGER NOT NULL DEFAULT 0,
+		combined_bytes INTEGER NOT NULL DEFAULT 0,
+		pinned INTEGER NOT NULL DEFAULT 0,
+		expires_at TEXT NOT NULL DEFAULT '',
+		cleanup_state TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL DEFAULT '',
 		updated_at TEXT NOT NULL DEFAULT ''
 	)`,

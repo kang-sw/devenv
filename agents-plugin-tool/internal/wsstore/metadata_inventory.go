@@ -133,7 +133,7 @@ var runtimeMetadataInventory = func() []RuntimeFieldClassification {
 	)...)
 
 	out = append(out, sqliteFields(RuntimeSourceExecJobJSON,
-		"schema_version", "exec_key", "status", "root", "working_dir", "argv", "command", "shell", "pid", "started_at", "updated_at", "completed_at", "exit_code", "error", "cancel_requested", "stdout_bytes", "stderr_bytes", "combined_bytes",
+		"schema_version", "exec_key", "status", "root", "working_dir", "argv", "command", "shell", "env", "stdin_present", "stdin_bytes", "pid", "started_at", "updated_at", "completed_at", "exit_code", "error", "cancel_requested", "stdout_bytes", "stderr_bytes", "combined_bytes",
 	)...)
 	out = append(out, fileFields(RuntimeSourceExecJobJSON, "stdout", "stderr", "combined")...)
 	return out
