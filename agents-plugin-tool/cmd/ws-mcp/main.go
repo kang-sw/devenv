@@ -1072,9 +1072,10 @@ func agentsCheckInbox(args []string) {
 	fs := flag.NewFlagSet("agents check-inbox", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
+	actorID := fs.String("actor-id", "", "hidden actor-scoped registry id")
 	_ = fs.Parse(args)
 
-	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInbox(defaultRoot(*root), *name, "hook")
+	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInboxScoped(defaultRoot(*root), *name, *actorID, "hook")
 	if err != nil {
 		fatal("agents check-inbox", err)
 	}

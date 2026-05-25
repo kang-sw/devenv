@@ -2033,3 +2033,61 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 type execToolResponse struct {
 	ExecKey string `json:"exec_key"`
 }
+
+func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260524-feat-actor-lifecycle")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	call := func(id int, payload string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := server.ServeStdio(context.Background(), strings.NewReader(payload+"\n"), &out); err != nil {
+			t.Fatalf("ServeStdio id %d returned error: %v", id, err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		line := byID[fmt.Sprint(id)]
+		if toolIsError(t, line) {
+			t.Fatalf("tool id %d returned error: %s", id, line)
+		}
+		return toolText(t, line)
+	}
+
+	call(1, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`, root))
+	call(2, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"same","backend":"bogus","model":"global-model"}}}`, root))
+	call(3, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"same","backend":"bogus","model":"actor-model"}}}`)
+	actorStatus := call(4, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"same"}}}`)
+	globalStatus := call(5, fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
+	callText := call(6, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"same","prompt":"do work"}}}`)
+	waitText := call(7, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"same","timeout_seconds":5}}}`)
+	resultText := call(8, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"same"}}}`)
+	tailText := call(9, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"agents.tail","arguments":{"name":"same","lines":20}}}`)
+	cancelText := call(10, `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"agents.cancel","arguments":{"name":"same"}}}`)
+	call(11, `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"agents.erase","arguments":{"name":"same"}}}`)
+	globalAfterErase := call(12, fmt.Sprintf(`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"same"}}}`, root))
+
+	if !strings.Contains(actorStatus, "model: actor-model") || strings.Contains(actorStatus, "global-model") {
+		t.Fatalf("root-omitted status did not use actor scope:\n%s", actorStatus)
+	}
+	if !strings.Contains(globalStatus, "model: global-model") || strings.Contains(globalStatus, "actor-model") {
+		t.Fatalf("explicit-root status did not use global compatibility scope:\n%s", globalStatus)
+	}
+	if !strings.Contains(callText, "same\trunning") {
+		t.Fatalf("actor-scoped call did not start:\n%s", callText)
+	}
+	if !strings.Contains(waitText, "agent: same") || !strings.Contains(waitText, "ready: true") {
+		t.Fatalf("actor-scoped wait mismatch:\n%s", waitText)
+	}
+	if !strings.Contains(resultText, "result_available: false") {
+		t.Fatalf("actor-scoped result status mismatch:\n%s", resultText)
+	}
+	if !strings.Contains(tailText, "call.started_async") {
+		t.Fatalf("actor-scoped tail did not read scoped diagnostics:\n%s", tailText)
+	}
+	if !strings.Contains(cancelText, "model: actor-model") {
+		t.Fatalf("actor-scoped cancel/status mismatch:\n%s", cancelText)
+	}
+	if !strings.Contains(globalAfterErase, "model: global-model") {
+		t.Fatalf("actor erase removed or shadowed explicit global agent:\n%s", globalAfterErase)
+	}
+}

@@ -2508,3 +2508,78 @@ func TestResultReportsMissingOutputAsRecoverableConsistencyState(t *testing.T) {
 		t.Fatalf("missing output was not reported as recoverable:\n%s", text)
 	}
 }
+
+func TestActorScopedSubqueryRegistersAndCallsSameScope(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 2468}
+	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }, WorkerStarter: starter})
+	text, err := manager.Subquery(SubqueryOptions{Root: repo, ActorID: "lead-worktree-actor", Question: "Where is workflow?"})
+	if err != nil {
+		t.Fatalf("actor-scoped Subquery returned error: %v", err)
+	}
+	key := extractFieldLine(t, text, "subquery_key")
+	if len(starter.requests) != 1 || starter.requests[0].ActorID != "lead-worktree-actor" || starter.requests[0].Name != key {
+		t.Fatalf("subquery call did not keep actor scope: %+v", starter.requests)
+	}
+	if _, err := manager.AgentScoped(repo, key, "lead-worktree-actor"); err != nil {
+		t.Fatalf("subquery metadata not actor scoped: %v", err)
+	}
+	if _, err := manager.Agent(repo, key); err == nil {
+		t.Fatalf("actor-scoped subquery unexpectedly registered in global namespace")
+	}
+}
+
+func TestActorScopedInterruptHookAndCheckInboxUseScopedInbox(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }, WorkerStarter: &fakeWorkerStarter{pid: 4567}})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, ActorID: "lead-worktree-actor", Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Call(CallOptions{Root: repo, ActorID: "lead-worktree-actor", Name: "impl", Prompt: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Interrupt(InterruptOptions{Root: repo, ActorID: "lead-worktree-actor", Name: "impl", Message: "Switch now."}); err != nil {
+		t.Fatal(err)
+	}
+	globalMessages, err := manager.DeliverPendingInbox(repo, "impl", "hook")
+	if err == nil && len(globalMessages) != 0 {
+		t.Fatalf("global inbox saw actor-scoped interrupt: %+v", globalMessages)
+	}
+	messages, err := manager.DeliverPendingInboxScoped(repo, "impl", "lead-worktree-actor", "hook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Text != "Switch now." {
+		t.Fatalf("actor-scoped inbox messages mismatch: %+v", messages)
+	}
+	hook := interruptHookCommand(repo, "impl", "lead-worktree-actor")
+	if !strings.Contains(hook, "--actor-id") || !strings.Contains(hook, "lead-worktree-actor") {
+		t.Fatalf("interrupt hook did not include actor id: %s", hook)
+	}
+}
+
+func TestSelfWorkerStarterPropagatesHiddenActorID(t *testing.T) {
+	args := asyncWorkerArgs(asyncWorkerCommand{Path: "ws-mcp"}, AsyncWorkerRequest{Root: "/repo", ActorID: "lead-worktree-actor", Name: "impl"})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "agents run-current") || !strings.Contains(joined, "--actor-id lead-worktree-actor") {
+		t.Fatalf("runtime args missing actor id: %q", joined)
+	}
+}
+
+func TestCorruptLegacyAgentJSONReportsBoundedRecovery(t *testing.T) {
+	repo := initRepo(t)
+	manager := NewManager(Options{CacheHome: filepath.Join(t.TempDir(), "cache"), Now: func() time.Time { return testNow }})
+	layout, err := manager.layout(repo, "broken", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.AgentFile, []byte(`{"schema_version":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.Agent(repo, "broken")
+	if err == nil || !strings.Contains(err.Error(), "legacy agent.json recovery required") || !strings.Contains(err.Error(), "parse agent") {
+		t.Fatalf("corrupt legacy recovery error mismatch: %v", err)
+	}
+}

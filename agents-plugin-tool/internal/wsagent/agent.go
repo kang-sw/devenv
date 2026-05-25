@@ -248,11 +248,7 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	args := append([]string{}, worker.Args...)
-	args = append(args, "agents", "run-current", "--root", req.Root, "--name", req.Name)
-	if strings.TrimSpace(req.ActorID) != "" {
-		args = append(args, "--actor-id", req.ActorID)
-	}
+	args := asyncWorkerArgs(worker, req)
 	cmd := exec.Command(worker.Path, args...)
 	configureAsyncCommand(cmd)
 	if req.StdoutPath != "" {
@@ -278,6 +274,15 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 		_ = cmd.Wait()
 	}()
 	return cmd.Process.Pid, nil
+}
+
+func asyncWorkerArgs(worker asyncWorkerCommand, req AsyncWorkerRequest) []string {
+	args := append([]string{}, worker.Args...)
+	args = append(args, "agents", "run-current", "--root", req.Root, "--name", req.Name)
+	if strings.TrimSpace(req.ActorID) != "" {
+		args = append(args, "--actor-id", req.ActorID)
+	}
+	return args
 }
 
 func asyncWorkerCommandFor(exe string) (asyncWorkerCommand, error) {
@@ -798,7 +803,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	}
 	hookCommand := ""
 	if opts.CaptureStreams {
-		hookCommand = interruptHookCommand(layout.Root, agent.Name)
+		hookCommand = interruptHookCommand(layout.Root, agent.Name, layout.ActorID)
 	}
 	var onSessionID func(string) error
 	if opts.CaptureStreams {
@@ -1274,6 +1279,7 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	)
 	_, _, err := m.Register(RegisterOptions{
 		Root:                  opts.Root,
+		ActorID:               opts.ActorID,
 		Name:                  name,
 		Harness:               opts.Harness,
 		Tier:                  tier,
@@ -2232,13 +2238,17 @@ func (m Manager) deliverPendingInbox(layout Layout, route string) ([]Message, er
 }
 
 func (m Manager) DeliverPendingInbox(root, name, route string) ([]Message, error) {
+	return m.DeliverPendingInboxScoped(root, name, "", route)
+}
+
+func (m Manager) DeliverPendingInboxScoped(root, name, actorID, route string) ([]Message, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
 	if route == "" {
 		route = "manual"
 	}
-	layout, err := m.layout(root, name, false)
+	layout, err := m.scopedLayout(root, name, actorID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2456,12 +2466,16 @@ func followUpForCall(call CurrentCall) string {
 	}
 }
 
-func interruptHookCommand(root, name string) string {
+func interruptHookCommand(root, name, actorID string) string {
 	exe, err := os.Executable()
 	if err != nil || exe == "" {
 		exe = "ws-mcp"
 	}
-	return shellQuote(exe) + " agents check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
+	cmd := shellQuote(exe) + " agents check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
+	if strings.TrimSpace(actorID) != "" {
+		cmd += " --actor-id " + shellQuote(actorID)
+	}
+	return cmd
 }
 
 func shellQuote(value string) string {
