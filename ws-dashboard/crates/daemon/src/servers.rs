@@ -1356,7 +1356,9 @@ fn remote_terminal_websocket_url(
     terminal_id: &str,
     after: u64,
 ) -> Result<String, TerminalWebSocketForwardError> {
-    let mut url = Url::parse(endpoint).map_err(|_| TerminalWebSocketForwardError::Unavailable)?;
+    let legacy_path = format!("/api/dashboard/terminals/{terminal_id}/socket");
+    let mut url = Url::parse(&remote_url(endpoint, &legacy_path))
+        .map_err(|_| TerminalWebSocketForwardError::Unavailable)?;
     let scheme = match url.scheme() {
         "http" => "ws",
         "https" => "wss",
@@ -1366,7 +1368,6 @@ fn remote_terminal_websocket_url(
     };
     url.set_scheme(scheme)
         .map_err(|_| TerminalWebSocketForwardError::Unavailable)?;
-    url.set_path(&format!("/api/dashboard/terminals/{terminal_id}/socket"));
     url.query_pairs_mut().clear().append_pair("after", &after.to_string());
     Ok(url.to_string())
 }

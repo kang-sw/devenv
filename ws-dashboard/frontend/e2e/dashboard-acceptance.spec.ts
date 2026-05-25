@@ -3213,6 +3213,20 @@ test("linked server terminal WebSocket uses local gateway server-scoped route", 
   await page.keyboard.type("remote ws input");
   await page.keyboard.press("Enter");
   await expect
+    .poll(() =>
+      terminalSocketMessages
+        .map((message) => {
+          try {
+            const parsed = JSON.parse(message) as { type?: string; data?: string };
+            return parsed.type === "input" ? parsed.data ?? "" : "";
+          } catch {
+            return "";
+          }
+        })
+        .join(""),
+    )
+    .toContain("remote ws input");
+  await expect
     .poll(() => terminalSocketMessages.some((message) => message.includes('"type":"resize"')))
     .toBe(true);
 

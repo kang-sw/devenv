@@ -3612,6 +3612,21 @@ async fn mock_terminal_websocket_forwarding(
             let _ = sender
                 .send(axum::extract::ws::Message::Text(output.into()))
                 .await;
+            let _ = sender
+                .send(axum::extract::ws::Message::Binary(Bytes::from_static(
+                    b"upstream-bytes",
+                )))
+                .await;
+            let _ = sender
+                .send(axum::extract::ws::Message::Ping(Bytes::from_static(
+                    b"upstream-ping",
+                )))
+                .await;
+            let _ = sender
+                .send(axum::extract::ws::Message::Pong(Bytes::from_static(
+                    b"upstream-pong",
+                )))
+                .await;
             while let Some(Ok(message)) = receiver.next().await {
                 match message {
                     axum::extract::ws::Message::Text(text) => {
@@ -3850,11 +3865,11 @@ async fn linked_server_terminal_websocket_gateways_bearer_frames_and_cleanup() {
     let probe = TerminalWebSocketForwardingProbe::default();
     let remote_app = axum::Router::new()
         .route(
-            "/api/dashboard/link-auth",
+            "/gateway/api/dashboard/link-auth",
             axum::routing::post(mock_terminal_link_auth),
         )
         .route(
-            "/api/dashboard/terminals/{terminal_id}/socket",
+            "/gateway/api/dashboard/terminals/{terminal_id}/socket",
             axum::routing::get(mock_terminal_websocket_forwarding),
         )
         .with_state(probe.clone());
@@ -3868,7 +3883,7 @@ async fn linked_server_terminal_websocket_gateways_bearer_frames_and_cleanup() {
             label: "Windows dogfood".to_owned(),
             kind: ServerKind::Manual,
             ssh_target: None,
-            endpoint_hint: Some(format!("http://{remote_addr}")),
+            endpoint_hint: Some(format!("http://{remote_addr}/gateway")),
             remote_endpoint_hint: None,
         }])
         .await
@@ -3959,6 +3974,37 @@ async fn linked_server_terminal_websocket_gateways_bearer_frames_and_cleanup() {
             "chunk": { "sequence": 42, "data": "remote-output", "stream": "pty" }
         })
     );
+    let mut upstream_non_text_frames = Vec::new();
+    for _ in 0..3 {
+        let frame = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("linked websocket non-text timeout")
+            .expect("linked websocket non-text output")
+            .expect("linked websocket non-text frame");
+        match frame {
+            TungsteniteMessage::Binary(bytes) => upstream_non_text_frames
+                .push(format!("binary:{}", String::from_utf8_lossy(&bytes))),
+            TungsteniteMessage::Ping(bytes) => {
+                upstream_non_text_frames.push(format!("ping:{}", String::from_utf8_lossy(&bytes)))
+            }
+            TungsteniteMessage::Pong(bytes) => {
+                upstream_non_text_frames.push(format!("pong:{}", String::from_utf8_lossy(&bytes)))
+            }
+            other => panic!("unexpected linked websocket non-text frame: {other:?}"),
+        }
+    }
+    assert!(
+        upstream_non_text_frames.contains(&"binary:upstream-bytes".to_owned()),
+        "{upstream_non_text_frames:?}"
+    );
+    assert!(
+        upstream_non_text_frames.contains(&"ping:upstream-ping".to_owned()),
+        "{upstream_non_text_frames:?}"
+    );
+    assert!(
+        upstream_non_text_frames.contains(&"pong:upstream-pong".to_owned()),
+        "{upstream_non_text_frames:?}"
+    );
 
     let input_frame = serde_json::json!({ "type": "input", "data": "echo remote\n" }).to_string();
     let resize_frame = serde_json::json!({ "type": "resize", "columns": 100, "rows": 30 }).to_string();
@@ -3974,6 +4020,14 @@ async fn linked_server_terminal_websocket_gateways_bearer_frames_and_cleanup() {
         .send(TungsteniteMessage::Binary(Bytes::from_static(b"raw-bytes")))
         .await
         .expect("send linked websocket binary");
+    socket
+        .send(TungsteniteMessage::Ping(Bytes::from_static(b"browser-ping")))
+        .await
+        .expect("send linked websocket ping");
+    socket
+        .send(TungsteniteMessage::Pong(Bytes::from_static(b"browser-pong")))
+        .await
+        .expect("send linked websocket pong");
     socket.close(None).await.expect("close linked websocket");
     timeout(Duration::from_secs(2), probe.closed.notified())
         .await
@@ -3983,7 +4037,7 @@ async fn linked_server_terminal_websocket_gateways_bearer_frames_and_cleanup() {
     assert_eq!(upgrades.len(), 1);
     assert_eq!(
         upgrades[0].path_and_query,
-        "/api/dashboard/terminals/term-live/socket?after=41"
+        "/gateway/api/dashboard/terminals/term-live/socket?after=41"
     );
     assert_eq!(
         upgrades[0].authorization.as_deref(),
@@ -3993,6 +4047,8 @@ async fn linked_server_terminal_websocket_gateways_bearer_frames_and_cleanup() {
     assert!(frames.contains(&format!("text:{input_frame}")), "{frames:?}");
     assert!(frames.contains(&format!("text:{resize_frame}")), "{frames:?}");
     assert!(frames.contains(&"binary:raw-bytes".to_owned()), "{frames:?}");
+    assert!(frames.contains(&"ping:browser-ping".to_owned()), "{frames:?}");
+    assert!(frames.contains(&"pong:browser-pong".to_owned()), "{frames:?}");
 
     let mut reject_request =
         format!("ws://{local_addr}/api/dashboard/servers/server-windows/terminals/term-reject/socket")
