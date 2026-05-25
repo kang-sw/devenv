@@ -2939,6 +2939,153 @@ test("linked server Git toolbar keeps same-id state scoped by server", async ({ 
   await expect(page.locator(".git-toolbar")).toContainText("local-main");
 });
 
+test("linked server terminal HTTP lifecycle uses server-scoped local gateway routes", async ({ page }) => {
+  const remoteTerminalRequests: string[] = [];
+  let localTerminalHits = 0;
+  let remoteTerminals: unknown[] = [];
+
+  await page.route("**/api/dashboard/servers", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserServers()),
+    });
+  });
+  await page.route("**/api/dashboard/resources", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(linkedServerBrowserResources("server-local")),
+    });
+  });
+  await page.route(
+    "**/api/dashboard/servers/server-remote/resources",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(linkedServerBrowserResources("server-remote", "remote-root-opened")),
+      });
+    },
+  );
+  await page.route("**/api/dashboard/work-roots/remote-root-opened/terminals", async (route) => {
+    localTerminalHits += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "local terminal route should not be used" }),
+    });
+  });
+  await page.route("**/api/dashboard/terminals/remote-term-1**", async (route) => {
+    localTerminalHits += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "local terminal route should not be used" }),
+    });
+  });
+  await page.route(
+    "**/api/dashboard/servers/server-remote/work-roots/remote-root-opened/terminals",
+    async (route) => {
+      const url = new URL(route.request().url());
+      remoteTerminalRequests.push(`${route.request().method()} ${url.pathname}`);
+      if (route.request().method() === "POST") {
+        remoteTerminals = [
+          {
+            terminalId: "remote-term-1",
+            workRootId: "remote-root-opened",
+            title: "Terminal",
+            status: "running",
+            columns: 80,
+            rows: 24,
+            createdAtMs: 1,
+            cwdHint: null,
+          },
+        ];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(remoteTerminals[0]),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(remoteTerminals),
+      });
+    },
+  );
+  await page.route(
+    "**/api/dashboard/servers/server-remote/terminals/remote-term-1/**",
+    async (route) => {
+      const url = new URL(route.request().url());
+      remoteTerminalRequests.push(`${route.request().method()} ${url.pathname}`);
+      if (url.pathname.endsWith("/socket")) {
+        await route.fulfill({ status: 404, body: "" });
+        return;
+      }
+      if (url.pathname.endsWith("/output")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            terminalId: "remote-term-1",
+            status: "running",
+            nextSequence: 0,
+            chunks: [],
+          }),
+        });
+        return;
+      }
+      await route.fulfill({ status: 204, body: "" });
+    },
+  );
+  await page.route(
+    "**/api/dashboard/servers/server-remote/terminals/remote-term-1",
+    async (route) => {
+      const url = new URL(route.request().url());
+      remoteTerminalRequests.push(`${route.request().method()} ${url.pathname}`);
+      remoteTerminals = [];
+      await route.fulfill({ status: 204, body: "" });
+    },
+  );
+
+  await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-shell")).toBeVisible();
+  await page
+    .locator(".server-row", { hasText: "Remote fixture" })
+    .locator('[data-command-id="server.select"]')
+    .click();
+  await expect(page.locator('[data-resource-id="remote-root-opened"]')).toBeVisible();
+  await page.locator('[data-command-id="terminal.create"]').click();
+  await expect(
+    page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id="terminal:server-remote%2Fremote-term-1"]',
+    ),
+  ).toBeVisible();
+  expect(remoteTerminalRequests).toContain(
+    "POST /api/dashboard/servers/server-remote/work-roots/remote-root-opened/terminals",
+  );
+  expect(localTerminalHits).toBe(0);
+
+  const terminalTab = page.locator(
+    '.dockview-workbench-tab[data-workbench-pane-id="terminal:server-remote%2Fremote-term-1"]',
+  );
+  await terminalTab.hover();
+  await terminalTab.locator('[data-command-id="workbench.tab.close"]').click();
+  const popover = page.locator('[data-workbench-close-popover="cursor-near"]');
+  await expect(popover).toBeVisible();
+  await popover
+    .locator('[data-command-id="workbench.tab.close.confirm"]')
+    .click();
+  await expect(terminalTab).toHaveCount(0);
+  expect(remoteTerminalRequests).toContain(
+    "DELETE /api/dashboard/servers/server-remote/terminals/remote-term-1",
+  );
+  expect(localTerminalHits).toBe(0);
+});
+
 test("linked server root picker uses server-scoped local gateway routes", async ({ page }) => {
   const remoteGatewayRequests: string[] = [];
   let localRootPickerHits = 0;

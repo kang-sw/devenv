@@ -3,14 +3,20 @@ import {
   appendTerminalWebSocketMessage,
   canApplyTerminalOutputPoll,
   clampTerminalSize,
+  closeTerminal,
+  createTerminal,
+  fetchTerminalOutput,
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
   mergeListedTerminalSessions,
+  listTerminals,
   loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
   replaceTerminalRestoreIntentsForWorkRoot,
+  resizeTerminal,
   saveTerminalRestoreIntents,
+  sendTerminalInput,
   terminalCloseEndpoint,
   terminalInputEndpoint,
   terminalOutputEndpoint,
@@ -120,6 +126,129 @@ assertEqual(
   terminalWebSocketEndpoint("term/abc", 12, "server remote/1"),
   "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/socket?after=12",
   "server-scoped websocket endpoint encodes server id and cursor",
+);
+
+const originalFetch = globalThis.fetch;
+const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = typeof input === "string" ? input : input.toString();
+  fetchCalls.push({ url, init });
+  if (url.endsWith("/output?after=7")) {
+    return new Response(
+      JSON.stringify({
+        terminalId: "term/abc",
+        status: "running",
+        nextSequence: 8,
+        chunks: [{ sequence: 8, data: "remote", stream: "pty" }],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  if (init?.method === "DELETE" || url.endsWith("/input")) {
+    return new Response(null, { status: 204 });
+  }
+  if (url.endsWith("/resize")) {
+    return new Response(
+      JSON.stringify({
+        ...session,
+        terminalId: "term/abc",
+        columns: 100,
+        rows: 30,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  if (url.endsWith("/terminals") && init?.method === "POST") {
+    return new Response(JSON.stringify({ ...session, terminalId: "term/abc" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (url.endsWith("/terminals")) {
+    return new Response(JSON.stringify([{ ...session, terminalId: "term/abc" }]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify({ error: "unexpected route" }), {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}) as typeof fetch;
+
+const remoteServerId = "server remote/1";
+const createdRemote = await createTerminal(
+  "root/local abc",
+  { title: "Remote term", cwdHint: "nested" },
+  remoteServerId,
+);
+const listedRemote = await listTerminals("root/local abc", remoteServerId);
+const outputRemote = await fetchTerminalOutput("term/abc", 7, remoteServerId);
+await sendTerminalInput("term/abc", "echo remote\n", remoteServerId);
+const resizedRemote = await resizeTerminal("term/abc", 100, 30, remoteServerId);
+await closeTerminal("term/abc", remoteServerId);
+globalThis.fetch = originalFetch;
+
+assertEqual(
+  createdRemote.serverId,
+  remoteServerId,
+  "remote create response is normalized with selected server id",
+);
+assertEqual(
+  listedRemote[0]?.serverId,
+  remoteServerId,
+  "remote list response is normalized with selected server id",
+);
+assertEqual(
+  outputRemote.chunks[0]?.data,
+  "remote",
+  "remote output fetch parses output body",
+);
+assertEqual(resizedRemote.columns, 100, "remote resize parses response body");
+assertDeepEqual(
+  fetchCalls.map((call) => ({
+    url: call.url,
+    method: call.init?.method ?? "GET",
+    body: call.init?.body ? JSON.parse(String(call.init.body)) : null,
+  })),
+  [
+    {
+      url: "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20abc/terminals",
+      method: "POST",
+      body: {
+        columns: 80,
+        rows: 24,
+        title: "Remote term",
+        cwdHint: "nested",
+      },
+    },
+    {
+      url: "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20abc/terminals",
+      method: "GET",
+      body: null,
+    },
+    {
+      url: "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/output?after=7",
+      method: "GET",
+      body: null,
+    },
+    {
+      url: "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/input",
+      method: "POST",
+      body: { data: "echo remote\n" },
+    },
+    {
+      url: "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/resize",
+      method: "POST",
+      body: { columns: 100, rows: 30 },
+    },
+    {
+      url: "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc",
+      method: "DELETE",
+      body: null,
+    },
+  ],
+  "terminal fetch helpers call local gateway server-scoped lifecycle URLs",
 );
 assertEqual(
   terminalWebSocketUrl("term/abc", 12, {
