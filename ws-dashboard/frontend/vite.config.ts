@@ -39,6 +39,24 @@ export default defineConfig({
           if (id.includes('/node_modules/@codemirror/lang-rust/')) {
             return 'codemirror-lang-rust';
           }
+          if (id.includes('/node_modules/@codemirror/lang-xml/')) {
+            return 'codemirror-lang-xml';
+          }
+          if (id.includes('/node_modules/@codemirror/lang-sql/')) {
+            return 'codemirror-lang-sql';
+          }
+          if (id.includes('/node_modules/@codemirror/lang-go/')) {
+            return 'codemirror-lang-go';
+          }
+          if (id.includes('/node_modules/@codemirror/lang-java/')) {
+            return 'codemirror-lang-java';
+          }
+          if (id.includes('/node_modules/@codemirror/lang-cpp/')) {
+            return 'codemirror-lang-cpp';
+          }
+          if (id.includes('/node_modules/@codemirror/lang-php/')) {
+            return 'codemirror-lang-php';
+          }
           if (id.includes('/node_modules/@codemirror/legacy-modes/')) {
             return 'codemirror-legacy-modes';
           }

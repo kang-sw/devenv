@@ -72,6 +72,22 @@ test.beforeAll(async () => {
       ).join("\n") + "\n",
     );
     writeFileSync(
+      path.join(workRoot, "gate-config.toml"),
+      [
+        "title = \"CodeMirror source viewer\"",
+        "",
+        "[owner]",
+        "name = \"dashboard\"",
+        "enabled = true",
+        "",
+        ...Array.from({ length: 90 }, (_, index) => `source_scroll_line_${index + 1} = ${index + 1}`),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      path.join(workRoot, "gate-unknown.workflowx"),
+      "plain fallback source viewer fixture\n",
+    );
+    writeFileSync(
       path.join(workRoot, "gate-document.md"),
       [
         "# Gate Document",
@@ -1672,7 +1688,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     const pane = page.locator(".readonly-text-pane");
     await expect(pane).toBeVisible();
-    await expect(pane.locator(".readonly-text-content")).toContainText(
+    const sourceViewer = pane.locator('.document-source-viewer[data-editor-read-only="true"]');
+    await expect(sourceViewer).toBeVisible();
+    await expect(sourceViewer).toHaveAttribute("data-editor-language", "text");
+    await expect(sourceViewer.locator(".cm-lineNumbers")).toBeVisible();
+    await expect(sourceViewer.locator(".cm-content")).toContainText(
       "ws-dashboard browser gate fixture",
     );
     await expectDockviewWorkbench(page);
@@ -1728,7 +1748,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator(".readonly-text-pane-path")).toContainText(
       "gate-bulk-000.txt",
     );
-    await expect(pane.locator(".readonly-text-content")).toContainText(
+    await expect(sourceViewer).toHaveAttribute("data-editor-language", "text");
+    await expect(sourceViewer.locator(".cm-content")).toContainText(
       "bulk gate fixture 0",
     );
 
@@ -1773,6 +1794,76 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+
+  await test.step("source CodeMirror viewer renders TOML, fallback text, quiet focus, and edit save", async () => {
+    const tomlRow = page.locator(".file-explorer-row", {
+      hasText: "gate-config.toml",
+    });
+    if ((await tomlRow.count()) === 0) {
+      note(
+        "source CodeMirror viewer: skipped because external daemon workRoot did not provide gate-config.toml",
+      );
+      return;
+    }
+
+    await tomlRow.click();
+    const pane = page.locator(".document-pane");
+    const sourceViewer = pane.locator('.document-source-viewer[data-editor-read-only="true"]');
+    await expect(sourceViewer).toBeVisible();
+    await expect(sourceViewer).toHaveAttribute("data-editor-language", "toml");
+    await expect(sourceViewer.locator(".cm-lineNumbers")).toBeVisible();
+    await expect(pane.locator('[data-document-block-kind="heading"]')).toHaveCount(0);
+    await expect(sourceViewer.locator(".cm-content")).toContainText("CodeMirror source viewer");
+    await sourceViewer.locator(".cm-content").click();
+    await expect(sourceViewer.locator(".cm-content")).toBeFocused();
+    await expect
+      .poll(() =>
+        sourceViewer.locator(".cm-editor").evaluate((node) => {
+          return getComputedStyle(node).outlineStyle;
+        }),
+      )
+      .toBe("none");
+    const readScroller = sourceViewer.locator(".cm-scroller");
+    await readScroller.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect.poll(() => readScroller.evaluate((node) => node.scrollTop > 0)).toBe(true);
+
+    await pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]').click();
+    const sourceEditor = pane.locator('.document-raw-editor[data-editor-read-only="false"]');
+    await expect(sourceEditor).toBeVisible();
+    await expect(sourceEditor).toHaveAttribute("data-editor-language", "toml");
+    await expect(pane.locator('[data-command-id="document.save"]')).toBeDisabled();
+    await sourceEditor.locator(".cm-content").click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.keyboard.insertText(
+      [
+        "title = \"CodeMirror source viewer edited\"",
+        "",
+        "[owner]",
+        "name = \"dashboard\"",
+        "enabled = true",
+      ].join("\n") + "\n",
+    );
+    await pane.locator('[data-command-id="document.save"]').click();
+    await expect(pane.locator('[data-document-save-state="saved"]')).toContainText(/saved/i);
+    await pane.locator('[data-command-id="document.mode.set"][data-document-mode="view"]').click();
+    await expect(sourceViewer).toHaveAttribute("data-editor-language", "toml");
+    await expect(sourceViewer.locator(".cm-content")).toContainText("source viewer edited");
+    expect(readFileSync(path.join(workRoot, "gate-config.toml"), "utf8")).toContain(
+      "CodeMirror source viewer edited",
+    );
+
+    const fallbackRow = page.locator(".file-explorer-row", {
+      hasText: "gate-unknown.workflowx",
+    });
+    await fallbackRow.click();
+    await expect(sourceViewer).toHaveAttribute("data-editor-language", "text");
+    await expect(sourceViewer.locator(".cm-content")).toContainText("plain fallback source viewer fixture");
+    note(
+      "source CodeMirror viewer: TOML read view used read-only CodeMirror with quiet focus chrome and line numbers, edit mode saved through CodeMirror, and unknown source fell back to text",
+    );
+  });
   await test.step("markdown document viewer renders structured blocks and pathrefs", async () => {
     const markdownRow = page.locator(".file-explorer-row", {
       hasText: "gate-document.md",
@@ -1798,6 +1889,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const previewTabCountBeforeEdit = await previewTab.count();
     await expect(pane.locator('.document-viewer-segment.is-active[data-document-mode="view"]')).toBeVisible();
     await expect(pane.locator('[data-command-id="document.mode.set"][data-document-mode="edit"]')).toBeEnabled();
+    await expect(pane.locator('.document-source-viewer[data-editor-read-only="true"]')).toHaveCount(0);
     await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
     await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
     const nestedUnorderedList = pane.locator(".document-list-unordered .document-list-unordered");
@@ -1898,20 +1990,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   });
 
   await test.step("long read-only file scroll stays inside the pane", async () => {
-    // CONTRACT: Long read-only file content must own its scroll container.
-    // Scrolling over `.readonly-text-content` must not move the top-level
-    // browser document, displace dashboard chrome, or depend on a future
-    // editor-library replacement.
+    // CONTRACT: Long read-only source content must own its CodeMirror scroll
+    // container without moving the top-level browser document or displacing
+    // dashboard chrome.
     const longFileRow = page.locator(".file-explorer-row", {
       hasText: "gate-long-readonly.txt",
     });
     await longFileRow.click();
     await expectDockviewWorkbench(page);
 
-    const content = page.locator(".readonly-text-content");
-    await expect(content).toContainText(
+    const viewer = page.locator('.document-source-viewer[data-editor-read-only="true"]');
+    await expect(viewer).toHaveAttribute("data-editor-language", "text");
+    await expect(viewer.locator(".cm-content")).toContainText(
       "readonly scroll containment line 220",
     );
+    const content = viewer.locator(".cm-scroller");
     const scrollBox = await content.boundingBox();
     expect(scrollBox).not.toBeNull();
     await expect

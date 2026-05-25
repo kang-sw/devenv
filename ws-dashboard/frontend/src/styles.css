@@ -3165,6 +3165,14 @@ button {
   height: 100%;
 }
 
+.document-codemirror-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.document-source-viewer .cm-content {
+  cursor: text;
+}
+
 .document-codemirror-editor .cm-panels {
   border-color: var(--ws-color-divider-local);
   background: var(--ws-color-surface-editor-chrome);
