@@ -7,6 +7,7 @@ related:
 spec:
   - 260525-ws-dashboard-remote-deployment-guide
   - 260525-ws-dashboard-linked-server-registry-gateway-skeleton
+  - 260525-ws-dashboard-remote-link-auth-handshake
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -142,6 +143,29 @@ Deferred scope: persisted credentials and multi-owner identity.
 Verification should include daemon API tests for success and failure states plus
 browser coverage for entering a passphrase and observing the resulting server
 state transition.
+
+### Result (6f4299a) - 2026-05-25
+
+Implemented daemon-to-daemon link authentication. Remote dashboard daemons now
+own a daemon-lifetime link passphrase separate from the one-time browser
+pairing URL. `POST /api/dashboard/link-auth` exchanges the passphrase for a
+bearer token without requiring browser pairing, and wrong passphrases fail
+without installing browser cookies.
+
+The local gateway now accepts owner-authenticated passphrase submissions for
+remembered linked servers, forwards them to the linked endpoint, stores the
+returned bearer token only in memory, and updates the linked server view to
+`connected` for the local daemon lifetime. Connected linked servers can forward
+the existing resources view through bearer auth, with server ids rewritten to
+the local linked-server id so browser routes remain server-scoped.
+
+Verification:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon remote_link_auth_exchanges_passphrase_for_bearer_without_browser_pairing -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon local_link_auth_connects_and_forwards_remote_resources -- --nocapture`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-core`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml -p ws-dashboard-daemon`
+- `ws/spec_index.verify`
 
 ### Phase 3: CLI remote deployment guide
 
