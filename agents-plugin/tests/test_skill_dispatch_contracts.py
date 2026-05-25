@@ -21,6 +21,9 @@ class SkillDispatchContractsTest(unittest.TestCase):
     def test_implement_keeps_execution_owner(self):
         text = (SKILLS_DIR / "lead-implement" / "SKILL.md").read_text(encoding="utf-8")
 
+        self.assertIn("## Implementation Verdict", text)
+        self.assertIn("- **Mode**: <direct edit | delegated>", text)
+        self.assertIn("Do not use `NEXT:`", text)
         self.assertIn("### judge: needs-delegation", text)
         self.assertIn("| Direct-edit |", text)
         self.assertIn("If direct-edit: edit directly", text)

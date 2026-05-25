@@ -95,6 +95,9 @@ class WsflowSkillBundleTest(unittest.TestCase):
     def test_implement_keeps_wsflow_route_contract_owner(self):
         text = (SKILLS_DIR / "lead-implement" / "SKILL.md").read_text(encoding="utf-8")
 
+        self.assertIn("## Implementation Verdict", text)
+        self.assertIn("- **Branch Mode**: <continue implementation branch | create implementation branch>", text)
+        self.assertIn("Do not use `NEXT:`", text)
         self.assertIn("### judge: branch-mode", text)
         self.assertNotIn("Preserve caller-provided execution path", text)
         self.assertNotIn("Confirm execution context", text)

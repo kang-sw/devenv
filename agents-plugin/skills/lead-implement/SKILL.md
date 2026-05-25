@@ -18,7 +18,8 @@ Branch
 - Merge commits follow repository commit rules and include `## AI Context`.
 
 Execution
-- Create the task list at Prep; every task is mandatory and ordered.
+- Emit a user-facing Implementation Verdict after Route and before Prep as a non-blocking route summary.
+- Create the task list during Prep; every task is mandatory and ordered.
 - Delegated: implementer reads only the brief and optional plan; never the ticket directly.
 - Brief preserves every selected-scope binding decision; audit before commit.
 
@@ -38,7 +39,15 @@ Review
 5. Apply `judge: plan-depth`.
 6. Apply `judge: review-allocation`.
 
-### 2. Prep
+### 2. Emit Implementation Verdict
+
+1. Emit **Implementation Verdict** using the template.
+2. State only observable routing inputs and final judgment labels.
+3. Do not use `NEXT:`; `lead-implement` is starting implementation, not routing to a sibling workflow skill.
+4. Do not include chain-of-thought, alternatives considered, or private scoring.
+5. Continue immediately to Prep after emitting the template.
+
+### 3. Prep
 
 1. Record `<current-branch>`.
 2. Outside `implement/*`, set `<merge-target>` to `<current-branch>`.
@@ -67,7 +76,7 @@ Review
 [ ] Merge - only when approved
 ```
 
-### 3. Edit
+### 4. Edit
 
 1. If direct-edit: edit directly per target and impl-playbook; commit logical checkpoints.
 2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
@@ -76,7 +85,7 @@ Review
 5. If delegated: read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary; capture `<first-commit>..<last-commit>`.
 6. Capture `<commit-range>` and `<result-commit>`.
 
-### 4. Review
+### 5. Review
 
 1. If lead-only: record rationale; skip to step 8.
 2. If single: register reviewer via `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`; generate path via `ws/path.generate(kind: "review", stems: ["direct"])`.
@@ -87,7 +96,7 @@ Review
 7. If non-clean and partitioned: relay to implementer with **Review relay prompt**; extract won't-fix list; re-review non-clean partitions with **Re-review prompt**; keep clean partitions accepted unless fix touched their surface. Repeat until all `[clean]` or 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
 8. Summarize review outcomes and disputes for the final report, then delete all review path files.
 
-### 5. Doc Pre-Pass
+### 6. Doc Pre-Pass
 
 1. Invoke `ws:lead-update-spec` with `<commit-range>`.
 2. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
@@ -96,14 +105,14 @@ Review
 
 Run mental-model-updater after update-spec so it sees implemented-marker changes.
 
-### 6. Doc Commit Gate
+### 7. Doc Commit Gate
 
 1. Call `ws/infra.read(name: "executor-wrapup")`.
 2. Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
 3. If ticket-driven, follow Ticket Update using `<result-commit>`.
 4. Commit doc changes per executor-wrapup. Do not re-run Doc Pipeline.
 
-### 7. Doc Closeout Compaction
+### 8. Doc Closeout Compaction
 
 1. Run this gate for every supported branch mode; implementation runs are always on scoped implementation branches.
 2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
@@ -113,7 +122,7 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 6. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
 7. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report `<doc-compaction-status>` as skipped with the blocker.
 
-### 8. Final Action Gate
+### 9. Final Action Gate
 
 Report:
 
@@ -131,7 +140,7 @@ implementation slice or `ws:lead-sprint`; completed phases capture follow-up
 through append-only ticket Result editions. If the user chooses stop, leave the
 implementation branch unmerged and report the branch name plus merge target.
 
-### 9. Merge
+### 10. Merge
 
 Merge only when the user approves. Merge `implement/<scope>` to
 `<merge-target>` with the repository merge helper or equivalent non-interactive
@@ -197,6 +206,22 @@ Choose the smallest partition set that covers material risk.
 Full review (all three): reserve for cross-cutting behavior plus runtime/tooling plus test surface.
 
 ## Templates
+
+### Implementation Verdict
+
+```text
+## Implementation Verdict
+
+- **Target**: <ticket path/stem or inline target>
+- **Mode**: <direct edit | delegated>
+- **Branch Mode**: <continue implementation branch | create implementation branch>
+- **Plan Depth**: <none | brief | survey | research>
+- **Review Allocation**: <lead-only | single reviewer | partitioned: correctness[, fit][, test]>
+- **Scope**: <selected phase, whole target, or caller-provided slice>
+- **Reason**: <decisive route facts only>
+
+Proceeding with implementation.
+```
 
 ### Brief template
 

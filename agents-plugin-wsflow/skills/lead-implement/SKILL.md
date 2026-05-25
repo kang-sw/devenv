@@ -13,7 +13,8 @@ Target: user request
 - Execute code changes through `wsflow:lead-edit`; `lead-edit` owns the implementation strategy.
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
 - Invoke only the workflow skills named in this file.
-- Create the task list at prepare; every task is mandatory and ordered.
+- Emit a user-facing Implementation Verdict after Assess and before Prepare as a non-blocking route summary.
+- Create the task list during Prepare; every task is mandatory and ordered.
 - Commit logical units per repository commit rules with `## AI Context`.
 - After Final Action Gate, wait for user approval before merging or starting another implementation slice.
 
@@ -25,7 +26,16 @@ Target: user request
 2. If ticket-driven: read ticket; extract scope, stem, caller-provided slice, and phase results.
 3. Apply `judge: branch-mode`.
 
-### 2. Prepare
+### 2. Emit Implementation Verdict
+
+1. Emit **Implementation Verdict** using the template.
+2. State only observable routing inputs and final judgment labels.
+3. Do not use `NEXT:`; `wsflow:lead-implement` is starting implementation, not routing to a sibling workflow skill.
+4. Do not include Mode or Review Allocation; `wsflow:lead-edit` owns implementation strategy while `wsflow:lead-implement` reports review outcomes later.
+5. Do not include chain-of-thought, alternatives considered, or private scoring.
+6. Continue immediately to Prepare after emitting the template.
+
+### 3. Prepare
 
 Create and maintain this task list:
 
@@ -47,26 +57,26 @@ Create and maintain this task list:
 5. Record `<implementation-start>` with `git rev-parse HEAD`.
 6. If `branch-mode` = create: create `implement/<scope>` before any source edit.
 
-### 3. Execute
+### 4. Execute
 
 1. Invoke `wsflow:lead-edit` with the target and scope boundary.
 2. Capture commit range from `<implementation-start>..HEAD`.
 3. Capture `<result-commit>` as current source HEAD before documentation updates.
 
-### 4. Doc Pre-Pass
+### 5. Doc Pre-Pass
 
 1. Invoke `wsflow:lead-update-spec` with `<commit-range>`.
 2. Update relevant mental-model docs directly when the source diff changed module contracts, coupling, extension points, common mistakes, or technical debt.
 3. Commit mental-model changes separately and mention the affected mental-model docs in `## AI Context`.
 
-### 5. Doc Commit Gate
+### 6. Doc Commit Gate
 
 1. Call `wsflow/infra.read(name: "executor-wrapup")`.
 2. Refresh `ai-docs/_index.md` for new skills, package surfaces, focus changes, or major patterns.
 3. If ticket-driven, add a `### Result (<result-commit>) - YYYY-MM-DD` section to the completed phase.
 4. Commit ticket and index changes through `wsflow/git.commit`.
 
-### 6. Doc Closeout Compaction
+### 7. Doc Closeout Compaction
 
 1. Run this gate for every supported branch mode; implementation runs are always on scoped implementation branches.
 2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
@@ -76,7 +86,7 @@ Create and maintain this task list:
 6. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
 7. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report compaction as skipped with the blocker.
 
-### 7. Final Action Gate
+### 8. Final Action Gate
 
 Report:
 
@@ -95,7 +105,7 @@ or Edition section instead of editing prior Result text. If the user chooses
 stop, leave the implementation branch unmerged and report the branch name plus
 merge target.
 
-### 8. Merge
+### 9. Merge
 
 Merge only when the user approves. Merge `implement/<scope>` to
 `<merge-target>` with an equivalent non-interactive git sequence.
@@ -113,6 +123,21 @@ squash when the branch is one logical change with noisy or dependent commits.
 |----------|------|
 | Continue implementation branch | Current branch starts with `implement/` |
 | Create implementation branch | Current branch does not start with `implement/` |
+
+## Templates
+
+### Implementation Verdict
+
+```text
+## Implementation Verdict
+
+- **Target**: <ticket path/stem or inline target>
+- **Branch Mode**: <continue implementation branch | create implementation branch>
+- **Scope**: <selected phase, whole target, or caller-provided slice>
+- **Reason**: <decisive route facts only>
+
+Proceeding with implementation.
+```
 
 ## Doctrine
 
