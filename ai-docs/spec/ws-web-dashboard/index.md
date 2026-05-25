@@ -282,12 +282,37 @@ proxy. File panes, source keys, event subscriptions, save fan-out, stale/conflic
 state, and same bare `workRootId` plus path collisions remain scoped by
 `serverId`.
 
+Activity snapshots, Activity transcripts, Activity event streams, Git toolbar
+operations, workspace removal, and Git worktree-add operations use the same
+server-scoped gateway model for linked-server WorkRoots and workspaces.
+Activity list/transcript requests and Git/workspace one-shot operations forward
+through explicit allowlisted routes with upstream bearer auth and bounded
+unknown/auth-required/tunnel-required/unreachable refusals. Activity events use
+a route-specific SSE gateway for `activity/events` streams; non-SSE successful
+upstream responses are rejected as bad gateway instead of becoming a generic
+stream proxy.
+
+For `server-local`, the server-scoped Activity, Git, workspace removal, and Git
+worktree-add routes dispatch in-process with the same behavior as the existing
+local compatibility routes. For linked servers, forwarded non-2xx responses
+preserve upstream status, content type, and body. Successful Git worktree-add
+submit responses rewrite the nested resource view so the returned server and
+all `ResourcePath.serverId` values identify the selected linked server.
+
+Workspace and Git worktree-add command payloads carry `serverId` with the
+opaque workspace id, so remote workspace actions do not fall back to local
+routes when local and remote workspaces share the same bare id. Git toolbar
+status, branch state, pending actions, and stale async response guards are
+scoped by `serverId` plus `workRootId`. Activity stream and polling fallback
+state uses the same scoped identity, preventing events or delayed poll results
+from one server from updating another server's same-id WorkRoot. Workspace
+removal cleanup removes panes and layout state only for WorkRoots on the
+targeted server.
+
 > [!note] Planned 🚧
-> Later phases will attach the remaining Activity, Git, workspace mutation,
-> terminal HTTP lifecycle, Activity-event SSE, and terminal WebSocket operations
-> to the server-scoped route model. Activity SSE streams and terminal WebSockets
-> require stream or upgrade proxy behavior rather than the one-shot JSON
-> forwarding helper.
+> Later phases will attach terminal HTTP lifecycle and terminal WebSocket
+> operations to the server-scoped route model. Terminal WebSockets require
+> upgrade proxy behavior rather than the one-shot JSON forwarding helper.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 

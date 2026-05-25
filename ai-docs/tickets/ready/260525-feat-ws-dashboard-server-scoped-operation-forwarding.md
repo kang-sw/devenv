@@ -406,6 +406,50 @@ Verification should include forwarding tests for representative read and write
 operations, Activity SSE behavior, and remote Windows dogfood for Git status or
 bounded non-destructive Git operations when a remote Git fixture is available.
 
+### Result (c3ef069) - 2026-05-25
+
+Implemented remote Activity snapshots, Activity transcript reads, Activity
+event SSE, workspace removal, Git toolbar operations, and Git worktree-add
+operations through explicit server-scoped gateway routes. Server-local aliases
+dispatch in-process with legacy behavior, while linked-server routes use
+allowlisted forwarding with bearer auth, bounded refusal states, upstream
+status/body/content-type preservation, route-specific Activity SSE validation,
+and resource rewriting for Git worktree-add submit responses.
+
+Frontend workspace removal and Git worktree-add commands now carry `serverId`,
+Activity SSE and fallback polling are keyed by `serverId + workRootId`, Git
+toolbar state and stale async guards are server-scoped, and workspace removal
+cleanup removes panes/layout only for WorkRoots on the targeted server.
+
+Deferred scope remains agent control actions, terminal HTTP lifecycle, terminal
+WebSocket gatewaying, document translation forwarding, credential persistence,
+deployment automation, and public endpoint hardening. No native Windows
+endpoint dogfood was run; automated coverage uses route tests and
+daemon-served browser tests with mocked linked-server routes.
+
+Review outcome: fit was clean. Correctness found serverId propagation and
+same-id state isolation bugs, and test review found auth/refusal, bearer,
+upstream-error, and browser-coverage gaps. Fixes were implemented and all
+partitioned re-reviews returned clean.
+
+Verification passed:
+
+- `cargo test --manifest-path ws-dashboard/Cargo.toml server_scoped`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml forwarding`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml linked_server`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml work_root_activity`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml git`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml git_worktree`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml root_picker`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml resources`
+- `cargo test --manifest-path ws-dashboard/Cargo.toml`
+- `npm --prefix ws-dashboard/frontend run test:work-root-activity`
+- `npm --prefix ws-dashboard/frontend run test:git`
+- `npm --prefix ws-dashboard/frontend run test:commands`
+- `npm --prefix ws-dashboard/frontend run test:open-work-root`
+- `npm --prefix ws-dashboard/frontend run build`
+- `npm --prefix ws-dashboard/frontend run test:browser -- -g "linked server Git toolbar"`
+
 ### Phase 6: Remote terminal HTTP lifecycle
 
 Forward terminal creation, list, output polling, input, resize, and close
