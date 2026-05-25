@@ -814,13 +814,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			question, _ = params.Arguments["prompt"].(string)
 		}
 		deepResearch, _ := params.Arguments["deep_research"].(bool)
-		child, err := s.childActorSetupForSubquery(ctx, root)
+		actorID := s.actorScopeForAgentTool(root, params.Arguments)
+		child, err := s.childActorSetupForSubquery(ctx, root, actorID)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
 			Root:                  root,
-			ActorID:               s.actorScopeForAgentTool(root, params.Arguments),
+			ActorID:               actorID,
 			Question:              question,
 			DeepResearch:          deepResearch,
 			Harness:               s.currentHarness(),
@@ -1448,8 +1449,8 @@ func (s *Server) childActorSetupForAgent(ctx context.Context, root, name, actorI
 	return s.ensureChildActor(ctx, root, "", "delegate")
 }
 
-func (s *Server) childActorSetupForSubquery(ctx context.Context, root string) (childActorSetup, error) {
-	if !s.actorBoundToRoot(root) {
+func (s *Server) childActorSetupForSubquery(ctx context.Context, root, actorID string) (childActorSetup, error) {
+	if strings.TrimSpace(actorID) == "" {
 		return childActorSetup{}, nil
 	}
 	return s.ensureChildActor(ctx, root, "", "reader")
@@ -2626,7 +2627,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":          stringProperty("Repository root. Defaults to the server root."),
 					"question":      stringProperty("Scoped question to answer."),
 					"deep_research": boolProperty("Use deep model alias for broad tracing or research."),
 				},
