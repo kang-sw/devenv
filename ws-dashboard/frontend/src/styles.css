@@ -2506,6 +2506,46 @@ button {
   background: var(--ws-color-surface-nav-body);
 }
 
+.server-nav-toolbar {
+  display: grid;
+  flex: 0 0 auto;
+  min-height: 30px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--ws-space-03);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  background: var(--ws-color-surface-nav-header);
+  padding: var(--ws-space-02) var(--ws-space-05) var(--ws-space-02)
+    var(--ws-space-07);
+}
+
+.server-nav-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: var(--ws-line-height-02);
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-work-root-icon.open-work-root {
+  display: inline-flex;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
 .file-explorer {
   background: var(--ws-color-surface-files);
 }
@@ -2619,6 +2659,115 @@ button {
 .resource-row-action.icon-button:focus-visible {
   border-color: color-mix(in srgb, var(--ws-color-state-error) 70%, transparent);
   background: color-mix(in srgb, var(--ws-color-panel-hover) 76%, transparent);
+}
+
+.server-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--ws-space-03);
+  margin-bottom: var(--ws-space-04);
+}
+
+.server-row {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ws-space-04);
+  border: 0;
+  border-left: var(--ws-border-width-state-rail) solid transparent;
+  background: color-mix(in srgb, var(--ws-color-panel) 72%, transparent);
+  color: var(--ws-color-text-primary);
+  cursor: pointer;
+  padding: var(--ws-space-04) var(--ws-space-05);
+  text-align: left;
+}
+
+.server-row:hover,
+.server-row:focus-visible {
+  background: var(--ws-color-panel-hover);
+  outline: var(--ws-focus-ring);
+  outline-offset: -2px;
+}
+
+.server-row-selected {
+  border-left-color: var(--ws-color-action);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--ws-color-action) 18%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--ws-color-panel-selected) 82%, var(--ws-color-text-primary) 18%);
+}
+
+.server-row-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ws-space-04);
+  color: var(--ws-color-text-secondary);
+}
+
+.server-row-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-02);
+  font-weight: 700;
+  line-height: var(--ws-line-height-03);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-status-chip {
+  display: inline-flex;
+  max-width: 112px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ws-color-text-tertiary) 14%, transparent);
+  color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-01) var(--ws-space-04);
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-02);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-status-chip-connected {
+  background: color-mix(in srgb, var(--ws-color-state-success) 18%, transparent);
+  color: var(--ws-color-state-success);
+}
+
+.server-status-chip-authRequired,
+.server-status-chip-tunnelRequired,
+.server-status-chip-staleEndpoint,
+.server-status-chip-starting {
+  background: color-mix(in srgb, var(--ws-color-state-warning) 18%, transparent);
+  color: var(--ws-color-state-warning);
+}
+
+.server-status-chip-unreachable {
+  background: color-mix(in srgb, var(--ws-color-state-error) 16%, transparent);
+  color: var(--ws-color-state-error-text);
+}
+
+.server-workspaces {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--ws-space-03);
+  padding-left: var(--ws-space-04);
+}
+
+.server-empty-state {
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-border-subtle);
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
+  padding: var(--ws-space-05) var(--ws-space-06);
 }
 
 .workbench-toolbar {

@@ -1,7 +1,9 @@
 import {
   createResourceRefreshCoordinator,
   requestDashboardResources,
+  requestDashboardServers,
   resourceEndpoint,
+  serversEndpoint,
   type ResourceRefreshResult,
 } from "./resourceRefresh.js";
 import type { DashboardResourcesView } from "./resourceModel.js";
@@ -76,7 +78,7 @@ function view(id: string, availability: "available" | "missing" = "available"): 
 
 let capturedUrl = "";
 let capturedAccept = "";
-await requestDashboardResources((async (input, init) => {
+await requestDashboardResources("server-local", (async (input, init) => {
   capturedUrl = String(input);
   capturedAccept = String((init?.headers as Record<string, string> | undefined)?.Accept ?? "");
   return new Response(JSON.stringify(view("canonical")), {
@@ -86,6 +88,30 @@ await requestDashboardResources((async (input, init) => {
 }) as typeof fetch);
 assertEqual(capturedUrl, resourceEndpoint, "resource refresh uses canonical resources endpoint");
 assertEqual(capturedAccept, "application/json", "resource refresh asks for JSON");
+
+await requestDashboardResources("server remote/1", (async (input) => {
+  capturedUrl = String(input);
+  return new Response(JSON.stringify(view("remote")), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}) as typeof fetch);
+assertEqual(
+  capturedUrl,
+  "/api/dashboard/servers/server%20remote%2F1/resources",
+  "resource refresh scopes linked server resources by encoded server id",
+);
+
+await requestDashboardServers((async (input, init) => {
+  capturedUrl = String(input);
+  capturedAccept = String((init?.headers as Record<string, string> | undefined)?.Accept ?? "");
+  return new Response(JSON.stringify({ servers: [] }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}) as typeof fetch);
+assertEqual(capturedUrl, serversEndpoint, "server refresh uses canonical servers endpoint");
+assertEqual(capturedAccept, "application/json", "server refresh asks for JSON");
 
 {
   const first = deferred<DashboardResourcesView>();

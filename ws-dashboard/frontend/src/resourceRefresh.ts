@@ -1,6 +1,7 @@
-import type { DashboardResourcesView } from "./resourceModel.js";
+import type { DashboardResourcesView, DashboardServersView } from "./resourceModel.js";
 
 export const resourceEndpoint = "/api/dashboard/resources";
+export const serversEndpoint = "/api/dashboard/servers";
 export const resourceAvailabilityPollIntervalMs = 5_000;
 
 export type ResourceRefreshReason = "initial" | "explicit" | "poll" | "open";
@@ -11,9 +12,26 @@ export type ResourceFetch = (
 ) => Promise<Response>;
 
 export async function requestDashboardResources(
+  serverId = "server-local",
   fetchResource: ResourceFetch = fetch,
 ): Promise<DashboardResourcesView> {
-  const response = await fetchResource(resourceEndpoint, {
+  const endpoint =
+    serverId === "server-local"
+      ? resourceEndpoint
+      : `/api/dashboard/servers/${encodeURIComponent(serverId)}/resources`;
+  const response = await fetchResource(endpoint, { headers: { Accept: "application/json" } });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as DashboardResourcesView;
+}
+
+export async function requestDashboardServers(
+  fetchResource: ResourceFetch = fetch,
+): Promise<DashboardServersView> {
+  const response = await fetchResource(serversEndpoint, {
     headers: { Accept: "application/json" },
   });
 
@@ -21,7 +39,7 @@ export async function requestDashboardResources(
     throw new Error(`HTTP ${response.status}`);
   }
 
-  return (await response.json()) as DashboardResourcesView;
+  return (await response.json()) as DashboardServersView;
 }
 
 type ResourceRefreshCoordinatorOptions = {

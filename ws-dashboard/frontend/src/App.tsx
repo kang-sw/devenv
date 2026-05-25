@@ -20,6 +20,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Server,
   SquareTerminal,
   Stethoscope,
   Trash2,
@@ -178,9 +179,11 @@ import {
   reconcileSelectedId,
   type ActionHint,
   type DashboardResourcesView,
+  type DashboardServersView,
   type InstanceView,
   type ResourceEntity,
   type ResourcePath,
+  type ServerConnectionView,
   type ServerView,
   type ViewState,
   type WorkRootView,
@@ -233,6 +236,8 @@ import {
 import { ActivityConsole } from "./ActivityConsole";
 import {
   createResourceRefreshCoordinator,
+  requestDashboardResources,
+  requestDashboardServers,
   resourceAvailabilityPollIntervalMs,
   type ResourceRefreshCoordinator,
 } from "./resourceRefresh";
@@ -312,6 +317,10 @@ export function App() {
   const [resources, setResources] = useState<DashboardResourcesView | null>(
     null,
   );
+  const [serversView, setServersView] = useState<DashboardServersView | null>(
+    null,
+  );
+  const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -343,9 +352,11 @@ export function App() {
   );
   const resourceRefreshCoordinatorRef =
     useRef<ResourceRefreshCoordinator | null>(null);
+  const selectedServerIdRef = useRef(selectedServerId);
 
   if (!resourceRefreshCoordinatorRef.current) {
     resourceRefreshCoordinatorRef.current = createResourceRefreshCoordinator({
+      fetchResources: () => requestDashboardResources(selectedServerIdRef.current),
       applyResources: setResources,
       setLoading,
       setError,
@@ -358,14 +369,38 @@ export function App() {
     [],
   );
 
+  const loadServers = useCallback(async () => {
+    try {
+      setServersView(await requestDashboardServers());
+    } catch {
+      // The selected server resource request already owns the visible error
+      // surface; keep the last server list rather than blanking the nav.
+    }
+  }, []);
+
+  const serverConnections = useMemo(
+    () =>
+      serversView?.servers ??
+      (resources ? [serverViewToConnection(resources.server)] : []),
+    [resources, serversView],
+  );
+  const activeResources =
+    resources?.server.id === selectedServerId ? resources : null;
+
+  useEffect(() => {
+    selectedServerIdRef.current = selectedServerId;
+  }, [selectedServerId]);
+
   useEffect(() => {
     resourceRefreshCoordinatorRef.current?.resume();
+    void loadServers();
     void loadResources("initial");
-  }, [loadResources]);
+  }, [loadResources, loadServers]);
 
   useEffect(() => {
     resourceRefreshCoordinatorRef.current?.resume();
     const interval = window.setInterval(() => {
+      void loadServers();
       void loadResources("poll");
     }, resourceAvailabilityPollIntervalMs);
 
@@ -373,7 +408,7 @@ export function App() {
       window.clearInterval(interval);
       resourceRefreshCoordinatorRef.current?.dispose();
     };
-  }, [loadResources]);
+  }, [loadResources, loadServers]);
 
   const handleWorkRootOpened = useCallback(
     (openedView: DashboardResourcesView, requestedWorkRootId?: string) => {
@@ -392,13 +427,16 @@ export function App() {
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
       // source of truth for refresh and re-entry.
+      selectedServerIdRef.current = openedView.server.id;
+      setSelectedServerId(openedView.server.id);
       resourceRefreshCoordinatorRef.current?.applyExternalResources(openedView);
       if (openedWorkRootId) {
         setSelectedId(openedWorkRootId);
       }
+      void loadServers();
       void loadResources("open");
     },
-    [loadResources, resources],
+    [loadResources, loadServers, resources],
   );
 
   useEffect(() => {
@@ -406,20 +444,50 @@ export function App() {
       return;
     }
 
+    if (resources.server.id !== selectedServerIdRef.current) {
+      selectedServerIdRef.current = resources.server.id;
+      setSelectedServerId(resources.server.id);
+    }
     normalizeServerRoute(resources.server.id);
   }, [resources]);
 
-  const entities = useMemo(() => flattenEntities(resources), [resources]);
+  const handleServerSelected = useCallback(
+    (server: ServerConnectionView) => {
+      selectedServerIdRef.current = server.id;
+      setSelectedServerId(server.id);
+      setSelectedId(server.id);
+      if (server.status === "connected") {
+        void loadResources("explicit");
+      }
+    },
+    [loadResources],
+  );
+
+  const entities = useMemo(
+    () => flattenEntities(activeResources),
+    [activeResources],
+  );
 
   useEffect(() => {
     // Reconcile after every resource change so a selection that left the
     // entity set (the mock workspace once the tree turns live) cannot remain
     // active.
+    const serverIds = new Set(serverConnections.map((server) => server.id));
+    if (selectedId && serverIds.has(selectedId)) {
+      return;
+    }
+    if (entities.length === 0) {
+      const nextSelectedId = selectedId ?? selectedServerId;
+      if (nextSelectedId !== selectedId) {
+        setSelectedId(nextSelectedId);
+      }
+      return;
+    }
     const nextSelectedId = reconcileSelectedId(entities, selectedId);
     if (nextSelectedId !== selectedId) {
       setSelectedId(nextSelectedId);
     }
-  }, [entities, selectedId]);
+  }, [entities, selectedId, selectedServerId, serverConnections]);
 
   useEffect(() => {
     saveReadOnlyFilePaneRestoreSnapshot(
@@ -481,8 +549,8 @@ export function App() {
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
   const workbenchSelection = useMemo(
-    () => resolveWorkbenchSelection(resources, selectedId),
-    [resources, selectedId],
+    () => resolveWorkbenchSelection(activeResources, selectedId),
+    [activeResources, selectedId],
   );
 
   const openReadOnlyFile = useCallback(
@@ -627,6 +695,7 @@ export function App() {
         executableHandlers[command.commandId] = () => setSelectedId(entityId);
       } else if (command.payload.type === "refresh") {
         executableHandlers[command.commandId] = () => {
+          void loadServers();
           void loadResources("explicit");
         };
       } else if (command.payload.type === "workRoot.activation.set") {
@@ -648,7 +717,7 @@ export function App() {
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId } = command.payload;
         executableHandlers[command.commandId] = () => {
-          const workspace = resources?.workspaces.find(
+          const workspace = activeResources?.workspaces.find(
             (candidate) => candidate.id === workspaceId,
           );
           if (
@@ -718,7 +787,7 @@ export function App() {
         },
       });
     },
-    [loadResources, readOnlyFilePanes, resources],
+    [activeResources, loadResources, loadServers, readOnlyFilePanes],
   );
 
   const applyDocumentSaved = useCallback(
@@ -746,23 +815,16 @@ export function App() {
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
         <aside className="shell-panel shell-panel-nav ws-panel" aria-label="Resources">
-          <PanelHeader
-            title={resources?.server.label ?? "ws dashboard"}
-            state={resources?.server.state}
-            actions={resources?.server.actions ?? []}
-            entityId={resources?.server.id ?? "server"}
-            onCommand={executeCommand}
-          />
-          <OpenWorkRootControl
-            onOpened={handleWorkRootOpened}
-            onCommand={executeCommand}
-          />
           <ResourceNavigation
-            resources={resources}
+            resources={activeResources}
+            servers={serverConnections}
+            selectedServerId={selectedServerId}
             loading={loading}
             error={error}
-            selectedId={selectedEntity?.id ?? null}
+            selectedId={selectedId}
             selectedWorkRoot={workbenchSelection?.root ?? null}
+            onOpenWorkRoot={handleWorkRootOpened}
+            onSelectServer={handleServerSelected}
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
           />
@@ -788,7 +850,7 @@ export function App() {
             commandLog={commandLog}
             error={error}
             loading={loading}
-            resources={resources}
+            resources={activeResources}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
             workbenchGroupsByRoot={workbenchGroupsByRoot}
@@ -900,6 +962,34 @@ function WorkRootKindIcon({ kind }: { kind: WorkRootView["kind"] }) {
   return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
 }
 
+function serverViewToConnection(server: ServerView): ServerConnectionView {
+  return {
+    id: server.id,
+    label: server.label,
+    kind: "local",
+    status: "connected",
+    state: server.state,
+    actions: server.actions,
+  };
+}
+
+function serverConnectionStatusLabel(server: ServerConnectionView): string {
+  switch (server.status) {
+    case "connected":
+      return "connected";
+    case "authRequired":
+      return "auth required";
+    case "tunnelRequired":
+      return "tunnel required";
+    case "staleEndpoint":
+      return "stale endpoint";
+    case "starting":
+      return "starting";
+    case "unreachable":
+      return "unreachable";
+  }
+}
+
 function ToggleIcon({ toggle }: { toggle: WorkbenchToggle }) {
   const Icon = workbenchToggleIcon(toggle);
   return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
@@ -958,9 +1048,13 @@ function PanelHeader({
 function OpenWorkRootControl({
   onOpened,
   onCommand,
+  variant = "section",
+  disabled = false,
 }: {
   onOpened: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
   onCommand: DashboardCommandDispatcher;
+  variant?: "section" | "icon";
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pickerView, setPickerView] = useState<RootPickerView | null>(null);
@@ -1192,25 +1286,39 @@ function OpenWorkRootControl({
   const pinnedPaths = rootPickerPinnedPathSet(pickerView);
   const selectedPathIsPinned = selectedPath ? pinnedPaths.has(selectedPath) : false;
 
+  const openerButton = (
+    <button
+      ref={openerRef}
+      aria-label="Open workRoot"
+      className="icon-button icon-button-primary"
+      data-command-id="rootPicker.open"
+      disabled={disabled}
+      title={disabled ? "Open workRoot is local-only in this build" : "Open workRoot"}
+      type="button"
+      onClick={openPicker}
+    >
+      <FolderOpen aria-hidden="true" size={15} strokeWidth={1.8} />
+    </button>
+  );
+
   return (
-    <div className="open-work-root" aria-label="Open workRoot">
-      <div className="open-work-root-row">
-        <div>
-          <div className="section-label">Open workRoot</div>
-          <div className="open-work-root-summary">Choose a directory from this host</div>
+    <div
+      className={
+        variant === "icon" ? "open-work-root open-work-root-icon" : "open-work-root"
+      }
+      aria-label="Open workRoot"
+    >
+      {variant === "section" ? (
+        <div className="open-work-root-row">
+          <div>
+            <div className="section-label">Open workRoot</div>
+            <div className="open-work-root-summary">Choose a directory from this host</div>
+          </div>
+          {openerButton}
         </div>
-        <button
-          ref={openerRef}
-          aria-label="Open workRoot"
-          className="icon-button icon-button-primary"
-          data-command-id="rootPicker.open"
-          title="Open workRoot"
-          type="button"
-          onClick={openPicker}
-        >
-          <FolderOpen aria-hidden="true" size={15} strokeWidth={1.8} />
-        </button>
-      </div>
+      ) : (
+        openerButton
+      )}
       <ModalOverlay
         className="root-picker-backdrop"
         isDismissable
@@ -1736,18 +1844,26 @@ function GitWorktreeAddModal({
 
 function ResourceNavigation({
   resources,
+  servers,
+  selectedServerId,
   loading,
   error,
   selectedId,
   selectedWorkRoot,
+  onOpenWorkRoot,
+  onSelectServer,
   onCommand,
   onOpenFile,
 }: {
   resources: DashboardResourcesView | null;
+  servers: ServerConnectionView[];
+  selectedServerId: string;
   loading: boolean;
   error: string | null;
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
+  onOpenWorkRoot: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
+  onSelectServer: (server: ServerConnectionView) => void;
   onCommand: DashboardCommandDispatcher;
   onOpenFile: (
     workRoot: WorkRootView,
@@ -1755,35 +1871,28 @@ function ResourceNavigation({
     gesture: ReadOnlyFileOpenGesture,
   ) => void;
 }) {
-  if (loading && !resources) {
-    return <StatusPane title="Loading" detail="resources" />;
-  }
-
-  if (error && !resources) {
-    return (
-      <StatusPane
-        title="Fetch failed"
-        detail={error}
-        action={
-          <button
-            className="action-button action-button-primary"
-            data-command-id="dashboard.refresh"
-            type="button"
-            onClick={() => onCommand(buildDashboardRefreshCommand())}
-          >
-            Refresh
-          </button>
-        }
-      />
-    );
-  }
-
-  if (!resources || resources.workspaces.length === 0) {
-    return <StatusPane title="Empty" detail="no workspaces" />;
-  }
+  const selectedServer = servers.find((server) => server.id === selectedServerId);
+  const serverStatusDetail = selectedServer
+    ? serverConnectionStatusLabel(selectedServer)
+    : "server not listed";
 
   return (
     <div className="nav-stack">
+      <div className="server-nav-toolbar">
+        <div className="server-nav-title">Servers</div>
+        <ChromeIconButton
+          commandId="dashboard.refresh"
+          icon={RefreshCw}
+          label="Refresh servers"
+          onClick={() => onCommand(buildDashboardRefreshCommand())}
+        />
+        <OpenWorkRootControl
+          variant="icon"
+          disabled={selectedServerId !== "server-local"}
+          onOpened={onOpenWorkRoot}
+          onCommand={onCommand}
+        />
+      </div>
       <div className="resource-list resource-list-region">
         {error ? (
           <InlineNotice tone="error" title="Refresh failed" detail={error} />
@@ -1791,20 +1900,87 @@ function ResourceNavigation({
         {loading ? (
           <InlineNotice tone="info" title="Refreshing" detail="resources" />
         ) : null}
-        {resources.workspaces.map((workspace) => (
-          <WorkspaceRows
-            key={workspace.id}
-            workspace={workspace}
+        {servers.length === 0 ? (
+          <InlineNotice tone="info" title="Servers" detail="no linked servers" />
+        ) : null}
+        {servers.map((server) => (
+          <ServerRows
+            key={server.id}
+            server={server}
+            selected={server.id === selectedServerId}
             selectedId={selectedId}
+            resources={server.id === selectedServerId ? resources : null}
             onCommand={onCommand}
+            onSelectServer={onSelectServer}
           />
         ))}
+        {!loading && !resources && selectedServer ? (
+          <div className="server-empty-state">
+            {selectedServer.status === "connected"
+              ? "No workspace tree loaded"
+              : serverStatusDetail}
+          </div>
+        ) : null}
+        {!loading && resources && resources.workspaces.length === 0 ? (
+          <div className="server-empty-state">No workspaces</div>
+        ) : null}
       </div>
       <WorkRootFileExplorer
         workRoot={selectedWorkRoot}
         onCommand={onCommand}
         onOpenFile={onOpenFile}
       />
+    </div>
+  );
+}
+
+function ServerRows({
+  server,
+  selected,
+  selectedId,
+  resources,
+  onCommand,
+  onSelectServer,
+}: {
+  server: ServerConnectionView;
+  selected: boolean;
+  selectedId: string | null;
+  resources: DashboardResourcesView | null;
+  onCommand: DashboardCommandDispatcher;
+  onSelectServer: (server: ServerConnectionView) => void;
+}) {
+  return (
+    <div className="server-group">
+      <button
+        aria-label={`Select server ${server.label}`}
+        className={`server-row ws-row${selected ? " server-row-selected ws-row-selected" : ""}`}
+        data-command-id="server.select"
+        data-server-kind={server.kind}
+        data-server-status={server.status}
+        title={[server.label, server.kind, server.status, server.state.status].join(" · ")}
+        type="button"
+        onClick={() => onSelectServer(server)}
+      >
+        <span className="server-row-main">
+          <Server aria-hidden="true" size={15} strokeWidth={1.8} />
+          <span className="server-row-title">{server.label}</span>
+        </span>
+        <span className={`server-status-chip server-status-chip-${server.status}`}>
+          {serverConnectionStatusLabel(server)}
+        </span>
+      </button>
+      {selected && resources ? (
+        <div className="server-workspaces">
+          {resources.workspaces.map((workspace) => (
+            <WorkspaceRows
+              key={workspace.id}
+              workspace={workspace}
+              selectedId={selectedId}
+              onCommand={onCommand}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

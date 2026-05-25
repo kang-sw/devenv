@@ -31,6 +31,21 @@ export type ServerView = {
   actions: ActionHint[];
 };
 
+export type ServerConnectionView = {
+  id: string;
+  label: string;
+  kind: "local" | "sshRemote" | "wsl" | "manual";
+  status:
+    | "connected"
+    | "authRequired"
+    | "unreachable"
+    | "starting"
+    | "staleEndpoint"
+    | "tunnelRequired";
+  state: ViewState;
+  actions: ActionHint[];
+};
+
 export type WorkspaceView = {
   id: string;
   label: string;
@@ -77,6 +92,10 @@ export type InstanceView = {
 export type DashboardResourcesView = {
   server: ServerView;
   workspaces: WorkspaceView[];
+};
+
+export type DashboardServersView = {
+  servers: ServerConnectionView[];
 };
 
 export type ResourceEntity =
