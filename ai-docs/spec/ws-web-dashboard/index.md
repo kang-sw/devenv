@@ -546,6 +546,22 @@ ids, process ids, stdout/stderr paths, stream paths, or backend-native
 transcript paths. The read model remains read-only and does not add agent start,
 interrupt, cancel, erase, retry, or exec-job control actions.
 
+### 🚧 SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
+
+The Activity Console read model will use the ws runtime SQLite registry as the
+named-agent metadata authority for opened workRoots. Current named-agent role
+rows remain the source for the compatibility agent projection and current agent
+counts, while retained named-agent instance rows may add historical Activity
+Items when their payloads or diagnostics are still useful. Historical instance
+items do not increase the current named-agent count.
+
+Browser-visible routes and payload shapes stay stable. Activity snapshots,
+watch stream events, and transcript reads continue to use opaque workRoot and
+activity ids, and transcript/output bytes remain normalized by daemon-owned
+file-backed transcript readers. Missing, locked, unavailable, or incompatible
+registry state degrades to an empty or partial read model rather than failing
+the whole route or exposing cache paths.
+
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
 The WorkRoot Activity pane renders a reusable read-only Activity Console
