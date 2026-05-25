@@ -151,6 +151,8 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
+| `260525-bug-ws-setup-actor-token-format` | ready | Shorten setup actor recovery tokens without encoding worktree routing in the visible token |
+| `260525-bug-ws-setup-format-schema-attention` | ready | Hide setup-only structured format affordance from the public MCP schema while keeping hidden compatibility |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
 | `260518-feat-ws-dashboard-activity-read-model` | todo | Implement the backend Activity Feed snapshot plus selected transcript backfill read model |
@@ -178,14 +180,14 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
 | `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
-| `260525-bug-ws-setup-token-and-schema-attention` | idea | Shorten ws setup actor tokens and hide setup-only structured format affordance from public schema |
 | `260525-bug-lead-implement-delegation-pre-edit-guard` | idea | Require an explicit direct-edit verdict or implementer spawn before lead-implement mutates source |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 
 ## Ticket Focus
 
-None.
+`260525-bug-ws-setup-actor-token-format` - ready implementation target for delegated setup actor token shortening.
+`260525-bug-ws-setup-format-schema-attention` - ready implementation target for delegated setup schema attention cleanup.
 
 ## Session Notes
 

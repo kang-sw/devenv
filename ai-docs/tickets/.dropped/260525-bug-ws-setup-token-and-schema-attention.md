@@ -6,6 +6,14 @@ related:
 
 # ws setup actor token and schema attention
 
+## Dropped
+
+This mixed ticket was split into separate implementation tickets because actor
+token format and setup schema attention are distinct axes:
+
+- `260525-bug-ws-setup-actor-token-format`
+- `260525-bug-ws-setup-format-schema-attention`
+
 ## Background
 
 During a `ws:lead-discuss` dogfood run, `ws.setup(method:
