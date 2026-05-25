@@ -2075,7 +2075,9 @@ func TestServeStdioActorScopedAgentLifecycleAndExplicitRootCompatibility(t *test
 	if !strings.Contains(callText, "same\trunning") {
 		t.Fatalf("actor-scoped call did not start:\n%s", callText)
 	}
-	if !strings.Contains(waitText, "agent: same") || !strings.Contains(waitText, "ready: true") {
+	if !strings.Contains(waitText, "agent: same") ||
+		!strings.Contains(waitText, "call_status: running") ||
+		!strings.Contains(waitText, "wait_timeout: true") {
 		t.Fatalf("actor-scoped wait mismatch:\n%s", waitText)
 	}
 	if !strings.Contains(resultText, "result_available: false") {
