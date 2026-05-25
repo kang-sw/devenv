@@ -151,8 +151,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260525-bug-ws-setup-actor-token-format` | ready | Shorten setup actor recovery tokens without encoding worktree routing in the visible token |
-| `260525-bug-ws-setup-format-schema-attention` | ready | Hide setup-only structured format affordance from the public MCP schema while keeping hidden compatibility |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
 | `260518-feat-ws-dashboard-activity-read-model` | todo | Implement the backend Activity Feed snapshot plus selected transcript backfill read model |
@@ -186,8 +184,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-`260525-bug-ws-setup-actor-token-format` - ready implementation target for delegated setup actor token shortening.
-`260525-bug-ws-setup-format-schema-attention` - ready implementation target for delegated setup schema attention cleanup.
+None.
 
 ## Session Notes
 

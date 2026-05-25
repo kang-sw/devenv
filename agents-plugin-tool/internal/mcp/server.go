@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1231,7 +1231,7 @@ func (s *Server) bootstrapLeadActor(ctx context.Context, arguments map[string]an
 	}
 	defer store.Close()
 	worktreeKey := store.Layout().WorktreeKey
-	actorID, err := mintActorID("lead", worktreeKey)
+	actorID, err := mintUniqueActorID(ctx, store, "lead")
 	if err != nil {
 		return err
 	}
@@ -1259,24 +1259,48 @@ func canonicalSetupRoot(root string) (string, error) {
 }
 
 func (s *Server) restoreActor(ctx context.Context, actorID string) error {
-	worktreeKey, err := actorWorktreeKey(actorID)
-	if err != nil {
+	actorID = strings.ToLower(strings.TrimSpace(actorID))
+	if _, err := actorAuthority(actorID); err != nil {
 		return err
 	}
-	store, err := wsstore.NewManager(wsstore.Options{}).OpenWorktreeKey(worktreeKey)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	actor, ok, err := store.Actor(ctx, actorID)
-	if err != nil {
-		return err
+	manager := wsstore.NewManager(wsstore.Options{})
+	var store *wsstore.Store
+	var actor wsstore.Actor
+	var ok bool
+	if worktreeKey, err := actorWorktreeKey(actorID); err == nil {
+		opened, err := manager.OpenWorktreeKey(worktreeKey)
+		if err != nil {
+			return err
+		}
+		store = opened
+		defer store.Close()
+		actor, ok, err = store.Actor(ctx, actorID)
+		if err != nil {
+			return err
+		}
+	} else {
+		found, foundOK, err := manager.FindActor(ctx, actorID)
+		if err != nil {
+			return err
+		}
+		actor, ok = found, foundOK
+		if ok {
+			opened, err := manager.OpenWorktreeKey(actor.WorktreeKey)
+			if err != nil {
+				return err
+			}
+			store = opened
+			defer store.Close()
+		}
 	}
 	if !ok {
 		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<absolute-working-directory>\") to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
 	}
 	if actor.Status != "" && actor.Status != "active" {
 		return fmt.Errorf("actor id %q is not active: %s", actorID, actor.Status)
+	}
+	if store == nil {
+		return fmt.Errorf("actor id %q has no recoverable worktree state", actorID)
 	}
 	if err := store.UpsertActor(ctx, actor); err != nil {
 		return err
@@ -1293,12 +1317,73 @@ func (s *Server) bindActor(actor wsstore.Actor) {
 	s.sessionActorAuthority = actor.Authority
 }
 
-func mintActorID(authority, worktreeKey string) (string, error) {
-	var suffix [12]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
+var generateActorPayload = randomActorPayload
+
+func mintUniqueActorID(ctx context.Context, store *wsstore.Store, authority string) (string, error) {
+	if !validActorAuthority(authority) {
+		return "", fmt.Errorf("invalid actor authority %q", authority)
+	}
+	manager := wsstore.NewManager(wsstore.Options{})
+	for attempt := 0; attempt < 32; attempt++ {
+		actorID, err := mintActorID(authority)
+		if err != nil {
+			return "", err
+		}
+		if _, ok, err := store.Actor(ctx, actorID); err != nil {
+			return "", err
+		} else if ok {
+			continue
+		}
+		if _, ok, err := manager.FindActor(ctx, actorID); err != nil {
+			return "", err
+		} else if ok {
+			continue
+		}
+		return actorID, nil
+	}
+	return "", fmt.Errorf("could not mint unique %s actor id after collision retries", authority)
+}
+
+func mintActorID(authority string) (string, error) {
+	payload, err := generateActorPayload(8)
+	if err != nil {
 		return "", err
 	}
-	return authority + "-" + worktreeKey + "-" + hex.EncodeToString(suffix[:]), nil
+	return authority + "-" + payload, nil
+}
+
+func randomActorPayload(length int) (string, error) {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	if length <= 0 {
+		return "", nil
+	}
+	out := make([]byte, length)
+	for i := range out {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", err
+		}
+		out[i] = alphabet[n.Int64()]
+	}
+	return string(out), nil
+}
+
+func actorAuthority(actorID string) (string, error) {
+	authority, rest, ok := strings.Cut(strings.TrimSpace(actorID), "-")
+	if !ok || rest == "" || !validActorAuthority(authority) || !validActorIDRest(rest) {
+		return "", fmt.Errorf("invalid actor id %q", actorID)
+	}
+	return authority, nil
+}
+
+func validActorIDRest(value string) bool {
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '@' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func actorWorktreeKey(actorID string) (string, error) {
@@ -1390,7 +1475,7 @@ func (s *Server) ensureChildActor(ctx context.Context, root, actorID, authority 
 	defer store.Close()
 	authority = blankDefault(authority, "delegate")
 	if actorID == "" {
-		actorID, err = mintActorID(authority, store.Layout().WorktreeKey)
+		actorID, err = mintUniqueActorID(ctx, store, authority)
 		if err != nil {
 			return childActorSetup{}, err
 		}
@@ -2754,7 +2839,7 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "agents.") {
+	if !strings.HasPrefix(name, "agents.") && name != "ws.setup" {
 		return clone
 	}
 	schema, ok := clone["inputSchema"].(map[string]any)
@@ -2768,7 +2853,10 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		propertiesClone := make(map[string]any, len(properties))
 		for key, value := range properties {
-			if key == "root" {
+			if strings.HasPrefix(name, "agents.") && key == "root" {
+				continue
+			}
+			if name == "ws.setup" && key == "format" {
 				continue
 			}
 			propertiesClone[key] = value

@@ -4,6 +4,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -244,6 +245,91 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
             self.assertFalse(installed)
             self.assertEqual(calls, [(tmp, binary)])
+
+    def test_bootstrap_or_local_devenv_marker_forces_runtime_install(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.1"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
+
+            with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
+                self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
+
+    def test_forced_local_runtime_does_not_fall_back_to_release_download(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            binary = temp / "ws-mcp-0.18.1-test"
+
+            launcher.install_local_devenv_runtime = lambda *args, **kwargs: False
+
+            def forbidden_download(*args, **kwargs):
+                raise AssertionError("forced local runtime must not fall back to release download")
+
+            launcher.install_downloaded_runtime = forbidden_download
+
+            with self.assertRaises(SystemExit):
+                launcher.install_runtime(
+                    temp,
+                    temp,
+                    binary,
+                    "ws-mcp-darwin-arm64",
+                    {"plugin_version": "0.18.1"},
+                    "darwin",
+                    "darwin-arm64",
+                    force_local=True,
+                )
+
+    def test_forced_local_runtime_prefers_source_build_over_dist_candidate(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".codex" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.29.1"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / ".local-devenv-runtime").write_text("", encoding="utf-8")
+            runtime_dir = home / "runtime"
+            binary = runtime_dir / "ws-mcp-0.18.1-test"
+            asset = "ws-mcp-darwin-arm64"
+            dist = home / "devenv" / "agents-plugin-tool" / "dist"
+            dist.mkdir(parents=True)
+            (dist / asset).write_text("stale dist", encoding="utf-8")
+            build_calls = []
+
+            def fake_build(got_runtime_dir, got_binary, got_contract):
+                build_calls.append((got_runtime_dir, got_binary, got_contract))
+                return True
+
+            def forbidden_copy(*args, **kwargs):
+                raise AssertionError("forced local runtime should build source before reading dist candidates")
+
+            launcher.build_local_devenv_runtime = fake_build
+            launcher.copy_runtime = forbidden_copy
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertTrue(
+                    launcher.install_local_devenv_runtime(
+                        plugin_dir,
+                        runtime_dir,
+                        binary,
+                        asset,
+                        {"plugin_version": "0.18.1"},
+                        "darwin",
+                        "darwin-arm64",
+                        prefer_build=True,
+                    )
+                )
+
+            self.assertEqual(build_calls, [(runtime_dir, binary, {"plugin_version": "0.18.1"})])
 
 
 if __name__ == "__main__":

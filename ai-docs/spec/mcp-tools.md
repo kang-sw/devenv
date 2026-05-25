@@ -76,15 +76,19 @@ The root-only value is volatile and does not write user config, ws cache config,
 or repository files. Calling `ws.setup` without `root`, `method`, or `id`
 reports current setup state, including the detected session harness when one has
 been observed, and does not mint lead authority. The default response is compact
-labeled text; callers can request structured JSON for compatibility. Legacy
+labeled text. Structured JSON remains accepted as hidden compatibility dispatch,
+but the public setup schema does not advertise a `format` argument. Legacy
 `session.*` root tools may remain callable as hidden compatibility dispatch, but
 they are not advertised as canonical tools.
 
 `ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
 creates a cooperative lead actor for a workflow session and returns an actor id
-with explicit recovery guidance. Callers must pass the absolute repository path
-as a filesystem path; the MCP server cannot infer the agent's current directory
-from placeholders or relative paths.
+with explicit recovery guidance. New actor ids are short opaque recovery tokens
+with an authority prefix and lowercase payload, such as `lead-k9f2p7qx`; callers
+must treat the token as opaque and recover with the exact returned value rather
+than parsing worktree routing details out of it. Callers must pass the absolute
+repository path as a filesystem path; the MCP server cannot infer the agent's
+current directory from placeholders or relative paths.
 `ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
 and binds the current session root to the actor root. Root-omitted actor-owned
 tools such as agent registration, agent calls, and subqueries require either a

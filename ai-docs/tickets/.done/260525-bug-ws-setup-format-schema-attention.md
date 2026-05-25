@@ -7,6 +7,7 @@ spec:
   - 260524-mcp-actor-setup-bootstrap
 related-mental-model:
   - mcp-runtime
+completed: 2026-05-25
 ---
 
 # ws setup format schema attention
@@ -54,3 +55,13 @@ Deferred scope:
 
 Verification should cover public schema shape, hidden JSON dispatch, readable
 default setup output, and setup alias schema behavior.
+
+### Result (1038545) - 2026-05-25
+
+Removed `format` from the advertised public `ws.setup` schema while preserving
+hidden `format: "json"` dispatch and the default readable setup response.
+Setup alias schema behavior remains covered so `WS_MCP_SETUP_TOOL` continues to
+hide the same setup-only affordance.
+
+Verification covered public schema shape, hidden JSON setup dispatch, setup
+alias schema behavior, and unchanged non-setup structured-output surfaces.
