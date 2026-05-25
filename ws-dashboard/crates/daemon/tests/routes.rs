@@ -5159,6 +5159,31 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
 
     upsert_agent_instance(
         &agents_dir,
+        "reviewer:private/state/active-secret",
+        "reviewer",
+        "reviewer active protected",
+        "payload-historical-active",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "active-session-secret",
+        "running",
+        "2026-05-17T09:30:00Z",
+        "/private/cache/active/output.md",
+        "active",
+        "",
+        false,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-historical-active",
+        "active protected transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
         "reviewer:private/state/completed-secret",
         "reviewer",
         "reviewer old completed",
@@ -5279,6 +5304,56 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
 
     upsert_agent_instance(
         &agents_dir,
+        "reviewer:private/state/tombstone-secret",
+        "reviewer",
+        "reviewer tombstone",
+        "payload-historical-tombstone",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "tombstone-session-secret",
+        "completed",
+        "2026-05-17T04:30:00Z",
+        "/private/cache/tombstone/output.md",
+        "retention_tombstone",
+        "",
+        false,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-historical-tombstone",
+        "tombstone transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
+        "reviewer:private/state/internal-secret",
+        "reviewer",
+        "reviewer internal",
+        "payload-historical-internal",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "internal-session-secret",
+        "completed",
+        "2026-05-17T04:15:00Z",
+        "/private/cache/internal/output.md",
+        "internal_retention_marker",
+        "",
+        false,
+    );
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-historical-internal",
+        "internal transcript\n",
+    );
+
+    upsert_agent_instance(
+        &agents_dir,
         "reviewer:private/state/status-only-secret",
         "reviewer",
         "reviewer status only",
@@ -5323,7 +5398,10 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
     assert!(items.iter().any(|item| item["status"] == "completed"));
     assert!(items.iter().any(|item| item["status"] == "retired"));
     assert!(!body_text.contains("reviewer current duplicate"));
+    assert!(!body_text.contains("reviewer active protected"));
     assert!(!body_text.contains("reviewer deleted"));
+    assert!(!body_text.contains("reviewer tombstone"));
+    assert!(!body_text.contains("reviewer internal"));
     assert!(!body_text.contains("reviewer status only"));
     assert_eq!(
         items
@@ -5383,13 +5461,45 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
         root.display().to_string(),
         cache_home.display().to_string(),
         "current-session-secret".to_owned(),
-        "historical-session-secret".to_owned(),
         "current-instance-session-secret".to_owned(),
+        "historical-session-secret".to_owned(),
+        "failed-session-secret".to_owned(),
+        "cancelled-session-secret".to_owned(),
+        "retired-session-secret".to_owned(),
+        "deleted-session-secret".to_owned(),
+        "active-session-secret".to_owned(),
+        "tombstone-session-secret".to_owned(),
+        "internal-session-secret".to_owned(),
         "status-only-session-secret".to_owned(),
+        "reviewer:private/state/current-secret".to_owned(),
+        "reviewer:private/state/active-secret".to_owned(),
         "reviewer:private/state/completed-secret".to_owned(),
+        "reviewer:private/state/failed-secret".to_owned(),
+        "reviewer:private/state/cancelled-secret".to_owned(),
+        "reviewer:private/state/retired-secret".to_owned(),
+        "reviewer:private/state/deleted-secret".to_owned(),
+        "reviewer:private/state/tombstone-secret".to_owned(),
+        "reviewer:private/state/internal-secret".to_owned(),
+        "reviewer:private/state/status-only-secret".to_owned(),
+        "payload-current-reviewer".to_owned(),
+        "payload-historical-active".to_owned(),
         "payload-historical-completed".to_owned(),
+        "payload-historical-failed".to_owned(),
+        "payload-historical-cancelled".to_owned(),
+        "payload-historical-retired".to_owned(),
+        "payload-historical-deleted".to_owned(),
+        "payload-historical-tombstone".to_owned(),
+        "payload-historical-internal".to_owned(),
+        "payload-historical-status-only".to_owned(),
         "state.sqlite".to_owned(),
+        "/private/cache/current/output.md".to_owned(),
+        "/private/cache/active/output.md".to_owned(),
         "/private/cache/historical/output.md".to_owned(),
+        "/private/cache/failed/output.md".to_owned(),
+        "/private/cache/cancelled/output.md".to_owned(),
+        "/private/cache/deleted/output.md".to_owned(),
+        "/private/cache/tombstone/output.md".to_owned(),
+        "/private/cache/internal/output.md".to_owned(),
         "private cleanup path".to_owned(),
     ] {
         assert!(
