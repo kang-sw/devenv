@@ -3016,6 +3016,45 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
     let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
+
+    let phase5_scoped_cases = vec![
+        (Method::DELETE, "/api/dashboard/servers/server-windows/workspaces/workspace-test", false),
+        (Method::GET, "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options", false),
+        (Method::POST, "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/preview", true),
+        (Method::POST, "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add", true),
+        (Method::GET, "/api/dashboard/servers/server-windows/work-roots/root-test/activity", false),
+        (Method::GET, "/api/dashboard/servers/server-windows/work-roots/root-test/activity/items/activity-1/transcript", false),
+        (Method::GET, "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events", false),
+        (Method::GET, "/api/dashboard/servers/server-windows/work-roots/root-test/git/status", false),
+        (Method::GET, "/api/dashboard/servers/server-windows/work-roots/root-test/git/branches", false),
+        (Method::POST, "/api/dashboard/servers/server-windows/work-roots/root-test/git/branches", true),
+        (Method::POST, "/api/dashboard/servers/server-windows/work-roots/root-test/git/switch-branch", true),
+        (Method::POST, "/api/dashboard/servers/server-windows/work-roots/root-test/git/fetch", false),
+        (Method::POST, "/api/dashboard/servers/server-windows/work-roots/root-test/git/push", false),
+        (Method::POST, "/api/dashboard/servers/server-windows/work-roots/root-test/git/pull-ff-only", false),
+    ];
+
+    for (method, uri, has_json_body) in &phase5_scoped_cases {
+        let mut builder = Request::builder().method(method.clone()).uri(*uri);
+        if *has_json_body {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+        }
+        let unauthenticated = app
+            .clone()
+            .oneshot(
+                builder
+                    .body(if *has_json_body {
+                        Body::from(serde_json::json!({ "test": true }).to_string())
+                    } else {
+                        Body::empty()
+                    })
+                    .expect("unauthenticated phase5 server scoped request"),
+            )
+            .await
+            .expect("unauthenticated phase5 server scoped response");
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
     let cookie = pair_and_cookie(app.clone(), &token).await;
 
     let unknown = app
@@ -3063,25 +3102,23 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         .expect("unknown server scoped document events response");
     assert_eq!(unknown_document_events.status(), StatusCode::NOT_FOUND);
 
-    for uri in [
-        "/api/dashboard/servers/server-windows/root-picker",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/files",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/files/read?path=README.md",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/documents/events",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/items/activity-1/transcript",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/git/branches",
-        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
-    ] {
+    for (method, uri, has_json_body) in phase5_scoped_cases {
+        let mut builder = Request::builder()
+            .method(method.clone())
+            .uri(uri)
+            .header(header::COOKIE, cookie.as_str());
+        if has_json_body {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+        }
         let auth_required = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .uri(uri)
-                    .header(header::COOKIE, cookie.as_str())
-                    .body(Body::empty())
+                builder
+                    .body(if has_json_body {
+                        Body::from(serde_json::json!({ "test": true }).to_string())
+                    } else {
+                        Body::empty()
+                    })
                     .expect("auth-required server scoped route request"),
             )
             .await
@@ -3466,7 +3503,25 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn file_list_error() -> axum::response::Response {
+    fn reject_missing_test_bearer(
+        headers: &axum::http::HeaderMap,
+    ) -> Option<axum::response::Response> {
+        let bearer = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok());
+        (bearer != Some("Bearer test-token")).then(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                [(header::CONTENT_TYPE, "application/json")],
+                Body::from(r#"{"error":"missing bearer"}"#),
+            )
+                .into_response()
+        })
+    }
+    async fn file_list_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::IM_A_TEAPOT,
             [(header::CONTENT_TYPE, "application/problem+json")],
@@ -3474,7 +3529,10 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn file_read_error() -> axum::response::Response {
+    async fn file_read_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::BAD_GATEWAY,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3482,7 +3540,10 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn file_write_conflict() -> axum::response::Response {
+    async fn file_write_conflict(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::CONFLICT,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3490,7 +3551,10 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn document_events_error() -> axum::response::Response {
+    async fn document_events_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3498,7 +3562,12 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn document_events_invalid_content_type() -> axum::response::Response {
+    async fn document_events_invalid_content_type(
+        headers: axum::http::HeaderMap,
+    ) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3506,7 +3575,10 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn activity_events_error() -> axum::response::Response {
+    async fn activity_events_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3514,7 +3586,12 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn activity_events_invalid_content_type() -> axum::response::Response {
+    async fn activity_events_invalid_content_type(
+        headers: axum::http::HeaderMap,
+    ) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3522,7 +3599,10 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn git_status_error() -> axum::response::Response {
+    async fn git_status_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         (
             StatusCode::IM_A_TEAPOT,
             [(header::CONTENT_TYPE, "application/json")],
@@ -3530,7 +3610,34 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         )
             .into_response()
     }
-    async fn rewritten_resources_response() -> axum::response::Response {
+    async fn phase5_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
+        (
+            StatusCode::IM_A_TEAPOT,
+            [(header::CONTENT_TYPE, "application/problem+json")],
+            Body::from(r#"{"error":"phase5 failed"}"#),
+        )
+            .into_response()
+    }
+    async fn git_worktree_submit_error(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
+        (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"message":"submit failed","status":"blocked","branchName":"bad","filesystemName":"bad","targetPathLabel":"remote","blockers":[]}"#),
+        )
+            .into_response()
+    }
+    async fn rewritten_resources_response(
+        headers: axum::http::HeaderMap,
+    ) -> axum::response::Response {
+        if let Some(response) = reject_missing_test_bearer(&headers) {
+            return response;
+        }
         axum::Json(serde_json::json!({
             "resources": {
                 "server": {
@@ -3601,8 +3708,52 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
             axum::routing::get(activity_events_invalid_content_type),
         )
         .route(
+            "/api/dashboard/work-roots/root-error/activity",
+            axum::routing::get(phase5_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/activity/items/activity-1/transcript",
+            axum::routing::get(phase5_error),
+        )
+        .route(
             "/api/dashboard/work-roots/root-error/git/status",
             axum::routing::get(git_status_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/git/branches",
+            axum::routing::get(phase5_error).post(phase5_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/git/switch-branch",
+            axum::routing::post(phase5_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/git/fetch",
+            axum::routing::post(phase5_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/git/push",
+            axum::routing::post(phase5_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/git/pull-ff-only",
+            axum::routing::post(phase5_error),
+        )
+        .route(
+            "/api/dashboard/workspaces/workspace-error",
+            axum::routing::delete(phase5_error),
+        )
+        .route(
+            "/api/dashboard/workspaces/workspace-error/git-worktree-add/options",
+            axum::routing::get(phase5_error),
+        )
+        .route(
+            "/api/dashboard/workspaces/workspace-error/git-worktree-add/preview",
+            axum::routing::post(phase5_error),
+        )
+        .route(
+            "/api/dashboard/workspaces/workspace-error/git-worktree-add",
+            axum::routing::post(git_worktree_submit_error),
         )
         .route(
             "/api/dashboard/workspaces/workspace-remote/git-worktree-add",
@@ -3685,6 +3836,8 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
             "application/json",
             "activity unavailable",
         ),
+        (Method::GET, "/api/dashboard/servers/server-errors/work-roots/root-error/activity", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::GET, "/api/dashboard/servers/server-errors/work-roots/root-error/activity/items/activity-1/transcript", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
         (
             Method::GET,
             "/api/dashboard/servers/server-errors/work-roots/root-error/git/status",
@@ -3692,6 +3845,15 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
             "application/json",
             "git failed",
         ),
+        (Method::GET, "/api/dashboard/servers/server-errors/work-roots/root-error/git/branches", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::POST, "/api/dashboard/servers/server-errors/work-roots/root-error/git/branches", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::POST, "/api/dashboard/servers/server-errors/work-roots/root-error/git/switch-branch", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::POST, "/api/dashboard/servers/server-errors/work-roots/root-error/git/fetch", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::POST, "/api/dashboard/servers/server-errors/work-roots/root-error/git/push", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::POST, "/api/dashboard/servers/server-errors/work-roots/root-error/git/pull-ff-only", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::DELETE, "/api/dashboard/servers/server-errors/workspaces/workspace-error", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::GET, "/api/dashboard/servers/server-errors/workspaces/workspace-error/git-worktree-add/options", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
+        (Method::POST, "/api/dashboard/servers/server-errors/workspaces/workspace-error/git-worktree-add/preview", StatusCode::IM_A_TEAPOT, "application/problem+json", "phase5 failed"),
     ] {
         let response = local_app
             .clone()
@@ -3729,6 +3891,31 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         let value: serde_json::Value = serde_json::from_slice(&body).expect("upstream error JSON");
         assert_eq!(value["error"], expected_error, "{uri}");
     }
+
+    let submit_error = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-errors/workspaces/workspace-error/git-worktree-add"
+            .to_owned(),
+        &cookie,
+        serde_json::json!({
+            "worktreeName": "bad",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+    )
+    .await;
+    assert_eq!(submit_error.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        submit_error
+            .1
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("application/json")),
+        Some(true)
+    );
+    assert_eq!(submit_error.2["message"], "submit failed");
 
     for (uri, expected_error) in [
         (

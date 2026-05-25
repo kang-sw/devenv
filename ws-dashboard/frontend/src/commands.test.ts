@@ -231,6 +231,33 @@ assertEqual(
   "open workRoot command payload keeps server id while omitting host path",
 );
 
+const remoteGitWorktreeOpenCommand = buildGitWorktreeAddOpenCommand(
+  "workspace-same",
+  "server-remote",
+);
+assertEqual(
+  remoteGitWorktreeOpenCommand.payload.type === "gitWorktreeAdd.open" &&
+    remoteGitWorktreeOpenCommand.payload.serverId,
+  "server-remote",
+  "git worktree open command carries remote server id",
+);
+const remoteGitWorktreeSubmitCommand = buildGitWorktreeAddSubmitCommand(
+  "workspace-same",
+  "server-remote",
+);
+assertEqual(
+  remoteGitWorktreeSubmitCommand.payload.type === "gitWorktreeAdd.submit" &&
+    remoteGitWorktreeSubmitCommand.payload.serverId,
+  "server-remote",
+  "git worktree submit command carries remote server id",
+);
+assertEqual(
+  buildWorkspaceRemoveCommand("workspace-same", "server-remote").payload
+    .serverId,
+  "server-remote",
+  "workspace remove command carries remote server id",
+);
+
 const branchCreateCommand = buildGitBranchCreateSubmitCommand(
   workRootId,
   "new-private",
@@ -454,7 +481,13 @@ assertEqual(
   workspaceRemoveCommand.payload.type === "workspace.remove" &&
     workspaceRemoveCommand.payload.workspaceId,
   "workspace-local-abc",
-  "workspace remove command carries only the opaque workspace id",
+  "workspace remove command carries the opaque workspace id",
+);
+assertEqual(
+  workspaceRemoveCommand.payload.type === "workspace.remove" &&
+    workspaceRemoveCommand.payload.serverId,
+  "server-local",
+  "workspace remove command defaults to local server id",
 );
 assertNotContains(
   JSON.stringify(workspaceRemoveCommand),

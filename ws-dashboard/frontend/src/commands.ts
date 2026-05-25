@@ -48,10 +48,10 @@ export type DashboardCommandPayload =
   | { type: "select"; entityId: string }
   | { type: "action"; label: string; entityId: string }
   | { type: "workspace.menu.open"; workspaceId: string }
-  | { type: "workspace.remove"; workspaceId: string }
-  | { type: "gitWorktreeAdd.open"; workspaceId: string }
-  | { type: "gitWorktreeAdd.close"; workspaceId: string }
-  | { type: "gitWorktreeAdd.submit"; workspaceId: string }
+  | { type: "workspace.remove"; serverId: string; workspaceId: string }
+  | { type: "gitWorktreeAdd.open"; serverId: string; workspaceId: string }
+  | { type: "gitWorktreeAdd.close"; serverId: string; workspaceId: string }
+  | { type: "gitWorktreeAdd.submit"; serverId: string; workspaceId: string }
   | { type: "git.refresh"; workRootId: string }
   | { type: "git.fetch"; workRootId: string }
   | { type: "git.push"; workRootId: string }
