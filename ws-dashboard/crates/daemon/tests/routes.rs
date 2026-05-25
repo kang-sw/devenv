@@ -4572,7 +4572,11 @@ fn upsert_agent_instance(
                 last_call_at TEXT,
                 last_output_path TEXT,
                 cleanup_state TEXT,
+                cleanup_attempted_at TEXT,
                 cleanup_error TEXT,
+                retention_eligible_at TEXT,
+                retention_checked_at TEXT,
+                retention_next_check_at TEXT,
                 pinned INTEGER
             );",
         )
@@ -4582,8 +4586,9 @@ fn upsert_agent_instance(
             "INSERT OR REPLACE INTO agent_instances (
                 instance_id, agent_key, public_name, state_path, backend, harness, tier, model,
                 effort, session_id, status, created_at, updated_at, last_seen_at, last_call_at,
-                last_output_path, cleanup_state, cleanup_error, pinned
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, '', ?12, '', ?12, ?13, ?14, ?15, ?16)",
+                last_output_path, cleanup_state, cleanup_attempted_at, cleanup_error,
+                retention_eligible_at, retention_checked_at, retention_next_check_at, pinned
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, '', ?12, '', ?12, ?13, ?14, '', ?15, '', '', '', ?16)",
             params![
                 instance_id,
                 agent_key,
@@ -4617,6 +4622,74 @@ fn delete_agent_def(agents_dir: &Path, agent_key: &str) {
         )
         .expect("delete agent_defs fixture row");
     let _ = fs::remove_dir_all(agents_dir.join(agent_key));
+}
+
+fn update_agent_def_registry_fields(
+    agents_dir: &Path,
+    agent_key: &str,
+    status: &str,
+    updated_at: &str,
+    last_seen_at: &str,
+    last_output_path: &str,
+) {
+    let state_dir = agents_dir.parent().expect("agents dir has state parent");
+    let connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open state.sqlite fixture");
+    connection
+        .execute(
+            "UPDATE agent_defs
+             SET status = ?2,
+                 created_at = COALESCE(NULLIF(created_at, ''), ?3),
+                 updated_at = ?3,
+                 last_seen_at = ?4,
+                 last_output_path = ?5
+             WHERE agent_key = ?1",
+            params![
+                agent_key,
+                status,
+                updated_at,
+                last_seen_at,
+                last_output_path
+            ],
+        )
+        .expect("update agent_defs registry-only fields");
+}
+
+fn update_agent_instance_registry_fields(
+    agents_dir: &Path,
+    instance_id: &str,
+    cleanup_state: &str,
+    updated_at: &str,
+    cleanup_attempted_at: &str,
+    retention_eligible_at: &str,
+    retention_checked_at: &str,
+    retention_next_check_at: &str,
+) {
+    let state_dir = agents_dir.parent().expect("agents dir has state parent");
+    let connection =
+        Connection::open(state_dir.join("state.sqlite")).expect("open state.sqlite fixture");
+    connection
+        .execute(
+            "UPDATE agent_instances
+             SET updated_at = ?2,
+                 last_seen_at = ?2,
+                 cleanup_state = ?3,
+                 cleanup_attempted_at = ?4,
+                 retention_eligible_at = ?5,
+                 retention_checked_at = ?6,
+                 retention_next_check_at = ?7
+             WHERE instance_id = ?1",
+            params![
+                instance_id,
+                updated_at,
+                cleanup_state,
+                cleanup_attempted_at,
+                retention_eligible_at,
+                retention_checked_at,
+                retention_next_check_at
+            ],
+        )
+        .expect("update agent_instances registry-only fields");
 }
 
 fn write_current_call(agents_dir: &Path, agent_key: &str, raw: &str) {
@@ -5515,6 +5588,174 @@ async fn work_root_activity_route_projects_retained_agent_instances_as_items_onl
 }
 
 #[tokio::test]
+async fn work_root_activity_events_emit_retained_item_for_registry_only_lifecycle() {
+    if skip_without_git("work_root_activity_events_emit_retained_item_for_registry_only_lifecycle")
+    {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-retained-registry");
+    let cache_home = temp_fixture_path("work-root-activity-events-retained-registry-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    upsert_agent_def(
+        &agents_dir,
+        "retained-role",
+        "retained current",
+        "payload-current-retained",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "",
+        "idle",
+        "2026-05-25T00:00:00Z",
+        "",
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response =
+        fetch_work_root_activity_events(app.clone(), cookie.as_str(), &work_root_id, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted" && event["item"]["id"] == "agent:retained-role"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("initial retained SSE chunk")
+                .expect("initial retained SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("initial retained SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("initial retained current event");
+
+    upsert_agent_instance(
+        &agents_dir,
+        "retained-role:private/state/registry-only-secret",
+        "retained-role",
+        "registry retained",
+        "payload-retained-registry-only",
+        "codex",
+        "codex",
+        "core",
+        "gpt-5.3-codex",
+        "medium",
+        "retained-registry-session-secret",
+        "completed",
+        "2026-05-25T00:02:00Z",
+        "",
+        "retired",
+        "",
+        true,
+    );
+    update_agent_instance_registry_fields(
+        &agents_dir,
+        "retained-role:private/state/registry-only-secret",
+        "retired",
+        "2026-05-25T00:03:00Z",
+        "2026-05-25T00:04:00Z",
+        "2026-05-25T00:05:00Z",
+        "2026-05-25T00:06:00Z",
+        "2026-05-25T00:07:00Z",
+    );
+
+    let mut historical_id = String::new();
+    timeout(Duration::from_secs(5), async {
+        while historical_id.is_empty() {
+            let chunk = stream
+                .next()
+                .await
+                .expect("retained upsert SSE chunk")
+                .expect("retained upsert SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("retained upsert SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+            if let Some(id) = seen.iter().find_map(|event| {
+                (event["type"] == "itemUpserted")
+                    .then(|| event["item"]["id"].as_str())
+                    .flatten()
+                    .filter(|id| id.starts_with("agent-instance:"))
+                    .map(str::to_owned)
+            }) {
+                historical_id = id;
+            }
+        }
+    })
+    .await
+    .expect("retained registry-only item upsert event");
+
+    update_agent_instance_registry_fields(
+        &agents_dir,
+        "retained-role:private/state/registry-only-secret",
+        "cleanup_deleted",
+        "2026-05-25T00:08:00Z",
+        "2026-05-25T00:04:00Z",
+        "2026-05-25T00:05:00Z",
+        "2026-05-25T00:06:00Z",
+        "2026-05-25T00:07:00Z",
+    );
+
+    timeout(Duration::from_secs(5), async {
+        while !seen
+            .iter()
+            .any(|event| event["type"] == "itemRemoved" && event["activityId"] == historical_id)
+        {
+            let chunk = stream
+                .next()
+                .await
+                .expect("retained removal SSE chunk")
+                .expect("retained removal SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("retained removal SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("retained registry-only removal event");
+
+    let (status, body_text) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("retained lifecycle activity JSON");
+    assert_eq!(value["summary"]["total"], 1);
+    assert_eq!(value["agents"].as_array().expect("agents").len(), 1);
+
+    let events_text = serde_json::to_string(&seen).expect("retained events JSON string");
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "retained-role:private/state/registry-only-secret".to_owned(),
+        "retained-registry-session-secret".to_owned(),
+        "payload-retained-registry-only".to_owned(),
+        "state.sqlite".to_owned(),
+        "2026-05-25T00:08:00Z".to_owned(),
+    ] {
+        assert!(
+            !events_text.contains(&forbidden) && !body_text.contains(&forbidden),
+            "retained lifecycle responses must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
 async fn work_root_activity_route_limits_recent_agent_projection() {
     if skip_without_git("work_root_activity_route_limits_recent_agent_projection") {
         return;
@@ -5536,6 +5777,14 @@ async fn work_root_activity_route_limits_recent_agent_projection() {
                 "backend": "codex",
                 "status": "idle"
             }),
+        );
+        update_agent_def_registry_fields(
+            &agents_dir,
+            &format!("agent-{index}"),
+            "idle",
+            &format!("2026-05-25T00:0{index}:00Z"),
+            &format!("2026-05-25T00:0{index}:00Z"),
+            "",
         );
     }
 
@@ -5562,6 +5811,145 @@ async fn work_root_activity_route_limits_recent_agent_projection() {
             .len(),
         2
     );
+    let agent_ids = value["agents"]
+        .as_array()
+        .expect("recent-limited agents array")
+        .iter()
+        .map(|agent| agent["agentId"].as_str().expect("agent id").to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(agent_ids, vec!["agent-3", "agent-4"]);
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_limits_recent_retained_items_by_registry_metadata() {
+    if skip_without_git(
+        "work_root_activity_route_limits_recent_retained_items_by_registry_metadata",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-retained-recent-limit");
+    let cache_home = temp_fixture_path("work-root-activity-retained-recent-limit-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "current",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "current",
+            "status": "idle"
+        }),
+    );
+    update_agent_def_registry_fields(
+        &agents_dir,
+        "current",
+        "idle",
+        "2026-05-25T00:00:00Z",
+        "2026-05-25T00:00:00Z",
+        "",
+    );
+
+    for (instance_id, name, updated_at) in [
+        (
+            "current:private/state/old-retained-secret",
+            "old retained",
+            "2026-05-25T00:01:00Z",
+        ),
+        (
+            "current:private/state/new-retained-secret",
+            "new retained",
+            "2026-05-25T00:03:00Z",
+        ),
+    ] {
+        upsert_agent_instance(
+            &agents_dir,
+            instance_id,
+            "current",
+            name,
+            name.replace(' ', "-").as_str(),
+            "codex",
+            "codex",
+            "core",
+            "gpt-5.3-codex",
+            "medium",
+            "",
+            "completed",
+            "2026-05-24T23:59:00Z",
+            "",
+            "retired",
+            "",
+            true,
+        );
+        update_agent_instance_registry_fields(
+            &agents_dir,
+            instance_id,
+            "retired",
+            updated_at,
+            updated_at,
+            updated_at,
+            updated_at,
+            updated_at,
+        );
+    }
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("retained recent-limited activity JSON");
+    assert_eq!(value["summary"]["total"], 1);
+    assert_eq!(value["agents"].as_array().expect("agents array").len(), 1);
+    let labels = value["items"]
+        .as_array()
+        .expect("items array")
+        .iter()
+        .map(|item| item["label"].as_str().expect("item label").to_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "new retained (historical)"),
+        "registry-recent retained row should be selected; labels were {labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .all(|label| label != "old retained (historical)"),
+        "less-recent retained row should be omitted; labels were {labels:?}"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "current:private/state/old-retained-secret".to_owned(),
+        "current:private/state/new-retained-secret".to_owned(),
+        "state.sqlite".to_owned(),
+        "2026-05-25T00:03:00Z".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "retained recent response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
 }
 
 #[tokio::test]
@@ -6716,6 +7104,110 @@ async fn work_root_file_listing_routes_reports_non_directory_target() {
     assert!(!body.contains(&root.display().to_string()));
 
     remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_activity_events_emit_current_item_for_registry_only_update() {
+    if skip_without_git("work_root_activity_events_emit_current_item_for_registry_only_update") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-registry-current");
+    let cache_home = temp_fixture_path("work-root-activity-events-registry-current-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    write_agent_metadata(
+        &agents_dir,
+        "registry-current",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "registry current",
+            "status": "idle"
+        }),
+    );
+    update_agent_def_registry_fields(
+        &agents_dir,
+        "registry-current",
+        "idle",
+        "2026-05-25T00:00:00Z",
+        "2026-05-25T00:00:00Z",
+        "",
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response =
+        fetch_work_root_activity_events(app.clone(), cookie.as_str(), &work_root_id, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted"
+                && event["item"]["id"] == "agent:registry-current"
+                && event["item"]["status"] == "idle"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("initial registry SSE chunk")
+                .expect("initial registry SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("initial registry SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("initial registry item event");
+
+    update_agent_def_registry_fields(
+        &agents_dir,
+        "registry-current",
+        "blocked",
+        "2026-05-25T00:01:00Z",
+        "2026-05-25T00:01:00Z",
+        "",
+    );
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted"
+                && event["item"]["id"] == "agent:registry-current"
+                && event["item"]["status"] == "blocked"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("registry-only SSE chunk")
+                .expect("registry-only SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("registry-only SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("registry-only item update event");
+
+    let body_text = serde_json::to_string(&seen).expect("registry SSE events JSON string");
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "state.sqlite".to_owned(),
+        "2026-05-25T00:01:00Z".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "registry-only current event must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
 }
 
 fn work_root_ids(value: &serde_json::Value) -> Vec<String> {

@@ -542,13 +542,17 @@ fn activity_item_versions(
 
     let mut versions = BTreeMap::new();
     for record in read_activity_agent_records(&state_dir).unwrap_or_default() {
-        let Some(agent_dir) = record.payload_dir(&state_dir) else {
-            continue;
-        };
+        let agent_dir = record.payload_dir(&state_dir);
         let metadata = AgentMetadata::from(&record);
         versions.insert(
             named_agent_activity_id(&record.agent_key),
-            system_time_version(agent_record_modified_at(&agent_dir, codex_home, &metadata)),
+            activity_version(
+                current_registry_version_components(&record),
+                agent_dir
+                    .as_deref()
+                    .map(|agent_dir| agent_record_modified_at(agent_dir, codex_home, &metadata))
+                    .unwrap_or(UNIX_EPOCH),
+            ),
         );
     }
     for instance in read_activity_agent_instance_records(&state_dir).unwrap_or_default() {
@@ -559,14 +563,28 @@ fn activity_item_versions(
         };
         versions.insert(
             historical_agent_activity_id(&historical_agent_instance_token(&instance)),
-            system_time_version(agent_record_modified_at(
-                &agent_dir,
-                codex_home,
-                &projection.private_metadata,
-            )),
+            activity_version(
+                instance_registry_version_components(&instance),
+                agent_record_modified_at(&agent_dir, codex_home, &projection.private_metadata),
+            ),
         );
     }
     versions
+}
+
+fn activity_version<'a>(
+    registry_components: impl IntoIterator<Item = &'a str>,
+    payload_mtime: SystemTime,
+) -> String {
+    let mut version = String::new();
+    version.push_str("registry");
+    for component in registry_components {
+        version.push('\u{1f}');
+        version.push_str(component);
+    }
+    version.push_str("\u{1f}payload\u{1f}");
+    version.push_str(&system_time_version(payload_mtime));
+    version
 }
 
 fn system_time_version(value: SystemTime) -> String {
@@ -615,10 +633,13 @@ fn registry_named_agents(
             let agent_dir = record.payload_dir(state_dir);
             let metadata = AgentMetadata::from(&record);
             RecentAgentDir {
-                modified_at: agent_dir
-                    .as_deref()
-                    .map(|agent_dir| agent_record_modified_at(agent_dir, codex_home, &metadata))
-                    .unwrap_or(UNIX_EPOCH),
+                recent_key: registry_activity_recency_key(
+                    current_registry_recency_components(&record),
+                    agent_dir
+                        .as_deref()
+                        .map(|agent_dir| agent_record_modified_at(agent_dir, codex_home, &metadata))
+                        .unwrap_or(UNIX_EPOCH),
+                ),
                 record,
                 agent_dir,
             }
@@ -627,12 +648,12 @@ fn registry_named_agents(
 
     if let Some(limit) = recent_limit {
         // CONTRACT: hot-path refreshes can ask for only the recently changed
-        // rows. Use portable filesystem modification times from the agent dir
-        // plus key child files instead of platform-specific watchers here.
+        // rows. Use registry metadata together with portable payload mtimes
+        // so SQLite-only role updates are not hidden by stale or absent files.
         agent_dirs.sort_by(|left, right| {
             right
-                .modified_at
-                .cmp(&left.modified_at)
+                .recent_key
+                .cmp(&left.recent_key)
                 .then_with(|| left.record.agent_key.cmp(&right.record.agent_key))
         });
         agent_dirs.truncate(limit);
@@ -648,10 +669,99 @@ fn registry_named_agents(
     rows
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct ActivityRecencyKey {
+    registry_latest: String,
+    payload_mtime: String,
+}
+
+fn registry_activity_recency_key<'a>(
+    registry_components: impl IntoIterator<Item = &'a str>,
+    payload_mtime: SystemTime,
+) -> ActivityRecencyKey {
+    ActivityRecencyKey {
+        registry_latest: registry_latest(registry_components),
+        payload_mtime: system_time_version(payload_mtime),
+    }
+}
+
+fn registry_latest<'a>(components: impl IntoIterator<Item = &'a str>) -> String {
+    components
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .max()
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn current_registry_version_components(record: &ActivityRegistryAgentRecord) -> [&str; 6] {
+    [
+        record.status.as_str(),
+        record.created_at.as_str(),
+        record.updated_at.as_str(),
+        record.last_seen_at.as_str(),
+        record.last_call_at.as_str(),
+        record.last_output_path.as_str(),
+    ]
+}
+
+fn current_registry_recency_components(record: &ActivityRegistryAgentRecord) -> [&str; 4] {
+    [
+        record.created_at.as_str(),
+        record.updated_at.as_str(),
+        record.last_seen_at.as_str(),
+        record.last_call_at.as_str(),
+    ]
+}
+
+fn instance_registry_version_components(
+    instance: &ActivityRegistryAgentInstanceRecord,
+) -> [&str; 14] {
+    let agent = instance.agent_record();
+    [
+        instance.agent_key.as_str(),
+        instance.cleanup_state.as_str(),
+        instance.cleanup_attempted_at.as_str(),
+        instance.cleanup_error.as_str(),
+        instance.retention_eligible_at.as_str(),
+        instance.retention_checked_at.as_str(),
+        instance.retention_next_check_at.as_str(),
+        if instance.pinned {
+            "pinned"
+        } else {
+            "unpinned"
+        },
+        agent.status.as_str(),
+        agent.created_at.as_str(),
+        agent.updated_at.as_str(),
+        agent.last_seen_at.as_str(),
+        agent.last_call_at.as_str(),
+        agent.last_output_path.as_str(),
+    ]
+}
+
+fn instance_registry_recency_components(
+    instance: &ActivityRegistryAgentInstanceRecord,
+) -> [&str; 9] {
+    let agent = instance.agent_record();
+    [
+        instance.cleanup_attempted_at.as_str(),
+        instance.retention_eligible_at.as_str(),
+        instance.retention_checked_at.as_str(),
+        instance.retention_next_check_at.as_str(),
+        agent.created_at.as_str(),
+        agent.updated_at.as_str(),
+        agent.last_seen_at.as_str(),
+        agent.last_call_at.as_str(),
+        agent.last_output_path.as_str(),
+    ]
+}
+
 struct RecentAgentDir {
     record: ActivityRegistryAgentRecord,
     agent_dir: Option<PathBuf>,
-    modified_at: SystemTime,
+    recent_key: ActivityRecencyKey,
 }
 
 #[derive(Clone, Debug)]
@@ -736,9 +846,7 @@ fn registry_named_agent_projection(
             model: non_empty(metadata.model),
             effort: non_empty(metadata.effort),
             status,
-            last_call_at: non_empty(metadata.last_call_at)
-                .or_else(|| non_empty(metadata.last_seen_at))
-                .or_else(|| non_empty(metadata.updated_at)),
+            last_call_at: non_empty(metadata.last_call_at),
             // CONTRACT: collapse the private session id into a presence flag.
             session_present: !metadata.session_id.is_empty(),
             current_call,
@@ -775,7 +883,10 @@ fn registry_historical_agent_items(
         );
         item.label = format!("{} (historical)", item.label);
         entries.push((
-            agent_record_modified_at(&agent_dir, codex_home, &projection.private_metadata),
+            registry_activity_recency_key(
+                instance_registry_recency_components(&instance),
+                agent_record_modified_at(&agent_dir, codex_home, &projection.private_metadata),
+            ),
             item,
         ));
     }
@@ -2281,10 +2392,6 @@ struct AgentMetadata {
     #[serde(default)]
     last_call_at: String,
     #[serde(default)]
-    updated_at: String,
-    #[serde(default)]
-    last_seen_at: String,
-    #[serde(default)]
     last_output_path: String,
 }
 
@@ -2300,8 +2407,6 @@ impl From<&ActivityRegistryAgentRecord> for AgentMetadata {
             session_id: record.session_id.clone(),
             status: record.status.clone(),
             last_call_at: record.last_call_at.clone(),
-            updated_at: record.updated_at.clone(),
-            last_seen_at: record.last_seen_at.clone(),
             last_output_path: record.last_output_path.clone(),
         }
     }
