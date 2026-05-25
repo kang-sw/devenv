@@ -10,10 +10,12 @@ spec:
 plans:
   phase-1: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-1
   phase-2: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-2
+  phase-3: 2026-05/25-260525-feat-ws-dashboard-sqlite-agent-activity-source-phase-3
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-25
 ---
 
 # ws dashboard SQLite-backed agent activity source
@@ -182,3 +184,24 @@ registry-backed ordering.
 Verification should cover registry-only status changes, payload-only transcript
 changes, retained instance appearance/removal, and recent-limit behavior after
 the source switches from directory mtimes to registry-aware versions.
+
+### Result (2a45d3b) - 2026-05-25
+
+Implemented registry-aware WorkRoot Activity freshness. Snapshot versions, SSE
+polling diffs, transcript invalidation checks, and recent refresh ordering now
+consider SQLite registry timestamps and cleanup/retention metadata together
+with current-call, output, runtime-log, stdout/stderr, and native transcript
+payload mtimes.
+
+Existing frontend behavior and Activity event vocabulary remain unchanged:
+registry-only metadata changes can produce item upserts, removals, transcript
+updates, and snapshot invalidations through the current API, while payload-only
+transcript changes continue to update transcript availability. Recent-limit
+ordering uses the latest valid registry or payload signal and preserves
+RFC3339Nano fractional timestamp ordering.
+
+Verification covers registry-only current-role changes, payload-only transcript
+changes, retained instance appearance/removal, combined registry/payload
+recency for current and retained rows, fractional registry timestamp ordering,
+full daemon package tests, daemon `cargo check`, rustfmt on changed files, and
+partitioned correctness/fit/test review.

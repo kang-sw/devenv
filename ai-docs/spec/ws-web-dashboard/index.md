@@ -570,9 +570,13 @@ transcripts through the instance `state_path`, and do not increase
 protected, cleanup-deleted, tombstone/internal, and payload-useless instance
 rows stay hidden from historical item and transcript projection.
 
-> [!note] Planned 🚧
-> Activity refresh/versioning will observe registry-only metadata changes
-> rather than relying only on payload file modification times.
+Activity freshness is registry-aware. Item versions and recent refresh ordering
+consider SQLite registry timestamps and cleanup/retention metadata together
+with payload mtimes for current-call state, output, runtime logs,
+stdout/stderr, and native transcript files. Registry-only updates can produce
+Activity item upserts, removals, transcript invalidations, and snapshot
+invalidations through the existing event vocabulary, while payload-only
+transcript changes continue to update transcript availability.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
