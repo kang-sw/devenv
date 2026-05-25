@@ -19,21 +19,30 @@ or explicit-root compatibility registrations use the global public-name
 namespace. Actor-bound sessions can therefore register the same public name
 without colliding.
 
+Agent registry identity has role and instance layers. A role is keyed by actor
+scope plus public name and points at the current instance. Each successful
+registration creates a distinct instance row and payload directory, then
+advances the role pointer after per-instance setup succeeds. Re-registering an
+existing role is rejected while the current instance has an active current call;
+otherwise the new instance becomes current while older instance payloads remain
+available until retention cleanup.
+
 Agent metadata records the backend, compatibility alias field, resolved model
 when present, session id, status, prompt references, materialized system prompt
-path, output path, capability flags, child actor binding, and whether the agent
-is ephemeral. SQLite is the write authority for this registry metadata.
-Re-registering an existing agent replaces its payload directory and metadata
-only when it has no active current call.
+path, output path, capability flags, child actor binding, whether the agent is
+ephemeral, the current instance path, and cleanup/retention metadata for
+retired instances. SQLite is the write authority for role pointers, instance
+metadata, path indexes, cleanup state, and retention fences.
 
 The payload directory contains the materialized system prompt bytes, inbox
 messages, current-call state, diagnostic streams, an append-only event log, and
 the last plain-text output. Prompt text, system prompt text, stdout, stderr,
 runtime logs, event JSONL, and final output bodies remain file-backed payloads;
 SQLite stores metadata and path indexes for them, not their bytes. Pre-existing
-`agent.json` records are bounded read-only compatibility input for import or
-diagnostics, not a durable write authority. Corrupt legacy metadata surfaces a
-bounded recovery/re-registration error instead of silently disappearing.
+`agent.json` records are bounded read-only compatibility input for creating the
+first global compatibility role instance or for diagnostics, not a durable write
+authority. Corrupt legacy metadata surfaces a bounded recovery/re-registration
+error instead of silently disappearing.
 {#260525-named-agent-runtime-metadata-inventory}
 
 ## Prompt Registration And Model Alias Resolution {#260505-agent-prompt-registration-tier-resolution}
@@ -93,7 +102,8 @@ metadata. The default wait timeout is 10 minutes.
 `agents.result` is the result-consumption surface for a single named agent. It
 can read an already completed result or wait up to an explicit timeout. Running,
 failed, cancelled, timed-out, and non-ready calls return status text rather than
-successful output. Successful result reads erase agents marked ephemeral.
+successful output. Successful result reads hide ephemeral role pointers, but the
+ephemeral instance payload remains subject to the normal retention cleanup path.
 
 ## Async Subquery Ephemeral Agents {#260505-async-subquery-ephemeral-agent}
 
@@ -148,6 +158,15 @@ After an MCP process restart, disk state remains sufficient for `agents.wait`,
 If the stored worker pid for a running call is no longer alive, readiness and
 result paths reconcile the call to a failed terminal state with diagnostic
 information.
+
+Retired named-agent instances are retained for seven days after their final call
+time, or for seven days after instance creation when they never had a call.
+Retention cleanup is bounded and SQLite-candidate-driven: ordinary operations do
+not scan agent directories looking for cleanup work. Cleanup skips the current
+role instance, pinned or diagnostic-recovery instances, and any retired instance
+whose per-instance `current/state.json` still reports a queued or running call.
+Failed cleanup records retry metadata on the instance row and schedules a later
+bounded check without moving payload bytes into SQLite.
 
 ## Recall Recovery {#260511-agent-recall-recovery}
 
