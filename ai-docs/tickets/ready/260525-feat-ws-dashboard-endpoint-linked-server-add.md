@@ -31,6 +31,9 @@ tunnel such as `http://127.0.0.1:<port>` is just an endpoint.
 ## Decisions
 
 - Make endpoint-only linking the primary add-server path.
+- Treat a user-managed loopback SSH tunnel as an ordinary endpoint from the
+  dashboard's point of view. `http://127.0.0.1:<port>` should not get a
+  special browser model merely because SSH created the port forward.
 - Treat SSH as an optional advanced or agent-operated transport, not as the
   default user-facing add-server modal.
 - The local dashboard daemon remains the browser gateway. The browser submits an
@@ -42,11 +45,17 @@ tunnel such as `http://127.0.0.1:<port>` is just an endpoint.
 - The existing SSH start/reconnect API may remain available for advanced
   automation and dogfood, but the basic modal must not require SSH target,
   startup command, or remote deployment details.
+- Remote daemon startup, tunnel creation, VPN routing, reverse proxying, and
+  public bind hardening are operator responsibilities for this slice. The
+  dashboard may document them through `--remote-guide`, but the browser add flow
+  should not become a remote deployment wizard.
 
 ## Constraints
 
 - Endpoint input may point to a user-managed local loopback tunnel, VPN/private
   network endpoint, or other owner-provided reachable dashboard endpoint.
+- The endpoint-only route must work equally for a direct reachable endpoint and
+  for a local loopback endpoint produced by an external tunnel.
 - The endpoint-only flow must verify that the target behaves like a compatible
   `ws-dashboard` daemon before treating it as connected.
 - If a passphrase is provided, the local daemon should immediately exchange it
@@ -60,6 +69,22 @@ tunnel such as `http://127.0.0.1:<port>` is just an endpoint.
   credential persistence remain out of scope.
 - Server ids remain opaque dashboard ids. Do not expose passphrases, bearer
   tokens, SSH targets, host paths, or cache paths in browser routes.
+- The primary add-server modal must not ask for SSH target, remote startup
+  command, remote path, tunnel port, or deployment strategy. Those details may
+  exist outside the dashboard or in advanced automation, but they are not part
+  of the ordinary endpoint registration contract.
+
+## Rejected Alternatives
+
+- Do not make the primary add-server modal manage SSH sessions or expose SSH
+  command authoring. That would mix transport setup, remote daemon lifecycle,
+  and endpoint registration into one fragile user model.
+- Do not require the remote daemon lifetime to be owned by the local dashboard
+  daemon. The local daemon may reconnect to remembered endpoint metadata after
+  restart, but remote process survival is outside this ticket.
+- Do not persist passphrases or bearer tokens for convenience. Re-entry after a
+  local daemon restart is expected until a separate credential-storage design is
+  accepted.
 
 ## Phases
 
