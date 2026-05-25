@@ -123,16 +123,14 @@ Active or planned product tracks:
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
-- Multi-server management - next-priority design track. Define the minimum MVP
-  shape for local, WSL, and owner-provided remote linked daemons, server
-  capability/status display, forwarding under the same `serverId` namespace,
-  deployment/pairing flows, and auth boundaries. The near-term design target is
-  a local dashboard acting as a gateway that can integrate a remote Windows
-  server seamlessly enough for dogfood use. Broader remote hardening and server
-  federation remain future scope.
-  `260525-feat-ws-dashboard-multi-server-gateway` is todo for the linked-server
-  registry, gateway forwarding skeleton, passphrase link-auth handshake, SSH
-  start/reconnect path, and server-first left navigation.
+- Multi-server management - backend gateway substrate done; product add flow
+  remains active. `260525-feat-ws-dashboard-multi-server-gateway` is done for
+  linked-server registry, selected-server resource forwarding, passphrase
+  link-auth, SSH start/reconnect dogfood, and server-first left navigation.
+  `260525-feat-ws-dashboard-endpoint-linked-server-add` is todo for the
+  endpoint-first add-server API and browser modal. Broader remote hardening,
+  automatic deployment, credential persistence, and server federation remain
+  future scope.
 - Dashboard persistence map - research track.
   `260523-research-ws-dashboard-persistable-ui-state-map` remains the backlog
   map for selected resources,
