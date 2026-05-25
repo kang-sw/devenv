@@ -5818,6 +5818,13 @@ async fn work_root_activity_route_limits_recent_agent_projection() {
         .map(|agent| agent["agentId"].as_str().expect("agent id").to_owned())
         .collect::<Vec<_>>();
     assert_eq!(agent_ids, vec!["agent-3", "agent-4"]);
+    let fallback_agent = value["agents"]
+        .as_array()
+        .expect("recent-limited agents array")
+        .iter()
+        .find(|agent| agent["agentId"] == "agent-4")
+        .expect("agent-4 row");
+    assert_eq!(fallback_agent["lastCallAt"], "2026-05-25T00:04:00Z");
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
@@ -5855,16 +5862,18 @@ async fn work_root_activity_route_limits_recent_retained_items_by_registry_metad
         "",
     );
 
-    for (instance_id, name, updated_at) in [
+    for (instance_id, name, updated_at, last_output_path) in [
         (
             "current:private/state/old-retained-secret",
             "old retained",
             "2026-05-25T00:01:00Z",
+            "/zzzz/private/output.md",
         ),
         (
             "current:private/state/new-retained-secret",
             "new retained",
             "2026-05-25T00:03:00Z",
+            "",
         ),
     ] {
         upsert_agent_instance(
@@ -5881,7 +5890,7 @@ async fn work_root_activity_route_limits_recent_retained_items_by_registry_metad
             "",
             "completed",
             "2026-05-24T23:59:00Z",
-            "",
+            last_output_path,
             "retired",
             "",
             true,
@@ -5939,6 +5948,7 @@ async fn work_root_activity_route_limits_recent_retained_items_by_registry_metad
         cache_home.display().to_string(),
         "current:private/state/old-retained-secret".to_owned(),
         "current:private/state/new-retained-secret".to_owned(),
+        "/zzzz/private/output.md".to_owned(),
         "state.sqlite".to_owned(),
         "2026-05-25T00:03:00Z".to_owned(),
     ] {
@@ -7198,7 +7208,6 @@ async fn work_root_activity_events_emit_current_item_for_registry_only_update() 
         root.display().to_string(),
         cache_home.display().to_string(),
         "state.sqlite".to_owned(),
-        "2026-05-25T00:01:00Z".to_owned(),
     ] {
         assert!(
             !body_text.contains(&forbidden),

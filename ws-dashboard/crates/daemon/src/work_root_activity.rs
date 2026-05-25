@@ -743,7 +743,7 @@ fn instance_registry_version_components(
 
 fn instance_registry_recency_components(
     instance: &ActivityRegistryAgentInstanceRecord,
-) -> [&str; 9] {
+) -> [&str; 8] {
     let agent = instance.agent_record();
     [
         instance.cleanup_attempted_at.as_str(),
@@ -754,7 +754,6 @@ fn instance_registry_recency_components(
         agent.updated_at.as_str(),
         agent.last_seen_at.as_str(),
         agent.last_call_at.as_str(),
-        agent.last_output_path.as_str(),
     ]
 }
 
@@ -846,7 +845,9 @@ fn registry_named_agent_projection(
             model: non_empty(metadata.model),
             effort: non_empty(metadata.effort),
             status,
-            last_call_at: non_empty(metadata.last_call_at),
+            last_call_at: non_empty(metadata.last_call_at)
+                .or_else(|| non_empty(metadata.last_seen_at))
+                .or_else(|| non_empty(metadata.updated_at)),
             // CONTRACT: collapse the private session id into a presence flag.
             session_present: !metadata.session_id.is_empty(),
             current_call,
@@ -2392,6 +2393,10 @@ struct AgentMetadata {
     #[serde(default)]
     last_call_at: String,
     #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    last_seen_at: String,
+    #[serde(default)]
     last_output_path: String,
 }
 
@@ -2407,6 +2412,8 @@ impl From<&ActivityRegistryAgentRecord> for AgentMetadata {
             session_id: record.session_id.clone(),
             status: record.status.clone(),
             last_call_at: record.last_call_at.clone(),
+            updated_at: record.updated_at.clone(),
+            last_seen_at: record.last_seen_at.clone(),
             last_output_path: record.last_output_path.clone(),
         }
     }
