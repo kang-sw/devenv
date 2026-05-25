@@ -123,11 +123,11 @@ Active or planned product tracks:
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
-- Multi-server management - backend gateway substrate done; product add flow
-  remains active. `260525-feat-ws-dashboard-multi-server-gateway` is done for
+- Multi-server management - MVP-complete child track.
+  `260525-feat-ws-dashboard-multi-server-gateway` is done for
   linked-server registry, selected-server resource forwarding, passphrase
   link-auth, SSH start/reconnect dogfood, and server-first left navigation.
-  `260525-feat-ws-dashboard-endpoint-linked-server-add` is todo for the
+  `260525-feat-ws-dashboard-endpoint-linked-server-add` is done for the
   endpoint-first add-server API and browser modal. Broader remote hardening,
   automatic deployment, credential persistence, and server federation remain
   future scope.
