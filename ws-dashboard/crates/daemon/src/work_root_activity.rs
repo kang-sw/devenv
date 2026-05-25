@@ -671,28 +671,90 @@ fn registry_named_agents(
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct ActivityRecencyKey {
-    registry_latest: String,
-    payload_mtime: String,
+    latest: SystemTime,
 }
 
 fn registry_activity_recency_key<'a>(
     registry_components: impl IntoIterator<Item = &'a str>,
     payload_mtime: SystemTime,
 ) -> ActivityRecencyKey {
+    let registry_latest = registry_components
+        .into_iter()
+        .filter_map(parse_registry_timestamp)
+        .max()
+        .unwrap_or(UNIX_EPOCH);
     ActivityRecencyKey {
-        registry_latest: registry_latest(registry_components),
-        payload_mtime: system_time_version(payload_mtime),
+        latest: registry_latest.max(payload_mtime),
     }
 }
 
-fn registry_latest<'a>(components: impl IntoIterator<Item = &'a str>) -> String {
-    components
-        .into_iter()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .max()
-        .unwrap_or("")
-        .to_owned()
+fn parse_registry_timestamp(value: &str) -> Option<SystemTime> {
+    let value = value.trim();
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+    let year = parse_digits(value.get(0..4)?)? as i32;
+    let month = parse_digits(value.get(5..7)?)? as u32;
+    let day = parse_digits(value.get(8..10)?)? as u32;
+    let hour = parse_digits(value.get(11..13)?)? as u32;
+    let minute = parse_digits(value.get(14..16)?)? as u32;
+    let second = parse_digits(value.get(17..19)?)? as u32;
+    let suffix = value.get(19..)?;
+    if suffix != "Z" && !(suffix.starts_with('.') && suffix.ends_with('Z')) {
+        return None;
+    }
+    if !(1..=12).contains(&month)
+        || !(1..=days_in_month(year, month)).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day)?;
+    if days < 0 {
+        return None;
+    }
+    let seconds = days as u64 * 86_400 + hour as u64 * 3_600 + minute as u64 * 60 + second as u64;
+    Some(UNIX_EPOCH + Duration::from_secs(seconds))
+}
+
+fn parse_digits(value: &str) -> Option<u32> {
+    value.bytes().try_fold(0_u32, |acc, byte| {
+        byte.is_ascii_digit()
+            .then_some(acc * 10 + u32::from(byte - b'0'))
+    })
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
+    let year = year - i32::from(month <= 2);
+    let era = (if year >= 0 { year } else { year - 399 }) / 400;
+    let year_of_era = year - era * 400;
+    let month = month as i32;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i32 - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(i64::from(era) * 146_097 + i64::from(day_of_era) - 719_468)
 }
 
 fn current_registry_version_components(record: &ActivityRegistryAgentRecord) -> [&str; 6] {

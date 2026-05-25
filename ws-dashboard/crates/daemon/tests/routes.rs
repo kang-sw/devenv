@@ -5768,15 +5768,20 @@ async fn work_root_activity_route_limits_recent_agent_projection() {
         .expect("resolve wsstate agents dir for git workRoot");
 
     for index in 0..5 {
-        write_agent_metadata(
+        upsert_agent_def(
             &agents_dir,
             &format!("agent-{index}"),
-            &serde_json::json!({
-                "schema_version": 1,
-                "name": format!("agent-{index}"),
-                "backend": "codex",
-                "status": "idle"
-            }),
+            &format!("agent-{index}"),
+            &format!("agent-{index}"),
+            "codex",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "idle",
+            "",
+            "",
         );
         update_agent_def_registry_fields(
             &agents_dir,
@@ -5825,6 +5830,77 @@ async fn work_root_activity_route_limits_recent_agent_projection() {
         .find(|agent| agent["agentId"] == "agent-4")
         .expect("agent-4 row");
     assert_eq!(fallback_agent["lastCallAt"], "2026-05-25T00:04:00Z");
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_recent_agent_limit_uses_latest_payload_or_registry_signal() {
+    if skip_without_git(
+        "work_root_activity_route_recent_agent_limit_uses_latest_payload_or_registry_signal",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-current-combined-recency");
+    let cache_home = temp_fixture_path("work-root-activity-current-combined-recency-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    for (agent_key, name, updated_at) in [
+        ("payload-wins", "payload wins", "1970-01-01T00:00:01Z"),
+        ("registry-newer", "registry newer", "1970-01-01T00:00:02Z"),
+    ] {
+        upsert_agent_def(
+            &agents_dir,
+            agent_key,
+            name,
+            agent_key,
+            "codex",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "idle",
+            "",
+            "",
+        );
+        update_agent_def_registry_fields(
+            &agents_dir,
+            agent_key,
+            "idle",
+            updated_at,
+            updated_at,
+            "",
+        );
+    }
+    write_agent_output(&agents_dir, "payload-wins", "payload recency wins\n");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("current combined recency activity JSON");
+    let agent_ids = value["agents"]
+        .as_array()
+        .expect("recent-limited agents array")
+        .iter()
+        .map(|agent| agent["agentId"].as_str().expect("agent id").to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(agent_ids, vec!["payload-wins"]);
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
@@ -5955,6 +6031,139 @@ async fn work_root_activity_route_limits_recent_retained_items_by_registry_metad
         assert!(
             !body_text.contains(&forbidden),
             "retained recent response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_recent_retained_limit_uses_latest_payload_or_registry_signal() {
+    if skip_without_git(
+        "work_root_activity_route_recent_retained_limit_uses_latest_payload_or_registry_signal",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-retained-combined-recency");
+    let cache_home = temp_fixture_path("work-root-activity-retained-combined-recency-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    upsert_agent_def(
+        &agents_dir,
+        "current",
+        "current",
+        "current",
+        "codex",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "idle",
+        "",
+        "",
+    );
+
+    for (instance_id, name, state_path, updated_at) in [
+        (
+            "current:private/state/payload-retained-secret",
+            "payload retained",
+            "payload-retained-combined",
+            "1970-01-01T00:00:01Z",
+        ),
+        (
+            "current:private/state/registry-retained-secret",
+            "registry retained",
+            "registry-retained-combined",
+            "1970-01-01T00:00:02Z",
+        ),
+    ] {
+        upsert_agent_instance(
+            &agents_dir,
+            instance_id,
+            "current",
+            name,
+            state_path,
+            "codex",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "completed",
+            "1970-01-01T00:00:00Z",
+            "",
+            "retired",
+            "",
+            true,
+        );
+        update_agent_instance_registry_fields(
+            &agents_dir,
+            instance_id,
+            "retired",
+            updated_at,
+            updated_at,
+            updated_at,
+            updated_at,
+            updated_at,
+        );
+    }
+    write_agent_output_at_state_path(
+        &agents_dir,
+        "payload-retained-combined",
+        "payload retained recency wins\n",
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("retained combined recency activity JSON");
+    let labels = value["items"]
+        .as_array()
+        .expect("items array")
+        .iter()
+        .map(|item| item["label"].as_str().expect("item label").to_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "payload retained (historical)"),
+        "payload-recent retained row should be selected; labels were {labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .all(|label| label != "registry retained (historical)"),
+        "registry-only retained row should lose to newer payload mtime; labels were {labels:?}"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "current:private/state/payload-retained-secret".to_owned(),
+        "current:private/state/registry-retained-secret".to_owned(),
+        "payload-retained-combined".to_owned(),
+        "registry-retained-combined".to_owned(),
+        "state.sqlite".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "retained combined recency response must not leak {forbidden}"
         );
     }
 
