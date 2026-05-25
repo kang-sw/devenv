@@ -5249,9 +5249,12 @@ function ReadOnlyDocumentPane({
           ) : renderMarkdown ? (
             <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
           ) : (
-            <pre className="readonly-text-content ws-doc-surface ws-code-block">
-              <code>{pane.content}</code>
-            </pre>
+            <DocumentRawEditor
+              value={pane.content}
+              source={pane}
+              ariaLabel={`Read-only source viewer for ${pane.path}`}
+              editable={false}
+            />
           )}
         </>
       )}

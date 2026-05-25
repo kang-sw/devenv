@@ -16,6 +16,26 @@ export type DocumentEditorLanguageId =
   | "python"
   | "rust"
   | "shell"
+  | "toml"
+  | "xml"
+  | "sql"
+  | "diff"
+  | "properties"
+  | "dockerfile"
+  | "makefile"
+  | "go"
+  | "java"
+  | "c"
+  | "cpp"
+  | "php"
+  | "ruby"
+  | "lua"
+  | "nix"
+  | "typst"
+  | "mermaid"
+  | "justfile"
+  | "gitignore"
+  | "env"
   | "text";
 
 export type DocumentEditorSource = {
@@ -25,10 +45,28 @@ export type DocumentEditorSource = {
 };
 
 export function documentEditorLanguageId(source: DocumentEditorSource): DocumentEditorLanguageId {
+  const fileName = fileNameFromPath(source.path);
+  const lowerFileName = fileName?.toLowerCase() ?? "";
   const extension = normalizeLanguageToken(source.extension);
   const languageHint = normalizeLanguageToken(source.languageHint);
   const pathExtension = normalizeLanguageToken(extensionFromPath(source.path));
   const tokens = [languageHint, extension, pathExtension].filter((token): token is string => Boolean(token));
+
+  if (lowerFileName === "dockerfile" || lowerFileName.endsWith(".dockerfile")) {
+    return "dockerfile";
+  }
+  if (lowerFileName === "makefile" || lowerFileName.endsWith(".mk")) {
+    return "makefile";
+  }
+  if (lowerFileName === "justfile" || lowerFileName.endsWith(".just")) {
+    return "justfile";
+  }
+  if (lowerFileName === ".gitignore" || lowerFileName.endsWith(".gitignore")) {
+    return "gitignore";
+  }
+  if (lowerFileName === ".env" || lowerFileName.startsWith(".env.")) {
+    return "env";
+  }
 
   for (const token of tokens) {
     switch (token) {
@@ -69,6 +107,67 @@ export function documentEditorLanguageId(source: DocumentEditorSource): Document
       case "zsh":
       case "shell":
         return "shell";
+      case "toml":
+        return "toml";
+      case "xml":
+      case "svg":
+      case "rss":
+      case "atom":
+        return "xml";
+      case "sql":
+        return "sql";
+      case "diff":
+      case "patch":
+        return "diff";
+      case "ini":
+      case "properties":
+      case "conf":
+      case "cfg":
+        return "properties";
+      case "env":
+      case "dotenv":
+        return "env";
+      case "dockerfile":
+        return "dockerfile";
+      case "makefile":
+      case "mk":
+        return "makefile";
+      case "go":
+      case "golang":
+        return "go";
+      case "java":
+        return "java";
+      case "c":
+      case "h":
+        return "c";
+      case "cc":
+      case "cpp":
+      case "cxx":
+      case "hpp":
+      case "hh":
+      case "hxx":
+        return "cpp";
+      case "php":
+      case "phtml":
+        return "php";
+      case "rb":
+      case "ruby":
+        return "ruby";
+      case "lua":
+        return "lua";
+      case "nix":
+        return "nix";
+      case "typ":
+      case "typst":
+        return "typst";
+      case "mmd":
+      case "mermaid":
+        return "mermaid";
+      case "just":
+      case "justfile":
+        return "justfile";
+      case "gitignore":
+        return "gitignore";
       default:
         break;
     }
@@ -119,12 +218,69 @@ export async function loadDocumentEditorLanguageExtension(languageId: DocumentEd
       const { shell } = await import("@codemirror/legacy-modes/mode/shell");
       return StreamLanguage.define(shell);
     }
+    case "toml": {
+      const { toml } = await import("@codemirror/legacy-modes/mode/toml");
+      return StreamLanguage.define(toml);
+    }
+    case "xml": {
+      const { xml } = await import("@codemirror/lang-xml");
+      return xml();
+    }
+    case "sql": {
+      const { sql } = await import("@codemirror/lang-sql");
+      return sql();
+    }
+    case "diff": {
+      const { diff } = await import("@codemirror/legacy-modes/mode/diff");
+      return StreamLanguage.define(diff);
+    }
+    case "properties":
+    case "env": {
+      const { properties } = await import("@codemirror/legacy-modes/mode/properties");
+      return StreamLanguage.define(properties);
+    }
+    case "dockerfile": {
+      const { dockerFile } = await import("@codemirror/legacy-modes/mode/dockerfile");
+      return StreamLanguage.define(dockerFile);
+    }
+    case "go": {
+      const { go } = await import("@codemirror/lang-go");
+      return go();
+    }
+    case "java": {
+      const { java } = await import("@codemirror/lang-java");
+      return java();
+    }
+    case "c":
+    case "cpp": {
+      const { cpp } = await import("@codemirror/lang-cpp");
+      return cpp();
+    }
+    case "php": {
+      const { php } = await import("@codemirror/lang-php");
+      return php();
+    }
+    case "ruby": {
+      const { ruby } = await import("@codemirror/legacy-modes/mode/ruby");
+      return StreamLanguage.define(ruby);
+    }
+    case "lua": {
+      const { lua } = await import("@codemirror/legacy-modes/mode/lua");
+      return StreamLanguage.define(lua);
+    }
+    case "makefile":
+    case "nix":
+    case "typst":
+    case "mermaid":
+    case "justfile":
+    case "gitignore":
     case "text":
       return [];
   }
 }
 
 const languageCompartment = new Compartment();
+const editabilityCompartment = new Compartment();
 
 const dashboardCodeMirrorTheme = EditorView.theme(
   {
@@ -173,8 +329,7 @@ const dashboardCodeMirrorTheme = EditorView.theme(
       outline: "var(--ws-border-width-hairline) solid var(--ws-color-action)",
     },
     "&.cm-focused": {
-      outline: "var(--ws-border-width-hairline) solid var(--ws-color-action)",
-      outlineOffset: "-1px",
+      outline: "none",
     },
   },
   { dark: true },
@@ -205,21 +360,28 @@ export function DocumentRawEditor({
   source,
   ariaLabel,
   onChange,
+  editable = true,
 }: {
   value: string;
   source: DocumentEditorSource;
   ariaLabel: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
+  editable?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const editableRef = useRef(editable);
   const syncingPropValueRef = useRef(false);
   const languageId = useMemo(() => documentEditorLanguageId(source), [source.extension, source.languageHint, source.path]);
 
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    editableRef.current = editable;
+  }, [editable]);
 
   useEffect(() => {
     if (!containerRef.current || viewRef.current) {
@@ -233,9 +395,10 @@ export function DocumentRawEditor({
         extensions: [
           ...baseEditorExtensions,
           languageCompartment.of([]),
+          editabilityCompartment.of(editabilityExtensions(editable)),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged && !syncingPropValueRef.current) {
-              onChangeRef.current(update.state.doc.toString());
+            if (update.docChanged && editableRef.current && !syncingPropValueRef.current) {
+              onChangeRef.current?.(update.state.doc.toString());
             }
           }),
           EditorView.contentAttributes.of({
@@ -252,6 +415,15 @@ export function DocumentRawEditor({
       viewRef.current = null;
     };
   }, []);
+
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+    view.dispatch({ effects: editabilityCompartment.reconfigure(editabilityExtensions(editable)) });
+  }, [editable]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -297,10 +469,15 @@ export function DocumentRawEditor({
   return (
     <div
       ref={containerRef}
-      className="document-raw-editor document-codemirror-editor ws-code-block"
+      className={`document-raw-editor document-codemirror-editor ws-code-block${editable ? "" : " document-source-viewer"}`}
       data-editor-language={languageId}
+      data-editor-read-only={editable ? "false" : "true"}
     />
   );
+}
+
+function editabilityExtensions(editable: boolean): Extension {
+  return [EditorState.readOnly.of(!editable), EditorView.editable.of(true)];
 }
 
 function normalizeLanguageToken(value: string | null | undefined) {
@@ -317,4 +494,8 @@ function extensionFromPath(path: string | null | undefined) {
   }
   const index = fileName.lastIndexOf(".");
   return index >= 0 ? fileName.slice(index + 1) : null;
+}
+
+function fileNameFromPath(path: string | null | undefined) {
+  return path ? path.split(/[\\/]/).pop() ?? path : null;
 }

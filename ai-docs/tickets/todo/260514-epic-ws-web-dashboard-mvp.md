@@ -99,7 +99,7 @@ Active or planned product tracks:
   line numbers, search, bracket matching, keybinding room, internal scrolling,
   and dashboard theme integration while keeping LSP/completion outside the MVP
   scope.
-- `260525-feat-ws-dashboard-codemirror-source-viewer` - todo; use read-only
+- `260525-feat-ws-dashboard-codemirror-source-viewer` - done; uses read-only
   CodeMirror for source files without custom viewers, remove noisy CodeMirror
   focus border chrome, and broaden lazy-loaded syntax highlighting coverage
   while preserving the document pane's view/edit lifecycle.
