@@ -45,6 +45,19 @@ lead-facing UX issues that make the new exec surface harder to use reliably.
 - Live dogfood on 2026-05-26 reproduced escaped JSON output, long keys, and the
   immediate non-terminal `exec.result` response.
 
+## Decisions
+
+- Do not keep a `format: json` escape hatch for the lead-facing `exec.*`
+  surface. The point of this fix is to make the default and only MCP response
+  shape readable to models.
+- Format `exec.result` as text with metadata above a clear separator and raw
+  command output below it. The separator may use an obvious marker such as
+  `==========` so JSON stdout remains visually raw instead of becoming escaped
+  payload inside response JSON.
+- Keep metadata compact and stable enough for a model to reuse the `exec_key`,
+  inspect status, and decide whether it needs `exec.raw.*`, without requiring a
+  JSON parser.
+
 ## Phases
 
 ### Phase 1: Improve exec follow-up readability and waiting
@@ -52,8 +65,10 @@ lead-facing UX issues that make the new exec surface harder to use reliably.
 Audit and improve the lead-facing exec follow-up surface while preserving the
 durable job model:
 
-- add compact readable default formatting for exec launch/status/result/abort
-  responses, with explicit JSON retained for structured callers if needed;
+- replace JSON text responses for the lead-facing exec MCP tools with compact
+  readable text responses;
+- make `exec.result` render compact metadata above a separator and raw stdout
+  and stderr content below the separator when inline output is available;
 - shorten new exec keys to the minimum token that preserves actor/worktree-local
   practical uniqueness and keep any required legacy-key compatibility for
   existing persisted jobs;
