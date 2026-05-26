@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -2037,13 +2038,10 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 	if !strings.Contains(shellText, "shell-shape") || !strings.Contains(shellText, execToolJSONPath(root)) {
 		t.Fatalf("shell response = %s", byID["9"])
 	}
-	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, execToolJSONPath(filepath.Join(root, "sub"))) || !strings.Contains(text, `"stderr":"err`) {
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "status: succeeded") || !strings.Contains(text, execToolJSONPath(filepath.Join(root, "sub"))) || !strings.Contains(text, "========== stdout ==========") || !strings.Contains(text, "========== stderr ==========") || !strings.Contains(text, "err") {
 		t.Fatalf("spawn response = %s", byID["2"])
 	}
-	var launch execToolResponse
-	if err := json.Unmarshal([]byte(text), &launch); err != nil {
-		t.Fatal(err)
-	}
+	launch := execToolResponse{ExecKey: execKeyFromText(t, text)}
 
 	input = strings.Join([]string{
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, launch.ExecKey),
@@ -2058,7 +2056,7 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	for id, want := range map[string]string{"3": "result_ready", "4": "beta42", "5": "beta42", "6": "err", "7": "beta42", "8": "beta42"} {
+	for id, want := range map[string]string{"3": "result_ready:", "4": "========== stdout ==========", "5": "beta42", "6": "next_offset:", "7": "beta42", "8": "beta42"} {
 		if !strings.Contains(byID[id], want) {
 			t.Fatalf("response %s missing %s: %s", id, want, byID[id])
 		}
@@ -2095,13 +2093,10 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	text := toolText(t, byID["1"])
-	if !strings.Contains(text, `"status":"running"`) || !strings.Contains(text, "exec.ask") || strings.Contains(text, "done") {
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "status: running") || !strings.Contains(text, "exec.ask") || strings.Contains(text, "done") {
 		t.Fatalf("running launch response = %s", byID["1"])
 	}
-	var running execToolResponse
-	if err := json.Unmarshal([]byte(text), &running); err != nil {
-		t.Fatal(err)
-	}
+	running := execToolResponse{ExecKey: execKeyFromText(t, text)}
 	out.Reset()
 	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
@@ -2116,12 +2111,12 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 			t.Fatal(err)
 		}
 		abortText = toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
-		if strings.Contains(abortText, `"status":"cancelled"`) {
+		if strings.Contains(abortText, "status: cancelled") {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if !strings.Contains(abortText, `"status":"cancelled"`) {
+	if !strings.Contains(abortText, "status: cancelled") {
 		t.Fatalf("abort status = %s", abortText)
 	}
 
@@ -2131,13 +2126,60 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 		t.Fatal(err)
 	}
 	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
-	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, `"combined_bytes":5000`) || !strings.Contains(largeText, "exec.raw.*") {
+	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, "combined_bytes: 5000") || !strings.Contains(largeText, "exec.raw.*") {
 		t.Fatalf("large response = %s", largeText)
+	}
+}
+
+func TestExecMCPResultReadableJSONStdoutAndTimeout(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	jsonArgs := map[string]any{"command": `printf '{"ok":true}\n'`}
+	if runtime.GOOS == "windows" {
+		jsonArgs = map[string]any{"shell": "powershell", "command": `Write-Output '{"ok":true}'`}
+	}
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(toolCallLine(t, 1, "exec.shell", jsonArgs)+"\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "========== stdout ==========") || !strings.Contains(text, `{"ok":true}`) || strings.Contains(text, `\"ok\"`) {
+		t.Fatalf("json stdout response = %s", text)
+	}
+
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(toolCallLine(t, 2, "exec.shell", mcpLongShellArgs())+"\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	running := execKeyFromText(t, toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"]))
+	out.Reset()
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":3}}}`, running) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	waitText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+	if !strings.Contains(waitText, "status: succeeded") || !strings.Contains(waitText, "done") {
+		t.Fatalf("timeout result = %s", waitText)
 	}
 }
 
 type execToolResponse struct {
 	ExecKey string `json:"exec_key"`
+}
+
+func execKeyFromText(t *testing.T, text string) string {
+	t.Helper()
+	re := regexp.MustCompile(`(?m)^exec_key: (exec-(?:[0-9a-f]{8}|[0-9]+-[0-9a-f]{16}))$`)
+	match := re.FindStringSubmatch(text)
+	if len(match) != 2 {
+		t.Fatalf("exec_key not found in text: %s", text)
+	}
+	return match[1]
 }
 
 func toolCallLine(t *testing.T, id int, name string, arguments map[string]any) string {
