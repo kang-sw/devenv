@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.29.4 - 2026-05-26
+
+### Changed
+- Make exec MCP lifecycle and raw-reader responses readable text instead of
+  JSON-serialized text payloads.
+- Add `exec.result(timeout_seconds)` waiting while preserving non-blocking
+  running guidance when the timeout is omitted or zero.
+- Shorten newly generated exec job keys while preserving legacy key lookup.
+
+### Fixed
+- Keep JSON-shaped command stdout unescaped in `exec.result` raw output sections
+  and cover readable raw-reader responses with MCP tests.
+
 ## v0.29.3 - 2026-05-25
 
 ### Added
