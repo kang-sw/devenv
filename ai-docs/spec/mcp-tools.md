@@ -389,6 +389,18 @@ finishes during the window and combined stdout plus stderr is within the fixed
 status, `exec_key`, and metadata. Running jobs or larger outputs return compact
 metadata, stream sizes, and follow-up guidance without inline raw output.
 
+The `exec.*` MCP tools return MCP text content formatted for direct model
+reading; they do not expose a public `format: json` response mode. Lifecycle
+responses use compact labeled metadata such as `exec_key`, `status`,
+`result_ready`, timestamps, exit state, and stream byte counts. When inline
+stdout or stderr is present, metadata appears first and raw stream text appears
+below obvious separator lines such as `========== stdout ==========` and
+`========== stderr ==========`. JSON-shaped command output remains raw text in
+that output area rather than being escaped inside a serialized JSON response.
+If output exceeds the fixed 4096-byte inline budget, lifecycle responses keep
+the raw body out of the result and include guidance to use the raw fallback
+readers.
+
 Exec lifecycle metadata is SQLite-backed while stream payload bytes remain in
 job-owned files. SQLite stores job identity, command and working-directory
 metadata, lifecycle state, process or lost-worker state, timestamps, exit
@@ -397,10 +409,15 @@ file-backed exec state is imported when possible; corrupt or unimportable legacy
 state returns bounded recovery metadata rather than silently disappearing.
 
 `exec.status` reports job lifecycle state and stream metadata. `exec.result`
-returns terminal job metadata and at most the fixed 4096-byte inline output
-budget; larger results guide callers to the future `exec.ask` path first and
-the raw fallback readers second. `exec.abort` best-effort terminates a running
-job while preserving partial output and terminal state metadata.
+returns job metadata and at most the fixed 4096-byte inline output budget for a
+terminal job. When `timeout_seconds` is omitted or zero, `exec.result` is
+non-blocking; a running job returns readable running metadata and guidance
+without an MCP error. When `timeout_seconds` is positive, `exec.result` waits up
+to that many seconds for the job to become terminal, then returns either the
+terminal result or the same readable running guidance if the timeout expires.
+Larger results guide callers to the future `exec.ask` path first and the raw
+fallback readers second. `exec.abort` best-effort terminates a running job while
+preserving partial output and terminal state metadata.
 
 If a process-local worker is lost while a persisted job still appears running,
 later status/result calls reconcile the record from process liveness and mark a
@@ -413,6 +430,14 @@ literal matching, and uses regular expressions only when the caller explicitly
 sets `regex: true`. If a stored stream path is missing, raw readers report a
 recoverable file-backed payload consistency state instead of treating the stream
 as empty.
+
+Raw-reader MCP responses are also readable text rather than JSON payload text.
+They identify the selected `exec_key` and `stream` with labels. Tail and read
+responses place returned bytes below a `========== text ==========` separator;
+read responses additionally expose `offset`, `next_offset`, `limit`, `size`,
+and `eof` metadata above the separator. Grep responses expose match count and
+truncation metadata above `========== matches ==========` and render each match
+as readable line blocks with any requested context.
 
 ## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
 

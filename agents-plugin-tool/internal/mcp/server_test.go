@@ -2061,6 +2061,20 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 			t.Fatalf("response %s missing %s: %s", id, want, byID[id])
 		}
 	}
+	tailText := toolText(t, byID["5"])
+	if strings.HasPrefix(strings.TrimSpace(tailText), "{") || !strings.Contains(tailText, "exec_key: ") || !strings.Contains(tailText, "stream: stdout") || !strings.Contains(tailText, "========== text ==========") {
+		t.Fatalf("tail response was not readable text: %s", byID["5"])
+	}
+	readText := toolText(t, byID["6"])
+	if strings.HasPrefix(strings.TrimSpace(readText), "{") || !strings.Contains(readText, "stream: stderr") || !strings.Contains(readText, "offset: 0") || !strings.Contains(readText, "========== text ==========") {
+		t.Fatalf("read response was not readable text: %s", byID["6"])
+	}
+	for _, id := range []string{"7", "8"} {
+		grepText := toolText(t, byID[id])
+		if strings.HasPrefix(strings.TrimSpace(grepText), "{") || !strings.Contains(grepText, "stream: stdout") || !strings.Contains(grepText, "matches: 1") || !strings.Contains(grepText, "========== matches ==========") {
+			t.Fatalf("grep response %s was not readable text: %s", id, byID[id])
+		}
+	}
 
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
@@ -2097,6 +2111,25 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 		t.Fatalf("running launch response = %s", byID["1"])
 	}
 	running := execToolResponse{ExecKey: execKeyFromText(t, text)}
+	out.Reset()
+	input = strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, running.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":0}}}`, running.ExecKey),
+	}, "\n") + "\n"
+	started := time.Now()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("non-blocking result calls took %s", elapsed)
+	}
+	resultByID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for _, id := range []string{"10", "11"} {
+		resultText := toolText(t, resultByID[id])
+		if strings.Contains(resultByID[id], `"isError":true`) || strings.HasPrefix(strings.TrimSpace(resultText), "{") || !strings.Contains(resultText, "status: running") || !strings.Contains(resultText, "guidance:") || strings.Contains(resultText, "done") {
+			t.Fatalf("non-blocking result %s = %s", id, resultByID[id])
+		}
+	}
 	out.Reset()
 	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
