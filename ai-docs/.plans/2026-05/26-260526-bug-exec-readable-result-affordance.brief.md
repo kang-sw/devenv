@@ -18,9 +18,9 @@ unrelated exec job lifecycle changes.
 ## Caller-Visible Contract
 
 The lead-facing MCP `exec.spawn`, `exec.shell`, `exec.status`, `exec.result`,
-and `exec.abort` responses must be compact readable text, not JSON serialized
-into MCP text content. Do not add or retain a public `format: json` option for
-these exec tools.
+`exec.abort`, and `exec.raw.*` responses must be compact readable text, not JSON
+serialized into MCP text content. Do not add or retain a public `format: json`
+option for these exec tools.
 
 `exec.result` must render metadata above a clear separator and raw stdout/stderr
 below it when inline output is available. Use an obvious marker such as
@@ -52,8 +52,10 @@ escalate before choosing a separate wait primitive.
   must still surface recoverable consistency warnings/errors, not empty output.
 - Preserve the 4096-byte inline budget. Large outputs should return metadata
   and guidance, not inline raw output.
-- Preserve `exec.raw.*` behavior except for any necessary response readability
-  changes if they currently conflict with the no-JSON lead-facing direction.
+- Preserve `exec.raw.*` reader semantics while changing their MCP response text
+  away from JSON serialization. Tail should expose selected stream and text;
+  read should expose selected stream, offset/next-offset metadata, and text;
+  grep should expose selected stream plus readable match blocks.
 - Do not add public exec CLI mirrors.
 - Do not change wsflow no-agent visibility except to keep existing hidden-tool
   assertions passing.
@@ -63,7 +65,8 @@ escalate before choosing a separate wait primitive.
 Extend or add tests around:
 
 - short key generation and old long-key compatibility;
-- MCP launch/status/result/abort responses no longer being JSON payload text;
+- MCP launch/status/result/abort/raw-reader responses no longer being JSON
+  payload text;
 - `exec.result` inline output using metadata + separator + raw stdout/stderr;
 - JSON-shaped stdout remaining unescaped in the raw output area;
 - positive `timeout_seconds` waiting for a running job to finish;
