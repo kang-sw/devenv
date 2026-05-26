@@ -33,7 +33,7 @@ const (
 	stateCancelled       = "cancelled"
 )
 
-var keyPattern = regexp.MustCompile(`^exec-[0-9]+-[0-9a-f]{16}$`)
+var keyPattern = regexp.MustCompile(`^exec-(?:[0-9a-f]{8}|[0-9]+-[0-9a-f]{16})$`)
 var mu sync.Mutex
 var active sync.Map
 
@@ -116,7 +116,7 @@ func Launch(opts LaunchOptions) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	key, err := newKey()
+	key, err := newKey(opts.Root)
 	if err != nil {
 		return Response{}, err
 	}
@@ -223,16 +223,36 @@ func Status(root, key string) (Response, error) {
 	return responseFor(root, rec, false), nil
 }
 func Result(root, key string) (Response, error) {
-	rec, err := reconcile(root, key)
-	if err != nil {
-		return Response{}, err
+	return ResultWithTimeout(root, key, 0)
+}
+
+func ResultWithTimeout(root, key string, timeout time.Duration) (Response, error) {
+	deadline := time.Time{}
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
 	}
-	if !terminal(rec.Status) {
+	for {
+		rec, err := reconcile(root, key)
+		if err != nil {
+			return Response{}, err
+		}
+		if terminal(rec.Status) {
+			return responseFor(root, rec, true), nil
+		}
 		r := responseFor(root, rec, false)
 		r.Guidance = guidance()
-		return r, fmt.Errorf("exec job %q is not terminal", key)
+		if timeout <= 0 || time.Now().After(deadline) {
+			return r, nil
+		}
+		sleep := 100 * time.Millisecond
+		if remaining := time.Until(deadline); remaining < sleep {
+			sleep = remaining
+		}
+		if sleep <= 0 {
+			return r, nil
+		}
+		time.Sleep(sleep)
 	}
-	return responseFor(root, rec, true), nil
 }
 func Abort(root, key string) (Response, error) {
 	rec, err := Load(root, key)
@@ -686,12 +706,48 @@ func updateSizes(rec *Record, root, key string) {
 		rec.CombinedBytes = st.Size()
 	}
 }
-func newKey() (string, error) {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
+func newKey(root string) (string, error) {
+	for i := 0; i < 32; i++ {
+		var b [4]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return "", err
+		}
+		key := "exec-" + hex.EncodeToString(b[:])
+		exists, err := keyExists(root, key)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return key, nil
+		}
 	}
-	return fmt.Sprintf("exec-%d-%s", time.Now().UTC().UnixNano(), hex.EncodeToString(b[:])), nil
+	return "", errors.New("could not allocate unique exec key")
+}
+
+func keyExists(root, key string) (bool, error) {
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	if err == nil {
+		defer store.Close()
+		_, ok, storeErr := store.ExecJob(context.Background(), key)
+		if storeErr != nil {
+			return false, storeErr
+		}
+		if ok {
+			return true, nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	dir, err := jobDir(root, key)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(dir); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	return false, nil
 }
 func activeKey(root, key string) string { return filepath.Clean(root) + "\x00" + key }
 func ts() string                        { return time.Now().UTC().Format(time.RFC3339Nano) }

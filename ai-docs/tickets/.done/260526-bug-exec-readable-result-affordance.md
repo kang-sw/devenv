@@ -9,6 +9,7 @@ spec:
   - 260524-exec-job-mcp-tools
 related-mental-model:
   - mcp-runtime
+completed: 2026-05-26
 ---
 
 # Exec result readability and wait affordance
@@ -77,3 +78,25 @@ durable job model:
   status polling loops;
 - update MCP tests, execjob tests, runtime docs, and related specs for the
   chosen caller-visible behavior.
+
+### Result (a9a80660) - 2026-05-26
+
+Implemented readable text output for the exec MCP lifecycle and raw-reader
+surface, including separator-delimited inline stdout/stderr for `exec.result`
+and raw-reader text/match sections. `exec.result` now accepts
+`timeout_seconds`: omitted or zero timeout returns prompt running guidance
+without an MCP error, while a positive timeout waits for terminal completion or
+returns the same running guidance on timeout.
+
+New exec jobs now use short `exec-<8hex>` keys with collision checks against
+SQLite metadata and legacy job directories. Legacy
+`exec-<unix-nano>-<16hex>` keys remain accepted so existing persisted jobs and
+raw readers still work after upgrade.
+
+Verification covered manager-level key/wait behavior, MCP readable lifecycle
+and raw-reader formatting, unescaped JSON-shaped stdout, non-blocking and
+waiting `exec.result`, and wsflow no-agent visibility:
+
+- `cd agents-plugin-tool && go test ./internal/execjob ./internal/mcp ./cmd/ws-mcp`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `ws/spec_index.verify`

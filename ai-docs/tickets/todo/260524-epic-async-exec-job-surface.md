@@ -41,9 +41,9 @@ The epic owns decomposition for:
   raw fallback text readers over persisted output files.
 - `260524-feat-exec-output-ask` - add lead-facing `exec.ask` questions over
   persisted exec output.
-- `260526-bug-exec-readable-result-affordance` - ready; improve the basic
-  exec launch/status/result/abort readability, key length, and result wait
-  affordance before layering model-backed output questions on top.
+- `260526-bug-exec-readable-result-affordance` - done; improved the basic
+  exec launch/status/result/abort/raw-reader readability, key length, and
+  result wait affordance before layering model-backed output questions on top.
 - `260524-chore-exec-surface-runtime-contract` - finalize runtime
   capabilities, manifests, CLI mirror policy, and wsflow package drift after the
   accepted `exec.*` surface is stable.

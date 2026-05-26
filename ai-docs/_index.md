@@ -155,7 +155,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
-| `260526-bug-exec-readable-result-affordance` | ready | Improve exec output readability, key length, and result wait affordance |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -193,7 +192,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-`260526-bug-exec-readable-result-affordance` - ready to improve exec output readability, key length, and result wait affordance.
+No ready ticket is selected.
 
 ## Session Notes
 

@@ -460,7 +460,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
 		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin})
-		return toolJSONResponse(req.ID, result, err)
+		return execResponse(req.ID, result, err, true)
 	case "exec.shell":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -471,7 +471,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		stdin, _ := params.Arguments["stdin"].(string)
 		shell, _ := params.Arguments["shell"].(string)
 		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true})
-		return toolJSONResponse(req.ID, result, err)
+		return execResponse(req.ID, result, err, true)
 	case "exec.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -479,15 +479,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		result, err := execjob.Status(root, key)
-		return toolJSONResponse(req.ID, result, err)
+		return execResponse(req.ID, result, err, false)
 	case "exec.result":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		key, _ := params.Arguments["exec_key"].(string)
-		result, err := execjob.Result(root, key)
-		return toolJSONResponse(req.ID, result, err)
+		timeout := durationFromSeconds(params.Arguments["timeout_seconds"])
+		result, err := execjob.ResultWithTimeout(root, key, timeout)
+		return execResponse(req.ID, result, err, true)
 	case "exec.abort":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -495,7 +496,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		result, err := execjob.Abort(root, key)
-		return toolJSONResponse(req.ID, result, err)
+		return execResponse(req.ID, result, err, false)
 	case "exec.raw.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -504,7 +505,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		key, _ := params.Arguments["exec_key"].(string)
 		stream, _ := params.Arguments["stream"].(string)
 		result, err := execjob.Tail(root, key, stream, intFromArgument(params.Arguments["lines"], 0))
-		return toolJSONResponse(req.ID, result, err)
+		return execRawTailResponse(req.ID, result, err)
 	case "exec.raw.read":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -513,7 +514,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		key, _ := params.Arguments["exec_key"].(string)
 		stream, _ := params.Arguments["stream"].(string)
 		result, err := execjob.Read(root, key, stream, int64FromArgument(params.Arguments["offset"], 0), int64FromArgument(params.Arguments["limit"], 0))
-		return toolJSONResponse(req.ID, result, err)
+		return execRawReadResponse(req.ID, result, err)
 	case "exec.raw.grep":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -523,7 +524,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		stream, _ := params.Arguments["stream"].(string)
 		pattern, _ := params.Arguments["pattern"].(string)
 		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
-		return toolJSONResponse(req.ID, result, err)
+		return execRawGrepResponse(req.ID, result, err)
 	case "config.show":
 		view, err := wsconfig.Show(wsconfig.Options{})
 		if wantsJSON(params.Arguments) {
@@ -2138,6 +2139,117 @@ func normalizedHarness(value string) string {
 	}
 }
 
+func execResponse(id json.RawMessage, r execjob.Response, err error, includeStreams bool) response {
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	return toolTextResponse(id, formatExecResponse(r, includeStreams), nil)
+}
+
+func formatExecResponse(r execjob.Response, includeStreams bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "exec_key: %s\n", r.ExecKey)
+	fmt.Fprintf(&b, "status: %s\n", r.Status)
+	fmt.Fprintf(&b, "result_ready: %t\n", r.ResultReady)
+	if r.PID != 0 {
+		fmt.Fprintf(&b, "pid: %d\n", r.PID)
+	}
+	if r.ExitCode != 0 || r.ResultReady {
+		fmt.Fprintf(&b, "exit_code: %d\n", r.ExitCode)
+	}
+	if r.StartedAt != "" {
+		fmt.Fprintf(&b, "started_at: %s\n", r.StartedAt)
+	}
+	if r.UpdatedAt != "" {
+		fmt.Fprintf(&b, "updated_at: %s\n", r.UpdatedAt)
+	}
+	if r.CompletedAt != "" {
+		fmt.Fprintf(&b, "completed_at: %s\n", r.CompletedAt)
+	}
+	fmt.Fprintf(&b, "stdout_bytes: %d\n", r.StdoutBytes)
+	fmt.Fprintf(&b, "stderr_bytes: %d\n", r.StderrBytes)
+	fmt.Fprintf(&b, "combined_bytes: %d\n", r.CombinedBytes)
+	if r.Error != "" {
+		fmt.Fprintf(&b, "error: %s\n", r.Error)
+	}
+	if r.Guidance != "" {
+		fmt.Fprintf(&b, "guidance: %s\n", r.Guidance)
+	}
+	if includeStreams && (r.Stdout != "" || r.Stderr != "") {
+		b.WriteString("========== stdout ==========" + "\n")
+		b.WriteString(r.Stdout)
+		if r.Stdout != "" && !strings.HasSuffix(r.Stdout, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("========== stderr ==========" + "\n")
+		b.WriteString(r.Stderr)
+		if r.Stderr != "" && !strings.HasSuffix(r.Stderr, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func execRawTailResponse(id json.RawMessage, r execjob.RawTailResponse, err error) response {
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "exec_key: %s\n", r.ExecKey)
+	fmt.Fprintf(&b, "stream: %s\n", r.Stream)
+	b.WriteString("========== text ==========" + "\n")
+	b.WriteString(r.Text)
+	if r.Text != "" && !strings.HasSuffix(r.Text, "\n") {
+		b.WriteString("\n")
+	}
+	return toolTextResponse(id, b.String(), nil)
+}
+
+func execRawReadResponse(id json.RawMessage, r execjob.RawReadResponse, err error) response {
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "exec_key: %s\n", r.ExecKey)
+	fmt.Fprintf(&b, "stream: %s\n", r.Stream)
+	fmt.Fprintf(&b, "offset: %d\n", r.Offset)
+	fmt.Fprintf(&b, "next_offset: %d\n", r.NextOffset)
+	fmt.Fprintf(&b, "limit: %d\n", r.Limit)
+	fmt.Fprintf(&b, "size: %d\n", r.Size)
+	fmt.Fprintf(&b, "eof: %t\n", r.EOF)
+	b.WriteString("========== text ==========" + "\n")
+	b.WriteString(r.Text)
+	if r.Text != "" && !strings.HasSuffix(r.Text, "\n") {
+		b.WriteString("\n")
+	}
+	return toolTextResponse(id, b.String(), nil)
+}
+
+func execRawGrepResponse(id json.RawMessage, r execjob.RawGrepResponse, err error) response {
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "exec_key: %s\n", r.ExecKey)
+	fmt.Fprintf(&b, "stream: %s\n", r.Stream)
+	fmt.Fprintf(&b, "matches: %d\n", len(r.Matches))
+	fmt.Fprintf(&b, "truncated: %t\n", r.Truncated)
+	b.WriteString("========== matches ==========" + "\n")
+	for i, m := range r.Matches {
+		if i > 0 {
+			b.WriteString("--\n")
+		}
+		for _, line := range m.Before {
+			fmt.Fprintf(&b, "%d- %s\n", m.Line, line)
+		}
+		fmt.Fprintf(&b, "%d: %s\n", m.Line, m.Text)
+		for _, line := range m.After {
+			fmt.Fprintf(&b, "%d+ %s\n", m.Line, line)
+		}
+	}
+	return toolTextResponse(id, b.String(), nil)
+}
+
 func toolJSONResponse(id json.RawMessage, value any, err error) response {
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -2300,8 +2412,8 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "exec.result",
-			"description": "Return terminal exec job metadata and at most the fixed 4096-byte inline output budget.",
-			"inputSchema": execKeySchema(),
+			"description": "Return terminal exec job metadata and at most the fixed 4096-byte inline output budget; positive timeout_seconds waits for completion.",
+			"inputSchema": execResultSchema(),
 		},
 		{
 			"name":        "exec.abort",
@@ -3058,6 +3170,13 @@ func execLaunchSchema(shell bool) map[string]any {
 
 func execKeySchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"exec_key": stringProperty("Durable exec job key.")}, "required": []string{"exec_key"}}
+}
+
+func execResultSchema() map[string]any {
+	s := execKeySchema()
+	props := s["properties"].(map[string]any)
+	props["timeout_seconds"] = numberProperty("Maximum seconds to wait for a running job to become terminal. Omit or set 0 for non-blocking behavior.")
+	return s
 }
 
 func execRawTailSchema() map[string]any {

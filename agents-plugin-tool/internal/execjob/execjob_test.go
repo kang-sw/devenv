@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,9 @@ func TestLaunchResultRawReadersAndWorkingDir(t *testing.T) {
 	}
 	if res.Status != stateSucceeded || !strings.Contains(res.Stdout, filepath.Join(root, "sub")) || !strings.Contains(res.Stderr, "errline") {
 		t.Fatalf("launch response = %#v", res)
+	}
+	if !regexp.MustCompile(`^exec-[0-9a-f]{8}$`).MatchString(res.ExecKey) {
+		t.Fatalf("exec key was not short: %s", res.ExecKey)
 	}
 	got, err := Result(root, res.ExecKey)
 	if err != nil || !strings.Contains(got.Stdout, "beta42") {
@@ -95,6 +99,18 @@ func TestLongLargeAndAbort(t *testing.T) {
 	partial, err := Tail(root, long.ExecKey, "stdout", 10)
 	if err != nil || !strings.Contains(partial.Text, "start") {
 		t.Fatalf("partial tail = %#v, %v", partial, err)
+	}
+
+	waiting, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "slow"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waited, err := ResultWithTimeout(root, waiting.ExecKey, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waited.Status != stateSucceeded || !strings.Contains(waited.Stdout, "done") {
+		t.Fatalf("waited result = %#v", waited)
 	}
 
 	large, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "large"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
