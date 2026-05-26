@@ -155,6 +155,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
+| `260526-bug-exec-readable-result-affordance` | ready | Improve exec output readability, key length, and result wait affordance |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -169,7 +170,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
-| `260526-bug-exec-readable-result-affordance` | idea | Improve exec output readability, key length, and result wait affordance |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -193,7 +193,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-No ready ticket is selected.
+`260526-bug-exec-readable-result-affordance` - ready to improve exec output readability, key length, and result wait affordance.
 
 ## Session Notes
 
