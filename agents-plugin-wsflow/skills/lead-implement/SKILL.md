@@ -18,7 +18,7 @@ Scope
 
 Dispatch
 - Delegate prompts reach native subagents only through `wsflow/prompt.render`; never hand-paste playbook prompt text into a subagent.
-- Render-eligible prompts are `project-survey`, `plan-populator-survey`, `plan-populator-research`, `code-reviewer`, and `mental-model-updater`.
+- Render-eligible prompts are `reference-discovery`, `plan-populator-survey`, `plan-populator-research`, `code-reviewer`, and `mental-model-updater`.
 - File-writing prompts receive a caller-created output path in render `context`; free-response prompts return their result as subagent text.
 
 Branch
@@ -65,7 +65,7 @@ Review
 7. Call `wsflow/mental_models.find(query: <target or domain>)` or `wsflow/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 8. Call `wsflow/infra.read(name: "impl-playbook")`.
 9. Identify integration test paths and their run command.
-10. If `plan-depth` >= survey: dispatch `project-survey` through **Render dispatch**; capture `[Must|Maybe]` references from the subagent's returned text.
+10. If `plan-depth` >= survey: dispatch `reference-discovery` through **Render dispatch**; capture `[Must|Maybe]` doc references from the subagent's returned text. This agent reads docs only; source-level reference mapping happens in step 12 via `plan-populator-survey`.
 11. If `plan-depth` >= brief: write the brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; transcribe any captured survey references under `## References`, tagging each `[Must]` or `[Maybe]`; audit against the target; commit.
 12. If `plan-depth` >= survey: generate a plan path with `wsflow/path.generate(kind: "plan", stems: ["<stem>"])`. At `survey`, dispatch `plan-populator-survey` through **Render dispatch** with the brief path and plan path in `context`; if it returns `[escalate-to-research]`, dispatch `plan-populator-research` through **Render dispatch** with the same brief path and plan path. At `research`, dispatch `plan-populator-research` directly through **Render dispatch** with the brief path and plan path. If a populator returns `[escalate-to-lead]`, stop and report the blocker; otherwise commit the plan.
 
@@ -171,7 +171,7 @@ Default: `none` for a narrow lead edit; `survey` when survey or plan evidence is
 | survey | Multi-module span; cold context; reuse points unconfirmed |
 | research | Multiple viable strategies; non-obvious cross-module side effects |
 
-Levels are cumulative: `brief` writes the brief; `survey` runs `project-survey`, writes the brief, then runs the survey plan-populator; `research` runs `project-survey`, writes the brief, then runs the research plan-populator directly.
+Levels are cumulative: `brief` writes the brief; `survey` runs `reference-discovery`, writes the brief, then runs the survey plan-populator; `research` runs `reference-discovery`, writes the brief, then runs the research plan-populator directly.
 
 ### judge: review-allocation
 
@@ -212,10 +212,10 @@ Proceeding with implementation.
 
 ### Render dispatch
 
-1. Call `wsflow/prompt.render(stem: "<prompt-stem>", context: { <key>: <value> })`; capture `prompt_path`. Choose `context` keys per prompt: `project-survey` gets the target or domain; `code-reviewer` gets the **Reviewer context** fields; `plan-populator-survey` and `plan-populator-research` get the brief path and plan output path; `mental-model-updater` gets the target mental-model output path.
+1. Call `wsflow/prompt.render(stem: "<prompt-stem>", context: { <key>: <value> })`; capture `prompt_path`. Choose `context` keys per prompt: `reference-discovery` gets the target or domain; `code-reviewer` gets the **Reviewer context** fields; `plan-populator-survey` and `plan-populator-research` get the brief path and plan output path; `mental-model-updater` gets the target mental-model output path.
 2. Spawn a native host subagent whose only instruction is to read `prompt_path` as its full task and to stay within the stated scope.
 3. For file-writing prompts (`plan-populator-survey`, `plan-populator-research`, `mental-model-updater`): the subagent writes to the caller-created output path passed in `context`, or returns the content for the lead to save when it cannot write.
-4. For free-response prompts (`project-survey`, `code-reviewer`): integrate the subagent's returned text directly.
+4. For free-response prompts (`reference-discovery`, `code-reviewer`): integrate the subagent's returned text directly.
 
 ### Brief template
 
