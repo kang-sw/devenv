@@ -151,6 +151,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
+| `260529-refactor-wsflow-implement-convergence` | todo | Converge wsflow lead-implement onto the unified spine and add a wsflow-only prompt.render dispatch tool |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
