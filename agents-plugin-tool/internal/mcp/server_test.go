@@ -682,6 +682,7 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer"}}}`, root),
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer","context":{"reviewer_scope":"correctness only"}}}}`, root),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"implementer"}}}`, root),
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -731,6 +732,99 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 	}
 	if !strings.Contains(contextText, "- reviewer_scope: correctness only") {
 		t.Fatalf("rendered prompt missing injected context key/value:\n%s", contextText)
+	}
+
+	// Ineligible stem returns MCP isError (not a JSON-RPC error).
+	if !toolIsError(t, byID["4"]) {
+		t.Fatalf("prompt.render with ineligible stem 'implementer' should return isError: %s", byID["4"])
+	}
+	if !strings.Contains(toolText(t, byID["4"]), "not render-eligible") {
+		t.Fatalf("ineligible stem error message missing 'not render-eligible': %s", toolText(t, byID["4"]))
+	}
+}
+
+func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+
+	// (a) Namespace substitution replaces ws/ and ws: at word boundaries only.
+	//     Tokens like "workflows/", "news/", "rows:" must NOT be mangled.
+	nonManglingCases := []struct {
+		input string
+		want  string
+	}{
+		{"use ws/specs.find here", "use wsflow/specs.find here"},
+		{"call ws:lead-implement skill", "call wsflow:lead-implement skill"},
+		{"rows: many items", "rows: many items"},
+		{"news/feed here", "news/feed here"},
+		{"workflows/steps", "workflows/steps"},
+		{"newws/path", "newws/path"},
+		{"ws/tool and ws:skill together", "wsflow/tool and wsflow:skill together"},
+	}
+	for _, tc := range nonManglingCases {
+		got := wsNamespaceRef.ReplaceAllString(tc.input, "wsflow"+"$1")
+		if got != tc.want {
+			t.Errorf("wsNamespaceRef.ReplaceAllString(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+
+	// (b) Render code-reviewer; the rendered file must contain wsflow/ (ws/ substituted)
+	//     and must not contain bare ws/ tokens.
+	path1, err := renderPrompt(root, "code-reviewer", nil)
+	if err != nil {
+		t.Fatalf("renderPrompt code-reviewer: %v", err)
+	}
+	data, err := os.ReadFile(path1)
+	if err != nil {
+		t.Fatalf("read rendered prompt: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "ws/") {
+		t.Errorf("rendered code-reviewer still contains 'ws/' after substitution")
+	}
+	if !strings.Contains(text, "wsflow/") {
+		t.Errorf("rendered code-reviewer missing 'wsflow/' after substitution")
+	}
+
+	// (b-cont) ws: -> wsflow: substitution: verified via regex unit cases above.
+	//         Also confirm a synthetic text with ws: is substituted correctly.
+	synth := wsNamespaceRef.ReplaceAllString("invoke ws:some-skill here", "wsflow"+"$1")
+	if synth != "invoke wsflow:some-skill here" {
+		t.Errorf("ws: substitution failed: %q", synth)
+	}
+
+	// (c) Ineligible stem and unknown stem both return errors.
+	if _, err := renderPrompt(root, "implementer", nil); err == nil {
+		t.Error("renderPrompt with ineligible stem 'implementer' returned nil error")
+	} else if !strings.Contains(err.Error(), "not render-eligible") {
+		t.Errorf("ineligible stem error message unexpected: %v", err)
+	}
+	if _, err := renderPrompt(root, "no-such-prompt", nil); err == nil {
+		t.Error("renderPrompt with unknown stem 'no-such-prompt' returned nil error")
+	} else if !strings.Contains(err.Error(), "not render-eligible") {
+		t.Errorf("unknown stem error message unexpected: %v", err)
+	}
+
+	// (d) Context values containing ws/ are NOT substituted (context is appended
+	//     after the substitution pass).
+	path2, err := renderPrompt(root, "code-reviewer", map[string]string{
+		"note": "see ws/specs.find for details",
+	})
+	if err != nil {
+		t.Fatalf("renderPrompt with context: %v", err)
+	}
+	data2, err := os.ReadFile(path2)
+	if err != nil {
+		t.Fatalf("read context-rendered prompt: %v", err)
+	}
+	text2 := string(data2)
+	if !strings.Contains(text2, "## Render Context") {
+		t.Error("context-rendered prompt missing ## Render Context block")
+	}
+	if !strings.Contains(text2, "ws/specs.find") {
+		t.Error("context value containing 'ws/specs.find' was unexpectedly substituted in the context block")
 	}
 }
 

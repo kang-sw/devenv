@@ -327,6 +327,14 @@ func TestRenderSourceRejectsPathsAndTraversal(t *testing.T) {
 	}
 }
 
+func TestRenderSourceRejectsUnknownStem(t *testing.T) {
+	if _, err := RenderSource("no-such-prompt"); err == nil {
+		t.Fatal("RenderSource accepted unknown stem")
+	} else if !strings.Contains(err.Error(), "no-such-prompt") {
+		t.Fatalf("RenderSource unknown-stem error missing stem name: %v", err)
+	}
+}
+
 func TestNormalizePromptHashContent(t *testing.T) {
 	got := string(normalizePromptHashContent([]byte("one\r\ntwo\nthree\r\n")))
 	want := "one\ntwo\nthree\n"

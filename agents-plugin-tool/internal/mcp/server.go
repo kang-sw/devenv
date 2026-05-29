@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -3138,17 +3139,35 @@ func wsflowOnlyTool(name string) bool {
 	}
 }
 
+// wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
+// a word boundary so that words containing "ws" as an interior substring (e.g.
+// "news/", "rows:", "workflows/") are never mangled.
+var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
+
+// wsflowRenderEligibleStems is the exact set of prompt stems that are
+// render-eligible from wsflow per spec #260529-prompt-render-tool.
+// Add entries here as the spec expands the set.
+var wsflowRenderEligibleStems = map[string]bool{
+	"project-survey":          true,
+	"plan-populator-survey":   true,
+	"plan-populator-research": true,
+	"code-reviewer":           true,
+	"mental-model-updater":    true,
+}
+
 // renderPrompt loads a bundled prompt by stem, applies namespace substitution,
 // appends an optional injected context block, writes the result to a
 // worktree-scoped tmp file, and returns the path.
 func renderPrompt(root, stem string, context map[string]string) (string, error) {
+	if !wsflowRenderEligibleStems[stem] {
+		return "", fmt.Errorf("prompt stem %q is not render-eligible in wsflow", stem)
+	}
 	body, err := wsprompt.RenderSource(stem)
 	if err != nil {
 		return "", fmt.Errorf("load prompt %q: %w", stem, err)
 	}
 	ns := RuntimeNamespace()
-	body = strings.ReplaceAll(body, "ws/", ns+"/")
-	body = strings.ReplaceAll(body, "ws:", ns+":")
+	body = wsNamespaceRef.ReplaceAllString(body, ns+"$1")
 	if len(context) > 0 {
 		keys := make([]string, 0, len(context))
 		for k := range context {
