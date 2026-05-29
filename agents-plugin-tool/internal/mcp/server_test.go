@@ -623,6 +623,117 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 }
 
+func TestWsflowOnlyToolHiddenInFullWsMode(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	// Full ws mode: WS_MCP_NO_AGENT is NOT set.
+	t.Setenv("WS_MCP_NO_AGENT", "")
+	t.Setenv("WS_MCP_NAMESPACE", "")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"stem":"code-reviewer"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+
+	// tools/list must NOT include prompt.render in full ws mode.
+	list := byID["1"]
+	if strings.Contains(list, "prompt.render") {
+		t.Fatalf("tools/list exposed wsflow-only tool prompt.render in full ws mode: %s", list)
+	}
+
+	// Explicit call must return a JSON-RPC error (not isError content).
+	var callResp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(byID["2"]), &callResp); err != nil {
+		t.Fatalf("unmarshal call response: %v", err)
+	}
+	if callResp.Error == nil {
+		t.Fatalf("prompt.render in full ws mode did not return JSON-RPC error: %s", byID["2"])
+	}
+	if !strings.Contains(callResp.Error.Message, "prompt.render") {
+		t.Fatalf("prompt.render full ws error missing tool name: %s", callResp.Error.Message)
+	}
+}
+
+func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	t.Setenv("WS_MCP_SETUP_TOOL", "setup")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer"}}}`, root),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer","context":{"reviewer_scope":"correctness only"}}}}`, root),
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+
+	// tools/list must include prompt.render in wsflow mode.
+	list := byID["1"]
+	if !strings.Contains(list, "prompt.render") {
+		t.Fatalf("tools/list missing prompt.render in wsflow mode: %s", list)
+	}
+
+	// Render without context: file must exist, contain wsflow/, not contain ws/.
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("prompt.render returned error in wsflow mode: %s", byID["2"])
+	}
+	promptPath := strings.TrimSpace(toolText(t, byID["2"]))
+	if _, err := os.Stat(promptPath); err != nil {
+		t.Fatalf("rendered prompt file does not exist at %q: %v", promptPath, err)
+	}
+	rendered, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("read rendered prompt: %v", err)
+	}
+	renderedText := string(rendered)
+	if strings.Contains(renderedText, "ws/") {
+		t.Fatalf("rendered prompt still contains 'ws/' after substitution:\n%s", renderedText)
+	}
+	if !strings.Contains(renderedText, "wsflow/") {
+		t.Fatalf("rendered prompt missing 'wsflow/' after substitution:\n%s", renderedText)
+	}
+
+	// Render with context: file must contain ## Render Context with injected key/value.
+	if toolIsError(t, byID["3"]) {
+		t.Fatalf("prompt.render with context returned error: %s", byID["3"])
+	}
+	contextPath := strings.TrimSpace(toolText(t, byID["3"]))
+	contextRendered, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read context-rendered prompt: %v", err)
+	}
+	contextText := string(contextRendered)
+	if !strings.Contains(contextText, "## Render Context") {
+		t.Fatalf("rendered prompt missing ## Render Context block:\n%s", contextText)
+	}
+	if !strings.Contains(contextText, "- reviewer_scope: correctness only") {
+		t.Fatalf("rendered prompt missing injected context key/value:\n%s", contextText)
+	}
+}
+
 func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	useLeadProfile(t)
 	rootA := initTicketRepo(t, "260505-feat-alpha")

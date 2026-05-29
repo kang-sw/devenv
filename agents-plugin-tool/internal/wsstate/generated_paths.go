@@ -67,6 +67,8 @@ func generatedPathTarget(layout Layout, kind string) (dir string, ext string, er
 	switch kind {
 	case "review":
 		return layout.ReviewDir, ".md", nil
+	case "prompt":
+		return layout.PromptDir, ".md", nil
 	default:
 		return "", "", fmt.Errorf("unsupported path kind %q", kind)
 	}

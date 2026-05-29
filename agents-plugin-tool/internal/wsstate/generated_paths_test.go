@@ -135,3 +135,37 @@ func TestGeneratePathsUsesWorktreeScopedReviewDirectory(t *testing.T) {
 		t.Fatalf("path dir = %q, want %q", gotDir, layout.ReviewDir)
 	}
 }
+
+func TestGeneratePathsUsesWorktreeScopedPromptDirectory(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	paths, err := manager.GeneratePaths(repo, "prompt", []string{"code-reviewer"})
+	if err != nil {
+		t.Fatalf("GeneratePaths returned error: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("len(paths) = %d, want 1", len(paths))
+	}
+	if paths[0].Kind != "prompt" {
+		t.Fatalf("kind = %q, want prompt", paths[0].Kind)
+	}
+	layout, _, _, err := manager.Ensure(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotDir := canonicalForTest(t, filepath.Dir(paths[0].Path))
+	if gotDir != layout.PromptDir {
+		t.Fatalf("path dir = %q, want %q", gotDir, layout.PromptDir)
+	}
+	if !strings.HasSuffix(paths[0].Path, ".md") {
+		t.Fatalf("path %q does not end with .md", paths[0].Path)
+	}
+	if info, err := os.Stat(paths[0].Path); err != nil || info.IsDir() {
+		t.Fatalf("reserved prompt path %q stat=%v err=%v", paths[0].Path, info, err)
+	}
+}

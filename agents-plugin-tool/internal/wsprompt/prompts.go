@@ -75,6 +75,16 @@ func Resolve(specs []string, systemPromptText, explicitTier, explicitModel strin
 	return resolved, nil
 }
 
+// RenderSource returns the raw body of an embedded prompt by bare stem.
+// It rejects absolute paths and ".." so callers cannot escape the bundle.
+func RenderSource(stem string) (string, error) {
+	if !isBareStem(stem) {
+		return "", fmt.Errorf("prompt stem %q must be a bare embedded stem, not a path", stem)
+	}
+	body, _, _, err := resolveOne(stem)
+	return body, err
+}
+
 func ReadInfra(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("infra document name is required")
