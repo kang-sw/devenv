@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.30.0 - 2026-05-29
+
+### Added
+- Add the wsflow-only `prompt.render` MCP tool: it loads a bundled delegate
+  prompt by stem, applies render-time `ws/` -> `wsflow/` namespace substitution,
+  injects caller context, and returns a rendered prompt path. Visibility mirrors
+  the agentless hidden-tool gate (advertised only in wsflow; hidden from full
+  ws), enforced at `callTool`, `toolAllowed`, and the capability surface.
+
+### Changed
+- Converge wsflow `lead-implement` onto the unified ws spine and absorb the
+  separate wsflow `lead-edit` skill (removed). The wsflow Edit stage is now lead
+  direct edits plus a lead-discretion scoped native subagent, dispatched through
+  `prompt.render` for the five render-eligible prompts; ws `lead-implement` and
+  the ws named-agent path are unchanged.
+- Rename the docs-only pre-invocation survey agent `project-survey` to
+  `reference-discovery` to end the selection-layer confusion with
+  `plan-populator-survey` (docs discovery vs source reference map); skills,
+  runtime prompt bundle, and docs updated accordingly.
+
 ## v0.29.4 - 2026-05-26
 
 ### Changed
