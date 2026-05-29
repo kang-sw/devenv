@@ -25,7 +25,7 @@ the checked-out branch.
 
 ## Follow-Up
 
-- Decide whether `project-survey` and `subquery` prompts should default to
+- Decide whether `reference-discovery` and `subquery` prompts should default to
   current-HEAD ancestry for ticket status evidence.
 - If cross-branch history is useful, require answers to label it as such and to
   separate current-branch conclusions from branch-local findings.

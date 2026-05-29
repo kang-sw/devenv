@@ -76,14 +76,14 @@ applies render-time `ws/` -> `wsflow/` namespace substitution, injects `context`
 values, writes the result to a tmp file, and returns `prompt_path`. The lead
 hands `prompt_path` to a native subagent.
 
-- Render-eligible prompt stems: `project-survey`, `plan-populator-survey`,
+- Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
   stems are not full-ws references and may appear in distributed wsflow skill
   text.
 - File-writing prompts (`plan-populator-*`, `mental-model-updater`) receive a
   caller-created output path in `context`; free-response prompts
-  (`project-survey`, `code-reviewer`) return text. `prompt.render` does not mint
-  an `expected_output_path`.
+  (`reference-discovery`, `code-reviewer`) return text. `prompt.render` does not
+  mint an `expected_output_path`.
 - The `implementer` prompt is not render-eligible in wsflow.
 
 `prompt.render` is a wsflow-only tool: it is advertised and callable only in the

@@ -9,7 +9,7 @@ entries that recent commits may have made stale.
 
 ## Constraints
 
-- Classify every entry as `[Must]` or `[Maybe]` using standard project-survey criteria.
+- Classify every entry as `[Must]` or `[Maybe]` using standard reference-discovery criteria.
 - Annotate with `[stale?]` when commits reference a covered area but no doc-update commit covers that file in the range.
 - Never drop an entry because it looks stale; stale entries remain in their tier.
 - When the commit range is empty, emit the tier list with no `[stale?]` annotations.

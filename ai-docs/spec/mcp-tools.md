@@ -305,7 +305,7 @@ prompts return their result as the subagent's text; file-writing prompts such as
 path through `context`, and the rendered prompt body directs the write to that
 path.
 
-wsflow exposes exactly five render-eligible prompts: `project-survey`,
+wsflow exposes exactly five render-eligible prompts: `reference-discovery`,
 `plan-populator-survey`, `plan-populator-research`, `code-reviewer`, and
 `mental-model-updater`. The `implementer` prompt is not render-eligible in
 wsflow.

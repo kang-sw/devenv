@@ -2777,7 +2777,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"root":    stringProperty("Repository root. Defaults to the server root."),
-					"stem":    stringProperty("Bundled prompt stem to render (e.g. code-reviewer, project-survey)."),
+					"stem":    stringProperty("Bundled prompt stem to render (e.g. code-reviewer, reference-discovery)."),
 					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional string key-value pairs injected as a ## Render Context block at the end of the rendered prompt."},
 				},
 				"required": []string{"stem"},
@@ -3148,7 +3148,7 @@ var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
 // render-eligible from wsflow per spec #260529-prompt-render-tool.
 // Add entries here as the spec expands the set.
 var wsflowRenderEligibleStems = map[string]bool{
-	"project-survey":          true,
+	"reference-discovery":     true,
 	"plan-populator-survey":   true,
 	"plan-populator-research": true,
 	"code-reviewer":           true,

@@ -40,7 +40,7 @@ Conversation
 ### 1. Gather Context
 
 1. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
-   For each unloaded doc, run `project-survey` and incorporate its returned reference list before responding.
+   For each unloaded doc, run `reference-discovery` and incorporate its returned reference list before responding.
 2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery` for focused implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
 
@@ -99,7 +99,7 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 ## Judgments
 
 ### judge: needs-survey
-Spawn `project-survey` when any of the following hold:
+Spawn `reference-discovery` when any of the following hold:
 - The current question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded in this session - regardless of whether the model feels confident it knows the answer.
 - The discussion direction shifts to a domain no doc for which has been loaded this session.
 

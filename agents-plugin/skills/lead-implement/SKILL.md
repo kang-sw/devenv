@@ -59,7 +59,7 @@ Review
 7. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 8. Call `ws/infra.read(name: "impl-playbook")`.
 9. Identify integration test paths and their run command.
-10. If `plan-depth` ≥ survey: survey project via `ws/agents.register(name: "project-survey", prompts: ["project-survey"])` → `ws/agents.call`; capture `[Must|Maybe]` references.
+10. If `plan-depth` ≥ survey: discover reference docs via `ws/agents.register(name: "reference-discovery", prompts: ["reference-discovery"])` → `ws/agents.call`; capture `[Must|Maybe]` doc references. This agent reads docs only; source-level reference mapping happens in step 12 via `plan-populator-survey`.
 11. If `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; audit against target; commit.
 12. If `plan-depth` ≥ survey: run plan populator with **Plan prompts**; if survey returns `[escalate-to-research]`, re-run as research; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
 13. If delegated: register implementer via `ws/agents.register(name: "implementer", prompts: ["implementer"])`.

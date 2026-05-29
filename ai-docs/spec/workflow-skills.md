@@ -170,7 +170,7 @@ Survey, plan-population, review, and mental-model documentation stages dispatch
 their delegate prompts through `prompt.render` (see
 `#260529-prompt-render-tool`): the lead renders the chosen prompt to a path,
 hands it to a native subagent, and integrates the subagent's returned result.
-The five render-eligible prompts are `project-survey`, `plan-populator-survey`,
+The five render-eligible prompts are `reference-discovery`, `plan-populator-survey`,
 `plan-populator-research`, `code-reviewer`, and `mental-model-updater`.
 
 ws `lead-implement` and the ws named-agent delegation path are unchanged by this
