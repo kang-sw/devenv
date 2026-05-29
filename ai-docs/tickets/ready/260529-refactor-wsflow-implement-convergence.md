@@ -2,6 +2,10 @@
 title: Converge wsflow lead-implement onto the unified spine with a wsflow-only prompt dispatch tool
 related:
   260521-refactor-wsflow-lead-implement-mirroring-gap: ends its deferred "for now" lead-edit divergence resolution
+spec:
+  - 260529-prompt-render-tool
+  - 260529-wsflow-only-tool-surface
+  - 260529-wsflow-converged-implement-spine
 related-mental-model:
   - workflow-skills
 ---
