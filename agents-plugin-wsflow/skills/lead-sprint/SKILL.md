@@ -60,7 +60,7 @@ Trigger: `judge: route-request` selects `Start or continue sprint-edit`.
 
 1. Apply `judge: sprint-edit`; if it fails, route through normal workflow instead.
 2. If no episode is active, set `<current-edit-context>` to a one-line context, set `<episode-slug>` to a short kebab-case slug, and set `<episode-start>` with `git rev-parse HEAD`.
-3. Invoke `wsflow:lead-edit` only for a lead-owned direct edit; if the edit needs subagent implementation, stop and route through normal workflow instead.
+3. Apply the edit directly as a lead-owned change; if the edit needs subagent implementation, stop and route through normal workflow instead.
 4. Run focused verification; read full output before claiming pass.
 5. Commit the edit with normal commit message content plus both marker lines:
 
