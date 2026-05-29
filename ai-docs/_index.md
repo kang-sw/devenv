@@ -151,7 +151,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260529-refactor-wsflow-implement-convergence` | ready | Converge wsflow lead-implement onto the unified spine and add a wsflow-only prompt.render dispatch tool |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -193,12 +192,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260529-refactor-wsflow-implement-convergence` - converge wsflow lead-implement
-  onto the unified spine and add the wsflow-only `prompt.render` dispatch tool;
-  ready, single Phase 1, spec-addressed (`260529-prompt-render-tool`,
-  `260529-wsflow-only-tool-surface`, `260529-wsflow-converged-implement-spine`).
-  Implementation commits should carry a `## Spec` section for those stems. No
-  blocking ticket dependency; ends the deferred divergence from `260521` (done).
+No ready ticket is selected.
 
 ## Session Notes
 

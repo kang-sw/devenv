@@ -123,17 +123,12 @@ bootstrap, release, verification, and reconstruction workflows:
 The wsflow `lead-sprint` skill mirrors the episode-oriented sprint shell: it
 coordinates discussion, exploration, `sprint-edit` micro-edit episodes, and
 normal workflow handoff without owning a sprint branch or final wrap-up.
-Current wsflow source execution remains `lead-edit`-mediated, so sprint-edit
-uses `lead-edit` only when the change stays lead-owned and direct; larger or
-subagent-worthy work routes through normal wsflow workflow gates.
+wsflow source execution is lead-owned: sprint-edit applies a lead-owned direct
+edit, and larger or subagent-worthy work routes through normal wsflow workflow
+gates, namely the converged `wsflow:lead-implement` spine
+(`#260529-wsflow-converged-implement-spine`). The former wsflow `lead-edit`
+skill was absorbed into that spine and removed from the wsflow skill set.
 {#260513-wsflow-sprint-skill}
-
-> [!note] Planned 🚧
-> wsflow `lead-edit` is absorbed into the converged wsflow `lead-implement`
-> spine and removed from the wsflow skill set. After convergence, sprint-edit
-> source execution is lead-owned direct edits plus lead-discretion scoped native
-> subagent work rather than `lead-edit`-mediated. See
-> `#260529-wsflow-converged-implement-spine`.
 
 The wsflow package excludes skeleton flows, recovery orchestration, and
 upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
@@ -156,7 +151,7 @@ replay the full bootstrap migration backlog. Bootstrap behavior changes remain
 mirroring-sensitive: maintainers check both packages and bump each package's
 template version only when that package receives the behavior change.
 
-## 🚧 wsflow Converged Implementation Spine {#260529-wsflow-converged-implement-spine}
+## wsflow Converged Implementation Spine {#260529-wsflow-converged-implement-spine}
 
 wsflow `lead-implement` adopts the same unified implementation spine as ws
 `lead-implement` (route, verdict, prepare, edit, review, documentation, merge
@@ -392,14 +387,10 @@ After route judgments and before preparation or source inspection,
 summarizes target, selected scope, branch mode, edit mode, plan depth, review
 allocation, and decisive route facts, then continues immediately. It does not
 use `NEXT:` because `lead-proceed` owns next-skill routing. wsflow mirrors this
-checkpoint with a smaller verdict that omits edit mode, plan depth, and review
-allocation because `wsflow:lead-edit` owns implementation strategy.
-
-> [!note] Planned 🚧
-> When wsflow `lead-implement` converges onto the unified spine and absorbs
-> `wsflow:lead-edit`, the wsflow verdict no longer defers implementation
-> strategy to a separate edit skill; it reflects the converged spine stages
-> directly. See `#260529-wsflow-converged-implement-spine`.
+checkpoint with its own verdict spanning branch mode, plan depth, and review
+allocation, because the converged `wsflow:lead-implement` spine owns
+implementation strategy directly rather than deferring it to a separate edit
+skill. See `#260529-wsflow-converged-implement-spine`.
 
 Review is a single stage for both modes. `judge: review-allocation` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,

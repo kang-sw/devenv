@@ -18,6 +18,7 @@ related:
 - `wsprompt.Resolve` resolves embedded stems or absolute prompt paths into system text and optional model metadata plus legacy tier metadata.
 - `wsprompt.Bundle` and `ContentSHA256` expose prompt bundle metadata to `runtime.info` and `runtime.capabilities`.
 - `wsagent.Manager.Register` materializes prompt chains into each agent's `system.md`. {#260505-agent-prompt-registration-tier-resolution}
+- `wsprompt.RenderSource` returns a single embedded prompt body by bare stem (absolute paths and `..` rejected) for the wsflow `prompt.render` MCP tool. {#260529-prompt-render-tool}
 
 ## Module Contracts
 
@@ -39,6 +40,7 @@ related:
 - Legacy skeleton prompt stems may remain bundled for compatibility; normal implementation routing does not register `skeleton-populator` or `skeleton-reviewer`.
 - `plan-populator-survey` and `plan-populator-research` are stable prompt stems with different responsibilities: survey collects evidence-only risk signals or exits to research, research makes planner judgments and escalation calls.
 - `prompts` is canonical while `prompt_refs` is a migration alias; when both are present, `prompts` wins.
+- wsflow `prompt.render` owns render-time namespace substitution (word-boundary `\bws/` and `\bws:`) and the five-stem render-eligibility allowlist in the `internal/mcp` tool layer; `RenderSource` stays a generic bundle loader. Adding a render-eligible prompt updates the allowlist in `internal/mcp`, not `wsprompt`, and substitution never touches caller-injected context values. {#260529-prompt-render-tool}
 
 ## Extension Points & Change Recipes
 

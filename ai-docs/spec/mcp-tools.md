@@ -288,7 +288,7 @@ plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
 `ws.setup` may remain available only as hidden compatibility dispatch when a
 different setup name is advertised.
 
-## 🚧 wsflow Prompt Render Tool {#260529-prompt-render-tool}
+## wsflow Prompt Render Tool {#260529-prompt-render-tool}
 
 `prompt.render(stem, context) -> { prompt_path }` is a read-only tool for the
 wsflow product mode. It loads a bundled delegate prompt by `stem`, applies the
