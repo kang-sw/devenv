@@ -8,6 +8,9 @@ spec:
   - 260529-wsflow-converged-implement-spine
 related-mental-model:
   - workflow-skills
+  - mcp-runtime
+  - prompt-bundle
+completed: 2026-05-29
 ---
 
 # Converge wsflow lead-implement onto the unified spine with a wsflow-only prompt dispatch tool
@@ -171,3 +174,44 @@ Verification (end-to-end observable behavior):
   `lead-edit` divergence exception removed.
 - wsflow distributed skill bundle test reports no forbidden full-ws references,
   no `lead-edit` in the shipped set, and no inventory drift.
+
+### Result (b9284c27) - 2026-05-29
+
+Implemented across three source commits on `implement/wsflow-implement-convergence`:
+
+- `accdc685` (lead-authored): rewrote `agents-plugin-wsflow/skills/lead-implement/SKILL.md`
+  to the unified spine (Route/Verdict/Prep/Edit/Review/Doc/Closeout/Final/Merge
+  with branch-mode, plan-depth, review-allocation judges; Edit = lead direct +
+  optional scoped native subagent, no implementer stage; render-mediated dispatch
+  for the five prompts); deleted `lead-edit/SKILL.md`; updated `lead-sprint` to a
+  lead-owned direct edit; synced `ai-docs/ref/wsflow-mirroring.md`. Fresh-reader
+  audit run (9 fixes applied; 3 kept as ws-mirroring parity).
+- `9a7f996d` + `b9284c27` (delegated, lead-reviewed): `prompt.render` MCP tool in
+  `internal/mcp/server.go` with `renderPrompt` (reuses `wsprompt.RenderSource`,
+  `wsstate.GeneratePaths` new `"prompt"` kind), the symmetric `wsflowOnlyTool`
+  gate, `agents-plugin-wsflow/runtime.json` entry, and Go + Python tests. Review
+  fixes: word-boundary substitution (`\bws([/:])`) and a five-stem
+  render-eligibility allowlist.
+- Doc closeout: spec markers stripped (`401cbda3`), mental models updated
+  (`a3560719`).
+
+Deviations and decisions:
+
+- The mirror gate is applied at THREE points — `callTool`, `toolAllowed`, and
+  `LeadToolNames` (the `runtime.capabilities` surface). The ticket named the
+  third as "tools/list advertise"; `LeadToolNames` is that capabilities/advertise
+  path. Captured as an mcp-runtime mental-model gotcha.
+- Added a five-stem render-eligibility allowlist in the tool layer (stricter than
+  the brief's "enforce at caller" note) so the spec's "exactly five / implementer
+  not render-eligible" is observable and enforced. Lead-approved during review.
+- Namespace substitution is word-boundary anchored to match the Python
+  forbidden-token semantics, so interior `ws` substrings (e.g. `workflows/`) are
+  never mangled.
+- Plan-populator step folded into the project-survey reference map (design fully
+  pinned by spec `83994c8`); no separate plan file.
+
+Verification: `go test ./internal/mcp/... ./internal/wsprompt/... ./internal/wsstate/...`
+pass; `python3 -m unittest discover agents-plugin-wsflow/tests` 10/10 pass; gate
+verified both directions (wsflow advertises+serves, full ws hides+rejects);
+rendered output substitutes `ws/`->`wsflow/` and injects context with no
+`expected_output_path`.

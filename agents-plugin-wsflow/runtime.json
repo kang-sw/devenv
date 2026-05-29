@@ -59,7 +59,8 @@
     "git.log": ">=0.29.4-dev <0.30.0",
     "git.merge_base": ">=0.29.4-dev <0.30.0",
     "git.commit": ">=0.29.4-dev <0.30.0",
-    "api.list": ">=0.29.4-dev <0.30.0"
+    "api.list": ">=0.29.4-dev <0.30.0",
+    "prompt.render": ">=0.29.4-dev <0.30.0"
   },
   "commands": {
     "runtime.info": ">=0.29.4-dev <0.30.0",

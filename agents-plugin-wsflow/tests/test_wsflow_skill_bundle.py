@@ -23,7 +23,6 @@ EXPECTED_SKILLS = {
     "lead-add-rule",
     "lead-bootstrap",
     "lead-discuss",
-    "lead-edit",
     "lead-forge-mental-model",
     "lead-forge-spec",
     "lead-implement",
@@ -40,9 +39,7 @@ EXPECTED_SKILLS = {
     "lead-write-ticket",
 }
 
-EXPECTED_WSFLOW_ONLY_SKILLS = {
-    "lead-edit",
-}
+EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
 
 FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
@@ -50,7 +47,6 @@ FORBIDDEN_PATTERNS = {
     "full ws dotted namespace": re.compile(r"\bws\."),
     "full ws query tool": re.compile(r"\bsubquery\b"),
     "full ws agent dotted tool": re.compile(r"\bagents\."),
-    "full ws mental model updater": re.compile(r"\bmental-model-updater\b"),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
     "excluded salvage skill": re.compile(r"\blead-salvage\b"),
@@ -71,7 +67,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         )
 
         self.assertEqual(missing_full_counterparts, [])
-        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), ["lead-edit"])
+        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), [])
         self.assertEqual(unexpected_wsflow_skills, [])
 
     def test_skill_files_do_not_reference_full_ws_agent_surface(self):
@@ -117,6 +113,8 @@ class WsflowSkillBundleTest(unittest.TestCase):
             [
                 "- **Target**: <ticket path/stem or inline target>",
                 "- **Branch Mode**: <continue implementation branch | create implementation branch>",
+                "- **Plan Depth**: <none | brief | survey | research>",
+                "- **Review Allocation**: <lead-only | single reviewer | partitioned: correctness[, fit][, test]>",
                 "- **Scope**: <selected phase, whole target, or caller-provided slice>",
                 "- **Reason**: <decisive route facts only>",
             ],

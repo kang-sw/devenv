@@ -34,7 +34,6 @@ Included:
 - `lead-proceed`
 - `lead-implement`
 - `lead-check-blockers`
-- `lead-edit`
 - `lead-update-spec`
 - `lead-bootstrap`
 - `lead-add-rule`
@@ -66,6 +65,31 @@ Excluded:
   review when useful.
 - Keep workflow integration lead-owned: docs, ticket/spec changes, mental-model
   updates, commits, and final judgment stay with the lead.
+- Feed playbook delegate prompts to native subagents only through
+  `wsflow/prompt.render`; never hand-paste full playbook prompt text.
+
+## Prompt Render Dispatch
+
+`wsflow/prompt.render(stem, context)` is the wsflow-only mechanism for handing a
+bundled delegate prompt to a native subagent. It loads the prompt by stem,
+applies render-time `ws/` -> `wsflow/` namespace substitution, injects `context`
+values, writes the result to a tmp file, and returns `prompt_path`. The lead
+hands `prompt_path` to a native subagent.
+
+- Render-eligible prompt stems: `project-survey`, `plan-populator-survey`,
+  `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
+  stems are not full-ws references and may appear in distributed wsflow skill
+  text.
+- File-writing prompts (`plan-populator-*`, `mental-model-updater`) receive a
+  caller-created output path in `context`; free-response prompts
+  (`project-survey`, `code-reviewer`) return text. `prompt.render` does not mint
+  an `expected_output_path`.
+- The `implementer` prompt is not render-eligible in wsflow.
+
+`prompt.render` is a wsflow-only tool: it is advertised and callable only in the
+wsflow product mode and is hidden from the full ws surface. This is the mirror of
+the agentless hidden-tool gate (full ws hides `agents.*`, `subquery`, and other
+agent-backed tools in wsflow). The two gates are symmetric and must stay so.
 
 ## Bootstrap Template Rules
 
@@ -84,9 +108,11 @@ The wsflow distributed skill bundle has package tests that fail when shipped
 skill files contain forbidden full-ws references, excluded skills, or inventory
 drift.
 
-`lead-edit` is the only intentional wsflow-only shipped skill while wsflow keeps
-source execution `lead-edit`-mediated. Any additional wsflow-only skill must be
-documented here and in the package test before release.
+wsflow ships no wsflow-only skills: `lead-implement` is the converged unified
+spine and absorbs the former `lead-edit` primitive. The only wsflow-only runtime
+surface is the `prompt.render` MCP tool (see **Prompt Render Dispatch**). Any new
+wsflow-only skill or tool must be documented here and in the package test before
+release.
 
 Run:
 
@@ -107,7 +133,6 @@ Forbidden distributed-skill references include:
 - `agents.register`
 - `agents.call`
 - `agents.result`
-- `mental-model-updater`
 - `lead-write-code`
 - `lead-write-skeleton`
 - `lead-salvage`

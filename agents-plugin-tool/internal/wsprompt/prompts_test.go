@@ -306,6 +306,35 @@ func TestRuntimeContractPromptBundleHash(t *testing.T) {
 	}
 }
 
+func TestRenderSourceReturnsBareEmbeddedPromptBody(t *testing.T) {
+	body, err := RenderSource("code-reviewer")
+	if err != nil {
+		t.Fatalf("RenderSource returned error: %v", err)
+	}
+	if strings.HasPrefix(strings.TrimSpace(body), "---") || strings.Contains(body, "model: core") {
+		t.Fatalf("RenderSource did not strip frontmatter: %q", body[:min(len(body), 120)])
+	}
+	if !strings.Contains(body, "You are a code reviewer.") {
+		t.Fatalf("RenderSource missing expected prompt body: %q", body[:min(len(body), 120)])
+	}
+}
+
+func TestRenderSourceRejectsPathsAndTraversal(t *testing.T) {
+	for _, bad := range []string{"../secret", "prompts/code-reviewer", "dir\\prompt", ""} {
+		if _, err := RenderSource(bad); err == nil {
+			t.Fatalf("RenderSource accepted non-bare spec %q", bad)
+		}
+	}
+}
+
+func TestRenderSourceRejectsUnknownStem(t *testing.T) {
+	if _, err := RenderSource("no-such-prompt"); err == nil {
+		t.Fatal("RenderSource accepted unknown stem")
+	} else if !strings.Contains(err.Error(), "no-such-prompt") {
+		t.Fatalf("RenderSource unknown-stem error missing stem name: %v", err)
+	}
+}
+
 func TestNormalizePromptHashContent(t *testing.T) {
 	got := string(normalizePromptHashContent([]byte("one\r\ntwo\nthree\r\n")))
 	want := "one\ntwo\nthree\n"

@@ -42,6 +42,7 @@ type Layout struct {
 	WorktreeMeta     string
 	AgentsDir        string
 	ReviewDir        string
+	PromptDir        string
 	SessionsDir      string
 	WorktreeLocksDir string
 	TmpDir           string
@@ -147,6 +148,7 @@ func (m Manager) Ensure(repoPath string) (Layout, ProjectMetadata, WorktreeMetad
 		layout.LocksDir,
 		layout.AgentsDir,
 		layout.ReviewDir,
+		layout.PromptDir,
 		layout.SessionsDir,
 		layout.WorktreeLocksDir,
 		layout.TmpDir,
@@ -189,6 +191,7 @@ func layoutFor(cacheRoot, projectKey, worktreeKey string) Layout {
 		WorktreeMeta:     filepath.Join(worktreeDir, "worktree.json"),
 		AgentsDir:        filepath.Join(worktreeDir, "agents"),
 		ReviewDir:        filepath.Join(worktreeDir, "review-paths"),
+		PromptDir:        filepath.Join(worktreeDir, "prompt-paths"),
 		SessionsDir:      filepath.Join(worktreeDir, "sessions"),
 		WorktreeLocksDir: filepath.Join(worktreeDir, "locks"),
 		TmpDir:           filepath.Join(worktreeDir, "tmp"),

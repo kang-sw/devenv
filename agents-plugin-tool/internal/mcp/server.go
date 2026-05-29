@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -340,6 +341,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
+	}
+	if !NoAgentMode() && wsflowOnlyTool(params.Name) {
+		return errorResponse(req.ID, -32601, fmt.Sprintf("%s: tool not available in full ws mode: %s", RuntimeNamespace(), params.Name))
 	}
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
@@ -846,6 +850,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
+	case "prompt.render":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		stem, _ := params.Arguments["stem"].(string)
+		promptPath, err := renderPrompt(root, stem, stringMapArgument(params.Arguments["context"]))
+		return toolTextResponse(req.ID, promptPath+"\n", err)
 	case "agents.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2759,6 +2771,19 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "prompt.render",
+			"description": namespaceText("Render a bundled delegate prompt by stem with namespace substitution and injected context; returns a tmp prompt file path (wsflow only)."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":    stringProperty("Repository root. Defaults to the server root."),
+					"stem":    stringProperty("Bundled prompt stem to render (e.g. code-reviewer, project-survey)."),
+					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional string key-value pairs injected as a ## Render Context block at the end of the rendered prompt."},
+				},
+				"required": []string{"stem"},
+			},
+		},
+		{
 			"name":        "agents.register",
 			"description": "Register a durable ws agent session for the current worktree.",
 			"inputSchema": map[string]any{
@@ -2915,6 +2940,9 @@ func LeadToolNames() []string {
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
+		if !NoAgentMode() && wsflowOnlyTool(name) {
+			continue
+		}
 		if name != "" {
 			names = append(names, name)
 		}
@@ -2981,6 +3009,9 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 
 func (s *Server) toolAllowed(name string) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
+		return false
+	}
+	if !NoAgentMode() && wsflowOnlyTool(name) {
 		return false
 	}
 	if !roleAllowsTool(s.role, name) {
@@ -3097,6 +3128,71 @@ func noAgentHiddenTool(name string) bool {
 	default:
 		return false
 	}
+}
+
+func wsflowOnlyTool(name string) bool {
+	switch name {
+	case "prompt.render":
+		return true
+	default:
+		return false
+	}
+}
+
+// wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
+// a word boundary so that words containing "ws" as an interior substring (e.g.
+// "news/", "rows:", "workflows/") are never mangled.
+var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
+
+// wsflowRenderEligibleStems is the exact set of prompt stems that are
+// render-eligible from wsflow per spec #260529-prompt-render-tool.
+// Add entries here as the spec expands the set.
+var wsflowRenderEligibleStems = map[string]bool{
+	"project-survey":          true,
+	"plan-populator-survey":   true,
+	"plan-populator-research": true,
+	"code-reviewer":           true,
+	"mental-model-updater":    true,
+}
+
+// renderPrompt loads a bundled prompt by stem, applies namespace substitution,
+// appends an optional injected context block, writes the result to a
+// worktree-scoped tmp file, and returns the path.
+func renderPrompt(root, stem string, context map[string]string) (string, error) {
+	if !wsflowRenderEligibleStems[stem] {
+		return "", fmt.Errorf("prompt stem %q is not render-eligible in wsflow", stem)
+	}
+	body, err := wsprompt.RenderSource(stem)
+	if err != nil {
+		return "", fmt.Errorf("load prompt %q: %w", stem, err)
+	}
+	ns := RuntimeNamespace()
+	body = wsNamespaceRef.ReplaceAllString(body, ns+"$1")
+	if len(context) > 0 {
+		keys := make([]string, 0, len(context))
+		for k := range context {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var sb strings.Builder
+		sb.WriteString("\n\n## Render Context\n")
+		for _, k := range keys {
+			sb.WriteString("- ")
+			sb.WriteString(k)
+			sb.WriteString(": ")
+			sb.WriteString(context[k])
+			sb.WriteString("\n")
+		}
+		body += sb.String()
+	}
+	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, "prompt", []string{stem})
+	if err != nil {
+		return "", fmt.Errorf("allocate prompt path: %w", err)
+	}
+	if err := os.WriteFile(generated[0].Path, []byte(body), 0o644); err != nil {
+		return "", fmt.Errorf("write prompt %s: %w", generated[0].Path, err)
+	}
+	return generated[0].Path, nil
 }
 
 func (s *Server) subqueryAgentAccessAllowed(toolName string, arguments map[string]any) bool {
