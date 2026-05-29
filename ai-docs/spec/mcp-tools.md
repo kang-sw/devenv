@@ -288,6 +288,36 @@ plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
 `ws.setup` may remain available only as hidden compatibility dispatch when a
 different setup name is advertised.
 
+## 🚧 wsflow Prompt Render Tool {#260529-prompt-render-tool}
+
+`prompt.render(stem, context) -> { prompt_path }` is a read-only tool for the
+wsflow product mode. It loads a bundled delegate prompt by `stem`, applies the
+render-time `ws/` -> `wsflow/` namespace substitution used for wsflow-facing
+text, injects caller-supplied `context` values into the prompt body, writes the
+rendered result to a temporary file, and returns that file path. The caller
+hands `prompt_path` to a native host subagent.
+
+The tool carries no routing or strategy decision: the caller selects the stem,
+and `prompt.render` only materializes a context-injected, namespace-substituted
+copy. It does not mint or require an `expected_output_path`. Free-response
+prompts return their result as the subagent's text; file-writing prompts such as
+`plan-populator-*` and `mental-model-updater` receive a caller-supplied output
+path through `context`, and the rendered prompt body directs the write to that
+path.
+
+wsflow exposes exactly five render-eligible prompts: `project-survey`,
+`plan-populator-survey`, `plan-populator-research`, `code-reviewer`, and
+`mental-model-updater`. The `implementer` prompt is not render-eligible in
+wsflow.
+
+`prompt.render` belongs to a symmetric wsflow-only tool surface. Just as the
+agentless mode (`#260513-wsflow-agentless-runtime-mode`) hides agent-backed
+tools from the wsflow distribution, wsflow-only tools are hidden from the full
+ws distribution: a full ws session does not advertise `prompt.render`, while a
+wsflow session does. Advertisement in `tools/list`, explicit-call gating, and
+runtime capability output all follow the selected product mode in both
+directions. {#260529-wsflow-only-tool-surface}
+
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 
 The `agents.*` tool family exposes durable named-agent orchestration.

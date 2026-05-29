@@ -128,6 +128,13 @@ uses `lead-edit` only when the change stays lead-owned and direct; larger or
 subagent-worthy work routes through normal wsflow workflow gates.
 {#260513-wsflow-sprint-skill}
 
+> [!note] Planned 🚧
+> wsflow `lead-edit` is absorbed into the converged wsflow `lead-implement`
+> spine and removed from the wsflow skill set. After convergence, sprint-edit
+> source execution is lead-owned direct edits plus lead-discretion scoped native
+> subagent work rather than `lead-edit`-mediated. See
+> `#260529-wsflow-converged-implement-spine`.
+
 The wsflow package excludes skeleton flows, recovery orchestration, and
 upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
 `lead-skill-authoring`. wsflow skill text uses scoped subagent guidance for
@@ -148,6 +155,31 @@ wsflow bootstrap uses package-local template version history. Its downstream
 replay the full bootstrap migration backlog. Bootstrap behavior changes remain
 mirroring-sensitive: maintainers check both packages and bump each package's
 template version only when that package receives the behavior change.
+
+## 🚧 wsflow Converged Implementation Spine {#260529-wsflow-converged-implement-spine}
+
+wsflow `lead-implement` adopts the same unified implementation spine as ws
+`lead-implement` (route, verdict, prepare, edit, review, documentation, merge
+readiness) and absorbs the separate `wsflow:lead-edit` skill, which is removed
+from the wsflow skill set. wsflow `lead-implement` becomes the single
+source-editing entry point.
+
+The Edit stage is lead-owned: the lead applies direct edits and may delegate
+scoped work to a native host subagent at its discretion. wsflow has no
+`implementer` named stage, and the `implementer` prompt is not render-eligible
+in wsflow. In a one-shot subagent host the implementer loses its multi-turn
+fix-relay value, so larger delegation stays lead-discretion scoped native
+subagent work instead of a fixed implementer stage.
+
+Survey, plan-population, review, and mental-model documentation stages dispatch
+their delegate prompts through `prompt.render` (see
+`#260529-prompt-render-tool`): the lead renders the chosen prompt to a path,
+hands it to a native subagent, and integrates the subagent's returned result.
+The five render-eligible prompts are `project-survey`, `plan-populator-survey`,
+`plan-populator-research`, `code-reviewer`, and `mental-model-updater`.
+
+ws `lead-implement` and the ws named-agent delegation path are unchanged by this
+convergence; the change is wsflow-local.
 
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 
@@ -362,6 +394,12 @@ allocation, and decisive route facts, then continues immediately. It does not
 use `NEXT:` because `lead-proceed` owns next-skill routing. wsflow mirrors this
 checkpoint with a smaller verdict that omits edit mode, plan depth, and review
 allocation because `wsflow:lead-edit` owns implementation strategy.
+
+> [!note] Planned 🚧
+> When wsflow `lead-implement` converges onto the unified spine and absorbs
+> `wsflow:lead-edit`, the wsflow verdict no longer defers implementation
+> strategy to a separate edit skill; it reflects the converged spine stages
+> directly. See `#260529-wsflow-converged-implement-spine`.
 
 Review is a single stage for both modes. `judge: review-allocation` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
