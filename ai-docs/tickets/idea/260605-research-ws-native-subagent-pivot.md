@@ -354,22 +354,111 @@ fragment — not the full manual, not into every playbook.
    ticket.
 5. **Actor/setup model redesign** for shared-server logical sessions.
 
+## Continuation Decisions (2026-06-08)
+
+Second lead-discuss session. Resolves/refines three items from the original
+record; the original decision sections above are kept as the first-session
+trail.
+
+### Entry-skill keep-list (resolves the open question)
+
+Actual inventory is 20 `SKILL.md` under `agents-plugin/skills` (the prior "21"
+was off-by-one / counted the `reference-discovery` prompt-stem). Settled split:
+**11 entry shims, 9 internal → `playbook.print` bodies.**
+
+- Entry shims (user-exposed, thin shims with good trigger descriptions):
+  `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`, `lead-ship`,
+  `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`, `lead-add-rule`,
+  `lead-forge-mental-model`, `lead-forge-spec`.
+- Internal → `playbook.print` bodies: `lead-implement`, `lead-write-ticket`,
+  `lead-write-spec`, `lead-workflow-manual`, `lead-check-blockers`,
+  `lead-verify-design`, `lead-verify-discussion`, `lead-write-skeleton`,
+  `lead-update-spec`.
+- `lead-write-ticket` and `lead-write-spec` are dual-use today but are NOT
+  user-invoked directly going forward (orchestration-only); their bodies move
+  to playbook content invoked by caller skills. `forge-*` stay as entry
+  (rare user-driven reconstruction). `lead-skill-authoring` stays entry, but
+  its invariant-audit target moves to the rsrc playbook sources, so the audit
+  procedure follows the text.
+- Classification axis is "is the user meant to type `/ws:<name>` directly",
+  not cross-skill invocation count (which mixes pure-internal references like
+  `lead-workflow-manual` with dual-use writers).
+
+### Implement entry routing (new decision)
+
+`lead-implement` is NOT exposed as a user entry. `lead-proceed` stays the
+single implementation entry point and gains a conservative ticket-skip gate
+with two paths:
+
+- **Explicit skip (deterministic)**: user requests a direct edit or explicitly
+  says go without a ticket — judged from user words, no model guess.
+- **Implicit skip (conservative, default to full routing)**: proceed auto-skips
+  ticket routing only when an all-of threshold holds — relevant code already
+  read into the session context, localized 1-2 file scope, and no
+  cross-module/behavioral/spec impact. When in doubt, fall through to full
+  routing.
+
+The skip threshold **reuses the repo Approval Protocol categories** as the
+decision key (Auto-proceed set = implicit-skip-eligible; Ask-first / Always-ask
+= force full routing) — no new abstraction. Guard: if an implicit-skip edit
+grows mid-implementation, retroactively suggest ticket creation (escape hatch,
+not a forced step). Cold/compacted context naturally degrades the gate to full
+routing, which is the correct behavior.
+
+Rejected: exposing `lead-implement` as a second user entry — it reopens the
+"code touched before spec/ticket/plan routing" hole that `lead-proceed` exists
+to close, and forces a when-to-use-which judgment onto the user.
+
+### Convention loading via playbook (refines api.ask / rsrc-loader direction)
+
+Flag-based loading (e.g. `playbook.read(name, ["conventions"])`) is **rejected**
+— it pushes the include decision back to the caller and is no better than
+today's `convention.read` skip surface (the caller must still remember the
+flag). Chosen instead:
+
+- **Playbook frontmatter declares its own text dependencies** (e.g.
+  `includes: [ticket-conventions]`); the rsrc loader **auto-includes** them at
+  print time. The caller makes the one `playbook.print(name)` call it was going
+  to make anyway.
+- The real benefit is **atomicity** (the procedure cannot be obtained without
+  its conventions), not round-trip reduction. The include decision is fixed at
+  authoring time, not runtime, so context-gating is per-playbook and CI
+  validates declared includes (extends the planned tree validator).
+- `convention.read` / `infra.read` **survive as standalone discovery tools**
+  for raw access (e.g. `lead-skill-authoring` audits, ad-hoc lead inspection).
+  They serve a different entry point and do not compete with execution-path
+  auto-include.
+
+This settles the design for the open question "whether `infra.read`/
+`convention.read` unify onto the rsrc loader"; the unify mechanism is
+auto-include with the read tools retained for discovery. First-pass-vs-later
+timing remains an implementation-sequencing call.
+
+### Verification status update (from this session)
+
+- Codex `rsrc/` materialization and parallel fan-out were confirmed verified by
+  the user; these drop from the open verification list. Reconnect UX after
+  binary swap is the remaining Codex item.
+- Observability loss (`agents.tail/status/debug`, dashboard agent-activity
+  sources) is accepted; harness-native subagent visibility is the replacement.
+
 ## Open Questions (continuation agenda)
 
-- Entry-skill keep-list (which of the 21 skills survive as shims).
+- ~~Entry-skill keep-list~~ — resolved above (11 entry / 9 playbook).
 - memory./mutation tool first slice: which operations, what layering, where
   delegation notes (if any) live.
 - Playbook schema: frontmatter fields (`kind: print|render`,
-  `delegates: bool`, params, overlays), directory layout, manifest format.
-- Codex: rsrc materialization check; parallel fan-out verification; reconnect
-  UX after binary swap.
+  `delegates: bool`, `includes: [<text-dep>]`, params, overlays), directory
+  layout, manifest format.
+- Codex: reconnect UX after binary swap (rsrc materialization and parallel
+  fan-out now verified).
 - Migration sequencing detail within the epic: agentless-default dogfood →
   skill-text agents.* reference removal → runtime code deletion (order agreed
   in principle).
 - Disposition mechanics: 260429 absorption into the epic; dashboard tree
   drop/salvage pass; 260521 retirement.
-- Whether `infra.read`/`convention.read` unify onto the rsrc loader in the
-  first pass or later.
+- `infra.read`/`convention.read` rsrc-loader unify: design settled
+  (auto-include + read tools retained); first-pass-vs-later timing open.
 
 ## Survey Provenance (session evidence trail)
 
