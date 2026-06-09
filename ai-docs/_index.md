@@ -187,16 +187,19 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260609-feat-ws-playbook-surface-mvp` - playbook surface MVP (M1 of the
-  playbook-factory pivot epic); ready. **Phase 1 done** (`internal/wsrsrc`
-  call-time loader + `agents-plugin/rsrc/` tree + manifest/schema-version +
-  `WS_RSRC_ROOT` + CI validator; no MCP tool yet). **Phase 2 next**:
-  `playbook.print`/`playbook.render` MCP tools + harness-aware selection. Spec
-  stems (`260609-playbook-tools`, `260609-playbook-harness-rendering`,
-  `260609-rsrc-playbook-distribution`) stay 🚧 until Phase 2 exposes the
-  caller-visible surface. Binary/text swap-race tickets (`260523`,
-  `260524-codex-cache`) are distribution prerequisites; Codex `rsrc/` cache
-  materialization remains an open verification item.
+- `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory pivot
+  board; not implementation-ready (board artifact). **M1
+  `260609-feat-ws-playbook-surface-mvp` is done** (`.done/`): `internal/wsrsrc`
+  call-time loader (Phase 1) + `playbook.print`/`playbook.render` MCP tools with
+  harness-aware rendering (Phase 2); spec stems `260609-playbook-tools` /
+  `-harness-rendering` / `-rsrc-playbook-distribution` are implemented. **Next
+  child: M2 `260609-refactor-ws-skill-text-playbook-conversion`** (todo —
+  retained-native-subagent delegation patterns replace agents.*/subquery refs;
+  internal skill bodies → playbooks; depends on M1). M3
+  (`260609-refactor-ws-spawn-runtime-deletion-session-auth`, todo) still needs
+  option-B re-scoping + contract-first spec before ready. Open verification item
+  carried forward: Codex non-skill `rsrc/` cache materialization (prereqs
+  `260523`, `260524-codex-cache`).
 
 ## Session Notes
 
