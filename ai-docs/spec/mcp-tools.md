@@ -318,6 +318,89 @@ wsflow session does. Advertisement in `tools/list`, explicit-call gating, and
 runtime capability output all follow the selected product mode in both
 directions. {#260529-wsflow-only-tool-surface}
 
+## 🚧 Playbook Tools {#260609-playbook-tools}
+
+The playbook tools are the ws-distribution surface for serving workflow procedure
+text and subagent-injection prompts from a plain-text resource tree, with content
+selected for the detected host harness. They are the full-ws generalization of the
+wsflow-only `prompt.render` (`#260529-prompt-render-tool`): `prompt.render` stays
+the wsflow surface during migration and is not removed by this surface.
+
+`playbook.print(name, context?)` returns the named playbook's procedure text
+inline in the tool result, with `context` values substituted and declared
+includes resolved. It is the lead-facing successor of internal workflow-skill
+bodies.
+
+`playbook.render(name, context?)` materializes the named playbook as a
+context-injected, harness-rendered prompt, writes it to a worktree-scoped
+temporary file, and returns that file path. The caller hands the path to a
+host-native subagent. Like `prompt.render`, it carries no routing or strategy
+decision — the caller selects `name`, and the tool only materializes a rendered
+copy.
+
+A playbook is selected by `name`; the tool does not decide which playbook to use.
+A load or render failure for a requested `name` is a loud error, not a silent
+empty result.
+
+Harness-aware content selection uses the harness the MCP session has already
+detected (`#260508-mcp-payload-harness-detection`). Harness differences are
+served as data, not as separate code paths: a shared playbook body plus a
+per-harness terminology table (exploration agent name, spawn idiom, continuation
+idiom, model aliases), with structural divergence expressed only through
+per-harness overlay files. The supported harness set is Claude and Codex; an
+unrecognized harness renders host-neutral text rather than failing. Concrete
+per-provider model names are resolved from configuration
+(`#260513-harness-local-agent-tier-config`), never baked into the resource tree
+or the binary, so model-name churn is a config update rather than a
+redistribution. {#260609-playbook-harness-rendering}
+
+A playbook may declare text dependencies in its frontmatter; the renderer
+auto-includes that text at print/render time, so a single `playbook.print(name)`
+call returns the procedure together with its required conventions. The include
+set is fixed at authoring time, not chosen by the caller per call. This does not
+replace `convention.read` / `infra.read`, which remain standalone discovery tools
+for raw access.
+
+A playbook marked as delegating carries a compact continuation tip in its
+rendered output, reminding the caller to reuse the host-returned subagent agent
+id for continuation instead of respawning. The tip is the only continuity
+mechanism: the playbook surface keeps no agent registry and mandates no
+continuity-recording file.
+
+> [!note] Constraints
+> - Gemini is out of scope; only Claude and Codex have terminology tables. Any
+>   other harness, including none detected, gets host-neutral text.
+> - The continuation tip is advisory text, not an enforced or tracked binding.
+
+### 🚧 Resource Tree Distribution {#260609-rsrc-playbook-distribution}
+
+Playbook and prompt text ships as a plain-text resource tree distributed with the
+plugin and loaded at call time, rather than compiled into the binary. Text-only
+changes to playbooks are therefore deployable without a binary version change.
+
+The tree carries a manifest recording per-file integrity data and a playbook
+schema version. The runtime gates loading on **schema-version compatibility**,
+not on exact content-hash equality, so compatible text edits load without a
+binary bump while an incompatible schema version is refused.
+
+A manifest mismatch or load failure is a loud, partial failure of the playbook
+surface: the playbook tools report the failure and do not serve playbook content,
+and there is no embedded fallback copy. A session whose playbook surface has
+failed still serves the discovery, Git, and other tools that do not depend on the
+resource tree.
+
+`WS_RSRC_ROOT` overrides the resource-tree load root. When set, the runtime loads
+the tree from that path instead of the distributed plugin copy, so a development
+checkout can edit playbook text and see it live without waiting on plugin cache
+refresh.
+
+> [!note] Constraints
+> - Compatibility is defined by schema version, not file-hash equality; the
+>   manifest's hashes are integrity data, not a load gate.
+> - There is no embedded fallback text. When the resource tree is unavailable or
+>   incompatible, the playbook surface fails loudly rather than degrading to a
+>   stale built-in copy.
+
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 
 The `agents.*` tool family exposes durable named-agent orchestration.

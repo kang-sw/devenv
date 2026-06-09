@@ -187,7 +187,12 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-No ready ticket is selected.
+- `260609-feat-ws-playbook-surface-mvp` - playbook surface MVP (M1 of the
+  playbook-factory pivot epic); ready, contract-first spec authored
+  (`260609-playbook-tools`, `260609-playbook-harness-rendering`,
+  `260609-rsrc-playbook-distribution`). Phase 1 rsrc loader → Phase 2 MCP
+  tools; binary/text swap-race tickets (`260523`, `260524-codex-cache`) are
+  distribution prerequisites. Implementation commits carry a `## Spec` section.
 
 ## Session Notes
 

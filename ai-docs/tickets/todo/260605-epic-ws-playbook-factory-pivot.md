@@ -39,10 +39,12 @@ subagents. Direction, decisions, and evidence live in
   resolved-by-deletion candidates, promote cache/launcher race tickets to
   prerequisites, start agentless-mode (`WS_MCP_NO_AGENT=1`) dogfooding as the
   breakage-discovery forcing function.
-- Planned (M1 — playbook surface MVP): `playbook.print`/`playbook.render`,
-  rsrc/ tree + manifest/schema-version contract + `WS_RSRC_ROOT` dev
-  override, harness terminology/model tables (config-backed), unknown-harness
-  fallback, delegation tip injection.
+- `260609-feat-ws-playbook-surface-mvp` (ready, M1 — playbook surface MVP):
+  `playbook.print`/`playbook.render`, rsrc/ tree + manifest/schema-version
+  contract + `WS_RSRC_ROOT` dev override, harness terminology/model tables
+  (config-backed), unknown-harness fallback, delegation tip injection.
+  Contract-first spec authored (`260609-playbook-tools`,
+  `260609-playbook-harness-rendering`, `260609-rsrc-playbook-distribution`).
 - Planned (M2 — skill-text conversion): retained-native-subagent delegation
   patterns replace agents.*/subquery references across skills; subquery →
   Explore absorption; entry-skill keep-list decision; internal skill bodies →
