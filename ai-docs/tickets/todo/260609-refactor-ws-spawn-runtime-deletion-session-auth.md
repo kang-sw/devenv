@@ -1,11 +1,11 @@
 ---
-title: ws spawn-runtime deletion and ephemeral session-auth model
+title: ws spawn-runtime reshape to mercenary and ephemeral session-auth model
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
-  260605-research-ws-native-subagent-pivot: direction, session-auth model, root-vs-cwd, role-containment decisions
+  260605-research-ws-native-subagent-pivot: direction, option B mercenary reshape, session-auth model, root-vs-cwd, role-containment decisions
   260609-refactor-ws-skill-text-playbook-conversion: prerequisite — skill text must stop referencing the spawn surface first
-  260517-bug-ws-agent-empty-result-after-tool-use: resolved-by-deletion in this milestone
-  260524-bug-ws-agent-register-stale-dir-result-hang: resolved-by-deletion in this milestone
+  260517-bug-ws-agent-empty-result-after-tool-use: NOT auto-resolved under option B — lives in the retained mercenary path, must be fixed/re-triaged
+  260524-bug-ws-agent-register-stale-dir-result-hang: NOT auto-resolved under option B — re-triage against the reshaped path (may be obsoleted by dropping register-with-stems)
   260524-bug-wsstore-ci-sqlite-busy: resolved-by-deletion (in-memory session map replaces wsstore actor records)
   260524-bug-subquery-non-head-history-evidence: resolved-by-deletion (subquery runtime removed)
   260524-bug-subquery-working-directory-stderr: resolved-by-deletion (subquery runtime removed)
@@ -22,13 +22,18 @@ related-mental-model:
 
 Milestone M3 of the playbook-factory pivot (epic
 `260605-epic-ws-playbook-factory-pivot`). With skill text no longer referencing
-the spawn surface (M2), this slice deletes the subprocess-spawn agent machinery
-and replaces the persistent actor/authority model with an ephemeral in-memory
-session-auth model.
+the spawn surface (M2), this slice **reshapes** the subprocess-spawn agent
+machinery — retaining a scoped first-class "mercenary" surface (codex engine,
+implementer/reviewer roles) per option B — and replaces the persistent
+actor/authority model with an ephemeral in-memory session-auth model. It is
+NOT a pure deletion (the earlier option-C freeze is superseded for the retained
+core); deletion is confined to gemini / subquery / exploration-spawn /
+diagnostic-sprawl.
 
-This is the largest milestone and the one that realizes the pivot's
-simplification payoff (no dual-path maintenance). Full direction, empirical
-grounding, and rejected alternatives live in
+This is the largest milestone and the one that realizes the bulk of the pivot's
+simplification payoff (actor machinery removed; spawn surface scoped and
+parity-aligned). Full direction, empirical grounding, and rejected alternatives
+live in
 `260605-research-ws-native-subagent-pivot` (see the 2026-06-09 "actor/setup →
 ephemeral session auth model", "root role unchanged; cwd separated", "exec →
 stateless capability", and "role-containment retained" sections, plus the
@@ -38,36 +43,52 @@ original "total spawn removal" inventory).
 
 Binding decisions from the research ticket and the epic Cross-Child Decisions:
 
-### Spawn removal — live path deleted, spawn core frozen (option C)
+### Spawn-runtime reshape to mercenary (option B) — partial retain, not deletion
 
-Disposition refined by the research ticket's 2026-06-09 "spawn core
-frozen-preserved, not source-deleted (option C)" decision: the **live** spawn
-path is removed; the spawn **source** is frozen out of the compiled server
-rather than deleted.
+Disposition set by the research ticket's 2026-06-09 "option B — mercenary
+retained first-class" decision, which supersedes the earlier option-C freeze for
+the retained core. This milestone is no longer pure deletion: the dominant,
+battle-tested codex spawn path is **reshaped into a first-class "mercenary"
+surface** and kept live; deletion is confined to genuinely-retired parts.
 
-- Remove from the live server: `agents.*` lifecycle/diagnostic tools
-  (register/call/wait/result/status/tail/print/cancel/erase/interrupt/debug.*),
-  the `SelfWorkerStarter` async spawn path, SQLite role pointers and instance
-  state, wsstate file-backed agent state, and the actor/authority/child-actor
-  entanglement. Live schema removal uses the existing `noAgentHiddenTool` filter
-  mechanism (`mcp/server.go:3118`).
-- **Freeze-preserve, do NOT source-delete, the runner backends
-  (claude.go/codex.go/gemini.go) and the spawn core.** Lift them out of the
-  compiled server (build-tag isolation or `ai-docs/ref/`) so they carry zero
-  compile/compat tax but remain resurrectable if a no-native-subagent harness
-  becomes a real target. Rationale (research ticket): the token argument does
-  not favor ws-spawn, native delegation captures the context-isolation win, and
-  the sole residual value is harness-independence — already covered as a soft
-  dependency by the resume-brief recovery path.
-- Remove the `subquery` tool runtime from the live server (skill text already
-  migrated to the Explore playbook in M2); its spawn dependency is part of the
-  frozen core.
+- **mercenary = ws-spawned external subprocess agent**, a deliberately distinct
+  term from harness-native "subagent" (resolves the LLM semantic collision).
+- **Retain live (reshaped onto session-auth):** the **codex** runner backend
+  (primary mercenary engine) and the reshaped `agents.*` call/lifecycle core.
+  Claude mercenary retention is OPEN (native claude is strong; harness-neutrality
+  may argue for keeping it).
+- **Scope restriction — mercenary is for implementer and reviewer roles ONLY.**
+  Exploration/survey (reference-discovery, plan-populator), mental-model-update,
+  and `subquery` successors route to native subagents.
+- **Routing:** mercenary selected when (a) the user explicitly requests it, or
+  (b) config enables it and `playbook.render` advises the mercenary spawn idiom
+  in the rendered implementer/reviewer prompt. Default otherwise is native.
+- **Delete (genuinely retired):** the **gemini** runner backend
+  (unused/excluded), the `subquery` tool runtime (exploration → native), the
+  exploration-purpose spawn paths, and the diagnostic sprawl beyond what
+  mercenary needs (`agents.tail/status/debug` minimized to mercenary needs).
+- **Delete the actor/authority/child-actor entanglement** (unchanged from the
+  session-auth decision); the retained mercenary spawn path is rewired onto
+  session keys via pre-allocate + system-prompt splice (existing
+  `ensureAgentChildSetup`, `agent.go:1243-1265`, token swapped actor-id → session
+  key).
+- **Interface parity with native (drop divergence):** remove the
+  `agents.register(prompts: [stems])` schema; mercenary and native are both
+  invoked with a single self-contained prompt from `playbook.render`. Mercenary
+  returns a continuation handle of the same shape as a native agentId. Net: the
+  retained mercenary interface is smaller than today's register-with-stems
+  surface.
+- **Recursion containment:** mercenaries are spawned only by the native lead and
+  are leaf (implementer/reviewer do not spawn), so the workflow bounds spawning
+  to depth 1. A server-side enforced spawn-depth/capability backstop is still
+  wanted because no hard barrier prevents a mercenary from calling spawn tools —
+  the `WS_MCP_TOOL_PROFILE` env profile is verified non-functional (see
+  `named-agent-runtime` mental model), and capability-scoped keys are soft.
+  Mechanism detail (depth token via CLI flag, tracked server-side per key-chain)
+  is deferred to mercenary design.
 - Remove `api.ask` spawn machinery and the async job surface from the live
   server — coordinated with M4 (`api.ask` redesign owns the replacement
   contract).
-- No spawn fallback path survives on **any live path**; live dual-path designs
-  are rejected. The frozen copy is archival only — it is NOT wired as a runtime
-  fallback.
 - Casualties accepted: `agents.tail/status/debug` observability and the
   dashboard's agent-activity sources disappear (harness-native visibility
   replaces them); uniform cross-harness wait/result/cancel semantics are
@@ -134,15 +155,23 @@ rather than deleted.
 
 ### Resolved-by-deletion bug tickets
 
-Drop the following to `.dropped/` in the same commits that remove the code they
-live on (audit linkage was deliberately preserved via their `## Pending Removal`
-markers): `260517-bug-ws-agent-empty-result-after-tool-use`,
-`260524-bug-ws-agent-register-stale-dir-result-hang`,
-`260524-bug-wsstore-ci-sqlite-busy`, `260524-bug-subquery-non-head-history-evidence`,
-`260524-bug-subquery-working-directory-stderr`. Close
-`260525-bug-ws-setup-cwd-plugin-cache-root` when the session-auth contract lands
-(it is retained as design input — the new contract must not reproduce the
-plugin-cache-root binding footgun).
+Under option B the disposition SPLITS — only bugs whose code is genuinely removed
+are resolved-by-deletion:
+
+- **Resolved-by-deletion (drop to `.dropped/` in the removing commits):**
+  `260524-bug-wsstore-ci-sqlite-busy` (wsstore actor records gone → in-memory
+  session map), `260524-bug-subquery-non-head-history-evidence` and
+  `260524-bug-subquery-working-directory-stderr` (subquery runtime removed).
+- **NOT auto-resolved — live in the retained mercenary (codex) path, must be
+  FIXED or re-triaged:** `260517-bug-ws-agent-empty-result-after-tool-use` and
+  `260524-bug-ws-agent-register-stale-dir-result-hang`. These were "resolved by
+  deletion" only under total removal; with the codex spawn engine retained they
+  remain live defects. Re-triage against the reshaped path (the register bug may
+  be obsoleted by dropping the register-with-stems schema; the empty-result bug
+  likely persists and needs a real fix).
+- `260525-bug-ws-setup-cwd-plugin-cache-root`: close when the session-auth
+  contract lands (retained as design input — the new contract must not reproduce
+  the plugin-cache-root binding footgun).
 
 ### Dashboard agent-audit strip
 
@@ -175,18 +204,22 @@ existing actor model so callers can migrate. Verification: concurrent
 distinct-root calls do not clobber; missing/unknown key yields the re-login
 recovery contract; capability-scoped key restricts the intended tools.
 
-### Phase 2: spawn machinery + actor model deletion (spawn core frozen)
+### Phase 2: mercenary reshape + actor model deletion (option B)
 
-Remove from the live server: `agents.*`, the `subquery` runtime entry,
-`SelfWorkerStarter`, SQLite role pointers/instance state, wsstate, and the
-actor/authority/child-actor machinery. **Freeze-preserve the runner backends
-(claude.go/codex.go/gemini.go) and the spawn core** out of the compiled server
-(build-tag isolation or `ai-docs/ref/`) rather than source-deleting them (option
-C). Drop the resolved-by-deletion bug tickets in the same commits — they are
-resolved because the buggy code no longer executes on any live path; the frozen
-copy carries the known issues only if resurrected. Verification: full ws runs
-agentless by default; no spawn path remains live; the compiled server does not
-reference the frozen core; the dropped bug tickets are removed.
+Delete the actor/authority/child-actor machinery, the **gemini** runner backend,
+the `subquery` runtime, exploration-purpose spawn paths, and diagnostic sprawl
+beyond mercenary needs. **Retain and reshape** the **codex** runner backend
+(claude OPEN) plus the `agents.*` call/lifecycle core into the mercenary surface:
+rewire the spawn path onto session keys (pre-allocate + system-prompt splice),
+drop the `register(prompts: [stems])` schema for a single self-contained prompt,
+align the continuation handle to the native agentId shape, and scope mercenary to
+implementer/reviewer with the user-explicit / config-advised routing. Drop the
+subquery and wsstore-sqlite-busy bug tickets here (their code is removed); the
+agent-empty-result and register-stale-dir bugs are NOT auto-resolved — they live
+in the retained mercenary path and must be FIXED or re-triaged (see below).
+Verification: native is the default delegation path; mercenary spawns only for
+implementer/reviewer via the routing gate; the actor model is gone; no gemini /
+subquery / exploration spawn remains.
 
 ### Phase 3: exec stateless + role-containment fold + dashboard strip
 
@@ -201,15 +234,22 @@ dependency before the actor model is deleted).
 
 ## Spec Impact
 
-- Target spec area: `mcp-tools.md` — remove the named-agent contracts
-  (`#260505-named-agent-mcp-tools`, `#260508-agents-register-model-alias-field`,
-  `#260512-agent-cancel-resume-guidance`, `#260512-agent-recall-hidden-surface`,
-  `#260523-agents-root-schema-invisibility`), rewrite
+- Target spec area: `mcp-tools.md` — under option B the named-agent contracts are
+  **reshaped into a mercenary contract, not all removed**. Rewrite
+  `#260505-named-agent-mcp-tools` to the mercenary surface (single
+  self-contained prompt, no `register(prompts: [stems])`, native-shaped
+  continuation handle, implementer/reviewer scope, user-explicit / config routing);
+  remove `#260508-agents-register-model-alias-field` (stems/alias registration
+  gone), `#260523-agents-root-schema-invisibility` (actor-root invisibility
+  obsolete under session keys); re-evaluate `#260512-agent-cancel-resume-guidance`
+  and `#260512-agent-recall-hidden-surface` against the reshaped surface; rewrite
   `#260524-mcp-actor-setup-bootstrap` and adjust `#260505-mcp-session-default-root`
-  to the session-auth model, remove the skill-facing `subquery` contract, and
-  fold `#260505-tool-profile-gating` into capability-scoped keys.
-  `api.*` removals are owned by M4.
+  to the session-auth model; remove the skill-facing `subquery` contract; fold
+  `#260505-tool-profile-gating` into capability-scoped keys (noting the env
+  profile is verified non-functional). `api.*` removals are owned by M4.
 - Expected caller-visible change: actor bootstrap replaced by mandatory
-  session-key auth; the entire `agents.*`/`subquery` MCP surface removed.
+  session-key auth; the `agents.*` surface reshaped into a scoped mercenary
+  surface (not fully removed); `subquery` removed.
 - Contract-first spec: yes. Resolve at ready promotion via `lead-write-spec`
-  (likely several `spec-remove:` stems plus a new session-auth stem).
+  (a new session-auth stem, a reshaped mercenary stem, plus several
+  `spec-remove:` stems for the retired registration/subquery contracts).

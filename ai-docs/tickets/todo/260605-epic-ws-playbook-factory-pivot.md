@@ -50,25 +50,37 @@ subagents. Direction, decisions, and evidence live in
   agents.*/subquery references across skills; subquery → Explore absorption;
   entry-skill keep-list (11 entry / 9 playbook); internal skill bodies →
   playbooks. Depends on M1.
-- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (todo, M3 — runtime
-  deletion): remove agents.*/spawn machinery and SQLite/wsstate agent state from
-  the live server; **freeze-preserve the runner backends + spawn core out of the
-  compiled server** (build-tag/`ai-docs/ref/`), not source-deleted (option C);
-  replace actor/wsstore/authority with an ephemeral mandatory
-  per-call session-key auth model (login → word-chain key; in-memory
-  session→root map); exec stateless; role-containment folded into
-  capability-scoped keys; dashboard agent-audit strip; resolved-by-deletion bug
-  tickets dropped here. Depends on M2; coordinated with M4.
+- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (todo, M3 — spawn
+  reshape + session-auth): **reshape** the spawn engine into a first-class scoped
+  "mercenary" surface (option B, supersedes the option-C freeze): retain the codex
+  runner live (claude OPEN), drop gemini/subquery/exploration-spawn/diagnostic
+  sprawl, scope mercenary to implementer/reviewer (exploration + mental-model
+  update → native), route by user-explicit request or config-advised
+  `playbook.render`, drop `register(prompts:[stems])` for native-parity single
+  prompts; replace actor/wsstore/authority with an ephemeral mandatory per-call
+  session-key auth model (login → word-chain key; in-memory session→root map);
+  exec stateless; role-containment folded into capability-scoped keys; dashboard
+  agent-audit strip. Bug-ticket disposition SPLITS (subquery/wsstore-busy dropped;
+  agent-empty-result/register-stale re-triaged on the retained path). Depends on
+  M2; coordinated with M4.
 - `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
   corpus-routed api-doc playbook, cache index/staleness conventions, async job
   surface removal. Depends on M1; coordinated with M3.
 
 ## Cross-Child Decisions
 
-- No spawn fallback path survives on any live path; live dual-path designs are
-  rejected. The spawn runner backends + core are **frozen-preserved out of the
-  compiled server** (option C), not source-deleted, and are archival-only — not
-  wired as a runtime fallback.
+- Spawn engine is **retained as a scoped first-class "mercenary" surface**
+  (option B, supersedes the option-C freeze): codex engine live, scoped to
+  implementer/reviewer, routed by user-explicit request or config-advised
+  `playbook.render`. Exploration, survey, and mental-model-update prefer native
+  subagents. Mercenary ("special external agent") is a deliberately distinct term
+  from native "subagent" to avoid the LLM semantic collision. ws-only capability:
+  wsflow stays agentless, so the mercenary/spawn axis is a ws↔wsflow divergence
+  (partial convergence; the shared playbook/text core still unifies).
+- Mercenary and native share one call shape: a single self-contained prompt from
+  `playbook.render`, native-shaped continuation handle; recursion is bounded by
+  lead-only spawning (mercenaries are leaf) with a server-side spawn-depth
+  backstop (the `WS_MCP_TOOL_PROFILE` env barrier is verified non-functional).
 - Retained agent = fast path; fresh spawn + resume brief = recovery path.
   Reuse guarantees end at lead-context lifetime (tip-only continuity).
 - Harness differences ship as data (terminology/model tables, overlays);
@@ -84,16 +96,20 @@ subagents. Direction, decisions, and evidence live in
   logout, no eviction (rows tiny + bounded). An `unknown_session → re-login`
   contract guard is mandatory on every keyed call, making a later persistent
   backend a contract-invariant implementation swap.
-- Role-containment (`WS_MCP_TOOL_PROFILE`) is retained, not deprecated: a
-  session key carries `{root + optional capability/role scope}`, so the lead can
-  mint capability-scoped keys for delegates. Soft guard (re-`login` can
-  re-escalate); key issuance reserves a capability-scope parameter from the
-  first cut. M3 deletion does NOT remove role gating.
+- Role-containment moves to the **session key (server-side)**: a key carries
+  `{root + optional capability/role scope}`, so the lead can mint
+  capability-scoped keys for delegates. Soft guard (re-`login` can re-escalate);
+  key issuance reserves a capability-scope parameter from the first cut. NOTE:
+  the legacy `WS_MCP_TOOL_PROFILE` env profile is **verified non-functional** for
+  containment (see `named-agent-runtime` mental model) — containment must be
+  enforced server-side on the key, not via the env var.
 
 ## Completion Criteria
 
-- Done: full ws runs agentless by default; all delegation flows use native
-  subagents via playbooks; spawn machinery deleted; M0–M4 children closed.
+- Done: native subagents are the default delegation path via playbooks; the spawn
+  engine is reshaped into a scoped mercenary surface (codex retained,
+  implementer/reviewer only) rather than deleted; the actor model is replaced by
+  session-auth; M0–M4 children closed.
 - Dropped: direction reversal recorded in the research ticket.
 - Deferred: memory./mutation contracts, wsflow convergence mechanics, TUI
   implementation — each leaves through its own follow-up ticket.

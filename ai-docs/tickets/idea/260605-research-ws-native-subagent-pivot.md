@@ -619,6 +619,11 @@ implementation only honours a single default profile.
 
 ### Refine: spawn core frozen-preserved, not source-deleted (option C)
 
+> **Superseded for the retained core by option B below (2026-06-09).** The
+> dominant codex mercenary path is retained live, not frozen. The freeze framing
+> survives only for genuinely-retired parts (gemini runner, subquery, exploration
+> spawn, diagnostic sprawl). Kept as the decision trail.
+
 Fourth lead-discuss session (2026-06-09). The "total spawn removal" decision is
 refined on its disposition of the spawn **source**, not its disposition of the
 **live path**.
@@ -659,6 +664,101 @@ Unchanged by this refine: the live `agents.*`/`subquery` schema removal, the
 actor → session-auth replacement, and the resolved-by-deletion outcome for the
 spawn bug backlog (the buggy code no longer executes on any live path; the
 frozen copy carries the known issues only if resurrected, not before).
+
+### Supersede: option B — mercenary retained first-class, scoped to implementer/reviewer
+
+Fifth lead-discuss exchange (2026-06-09). Use-case data plus a verified
+limitation reshape option C into option B. Trail kept (total deletion → freeze →
+retain-reshape); option B is the current decision for the retained core.
+
+Drivers:
+
+- ws-spawn **codex** calls are the dominant real use case and the code is
+  battle-tested; deep-freezing the dominant path is wasteful — option C's
+  "archival insurance" framing under-values it.
+- The assumed recursion barrier is gone: the `WS_MCP_TOOL_PROFILE` env profile
+  is **verified non-functional** for capability containment (recorded in the
+  `named-agent-runtime` mental model, 2026-06). Capability-scoped session keys
+  are soft (re-loginable). Neither layer hard-prevents recursive spawning.
+
+Decision — **option B: retain the spawn engine as a first-class "mercenary"
+surface** (not frozen-archival), but scoped:
+
+- **mercenary = ws-spawned external subprocess agent**, a deliberately distinct
+  term from harness-native "subagent" (resolves the LLM semantic collision). The
+  engine = the runner backends + the reshaped lifecycle.
+- **Scope restriction: mercenary is for implementer and reviewer roles ONLY.**
+  Exploration/survey (reference-discovery, plan-populator), mental-model-update,
+  and `subquery`'s successors route to **native subagents** — the pivot
+  direction is retained for those (subquery→Explore absorption stands).
+- **Routing**: a mercenary is selected when (a) the user explicitly requests a
+  mercenary call, or (b) config enables it and `playbook.render` advises the
+  mercenary spawn idiom inside the rendered implementer/reviewer prompt. Default
+  without that signal is native.
+- **codex runner stays live** (primary mercenary engine); **gemini runner is
+  dropped** (unused/excluded); claude mercenary retention is an OPEN detail
+  (native claude is strong, but harness-neutrality may argue for keeping it).
+- `subquery.go` spawn path is removed (exploration → native).
+
+What option B changes vs option C / total-deletion:
+
+- The codex (and possibly claude) runner backends + the reshaped `agents.*`
+  call/lifecycle core stay **compiled and live** behind the mercenary surface —
+  NOT frozen out of the server. Freeze/removal now applies only to genuinely
+  retired parts (gemini runner, subquery spawn, exploration spawn paths, and the
+  diagnostic sprawl beyond what mercenary needs).
+- The actor → ephemeral session-auth replacement is **unchanged** (M3 holds);
+  the mercenary spawn path is rewired onto session keys (see wiring below).
+
+Call/interface parity (mercenary aligned to native, not divergent):
+
+- **Drop the `agents.register(prompts: [stems])` schema.** Both native and
+  mercenary are invoked with a single self-contained prompt produced by
+  `playbook.render(name, context)`; the dispatch target is orthogonal to prompt
+  production. Stem assembly at registration is removed.
+- Output parity: a mercenary returns a continuation handle of the same shape as
+  a native agentId; the tip-only continuity fragment applies to both.
+- Net: the retained mercenary interface is SMALLER than today's
+  register-with-stems surface.
+
+Wiring onto session-auth (both feasible; moderate-rewire, sonnet-Explore
+verified — actorID is a lookup coordinate, not an auth token; runner backends
+are fully decoupled from actor identity):
+
+- **native subagent ↔ parent-login**: the lead (same MCP process) mints a key
+  (optionally capability-scoped) and passes it in the delegation brief; worktree
+  native subagents may self-login with their own root.
+- **mercenary ↔ pre-allocate + splice**: the spawn path pre-allocates a session
+  key and splices the login instruction into the spawned system prompt — the
+  existing `ensureAgentChildSetup` mechanism (`agent.go:1243-1265`) with the
+  token swapped from actor-id to session key.
+
+Recursion containment (open, but largely defused by scope):
+
+- Because mercenaries are spawned **only by the (native) lead** and are scoped to
+  leaf implementer/reviewer roles, the workflow naturally bounds spawning to
+  depth 1 (lead → mercenary; mercenaries do not spawn). Recursion becomes a
+  workflow-design property, not a hard requirement.
+- A server-side **enforced spawn-depth (or capability) backstop** is still wanted
+  because no hard barrier prevents a mercenary from calling the spawn tools (env
+  profile dead, key scope soft). Mechanism detail (depth token propagated via CLI
+  flag — CLI propagation works where env does not — tracked server-side per
+  key-chain to resist forging) is deferred to mercenary-revival design.
+
+ws↔wsflow convergence is PARTIAL under option B:
+
+- mercenary is a **ws-only capability** wsflow (agentless, company-distributed)
+  does not carry. The shared playbook/text core still converges to a single
+  source via namespace rendering, but the mercenary/spawn surface is a ws-only
+  divergence. The earlier "mirroring burden mostly disappears" claim is
+  qualified: the agent/spawn axis stays a real ws-vs-wsflow difference (a ws-only
+  section excluded from wsflow rendering, or separately maintained on that axis).
+
+M3 scope implication: `260609-refactor-ws-spawn-runtime-deletion-session-auth`
+is no longer pure deletion — it becomes spawn-runtime **reshape to mercenary** +
+session-auth for the retained codex/claude path, with deletion confined to
+gemini / subquery / exploration-spawn / diagnostic-sprawl. Re-scope at ready
+promotion.
 
 ## Open Questions (continuation agenda)
 
