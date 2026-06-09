@@ -12,6 +12,16 @@ related-mental-model:
 
 # Add cycled named-agent instance history
 
+## Disposition (2026-06-09): dropped — feature target removed by the pivot
+
+This feature extends the named-agent (`agents.*`) runtime, which
+`260605-epic-ws-playbook-factory-pivot` deletes wholesale (delegation moves to
+harness-native subagents). With the machinery gone there is nothing to add
+instance-cycling to, so this is dropped rather than annotated for later. The
+`spec:` link to `260505-async-subquery-ephemeral-agent` is left intact; that
+spec anchor lives in `named-agent-runtime.md` and is removed by the epic's own
+`spec-remove` flow at M2/M3, not by this drop. Body retained for context.
+
 ## Background
 
 Dogfood investigation of stale-looking WorkRoot Activity raised whether named

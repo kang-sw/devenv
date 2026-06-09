@@ -8,6 +8,15 @@ related:
 
 # durable leaf role assignment
 
+## Disposition (2026-06-09): dropped — premise removed by the pivot
+
+This research concerns leaf/subquery recursion control and delegate containment
+for the `agents.*`/`subquery` spawn runtime. `260605-epic-ws-playbook-factory-pivot`
+removes that runtime (subquery → harness Explore; spawn machinery deleted) and
+folds the remaining containment role into capability-scoped session keys, so the
+leaf-role-assignment premise no longer exists. Dropped, not deferred. Body
+retained for context.
+
 ## Background
 
 The worktree-local orchestrator lock now prevents delegated Codex agents from

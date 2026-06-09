@@ -6,6 +6,16 @@ related:
 
 # ws setup cwd literal can bind to plugin cache root
 
+## Superseded-by-redesign (2026-06-09): folded into M3 session-auth
+
+Do not fix this in isolation. `260605-epic-ws-playbook-factory-pivot` (M3)
+replaces `ws/setup` with a `login`-style session-auth model that returns a
+word-chain session key and takes an explicit root, with mandatory per-call keys
+and no ambient cwd auto-derivation. That redesign reworks the exact surface this
+bug lives on, so this ticket is retained as **design input to M3** (a concrete
+failure the new contract must not reproduce), not as a standalone fix. Drop or
+close it when M3 lands the session-auth contract.
+
 ## Background
 
 During a lead-discuss dogfood run, `ws/setup(method: "lead-workflow-bootstrap", root: "<cwd>")` failed because the runtime resolved the literal cwd placeholder to the installed plugin cache path instead of the caller's repository root:

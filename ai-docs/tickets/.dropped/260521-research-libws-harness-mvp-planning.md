@@ -15,6 +15,15 @@ related-mental-model:
 
 # libws-harness MVP planning research
 
+## Disposition (2026-06-09): dropped — deprioritized by the playbook-factory pivot
+
+Same libws-harness line as `260521-research-libws-harness-agent-substrate`
+(dropped). `260605-epic-ws-playbook-factory-pivot` removes ws-side spawn/agent
+machinery in favor of harness-native subagents, so planning a ws-owned
+libws-harness MVP is no longer a pursued direction. Dropped, not deferred; start
+a fresh ticket if a ws-side harness substrate is ever revived. Body retained for
+context.
+
 ## Background
 
 `260521-research-libws-harness-agent-substrate` captured the target substrate:
