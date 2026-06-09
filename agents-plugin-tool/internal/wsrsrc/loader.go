@@ -13,21 +13,30 @@ const envRsrcRoot = "WS_RSRC_ROOT"
 //
 // Resolution order:
 //  1. WS_RSRC_ROOT environment variable, when set and non-empty.
-//  2. Plugin-path default (Phase-2 stub — not implemented yet).
+//  2. Plugin-path default: filepath.Join(filepath.Dir(os.Executable()), "..", "rsrc").
 //
-// Phase-2 stub: the plugin-path default will be derived as:
+// The production plugin layout is:
 //
-//	filepath.Join(filepath.Dir(os.Executable()), "..", "rsrc")
+//	<plugin-cache>/bin/ws-mcp   (or ws-mcp.exe on Windows)
+//	<plugin-cache>/rsrc/        ← resource tree
 //
-// For now, an empty WS_RSRC_ROOT returns an error directing callers to set it.
+// Codex cache materialization assumption: Codex is assumed to place plugin files
+// under a cache directory with the same bin/rsrc layout. This is an open
+// verification item (see Phase-2 brief for 260609-feat-ws-playbook-surface-mvp).
+// If the derived path does not contain a valid manifest, callers will see
+// ErrManifestMissing at Load time rather than a silent fallback.
+//
 // See internal/wsagent/agent.go SelfWorkerStarter.StartAsyncCall for the
-// os.Executable() pattern this derivation will mirror.
+// os.Executable() pattern this derivation mirrors.
 func ResolveRoot() (string, error) {
 	if env := os.Getenv(envRsrcRoot); env != "" {
 		return env, nil
 	}
-	// Phase-2 stub: derive from os.Executable() → filepath.Dir(exe) → ../rsrc
-	return "", fmt.Errorf("WS_RSRC_ROOT is not set; plugin-path default requires Phase-2 implementation")
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("WS_RSRC_ROOT not set and cannot determine plugin path: %w", err)
+	}
+	return filepath.Join(filepath.Dir(exe), "..", "rsrc"), nil
 }
 
 // Load loads a playbook by name from root, optionally selecting a harness

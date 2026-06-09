@@ -858,6 +858,37 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		stem, _ := params.Arguments["stem"].(string)
 		promptPath, err := renderPrompt(root, stem, stringMapArgument(params.Arguments["context"]))
 		return toolTextResponse(req.ID, promptPath+"\n", err)
+
+	case "playbook.print":
+		// Phase 2: name + context; rsrc root is call-site-overridable seam for M3.
+		// Argument parsing is named/extensible (not positional) for forward-compat
+		// with M3's session_key prepend.
+		name, _ := params.Arguments["name"].(string)
+		callerContext := stringMapArgument(params.Arguments["context"])
+		// M3 forward-compat: rsrc root resolved here so M3 can pass root_override.
+		rsrcRoot, err := resolveRsrcRoot("")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		body, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{})
+		return toolTextResponse(req.ID, body+"\n", err)
+
+	case "playbook.render":
+		// Phase 2: name + context; worktree root for tmp file; rsrc root overridable.
+		name, _ := params.Arguments["name"].(string)
+		callerContext := stringMapArgument(params.Arguments["context"])
+		worktreeRoot, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// M3 forward-compat: rsrc root resolved here so M3 can pass root_override.
+		rsrcRoot, err := resolveRsrcRoot("")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		path, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{})
+		return toolTextResponse(req.ID, path+"\n", err)
+
 	case "agents.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2781,6 +2812,31 @@ func tools() []map[string]any {
 					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional string key-value pairs injected as a ## Render Context block at the end of the rendered prompt."},
 				},
 				"required": []string{"stem"},
+			},
+		},
+		{
+			"name":        "playbook.print",
+			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Full ws; not wsflow-only."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":    stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
+					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "playbook.render",
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Full ws; not wsflow-only."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":    stringProperty("Repository root for the tmp file. Defaults to the server root."),
+					"name":    stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
+					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+				},
+				"required": []string{"name"},
 			},
 		},
 		{

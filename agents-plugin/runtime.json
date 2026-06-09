@@ -53,6 +53,8 @@
     "tickets.status": ">=0.30.0-dev <0.31.0",
     "subquery": ">=0.30.0-dev <0.31.0",
     "path.generate": ">=0.30.0-dev <0.31.0",
+    "playbook.print": ">=0.30.0-dev <0.31.0",
+    "playbook.render": ">=0.30.0-dev <0.31.0",
     "agents.register": ">=0.30.0-dev <0.31.0",
     "agents.call": ">=0.30.0-dev <0.31.0",
     "agents.wait": ">=0.30.0-dev <0.31.0",

@@ -701,11 +701,23 @@ func TestResolveRootEnv(t *testing.T) {
 	}
 }
 
-func TestResolveRootMissingEnv(t *testing.T) {
+func TestResolveRootFallsBackToExecutablePath(t *testing.T) {
+	// With WS_RSRC_ROOT unset, ResolveRoot must succeed and return a path
+	// derived from os.Executable(). The returned path may not exist on disk
+	// (the test environment does not have a <bin>/../rsrc layout), but
+	// ResolveRoot itself must not error; manifest-missing failures happen later
+	// in wsrsrc.Load.
 	t.Setenv(envRsrcRoot, "")
-	_, err := ResolveRoot()
-	if err == nil {
-		t.Fatal("expected error when WS_RSRC_ROOT is empty, got nil")
+	got, err := ResolveRoot()
+	if err != nil {
+		t.Fatalf("ResolveRoot: %v", err)
+	}
+	if got == "" {
+		t.Fatal("ResolveRoot returned empty path")
+	}
+	// The derived path should end in "rsrc" (the plugin-cache layout).
+	if filepath.Base(got) != "rsrc" {
+		t.Errorf("ResolveRoot = %q, expected base to be 'rsrc'", got)
 	}
 }
 
