@@ -45,8 +45,10 @@ MCP layer, plus the on-disk `rsrc/` tree contract and the CI validator.
     declared variables).
   - Root resolution: `WS_RSRC_ROOT` env when set and non-empty, else the
     plugin-path default. Phase 1 tests drive the loader via `WS_RSRC_ROOT` and
-    explicit roots; the plugin-path default is a documented function (full MCP
-    wiring is Phase 2).
+    explicit roots; the plugin-path default is a documented `ResolveRoot` function
+    that leaves a Phase-2 stub comment for the `os.Executable()` →
+    `filepath.Dir(exe)` → `../rsrc` derivation (do NOT implement that derivation
+    in Phase 1; just leave the seam).
   - A manifest reader + schema-version compatibility check. Incompatible or
     missing manifest, missing manifest-listed files, or hash mismatch on a loaded
     file ⇒ a loud typed error (no fallback text). The package exposes a
@@ -80,10 +82,14 @@ MCP layer, plus the on-disk `rsrc/` tree contract and the CI validator.
   `WS_RSRC_ROOT` points dogfood at the repo copy). This is an existing-deliverable
   subdir, not a new root module.
 - Reuse, do not reinvent:
-  - Frontmatter parsing style: mirror `wsprompt.stripFrontmatter` conventions, but
-    rsrc needs list-valued fields (`includes`, `variables`) — a small dedicated
-    parser or a minimal YAML subset is acceptable; do not pull a heavy YAML dep
-    unless `go.mod` already has one (check first).
+  - Frontmatter parsing: model the parser on `internal/wsdoc/frontmatter.go`
+    (multi-type YAML-subset: scalars + `- item` lists + sub-maps), NOT on
+    `wsprompt.stripFrontmatter` (scalar-only `map[string]string` would silently
+    drop the list-valued `includes`/`variables`). `wsdoc.frontmatter` is
+    unexported and path-based, so copy its logic adapted to take a string and
+    return `(frontmatter, body)`; do not import it. No YAML dep exists in `go.mod`
+    (only `modernc.org/sqlite` + transitive) — a hand-rolled minimal parser is the
+    settled choice; do not add a YAML dependency.
   - `sha256` + `hex` hashing and `\r\n`→`\n` normalization mirror
     `wsprompt.ContentSHA256` / `normalizePromptHashContent` so hashes are stable
     cross-platform.
@@ -160,9 +166,12 @@ Cross-Child Decisions):
   `Validate(root)`.
 - Add a manifest (re)generation helper so editing the tree can refresh hashes
   deterministically (used by CI/dev; a Go test or small CLI under the package).
-- Wire CI: a `go test` that validates the real tree; optionally a thin
-  `scripts/` wrapper consistent with existing `scripts/*.sh` style if CI shells
-  out (check how CI currently invokes Go tests before adding a script).
+- Wire CI: CI already runs `go test ./...` from `agents-plugin-tool/`
+  (`.github/workflows/ws-mcp-release.yml`), so the `Validate(agents-plugin/rsrc)`
+  test hooks in automatically — no new script needed. Constraint: the
+  `agents-plugin/rsrc/` tree + `manifest.json` MUST be committed in the same
+  change as the validating test, or CI fails on the first push (the test needs a
+  real tree to validate).
 
 ## Constraints
 
