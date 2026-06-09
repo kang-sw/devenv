@@ -31,7 +31,9 @@ subagents. Direction, decisions, and evidence live in
 ## Child Tickets
 
 - Planned (M0 — cleanup): board and direction hygiene — absorb/close 260429,
-  dashboard epic tree disposition (drop/salvage pass, user-gated), retire
+  retain dashboard as a web-tmux surface (strip only agent-audit/agent-activity
+  logic, keep MCP-integration children; destructive child drops stay
+  user-gated), retire
   260521, mark spawn-bug tickets (260517, 260524 stale-dir) as
   resolved-by-deletion candidates, promote cache/launcher race tickets to
   prerequisites, start agentless-mode (`WS_MCP_NO_AGENT=1`) dogfooding as the
@@ -45,8 +47,9 @@ subagents. Direction, decisions, and evidence live in
   Explore absorption; entry-skill keep-list decision; internal skill bodies →
   playbooks.
 - Planned (M3 — runtime deletion): remove agents.*/spawn machinery, runner
-  backends, SQLite/wsstate agent state; actor/setup model rework for
-  shared-server logical sessions.
+  backends, SQLite/wsstate agent state; replace actor/wsstore/authority with an
+  ephemeral mandatory per-call session-key auth model (login → word-chain key;
+  in-memory session→root map).
 - Planned (M4 — api.ask redesign): corpus-routed api-doc playbook, cache
   index/staleness conventions, async job surface removal.
 
@@ -61,6 +64,9 @@ subagents. Direction, decisions, and evidence live in
 - Text-only playbook changes must be distributable without a binary version
   bump (schema-version compatibility, not hash equality).
 - Playbook load failure is loud and partial; no embedded fallback text.
+- ws-mcp uses mandatory ephemeral per-call session keys (auth model); no
+  persistent actor/authority state; the session carries the project root;
+  in-memory session→root map (no SQLite).
 
 ## Completion Criteria
 

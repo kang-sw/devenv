@@ -442,21 +442,126 @@ timing remains an implementation-sequencing call.
 - Observability loss (`agents.tail/status/debug`, dashboard agent-activity
   sources) is accepted; harness-native subagent visibility is the replacement.
 
+## Continuation Decisions (2026-06-09)
+
+Third lead-discuss session. The actor/setup disposition is settled with
+empirical grounding; several earlier decisions are superseded or refined. The
+2026-06-08 section above is kept as the prior trail.
+
+### Empirical basis: native subagents SHARE the lead's MCP process
+
+In-session worktree probe (2026-06-09): a native Claude subagent spawned with
+worktree isolation was inspected. Its no-arg `ws_setup` returned the LEAD's
+actor (`actor_id: lead-kkp0lze6`, `has_actor: true`); its root-omitted
+`git_status` reflected the MAIN repo (`main`, `22c16db`), NOT its worktree
+branch; `server_root`/`env_project_root` were the main repo. Conclusion:
+**native subagents share the lead's single ws-mcp process and state over one
+multiplexed stdio connection.** This verifies the earlier "share the lead's MCP
+server instance" premise, which had been asserted from tool-visibility alone.
+
+Consequences:
+
+- The single process-global `sessionRoot` field (server.go:38) clobbers across
+  callers; the server cannot distinguish callers ambiently (Claude cwd
+  auto-derivation is verified-failing).
+- A worktree delegate doing root-omitted ws calls **silently operates on the
+  lead's main repo (no error)** — a wrong-tree footgun the server cannot detect.
+- The current `childActorInstruction` recovery (`setup(id:)`) is itself broken
+  under a shared process: it would clobber the lead's `sessionRoot`. This
+  reinforces removal, not redesign.
+
+### Decision: actor/setup → ephemeral session auth model
+
+Replace the persistent actor / wsstore-actor / authority / child-actor
+machinery with an **ephemeral in-memory session (auth model)**:
+
+- A login-style call (term open: `login` | `session.open` | `attach`) takes a
+  root and returns an **LLM-friendly word-chain session key** (not a UUID —
+  word chains copy more reliably and cost fewer tokens).
+- The single `sessionRoot` field becomes a `{session-key → root context}`
+  **map**, so concurrent distinct worktree roots are supported and there is no
+  clobber — each caller logs in and gets its own key.
+- **Mandatory session key on every ws call** (chosen over a keyless-lead-default
+  alternative), analogous to REST bearer auth. There is no keyless fallback to a
+  foreign root, which is exactly what kills the silent wrong-root footgun.
+  Playbooks generate the call patterns with the session slot, so the marginal
+  burden is ~0.
+- **In-memory, not SQLite/wsstore** → sidesteps `260524-bug-wsstore-ci-sqlite-busy`;
+  recovery is simply re-login (no persistent actor records to restore).
+- Removed: actor_id-as-identity, the authority field, `ensureChildActor` /
+  `childActorInstruction`, `restoreActor` / `bindActor` persistence, wsstore
+  actor records.
+
+Rejected: keyless-lead-default + keyed-delegates — leaves the footgun for any
+delegate that drops its key; the server cannot enforce keying without caller
+identity, so only mandatory keys close the hole.
+
+### Decision: root role unchanged; cwd separated
+
+- **root** stays the project/repo anchor + ws bookkeeping locus (git target,
+  ai-docs discovery, exec cache/output anchor); it is carried **by the session**.
+  ws ignores caller cwd entirely for root resolution (probe-proven).
+- **cwd** is a separate per-call execution/target directory, primarily consumed
+  by exec (run-here, store-under-root). Honest note: a distinct exec `cwd`
+  parameter is proposed design, not confirmed current behavior.
+- **Open design artifact**: a per-tool **root-vs-cwd classification table** —
+  which tools anchor at root (`path.generate`, exec cache, review artifacts) vs
+  follow cwd/target (exec execution dir; worktree-delegate git and discovery).
+  This table resolves the worktree contradiction (git must target the worktree
+  while exec cache aggregates at the project root). Worktrees remain first-class
+  distinct roots (`canonicalGitRoot` resolves each worktree to its own toplevel).
+
+### Decision: exec → stateless capability
+
+`exec.spawn` returns an `exec_id` capability token; output/cache anchored at the
+session root; cwd per spawn. No actor needed (confirms earlier reasoning that
+exec keys by job token, not caller).
+
+### Decision: playbook schema is fully custom
+
+The playbook schema is **not bound to any agent / MCP-prompt standard** — ws is
+the sole reader and renderer. Frontmatter fields (including the auto-include
+`includes:`), directory layout, and manifest format are an autonomous design
+detail.
+
+### Supersede: dashboard retained, not deprecated to TUI
+
+The 2026-06-05 decision "Dashboard is deprecated, downgraded to a lightweight
+TUI" is **superseded**. The dashboard is **retained as a usable
+web-tmux-style surface**; only the subagent-audit / agent-activity logic
+(sourced from `agents.tail/status/debug`, removed with spawn) is ripped out. ws
+MCP integration surfaces (ticket board, index, file/terminal) are **kept and
+intended to grow**.
+
+### Candidate: role-containment deprecation
+
+`WS_MCP_TOOL_PROFILE` role gating (lead/delegate/leaf tool restrictions) was
+spawn-containment. Under native subagents the harness restricts subagent tools,
+so ws-side role gating becomes a **deprecation candidate** (containment moves to
+harness + playbook discipline). Pending policy decision (always-ask), not final.
+
 ## Open Questions (continuation agenda)
 
-- ~~Entry-skill keep-list~~ — resolved above (11 entry / 9 playbook).
+- ~~Entry-skill keep-list~~ — resolved (11 entry / 9 playbook).
+- ~~actor/setup model~~ — resolved as the ephemeral mandatory-session-key auth
+  model (2026-06-09 section).
+- **Per-tool root-vs-cwd classification table** — the remaining design artifact
+  for the session/root/cwd model; resolves the worktree git-vs-cache split.
+- **Session term choice**: `login` | `session.open` | `attach`.
+- **Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation** — pending policy
+  decision (always-ask).
 - memory./mutation tool first slice: which operations, what layering, where
   delegation notes (if any) live.
-- Playbook schema: frontmatter fields (`kind: print|render`,
-  `delegates: bool`, `includes: [<text-dep>]`, params, overlays), directory
-  layout, manifest format.
+- Playbook schema is fully custom (2026-06-09); remaining detail: concrete
+  frontmatter fields (`kind: print|render`, `delegates: bool`,
+  `includes: [<text-dep>]`, params, overlays), directory layout, manifest format.
 - Codex: reconnect UX after binary swap (rsrc materialization and parallel
   fan-out now verified).
 - Migration sequencing detail within the epic: agentless-default dogfood →
   skill-text agents.* reference removal → runtime code deletion (order agreed
   in principle).
-- Disposition mechanics: 260429 absorption into the epic; dashboard tree
-  drop/salvage pass; 260521 retirement.
+- Disposition mechanics: 260429 absorption into the epic; dashboard retained
+  (strip agent-audit only, 2026-06-09); 260521 retirement.
 - `infra.read`/`convention.read` rsrc-loader unify: design settled
   (auto-include + read tools retained); first-pass-vs-later timing open.
 
