@@ -188,11 +188,15 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Focus
 
 - `260609-feat-ws-playbook-surface-mvp` - playbook surface MVP (M1 of the
-  playbook-factory pivot epic); ready, contract-first spec authored
-  (`260609-playbook-tools`, `260609-playbook-harness-rendering`,
-  `260609-rsrc-playbook-distribution`). Phase 1 rsrc loader → Phase 2 MCP
-  tools; binary/text swap-race tickets (`260523`, `260524-codex-cache`) are
-  distribution prerequisites. Implementation commits carry a `## Spec` section.
+  playbook-factory pivot epic); ready. **Phase 1 done** (`internal/wsrsrc`
+  call-time loader + `agents-plugin/rsrc/` tree + manifest/schema-version +
+  `WS_RSRC_ROOT` + CI validator; no MCP tool yet). **Phase 2 next**:
+  `playbook.print`/`playbook.render` MCP tools + harness-aware selection. Spec
+  stems (`260609-playbook-tools`, `260609-playbook-harness-rendering`,
+  `260609-rsrc-playbook-distribution`) stay 🚧 until Phase 2 exposes the
+  caller-visible surface. Binary/text swap-race tickets (`260523`,
+  `260524-codex-cache`) are distribution prerequisites; Codex `rsrc/` cache
+  materialization remains an open verification item.
 
 ## Session Notes
 

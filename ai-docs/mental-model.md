@@ -32,7 +32,7 @@ source, and tests for behavioral truth.
 | api-documentation-cache | `mental-model/api-documentation-cache.md` | API docs domain routing, manager agents, cache ownership, prompt contracts |
 | claude-compatibility | `mental-model/claude-compatibility.md` | Claude shim, agents-plugin compatibility metadata, installer snapshot, retired legacy boundaries |
 | developer-environment-tools | `mental-model/developer-environment-tools.md` | install.sh, shell/editor config, tmux helpers, Claude TUIs |
-| prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt discovery, resolution, delegate orientation, bundle metadata |
+| prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt loading (wsprompt/go:embed), call-time rsrc playbook loading (wsrsrc/filesystem), delegate orientation, bundle metadata |
 | ws-web-dashboard | `mental-model/ws-web-dashboard.md` | Personal ws dashboard daemon, owner-auth boundary, UI serving, Activity Console streams, resource view-model API/fixtures, and host-control separation |
 
 ## Directory Hierarchy

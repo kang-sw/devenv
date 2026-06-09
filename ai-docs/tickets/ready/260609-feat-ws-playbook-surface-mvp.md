@@ -136,6 +136,53 @@ Goal: the call-time loading substrate the playbook tools sit on.
 Deliverable boundary: no MCP tool yet; the loader/validator is exercised through
 tests and the CI tree check. No skill-body migration in this phase.
 
+### Result (5d4f9d03) - 2026-06-09
+
+Implemented in `bd9f1cae` (feat) + `5d4f9d03` (review fixes). Added the new
+`agents-plugin-tool/internal/wsrsrc/` package — a call-time, filesystem-backed
+loader deliberately distinct from the `go:embed` `internal/wsprompt` bundle:
+
+- `frontmatter.go` — YAML-subset parser (scalars + `- item` lists + sub-maps),
+  modeled on `wsdoc/frontmatter.go` with added `\r\n` normalization on all return
+  paths (not `wsprompt.stripFrontmatter`, which is scalar-only).
+- `manifest.go` — per-file sha256 (cross-platform via a verbatim copy of
+  `wsprompt.normalizePromptHashContent`), `ReadManifest`/`GenerateManifest`/
+  `WriteManifest`.
+- `loader.go` — `ResolveRoot` (`WS_RSRC_ROOT` env-first; plugin-path default is a
+  documented Phase-2 stub for the `os.Executable()→../rsrc` derivation), `Load`
+  (base + harness overlay), single-pass declared-variable substitution (undeclared
+  or unprovided-but-used → typed error; no double-expansion), flat auto-include
+  resolver, `isBareStem` guard applied to name and harness components
+  independently.
+- `validate.go` — `Validate(root)`: manifest existence/schema/hash, required base
+  variant per playbook dir, undeclared-variable scan, dangling-include check,
+  bidirectional manifest/tree coverage.
+- `wsrsrc.go` — six typed errors (`ErrManifestMissing`, `ErrSchemaMismatch`,
+  `ErrHashMismatch`, `ErrFileMissing`, `ErrUndeclaredVar`, `ErrUnprovidedVar`),
+  `PlaybookMeta`/`LoadedPlaybook`/`Manifest`, `SupportedSchemaVersion` const.
+- `agents-plugin/rsrc/` sample tree: `sample-playbook/{sample-playbook.md,
+  sample-playbook.codex.md}` (base + codex overlay with an include and a declared
+  `{{.WorktreeID}}` variable), `sample-conventions.md` (flat include),
+  `manifest.json` (`schema_version=1`).
+- 45 unit tests including `TestValidateRealTree` (the CI tree gate, picked up by
+  the existing `go test ./...` workflow with no new script). Compatibility is
+  gated on schema-version only; hashes are CI tree-sync + load-time integrity.
+
+Decisions honored: plain-text call-time loading (binary version decoupled from
+text edits), loud typed-error failure with no embedded fallback, frontmatter-
+declared auto-includes. Partitioned review (correctness/fit/test) returned clean
+after one fix cycle.
+
+Open item: Codex plugin distribution materializing non-skill `rsrc/` directories
+into its cache is **not yet confirmed** — Phase 1 runs against the `WS_RSRC_ROOT`
+dev override; the distribution-race prerequisites (`260523`, `260524-codex-cache`)
+were not addressed here.
+
+Forward to Phase 2: wire `playbook.print`/`playbook.render` MCP tools onto the
+`Load` seam, add harness-aware selection (config model tables, unknown-harness
+fallback, delegation tip), and confirm whether `manifest.json` needs to enter the
+`runtime.json` launcher validation contract.
+
 ### Phase 2: playbook.print / playbook.render MCP tools and harness-aware selection
 
 Depends on Phase 1 (loader/schema/manifest must exist).

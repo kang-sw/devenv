@@ -44,6 +44,7 @@ related:
 - Change the exec job surface or runtime contract: include the full `exec.*` MCP tool set in the full ws runtime contract, keep it out of the wsflow no-agent contract, and verify explicit hidden-tool calls fail rather than starting command jobs. `exec.*` is an MCP surface; do not add launcher-required exec CLI mirrors unless the CLI contract is explicitly revised. {#260524-exec-runtime-contract-surface}
 - Add or rename a CLI command: update `cmd/ws-mcp/main.go`, `runtimeCapabilityCommandNames`, command tests, `runtime.json.commands`, launcher command probing assumptions, and docs. {#260505-runtime-cli-entrypoints}
 - Edit embedded prompts: update `agents-plugin/runtime.json` prompt bundle hash/list or build release assets so the script rewrites it.
+- Edit rsrc playbook text (`agents-plugin/rsrc/`): regenerate `manifest.json` via `wsrsrc.GenerateManifest`; no `runtime.json` refresh or binary bump required unless `SupportedSchemaVersion` increments.
 - Change `.mcp.json` timeouts or command path: verify installed plugin cache startup, not only source-tree execution.
 
 ## Extension Points & Change Recipes
