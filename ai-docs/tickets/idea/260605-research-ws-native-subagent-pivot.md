@@ -598,6 +598,12 @@ web-tmux-style surface**; only the subagent-audit / agent-activity logic
 MCP integration surfaces (ticket board, index, file/terminal) are **kept and
 intended to grow**.
 
+> **Re-evaluated under option B (2026-06-09, see ws.lead/child-key section):**
+> the "rip out agent-activity" half no longer holds — the codex mercenary
+> lifecycle survives, so the feed has a live source. agent-activity becomes a
+> port-vs-remove product decision deferred to a separate dashboard `idea/`
+> ticket; M3 only keeps the dashboard compiling against the reshaped surface.
+
 ### Decision: role-containment retained — capability-scoped session keys
 
 `WS_MCP_TOOL_PROFILE` role gating (lead/delegate/leaf tool restrictions) was
@@ -691,10 +697,11 @@ surface** (not frozen-archival), but scoped:
   Exploration/survey (reference-discovery, plan-populator), mental-model-update,
   and `subquery`'s successors route to **native subagents** — the pivot
   direction is retained for those (subquery→Explore absorption stands).
-- **Routing**: a mercenary is selected when (a) the user explicitly requests a
-  mercenary call, or (b) config enables it and `playbook.render` advises the
-  mercenary spawn idiom inside the rendered implementer/reviewer prompt. Default
-  without that signal is native.
+- **Routing** (finalized 2026-06-09, see ws.lead/child-key section): default is
+  **always native**; the mercenary is always *available* to the lead, invoked only
+  when (a) the user explicitly requests a mercenary call, or (b)
+  `ws/lead.prefer_mercenary(session_key)` has flipped that key's render mode.
+  `prefer_mercenary` changes only the *default guidance*, never availability.
 - **codex runner stays live** (primary mercenary engine); claude/gemini
   disposition is refined in the ws.lead/child-key section below (claude
   **retained**, gemini → **deferred plug**, not a deletion).
@@ -838,9 +845,43 @@ a mercenary, never accidental.
 filtering is harness-owned and advisory; capability/role enforcement must be a
 server-side check in the keyed `tools/call` handler, not schema omission.
 
-**Still OPEN:** child `unknown_session` recovery message — role-split
-("lead → re-login / child → ask issuer to re-render") vs a generic
-"re-acquire via your issuer" line.
+**Routing finalized.** Default delegation is **always native**. The mercenary is
+**always available to the lead** (not a feature flag) and is invoked only by
+(a) an explicit user request or (b) a per-session-key render-mode flip
+`ws/lead.prefer_mercenary(session_key)` (under `ws.lead.*`, lead-only). The flip
+changes only the *default guidance*: when set, `playbook.render` advises the
+mercenary spawn idiom as the primary delegation guidance for implementer/reviewer
+prompts; when unset, native idiom is primary. **Independently, a small always-on
+tip fragment** (`tip: if the user requests a mercenary call, …`) is injected into
+every delegation-capable rendering, so the on-request path is reachable without
+the toggle (token noise accepted, same philosophy as the agentId-continuity tip).
+This replaces the earlier "config enables it" framing with a runtime per-key
+toggle; availability is invariant.
+
+**Child `unknown_session` — resolved as a known gap (not a designed path).** It
+fires only when the in-memory session map is lost, i.e. the lead's ws-mcp process
+restarts while a delegation is live (native children share that process;
+mercenary keys live in its map). A child cannot self-recover — it never logged in
+and `ws.lead.*` gating denies login — so the interim behavior is a **generic
+`unknown_session` reject**; the child then escalates to its issuer (the lead),
+which re-renders a fresh key and re-delegates (the existing fresh-spawn +
+resume-brief recovery path). A role-specific child message is not worth designing
+now: a **persistent session backend** (the deferred contract-invariant swap) makes
+cross-restart key survival the norm, shrinking child `unknown_session` to
+~never. Revisit the message only if/when that backend lands.
+
+**Dashboard disposition reconsidered (port, not strip).** The 2026-06-09
+"dashboard retained, strip agent-audit" decision assumed spawn deletion removed
+the agent-activity source. Option B retains the codex mercenary lifecycle, so the
+source survives — the agent-activity feed becomes a **port to the reshaped
+mercenary lifecycle, or a removal**, which is a deferred product decision (a
+separate dashboard `idea/` ticket, `re-evaluate — see epic 260605`). M3 only keeps
+the dashboard **compiling** against the reshaped session/lifecycle surface (the
+actor-model + register-schema change forces a mechanical read adaptation
+regardless); it no longer "strips" the feature. The destructive `260514` child
+drops likewise move to idea-level backlog with an epic pointer (always-ask gate
+preserved). `260429` absorption and `260521` retirement are unaffected by
+mercenary retention and keep their settled direction.
 
 ## Open Questions (continuation agenda)
 
@@ -861,8 +902,9 @@ server-side check in the keyed `tools/call` handler, not schema omission.
 - ~~claude mercenary retention~~ — resolved (2026-06-09): **retained**
   (harness-neutrality); gemini → deferred plug (neutral backend interface kept,
   `gemini.go` implementation unshipped).
-- **child `unknown_session` recovery message**: role-split (lead → re-login /
-  child → ask issuer to re-render) vs a generic "re-acquire via your issuer" line.
+- ~~child `unknown_session` recovery message~~ — resolved (2026-06-09) as a known
+  gap: generic reject + lead re-render interim; fires only on lead-process restart;
+  a persistent session backend shrinks it to ~never. Revisit at that backend.
 - ~~Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation~~ — resolved
   (2026-06-09): retained and folded into the session key as an optional
   capability/role scope (soft guard). Session-key issuance reserves a

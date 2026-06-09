@@ -3,7 +3,7 @@ title: ws playbook-factory pivot — spawn removal and native-subagent convergen
 related:
   260605-research-ws-native-subagent-pivot: full direction discussion, decisions, evidence, and open questions
   260429-research-host-neutral-ws-plugin: prior migration anchor, absorbed and superseded by this epic (archived .done)
-  260514-epic-ws-web-dashboard-mvp: retained as a web-tmux surface; M0 strips only agent-audit/agent-activity logic and keeps MCP-integration children (TUI-replacement plan superseded)
+  260514-epic-ws-web-dashboard-mvp: retained as a web-tmux surface; under option B the agent-activity feed is NOT stripped (mercenary lifecycle survives as its source) — M3 only keeps it compiling, port-vs-remove deferred to a dashboard idea ticket; MCP-integration children kept (TUI-replacement plan superseded)
   260521-research-libws-harness-agent-substrate: deprioritized by this pivot (dropped .dropped)
   260523-bug-ws-mcp-launcher-runtime-repair-race: prerequisite — binary/text swap race for rsrc distribution
   260524-bug-codex-plugin-cache-refresh-mcp-startup-race: prerequisite — plugin cache refresh race for rsrc distribution
@@ -24,19 +24,23 @@ subagents. Direction, decisions, and evidence live in
 
 - memory.* / ticket-mutation MCP tool contracts (deferred follow-up).
 - wsflow naming/convergence mechanics (company compat; follow-up).
-- Dashboard growth beyond the M0 agent-audit/agent-activity strip (the
-  dashboard is retained as a web-tmux surface; broader MCP-integration features
-  are follow-up). The earlier TUI-replacement/deprecation plan is superseded.
+- Dashboard feature changes beyond keeping it compiling against the reshaped
+  surface (the dashboard is retained as a web-tmux surface). Under option B the
+  agent-activity feed is NOT stripped — its mercenary lifecycle source survives,
+  so port-vs-remove is a deferred product decision in a separate dashboard idea
+  ticket. The earlier TUI-replacement/deprecation plan is superseded.
 - Gemini harness support (explicitly excluded).
 
 ## Child Tickets
 
 - Planned (M0 — cleanup): board and direction hygiene — absorb/close 260429,
-  retain dashboard as a web-tmux surface (strip only agent-audit/agent-activity
-  logic, keep MCP-integration children; destructive child drops stay
-  user-gated), retire
-  260521, mark spawn-bug tickets (260517, 260524 stale-dir) as
-  resolved-by-deletion candidates, promote cache/launcher race tickets to
+  retain dashboard as a web-tmux surface (under option B do NOT strip
+  agent-activity; M3 keeps it compiling, port-vs-remove deferred to a dashboard
+  idea ticket; destructive 260514 child drops move to idea-level backlog with an
+  epic pointer, still user-gated), retire
+  260521, re-triage spawn-bug tickets under option B (260517 empty-result and
+  260524 stale-dir live in the retained mercenary path — NOT resolved-by-deletion;
+  only subquery/wsstore-busy bugs drop), promote cache/launcher race tickets to
   prerequisites, start agentless-mode (`WS_MCP_NO_AGENT=1`) dogfooding as the
   breakage-discovery forcing function.
 - `260609-feat-ws-playbook-surface-mvp` (ready, M1 — playbook surface MVP):
@@ -71,8 +75,11 @@ subagents. Direction, decisions, and evidence live in
 
 - Spawn engine is **retained as a scoped first-class "mercenary" surface**
   (option B, supersedes the option-C freeze): codex + claude engines live (claude
-  retained for harness-neutrality, 2026-06-09), scoped to implementer/reviewer,
-  routed by user-explicit request or config-advised `playbook.render`.
+  retained for harness-neutrality, 2026-06-09), scoped to implementer/reviewer.
+  Routing: default always native; mercenary always available to the lead, invoked
+  only by user-explicit request or a per-key `ws/lead.prefer_mercenary(session_key)`
+  render-mode flip (changes default guidance, not availability), with a small
+  always-on mercenary tip in every delegation-capable rendering.
   Exploration, survey, and mental-model-update prefer native subagents. The
   runner-backend interface stays **harness-neutral/pluggable**: the `gemini.go`
   implementation is unshipped (model-compat cost) but the plug point is preserved

@@ -61,9 +61,16 @@ surface** and kept live; deletion is confined to genuinely-retired parts.
 - **Scope restriction — mercenary is for implementer and reviewer roles ONLY.**
   Exploration/survey (reference-discovery, plan-populator), mental-model-update,
   and `subquery` successors route to native subagents.
-- **Routing:** mercenary selected when (a) the user explicitly requests it, or
-  (b) config enables it and `playbook.render` advises the mercenary spawn idiom
-  in the rendered implementer/reviewer prompt. Default otherwise is native.
+- **Routing (finalized 2026-06-09):** default delegation is **always native**;
+  the mercenary is **always available to the lead** (not a feature flag), invoked
+  only when (a) the user explicitly requests it, or (b)
+  `ws/lead.prefer_mercenary(session_key)` (lead-only, `ws.lead.*`) has flipped that
+  key's render mode so `playbook.render` advises the mercenary spawn idiom as the
+  primary delegation guidance for implementer/reviewer. The flip changes only the
+  *default guidance*, never availability. Independently, a small **always-on tip
+  fragment** (`tip: if the user requests a mercenary call, …`) is injected into
+  every delegation-capable rendering so the on-request path is reachable without
+  the toggle (token noise accepted).
 - **Delete (genuinely retired):** the `gemini.go` runner **implementation**
   (unmaintained; model-compat tracking cost) — but **keep the harness-neutral
   runner-backend interface** so gemini/antigravity/custom harnesses are a deferred
@@ -150,9 +157,15 @@ surface** and kept live; deletion is confined to genuinely-retired parts.
 - **Session term resolved (2026-06-09):** **`ws/lead.login(root)`** under a
   lead-centric `ws.lead.*` namespace (only the lead logs in; subagents never
   login — they receive a key, see mercenary child-key acquisition). `session.open`
-  / `attach` dropped. Still OPEN: the child `unknown_session` recovery message —
-  role-split (lead → re-login / child → ask issuer to re-render) vs a generic
-  "re-acquire via your issuer" line.
+  / `attach` dropped.
+- **Child `unknown_session` — known gap, not a designed path (2026-06-09).** It
+  fires only when the in-memory map is lost (lead ws-mcp process restart while a
+  delegation is live). A child cannot self-recover (never logged in; `ws.lead.*`
+  gating denies login), so interim behavior is a **generic `unknown_session`
+  reject** → the child escalates to its issuer (the lead), which re-renders a fresh
+  key and re-delegates (existing fresh-spawn + resume-brief recovery). A
+  persistent session backend later shrinks this to ~never; revisit the message
+  then. Do not design a role-specific child recovery message now.
 
 ### root vs cwd; exec; role-containment
 
@@ -198,12 +211,20 @@ are resolved-by-deletion:
   contract lands (retained as design input — the new contract must not reproduce
   the plugin-cache-root binding footgun).
 
-### Dashboard agent-audit strip
+### Dashboard — keep compiling, defer the feature decision (revised under option B)
 
-Strip the dashboard's agent-audit / agent-activity logic (sourced from
-`agents.tail/status/debug`) here, since it shares the code removed by spawn
-deletion. The dashboard is otherwise **retained** as a web-tmux surface; only the
-agent-activity source is removed.
+The earlier "strip the dashboard agent-audit / agent-activity logic" plan assumed
+spawn deletion removed the source. **Under option B the codex mercenary lifecycle
+survives, so the agent-activity source survives.** Therefore:
+
+- M3 **does not strip** the feature. It only keeps the dashboard **compiling**
+  against the reshaped session/lifecycle surface — the actor-model removal and the
+  `register(prompts: [stems])` schema change force a mechanical read adaptation
+  (the dashboard reads wsstore actor/instance records) regardless.
+- "Port the agent-activity feed onto the mercenary lifecycle vs remove it" is a
+  **deferred product decision** → a separate dashboard `idea/` ticket
+  (`re-evaluate — see epic 260605`), not decided here.
+- The dashboard is otherwise **retained** as a web-tmux surface.
 
 ## Constraints
 
@@ -246,13 +267,15 @@ Verification: native is the default delegation path; mercenary spawns only for
 implementer/reviewer via the routing gate; the actor model is gone; no gemini /
 subquery / exploration spawn remains.
 
-### Phase 3: exec stateless + role-containment fold + dashboard strip
+### Phase 3: exec stateless + role-containment fold + dashboard build-fix
 
 Confirm exec is a stateless `exec_key` capability anchored at the session root;
-fold role-containment into capability-scoped keys; strip the dashboard
-agent-audit/agent-activity source. Verification: exec works without any actor;
-capability-scoped keys gate delegate tools; the dashboard runs without the
-agent-activity source and otherwise unchanged.
+fold role-containment into capability-scoped keys; keep the dashboard **compiling**
+against the reshaped session/lifecycle surface (mechanical read adaptation, no
+feature strip — the agent-activity port-vs-remove decision is deferred to a
+separate dashboard ticket). Verification: exec works without any actor;
+capability-scoped keys gate delegate tools; the dashboard builds and runs against
+the reshaped surface.
 
 Phase order: Phase 1 before Phase 2 (session-auth must replace the actor
 dependency before the actor model is deleted).
