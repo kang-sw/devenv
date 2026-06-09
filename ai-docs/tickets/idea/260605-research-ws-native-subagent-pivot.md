@@ -496,20 +496,59 @@ Rejected: keyless-lead-default + keyed-delegates — leaves the footgun for any
 delegate that drops its key; the server cannot enforce keying without caller
 identity, so only mandatory keys close the hole.
 
+**Concurrency & lifecycle (verified 2026-06-09, `ws:lead-verify-discussion`):**
+
+- The session map MUST be concurrency-safe (`sync.RWMutex` / `sync.Map`).
+  Non-setup requests are handled in parallel goroutines (`ServeStdio` spawns
+  `go func()` per request, server.go:156); the current single `sessionRoot`
+  field (server.go:38) is mutated under a synchronous **setup-fence**
+  (`isSetupFenceRequest` drains in-flight work via `wg.Wait()` before running
+  setup, server.go:142-153).
+- Adopting per-call keys lets the **setup-fence be removed**: with no shared
+  mutable root field, concurrent distinct-worktree calls each resolve their own
+  root from the map with no serialization. This is a net hygiene reduction
+  (wsstore actor persistence + fence + single field → one guarded map).
+- **Open: session lifecycle/eviction rule.** "Ephemeral in-memory" lacks a
+  disposal rule; the server can live for the whole harness session (days), so
+  unbounded keys leak. Decide at least one of: explicit `logout`, idle-TTL, or
+  LRU. Recovery on miss is re-login.
+
 ### Decision: root role unchanged; cwd separated
 
 - **root** stays the project/repo anchor + ws bookkeeping locus (git target,
   ai-docs discovery, exec cache/output anchor); it is carried **by the session**.
   ws ignores caller cwd entirely for root resolution (probe-proven).
-- **cwd** is a separate per-call execution/target directory, primarily consumed
-  by exec (run-here, store-under-root). Honest note: a distinct exec `cwd`
-  parameter is proposed design, not confirmed current behavior.
-- **Open design artifact**: a per-tool **root-vs-cwd classification table** —
-  which tools anchor at root (`path.generate`, exec cache, review artifacts) vs
-  follow cwd/target (exec execution dir; worktree-delegate git and discovery).
-  This table resolves the worktree contradiction (git must target the worktree
-  while exec cache aggregates at the project root). Worktrees remain first-class
-  distinct roots (`canonicalGitRoot` resolves each worktree to its own toplevel).
+- **cwd** is a separate per-call execution directory. **Confirmed current
+  behavior** (server.go:3251): `execLaunchSchema` already exposes `working_dir`
+  ("defaults to the resolved ws worktree root; relative paths resolve beneath
+  that root"). So exec already separates working_dir from root; this is not new
+  design, only formalized.
+
+**Root-vs-cwd classification table (resolved 2026-06-09).** The earlier
+"worktree git-vs-cache contradiction" dissolves: under per-session roots a
+worktree is its own session (re-login), so git and exec cache both anchor at
+that session's root — there is no split to reconcile.
+
+- **root-bound, no cwd input:** git.* (status/diff/log/merge_base/commit),
+  discovery (tickets.*/specs.*/mental_models.*/references.trace),
+  convention.read, project_tree, path.generate, config.*. These must NOT take a
+  cwd argument (a cwd input here would reintroduce a wrong-tree footgun).
+- **global / session-agnostic:** runtime.info, infra.read.
+- **cwd-consuming — exec launch only:** `exec.spawn` / `exec.shell` read
+  `working_dir` at launch; cwd is captured into the job. Default = session root;
+  explicit `working_dir` is free (chosen option: outside-root allowed, no
+  containment — reads are key-scoped, so there is no path footgun to contain).
+- **exec_key-scoped, dir-agnostic:** `exec.raw_read` / `raw_grep` / `raw_tail` /
+  `result` / `status` / `abort` take only `exec_key` (`execKeySchema`,
+  server.go:3267) — they read the captured streams of one job, NOT files by
+  path. The feared "raw_read reads outside-root files via cwd" footgun does not
+  exist.
+
+Net: **the only cwd consumer is exec launch; everything else is root-bound; exec
+output is tracked by `exec_key`**, so an outside-root working_dir does not break
+output/cache traceability. Worktrees remain first-class distinct roots
+(`canonicalGitRoot` resolves each worktree to its own toplevel) and re-login per
+worktree.
 
 ### Decision: exec → stateless capability
 
@@ -545,8 +584,11 @@ harness + playbook discipline). Pending policy decision (always-ask), not final.
 - ~~Entry-skill keep-list~~ — resolved (11 entry / 9 playbook).
 - ~~actor/setup model~~ — resolved as the ephemeral mandatory-session-key auth
   model (2026-06-09 section).
-- **Per-tool root-vs-cwd classification table** — the remaining design artifact
-  for the session/root/cwd model; resolves the worktree git-vs-cache split.
+- ~~Per-tool root-vs-cwd classification table~~ — resolved (2026-06-09 section):
+  exec launch is the only cwd consumer; all else root-bound; raw_* are
+  exec_key-scoped.
+- **Session lifecycle/eviction rule** — explicit `logout` vs idle-TTL vs LRU for
+  the in-memory session map (unbounded keys leak over a long-lived server).
 - **Session term choice**: `login` | `session.open` | `attach`.
 - **Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation** — pending policy
   decision (always-ask).

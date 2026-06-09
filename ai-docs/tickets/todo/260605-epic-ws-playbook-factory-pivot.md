@@ -66,7 +66,9 @@ subagents. Direction, decisions, and evidence live in
 - Playbook load failure is loud and partial; no embedded fallback text.
 - ws-mcp uses mandatory ephemeral per-call session keys (auth model); no
   persistent actor/authority state; the session carries the project root;
-  in-memory session→root map (no SQLite).
+  in-memory session→root map (no SQLite). The map is concurrency-safe and
+  replaces the existing setup-fence (requests run in parallel goroutines);
+  session lifecycle/eviction (logout/TTL/LRU) is an open child-ticket detail.
 
 ## Completion Criteria
 
