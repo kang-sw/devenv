@@ -208,6 +208,28 @@ Goal: the two caller-visible MCP tools and harness-aware rendering.
   expectation; config-driven model alias substitution verified without baked
   model names.
 
+**Forward-compat guardrail — keyed render signature (M3 coordination).** The
+epic Cross-Child Decisions settle the *final* render signature as
+`playbook.render(session_key, name, context?, root_override?)`: render is keyed
+like every ws call; when `session_key.role == lead` it mints and injects a fresh
+child key; `root_override` rebinds both the auto-include root and the child-key
+root for worktree children (the caller passes the path, so
+pre-allocate-before-splice makes it known at render time and render never has to
+infer lead-in-worktree vs spawn-into-worktree). The session-auth model
+(`session_key`, `ws/lead.login`, key roles, in-memory session→root map) does NOT
+exist until M3, so **Phase 2 implements `render(name, context?)` as written above
+and does NOT mint keys** — but it must leave the seam so M3 retrofits the keyed
+signature without reworking the tmp-file / context-injection / path-return core:
+
+- Do not bake in `name` as an immovable first positional or otherwise preclude
+  prepending a `session_key` argument later.
+- Keep root resolution a parameterizable seam: the `WS_RSRC_ROOT` / auto-include
+  root must be overridable from the call site (anticipating `root_override`),
+  not hard-wired to a single process-global resolution.
+
+Rejected for Phase 2: implementing the full keyed signature now — session-auth
+lands in M3, and render cannot mint a child key before the session model exists.
+
 Deliverable boundary: the playbook surface is callable and harness-aware. Skill
 bodies are NOT yet migrated to playbooks (M2). Spawn machinery untouched (M3).
 
