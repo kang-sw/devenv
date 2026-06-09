@@ -1,6 +1,7 @@
 package wsrsrc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,8 +109,22 @@ func TestFrontmatterNoBlock(t *testing.T) {
 	if fm != nil {
 		t.Errorf("expected nil frontmatter, got %v", fm)
 	}
+	// body is the normalized (LF-only) text — for pure-LF input it equals the original.
 	if body != text {
-		t.Errorf("body = %q, want original text", body)
+		t.Errorf("body = %q, want normalized text %q", body, text)
+	}
+}
+
+func TestFrontmatterNoBlockCRLFNormalized(t *testing.T) {
+	// A CRLF input with no frontmatter block must return LF-only body.
+	crlfText := "no frontmatter\r\nhere\r\n"
+	_, body := parseFrontmatter(crlfText)
+	if strings.Contains(body, "\r") {
+		t.Errorf("body contains \\r — CRLF not normalized in no-frontmatter early-return path: %q", body)
+	}
+	wantBody := "no frontmatter\nhere\n"
+	if body != wantBody {
+		t.Errorf("body = %q, want %q", body, wantBody)
 	}
 }
 
@@ -315,24 +330,26 @@ func TestSubstituteProvided(t *testing.T) {
 }
 
 func TestSubstituteUndeclaredInContext(t *testing.T) {
-	// vars has a key not declared in the playbook → error
+	// vars has a key not declared in the playbook → ErrUndeclaredVar
 	_, err := substituteVars("body", []string{"Declared"}, map[string]string{"Undeclared": "x"})
-	if err == nil {
-		t.Fatal("expected error for undeclared variable in vars, got nil")
+	var target ErrUndeclaredVar
+	if !asError(err, &target) {
+		t.Fatalf("expected ErrUndeclaredVar, got %T: %v", err, err)
 	}
-	if !strings.Contains(err.Error(), "Undeclared") {
-		t.Errorf("error = %q, want mention of 'Undeclared'", err)
+	if target.Name != "Undeclared" {
+		t.Errorf("ErrUndeclaredVar.Name = %q, want Undeclared", target.Name)
 	}
 }
 
 func TestSubstituteDeclaredButUnprovidedAndUsed(t *testing.T) {
-	// declared variable appears in body but is not in vars → error
+	// declared variable appears in body but is not in vars → ErrUnprovidedVar
 	_, err := substituteVars("Hello {{.Name}}!", []string{"Name"}, map[string]string{})
-	if err == nil {
-		t.Fatal("expected error for declared-but-unprovided variable, got nil")
+	var target ErrUnprovidedVar
+	if !asError(err, &target) {
+		t.Fatalf("expected ErrUnprovidedVar, got %T: %v", err, err)
 	}
-	if !strings.Contains(err.Error(), "Name") {
-		t.Errorf("error = %q, want mention of 'Name'", err)
+	if target.Name != "Name" {
+		t.Errorf("ErrUnprovidedVar.Name = %q, want Name", target.Name)
 	}
 }
 
@@ -348,13 +365,34 @@ func TestSubstituteDeclaredButUnprovidedAndUnused(t *testing.T) {
 }
 
 func TestSubstituteUndeclaredInBody(t *testing.T) {
-	// body uses {{.Ghost}} but it's not in declared → error after substituting declared ones
+	// body uses {{.Ghost}} but it's not in declared → ErrUndeclaredVar after substituting declared ones
 	_, err := substituteVars("{{.Declared}} {{.Ghost}}", []string{"Declared"}, map[string]string{"Declared": "val"})
-	if err == nil {
-		t.Fatal("expected error for undeclared variable in body, got nil")
+	var target ErrUndeclaredVar
+	if !asError(err, &target) {
+		t.Fatalf("expected ErrUndeclaredVar, got %T: %v", err, err)
 	}
-	if !strings.Contains(err.Error(), "Ghost") {
-		t.Errorf("error = %q, want mention of 'Ghost'", err)
+	if target.Name != "Ghost" {
+		t.Errorf("ErrUndeclaredVar.Name = %q, want Ghost", target.Name)
+	}
+}
+
+// TestSubstituteNoDoubleExpansion verifies that a replacement value containing
+// another placeholder literal is not re-expanded (single-pass semantics).
+func TestSubstituteNoDoubleExpansion(t *testing.T) {
+	// A's value contains "{{.B}}" as a literal. B's placeholder also appears in body.
+	// Expected: the {{.B}} from A's value stays as a literal; the {{.B}} originally
+	// in the body is replaced with "World".
+	result, err := substituteVars(
+		"start {{.A}} end {{.B}}",
+		[]string{"A", "B"},
+		map[string]string{"A": "{{.B}}", "B": "World"},
+	)
+	if err != nil {
+		t.Fatalf("substituteVars: %v", err)
+	}
+	const want = "start {{.B}} end World"
+	if result != want {
+		t.Errorf("result = %q, want %q (A's value must not be re-expanded)", result, want)
 	}
 }
 
@@ -388,8 +426,41 @@ func TestAutoIncludeDangling(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for dangling include, got nil")
 	}
-	if !strings.Contains(err.Error(), "missing") {
-		t.Errorf("error = %q, want mention of 'missing'", err)
+	// "missing.md" is the filename of the dangling include; asserting this rather
+	// than "missing" alone avoids false-positive matches on other error phrases.
+	if !strings.Contains(err.Error(), "missing.md") {
+		t.Errorf("error = %q, want mention of filename 'missing.md'", err)
+	}
+}
+
+// TestAutoIncludeCRLFNoFrontmatter verifies that an include file with CRLF line
+// endings and no frontmatter block delivers LF-only body text after Load
+// (parseFrontmatter's early-return must yield the normalized, not original, text).
+func TestAutoIncludeCRLFNoFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	// Playbook uses a CRLF include that has no frontmatter block.
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - crlf-dep\n---\nbody\n")
+	// Write the include with CRLF and no frontmatter.
+	crlfContent := "line one\r\nline two\r\n"
+	writeFile(t, root, "crlf-dep.md", crlfContent)
+
+	m, err := GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	pb, err := Load(root, "pb", "", nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if strings.Contains(pb.Body, "\r") {
+		t.Errorf("Body contains \\r after Load — CRLF normalization not applied in no-frontmatter path:\n%q", pb.Body)
+	}
+	if !strings.Contains(pb.Body, "line one") || !strings.Contains(pb.Body, "line two") {
+		t.Errorf("Body = %q: expected include lines to be present", pb.Body)
 	}
 }
 
@@ -639,19 +710,14 @@ func TestResolveRootMissingEnv(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// errors.As helper (avoids importing errors in test without the full package)
+// errors.As helper
 // ---------------------------------------------------------------------------
 
-// asError reports whether err (or any error in its chain) can be assigned to
-// target. Uses a manual type-switch since the test package lives in the same
-// package and can directly type-assert the concrete types.
-func asError[T any](err error, target *T) bool {
+// asError reports whether err or any error in its chain matches type T,
+// using errors.As so that wrapped typed errors are also matched.
+func asError[T error](err error, target *T) bool {
 	if err == nil {
 		return false
 	}
-	if v, ok := err.(T); ok {
-		*target = v
-		return true
-	}
-	return false
+	return errors.As(err, target)
 }

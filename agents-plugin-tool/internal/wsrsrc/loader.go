@@ -40,12 +40,14 @@ func ResolveRoot() (string, error) {
 // no fallback.
 //
 // vars controls variable substitution:
-//   - nil → no substitution; body is returned as-is.
-//   - non-nil → substitution is applied. Every key in vars must be declared in
-//     the playbook's variables list (ErrUndeclaredVar). Every declared variable
-//     that appears as {{.Name}} in the body must be present in vars
-//     (ErrUnprovidedVar). Declared variables not appearing in the body are
-//     ignored if absent from vars.
+//   - nil → no substitution; body is returned as-is with placeholders intact.
+//   - non-nil → substitution is applied via a single-pass strings.NewReplacer so
+//     that a value containing another placeholder literal is never re-expanded.
+//     Every key in vars must appear in the playbook's variables list, otherwise
+//     an ErrUndeclaredVar is returned. Every declared variable whose placeholder
+//     {{.Name}} appears in the body must be present in vars, otherwise an
+//     ErrUnprovidedVar is returned. Declared variables not appearing in the body
+//     are silently ignored when absent from vars.
 func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, error) {
 	if !isBareStem(name) {
 		return LoadedPlaybook{}, fmt.Errorf("invalid playbook name %q: must be a bare stem", name)
@@ -215,11 +217,16 @@ func resolveIncludes(root string, names []string, manifest Manifest) (string, er
 // substituteVars replaces {{.Name}} placeholders in body.
 //
 // Rules (vars non-nil path):
-//   - A key in vars that is not in declared → error.
-//   - A placeholder {{.Name}} in body where Name is not in declared → error.
-//   - A declared variable whose placeholder appears in body but is absent from
-//     vars → error (caller must supply all used declared variables).
-//   - A declared variable not present in body → no-op regardless of vars.
+//   - A key in vars that is not in declared → ErrUndeclaredVar.
+//   - A placeholder {{.Name}} in the body where Name is not in declared →
+//     ErrUndeclaredVar (detected after all declared replacements are applied).
+//   - A declared variable whose placeholder appears in the body but is absent
+//     from vars → ErrUnprovidedVar.
+//   - A declared variable not present in the body → silently ignored.
+//
+// Replacements are applied in a single pass via strings.NewReplacer so that a
+// value containing another placeholder literal (e.g. "{{.Other}}") is never
+// re-expanded.
 func substituteVars(body string, declared []string, vars map[string]string) (string, error) {
 	declaredSet := make(map[string]bool, len(declared))
 	for _, d := range declared {
@@ -229,26 +236,38 @@ func substituteVars(body string, declared []string, vars map[string]string) (str
 	// Check for undeclared variables in provided vars.
 	for k := range vars {
 		if !declaredSet[k] {
-			return "", fmt.Errorf("variable %q is not declared in playbook (declared: %v)", k, declared)
+			return "", ErrUndeclaredVar{Name: k}
 		}
 	}
 
-	result := body
-
-	// Replace all declared-variable placeholders.
+	// Build old→new pairs for all declared placeholders found in body.
+	// Using strings.NewReplacer ensures a single left-to-right pass: replacement
+	// values are never re-scanned, so "{{.B}}" in a value for "{{.A}}" is
+	// preserved as a literal and not expanded.
+	var pairs []string
 	for _, name := range declared {
 		placeholder := "{{." + name + "}}"
-		if !strings.Contains(result, placeholder) {
+		if !strings.Contains(body, placeholder) {
 			continue // declared but not used in body — fine
 		}
 		value, provided := vars[name]
 		if !provided {
-			return "", fmt.Errorf("declared variable %q appears in body but was not provided", name)
+			return "", ErrUnprovidedVar{Name: name}
 		}
-		result = strings.ReplaceAll(result, placeholder, value)
+		pairs = append(pairs, placeholder, value)
 	}
 
-	// Detect any remaining {{.xxx}} placeholders that were never declared.
+	var result string
+	if len(pairs) > 0 {
+		result = strings.NewReplacer(pairs...).Replace(body)
+	} else {
+		result = body
+	}
+
+	// Detect any remaining {{.xxx}} placeholders whose name is not in declared.
+	// Declared-var placeholders inserted by a replacement value (e.g. A's value
+	// is "{{.B}}") are left in the result by design and are not errors — the
+	// guard below passes them through.
 	remaining := result
 	for {
 		idx := strings.Index(remaining, "{{.")
@@ -261,7 +280,10 @@ func substituteVars(body string, declared []string, vars map[string]string) (str
 		}
 		end += idx
 		varName := remaining[idx+3 : end]
-		return "", fmt.Errorf("variable %q used in body but not declared in playbook", varName)
+		if !declaredSet[varName] {
+			return "", ErrUndeclaredVar{Name: varName}
+		}
+		remaining = remaining[end+2:] // advance past this (benign) placeholder
 	}
 
 	return result, nil

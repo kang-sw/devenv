@@ -7,7 +7,8 @@ import "strings"
 // this mirrors wsprompt.stripFrontmatter's normalization practice).
 //
 // Returns (frontmatter map, body). If no valid frontmatter block is found,
-// returns (nil, text) with the original text as body.
+// returns (nil, normalized) so callers always receive LF-only text regardless
+// of the input line endings.
 //
 // Supported YAML-subset:
 //   - Scalar:   key: value
@@ -17,10 +18,11 @@ import "strings"
 // Adapted from internal/wsdoc/frontmatter.go; copied (not imported) because
 // that function is unexported and path-based.
 func parseFrontmatter(text string) (map[string]any, string) {
-	// Normalize line endings before processing.
+	// Normalize line endings before processing. All return paths below yield
+	// the normalized string so callers receive LF-only text in every case.
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(normalized, "---") {
-		return nil, text
+		return nil, normalized
 	}
 	lines := strings.Split(normalized, "\n")
 	end := -1
@@ -31,7 +33,7 @@ func parseFrontmatter(text string) (map[string]any, string) {
 		}
 	}
 	if end == -1 {
-		return nil, text
+		return nil, normalized
 	}
 
 	// Body is everything after the closing ---.
@@ -50,8 +52,10 @@ func parseFrontmatter(text string) (map[string]any, string) {
 			current = strings.TrimSpace(parts[0])
 			value := cleanFrontmatterScalar(parts[1])
 			if value == "" || value == "[]" || value == "{}" || value == "null" || value == "~" {
-				// Empty value — initialize as empty map; list items may follow.
-				result[current] = map[string]string{}
+				// Empty value — initialize as nil []string so that a subsequent
+				// "- item" line does a well-typed append and the intent is explicit.
+				// A following "subkey: val" line replaces it with a map[string]string.
+				result[current] = ([]string)(nil)
 			} else {
 				result[current] = value
 			}

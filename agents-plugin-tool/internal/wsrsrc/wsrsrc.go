@@ -75,3 +75,20 @@ type ErrFileMissing struct{ RelPath string }
 func (e ErrFileMissing) Error() string {
 	return fmt.Sprintf("rsrc manifest-listed file missing: %q", e.RelPath)
 }
+
+// ErrUndeclaredVar is returned by substituteVars when a variable is referenced
+// (either supplied in vars or found as {{.Name}} in the body) but is absent
+// from the playbook's declared variables list.
+type ErrUndeclaredVar struct{ Name string }
+
+func (e ErrUndeclaredVar) Error() string {
+	return fmt.Sprintf("variable %q is not declared in playbook", e.Name)
+}
+
+// ErrUnprovidedVar is returned by substituteVars when a declared variable's
+// placeholder {{.Name}} appears in the body but no value was supplied in vars.
+type ErrUnprovidedVar struct{ Name string }
+
+func (e ErrUnprovidedVar) Error() string {
+	return fmt.Sprintf("declared variable %q appears in body but was not provided", e.Name)
+}
