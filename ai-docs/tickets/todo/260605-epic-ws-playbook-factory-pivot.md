@@ -67,8 +67,10 @@ subagents. Direction, decisions, and evidence live in
 - ws-mcp uses mandatory ephemeral per-call session keys (auth model); no
   persistent actor/authority state; the session carries the project root;
   in-memory session→root map (no SQLite). The map is concurrency-safe and
-  replaces the existing setup-fence (requests run in parallel goroutines);
-  session lifecycle/eviction (logout/TTL/LRU) is an open child-ticket detail.
+  replaces the existing setup-fence (requests run in parallel goroutines). No
+  logout, no eviction (rows tiny + bounded). An `unknown_session → re-login`
+  contract guard is mandatory on every keyed call, making a later persistent
+  backend a contract-invariant implementation swap.
 
 ## Completion Criteria
 

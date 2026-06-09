@@ -508,10 +508,30 @@ identity, so only mandatory keys close the hole.
   mutable root field, concurrent distinct-worktree calls each resolve their own
   root from the map with no serialization. This is a net hygiene reduction
   (wsstore actor persistence + fence + single field → one guarded map).
-- **Open: session lifecycle/eviction rule.** "Ephemeral in-memory" lacks a
-  disposal rule; the server can live for the whole harness session (days), so
-  unbounded keys leak. Decide at least one of: explicit `logout`, idle-TTL, or
-  LRU. Recovery on miss is re-login.
+- **Resolved — session lifecycle (2026-06-09): in-memory, no logout, no
+  eviction.** `login` is a bootstrap verb only; there is no `logout`. Session
+  rows are tiny ((word-chain key, root path)) and bounded in practice by the
+  number of distinct roots a fleet touches, so unbounded growth is a
+  non-problem — no eviction needed. The map stays `sync.Map`-backed in-memory.
+- **Forward-compat guard — `unknown_session` → re-login contract.** Every keyed
+  ws call specifies: on an `unknown_session` rejection the caller re-logins
+  (with its known root) and retries. This is a general key-rejection recovery
+  path, not a restart-only path. Because the caller-visible contract
+  (`login(root) → key`; `<tool>(key, …)`; re-login-on-reject) hides the backend,
+  switching the map from in-memory to a persistent backend (SQLite or a
+  key-file folder) later is a pure implementation swap with **zero contract
+  migration**; it only changes how often the re-login branch fires (every
+  restart → ~never), never whether it exists. Persistence is therefore deferred
+  until session-wise state grows heavy enough to justify it.
+- Re-login always has its root available, consistent with the no-auto-derive
+  rule: the lead knows its own root; a subagent's delegation brief carries it.
+- Rejected for now: SQLite-backed sessions (reopens
+  `260524-bug-wsstore-ci-sqlite-busy`'s surface for a marginal "survive restart"
+  gain that the re-login branch already covers cheaply) and a key-file folder
+  (persistence-by-another-name: forces a global location via a chicken-and-egg —
+  the folder cannot live under the session root it is meant to resolve — and
+  tends to grow an in-memory read cache anyway). Both stay available as the
+  later backend-swap target under the same contract.
 
 ### Decision: root role unchanged; cwd separated
 
@@ -587,8 +607,9 @@ harness + playbook discipline). Pending policy decision (always-ask), not final.
 - ~~Per-tool root-vs-cwd classification table~~ — resolved (2026-06-09 section):
   exec launch is the only cwd consumer; all else root-bound; raw_* are
   exec_key-scoped.
-- **Session lifecycle/eviction rule** — explicit `logout` vs idle-TTL vs LRU for
-  the in-memory session map (unbounded keys leak over a long-lived server).
+- ~~Session lifecycle/eviction rule~~ — resolved (2026-06-09): in-memory, no
+  logout, no eviction (rows tiny + bounded); `unknown_session → re-login`
+  guardrail keeps a later persistent backend a contract-invariant swap.
 - **Session term choice**: `login` | `session.open` | `attach`.
 - **Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation** — pending policy
   decision (always-ask).
