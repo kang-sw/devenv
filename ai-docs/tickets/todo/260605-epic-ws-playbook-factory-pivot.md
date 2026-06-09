@@ -45,16 +45,21 @@ subagents. Direction, decisions, and evidence live in
   (config-backed), unknown-harness fallback, delegation tip injection.
   Contract-first spec authored (`260609-playbook-tools`,
   `260609-playbook-harness-rendering`, `260609-rsrc-playbook-distribution`).
-- Planned (M2 — skill-text conversion): retained-native-subagent delegation
-  patterns replace agents.*/subquery references across skills; subquery →
-  Explore absorption; entry-skill keep-list decision; internal skill bodies →
-  playbooks.
-- Planned (M3 — runtime deletion): remove agents.*/spawn machinery, runner
-  backends, SQLite/wsstate agent state; replace actor/wsstore/authority with an
-  ephemeral mandatory per-call session-key auth model (login → word-chain key;
-  in-memory session→root map).
-- Planned (M4 — api.ask redesign): corpus-routed api-doc playbook, cache
-  index/staleness conventions, async job surface removal.
+- `260609-refactor-ws-skill-text-playbook-conversion` (todo, M2 — skill-text
+  conversion): retained-native-subagent delegation patterns replace
+  agents.*/subquery references across skills; subquery → Explore absorption;
+  entry-skill keep-list (11 entry / 9 playbook); internal skill bodies →
+  playbooks. Depends on M1.
+- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (todo, M3 — runtime
+  deletion): remove agents.*/spawn machinery, runner backends, SQLite/wsstate
+  agent state; replace actor/wsstore/authority with an ephemeral mandatory
+  per-call session-key auth model (login → word-chain key; in-memory
+  session→root map); exec stateless; role-containment folded into
+  capability-scoped keys; dashboard agent-audit strip; resolved-by-deletion bug
+  tickets dropped here. Depends on M2; coordinated with M4.
+- `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
+  corpus-routed api-doc playbook, cache index/staleness conventions, async job
+  surface removal. Depends on M1; coordinated with M3.
 
 ## Cross-Child Decisions
 
