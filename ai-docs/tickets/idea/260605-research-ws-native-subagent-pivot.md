@@ -617,6 +617,49 @@ Forward note: the session-key issuance API should therefore reserve an optional
 capability/role-scope parameter from the first cut, even if the first
 implementation only honours a single default profile.
 
+### Refine: spawn core frozen-preserved, not source-deleted (option C)
+
+Fourth lead-discuss session (2026-06-09). The "total spawn removal" decision is
+refined on its disposition of the spawn **source**, not its disposition of the
+**live path**.
+
+Reconsidered question: is it cheaper to keep ws.agent but hide it from the
+public schema rather than delete it? Findings:
+
+- "Hide from public schema" already exists and is dogfooded: `WS_MCP_NO_AGENT=1`
+  → `noAgentHiddenTool()` (`mcp/server.go:3118`) already filters `agents.*`,
+  `exec.*`, `subquery`, `api.ask*`, `config.agents_tier` from the schema. The
+  hiding cost is ≈ 0 — a default-flip, not new work.
+- The expensive work (skill-text conversion to native delegation, M2) is paid
+  either way; hiding the runtime does not save it.
+- The real tax of keeping the spawn code **compiled-but-dormant** is
+  entanglement: `agent.go`'s `SelfWorkerStarter`/`childActor` paths are welded
+  to the actor/setup machinery this pivot deletes, and `childActorInstruction`
+  recovery is already broken under shared-process native subagents. Keeping it
+  compilable means either reviving the broken actor model or rewiring dormant
+  code onto session-auth — integration labor with no deletion payoff.
+- The token motivation does not favor ws-spawn: a spawned subprocess reboots a
+  full model session (system prompt + full tool schema reload → more tokens),
+  while the context-isolation win is delivered equally by native subagents
+  (which inherit the full ws toolset and return only results). The sole genuine
+  residual value is harness-independence (a harness with no subagent feature at
+  all), which the tip-only / fresh-spawn + resume-brief recovery path already
+  covers as a soft dependency.
+
+Outcome — **option C, chosen over both total source-deletion and
+compiled-but-dormant retention**: remove the spawn surface from the live server
+and delete the actor entanglement, but **freeze-preserve the runner backends
+(claude.go/codex.go/gemini.go) and the spawn core out of the compiled server**
+(build-tag isolation or `ai-docs/ref/`), carrying zero compile/compat tax. The
+capability is resurrectable if a no-native-subagent harness ever becomes a real
+target. Consistent with repo Architecture rule #5 (preserve historical material
+under `ai-docs/ref/`).
+
+Unchanged by this refine: the live `agents.*`/`subquery` schema removal, the
+actor → session-auth replacement, and the resolved-by-deletion outcome for the
+spawn bug backlog (the buggy code no longer executes on any live path; the
+frozen copy carries the known issues only if resurrected, not before).
+
 ## Open Questions (continuation agenda)
 
 - ~~Entry-skill keep-list~~ — resolved (11 entry / 9 playbook).

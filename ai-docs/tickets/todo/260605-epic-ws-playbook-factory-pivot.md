@@ -51,8 +51,10 @@ subagents. Direction, decisions, and evidence live in
   entry-skill keep-list (11 entry / 9 playbook); internal skill bodies →
   playbooks. Depends on M1.
 - `260609-refactor-ws-spawn-runtime-deletion-session-auth` (todo, M3 — runtime
-  deletion): remove agents.*/spawn machinery, runner backends, SQLite/wsstate
-  agent state; replace actor/wsstore/authority with an ephemeral mandatory
+  deletion): remove agents.*/spawn machinery and SQLite/wsstate agent state from
+  the live server; **freeze-preserve the runner backends + spawn core out of the
+  compiled server** (build-tag/`ai-docs/ref/`), not source-deleted (option C);
+  replace actor/wsstore/authority with an ephemeral mandatory
   per-call session-key auth model (login → word-chain key; in-memory
   session→root map); exec stateless; role-containment folded into
   capability-scoped keys; dashboard agent-audit strip; resolved-by-deletion bug
@@ -63,7 +65,10 @@ subagents. Direction, decisions, and evidence live in
 
 ## Cross-Child Decisions
 
-- No spawn fallback path survives anywhere; dual-path designs are rejected.
+- No spawn fallback path survives on any live path; live dual-path designs are
+  rejected. The spawn runner backends + core are **frozen-preserved out of the
+  compiled server** (option C), not source-deleted, and are archival-only — not
+  wired as a runtime fallback.
 - Retained agent = fast path; fresh spawn + resume brief = recovery path.
   Reuse guarantees end at lead-context lifetime (tip-only continuity).
 - Harness differences ship as data (terminology/model tables, overlays);

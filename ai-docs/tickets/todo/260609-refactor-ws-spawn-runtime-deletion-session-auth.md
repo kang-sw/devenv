@@ -38,17 +38,36 @@ original "total spawn removal" inventory).
 
 Binding decisions from the research ticket and the epic Cross-Child Decisions:
 
-### Spawn removal (no fallback path survives)
+### Spawn removal — live path deleted, spawn core frozen (option C)
 
-- Remove `agents.*` lifecycle/diagnostic tools (register/call/wait/result/status/
-  tail/print/cancel/erase/interrupt/debug.*), the `SelfWorkerStarter` async spawn
-  path, the codex/claude/gemini Runner backends, SQLite role pointers and
-  instance state, and wsstate file-backed agent state.
-- Remove the `subquery` tool runtime (skill text already migrated to the Explore
-  playbook in M2).
-- Remove `api.ask` spawn machinery and the async job surface — coordinated with
-  M4 (`api.ask` redesign owns the replacement contract).
-- No spawn fallback path survives anywhere; dual-path designs are rejected.
+Disposition refined by the research ticket's 2026-06-09 "spawn core
+frozen-preserved, not source-deleted (option C)" decision: the **live** spawn
+path is removed; the spawn **source** is frozen out of the compiled server
+rather than deleted.
+
+- Remove from the live server: `agents.*` lifecycle/diagnostic tools
+  (register/call/wait/result/status/tail/print/cancel/erase/interrupt/debug.*),
+  the `SelfWorkerStarter` async spawn path, SQLite role pointers and instance
+  state, wsstate file-backed agent state, and the actor/authority/child-actor
+  entanglement. Live schema removal uses the existing `noAgentHiddenTool` filter
+  mechanism (`mcp/server.go:3118`).
+- **Freeze-preserve, do NOT source-delete, the runner backends
+  (claude.go/codex.go/gemini.go) and the spawn core.** Lift them out of the
+  compiled server (build-tag isolation or `ai-docs/ref/`) so they carry zero
+  compile/compat tax but remain resurrectable if a no-native-subagent harness
+  becomes a real target. Rationale (research ticket): the token argument does
+  not favor ws-spawn, native delegation captures the context-isolation win, and
+  the sole residual value is harness-independence — already covered as a soft
+  dependency by the resume-brief recovery path.
+- Remove the `subquery` tool runtime from the live server (skill text already
+  migrated to the Explore playbook in M2); its spawn dependency is part of the
+  frozen core.
+- Remove `api.ask` spawn machinery and the async job surface from the live
+  server — coordinated with M4 (`api.ask` redesign owns the replacement
+  contract).
+- No spawn fallback path survives on **any live path**; live dual-path designs
+  are rejected. The frozen copy is archival only — it is NOT wired as a runtime
+  fallback.
 - Casualties accepted: `agents.tail/status/debug` observability and the
   dashboard's agent-activity sources disappear (harness-native visibility
   replaces them); uniform cross-harness wait/result/cancel semantics are
@@ -156,13 +175,18 @@ existing actor model so callers can migrate. Verification: concurrent
 distinct-root calls do not clobber; missing/unknown key yields the re-login
 recovery contract; capability-scoped key restricts the intended tools.
 
-### Phase 2: spawn machinery + actor model deletion
+### Phase 2: spawn machinery + actor model deletion (spawn core frozen)
 
-Delete `agents.*`, `subquery` runtime, runner backends, `SelfWorkerStarter`,
-SQLite role pointers/instance state, wsstate, and the actor/authority/child-actor
-machinery. Drop the resolved-by-deletion bug tickets in the same commits.
-Verification: full ws runs agentless by default; no spawn path remains; the
-dropped bug tickets are removed with their code.
+Remove from the live server: `agents.*`, the `subquery` runtime entry,
+`SelfWorkerStarter`, SQLite role pointers/instance state, wsstate, and the
+actor/authority/child-actor machinery. **Freeze-preserve the runner backends
+(claude.go/codex.go/gemini.go) and the spawn core** out of the compiled server
+(build-tag isolation or `ai-docs/ref/`) rather than source-deleting them (option
+C). Drop the resolved-by-deletion bug tickets in the same commits — they are
+resolved because the buggy code no longer executes on any live path; the frozen
+copy carries the known issues only if resurrected. Verification: full ws runs
+agentless by default; no spawn path remains live; the compiled server does not
+reference the frozen core; the dropped bug tickets are removed.
 
 ### Phase 3: exec stateless + role-containment fold + dashboard strip
 
