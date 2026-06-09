@@ -2,9 +2,9 @@
 title: ws playbook-factory pivot — spawn removal and native-subagent convergence
 related:
   260605-research-ws-native-subagent-pivot: full direction discussion, decisions, evidence, and open questions
-  260429-research-host-neutral-ws-plugin: prior migration anchor; this epic absorbs and supersedes its direction
-  260514-epic-ws-web-dashboard-mvp: to be deprecated under milestone 0; replacement is a lightweight TUI (follow-up)
-  260521-research-libws-harness-agent-substrate: deprioritized by this pivot
+  260429-research-host-neutral-ws-plugin: prior migration anchor, absorbed and superseded by this epic (archived .done)
+  260514-epic-ws-web-dashboard-mvp: retained as a web-tmux surface; M0 strips only agent-audit/agent-activity logic and keeps MCP-integration children (TUI-replacement plan superseded)
+  260521-research-libws-harness-agent-substrate: deprioritized by this pivot (dropped .dropped)
   260523-bug-ws-mcp-launcher-runtime-repair-race: prerequisite — binary/text swap race for rsrc distribution
   260524-bug-codex-plugin-cache-refresh-mcp-startup-race: prerequisite — plugin cache refresh race for rsrc distribution
 ---
@@ -24,8 +24,9 @@ subagents. Direction, decisions, and evidence live in
 
 - memory.* / ticket-mutation MCP tool contracts (deferred follow-up).
 - wsflow naming/convergence mechanics (company compat; follow-up).
-- TUI replacement for the dashboard (follow-up; only the deprecation decision
-  is in scope here).
+- Dashboard growth beyond the M0 agent-audit/agent-activity strip (the
+  dashboard is retained as a web-tmux surface; broader MCP-integration features
+  are follow-up). The earlier TUI-replacement/deprecation plan is superseded.
 - Gemini harness support (explicitly excluded).
 
 ## Child Tickets
