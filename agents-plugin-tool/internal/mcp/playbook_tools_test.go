@@ -110,6 +110,9 @@ Worktree: {{.WorktreeID}}
 `
 
 	// delegatePlaybookContent: delegates:true with all terminology vars.
+	// NOTE: kind:render is advisory metadata only — the loader does not restrict
+	// by kind, so this fixture is valid for use with printPlaybook too. kind is
+	// not a tool-routing gate; it is surfaced in PlaybookMeta for caller inspection.
 	delegatePlaybookContent = `---
 kind: render
 delegates: true
@@ -192,12 +195,13 @@ func TestPlaybookPrintClaudeHarness(t *testing.T) {
 			t.Errorf("body %q: expected claude %s %q", body, varName, claudeTerm[varName])
 		}
 	}
-	// Codex terms must NOT appear (proves harness selection works).
+	// Codex terms must NOT appear for any var (proves harness selection on all vars).
 	codexTerm := terminologyForHarness("codex")
-	// Only check if terms actually differ.
-	if claudeTerm["ExploreAgent"] != codexTerm["ExploreAgent"] {
-		if strings.Contains(body, codexTerm["ExploreAgent"]) {
-			t.Errorf("body %q: codex ExploreAgent term should not appear in claude render", body)
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if claudeTerm[varName] != codexTerm[varName] {
+			if strings.Contains(body, codexTerm[varName]) {
+				t.Errorf("body %q: codex %s term %q must not appear in claude render", body, varName, codexTerm[varName])
+			}
 		}
 	}
 }
@@ -478,6 +482,35 @@ func TestPlaybookPrintUnprovidedVar(t *testing.T) {
 	if !asPlaybookError(err, &unprov) {
 		t.Errorf("expected ErrUnprovidedVar, got %T: %v", err, err)
 	}
+	if unprov.Name != "WorktreeID" {
+		t.Errorf("ErrUnprovidedVar.Name = %q, want WorktreeID", unprov.Name)
+	}
+}
+
+func TestPlaybookPrintDanglingInclude(t *testing.T) {
+	// Playbook declares includes: [dangling] but dangling.md is not in the tree.
+	// The include resolution should fail and propagate the error through printPlaybook.
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		// Only the playbook file; dangling.md is intentionally absent so the
+		// manifest will not list it, causing ErrFileMissing from resolveIncludes.
+		"dangle-pb/dangle-pb.md": "---\nkind: print\ndelegates: false\nincludes:\n  - dangling\n---\nbody\n",
+	})
+	s := newTestServerWithHarness(t, "")
+
+	_, err := printPlaybook(s, rsrcRoot, "dangle-pb", nil, wsconfig.Options{})
+	if err == nil {
+		t.Fatal("expected error for dangling include, got nil")
+	}
+	// The error message must contain the missing include stem name.
+	if !strings.Contains(err.Error(), "dangling") {
+		t.Errorf("error %q: expected include stem 'dangling' in message", err)
+	}
+	// The wrapped underlying error must be ErrFileMissing (the manifest does not
+	// list dangling.md since it was never written to the tree).
+	var fileMissing wsrsrc.ErrFileMissing
+	if !asPlaybookError(err, &fileMissing) {
+		t.Errorf("expected ErrFileMissing (via errors.As), got %T: %v", err, err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -612,11 +645,20 @@ func TestPlaybookPrintGoldenDelegateSampleClaudeHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
+	// Derived checks (broad coverage).
 	claudeTerm := terminologyForHarness("claude")
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, claudeTerm[varName]) {
 			t.Errorf("golden body %q: expected claude %s %q", body, varName, claudeTerm[varName])
 		}
+	}
+	// Hardcoded expected strings to guard against a wrong terminology table
+	// (both sides of a derived assertion would agree even if the table were wrong).
+	if !strings.Contains(body, "the Explore agent") {
+		t.Errorf("golden body %q: expected hardcoded claude ExploreAgent 'the Explore agent'", body)
+	}
+	if !strings.Contains(body, "SendMessage(to: <agentId>)") {
+		t.Errorf("golden body %q: expected hardcoded claude ContinueIdiom 'SendMessage(to: <agentId>)'", body)
 	}
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
@@ -632,11 +674,19 @@ func TestPlaybookPrintGoldenDelegateSampleCodexHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
+	// Derived checks.
 	codexTerm := terminologyForHarness("codex")
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, codexTerm[varName]) {
 			t.Errorf("golden body %q: expected codex %s %q", body, varName, codexTerm[varName])
 		}
+	}
+	// Hardcoded expected strings for the same anti-tautology reason.
+	if !strings.Contains(body, "a search agent") {
+		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'a search agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its task id") {
+		t.Errorf("golden body %q: expected hardcoded codex ContinueIdiom", body)
 	}
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
@@ -698,12 +748,22 @@ func TestTerminologyTableCoverage(t *testing.T) {
 	}
 }
 
-func TestClaudeCodexTermsDiffer(t *testing.T) {
+// TestTermsDifferThreeWay asserts three-way distinctness (claude ≠ codex ≠ neutral)
+// for each terminology variable, so a copy-paste collapse in the neutral table
+// does not go undetected even when tautological golden tests pass.
+func TestTermsDifferThreeWay(t *testing.T) {
 	claude := terminologyForHarness("claude")
 	codex := terminologyForHarness("codex")
+	neutral := terminologyForHarness("")
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if claude[varName] == codex[varName] {
-			t.Errorf("claude and codex have identical value for %q: %q — update the terminology table", varName, claude[varName])
+			t.Errorf("claude == codex for %q: %q — update terminology table", varName, claude[varName])
+		}
+		if neutral[varName] == claude[varName] {
+			t.Errorf("neutral == claude for %q: %q — update terminology table", varName, neutral[varName])
+		}
+		if neutral[varName] == codex[varName] {
+			t.Errorf("neutral == codex for %q: %q — update terminology table", varName, neutral[varName])
 		}
 	}
 }

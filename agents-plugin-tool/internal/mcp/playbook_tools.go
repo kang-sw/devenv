@@ -38,9 +38,13 @@ var playbookTerminologyTable = map[string]map[string]string{
 	},
 }
 
-// reservedToolVarNames is the union of all variable names that the tool layer
-// injects from the terminology table or model alias resolution.
-// These names win over caller-supplied context on collision.
+// reservedToolVarNames documents the complete set of variable names that the
+// tool layer may inject (from the terminology table or model alias resolution).
+// This variable is a documentation artifact: the "tool-injected wins on
+// collision" invariant is achieved by layer ordering in buildPlaybookVars
+// (terminology and model alias layers overwrite the caller context layer),
+// not by a guard that references this set. Tests use it to assert that the
+// documented reserved set is complete.
 var reservedToolVarNames = func() map[string]bool {
 	set := map[string]bool{}
 	for _, vars := range playbookTerminologyTable {
@@ -220,6 +224,10 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 }
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
+//
+// Zero-logic wrapper over renderPlaybookBody: the indirection is intentional
+// forward-compat for M3, where print and render may diverge (e.g., different
+// session-scoped output constraints or inline vs. path semantics).
 //
 // rsrcRoot is a call-site-overridable seam for M3 root_override support.
 // configOpts controls config-backed model alias resolution.
