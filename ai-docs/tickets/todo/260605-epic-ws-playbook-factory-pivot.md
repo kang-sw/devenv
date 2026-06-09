@@ -70,17 +70,33 @@ subagents. Direction, decisions, and evidence live in
 ## Cross-Child Decisions
 
 - Spawn engine is **retained as a scoped first-class "mercenary" surface**
-  (option B, supersedes the option-C freeze): codex engine live, scoped to
-  implementer/reviewer, routed by user-explicit request or config-advised
-  `playbook.render`. Exploration, survey, and mental-model-update prefer native
-  subagents. Mercenary ("special external agent") is a deliberately distinct term
-  from native "subagent" to avoid the LLM semantic collision. ws-only capability:
-  wsflow stays agentless, so the mercenary/spawn axis is a ws↔wsflow divergence
-  (partial convergence; the shared playbook/text core still unifies).
-- Mercenary and native share one call shape: a single self-contained prompt from
-  `playbook.render`, native-shaped continuation handle; recursion is bounded by
-  lead-only spawning (mercenaries are leaf) with a server-side spawn-depth
-  backstop (the `WS_MCP_TOOL_PROFILE` env barrier is verified non-functional).
+  (option B, supersedes the option-C freeze): codex + claude engines live (claude
+  retained for harness-neutrality, 2026-06-09), scoped to implementer/reviewer,
+  routed by user-explicit request or config-advised `playbook.render`.
+  Exploration, survey, and mental-model-update prefer native subagents. The
+  runner-backend interface stays **harness-neutral/pluggable**: the `gemini.go`
+  implementation is unshipped (model-compat cost) but the plug point is preserved
+  for gemini/antigravity/custom harnesses (deferred plug, not deletion). Mercenary
+  ("special external agent") is a deliberately distinct term from native
+  "subagent" to avoid the LLM semantic collision. ws-only capability: wsflow stays
+  agentless, so the mercenary/spawn axis is a ws↔wsflow divergence (partial
+  convergence; the shared playbook/text core still unifies).
+- `login` + mercenary spawn/lifecycle live under a lead-centric **`ws.lead.*`
+  namespace** (`ws/lead.login`); session term resolved as `lead.login`
+  (`session.open`/`attach` dropped). Mercenary and native share one call shape: a
+  single self-contained prompt from `playbook.render`, native-shaped continuation
+  handle. **Child keys are render-minted**:
+  `playbook.render(session_key, name, context?, root_override?)` mints+injects a
+  fresh child key when `session_key.role == lead`; `root_override` rebinds both
+  the auto-include root and the child-key root for worktree children (M1
+  coordinates the keyed render signature).
+- **Recursion containment + key-role enforcement live on the keyed `tools/call`
+  handler, server-side** (resolved 2026-06-09): the handler rejects `ws.lead.*`
+  calls from non-lead keys → children cannot spawn → spawn depth strictly 1, so
+  the CLI-flag spawn-depth counter is unnecessary (defense-in-depth only). Schema
+  / `tools/list` filtering is a harness-owned soft-guard (LLM-confusion reduction,
+  not enforcement); both the `WS_MCP_TOOL_PROFILE` env profile and schema-hiding
+  are non-enforcing — enforcement is the keyed-handler role check.
 - Retained agent = fast path; fresh spawn + resume brief = recovery path.
   Reuse guarantees end at lead-context lifetime (tip-only continuity).
 - Harness differences ship as data (terminology/model tables, overlays);
@@ -101,8 +117,10 @@ subagents. Direction, decisions, and evidence live in
   capability-scoped keys for delegates. Soft guard (re-`login` can re-escalate);
   key issuance reserves a capability-scope parameter from the first cut. NOTE:
   the legacy `WS_MCP_TOOL_PROFILE` env profile is **verified non-functional** for
-  containment (see `named-agent-runtime` mental model) — containment must be
-  enforced server-side on the key, not via the env var.
+  containment (see `named-agent-runtime` mental model), and schema/`tools/list`
+  filtering is likewise only a harness-owned soft-guard — containment must be
+  enforced **server-side in the keyed `tools/call` handler** by session-key role,
+  not via the env var or schema omission.
 
 ## Completion Criteria
 

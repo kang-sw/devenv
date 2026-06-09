@@ -53,20 +53,23 @@ surface** and kept live; deletion is confined to genuinely-retired parts.
 
 - **mercenary = ws-spawned external subprocess agent**, a deliberately distinct
   term from harness-native "subagent" (resolves the LLM semantic collision).
-- **Retain live (reshaped onto session-auth):** the **codex** runner backend
-  (primary mercenary engine) and the reshaped `agents.*` call/lifecycle core.
-  Claude mercenary retention is OPEN (native claude is strong; harness-neutrality
-  may argue for keeping it).
+- **Retain live (reshaped onto session-auth):** the **codex** and **claude**
+  runner backends and the reshaped `agents.*` call/lifecycle core. Claude
+  mercenary is **retained** (harness-neutrality, resolved 2026-06-09). The
+  runner-backend interface stays **harness-neutral/pluggable** so gemini
+  (antigravity) and a future custom harness can re-attach.
 - **Scope restriction — mercenary is for implementer and reviewer roles ONLY.**
   Exploration/survey (reference-discovery, plan-populator), mental-model-update,
   and `subquery` successors route to native subagents.
 - **Routing:** mercenary selected when (a) the user explicitly requests it, or
   (b) config enables it and `playbook.render` advises the mercenary spawn idiom
   in the rendered implementer/reviewer prompt. Default otherwise is native.
-- **Delete (genuinely retired):** the **gemini** runner backend
-  (unused/excluded), the `subquery` tool runtime (exploration → native), the
-  exploration-purpose spawn paths, and the diagnostic sprawl beyond what
-  mercenary needs (`agents.tail/status/debug` minimized to mercenary needs).
+- **Delete (genuinely retired):** the `gemini.go` runner **implementation**
+  (unmaintained; model-compat tracking cost) — but **keep the harness-neutral
+  runner-backend interface** so gemini/antigravity/custom harnesses are a deferred
+  plug, not a structural exclusion; the `subquery` tool runtime (exploration →
+  native); the exploration-purpose spawn paths; and the diagnostic sprawl beyond
+  what mercenary needs (`agents.tail/status/debug` minimized to mercenary needs).
 - **Delete the actor/authority/child-actor entanglement** (unchanged from the
   session-auth decision); the retained mercenary spawn path is rewired onto
   session keys via pre-allocate + system-prompt splice (existing
@@ -78,14 +81,32 @@ surface** and kept live; deletion is confined to genuinely-retired parts.
   returns a continuation handle of the same shape as a native agentId. Net: the
   retained mercenary interface is smaller than today's register-with-stems
   surface.
-- **Recursion containment:** mercenaries are spawned only by the native lead and
-  are leaf (implementer/reviewer do not spawn), so the workflow bounds spawning
-  to depth 1. A server-side enforced spawn-depth/capability backstop is still
-  wanted because no hard barrier prevents a mercenary from calling spawn tools —
-  the `WS_MCP_TOOL_PROFILE` env profile is verified non-functional (see
-  `named-agent-runtime` mental model), and capability-scoped keys are soft.
-  Mechanism detail (depth token via CLI flag, tracked server-side per key-chain)
-  is deferred to mercenary design.
+- **Child-key acquisition = render-minted (resolved 2026-06-09).**
+  `playbook.render(session_key, name, context?, root_override?)` is the mint+inject
+  point for both native and mercenary delegates: when `session_key.role == lead` it
+  mints a fresh child key (role from the playbook frontmatter) and splices it into
+  the rendered prompt, so both paths receive a prompt with the child key already
+  embedded (automatic call parity). `root_override` overrides BOTH the
+  auto-include resolution root and the child-key binding root when the child runs
+  in a different worktree; render does not infer worktree shape (caller passes the
+  path; the pre-allocate-before-splice order makes it known at render time).
+  render is keyed like every ws call (gives the root for root-scoped auto-includes
+  such as local ai-docs). This crosses into the M1 `playbook.render` surface —
+  coordinate the keyed signature + `root_override` + lead-gated mint branch with
+  M1.
+- **`ws.lead` namespace + keyed-handler containment (resolved 2026-06-09):**
+  `login` and the mercenary spawn/lifecycle live under a lead-centric `ws.lead.*`
+  namespace (`ws/lead.login`, `ws/lead.<spawn>`). Containment is a **server-side
+  role check in the keyed `tools/call` handler** that rejects `ws.lead.*` calls
+  from non-lead keys — NOT schema/`tools/list` filtering, which is a harness-owned
+  soft-guard (LLM-confusion reduction only; a caller knowing the name can still
+  invoke the tool). All containment converges on the keyed-call handler.
+- **Recursion containment (resolved 2026-06-09):** because the handler rejects
+  non-lead `ws.lead.*` calls, a child (native or mercenary) cannot login or spawn
+  → spawn depth is **strictly 1** (lead → mercenary leaf). The earlier deferred
+  CLI-flag spawn-depth counter is **unnecessary** (optional defense-in-depth
+  only). The `WS_MCP_TOOL_PROFILE` env profile is verified non-functional (see
+  `named-agent-runtime` mental model); the keyed-handler check replaces it.
 - Remove `api.ask` spawn machinery and the async job surface from the live
   server — coordinated with M4 (`api.ask` redesign owns the replacement
   contract).
@@ -126,8 +147,12 @@ surface** and kept live; deletion is confined to genuinely-retired parts.
 - Removed: actor_id-as-identity, the authority field, `ensureChildActor` /
   `childActorInstruction`, `restoreActor` / `bindActor` persistence, wsstore
   actor records.
-- **Session term choice is OPEN**: `login` | `session.open` | `attach`. Decide at
-  implementation; the contract shape above is term-independent.
+- **Session term resolved (2026-06-09):** **`ws/lead.login(root)`** under a
+  lead-centric `ws.lead.*` namespace (only the lead logs in; subagents never
+  login — they receive a key, see mercenary child-key acquisition). `session.open`
+  / `attach` dropped. Still OPEN: the child `unknown_session` recovery message —
+  role-split (lead → re-login / child → ask issuer to re-render) vs a generic
+  "re-acquire via your issuer" line.
 
 ### root vs cwd; exec; role-containment
 

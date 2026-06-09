@@ -78,6 +78,7 @@ related:
 - Assuming Gemini has live hook-style interrupt delivery; until a stable mechanism exists, inbox messages are delivered by prepending them to the next resumed call.
 - Cancelling by killing only the parent process can leave children alive on Unix; process-group behavior is intentional. {#260505-agent-cancel-recovery}
 - Relying on the `WS_MCP_TOOL_PROFILE` env profile to contain a spawned child's capabilities — e.g. to stop a spawned agent from recursively spawning more agents — does NOT work. Verified non-functional several times (2026-06): the env barrier does not gate the child's tool surface. Recursion and capability containment must use a working server-side mechanism.
+- Relying on MCP `tools/list` (schema) filtering to contain capabilities is the same class of mistake (2026-06). What the schema advertises is harness-owned and advisory — a caller that knows a tool name can still issue `tools/call`, so hiding a tool from the schema (e.g. `noAgentHiddenTool`) only reduces LLM confusion; it does not deny the capability. Capability/role enforcement must be a server-side check in the keyed `tools/call` handler (reject by session-key role), not schema omission.
 
 ## Technical Debt
 

@@ -695,9 +695,9 @@ surface** (not frozen-archival), but scoped:
   mercenary call, or (b) config enables it and `playbook.render` advises the
   mercenary spawn idiom inside the rendered implementer/reviewer prompt. Default
   without that signal is native.
-- **codex runner stays live** (primary mercenary engine); **gemini runner is
-  dropped** (unused/excluded); claude mercenary retention is an OPEN detail
-  (native claude is strong, but harness-neutrality may argue for keeping it).
+- **codex runner stays live** (primary mercenary engine); claude/gemini
+  disposition is refined in the ws.lead/child-key section below (claude
+  **retained**, gemini → **deferred plug**, not a deletion).
 - `subquery.go` spawn path is removed (exploration → native).
 
 What option B changes vs option C / total-deletion:
@@ -735,6 +735,11 @@ are fully decoupled from actor identity):
 
 Recursion containment (open, but largely defused by scope):
 
+> **Resolved below (ws.lead/child-key section):** the keyed-call-handler role
+> check rejects non-lead `ws.lead.*` calls, so children cannot spawn → depth
+> strictly 1; the CLI-flag depth-token backstop becomes unnecessary
+> (defense-in-depth only).
+
 - Because mercenaries are spawned **only by the (native) lead** and are scoped to
   leaf implementer/reviewer roles, the workflow naturally bounds spawning to
   depth 1 (lead → mercenary; mercenaries do not spawn). Recursion becomes a
@@ -760,6 +765,83 @@ session-auth for the retained codex/claude path, with deletion confined to
 gemini / subquery / exploration-spawn / diagnostic-sprawl. Re-scope at ready
 promotion.
 
+### Refine: ws.lead namespace, render-minted child keys, containment at the keyed call handler
+
+Sixth lead-discuss exchange (2026-06-09). Refines option B's open details
+(claude retention, child-key acquisition, recursion backstop) and corrects the
+containment mechanism.
+
+**Harness-neutral mercenary backend; claude retained, gemini deferred-plug.**
+
+- harness-neutrality is a kept goal: gemini (now antigravity) and likely a
+  future custom harness will attach via the mercenary **runner-backend
+  interface**, so that abstraction stays harness-neutral/pluggable.
+- **claude mercenary is RETAINED** (closes the option-B OPEN) — harness-neutrality
+  argues for keeping it alongside codex.
+- **gemini is a deferred plug, not a deletion.** Keep the neutral backend
+  interface; remove only the `gemini.go` implementation (its real cost is
+  model-compat tracking, not the abstraction). gemini/antigravity re-attach later
+  through the same interface. Distinguish the two costs: the harness-neutral
+  abstraction (one layer, ~free) is kept; only the unmaintained implementation is
+  unshipped. "gemini dropped" is re-read as "gemini implementation unshipped now;
+  plug point preserved."
+
+**Child-key acquisition = render-minted, with a `root_override` param (option (c)).**
+
+- Rejected: (a) lead key passed verbatim (no role distinction) and (b) an
+  explicit `lead.issue` step (lead handles raw keys, extra round-trip).
+- `playbook.render` is the mint+inject point: it already injects the delegation
+  brief and knows the playbook is a delegate. Final signature:
+  `playbook.render(session_key, name, context?, root_override?)`.
+  - `session_key`: required (render is a ws call → keyed like all others); gives
+    the default root for root-scoped **auto-includes** (e.g. local ai-docs) and
+    the **role** for the mint gate.
+  - `root_override`: when the child will run in a different worktree, overrides
+    BOTH the auto-include resolution root AND the minted child-key binding root.
+    render does **not** infer "lead-in-worktree vs spawn-into-worktree" — the
+    caller that decided the worktree passes its path. Timing holds: the mercenary
+    path pre-allocates the worktree before prompt splice, so the path is known at
+    render time (native worktree likewise decided by the lead).
+  - `role` is derived from the playbook frontmatter (playbooks are role-specific),
+    so `root_override` is the only genuinely new param.
+  - **Mint branch** (mint + inject a fresh child key) fires only when
+    `session_key.role == lead` (server-side check). For non-lead keys render still
+    returns text (auto-includes for the caller's own root) but mints nothing.
+- Native and mercenary both receive "a rendered prompt with the child key already
+  spliced in" → call parity is automatic.
+
+**ws.lead namespace.** `login` and the mercenary spawn/lifecycle move under a
+lead-centric `ws.lead.*` namespace (`ws/lead.login(root)`,
+`ws/lead.<mercenary spawn>`). This resolves the session-term question:
+**`lead.login`** (drop `session.open`/`attach`). `playbook.print`/`playbook.render`
+stay under `playbook.*` (M1 surface); only render's mint branch is lead-gated by a
+capability check, not by namespace.
+
+**Containment correction — schema filtering is soft; enforcement is the keyed
+call handler.** Hiding `ws.lead.*` from `tools/list` is a **harness-owned
+soft-guard** (LLM-confusion reduction, the same role `noAgentHiddenTool` plays) —
+a caller that knows the tool name can still issue `tools/call`. The hard guard is
+a **server-side role check in the keyed `tools/call` handler** that rejects
+`ws.lead.*` calls from non-lead keys. This converges all containment onto the
+keyed-call handler (consistent with "containment lives on the session key,
+server-side"). Same class of correction as the `WS_MCP_TOOL_PROFILE` env-barrier
+finding.
+
+**Recursion backstop resolved.** Because the keyed handler rejects non-lead
+`ws.lead.*` calls, a child (native or mercenary) cannot login or spawn → spawn
+depth is **strictly 1** (lead → mercenary leaf). The earlier deferred spawn-depth
+counter (depth token via CLI flag) is therefore **unnecessary**; demote to
+optional defense-in-depth. Raising depth > 1 later = an explicit lead-key grant to
+a mercenary, never accidental.
+
+**Durable lesson (capture to `named-agent-runtime`):** MCP `tools/list` (schema)
+filtering is harness-owned and advisory; capability/role enforcement must be a
+server-side check in the keyed `tools/call` handler, not schema omission.
+
+**Still OPEN:** child `unknown_session` recovery message — role-split
+("lead → re-login / child → ask issuer to re-render") vs a generic
+"re-acquire via your issuer" line.
+
 ## Open Questions (continuation agenda)
 
 - ~~Entry-skill keep-list~~ — resolved (11 entry / 9 playbook).
@@ -771,7 +853,16 @@ promotion.
 - ~~Session lifecycle/eviction rule~~ — resolved (2026-06-09): in-memory, no
   logout, no eviction (rows tiny + bounded); `unknown_session → re-login`
   guardrail keeps a later persistent backend a contract-invariant swap.
-- **Session term choice**: `login` | `session.open` | `attach`.
+- ~~Session term choice~~ — resolved (2026-06-09): **`ws/lead.login`** under a
+  lead-centric `ws.lead.*` namespace; `session.open`/`attach` dropped.
+- ~~Recursion spawn-depth backstop mechanism~~ — resolved (2026-06-09): the keyed
+  `tools/call` handler rejects non-lead `ws.lead.*` calls → depth strictly 1; the
+  CLI-flag depth-token counter is unnecessary (defense-in-depth only).
+- ~~claude mercenary retention~~ — resolved (2026-06-09): **retained**
+  (harness-neutrality); gemini → deferred plug (neutral backend interface kept,
+  `gemini.go` implementation unshipped).
+- **child `unknown_session` recovery message**: role-split (lead → re-login /
+  child → ask issuer to re-render) vs a generic "re-acquire via your issuer" line.
 - ~~Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation~~ — resolved
   (2026-06-09): retained and folded into the session key as an optional
   capability/role scope (soft guard). Session-key issuance reserves a
