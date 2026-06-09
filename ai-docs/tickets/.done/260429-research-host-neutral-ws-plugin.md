@@ -1,8 +1,20 @@
 ---
 title: Host-neutral ws plugin architecture
+completed: 2026-06-09
 ---
 
 # Host-neutral ws plugin architecture
+
+## Disposition (2026-06-09): absorbed by the playbook-factory pivot
+
+This research anchor is **absorbed and superseded** by
+`260605-epic-ws-playbook-factory-pivot` (direction detail in
+`260605-research-ws-native-subagent-pivot`). The host-neutral direction it
+opened — playbook factory, rsrc plain-text prompt distribution, harness-aware
+routing as data, total spawn removal in favor of harness-native subagents — is
+now owned by that epic's M0–M4 milestones. Moved to `.done/` as a completed
+direction-setting investigation, not dropped: its framing carried forward intact.
+The background below is retained for historical context.
 
 ## Background
 

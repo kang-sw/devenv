@@ -13,6 +13,14 @@ related-mental-model:
   - plugin-runtime
 ---
 
+## Disposition (2026-06-09): dropped — deprioritized by the playbook-factory pivot
+
+`260605-epic-ws-playbook-factory-pivot` removes all subprocess-spawn agent
+machinery in favor of harness-native subagents. A ws-owned harness-library agent
+substrate (the subject of this research) is no longer a direction ws pursues, so
+this ticket is dropped, not deferred. If a ws-side agent substrate is ever
+revived, start a fresh ticket; do not reopen this one. Body retained for context.
+
 # libws-harness agent substrate research
 
 ## Background

@@ -174,7 +174,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
-| `260521-research-libws-harness-agent-substrate` | idea | Research a JSONL-first libws-harness run substrate with canonical run records, ToolHost composition, compaction, and dashboard/MCP/CLI adapters |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260523-bug-worktree-local-index-missing` | idea | Explore dashboard-managed propagation of ignored local workflow context across worktrees |
 | `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
@@ -188,7 +187,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260524-bug-codex-plugin-cache-refresh-mcp-startup-race` | idea | Investigate Codex plugin cache refresh and MCP startup race behavior |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
-| `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 
 ## Ticket Focus
 

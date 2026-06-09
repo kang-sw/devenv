@@ -30,8 +30,11 @@ Read at every session start, before other action:
 3. **Project arc** - run `git log --oneline --graph -50`.
 4. **Recent history** - run `git log -10` for `## AI Context` rationale.
 5. **Migration anchor** - read
-   `ai-docs/tickets/idea/260429-research-host-neutral-ws-plugin.md` when the task
-   touches plugin architecture, host-neutral migration, or adapter boundaries.
+   `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` (under epic
+   `260605-epic-ws-playbook-factory-pivot`) when the task touches plugin
+   architecture, host-neutral migration, the spawn-removal pivot, or adapter
+   boundaries. The prior anchor `260429-research-host-neutral-ws-plugin` is
+   absorbed into this epic and archived under `.done/`.
 
 ## Response Discipline
 
@@ -201,8 +204,9 @@ ai-docs/tickets/.dropped/
   MCP parser behavior.
 - Current priority is making the project and ticket system usable from
   Agents/Codex while retiring the legacy Claude tree behind explicit tickets.
-- Research anchor: `260429-research-host-neutral-ws-plugin`. Promote or split it
-  before broad structural changes.
+- Research anchor: `260605-research-ws-native-subagent-pivot` (direction detail),
+  coordinated by epic `260605-epic-ws-playbook-factory-pivot`. The earlier
+  `260429-research-host-neutral-ws-plugin` anchor is absorbed and archived.
 - Existing historical Claude workflow notes may mention `ws-*` on `PATH`; new
   shared guidance should use MCP tools and bundled runtime documents.
 - Claude plugin source artifacts were retired from the live tree; do not add a
