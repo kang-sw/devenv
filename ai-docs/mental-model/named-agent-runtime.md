@@ -50,7 +50,7 @@ related:
 
 - MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces and actor-scoped variants where public names may collide with global compatibility registrations.
 - Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced, and `agents run-current` must receive the hidden actor id for actor-scoped calls so worker state matches parent MCP dispatch.
-- `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
+- `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary. Verified non-functional as a containment barrier across several checks (2026-06): the env profile does not actually restrict the spawned child's exposed tool surface, so it cannot deny capabilities in a spawned subprocess. Treat it as an advisory hint only; real capability containment needs a working server-side mechanism (e.g. session-key capability scope or an enforced spawn-depth limit), not this env var.
 - Worktree scoping is shared by agents, generated review paths, orchestrator locks, and dashboard Activity Console projection; changing cache layout, `agent.json` metadata semantics, or Codex `session_id` persistence affects dashboard feed/transcript behavior as well as agent tools.
 - The SQLite state-store is authoritative for role pointers, instance metadata, path indexes, and retention fences, but not for `current/state.json`, `events.jsonl`, or payload bodies. Preserve file-backed diagnostics and result consumption semantics: path fields such as `state_path`, `system_prompt_path`, and `last_output_path` are SQLite metadata indexes, while prompt/stdout/stderr/runtime-log/event/final-output bytes remain file-backed payloads. {#260525-named-agent-runtime-metadata-inventory}
 - Agent-instance cleanup participates in prune-run diagnostics but keeps retry metadata on `agent_instances`, not artifact tombstones; instance cleanup deletes directories and must not imply artifact payload ownership or retry semantics.
@@ -77,6 +77,7 @@ related:
 - Treating every stdout line after a completed Codex result as model output can discard a valid Windows result when process-control messages are appended.
 - Assuming Gemini has live hook-style interrupt delivery; until a stable mechanism exists, inbox messages are delivered by prepending them to the next resumed call.
 - Cancelling by killing only the parent process can leave children alive on Unix; process-group behavior is intentional. {#260505-agent-cancel-recovery}
+- Relying on the `WS_MCP_TOOL_PROFILE` env profile to contain a spawned child's capabilities — e.g. to stop a spawned agent from recursively spawning more agents — does NOT work. Verified non-functional several times (2026-06): the env barrier does not gate the child's tool surface. Recursion and capability containment must use a working server-side mechanism.
 
 ## Technical Debt
 
