@@ -109,6 +109,12 @@ Direct in-session test on Claude Code 2.1.165:
    Transcript inspection confirmed the original conversation continued with
    the recall question appended as a new turn.
 
+Re-confirmed 2026-06-09 (independent run, Claude Code 2.1.168): spawned a probe
+holding `crimson-otter-lantern-seventeen-velvet` (first reply withheld it,
+confirming no echo), then `SendMessage(to: <agentId>)` to the completed agent
+("had no active task; resumed from transcript"); the resumed turn returned the
+passphrase verbatim. The load-bearing durability premise holds across versions.
+
 Documentation cross-check (claude-code-guide agent):
 
 - Completed-subagent resume with full transcript is **officially documented
@@ -592,12 +598,24 @@ web-tmux-style surface**; only the subagent-audit / agent-activity logic
 MCP integration surfaces (ticket board, index, file/terminal) are **kept and
 intended to grow**.
 
-### Candidate: role-containment deprecation
+### Decision: role-containment retained — capability-scoped session keys
 
 `WS_MCP_TOOL_PROFILE` role gating (lead/delegate/leaf tool restrictions) was
-spawn-containment. Under native subagents the harness restricts subagent tools,
-so ws-side role gating becomes a **deprecation candidate** (containment moves to
-harness + playbook discipline). Pending policy decision (always-ask), not final.
+spawn-containment. It is **retained**, not deprecated. Rationale: it composes
+with the session-key model into a useful long-term capability — the lead can
+`login` and mint a **capability-scoped key** (e.g. commit-disabled) to hand a
+delegate, so a session key carries `{root + capability/role scope}`, not just a
+root. This is defense-in-depth layered on top of the harness's own subagent tool
+restriction.
+
+Honest scope: this is a **soft guard**, not a hard security boundary — a
+delegate can always issue a fresh `login` to re-escalate. That is acceptable and
+consistent with the existing layered prompt-based soft guards (the `setup`/root
+discipline class). The value is friction and intent-signalling, not enforcement.
+
+Forward note: the session-key issuance API should therefore reserve an optional
+capability/role-scope parameter from the first cut, even if the first
+implementation only honours a single default profile.
 
 ## Open Questions (continuation agenda)
 
@@ -611,8 +629,10 @@ harness + playbook discipline). Pending policy decision (always-ask), not final.
   logout, no eviction (rows tiny + bounded); `unknown_session → re-login`
   guardrail keeps a later persistent backend a contract-invariant swap.
 - **Session term choice**: `login` | `session.open` | `attach`.
-- **Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation** — pending policy
-  decision (always-ask).
+- ~~Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation~~ — resolved
+  (2026-06-09): retained and folded into the session key as an optional
+  capability/role scope (soft guard). Session-key issuance reserves a
+  capability-scope parameter from the first cut.
 - memory./mutation tool first slice: which operations, what layering, where
   delegation notes (if any) live.
 - Playbook schema is fully custom (2026-06-09); remaining detail: concrete

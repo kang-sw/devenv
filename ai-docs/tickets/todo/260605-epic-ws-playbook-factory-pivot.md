@@ -71,6 +71,11 @@ subagents. Direction, decisions, and evidence live in
   logout, no eviction (rows tiny + bounded). An `unknown_session → re-login`
   contract guard is mandatory on every keyed call, making a later persistent
   backend a contract-invariant implementation swap.
+- Role-containment (`WS_MCP_TOOL_PROFILE`) is retained, not deprecated: a
+  session key carries `{root + optional capability/role scope}`, so the lead can
+  mint capability-scoped keys for delegates. Soft guard (re-`login` can
+  re-escalate); key issuance reserves a capability-scope parameter from the
+  first cut. M3 deletion does NOT remove role gating.
 
 ## Completion Criteria
 
