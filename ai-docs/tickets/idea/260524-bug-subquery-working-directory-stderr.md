@@ -10,6 +10,15 @@ related-mental-model:
 
 # Subquery working-directory stderr during dogfood runs
 
+## Pending Removal (2026-06-09)
+
+Resolved-by-deletion candidate under `260605-epic-ws-playbook-factory-pivot`.
+`ws/subquery` is absorbed into the harness-native Explore agent and removed at
+milestone M2, so this subquery working-directory stderr bug ceases to exist. Do
+not invest in a standalone fix; drop this ticket to `.dropped/` in the same
+commit that removes subquery. Retained in place until then so git blame and
+ticket scans surface the coupling.
+
 ## Background
 
 During a `ws:lead-discuss` dogfood run on 2026-05-24, a delegated subquery

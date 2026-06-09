@@ -6,6 +6,16 @@ related:
 
 # wsstore CI SQLite busy under concurrent handles
 
+## Pending Removal (2026-06-09)
+
+Resolved-by-deletion candidate under `260605-epic-ws-playbook-factory-pivot`.
+The wsstore actor state-store this write contention lives in is removed at
+milestone M3: the session-auth model is an in-memory `{session-key → root}` map
+with no SQLite actor records, so `TestConcurrentShortActorWrites` and its busy
+surface disappear. Do not invest in a standalone fix; drop this ticket to
+`.dropped/` in the same commit that removes wsstore actor state. Retained in
+place until then so git blame and ticket scans surface the coupling.
+
 ## Background
 
 The `v0.29.0` tag release workflow failed on Ubuntu during

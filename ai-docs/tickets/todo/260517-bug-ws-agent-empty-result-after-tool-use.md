@@ -9,6 +9,15 @@ related-mental-model:
 
 # ws named agent empty result after long tool-use run
 
+## Pending Removal (2026-06-09)
+
+Resolved-by-deletion candidate under `260605-epic-ws-playbook-factory-pivot`.
+The named-agent (`agents.*`) spawn machinery this bug lives in is removed
+wholesale at milestone M3 (delegation moves to harness-native subagents). Do not
+invest in a standalone fix; drop this ticket to `.dropped/` in the same commit
+that deletes the spawn machinery. Retained in place until then so git blame and
+ticket scans surface the coupling.
+
 ## Background
 
 During the dashboard editor scroll and terminal input fidelity implementation on
