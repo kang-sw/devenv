@@ -200,15 +200,25 @@ dropped tickets live in hidden archive dirs and git history.
   `260610-subquery-explore-delegation-shift` implemented. `ws/subquery`/`agents.*`
   runtime stays callable but unreferenced by shipped skill text (reshape/deletion
   is M3). **Next: M3** (`260609-refactor-ws-spawn-runtime-deletion-session-auth`,
-  todo) — spawn engine → scoped mercenary reshape + ephemeral per-call session-key
-  auth (drops actor/wsstore/authority); still needs option-B re-scoping +
-  contract-first spec before ready. **M4**
+  **ready**) — spawn engine → scoped mercenary reshape + ephemeral per-call
+  session-key auth (drops actor/wsstore/authority); promoted to ready with
+  contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
+  `260610-mercenary-delegation-surface`). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
   `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity),
   `260610-bug-wsflow-runtime-contract-playbook-tools-drift` (pre-existing M1
   capability-contract drift).
+- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (ready) — M3, direct
+  implementation target. Spawn-runtime reshape to a scoped mercenary surface
+  (codex+claude live, implementer/reviewer only; native is default) + ephemeral
+  `ws.lead.login` session-key auth replacing the actor/wsstore/authority model.
+  Contract-first spec `260610-ephemeral-session-auth-model` +
+  `260610-mercenary-delegation-surface` (`spec-remove`:
+  `260508-agents-register-model-alias-field`,
+  `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth) is
+  the first slice; depends M2 (done), coordinated with M4. Largest milestone.
 
 ## Session Notes
 

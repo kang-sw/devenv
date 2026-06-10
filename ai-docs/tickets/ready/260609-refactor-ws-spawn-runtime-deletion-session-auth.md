@@ -10,6 +10,12 @@ related:
   260524-bug-subquery-non-head-history-evidence: resolved-by-deletion (subquery runtime removed)
   260524-bug-subquery-working-directory-stderr: resolved-by-deletion (subquery runtime removed)
   260525-bug-ws-setup-cwd-plugin-cache-root: design input — the new contract must not reproduce this footgun
+spec:
+  - 260610-ephemeral-session-auth-model
+  - 260610-mercenary-delegation-surface
+spec-remove:
+  - 260508-agents-register-model-alias-field
+  - 260523-agents-root-schema-invisibility
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
@@ -282,22 +288,26 @@ dependency before the actor model is deleted).
 
 ## Spec Impact
 
-- Target spec area: `mcp-tools.md` — under option B the named-agent contracts are
-  **reshaped into a mercenary contract, not all removed**. Rewrite
-  `#260505-named-agent-mcp-tools` to the mercenary surface (single
-  self-contained prompt, no `register(prompts: [stems])`, native-shaped
-  continuation handle, implementer/reviewer scope, user-explicit / config routing);
-  remove `#260508-agents-register-model-alias-field` (stems/alias registration
-  gone), `#260523-agents-root-schema-invisibility` (actor-root invisibility
-  obsolete under session keys); re-evaluate `#260512-agent-cancel-resume-guidance`
-  and `#260512-agent-recall-hidden-surface` against the reshaped surface; rewrite
-  `#260524-mcp-actor-setup-bootstrap` and adjust `#260505-mcp-session-default-root`
-  to the session-auth model; remove the skill-facing `subquery` contract; fold
-  `#260505-tool-profile-gating` into capability-scoped keys (noting the env
-  profile is verified non-functional). `api.*` removals are owned by M4.
-- Expected caller-visible change: actor bootstrap replaced by mandatory
-  session-key auth; the `agents.*` surface reshaped into a scoped mercenary
-  surface (not fully removed); `subquery` removed.
-- Contract-first spec: yes. Resolve at ready promotion via `lead-write-spec`
-  (a new session-auth stem, a reshaped mercenary stem, plus several
-  `spec-remove:` stems for the retired registration/subquery contracts).
+Contract-first spec authored at ready promotion (commit `77a9322a`); the planned
+contract now lives in `ai-docs/spec/mcp-tools.md` and is tracked through `spec:` /
+`spec-remove:` frontmatter:
+
+- `spec:` — `260610-ephemeral-session-auth-model` (the `ws.lead.login` session-key
+  auth model) and `260610-mercenary-delegation-surface` (the reshaped `agents.*`
+  family). Existing reshaped-but-retained stems
+  (`#260524-mcp-actor-setup-bootstrap`, `#260505-mcp-session-default-root`,
+  `#260505-tool-profile-gating`, `#260512-agent-cancel-resume-guidance`,
+  `#260512-agent-recall-hidden-surface`) carry Planned 🚧 callouts pointing to the
+  two new stems; their `🚧` strips when this milestone implements.
+- `spec-remove:` — `260508-agents-register-model-alias-field` and
+  `260523-agents-root-schema-invisibility`, retired by the single-self-contained-prompt
+  and mandatory-session-key contracts respectively.
+
+Closeout notes not owned by the spec stems:
+
+- The skill-facing `subquery` contract has no standalone spec stem; its removal is
+  a text edit within `#260505-workflow-state-delegation-tools` (Planned 🚧 callout
+  already added), not a `spec-remove:` stem.
+- `api.*` spawn/async-job removals are owned by M4
+  (`260609-refactor-ws-api-ask-corpus-routing`) and are intentionally absent from
+  this ticket's spec surgery.
