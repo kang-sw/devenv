@@ -53,17 +53,17 @@ At the start of any lead workflow session, call
 Pass the repository's absolute filesystem path as `root`; the MCP server cannot
 infer the agent's current directory from placeholders or relative paths. Record
 the returned `actor_id`; if MCP restarts, recover with
-`ws/setup(id: "<actor-id>")` before any agent or subquery call that omits
+`ws/setup(id: "<actor-id>")` before any agent or exploration call that omits
 `root`.
 
 ### Scoped Exploration (native Explore)
 
-`playbook.print`
-`playbook.render`
+`ws/playbook.print`
+`ws/playbook.render`
 
 Use for scoped fact-finding, surveys, and one-turn answers. Pattern: render the
-`explore` playbook (`playbook.render(name: "explore", context: {...})` to hand a
-worker a brief file, or `playbook.print(name: "explore")` for inline); spawn a
+`explore` playbook (`ws/playbook.render(name: "explore", context: {...})` to hand a
+worker a brief file, or `ws/playbook.print(name: "explore")` for inline); spawn a
 native Explore-style subagent with the rendered brief; collect the deferred result.
 For parallel dispatch, spawn multiple concurrent subagents in a single turn and
 collect all before synthesizing. Use a broad-tracing scope for wide structural surveys.
@@ -199,7 +199,7 @@ assuming richer interrupt behavior.
 
 ```text
 Scoped exploration:
-render the explore playbook: `playbook.render(name: "explore", context: {...})`.
+render the explore playbook: `ws/playbook.render(name: "explore", context: {...})`.
 spawn a native Explore-style subagent with the rendered brief path.
 collect the result when the subagent returns.
 for parallel dispatch, spawn multiple concurrent subagents in a single turn; collect all before synthesizing.

@@ -196,7 +196,7 @@ confirmed list before writing anything.
 ### 6. Associate stems with tickets
 
 1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
-2. Spawn a scoped Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) for the ticket-association check; collect the result before committing:
+2. Spawn a scoped Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) for the ticket-association check:
 
 ```text
 Associate spec stems with tickets and check convention compliance.
@@ -217,7 +217,7 @@ For each ticket:
 4. Do not commit; caller owns git.
 ```
 
-3. Collect the subagent result, then review the returned ticket-association report. Resolve any open questions with the user before committing.
+3. Collect the subagent result; review the ticket-association report and resolve any open questions with the user before committing.
 4. Commit all domain changes in one commit: spec file + ticket association updates.
 
 ### 7. Complete domain

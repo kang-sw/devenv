@@ -831,6 +831,14 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 			t.Errorf("golden body %q: expected neutral %s %q for junk harness", body, varName, neutralTerm[varName])
 		}
 	}
+	// Hardcoded literals for anti-tautology: guards against a wrong neutral table
+	// producing a false-positive derived pass (same strings as Unknown harness test).
+	if !strings.Contains(body, "an exploration agent") {
+		t.Errorf("golden body %q: expected hardcoded neutral ExploreAgent 'an exploration agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its returned id") {
+		t.Errorf("golden body %q: expected hardcoded neutral ContinueIdiom", body)
+	}
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
 	}
