@@ -22,7 +22,7 @@ Pipeline
 - Proceed assumes implementation intent; stop when routing cannot safely reach implementation.
 
 Execution
-- Emit a Routing Verdict before execution; invoke only the skill named by `NEXT:`, or invoke nothing when `NEXT: stop`.
+- Emit a Routing Verdict before execution; invoke only the route named by `NEXT:`, or invoke nothing when `NEXT: stop`.
 - After the lead-write-ticket procedure returns, rebuild route context and emit a new Routing Verdict.
 
 ## Route Rules
@@ -115,19 +115,19 @@ NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>
 - **Safe Next Request**: <Proceed on one ready included ticket path | required user action | n/a>
 
 Proceed is routing-only. It must not inspect source, edit files, plan implementation, or substitute for `NEXT`.
-If `NEXT` names a skill: `Proceeding through <NEXT>.`
+If `NEXT` names a route: `Proceeding through <NEXT>.`
 If `NEXT: stop`: `Stopping here: <blocking condition>.`
 For workset stops, the safe next request must be `Proceed on <single ready included ticket path>` or a user action to create/promote one included actionable ticket; do not invoke implementation or continue automatically.
 ```
 
-Emit exactly one `NEXT:` value: one allowed skill name, or `stop`.
+Emit exactly one `NEXT:` value: one allowed route name, or `stop`.
 Use `NEXT: stop` when the selected route stops instead of invoking another skill.
 Do not ask for confirmation; the user can interrupt.
 
 ### 4. Execute Verdict
 
 1. Read the emitted `NEXT:` line.
-2. Invoke exactly that skill, or stop when `NEXT: stop`.
+2. If `NEXT:` names an entry skill (`ws:lead-discuss`), invoke that skill. If `NEXT:` names a procedure (`lead-write-ticket`, `lead-implement`), call `ws/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
 3. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
 4. If `NEXT: lead-implement`, call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline before any source inspection, planning, or editing.
 5. Do not call implementation tools from `lead-proceed`.

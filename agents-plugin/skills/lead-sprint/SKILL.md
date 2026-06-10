@@ -112,8 +112,8 @@ Pick first match, execute, return to loop.
 
 | Request type | Routing |
 |---|---|
-| Behavior, concept, or status question | Answer inline; spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) if codebase search is needed |
-| Codebase exploration | Spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) |
+| Behavior, concept, or status question | Answer inline; spawn a native Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook) if codebase search is needed |
+| Codebase exploration | Spawn a native Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook) |
 | Design discussion | Discuss inline; do not auto-chain to the lead-write-spec procedure |
 | Ticket, spec, or protocol change | Route through normal workflow; usually `ws:lead-proceed` when implementation is requested |
 | One-context small interactive edit | Start or continue sprint-edit |
