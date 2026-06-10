@@ -203,7 +203,9 @@ dropped tickets live in hidden archive dirs and git history.
   **ready**) — spawn engine → scoped mercenary reshape + ephemeral per-call
   session-key auth (drops actor/wsstore/authority); promoted to ready with
   contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
-  `260610-mercenary-delegation-surface`). **M4**
+  `260610-mercenary-delegation-surface`). **M3 Phase 1 (additive session-auth)
+  implemented** on `implement/ws-session-auth-phase1` (`447946f4`, pending merge);
+  Phase 2 (actor-model deletion + mercenary reshape) next. **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
@@ -217,11 +219,15 @@ dropped tickets live in hidden archive dirs and git history.
   Contract-first spec `260610-ephemeral-session-auth-model` +
   `260610-mercenary-delegation-surface` (`spec-remove`:
   `260508-agents-register-model-alias-field`,
-  `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth) is
-  the first slice; depends M2 (done), coordinated with M4. Largest milestone.
-  Session keys use a reusable word-chain generator (EFF large 7776 pool, vendored
-  + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it to other
-  id surfaces is reserved as `260610-refactor-ws-wordchain-id-generalization`
+  `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth:
+  `ws.lead.login`, `internal/wskey`, in-memory `{key→root}` registry, keyed root
+  resolution, `unknown_session` contract, capability gate) **complete**
+  (`447946f4`, branch `implement/ws-session-auth-phase1`, pending merge); Phase 2
+  (actor-model deletion + mercenary reshape) next. Depends M2 (done), coordinated
+  with M4. Largest milestone. Session keys use a reusable word-chain generator
+  (EFF large diceware, 7772 usable words after dropping 4 hyphenated entries,
+  vendored + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it
+  to other id surfaces is reserved as `260610-refactor-ws-wordchain-id-generalization`
   (todo, follow-up).
 
 ## Session Notes

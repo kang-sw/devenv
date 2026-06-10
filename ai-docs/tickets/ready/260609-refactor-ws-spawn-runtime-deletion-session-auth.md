@@ -282,6 +282,61 @@ existing actor model so callers can migrate. Verification: concurrent
 distinct-root calls do not clobber; missing/unknown key yields the re-login
 recovery contract; capability-scoped key restricts the intended tools.
 
+### Result (447946f4) - 2026-06-10
+
+Landed additively on `implement/ws-session-auth-phase1`; the actor/`sessionRoot`
+model and the `ws.setup` fence are fully intact this phase. Commits: `a5370cd1`
+(wskey generator package), `50e7d7d0` (mcp session-auth wiring), `447946f4`
+(review-cycle-1 fixes).
+
+Delivered:
+- `internal/wskey` — policy-free word-chain key generator: `//go:embed` EFF large
+  diceware list vendored as 7772 pure-`[a-z]+` words (4 hyphenated EFF entries
+  dropped so the `-` separator is unambiguous; pool size is ergonomic per the
+  Session-key generation decision, not load-bearing). `Generate()` = 4 words + a
+  2-digit suffix via `crypto/rand`; `GenerateUnique(exists)` for non-atomic callers.
+  No import of mcp/auth.
+- `internal/mcp/session_auth.go` — concurrency-safe in-memory `sessionRegistry`
+  `{session_key → {root, scope toolRole}}`; `mint` does atomic check-and-insert
+  under its own write lock (deliberately not `wskey.GenerateUnique`, which checks
+  the predicate outside the lock → TOCTOU). No SQLite, no logout, no eviction.
+- `ws.lead.login(root, capability?)` MCP tool (literal `ws.lead.*` namespace,
+  paralleling `ws.setup`); returns the word-chain `session_key` + canonical root;
+  NOT a setup-fence request; uses `canonicalSetupRoot` (rejects `"<cwd>"`, 260525
+  footgun guard). `capability` reserved (maps to `roleLead`/`roleDelegate`/`roleLeaf`;
+  omitted ⇒ lead/unrestricted).
+- `resolveToolRoot` gains a highest-priority `session_key` branch: known ⇒ key's
+  root; unknown ⇒ `unknown_session` re-login error (caller-visible isError, names
+  `ws.lead.login`); absent ⇒ existing chain unchanged (additive).
+- Keyed capability gate in `callTool`: a known non-lead key is gated by
+  `roleAllowsTool`, and any `ws.lead.*` tool is rejected for non-lead keys
+  (self-login escalation block — implements the spec Constraints "a delegate cannot
+  self-login or escalate"). Keyless callers unaffected.
+- `ws.lead.login` added to both `agents-plugin/runtime.json` and
+  `agents-plugin-wsflow/runtime.json` (visible in wsflow no-agent mode; not
+  agent-backed).
+
+Verification: `go build/vet ./...` clean; `go test ./...` green (mcp + wskey incl.
+the 5 integration cases + wskey units); Python launcher capability unittest (16
+tests, incl. exact-surface rejection) green. Partitioned review (correctness/fit/test)
+clean after one fix cycle; one test re-review objection was a refuted false positive
+(it missed the `strings.HasPrefix("ws.lead.")` short-circuit preceding `roleAllowsTool`
+— `TestCapabilityScopedKeyGatesTools` passes).
+
+Spec: planned 🚧 stems `260610-ephemeral-session-auth-model` /
+`260610-mercenary-delegation-surface` intentionally NOT stripped (span all three
+phases; Phase 1 is partial). Mental models updated additively (`4594f70e`):
+mcp-runtime + named-agent-runtime record the session-auth layer and the keyed
+`ws.lead.*` prefix gate as the first concrete server-side containment, coexisting
+with the still-live actor model.
+
+> Forward (Phase 2): migrate callers to session keys, then delete the actor/authority/
+> child-actor machinery + `subquery` runtime + gemini runner, reshape `agents.*` to the
+> mercenary surface, remove the `ws.setup` fence, and harden keyless hard-rejection
+> (mandatory key). `260524-bug-wsstore-ci-sqlite-busy` etc. drop when that code is removed.
+> Forward (Phase 3): exec stateless + full role-containment fold (capability-scoped keys
+> replace `WS_MCP_TOOL_PROFILE`) + dashboard build-fix.
+
 ### Phase 2: mercenary reshape + actor model deletion (option B)
 
 Delete the actor/authority/child-actor machinery, the **gemini** runner backend,
