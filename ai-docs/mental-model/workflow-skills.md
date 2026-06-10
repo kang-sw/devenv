@@ -3,6 +3,7 @@ domain: workflow-skills
 description: "Codex lead skills and workflow prompt orchestration."
 sources:
   - agents-plugin/skills/
+  - agents-plugin/rsrc/
   - agents-plugin-wsflow/skills/
   - agents-plugin-tool/internal/wsprompt/
 related:
@@ -14,9 +15,10 @@ related:
 
 ## Entry Points
 
-- `agents-plugin/skills/lead-*` is the Codex-facing workflow surface and uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
+- `agents-plugin/skills/lead-*` holds the 11 directly user-invocable `ws:` entry skills; uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
+- `agents-plugin/rsrc/lead-*/` holds internal procedure playbooks (e.g., `lead-implement`, `lead-write-ticket`, `lead-workflow-manual`); callers invoke them via `ws/playbook.print(name: "<name>")` and execute the returned procedure inline — they are not directly user-invocable `ws:` skills. {#260609-rsrc-playbook-distribution}
 - `agents-plugin-wsflow/skills/lead-*` is the curated derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
-- `lead-workflow-manual` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
+- The `lead-workflow-manual` playbook is the notation and primitive boundary reference for shared skill text; load it via `ws/playbook.print(name: "lead-workflow-manual")`. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
 
@@ -30,9 +32,10 @@ related:
 - Skill-to-skill handoffs share the active conversation; do not declare carry blocks, and reserve argument language for MCP tools, CLIs, and templates. {#260514-skill-authoring-carried-context}
 - User-approval gates in skills fire only on direct user invocation; chained invocations re-ask only for safety, deletion, or explicit consent rules. {#260514-skill-authoring-carried-context}
 - Dense skill routing should use Markdown hierarchy, grouped invariants, fixed lookup tables, responsibility-named handler sub-blocks, and command-shaped lists before custom notation; skill, agent, and prompt edits run a no-prior-context fresh-reader audit through a separate reviewer that is instructed to read only the target file or excerpt, the lead edits only findings classified as fix, and audit/revision loops stop after at most three cycles. {#260514-skill-authoring-carried-context}
+- `lead-skill-authoring` invariant audit covers both `agents-plugin/skills/*/SKILL.md` entry skill files and `agents-plugin/rsrc/lead-*/lead-*.md` procedure playbook files; apply the invariant checklist before shipping changes to either surface. {#260514-skill-authoring-carried-context}
 - `lead-proceed` routes through handoff stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-proceed` must stop on epic and workset ticket paths because they are board artifacts; implementation routes through child or included actionable tickets. {#260505-proceed-routing-pipeline} {#260524-workset-workflow-skill-routing}
-- `lead-proceed` emits a single-next-hop Routing Verdict before every handoff; when `NEXT:` is `lead-implement`, it invokes that skill before source inspection, planning, editing, or implementation-tool use. {#260505-proceed-routing-pipeline} {#260519-proceed-implementation-dispatch-precheck}
+- `lead-proceed` emits a single-next-hop Routing Verdict before every handoff; entry skills (`ws:lead-discuss`) are invoked directly, internal procedures (`lead-implement`, `lead-write-ticket`) are invoked via `ws/playbook.print(name: "<name>")` and executed inline; when `NEXT: lead-implement`, the playbook call must precede source inspection, planning, or editing. {#260505-proceed-routing-pipeline} {#260519-proceed-implementation-dispatch-precheck}
 - `lead-proceed` treats `idea/` and `todo/` ticket paths as implementation intent, routes them through `lead-write-ticket` for triage, refresh, or ready promotion rather than pre-routing through `lead-write-spec`, and escalates only for unresolved design or spec-address/readiness blockers. {#260505-proceed-routing-pipeline}
 - `lead-proceed` can route narrow, routine, fully scoped inline implementation directly to `lead-implement` when no durable ticket is needed and commit `AI Context` is enough traceability. {#260505-proceed-routing-pipeline}
 - `lead-proceed` does not rejudge ticket decomposition; absent an explicit phase name, it selects the first unfinished phase and treats that phase as hard downstream scope. {#260505-proceed-routing-pipeline}
@@ -55,7 +58,7 @@ related:
 - `lead-verify-design` is a premise-gated design checkpoint: run discussion verification first, build a neutral temporary brief, isolate a fresh deep reviewer from conversation pressure, calibrate findings as keep/revise/reject/defer, and recommend persistence only when future coordination needs it. {#260524-design-verification-skill}
 - `lead-check-blockers` is a small explicit checkpoint for separating user-blocking design questions from autonomous hygiene, implementation detail, ticket/spec capture gaps, and proceed readiness; keep it compact, callable, and lightweight. {#260513-check-blockers-skill}
 - `lead-salvage` is the reverse workflow for premise-collapse recovery: freeze evidence, survey blast radius through agents, confirm invalidated premises with the user, then capture a research report plus recovery epic or child tickets. {#260510-salvage-recovery-workflow-skill}
-- `lead-write-skeleton` is deprecated from normal implementation routing; keep the skill file and old prompt bundle entries for compatibility, but do not route new work through generated skeleton artifacts. {#260510-skeleton-contract-populator-flow}
+- `lead-write-skeleton` is deprecated and its `SKILL.md` was removed (zero call sites, no playbook replacement); prompt bundle entries remain for compatibility. Do not route new work through skeleton artifacts. {#260510-skeleton-contract-populator-flow}
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
 - `lead-bootstrap` index health is advisory but explicit: the first pass reads only `_index.md`; when candidates exist, it reports likely scope drift, asks whether to clean up now, defer, or route semantic follow-up, and keeps approved cleanup limited to `_index.md`; it must not author or update specs, mental models, tickets, or references. {#260506-bootstrap-workflow-guide}
 - `lead-bootstrap` is mirrored between ws and wsflow, but downstream template version histories are package-local; wsflow starts its bootstrap baseline at `v0001` and does not replay the full ws migration backlog. {#260513-wsflow-agentless-skill-surface}
@@ -87,7 +90,7 @@ related:
 
 ## Extension Points & Change Recipes
 
-- **Add a Codex workflow skill**: create `agents-plugin/skills/lead-<name>/SKILL.md`, follow skill-authoring invariants, add OpenAI UI metadata only if needed, and update workflow specs and mental models.
+- **Add a Codex workflow skill**: for a user-invocable entry skill, create `agents-plugin/skills/lead-<name>/SKILL.md`; for an internal procedure, create `agents-plugin/rsrc/lead-<name>/lead-<name>.md` as a `kind:print` playbook (set `delegates:true` if it spawns subagents) and invoke via `ws/playbook.print(name: "<name>")`. Follow skill-authoring invariants for both surfaces; add OpenAI UI metadata only for entry skills; update workflow specs and mental models.
 - **Add a config-first review skill variant**: follow `lead-review` pattern — machine-local `ai-docs/_review.local.md` captures environment judgment, setup interview fires only when config is absent, judges gate subagent depth rather than hard-coding it.
 - **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
 - **Change a full workflow skill excluded from wsflow**: check `ai-docs/ref/wsflow-mirroring.md` and update wsflow docs, workflow manual text, or exclusion rationale if the excluded skill's meaning changed.
@@ -97,7 +100,7 @@ related:
 ## Common Mistakes
 
 - Treating `lead-proceed` as an implementation skill; it routes, sends `todo/` tickets through ready promotion, selects scope slices, and does not read source.
-- Skipping `lead-workflow-manual` before executing or editing orchestration-heavy skills, which causes notation drift back to Claude shell helpers.
+- Skipping the `lead-workflow-manual` playbook (load via `ws/playbook.print(name: "lead-workflow-manual")`) before executing or editing orchestration-heavy skills, which causes notation drift back to Claude shell helpers.
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve workflow intent while using wsflow notation, scoped subagent guidance, and the curated skill inventory.

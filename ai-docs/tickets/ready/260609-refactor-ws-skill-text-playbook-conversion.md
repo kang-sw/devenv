@@ -140,6 +140,42 @@ audit runs against rsrc sources.
 Depends on Phase 1 (the Explore playbook is one migrated body's delegation
 target).
 
+### Result (47fa7368) - 2026-06-10
+
+Implemented on `implement/internal-procedures-playbook` (delegated; survey plan;
+partitioned review correctness/fit/test).
+- 8 internal procedure bodies migrated to `agents-plugin/rsrc/lead-<name>/lead-<name>.md`
+  `kind:print` playbooks (`lead-implement`, `lead-write-ticket`, `lead-write-spec`,
+  `lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
+  `lead-verify-discussion`, `lead-update-spec`); `delegates:true` set only on the
+  four that spawn subagents (implement, write-spec, verify-design, verify-discussion).
+  `lead-write-skeleton` had zero live call sites and is deprecated, so its SKILL.md
+  was removed with no playbook authored.
+- All 9 internal `SKILL.md` entry points removed; the directly user-invocable
+  `/ws:` surface is now exactly the 11 entry skills. Every entry-skill and
+  inter-procedure call site rewired to `ws/playbook.print(name: ...)` + inline
+  execution (incl. user-facing suggestions that pointed at now-removed slash
+  commands). `lead-write-ticket`/`lead-write-spec` are orchestration-only.
+- Convention auto-inclusion resolved to the single-source path: playbook bodies
+  keep inline `ws/convention.read`/`ws/infra.read` calls (separate `go:embed`
+  loaders), not duplicated rsrc `kind:text` deps. `lead-skill-authoring` stays an
+  entry skill; its invariant-audit target now covers `agents-plugin/rsrc/lead-*/`
+  plus `agents-plugin/skills/*/`.
+- Two dead-path references fixed (`lead-update-spec` → rsrc path; `lead-workflow-manual`
+  self re-invoke → `playbook.print`). `manifest.json` regenerated; 8 print golden
+  tests added. `go test ./...` green; wsrsrc validate-tree gates the new playbooks.
+- wsflow untouched: 8 of 9 are wsflow-mirrored but wsflow has no `playbook.print`
+  surface and rsrc convergence is deferred epic non-scope. The wsflow
+  inventory-drift test was updated (user-approved) to accept rsrc playbook dirs as
+  full-ws counterparts; only the pre-existing `playbook.print/render` runtime-contract
+  failure remains (captured in `260610-bug-wsflow-runtime-contract-playbook-tools-drift`).
+- Review: partitioned, clean after one fix cycle (`47fa7368`: dangling
+  `ws:lead-write-ticket` example, lead-proceed Execute write-ticket dispatch, stale
+  notation, drift-test update).
+
+Forward: Phase 3 reduces the 11 entry skills to thin trigger shims over their
+playbook bodies; `260610-entry-skill-surface-reduction` stays 🚧 until Phase 3 lands.
+
 ### Phase 3: entry-skill shim reduction
 
 Reduce the 11 entry skills (`lead-discuss`, `lead-sprint`, `lead-proceed`,
