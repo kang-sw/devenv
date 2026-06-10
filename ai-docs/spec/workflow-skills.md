@@ -38,7 +38,6 @@ lead-update-spec
 lead-verify-design
 lead-verify-discussion
 lead-workflow-manual
-lead-write-skeleton
 lead-write-spec
 lead-write-ticket
 ```
@@ -49,25 +48,20 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-> [!note] Planned 🚧 {#260610-entry-skill-surface-reduction}
-> The directly invocable surface will narrow: only 11 of the lead-* skills remain
-> entry points the user invokes as `/ws:<name>` — `lead-discuss`, `lead-sprint`,
-> `lead-proceed`, `lead-review`, `lead-ship`, `lead-salvage`, `lead-bootstrap`,
-> `lead-skill-authoring`, `lead-add-rule`, `lead-forge-mental-model`, and
-> `lead-forge-spec`. The remaining 9 — `lead-implement`, `lead-write-ticket`,
-> `lead-write-spec`, `lead-workflow-manual`, `lead-check-blockers`,
-> `lead-verify-design`, `lead-verify-discussion`, `lead-write-skeleton`, and
-> `lead-update-spec` — become internal procedures served as `playbook.print`
-> content invoked by caller skills, not directly user-invoked entry points;
-> `lead-write-ticket` and `lead-write-spec` become orchestration-only. The
-> classification axis is whether the user is meant to type `/ws:<name>` directly,
-> not cross-skill invocation count.
->
-> M2 Phase 2 landed the internal-procedure move: the 9 listed procedures are now
-> served as `playbook.print` content and are no longer directly invocable, leaving
-> exactly the 11 entry skills user-invocable. The remaining entry-skill shim
-> reduction (M2 Phase 3, internal refactor with no further caller-visible change)
-> is still planned; this marker clears when Phase 3 lands.
+The directly invocable surface is narrowed to 11 entry skills the user invokes as
+`/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
+`lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
+`lead-add-rule`, `lead-forge-mental-model`, and `lead-forge-spec`. The remaining
+procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
+`lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
+`lead-verify-discussion`, and `lead-update-spec` — are internal procedures served
+as `ws/playbook.print` content invoked by caller skills, not directly user-invoked
+entry points; `lead-write-ticket` and `lead-write-spec` are orchestration-only. The
+classification axis is whether the user is meant to type `/ws:<name>` directly, not
+cross-skill invocation count. Each entry skill's own procedure body is likewise
+served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
+surface carries only the trigger description and delegates execution to its
+playbook. {#260610-entry-skill-surface-reduction}
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
