@@ -199,14 +199,16 @@ dropped tickets live in hidden archive dirs and git history.
   carried forward: Codex non-skill `rsrc/` cache materialization (prereqs
   `260523`, `260524-codex-cache`).
 - `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - **Phase 1
-  done** (`d982d4fe`, on unmerged `implement/subquery-explore-playbook`): `explore`
-  render playbook + all `ws/subquery` skill-text refs shifted to the native
-  Explore pattern; spec `260610-subquery-explore-delegation-shift` implemented.
-  **Next: Phase 2** — 9 internal skill bodies → `playbook.print`, 11 entry-skill
-  shims, `lead-write-ticket`/`lead-write-spec` orchestration-only; spec
-  `260610-entry-skill-surface-reduction` stays 🚧. No runtime deletion (M3).
-  Follow-up `260610-chore-wsflow-explore-playbook-mirroring` (idea) tracks wsflow
-  parity.
+  done and merged to the epic** (`e211f87b`, `--no-ff`): `explore` render
+  playbook + all `ws/subquery` skill-text refs shifted to the native Explore
+  pattern; spec `260610-subquery-explore-delegation-shift` implemented. Phase 2
+  was split (too-broad for one slice) into **Phase 2** (9 internal skill bodies →
+  `playbook.print` + caller wiring; `lead-write-ticket`/`lead-write-spec`
+  orchestration-only; `lead-skill-authoring` audit target → rsrc) and **Phase 3**
+  (11 entry-skill shim reduction). **Next: Phase 2.** Spec
+  `260610-entry-skill-surface-reduction` stays 🚧 until both phases land. No
+  runtime deletion (M3). Follow-up
+  `260610-chore-wsflow-explore-playbook-mirroring` (idea) tracks wsflow parity.
 
 ## Session Notes
 

@@ -121,18 +121,38 @@ reduces the 11 entry shims; `260610-entry-skill-surface-reduction` stays 🚧.
 wsflow mirroring parity for the explore playbook is deferred to follow-up ticket
 `260610-chore-wsflow-explore-playbook-mirroring`.
 
-### Phase 2: internal skill bodies → playbooks; entry-skill shim reduction
+### Phase 2: internal procedures move off the entry surface
 
-Move the 9 internal skill bodies to `playbook.print` content; reduce the 11
-entry skills to thin trigger shims; make `lead-write-ticket`/`lead-write-spec`
-orchestration-only. Relocate `lead-skill-authoring`'s invariant-audit target to
-the rsrc playbook sources and follow the audit procedure to the new text.
+Move the 9 internal skill bodies (`lead-implement`, `lead-write-ticket`,
+`lead-write-spec`, `lead-workflow-manual`, `lead-check-blockers`,
+`lead-verify-design`, `lead-verify-discussion`, `lead-write-skeleton`,
+`lead-update-spec`) into `playbook.print`-served content with caller wiring so
+they are no longer directly user-invoked entry points. Make `lead-write-ticket`
+and `lead-write-spec` orchestration-only. Relocate `lead-skill-authoring`'s
+invariant-audit target to the rsrc playbook sources and follow the audit
+procedure to the new text.
+
+Verification: internal procedures resolve through `playbook.print` with
+auto-included conventions; `lead-write-ticket`/`lead-write-spec` are reachable
+only as orchestration, not as direct `/ws:<name>` entry points; the invariant
+audit runs against rsrc sources.
+
+Depends on Phase 1 (the Explore playbook is one migrated body's delegation
+target).
+
+### Phase 3: entry-skill shim reduction
+
+Reduce the 11 entry skills (`lead-discuss`, `lead-sprint`, `lead-proceed`,
+`lead-review`, `lead-ship`, `lead-salvage`, `lead-bootstrap`,
+`lead-skill-authoring`, `lead-add-rule`, `lead-forge-mental-model`,
+`lead-forge-spec`) to thin trigger shims over their playbook bodies, preserving
+direct `/ws:<name>` invocability and good trigger descriptions.
+
 Verification: the 11 entry skills remain user-invocable with correct triggers;
-internal procedures resolve through `playbook.print` with auto-included
-conventions; the invariant audit runs against rsrc sources.
+their procedural bodies resolve through the playbook surface.
 
-Depends on Phase 1 (Explore playbook is one of the migrated bodies' delegation
-targets).
+Depends on Phase 2 (internal procedures and shared playbook content must land
+before entry shims are thinned over them).
 
 ## Spec Impact
 
