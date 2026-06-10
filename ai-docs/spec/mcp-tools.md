@@ -99,6 +99,14 @@ ceremony remains in workflow guidance rather than repeated in each tool error.
 The actor model is a cooperative workflow guard, not a hard security boundary.
 {#260524-mcp-actor-setup-bootstrap}
 
+> [!note] Planned 🚧
+> The actor / authority / child-actor bootstrap (`actor_id`, `restoreActor`,
+> `ensureChildActor`) is replaced by the ephemeral session-auth model
+> (`#260610-ephemeral-session-auth-model`): `ws.lead.login(root)` returns a
+> word-chain session key, every call carries a key, and child actors give way to
+> render-minted child keys. Current actor behavior is unchanged until that model
+> lands.
+
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
 to pass the absolute repository path explicitly or call `ws.setup` with that
@@ -108,6 +116,68 @@ An explicit non-dot server startup root is treated as authoritative before the
 launcher-provided project-root environment fallback. If that explicit startup
 root is invalid, root-aware tools fail closed instead of silently falling back to
 `WS_MCP_PROJECT_ROOT`.
+
+> [!note] Planned 🚧
+> The volatile session-default-root resolution and the `ws.setup` actor-bootstrap
+> contract (`#260524-mcp-actor-setup-bootstrap`) are replaced by the ephemeral
+> session-auth model (`#260610-ephemeral-session-auth-model`). Root will be
+> carried by a per-call session key rather than a process-global default field,
+> so concurrent distinct worktree roots resolve without clobber. Current behavior
+> is unchanged until that model lands.
+
+## 🚧 Ephemeral Session-Auth Model {#260610-ephemeral-session-auth-model}
+
+The persistent actor / authority / child-actor model
+(`#260524-mcp-actor-setup-bootstrap`) is replaced by an ephemeral, in-memory
+session-auth model. This is the caller-visible authentication contract for ws
+tool calls; it is not yet implemented.
+
+A lead-centric bootstrap verb mints a session:
+`ws.lead.login(root) -> session_key`. The returned key is an LLM-friendly
+word-chain string (for example `amber-tide-fox`), not a UUID. Only the lead logs
+in; subagents and mercenaries never call login — they receive a render-minted key
+(`#260610-mercenary-delegation-surface`).
+
+Every ws tool call carries a session key (REST-bearer style). There is no keyless
+fallback to a foreign root: a call without a valid key does not silently operate
+on a server-default or lead root. This closes the wrong-tree footgun in which a
+worktree delegate doing root-omitted calls silently mutated the lead's main
+repository.
+
+The server holds a concurrency-safe in-memory `{session_key -> root context}`
+map. It replaces the process-global default-root field and the request-order
+setup fence, so parallel requests each resolve their own root with no
+serialization and no shared-field clobber. The map is in-memory only — no
+SQLite, no persistent store.
+
+`login` is a bootstrap verb only: there is no logout and no eviction (rows are a
+tiny `(word-chain key, root path)` bounded by the number of distinct roots a
+fleet touches).
+
+Every keyed call honors an `unknown_session` recovery contract: when a key is not
+found (for example after the in-memory map is lost to an MCP process restart),
+the call is rejected with an `unknown_session` signal and the caller re-logins
+with its own known root and retries. Because the caller-visible contract
+(`login(root) -> key`; `<tool>(key, …)`; re-login-on-reject) hides the backend,
+a later persistent session store is a pure implementation swap with no contract
+migration.
+
+Key issuance reserves an optional capability/role-scope parameter from the first
+cut (`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys
+for delegates even if the first implementation honors only a single default
+profile.
+
+> [!note] Constraints
+> - The session key is mandatory on every ws call; there is no keyless lead
+>   default. A delegate that drops its key gets `unknown_session`, not a silent
+>   foreign-root operation.
+> - `login` is lead-only and lives under the `ws.lead.*` namespace. A non-lead
+>   key calling `ws.lead.*` is rejected by the keyed-call handler
+>   (`#260610-mercenary-delegation-surface`), so a delegate cannot self-login or
+>   escalate by logging in again from a contained context. Re-login for recovery
+>   uses the caller's own already-known root.
+> - The model is in-memory with no eviction; a persistent backend is deferred
+>   until session state grows heavy and is a contract-invariant swap.
 
 ## Config Tools {#260505-config-tools}
 
@@ -261,6 +331,14 @@ non-move ticket changes rather than inventing a destination status.
 returns a generated subquery key immediately. Callers collect the result through
 the named-agent result/status/tail/cancel surfaces.
 
+> [!note] Planned 🚧
+> The `subquery` tool runtime is removed. Scoped exploration, survey, and
+> one-turn fact-finding move to host-native subagents rendered through the
+> playbook surface (`#260609-playbook-harness-rendering`); the mercenary surface
+> (`#260610-mercenary-delegation-surface`) is scoped to implementer/reviewer only
+> and does not cover exploration. The skill-facing `subquery` contract is retired;
+> `path.generate` is unaffected. Current behavior is unchanged until removal lands.
+
 `path.generate` allocates worktree-scoped writable artifact paths, such as review
 files, so workflow agents can exchange file paths without inventing cache
 locations.
@@ -405,6 +483,21 @@ refresh.
 
 The `agents.*` tool family exposes durable named-agent orchestration.
 
+> [!note] Planned 🚧
+> The `agents.*` family is reshaped — not wholly removed — into the scoped
+> mercenary delegation surface (`#260610-mercenary-delegation-surface`). The
+> retained surface is smaller: `agents.register(prompts: [stems])` and the
+> model-alias registration field (`#260508-agents-register-model-alias-field`)
+> are dropped in favor of a single self-contained prompt from `playbook.render`;
+> the actor-scoped root invisibility contract
+> (`#260523-agents-root-schema-invisibility`) is obsolete under mandatory session
+> keys; mercenaries are scoped to implementer/reviewer roles only; and the
+> gemini runner, the `subquery` runtime, exploration-purpose spawns, and
+> diagnostic sprawl beyond mercenary needs are removed. The cancel-retry guidance
+> (`#260512-agent-cancel-resume-guidance`) and hidden `agents.recall`
+> (`#260512-agent-recall-hidden-surface`) carry over to the mercenary path. Current
+> behavior is unchanged until the reshape lands.
+
 `agents.register` creates or updates an agent record with backend, model alias
 or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
@@ -415,6 +508,12 @@ omit `root` end-to-end, including raw advertised schema metadata and
 host-visible generated metadata, while preserving intentional hidden
 explicit-root dispatch compatibility.
 {#260523-agents-root-schema-invisibility}
+
+> [!note] Planned 🚧
+> This contract is retired by the session-auth model. Under mandatory per-call
+> session keys (`#260610-ephemeral-session-auth-model`) there is no actor-root to
+> hide: root is carried by the key, so the root-schema-invisibility surface is
+> removed rather than reshaped.
 
 When the parent MCP session is bound to an actor and the call targets that actor
 root, named-agent registration/calls receive a persistent delegated child actor
@@ -439,6 +538,14 @@ supply optional effort metadata; `agents.register` does not accept direct effort
 input, and backend calls apply effort only when the selected alias resolves a
 non-empty effort.
 {#260508-agents-register-model-alias-field}
+
+> [!note] Planned 🚧
+> This registration contract is retired. Mercenaries are invoked with a single
+> self-contained prompt from `playbook.render`
+> (`#260610-mercenary-delegation-surface`), so `agents.register(prompts: [stems])`
+> and the registration-time model-alias/`tier` field are removed; per-mercenary
+> model selection moves into the rendered prompt and harness config
+> (`#260513-harness-local-agent-tier-config`).
 
 `agents.wait` waits for one or more agents to become ready and returns readiness
 metadata, not final output. `agents.result` is the result-consumption surface and
@@ -465,6 +572,66 @@ remains a deprecated compatibility reader over the resolved current instance.
 `agents.erase` removes or hides the resolved role pointer for the current
 worktree and actor scope; historical instance payloads are removed later by the
 named-agent retention cleanup policy rather than synchronously during erase.
+
+## 🚧 Mercenary Delegation Surface {#260610-mercenary-delegation-surface}
+
+The reshaped delegation surface. A **mercenary** is a ws-spawned external
+subprocess agent — a deliberately distinct term from a harness-native
+**subagent**, so callers never confuse the two delegation paths. This section is
+the planned caller-visible contract for the reshaped `agents.*` family; it is not
+yet implemented.
+
+**Default is native; mercenary is always available.** Default delegation is
+always to a host-native subagent. The mercenary path is always available to the
+lead — it is not a feature flag the user must enable. A mercenary is invoked only
+when (a) the user explicitly requests it, or (b) the lead has flipped its session
+key's render mode with `ws.lead.prefer_mercenary(session_key)` (lead-only), which
+changes only the *default delegation guidance* `playbook.render` emits for
+implementer/reviewer playbooks — never availability. Independently, every
+delegation-capable rendering carries a small always-on tip fragment noting the
+mercenary path is reachable on request, so the on-request path works without the
+toggle.
+
+**Scope: implementer and reviewer roles only.** Mercenaries cover implementer and
+reviewer delegation. Exploration, survey (reference-discovery, plan-populator),
+and mental-model update route to host-native subagents
+(`#260609-playbook-harness-rendering`), not mercenaries.
+
+**Live, pluggable backends.** The codex and claude runner backends are retained
+and live. The runner-backend interface is harness-neutral and pluggable: the
+gemini backend implementation is unshipped (model-compat cost), but the plug
+point is preserved so gemini, antigravity, or a custom harness can re-attach as a
+deferred plug, not a structural exclusion.
+
+**Single self-contained prompt; native-shaped handle.** A mercenary is invoked
+with one self-contained prompt produced by `playbook.render`
+(`#260609-playbook-tools`); there is no `register(prompts: [stems])` step. A
+mercenary call returns a continuation handle of the same shape as a native
+subagent id, so the lead reuses one continuation idiom across both paths.
+
+**Render-minted child keys.** `playbook.render(session_key, name, context?,
+root_override?)` is the mint-and-inject point for both native and mercenary
+delegates: when `session_key.role == lead` it mints a fresh child key (role taken
+from the playbook frontmatter) and splices it into the rendered prompt, so the
+delegate receives a prompt with its key already embedded. `root_override` rebinds
+both the auto-include resolution root and the child-key binding root when the
+child runs in a different worktree; render does not infer worktree shape — the
+caller passes the path.
+
+**Containment is server-side on the keyed call handler.** The keyed `tools/call`
+handler rejects `ws.lead.*` calls from non-lead keys. A child key (native or
+mercenary) is therefore unable to login or spawn, so spawn depth is strictly 1
+(lead → mercenary leaf); no recursion-depth counter is needed. Schema and
+`tools/list` filtering remain a harness-owned soft-guard for LLM-confusion
+reduction only — they are not the enforcement boundary.
+
+> [!note] Constraints
+> - Mercenary availability is not user-gated; only the *default guidance* flips,
+>   via `ws.lead.prefer_mercenary`. The on-request path is always reachable.
+> - Mercenary scope is implementer/reviewer only. Exploration and mental-model
+>   work are native-subagent only and never mint a mercenary.
+> - Gemini is a preserved plug point, not a shipped backend.
+> - Containment is the server-side keyed-handler role check, not schema hiding.
 
 ## API Documentation MCP Tools {#260505-api-documentation-mcp-tools}
 
@@ -588,6 +755,16 @@ delegate orientation and lead-owned orchestration instructions, not on MCP
 tool-surface filtering. `WS_MCP_ALLOWED_TOOLS` can further narrow the visible
 surface for tests or debugging, but it cannot expand access beyond the selected
 profile.
+
+> [!note] Planned 🚧
+> Role containment folds into capability-scoped session keys
+> (`#260610-ephemeral-session-auth-model`): a key carries `{root + optional
+> capability/role scope}`, and enforcement is the server-side role check in the
+> keyed `tools/call` handler (`#260610-mercenary-delegation-surface`). The
+> `WS_MCP_TOOL_PROFILE` env profile is verified non-functional for containment
+> (it is a soft-guard only, lost whenever the host fails to propagate the env
+> var) and is retained as defense-in-depth, not as the enforcement boundary.
+> Current behavior is unchanged until the keyed-handler check lands.
 
 ## CLI Mirror Coverage {#260505-cli-mirror-coverage}
 
