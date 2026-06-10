@@ -1215,3 +1215,60 @@ func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
 	}
 }
+
+// TestPlaybookPrintGoldenLeadForgeSpec verifies lead-forge-spec resolves from the
+// real rsrc tree and is delegates:true (explore playbook spawns — tip must appear).
+func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-forge-spec", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "confirmed spec entries per domain") {
+		t.Errorf("body %q: expected doctrine text 'confirmed spec entries per domain'", body)
+	}
+	// delegates:true (explore playbook spawns) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadForgeMentalModel verifies lead-forge-mental-model resolves
+// from the real rsrc tree and is delegates:true (explore playbook spawns — tip must appear).
+func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-forge-mental-model", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "confirmed operational knowledge per domain") {
+		t.Errorf("body %q: expected doctrine text 'confirmed operational knowledge per domain'", body)
+	}
+	// delegates:true (explore playbook spawns) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadBootstrap verifies lead-bootstrap resolves from the
+// real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-bootstrap", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "idempotent downstream migration") {
+		t.Errorf("body %q: expected doctrine text 'idempotent downstream migration'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
