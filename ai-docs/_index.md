@@ -192,14 +192,20 @@ dropped tickets live in hidden archive dirs and git history.
   `260609-feat-ws-playbook-surface-mvp` is done** (`.done/`): `internal/wsrsrc`
   call-time loader (Phase 1) + `playbook.print`/`playbook.render` MCP tools with
   harness-aware rendering (Phase 2); spec stems `260609-playbook-tools` /
-  `-harness-rendering` / `-rsrc-playbook-distribution` are implemented. **Next
-  child: M2 `260609-refactor-ws-skill-text-playbook-conversion`** (todo —
-  retained-native-subagent delegation patterns replace agents.*/subquery refs;
-  internal skill bodies → playbooks; depends on M1). M3
+  `-harness-rendering` / `-rsrc-playbook-distribution` are implemented (merged to
+  the epic branch at `4bc4efd9`). M3
   (`260609-refactor-ws-spawn-runtime-deletion-session-auth`, todo) still needs
   option-B re-scoping + contract-first spec before ready. Open verification item
   carried forward: Codex non-skill `rsrc/` cache materialization (prereqs
   `260523`, `260524-codex-cache`).
+- `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - direct
+  implementation target: retained-native-subagent delegation replaces
+  `agents.*`/`subquery` skill-text refs (Phase 1: subquery → native Explore
+  playbook; Phase 2: 9 internal skill bodies → `playbook.print`, 11 entry-skill
+  shims, `lead-write-ticket`/`lead-write-spec` orchestration-only). Spec-addressed
+  by planned `260610-entry-skill-surface-reduction` /
+  `260610-subquery-explore-delegation-shift`. Depends on M1 (merged); no runtime
+  deletion (that is M3).
 
 ## Session Notes
 

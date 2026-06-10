@@ -4,6 +4,9 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260605-research-ws-native-subagent-pivot: direction, entry-skill keep-list, subquery absorption decisions
   260609-feat-ws-playbook-surface-mvp: prerequisite — playbook surface (print/render + rsrc) must exist
+spec:
+  - 260610-entry-skill-surface-reduction
+  - 260610-subquery-explore-delegation-shift
 related-mental-model:
   - workflow-skills
   - prompt-bundle
@@ -61,6 +64,14 @@ re-derive a different skill surface:
   fresh-spawn + resume-brief recovery path. Retain/spawn continuity is tip-only
   (the `delegates: true` fragment from M1), guaranteed only within lead-context
   lifetime.
+- **Forward-compat (epic 260605 option-B mercenary surface).** Native delegation
+  is the *default*, not the *exclusive*, path. M3 reshapes the spawn engine into a
+  scoped lead-invokable "mercenary" surface (codex+claude, implementer/reviewer
+  only); M2 skill/playbook text must not bake in native-only delegation language
+  that M3 would have to unwind. The M1 `delegates: true` tip fragment **is** the
+  always-on mercenary-tip seam — mark delegating playbooks `delegates: true`
+  rather than inlining native-only delegation prose. No mercenary runtime or
+  routing wiring lands in M2 (that is M3); M2 only preserves the seam.
 - **`lead-skill-authoring` stays an entry skill, but its invariant-audit target
   moves to the rsrc playbook sources.** The audit procedure must follow the text
   to its new home.
@@ -100,11 +111,10 @@ targets).
 
 ## Spec Impact
 
-- Target spec area: workflow-skill specs (the entry-skill surface and delegation
-  model) and `mcp-tools.md` (subquery's skill-facing usage; the runtime tool
-  removal itself is M3). Expected caller-visible change: the set of directly
-  invocable `/ws:*` skills shrinks to 11; delegation guidance shifts from
-  `ws/subquery` to native Explore.
-- Contract-first spec: likely yes (observable workflow change; the keep-list must
-  be stable before conversion). Resolve at ready promotion via
-  `lead-write-spec`.
+Addressed at ready promotion by contract-first planned spec entries in
+`ai-docs/spec/workflow-skills.md` (listed in `spec:`):
+`260610-entry-skill-surface-reduction` (directly invocable `/ws:*` set shrinks to
+11; 9 internal → `playbook.print`) and `260610-subquery-explore-delegation-shift`
+(skill-facing delegation guidance moves from `ws/subquery` to a native Explore
+playbook). The `ws/subquery` runtime-tool removal is **M3**, not addressed here.
+Doc closeout strips the `🚧` markers when implementation lands.
