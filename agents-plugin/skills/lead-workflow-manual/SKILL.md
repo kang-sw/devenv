@@ -25,7 +25,7 @@ Write MCP calls as `ws/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
-Write prompts sent to `ws/subquery` and `ws/agents.call` in English.
+Write prompts sent to native Explore-style subagents and `ws/agents.call` in English.
 
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
@@ -53,16 +53,22 @@ At the start of any lead workflow session, call
 Pass the repository's absolute filesystem path as `root`; the MCP server cannot
 infer the agent's current directory from placeholders or relative paths. Record
 the returned `actor_id`; if MCP restarts, recover with
-`ws/setup(id: "<actor-id>")` before any agent or subquery call that omits
+`ws/setup(id: "<actor-id>")` before any agent or exploration call that omits
 `root`.
 
-### Async one-turn query
+### Scoped Exploration (native Explore)
 
-`ws/subquery`
+`ws/playbook.print`
+`ws/playbook.render`
 
-Use for scoped fact-finding, surveys, and one-turn answers. It starts async and
-returns a `subquery_key`; retrieve output with `ws/agents.result(name: <key>,
-timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
+Use for scoped fact-finding, surveys, and one-turn answers. Pattern: render the
+`explore` playbook (`ws/playbook.render(name: "explore", context: {...})` to hand a
+worker a brief file, or `ws/playbook.print(name: "explore")` for inline); spawn a
+native Explore-style subagent with the rendered brief; collect the deferred result.
+For parallel dispatch, spawn multiple concurrent subagents in a single turn and
+collect all before synthesizing. Use a broad-tracing scope for wide structural surveys.
+
+`ws/subquery` remains callable but is not the shipped-skill delegation path.
 
 ### Persistent agents
 
@@ -192,10 +198,11 @@ assuming richer interrupt behavior.
 ## Usage Pattern
 
 ```text
-One-turn survey:
-call `ws/subquery(question: "<exact scoped question>")`; store `<subquery-key>`.
-call `ws/subquery(deep_research: true, question: <block below>)` only for broad tracing.
-call `ws/agents.result(name: "<subquery-key>", timeout_seconds: 600)` to read output.
+Scoped exploration:
+render the explore playbook: `ws/playbook.render(name: "explore", context: {...})`.
+spawn a native Explore-style subagent with the rendered brief path.
+collect the result when the subagent returns.
+for parallel dispatch, spawn multiple concurrent subagents in a single turn; collect all before synthesizing.
 
 Persistent task:
 call `ws/agents.register(name: "<agent-name>")` for a general-purpose delegate.

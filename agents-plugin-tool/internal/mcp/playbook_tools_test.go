@@ -729,6 +729,122 @@ func TestPlaybookPrintGoldenSamplePlaybookNoDelegation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Golden render: explore playbook (real rsrc tree)
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintGoldenExploreClaudeHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Derived checks (broad coverage).
+	claudeTerm := terminologyForHarness("claude")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, claudeTerm[varName]) {
+			t.Errorf("golden body %q: expected claude %s %q", body, varName, claudeTerm[varName])
+		}
+	}
+	// Hardcoded expected strings to guard against a wrong terminology table.
+	if !strings.Contains(body, "the Explore agent") {
+		t.Errorf("golden body %q: expected hardcoded claude ExploreAgent 'the Explore agent'", body)
+	}
+	if !strings.Contains(body, "SendMessage(to: <agentId>)") {
+		t.Errorf("golden body %q: expected hardcoded claude ContinueIdiom 'SendMessage(to: <agentId>)'", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenExploreCodexHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Derived checks.
+	codexTerm := terminologyForHarness("codex")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, codexTerm[varName]) {
+			t.Errorf("golden body %q: expected codex %s %q", body, varName, codexTerm[varName])
+		}
+	}
+	// Hardcoded expected strings for the same anti-tautology reason.
+	if !strings.Contains(body, "a search agent") {
+		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'a search agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its task id") {
+		t.Errorf("golden body %q: expected hardcoded codex ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenExploreUnknownHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "") // host-neutral
+
+	body, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	neutralTerm := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, neutralTerm[varName]) {
+			t.Errorf("golden body %q: expected neutral %s %q", body, varName, neutralTerm[varName])
+		}
+	}
+	// Hardcoded expected strings.
+	if !strings.Contains(body, "an exploration agent") {
+		t.Errorf("golden body %q: expected hardcoded neutral ExploreAgent 'an exploration agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its returned id") {
+		t.Errorf("golden body %q: expected hardcoded neutral ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "junk-harness-xyz") // unrecognized → neutral
+
+	body, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Unrecognized harness falls back to host-neutral table.
+	neutralTerm := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, neutralTerm[varName]) {
+			t.Errorf("golden body %q: expected neutral %s %q for junk harness", body, varName, neutralTerm[varName])
+		}
+	}
+	// Hardcoded literals for anti-tautology: guards against a wrong neutral table
+	// producing a false-positive derived pass (same strings as Unknown harness test).
+	if !strings.Contains(body, "an exploration agent") {
+		t.Errorf("golden body %q: expected hardcoded neutral ExploreAgent 'an exploration agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its returned id") {
+		t.Errorf("golden body %q: expected hardcoded neutral ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Terminology table coverage assertions
 // ---------------------------------------------------------------------------
 

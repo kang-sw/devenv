@@ -112,8 +112,8 @@ Pick first match, execute, return to loop.
 
 | Request type | Routing |
 |---|---|
-| Behavior, concept, or status question | Answer inline; use `ws/subquery(question: <focused question>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if codebase search is needed |
-| Codebase exploration | Call `ws/subquery(question: <focused question>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` |
+| Behavior, concept, or status question | Answer inline; spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) if codebase search is needed |
+| Codebase exploration | Spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) |
 | Design discussion | Discuss inline; do not auto-chain to `ws:lead-write-spec` |
 | Ticket, spec, or protocol change | Route through normal workflow; usually `ws:lead-proceed` when implementation is requested |
 | One-context small interactive edit | Start or continue sprint-edit |

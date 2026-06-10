@@ -42,8 +42,8 @@ Agents
 
 1. Read the ticket. Note ambiguities requiring lead judgment: scope boundaries, design choices, and non-obvious integration constraints.
 2. Skim relevant mental-model docs only if needed to resolve those ambiguities.
-3. Call `ws/subquery(deep_research: true, question: "<candidate insertion points, adjacent conventions, public contracts, and integration test targets for this ticket>")`.
-4. Read the result with `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`.
+3. Render the `explore` playbook and spawn a native Explore-style subagent with a broad-tracing scope (see `lead-workflow-manual`) covering candidate insertion points, adjacent conventions, public contracts, and integration test targets for this ticket.
+4. Collect the result when the subagent returns.
 5. Choose insertion points, public shapes, and test target locations.
 
 ### 2. Draft Source

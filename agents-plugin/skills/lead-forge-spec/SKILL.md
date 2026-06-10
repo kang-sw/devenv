@@ -10,13 +10,13 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
-- All survey queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`; ticket-association checks use `ws/subquery(deep_research: false, question: <self-contained prompt>)`.
+- All survey queries spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`); ticket-association checks spawn a scoped Explore-style subagent.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `ws/spec_index.verify()` after every spec file write or update.
 - Domain task labels use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
-- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls; store returned keys and wait on all keys before synthesizing.
+- All survey Explore-style subagents for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 
 ## On: invoke
 
@@ -40,9 +40,9 @@ Target: user request
 
 ### 2. Parallel codebase survey
 
-Issue all four queries in a single response turn as parallel `ws/subquery` calls. Store each returned `subquery_key`:
+Spawn all four Explore-style subagents with broad-tracing scope in a single response turn via the `explore` playbook (see `lead-workflow-manual`). Collect all results before synthesizing.
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 1 — directory and module structure:
 
 ```text
 Survey the project's directory and module structure.
@@ -52,7 +52,7 @@ and return module names, paths, and purpose inferred from names/layout.
 Format: markdown bullets grouped by module/area.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 2 — ticket domain survey:
 
 ```text
 Survey all tickets through `ws/tickets.list(include_done: true, include_dropped: true)`.
@@ -62,7 +62,7 @@ Group by inferred behavioral domain.
 Return: domain -> behaviors/features mentioned in tickets.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 3 — archived spec survey:
 
 ```text
 Survey the archived spec files in ai-docs/.old/spec/ (most recent YYMMDD subdirectory).
@@ -72,7 +72,7 @@ Glob ai-docs/.old/spec/**/*.md. Extract title, summary, `##` headings, and
 only; do not treat archived specs as authoritative.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 4 — commit history behavioral signals:
 
 ```text
 Survey recent commit history for behavioral signals.
@@ -83,7 +83,7 @@ Return behavioral areas -> representative commits. Omit chore/docs/refactor
 unless they reference spec-stems.
 ```
 
-Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
+Collect each subagent result before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -117,9 +117,9 @@ Update the visible task list entry for this domain to in-progress.
 
 ### 2. Parallel domain survey
 
-Issue all four queries in a single response turn as parallel `ws/subquery` calls. Store each returned `subquery_key`:
+Spawn all four Explore-style subagents with broad-tracing scope in a single response turn via the `explore` playbook (see `lead-workflow-manual`). Collect all results before synthesizing.
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 1 — domain source code:
 
 ```text
 Survey source code for the <domain> domain.
@@ -130,7 +130,7 @@ HTTP endpoints, config options, output formats, events, and observable interface
 Return behaviors with status: implemented / partial / none visible.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 2 — domain tickets:
 
 ```text
 Find tickets relevant to the <domain> domain.
@@ -140,7 +140,7 @@ Use `ws/tickets.find(query: "<domain>")`; filter by module paths when needed.
 Return features -> ticket status. Only contract-first ready implementation items, plus epic/research/workset planned decomposition, investigation text, or operating context, are `🚧` candidates; todo items are ticket-intent evidence.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 3 — archived specs for this domain:
 
 ```text
 Survey the archived spec files for the <domain> domain.
@@ -152,7 +152,7 @@ Read relevant archived specs. For each `##` heading, note feature name,
 Return features with archived status and current-source presence.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 4 — domain commit history:
 
 ```text
 Survey commit history for the <domain> domain.
@@ -163,7 +163,7 @@ caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
 Return behavioral changes newest first, with implementation status when visible.
 ```
 
-Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
+Collect each subagent result before synthesizing.
 
 ### 3. Synthesize behavior brief
 
@@ -196,9 +196,7 @@ confirmed list before writing anything.
 ### 6. Associate stems with tickets
 
 1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
-2. Dispatch one ticket-association check covering all collected tickets, store the returned `subquery_key`, then wait for it:
-
-Call `ws/subquery(deep_research: false, question: <block below>)`:
+2. Spawn a scoped Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) for the ticket-association check:
 
 ```text
 Associate spec stems with tickets and check convention compliance.
@@ -219,7 +217,7 @@ For each ticket:
 4. Do not commit; caller owns git.
 ```
 
-3. Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, then review the returned ticket-association report. Resolve any open questions with the user before committing.
+3. Collect the subagent result; review the ticket-association report and resolve any open questions with the user before committing.
 4. Commit all domain changes in one commit: spec file + ticket association updates.
 
 ### 7. Complete domain
@@ -250,7 +248,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
+- Spawn a scoped Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) with a spec-updater brief to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.
 - Run `ws:lead-write-spec` for any domain surfaces discovered after wrap-up.
 
