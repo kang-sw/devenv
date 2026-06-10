@@ -173,6 +173,32 @@ surface** and kept live; deletion is confined to genuinely-retired parts.
   persistent session backend later shrinks this to ~never; revisit the message
   then. Do not design a role-specific child recovery message now.
 
+### Session-key generation (resolved 2026-06-10)
+
+The word-chain key generator is a **reusable, generic utility in its own small
+package**, kept deliberately separate from auth/capability *policy*: it produces
+the string; callers decide what a key authorizes.
+
+- **Format:** 4 words + a 2-digit numeric suffix (e.g. `amber-tide-fox-river-42`).
+  The 2-digit suffix is a readability/tiebreak nicety, not load-bearing entropy.
+- **Correctness via mint-time uniqueness, not pool size:** `mint` checks the
+  in-memory session map and regenerates on the (astronomically rare) collision,
+  so pool size is an ergonomics choice, not a correctness guarantee.
+- **Word pool = EFF large diceware list (7776 words), vendored + `go:embed`.** The
+  list is fetched ONCE at development time into the repo as a data asset and
+  embedded at build time. There is NO runtime network fetch: login is the
+  per-session bootstrap verb, so a network dependency on key minting would be an
+  offline/CI/airgap reliability regression and a supply-chain risk. Rejected:
+  runtime REST fetch of a word corpus (the "save LLM context" motive is moot — an
+  on-disk/embedded list costs zero conversation context, only build-time bytes).
+  Rejected: hand-enumerating a word pool token-by-token in source.
+- **M3 wiring scope:** only `ws.lead.login` session keys use the generator in this
+  milestone. Re-minting the other id-issuing surfaces (`exec_key`, `api_job_key`,
+  `path.generate` stems, mercenary continuation handles) onto the shared generator
+  is reserved for the follow-up todo ticket
+  `260610-refactor-ws-wordchain-id-generalization`, so M3 stays scoped. Build the
+  generator generic now; wire only session keys.
+
 ### root vs cwd; exec; role-containment
 
 - **root** stays the project/repo anchor + ws bookkeeping locus, carried by the

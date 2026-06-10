@@ -219,6 +219,10 @@ dropped tickets live in hidden archive dirs and git history.
   `260508-agents-register-model-alias-field`,
   `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth) is
   the first slice; depends M2 (done), coordinated with M4. Largest milestone.
+  Session keys use a reusable word-chain generator (EFF large 7776 pool, vendored
+  + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it to other
+  id surfaces is reserved as `260610-refactor-ws-wordchain-id-generalization`
+  (todo, follow-up).
 
 ## Session Notes
 
