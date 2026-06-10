@@ -1139,3 +1139,79 @@ func TestPlaybookPrintGoldenLeadSprint(t *testing.T) {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
 }
+
+// TestPlaybookPrintGoldenLeadDiscuss verifies lead-discuss resolves from the
+// real rsrc tree and is delegates:true (reference-discovery spawn — tip must appear).
+func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-discuss", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "decision quality per conversation turn") {
+		t.Errorf("body %q: expected doctrine text 'decision quality per conversation turn'", body)
+	}
+	// delegates:true (reference-discovery spawn in judge: needs-survey) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadReview verifies lead-review resolves from the
+// real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-review", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "maintainer decision quality with minimum friction") {
+		t.Errorf("body %q: expected doctrine text 'maintainer decision quality with minimum friction'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadSalvage verifies lead-salvage resolves from the
+// real rsrc tree and is delegates:true (explore playbook + ws/agents.register — tip must appear).
+func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-salvage", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "evidence-preserving loss containment") {
+		t.Errorf("body %q: expected doctrine text 'evidence-preserving loss containment'", body)
+	}
+	// delegates:true (explore playbook + named agent registration) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadSkillAuthoring verifies lead-skill-authoring resolves
+// from the real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "executability under pressure") {
+		t.Errorf("body %q: expected doctrine text 'executability under pressure'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
