@@ -1,8 +1,7 @@
 ---
-name: lead-verify-design
-description: Run a premise-gated, brief-mediated critical design review with fresh reviewer isolation.
+kind: print
+delegates: true
 ---
-
 # Verify Design
 
 Topic: design proposal under review
@@ -31,7 +30,7 @@ Scope
 
 ### 1. Premise Gate
 
-1. Run discussion verification first by invoking `ws:lead-verify-discussion` when available; if unavailable, locally identify corrected premises, evidence, constraints, reuse opportunities, over-alignment risks, countercases, and unresolved unknowns.
+1. Run discussion verification first by calling `ws/playbook.print(name: "lead-verify-discussion")` and executing the returned procedure inline; if unavailable, locally identify corrected premises, evidence, constraints, reuse opportunities, over-alignment risks, countercases, and unresolved unknowns.
 2. If a material premise fails, return premise status, corrected premises, blocking reason, and next action; stop before design review.
 3. If multiple plausible premises depend on an unmade user decision, ask one focused question, include the competing premise options, and stop before creating artifacts.
 4. Treat a premise as blocking when the design review would rely on it and it is contradicted or unsupported.

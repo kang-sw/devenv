@@ -1,8 +1,7 @@
 ---
-name: lead-implement
-description: Unified implementation spine. Routes to direct-edit or delegated implementation, reviews, closes docs, then gates merge or continuation.
+kind: print
+delegates: true
 ---
-
 # Implement
 
 Target: user request
@@ -44,7 +43,7 @@ Review
 
 1. Emit **Implementation Verdict** using the template.
 2. State only observable routing inputs and final judgment labels.
-3. Do not use `NEXT:`; `lead-implement` is starting implementation, not routing to a sibling workflow skill.
+3. Do not use `NEXT:`; the lead-implement procedure is starting implementation, not routing to a sibling workflow skill.
 4. Do not include chain-of-thought, alternatives considered, or private scoring.
 5. Continue immediately to Prep after emitting the template.
 
@@ -70,7 +69,7 @@ Review
 [ ] Prep - branch, context, brief/plan (per plan-depth)
 [ ] Edit - direct-edit or spawn implementer; capture commit range
 [ ] Review - run reviewer relay according to `judge: review-allocation`
-[ ] Doc pre-pass - invoke `ws:lead-update-spec`, then `mental-model-updater`; commit each
+[ ] Doc pre-pass - call `ws/playbook.print(name: "lead-update-spec")` and execute inline, then `mental-model-updater`; commit each
 [ ] Doc commit gate - refresh _index.md, ticket status, then commit docs
 [ ] Doc closeout compaction - compact safe documentation-only branch-tip suffix
 [ ] Final action gate - wait for merge, continue, or stop
@@ -99,7 +98,7 @@ Review
 
 ### 6. Doc Pre-Pass
 
-1. Invoke `ws:lead-update-spec` with `<commit-range>`.
+1. Call `ws/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<commit-range>`.
 2. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
 3. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <commit-range>")`.
 4. Wait for completion; commit file changes.

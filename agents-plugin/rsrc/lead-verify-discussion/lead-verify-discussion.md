@@ -1,8 +1,7 @@
 ---
-name: lead-verify-discussion
-description: Run a compact discussion verification checkpoint with premise, evidence, and over-alignment checks.
+kind: print
+delegates: true
 ---
-
 # Verify Discussion
 
 Topic: user request
@@ -22,7 +21,7 @@ Topic: user request
 
 1. Re-objectify the discussion as claims, assumptions, and desired outcome.
 2. Check the highest-risk assumptions against project evidence and existing mechanisms.
-3. Spawn one or more native Explore-style subagents via the `explore` playbook (see `lead-workflow-manual`) when scoped investigation is useful; collect results before synthesizing.
+3. Spawn one or more native Explore-style subagents via the `explore` playbook (see lead-workflow-manual playbook) when scoped investigation is useful; collect results before synthesizing.
 4. Name any over-alignment risk in the current direction.
 5. Test the best countercase against the evidence.
 6. Recommend keep, revise, reject, or ask the user to choose.

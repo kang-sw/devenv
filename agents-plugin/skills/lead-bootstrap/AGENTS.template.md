@@ -150,7 +150,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0019: Replace per-file `ai-docs/*.local.md` ignores with `ai-docs/**/*.local.md`.
 - v0020: Convert ticket `related:` list format to map format across all ticket statuses.
 - v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then run mental-model-updater to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
-- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run `ws:lead-write-spec` to rebuild `features:` frontmatter.
+- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `ws/playbook.print(name: "lead-write-spec")` to rebuild `features:` frontmatter.
 - v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
 - v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`; planned ticketed features -> `### 🚧 <Feature Name>`.
 - v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.

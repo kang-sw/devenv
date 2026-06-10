@@ -1,8 +1,6 @@
 ---
-name: lead-update-spec
-description: Post-implementation spec audit primitive for explicit commit ranges or workflow wrap-up; updates ai-docs/spec for caller-visible behavior changes.
+kind: print
 ---
-
 # Update Spec
 
 Target: user request
@@ -21,7 +19,7 @@ Target: user request
 
 ### 1. Load conventions
 
-Call `ws/convention.read(name: "spec-conventions")`. Read `agents-plugin/skills/lead-write-spec/SKILL.md`.
+Call `ws/convention.read(name: "spec-conventions")`. Read `agents-plugin/rsrc/lead-write-spec/lead-write-spec.md`.
 
 ### 2. Resolve commit range
 
@@ -38,7 +36,7 @@ Call `ws/git.log(range: "<range>", include_body: true)`. Apply **judge: spec-imp
 For each spec-impact commit:
 1. Identify the affected spec domain. Read the relevant file(s) from `ai-docs/spec/`.
 2. Check whether an entry already covers the new or changed behavior.
-3. If missing: call `ws/spec_stem.generate(slug: "<slug>")` and insert an entry following the `spec-format` template from `write-spec/SKILL.md`.
+3. If missing: call `ws/spec_stem.generate(slug: "<slug>")` and insert an entry following the `spec-format` template from the lead-write-spec playbook.
 
 ### 5. Strip `🚧`
 

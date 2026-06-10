@@ -11,19 +11,19 @@ Target: user request
 
 Scope
 - Route only; do not implement or plan here.
-- Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
+- Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Do not rejudge general ticket quality or mutate ticket structure.
 - Request phase or ticket slicing only when scope resolution blocks safe implementation.
 
 Pipeline
 - Handoff stage order is fixed when stages fire: ticket readiness -> implementation.
-- Always route code-editing work through `ws:lead-implement`.
+- Always route code-editing work through the lead-implement procedure (via `ws/playbook.print`).
 - Proceed assumes implementation intent; stop when routing cannot safely reach implementation.
 
 Execution
 - Emit a Routing Verdict before execution; invoke only the skill named by `NEXT:`, or invoke nothing when `NEXT: stop`.
-- After `ws:lead-write-ticket` returns, rebuild route context and emit a new Routing Verdict.
+- After the lead-write-ticket procedure returns, rebuild route context and emit a new Routing Verdict.
 
 ## Route Rules
 
@@ -32,7 +32,7 @@ Route Context
 - `discussion-needed` blocks every implementation route.
 - `needs-ticket` applies only to actionable inline targets without a ticket.
 - Freshness is lead-owned: compare active conversation decisions against the ticket, not source.
-- `freshness=missing-settled-decisions` means the ticket needs `ws:lead-write-ticket` refresh.
+- `freshness=missing-settled-decisions` means the ticket needs a lead-write-ticket procedure run.
 
 Routing
 - Use the first matching route row.
@@ -84,23 +84,23 @@ Routing
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
 | `has-ticket=yes` and category is `workset` | Stop; report that worksets are containers, list included actionable ticket paths grouped as `ready`, `not-ready`, and `unknown` from explicit path/status labels or already-loaded artifacts, and suggest one safe next request. |
 | `discussion-needed=yes` | Continue through `ws:lead-discuss`; stop. |
-| `has-ticket=yes` and status is `idea/` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `idea/` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
 | `scope-blocked=multiple-explicit-phases` | Stop; ask the user to choose one phase or create/slice tickets. |
 | `scope-blocked=too-broad` | Stop; ask for phase or ticket slicing before implementation. |
 | `scope-blocked=no-unfinished-phase` | Stop; report that all ticket phases appear complete and ask whether to close, reopen, or name a follow-up target. |
 | `scope-blocked=phase-already-complete` | Stop; report that the named phase already has a result and ask for explicit redo/revision confirmation or a different phase. |
-| `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and `freshness=missing-settled-decisions` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`. |
-| `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`. |
+| `has-ticket=yes` and status is `todo/` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and `freshness=missing-settled-decisions` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `ready/` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
+| `has-ticket=no` and `needs-ticket=yes` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=no` and `needs-ticket=no` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
 
 ### 3. Emit Routing Verdict
 
 ```text
 ## Routing Verdict
 
-NEXT: <ws:lead-discuss | ws:lead-write-ticket | ws:lead-implement | stop>
+NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>
 
 - **Target**: <ticket path or brief summary>
 - **Route**: <first matching route row>
@@ -129,11 +129,11 @@ Do not ask for confirmation; the user can interrupt.
 1. Read the emitted `NEXT:` line.
 2. Invoke exactly that skill, or stop when `NEXT: stop`.
 3. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
-4. If `NEXT: ws:lead-implement`, invoke `ws:lead-implement` before any source inspection, planning, or editing.
+4. If `NEXT: lead-implement`, call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline before any source inspection, planning, or editing.
 5. Do not call implementation tools from `lead-proceed`.
 6. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
 7. Stop on failure or user interruption.
-8. If `ws:lead-write-ticket` ran, capture its `Ticket:` path before downstream routing.
+8. If the lead-write-ticket procedure ran, capture its `Ticket:` path before downstream routing.
 9. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
 10. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
 

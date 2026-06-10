@@ -29,7 +29,7 @@ Conversation
 
 ## On: invoke
 
-1. Invoke `ws:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
+1. Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline (loads orchestration primitives reference).
 2. Call `ws/project_tree()` to load the current project map.
 3. Call `ws/git.status()`.
 4. If `user request` references a ticket, read it.
@@ -76,12 +76,12 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    a. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
    b. Do not require spec creation; `todo/` is accepted backlog, not implementation-ready status.
 3. **Ready promotion (todo/ -> ready/)**:
-   a. Invoke `ws:lead-write-ticket` (Edit path) for the `todo/` -> `ready/` promotion.
-   b. `ws:lead-write-ticket` owns spec addressing, frontmatter population, the `git mv`, focus update, and commit.
-   c. Stop this handler after `ws:lead-write-ticket` returns.
+   a. Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline (Edit path) for the `todo/` -> `ready/` promotion.
+   b. The lead-write-ticket procedure owns spec addressing, frontmatter population, the `git mv`, focus update, and commit.
+   c. Stop this handler after the lead-write-ticket procedure returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
-   b. No other ticket references this stem -> invoke `ws:lead-write-spec` to remove the `🚧` entry.
+   b. No other ticket references this stem -> call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove the `🚧` entry.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
    d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
 5. Commit through `ws/git.commit`.
@@ -89,10 +89,10 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 ## On: user signals done
 
 1. If the user wants implementation to start, continue through `ws:lead-proceed`.
-2. For persistence without implementation, suggest `ws:lead-write-spec` as the next route; that skill owns whether spec changes are needed.
+2. For persistence without implementation, suggest invoking the lead-write-spec procedure as the next action; it owns whether spec changes are needed.
 3. Then offer ticket persistence:
-   - **New ticket** - invoke `ws:lead-write-ticket`.
-   - **Ticket update** - invoke `ws:lead-write-ticket`, then append design notes to an existing ticket phase.
+   - **New ticket** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline.
+   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline, then append design notes to an existing ticket phase.
 4. Apply **judge: needs-integration-tests** to ticket writes.
 5. Write only what the user approves. No artifact needed for exploratory discussions.
 

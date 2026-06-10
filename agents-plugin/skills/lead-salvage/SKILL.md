@@ -26,7 +26,7 @@ Call `ws/project_tree()`.
 
 ## On: invoke
 
-1. Invoke `ws:lead-workflow-manual`.
+1. Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
 2. Call `ws/git.status()`.
 3. Identify target kind: branch, sprint, commit range, ticket graph, worktree diff, agent run, or user-described failure.
 4. Enter **Containment**.
@@ -80,11 +80,11 @@ Call `ws/project_tree()`.
 
 Trigger: user approves the salvage report and ticket plan.
 
-1. Invoke `ws:lead-write-ticket` to create or update one research ticket containing the salvage report.
-2. Apply **judge: needs-recovery-epic**; if it fires, invoke `ws:lead-write-ticket` to create or update one recovery epic.
-3. For concrete execution slices, invoke `ws:lead-write-ticket` separately for each child ticket.
+1. Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline to create or update one research ticket containing the salvage report.
+2. Apply **judge: needs-recovery-epic**; if it fires, call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline to create or update one recovery epic.
+3. For concrete execution slices, call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline separately for each child ticket.
 4. Apply **judge: destructive-action** immediately before any destructive ticket, spec, or source cleanup.
-5. For affected existing tickets, invoke `ws:lead-write-ticket` separately for each approved rewrite, drop, absorb, or status move.
+5. For affected existing tickets, call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline separately for each approved rewrite, drop, absorb, or status move.
 6. If destructive source cleanup is still needed, route to the approved manual git action or implementation skill.
 7. Report created or updated ticket paths, remaining unknowns, and the next user decision point.
 
