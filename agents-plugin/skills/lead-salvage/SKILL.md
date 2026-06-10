@@ -47,8 +47,8 @@ Call `ws/project_tree()`.
    - **Ticket graph** - active `idea/`, `todo/`, and `ready/` tickets that depend on suspect premises.
    - **Spec and mental-model impact** - planned or implemented behavior, documented invariants, and stale guidance affected by the failure.
    - **Evidence inventory** - logs, reviewer reports, plans, skeletons, screenshots, or external notes worth preserving.
-2. Dispatch all independent survey calls first; store subquery keys or agent names before collecting results.
-3. Use `ws/subquery(question: "<focused survey question>")` for one-turn bounded surveys; collect later with `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`.
+2. Dispatch all independent survey calls first; store agent ids or names before collecting results.
+3. Spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) for one-turn bounded surveys; collect the result when it returns.
 4. Use named agents for broad or stateful surveys:
    a. Register one agent per independent survey, such as `salvage-blast-radius`, `salvage-ticket-graph`, `salvage-doc-impact`, or `salvage-evidence`.
    b. Call each agent with the **Survey Prompt** for its assigned question.

@@ -49,7 +49,7 @@ These apply to both skill and agent documents.
 - Skill-to-skill handoffs share the active conversation; write `Continue through <skill>` without a carry block.
 - Skill-level user-approval gates apply only on direct user invocation; chained invocations re-ask only for safety, deletion, or explicit consent rules.
 - If a route references another skill without instructing invocation or delegation, perform the referenced steps locally.
-- The calling lead skill/session owns active-conversation judgments; use `ws/subquery` only for self-contained artifact, source, spec, or ticket evidence.
+- The calling lead skill/session owns active-conversation judgments; use the native Explore pattern (see `lead-workflow-manual`) only for self-contained artifact, source, spec, or ticket evidence.
 - When invoking another skill, name only the target skill and entry route; do not decide that skill's internal judgments in advance.
 - Use "arguments" only for formal tool, command, or template parameters.
 

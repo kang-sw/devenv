@@ -10,11 +10,11 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "mental-model-conventions")` before any document write - conventions are canonical there.
-- All survey and verifier queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`.
+- All survey and verifier queries spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`).
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain task labels use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Keep labels stable for resume scanning.
-- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls; store returned keys and wait on all keys before synthesizing.
+- All survey Explore-style subagents for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
@@ -42,9 +42,9 @@ Record whether spec is available (drives step 4 per domain).
 
 ### 2. Parallel codebase survey
 
-Issue all three queries in a single response turn as parallel `ws/subquery` calls. Store each returned `subquery_key`:
+Spawn all three Explore-style subagents with broad-tracing scope in a single response turn via the `explore` playbook (see `lead-workflow-manual`). Collect all results before synthesizing.
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 1 — directory and module structure:
 
 ```text
 Survey the project's directory and module structure.
@@ -54,7 +54,7 @@ responsibility, outward-facing interfaces, and file count as a size signal.
 Return markdown bullets by module/area.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 2 — entry points and cross-module contracts:
 
 ```text
 Survey the project for entry points and cross-module contracts.
@@ -64,7 +64,7 @@ interfaces, plugin registries, configuration schemas. Return entry points and
 contracts with coupling direction.
 ```
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Query 3 — coupling hotspots and implicit contracts:
 
 ```text
 Survey the project for coupling hotspots and implicit contracts - areas that cause wrong outcomes for a developer who modifies them without knowing the contract.
@@ -74,7 +74,7 @@ Look for: shared mutable state, ordering dependencies, sync points, extension re
 For each hotspot, return modules, contract, and failure mode.
 ```
 
-Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` for all three keys before synthesizing.
+Collect each subagent result before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -108,7 +108,7 @@ Update the visible task list entry for this domain to in-progress.
 
 ### 2. Domain survey
 
-Call `ws/subquery(deep_research: true, question: <block below>)`, store the returned `subquery_key`, then wait for it:
+Spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`); collect the result before drafting:
 
 ```text
 Analyze domain: <domain>
@@ -125,8 +125,6 @@ Focus on what would cause wrong outcomes if unknown:
 
 Be concrete: cite paths, functions, and types. Do not list fields or paraphrase functions.
 ```
-
-Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` before drafting.
 
 ### 3. Draft domain file
 
@@ -145,7 +143,7 @@ Skip if no spec exists.
 
 ### 5. Verify
 
-Call `ws/subquery(deep_research: true, question: <block below>)`, store the returned `subquery_key`, then wait for it:
+Spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`); collect the result before applying corrections:
 
 ```text
 Verify the following mental-model domain document against the codebase.

@@ -12,7 +12,7 @@ Target: user request
 - Call `ws/convention.read(name: "spec-conventions")` before any write or update - conventions are canonical there.
 - Location follows `judge: directory-vs-flat`.
 - Call `ws/spec_index.verify()` after every write or update.
-- Accuracy check: for every heading without `🚧`, confirm the feature exists. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if uncertain.
+- Accuracy check: for every heading without `🚧`, confirm the feature exists. Spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) if uncertain.
 
 ## On: invoke
 
@@ -34,7 +34,7 @@ Target: user request
    d. Apply `judge: contract-first-spec` before adding any `> [!note] Planned 🚧` callouts. Remove `🚧` from confirmed-implemented features as needed.
    e. Call `ws/spec_index.verify()` for duplicate-anchor verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-6. Accuracy check - confirm every heading without `🚧` exists in the codebase. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if uncertain. Never remove `🚧` without confirmation.
+6. Accuracy check - confirm every heading without `🚧` exists in the codebase. Spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) if uncertain. Never remove `🚧` without confirmation.
 7. **Commit** - call `ws/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
 8. **Output Handoff** - report changed spec path, changed stem, whether any `🚧` marker was added, and whether the caller should add `spec:` or keep ticket-local `## Spec Impact`.
 
