@@ -49,6 +49,21 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
+> [!note] Planned 🚧 {#260610-entry-skill-surface-reduction}
+> The directly invocable surface will narrow: only 11 of the lead-* skills remain
+> entry points the user invokes as `/ws:<name>` — `lead-discuss`, `lead-sprint`,
+> `lead-proceed`, `lead-review`, `lead-ship`, `lead-salvage`, `lead-bootstrap`,
+> `lead-skill-authoring`, `lead-add-rule`, `lead-forge-mental-model`, and
+> `lead-forge-spec`. The remaining 9 — `lead-implement`, `lead-write-ticket`,
+> `lead-write-spec`, `lead-workflow-manual`, `lead-check-blockers`,
+> `lead-verify-design`, `lead-verify-discussion`, `lead-write-skeleton`, and
+> `lead-update-spec` — become internal procedures served as `playbook.print`
+> content invoked by caller skills, not directly user-invoked entry points;
+> `lead-write-ticket` and `lead-write-spec` become orchestration-only. The
+> classification axis is whether the user is meant to type `/ws:<name>` directly,
+> not cross-skill invocation count. Current behavior (all listed skills directly
+> invocable) is unchanged until implemented.
+
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
 `lead-workflow-manual` is the shared primitive reference for writing or executing ws
@@ -71,6 +86,18 @@ general-purpose named-agent form; role-specific delegates use `prompts:
 ["<prompt-stem>"]`, and optional `model` arguments select portable aliases or
 one-off concrete models. CLI adapter syntax belongs only in compatibility or
 testing references. {#260507-mcp-centric-workflow-language}
+
+> [!note] Planned 🚧 {#260610-subquery-explore-delegation-shift}
+> Skill-facing delegation guidance for scoped fact-finding will shift from
+> `ws/subquery` to a per-harness Explore playbook: a native Explore-style
+> subagent, with the async fire-and-forget plus deferred-result shape mapping to
+> native background subagents. The `subquery` prompt-stem text (evidence
+> discipline, scoping) becomes render-kind playbook content with harness-rendered
+> terminology. Native delegation is the default, not the exclusive path — the
+> lead-invokable mercenary surface remains available and the `delegates: true`
+> render tip is its always-on seam. The `ws/subquery` runtime tool stays callable;
+> only shipped skill text stops naming it for new delegation. Current skill text
+> continues to reference `ws/subquery` until implemented.
 
 Workflow guidance prefers `model` for both portable aliases and concrete
 overrides. Examples use `model: "core"` or `model: "deep"` for portable
