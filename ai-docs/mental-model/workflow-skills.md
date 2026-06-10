@@ -16,7 +16,7 @@ related:
 ## Entry Points
 
 - `agents-plugin/skills/lead-*` holds the 11 directly user-invocable `ws:` entry skills; uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
-- `agents-plugin/rsrc/lead-*/` holds internal procedure playbooks (e.g., `lead-implement`, `lead-write-ticket`, `lead-workflow-manual`); callers invoke them via `ws/playbook.print(name: "<name>")` and execute the returned procedure inline — they are not directly user-invocable `ws:` skills. {#260609-rsrc-playbook-distribution}
+- `agents-plugin/rsrc/lead-*/` holds procedure bodies for all lead-* workflows — entry-skill bodies (e.g., `lead-proceed`, `lead-discuss`, `lead-bootstrap`) and internal-only procedures (e.g., `lead-implement`, `lead-write-ticket`, `lead-workflow-manual`); all are invoked via `ws/playbook.print(name: "<name>")` and executed inline. Entry-skill playbooks have a corresponding thin-shim `SKILL.md` (frontmatter + H1 + single print-and-execute line); internal-only playbooks have no user-invocable shim. {#260609-rsrc-playbook-distribution}
 - `agents-plugin-wsflow/skills/lead-*` is the curated derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
 - The `lead-workflow-manual` playbook is the notation and primitive boundary reference for shared skill text; load it via `ws/playbook.print(name: "lead-workflow-manual")`. {#260505-workflow-primitive-reference}
 
@@ -90,7 +90,7 @@ related:
 
 ## Extension Points & Change Recipes
 
-- **Add a Codex workflow skill**: for a user-invocable entry skill, create `agents-plugin/skills/lead-<name>/SKILL.md`; for an internal procedure, create `agents-plugin/rsrc/lead-<name>/lead-<name>.md` as a `kind:print` playbook (set `delegates:true` if it spawns subagents) and invoke via `ws/playbook.print(name: "<name>")`. Follow skill-authoring invariants for both surfaces; add OpenAI UI metadata only for entry skills; update workflow specs and mental models.
+- **Add a Codex workflow skill**: for a user-invocable entry skill, create both (a) a thin-shim `agents-plugin/skills/lead-<name>/SKILL.md` (frontmatter + H1 + single `ws/playbook.print(name: "<name>")` execute line) and (b) the full procedure body at `agents-plugin/rsrc/lead-<name>/lead-<name>.md` as a `kind:print` playbook (set `delegates:true` if it spawns subagents). For an internal-only procedure (no user shim), create only the rsrc playbook. Follow skill-authoring invariants for both surfaces; add OpenAI UI metadata only for entry skills; update workflow specs and mental models.
 - **Add a config-first review skill variant**: follow `lead-review` pattern — machine-local `ai-docs/_review.local.md` captures environment judgment, setup interview fires only when config is absent, judges gate subagent depth rather than hard-coding it.
 - **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
 - **Change a full workflow skill excluded from wsflow**: check `ai-docs/ref/wsflow-mirroring.md` and update wsflow docs, workflow manual text, or exclusion rationale if the excluded skill's meaning changed.

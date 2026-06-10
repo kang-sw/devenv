@@ -190,6 +190,38 @@ their procedural bodies resolve through the playbook surface.
 Depends on Phase 2 (internal procedures and shared playbook content must land
 before entry shims are thinned over them).
 
+### Result (421a2d78) - 2026-06-10
+
+Implemented on `implement/entry-skill-shim-reduction` (delegated, batched A/B/C;
+brief plan depth; partitioned review correctness/fit/test).
+- All 11 entry skills reduced to thin trigger shims: each `SKILL.md` keeps its
+  `name`/`description` frontmatter + H1 + a single
+  `ws/playbook.print(name: "<name>")` print-and-execute line; the full procedure
+  body moved **verbatim** into a `kind:print` playbook at
+  `agents-plugin/rsrc/<name>/<name>.md`. Entry skills stay directly `/ws:<name>`
+  invocable via the preserved trigger descriptions.
+- `delegates: true` set on the 5 spawning bodies (`lead-discuss`, `lead-salvage`,
+  `lead-forge-spec`, `lead-forge-mental-model`, `lead-sprint`); omitted on the 6
+  non-spawning bodies (`lead-proceed`, `lead-ship`, `lead-add-rule`, `lead-review`,
+  `lead-bootstrap`, `lead-skill-authoring`).
+- Pure relocation: no procedure text reworded, no cross-reference rewired
+  (`ws:<name>` refs to entry skills and `ws/playbook.print` refs to the 9 Phase 2
+  procedures stay valid; inline `ws/convention.read`/`ws/infra.read` stay inline
+  per the Phase 2 option-b single-source decision). Auxiliary files
+  (`lead-bootstrap/{AGENTS.template.md,WORKFLOW.md}`, `lead-discuss` &
+  `lead-skill-authoring` `agents/openai.yaml`) preserved.
+- `manifest.json` regenerated; 11 print golden tests added; `go test ./... -count=1`
+  green; `TestValidateRealTree` gates the new playbooks.
+- Executed as 3 batched implementer calls with fresh context each (Phase 2's single
+  implementer exhausted context at smaller scale). Review partitioned
+  (correctness/fit/test) — all clean on the first pass, no fix cycle.
+- Spec `260610-entry-skill-surface-reduction` 🚧 stripped (both Phase 2 and Phase 3
+  now landed); stale `lead-write-skeleton` removed from the namespace list.
+
+Forward: M2 (ticket 260609) is now fully implemented across all three phases. M3
+deletes the now-unreferenced `ws/subquery` runtime tool and `agents.*` spawn
+backends and reshapes the spawn engine into the lead-invokable mercenary surface.
+
 ## Spec Impact
 
 Addressed at ready promotion by contract-first planned spec entries in

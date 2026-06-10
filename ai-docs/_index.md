@@ -198,20 +198,22 @@ dropped tickets live in hidden archive dirs and git history.
   option-B re-scoping + contract-first spec before ready. Open verification item
   carried forward: Codex non-skill `rsrc/` cache materialization (prereqs
   `260523`, `260524-codex-cache`).
-- `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - **Phase 1 +
-  Phase 2 done**. Phase 1 (`e211f87b`, merged `--no-ff`): `explore` render
-  playbook + `ws/subquery` skill-text refs shifted to native Explore; spec
-  `260610-subquery-explore-delegation-shift` implemented. Phase 2 (`47fa7368`, on
-  `implement/internal-procedures-playbook`, unmerged): 9 internal procedures moved
-  off the entry surface to `playbook.print` rsrc playbooks, callers rewired to
-  `playbook.print` + inline execution, `lead-write-ticket`/`lead-write-spec`
-  orchestration-only, `lead-skill-authoring` audit target → rsrc; conventions stay
-  inline `convention.read` (single source). **Next: Phase 3** (reduce the 11 entry
-  skills to thin shims). Spec `260610-entry-skill-surface-reduction` stays 🚧 until
-  Phase 3 lands. No runtime deletion (M3). Follow-ups:
+- `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - **all three
+  phases done; M2 implementation complete**. Phase 1 (`e211f87b`, merged):
+  `explore` render playbook + `ws/subquery` skill-text refs shifted to native
+  Explore; spec `260610-subquery-explore-delegation-shift` implemented. Phase 2
+  (`47fa7368`, merged `--no-ff` into the epic): 9 internal procedures moved off the
+  entry surface to `playbook.print` rsrc playbooks, callers rewired,
+  `lead-write-ticket`/`lead-write-spec` orchestration-only, `lead-skill-authoring`
+  audit target → rsrc; conventions stay inline `convention.read` (single source).
+  Phase 3 (`421a2d78`, on `implement/entry-skill-shim-reduction`, unmerged): all 11
+  entry skills reduced to thin print-and-execute shims over `kind:print` rsrc
+  playbooks (verbatim relocation; `delegates:true` on the 5 spawning bodies). Spec
+  `260610-entry-skill-surface-reduction` 🚧 stripped (implemented). No runtime
+  deletion (M3). **Next: merge Phase 3 to the epic, then M3.** Follow-ups:
   `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity) and
   `260610-bug-wsflow-runtime-contract-playbook-tools-drift` (pre-existing M1
-  capability-contract drift surfaced during Phase 2).
+  capability-contract drift).
 
 ## Session Notes
 
