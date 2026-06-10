@@ -16,7 +16,7 @@ Call `ws/project_tree()`.
 Scope
 - Stay on the current branch; never create or require `sprint/` branches.
 - Keep `lead-sprint` responsible for routing, session continuity, and episode closure.
-- Route general implementation through `ws:lead-proceed` or `ws:lead-implement`; do not weaken their gates.
+- Route general implementation through `ws:lead-proceed` or the lead-implement procedure; do not weaken their gates.
 - Allow `sprint-edit` only for one-context, lead-owned, small interactive edits.
 
 Episodes
@@ -31,7 +31,7 @@ Language
 
 ## On: invoke
 
-1. Invoke `ws:lead-workflow-manual`.
+1. Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
 2. Call `ws/git.status()`.
 3. Call `ws/project_tree()`.
 4. Recover episode state from active conversation or recent `Sprint-Edit:` commit markers.
@@ -85,7 +85,7 @@ Trigger: post-edit reply means wrap it up, done, or good.
 2. Find commits in `<episode-start>..HEAD` whose commit body contains `Sprint-Edit: <episode-slug>`.
 3. Stop if no marked commits are found.
 4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
-5. Invoke `ws:lead-update-spec` with `<episode-range>` and the marked commit list.
+5. Call `ws/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<episode-range>` and the marked commit list.
 6. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
 7. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>")`.
 8. Wait for completion and apply any needed episode-scoped documentation updates.
@@ -112,12 +112,12 @@ Pick first match, execute, return to loop.
 
 | Request type | Routing |
 |---|---|
-| Behavior, concept, or status question | Answer inline; spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) if codebase search is needed |
-| Codebase exploration | Spawn a native Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`) |
-| Design discussion | Discuss inline; do not auto-chain to `ws:lead-write-spec` |
+| Behavior, concept, or status question | Answer inline; spawn a native Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook) if codebase search is needed |
+| Codebase exploration | Spawn a native Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook) |
+| Design discussion | Discuss inline; do not auto-chain to the lead-write-spec procedure |
 | Ticket, spec, or protocol change | Route through normal workflow; usually `ws:lead-proceed` when implementation is requested |
 | One-context small interactive edit | Start or continue sprint-edit |
-| Larger implementation, public contract work, cross-module change, new pattern, or review-worthy work | Continue through `ws:lead-proceed` or `ws:lead-implement` |
+| Larger implementation, public contract work, cross-module change, new pattern, or review-worthy work | Continue through `ws:lead-proceed` or the lead-implement procedure |
 | Ambiguous request | Ask the smallest routing question, then re-apply judge |
 
 ### judge: sprint-edit

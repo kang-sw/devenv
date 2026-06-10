@@ -93,6 +93,8 @@ Test: invariants should re-derive from the named resource.
 
 ## On: Fresh-Reader Audit
 
+Audit targets: `agents-plugin/rsrc/lead-*/lead-*.md` (migrated procedure playbooks) and `agents-plugin/skills/*/SKILL.md` (entry skills).
+
 1. Run a separate fresh reviewer (agent or subagent) for the audit.
 2. Give the reviewer only the target file or excerpt; do not include prior conversation, project docs, skill docs, specs, rationale, or host-generated metadata.
 3. Tell the reviewer to read only the provided target and not to read any other files, skills, docs, or context.
@@ -104,7 +106,7 @@ Test: invariants should re-derive from the named resource.
 
 ## On: Downstream Consistency Sweep
 
-1. Select affected skill, agent, prompt, spec, mental-model, test, and mirrored-package surfaces from the edited doctrine, terminology, route, layout, or audit gate.
+1. Select affected rsrc playbook sources (`agents-plugin/rsrc/lead-*/lead-*.md`), entry skill files (`agents-plugin/skills/*/SKILL.md`), agent prompts, specs, mental-models, tests, and mirrored-package surfaces from the edited doctrine, terminology, route, layout, or audit gate.
 2. Use a conservative finding-only first pass for broad skill-surface scans.
 3. Classify each finding as `fix`, `intentional difference`, or `out of scope`.
 4. Edit only accepted `fix` findings; record intentional differences when drift would otherwise look stale.

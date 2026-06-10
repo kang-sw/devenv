@@ -49,6 +49,10 @@ subagents. Direction, decisions, and evidence live in
   (config-backed), unknown-harness fallback, delegation tip injection.
   Contract-first spec authored (`260609-playbook-tools`,
   `260609-playbook-harness-rendering`, `260609-rsrc-playbook-distribution`).
+  Follow-up bug: `260610-bug-wsflow-runtime-contract-playbook-tools-drift`
+  (idea) — agentless capabilities expose `playbook.print`/`playbook.render` but
+  the wsflow `runtime.json` contract omits them; pre-existing M1-rollout drift,
+  not an M2 regression.
 - `260609-refactor-ws-skill-text-playbook-conversion` (todo, M2 — skill-text
   conversion): retained-native-subagent delegation patterns replace
   agents.*/subquery references across skills; subquery → Explore absorption;

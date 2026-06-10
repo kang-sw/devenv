@@ -1,8 +1,6 @@
 ---
-name: lead-write-ticket
-description: Use when the user asks to create, edit, promote, drop, close, or durably capture a repository workflow ticket.
+kind: print
 ---
-
 # Write Ticket
 
 Target: user request
@@ -10,7 +8,7 @@ Target: user request
 ## Invariants
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
-- Aside from required conventions and `ai-docs/_index.md` when focus changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or the native Explore pattern (see `lead-workflow-manual`) for graph discovery.
+- Aside from required conventions and `ai-docs/_index.md` when focus changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or the native Explore pattern (see lead-workflow-manual playbook) for graph discovery.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Workset tickets stay non-hierarchical operating-context collections; never add, remove, or change `parent:` based on workset inclusion.
@@ -70,7 +68,7 @@ Target: user request
 ### 3. Shape
 
 1. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
-2. For `epic`: reference existing/planned children; start a separate `ws:lead-write-ticket` invocation for child creation or child edit.
+2. For `epic`: reference existing/planned children; call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline for child creation or child edit.
 3. For `workset`: write context, focus, existing included tickets listed by stem/path with current status and role, and exit criteria.
 4. For `workset`: list planned-but-not-created work in `## Planned References` with a provisional label, intended role, and creation condition; do not assign status/path or `parent:`.
 5. For `workset`: if the user also requested included actionable ticket creation or edits, record planned references unless explicit cascade owns those ticket edits.
@@ -94,7 +92,7 @@ Target: user request
 
 1. Apply the requested change: phase update, content update, or status move.
 2. For `epic`, keep edits board-level.
-3. For `epic` implementation detail, stop after the epic edit and start a separate `ws:lead-write-ticket` invocation for the child ticket.
+3. For `epic` implementation detail, stop after the epic edit and call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline for the child ticket.
 4. For `workset`, keep edits to non-hierarchical operating context and included-ticket notes.
 
 ### 3. Move
@@ -155,7 +153,7 @@ Target: user request
 2. For `ready/`, keep confirmed existing stems in frontmatter.
 3. For `ready/`, when neither confirmed `spec:` nor `spec-remove:` stems address the phase, write or update `## Spec Impact`.
 4. `## Spec Impact` must name the target spec area, expected caller-visible change, and `Contract-first spec: yes|no`.
-5. If `Contract-first spec: yes`, continue through `ws:lead-write-spec`, re-check the created or updated stem, and list it in `spec:`.
+5. If `Contract-first spec: yes`, call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline, re-check the created or updated stem, and list it in `spec:`.
 6. After a contract-first spec is listed in `spec:`, remove redundant `## Spec Impact` text or keep only closeout notes not covered by the spec.
 7. If neither confirmed stems nor `## Spec Impact` addresses a phase, apply `judge: missing-spec-address`.
 
@@ -173,7 +171,7 @@ Target: user request
 2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
 3. For `workset`, suggest one concrete next action: proceed/promote an existing included actionable ticket, or create a planned reference as a new actionable ticket; never suggest proceeding or promoting the workset itself.
 4. For actionable tickets, suggest `ws:lead-proceed` unless `judge: missing-spec-address` fired.
-5. State that proceed routes to implementation readiness; `ws:lead-implement` resolves plan depth and execution mode.
+5. State that proceed routes to implementation readiness; the lead-implement procedure resolves plan depth and execution mode.
 6. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
 7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
 8. Preserve the final `Ticket:` line; callers such as `ws:lead-proceed` capture this path from prefix-stage output.
@@ -225,8 +223,8 @@ Default: if the user asks for a board without decomposition ownership, choose `w
 Trigger: non-`epic`, non-`research`, non-`workset` ticket creation or move into `ready/`.
 Ungated: `idea/` creation and `idea/` -> `todo/` triage.
 Find addressing: identify existing `spec:` or `spec-remove:` stems, or write a ticket-local `## Spec Impact` section.
-Contract-first: continue through `ws:lead-write-spec` only when `judge: contract-first-spec` is yes.
-Stop: no stem or `## Spec Impact` can address the behavior, `ws:lead-write-spec` failed, or the behavior is too underspecified; name the blocker.
+Contract-first: call `ws/playbook.print(name: "lead-write-spec")` and execute inline only when `judge: contract-first-spec` is yes.
+Stop: no stem or `## Spec Impact` can address the behavior, the lead-write-spec procedure failed, or the behavior is too underspecified; name the blocker.
 
 ### judge: initial-status
 

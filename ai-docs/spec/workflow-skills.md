@@ -61,8 +61,13 @@ overmatching internal pipeline stages.
 > content invoked by caller skills, not directly user-invoked entry points;
 > `lead-write-ticket` and `lead-write-spec` become orchestration-only. The
 > classification axis is whether the user is meant to type `/ws:<name>` directly,
-> not cross-skill invocation count. Current behavior (all listed skills directly
-> invocable) is unchanged until implemented.
+> not cross-skill invocation count.
+>
+> M2 Phase 2 landed the internal-procedure move: the 9 listed procedures are now
+> served as `playbook.print` content and are no longer directly invocable, leaving
+> exactly the 11 entry skills user-invocable. The remaining entry-skill shim
+> reduction (M2 Phase 3, internal refactor with no further caller-visible change)
+> is still planned; this marker clears when Phase 3 lands.
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 

@@ -3,6 +3,14 @@
   "files": {
     "delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
     "explore/explore.md": "ccc32c776f8ddd4499af5b12f4f903eff539d30c28a13bf885cb74cd64dfe32c",
+    "lead-check-blockers/lead-check-blockers.md": "3681e4ce6b4298c62d8bdacc5c52d1fbabdac7965e2490acf2129b209c7d0212",
+    "lead-implement/lead-implement.md": "d0f8b7b59b11f225eb1943ac5c03b37c0009f6b9362b2dcc3a2de3ab22ef56af",
+    "lead-update-spec/lead-update-spec.md": "6c8a2ab3fa1abe17b63e23158f549f9b83ff6a0470a25eef9444ea2dc189767c",
+    "lead-verify-design/lead-verify-design.md": "f8ef58d0c0223b41ba97b7278d65f9fd8eaa801826917137aa68fb5646497687",
+    "lead-verify-discussion/lead-verify-discussion.md": "b570a09301e96035da95df282d75c4749d35120ad5877b731aa0e5edf622401c",
+    "lead-workflow-manual/lead-workflow-manual.md": "eb6bdbe6c7daf65417474b699f0114440fa50e63cdc0ca06b2942eef7ce97c4b",
+    "lead-write-spec/lead-write-spec.md": "b7692fbccd5159c474ee32670f646db70565e3697465bb62cb68e9cde2c8503f",
+    "lead-write-ticket/lead-write-ticket.md": "a1039f16ef9a419cc1d21c762c0f4b6c8342e1350ac51ab15be37a4f3fdd25b2",
     "sample-conventions.md": "fd90dadec24fbd89a8489172239a7abe97d450ec16526b54818c9c7634aaeb91",
     "sample-playbook/sample-playbook.codex.md": "ce77a56088246fcaf1996e0fb45c5a4da2d1f7122653862fe6742fc4f5cf1df5",
     "sample-playbook/sample-playbook.md": "f813e57e9c3af21a911072c992f19afa7e8fd63b085d7527c315665543762673"

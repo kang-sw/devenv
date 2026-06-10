@@ -12,7 +12,7 @@ Target: user request
 - Load `ai-docs/_review.local.md` before any review step; run setup if absent.
 - Never push, force-push, or modify remote branches without user confirmation.
 - Record the current branch before checkout; offer to restore it after review.
-- Workflow mutations (fixes, commits) are lead-owned; route through `ws:lead-discuss` and `ws:lead-implement`.
+- Workflow mutations (fixes, commits) are lead-owned; route through `ws:lead-discuss` and the lead-implement procedure.
 - All written artifacts (review config, findings) must be in English regardless of conversation language.
 
 ## On: invoke [branch?]

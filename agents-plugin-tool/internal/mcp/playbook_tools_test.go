@@ -891,3 +891,171 @@ func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Golden print: migrated internal procedure playbooks (real rsrc tree)
+// ---------------------------------------------------------------------------
+
+// TestPlaybookPrintGoldenLeadCheckBlockers verifies lead-check-blockers
+// resolves from the real rsrc tree and contains procedure body text.
+func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-check-blockers", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	// Verify non-trivial procedure text is present.
+	if !strings.Contains(body, "user-blocking design questions") {
+		t.Errorf("body %q: expected procedure text 'user-blocking design questions'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadVerifyDiscussion verifies lead-verify-discussion
+// resolves and is marked delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadVerifyDiscussion(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-verify-discussion", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "Re-objectify the discussion") {
+		t.Errorf("body %q: expected procedure text 'Re-objectify the discussion'", body)
+	}
+	// delegates:true — continuity tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadUpdateSpec verifies lead-update-spec resolves
+// and contains the updated rsrc path reference.
+func TestPlaybookPrintGoldenLeadUpdateSpec(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-update-spec", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "spec coverage at commit boundaries") {
+		t.Errorf("body %q: expected doctrine text 'spec coverage at commit boundaries'", body)
+	}
+	// Verify the dead-path fix: updated rsrc path, not old SKILL.md path.
+	if !strings.Contains(body, "agents-plugin/rsrc/lead-write-spec/lead-write-spec.md") {
+		t.Errorf("body %q: expected updated rsrc path reference", body)
+	}
+	if strings.Contains(body, "agents-plugin/skills/lead-write-spec/SKILL.md") {
+		t.Errorf("body %q: must not contain stale SKILL.md path reference", body)
+	}
+	// delegates:false — no tip.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWorkflowManual verifies lead-workflow-manual resolves
+// and contains the updated self-reinvoke instruction.
+func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "WS Workflow Primitives") {
+		t.Errorf("body %q: expected heading 'WS Workflow Primitives'", body)
+	}
+	// Verify the dead-path fix: self-reinvoke uses playbook.print, not ws:lead-workflow-manual.
+	if !strings.Contains(body, `ws/playbook.print(name: "lead-workflow-manual")`) {
+		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.print", body)
+	}
+	// delegates:false — no tip.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWriteSpec verifies lead-write-spec resolves
+// and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadWriteSpec(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-write-spec", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "behavioral drift resistance") {
+		t.Errorf("body %q: expected doctrine text 'behavioral drift resistance'", body)
+	}
+	// delegates:true (conditional Explore accuracy check) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWriteTicket verifies lead-write-ticket resolves
+// and delegates:false (no tip).
+func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-write-ticket", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "recoverability of intent") {
+		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
+	}
+	// delegates:false — no tip.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadVerifyDesign verifies lead-verify-design resolves
+// and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadVerifyDesign(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-verify-design", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "judgment isolation") {
+		t.Errorf("body %q: expected doctrine text 'judgment isolation'", body)
+	}
+	// delegates:true (design-reviewer agent) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadImplement verifies lead-implement resolves
+// and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "verified code reaching the target branch") {
+		t.Errorf("body %q: expected doctrine text 'verified code reaching the target branch'", body)
+	}
+	// delegates:true (spawns implementer/reviewer agents) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}

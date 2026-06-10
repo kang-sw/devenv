@@ -1,12 +1,10 @@
 ---
-name: lead-workflow-manual
-description: Mandatory reference for ws workflow orchestration. Use when writing or executing workflow skills, MCP notation, named-agent primitives, model aliases, or orchestration boundaries matter.
+kind: print
 ---
-
 # Workflow Manual
 
 > **Session invariant:** Keep this reference active while writing or executing ws
-> workflow skills. After compaction, re-invoke `ws:lead-workflow-manual` when primitive
+> workflow skills. After compaction, call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when primitive
 > names or orchestration boundaries matter.
 
 ## On: invoke
@@ -20,7 +18,7 @@ Reading this file is the invocation; it loads the primitive reference.
 Host-neutral notation reference for ws plugin skill text.
 
 Use `ws/<tool-name>` for MCP server `ws`, tool `<tool-name>`.
-Use `ws:` only for plugin skills such as `ws:lead-write-ticket`.
+Use `ws:` only for plugin skills such as `ws:lead-discuss`.
 Write MCP calls as `ws/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.

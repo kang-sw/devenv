@@ -87,11 +87,11 @@ Mode: user request
 | Finding | Route |
 |---------|-------|
 | Source-derived detail | Compact to source pointers; use `ws:lead-discuss` if meaning is unclear |
-| Behavior coverage | `ws:lead-forge-spec` or `ws:lead-write-spec` |
+| Behavior coverage | `ws:lead-forge-spec` or the lead-write-spec procedure |
 | Modification knowledge | `ws:lead-forge-mental-model` |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
 | Project reading map | `ws:lead-forge-mental-model` or `ws:lead-discuss` when mixed with status claims |
-| Focus or ticket ordering | `ws:lead-write-ticket` |
+| Focus or ticket ordering | the lead-write-ticket procedure |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |
 | Duplicated doc map | Compact to start-here pointers |
 | Ambiguous project direction | `ws:lead-discuss` |

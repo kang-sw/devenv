@@ -5,6 +5,11 @@ from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
 FULL_PLUGIN_SKILLS_DIR = PLUGIN_DIR.parent / "agents-plugin" / "skills"
+# Full ws moves internal procedure bodies off the directly-invocable skill
+# surface into rsrc playbooks (epic 260605 M2). A wsflow-mirrored skill may
+# therefore have its full-ws counterpart as either a skill directory or an
+# rsrc playbook directory; both count for drift detection.
+FULL_PLUGIN_RSRC_DIR = PLUGIN_DIR.parent / "agents-plugin" / "rsrc"
 SKILLS_DIR = PLUGIN_DIR / "skills"
 
 
@@ -61,7 +66,17 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_full_skill_inventory_drift_is_visible(self):
         full_skills = {path.name for path in FULL_PLUGIN_SKILLS_DIR.iterdir() if path.is_dir()}
-        missing_full_counterparts = sorted(EXPECTED_SKILLS - EXPECTED_WSFLOW_ONLY_SKILLS - full_skills)
+        full_playbooks = (
+            {path.name for path in FULL_PLUGIN_RSRC_DIR.iterdir() if path.is_dir()}
+            if FULL_PLUGIN_RSRC_DIR.exists()
+            else set()
+        )
+        # A wsflow skill's full-ws counterpart may be a skill directory or an
+        # rsrc playbook directory (internal procedures migrated to playbooks).
+        full_counterparts = full_skills | full_playbooks
+        missing_full_counterparts = sorted(
+            EXPECTED_SKILLS - EXPECTED_WSFLOW_ONLY_SKILLS - full_counterparts
+        )
         unexpected_wsflow_skills = sorted(
             {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()} - EXPECTED_SKILLS
         )
