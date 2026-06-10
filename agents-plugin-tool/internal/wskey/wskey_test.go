@@ -47,20 +47,25 @@ func TestWordCountHelper(t *testing.T) {
 }
 
 // TestGenerateUniqueReRolls verifies that GenerateUnique re-rolls past rejected
-// candidates and returns a key the predicate does not mark taken. The predicate
-// is seeded with a set of "seen" keys grown by the test, not by hooking the RNG.
+// candidates and returns a key the predicate does not mark taken. Determinism is
+// driven by the predicate, not the RNG: the predicate rejects the first
+// rejectCount fresh candidates (and always rejects already-seen candidates),
+// then accepts the next one.
 func TestGenerateUniqueReRolls(t *testing.T) {
 	const rejectCount = 5
 
 	seen := make(map[string]bool)
-	rejected := 0
+	var rejected int
 	predicate := func(candidate string) bool {
+		if seen[candidate] {
+			return true // always reject already-seen candidates to avoid false-pass on hash collision
+		}
 		if rejected < rejectCount {
 			seen[candidate] = true
 			rejected++
-			return true // reject first rejectCount candidates
+			return true // reject first rejectCount fresh candidates
 		}
-		return false
+		return false // accept the first unseen candidate beyond rejectCount
 	}
 
 	key, err := GenerateUnique(predicate)
@@ -73,8 +78,10 @@ func TestGenerateUniqueReRolls(t *testing.T) {
 	if !keyPattern.MatchString(key) {
 		t.Fatalf("GenerateUnique() key %q does not match expected pattern", key)
 	}
-	if rejected < rejectCount {
-		t.Fatalf("predicate was called fewer times than expected: called %d, want >= %d", rejected, rejectCount)
+	// The predicate must have been called at least rejectCount+1 times:
+	// rejectCount rejections and at least one acceptance.
+	if rejected != rejectCount {
+		t.Fatalf("predicate rejected %d candidates, want exactly %d", rejected, rejectCount)
 	}
 }
 

@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
 )
 
-// keyPattern validates the word-chain session key format: 4 lowercase words + 2-digit suffix.
+// sessionKeyPattern validates the word-chain session key format: 4 lowercase words + 2-digit suffix.
 var sessionKeyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){3}-[0-9]{2}$`)
 
 // callLogin issues a ws.lead.login MCP call and returns the raw response line.
@@ -37,7 +38,7 @@ func callLogin(t *testing.T, server *Server, id int, root string, extra map[stri
 	return resp
 }
 
-// callTool issues a single tools/call MCP request and returns the raw response line.
+// callToolOnce issues a single tools/call MCP request and returns the raw response line.
 func callToolOnce(t *testing.T, server *Server, id int, name string, args map[string]any) string {
 	t.Helper()
 	raw, err := json.Marshal(args)
@@ -73,7 +74,16 @@ func parseLoginResponse(t *testing.T, respLine string) (key, root string) {
 	return key, root
 }
 
-// --- Test 1: ws.lead.login returns a valid key and correct root for two distinct repos ---
+// canonicalRootForTest returns the canonical form of root for test comparison.
+// It mirrors server-side canonicalGitRoot by running git rev-parse --show-toplevel
+// via the runGitOutput helper already defined in server_test.go (same package).
+func canonicalRootForTest(t *testing.T, root string) string {
+	t.Helper()
+	out := runGitOutput(t, root, "rev-parse", "--show-toplevel")
+	return filepath.Clean(strings.TrimSpace(string(out)))
+}
+
+// --- Test 1: ws.lead.login returns a valid key and correct canonical root ---
 
 func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	useLeadProfile(t)
@@ -81,6 +91,9 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	root2 := t.TempDir()
 	initGit(t, root1)
 	initGit(t, root2)
+
+	canonical1 := canonicalRootForTest(t, root1)
+	canonical2 := canonicalRootForTest(t, root2)
 
 	server := NewServer(root1, "test")
 
@@ -93,8 +106,9 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	if !sessionKeyPattern.MatchString(key1) {
 		t.Fatalf("key %q does not match word-chain format", key1)
 	}
-	if gotRoot1 == "" {
-		t.Fatalf("login returned empty root")
+	// Root round-trip: returned root must equal the canonical form of root1.
+	if gotRoot1 != canonical1 {
+		t.Fatalf("login root = %q, want canonical %q", gotRoot1, canonical1)
 	}
 
 	// Login for root2
@@ -102,17 +116,21 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	if toolIsError(t, resp2) {
 		t.Fatalf("ws.lead.login for root2 unexpectedly returned isError: %s", resp2)
 	}
-	key2, _ := parseLoginResponse(t, resp2)
+	key2, gotRoot2 := parseLoginResponse(t, resp2)
 	if !sessionKeyPattern.MatchString(key2) {
 		t.Fatalf("key2 %q does not match word-chain format", key2)
 	}
+	// Root round-trip for root2.
+	if gotRoot2 != canonical2 {
+		t.Fatalf("login root2 = %q, want canonical %q", gotRoot2, canonical2)
+	}
 
-	// Two keys must be distinct
+	// Two keys must be distinct (distinct logins → distinct keys).
 	if key1 == key2 {
 		t.Fatalf("two logins returned the same key: %q", key1)
 	}
 
-	// JSON format branch
+	// JSON format branch: key and root must be present and correctly formatted.
 	respJSON := callLogin(t, server, 3, root1, map[string]any{"format": "json"})
 	if toolIsError(t, respJSON) {
 		t.Fatalf("ws.lead.login json format returned isError: %s", respJSON)
@@ -128,8 +146,8 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	if !sessionKeyPattern.MatchString(parsed.SessionKey) {
 		t.Fatalf("json session_key %q does not match format", parsed.SessionKey)
 	}
-	if parsed.Root == "" {
-		t.Fatalf("json response has empty root")
+	if parsed.Root != canonical1 {
+		t.Fatalf("json root = %q, want canonical %q", parsed.Root, canonical1)
 	}
 }
 
@@ -142,70 +160,111 @@ func TestSessionKeyResolvesRoot(t *testing.T) {
 	initGit(t, root1)
 	initGit(t, root2)
 
+	canonical1 := canonicalRootForTest(t, root1)
+	canonical2 := canonicalRootForTest(t, root2)
+
+	// Create distinct sentinel untracked files in each root so git.status
+	// responses differ and we can verify which root each call resolved against.
+	mustWrite(t, root1, "session-marker-root1.txt", "marker1\n")
+	mustWrite(t, root2, "session-marker-root2.txt", "marker2\n")
+
 	server := NewServer(root1, "test")
 
-	// Mint keys for both roots directly on the registry to avoid round-trip parsing.
-	key1, err := server.sessions.mint(root1, roleLead)
+	// Mint keys for both roots directly to avoid round-trip parsing.
+	key1, err := server.sessions.mint(canonical1, roleLead)
 	if err != nil {
 		t.Fatalf("mint root1: %v", err)
 	}
-	key2, err := server.sessions.mint(root2, roleLead)
+	key2, err := server.sessions.mint(canonical2, roleLead)
 	if err != nil {
 		t.Fatalf("mint root2: %v", err)
 	}
 
-	// Verify that a root-aware call with key1 resolves root1, not root2.
+	// Serial checks: key1 must surface root1's marker, key2 must surface root2's.
 	resp1 := callToolOnce(t, server, 1, "git.status", map[string]any{"session_key": key1})
 	if toolIsError(t, resp1) {
 		t.Fatalf("git.status with key1 returned isError: %s", resp1)
 	}
+	if text1 := toolText(t, resp1); !strings.Contains(text1, "session-marker-root1.txt") {
+		t.Fatalf("key1 git.status missing root1 marker; got: %s", text1)
+	}
 
-	// Verify that a root-aware call with key2 resolves root2.
 	resp2 := callToolOnce(t, server, 2, "git.status", map[string]any{"session_key": key2})
 	if toolIsError(t, resp2) {
 		t.Fatalf("git.status with key2 returned isError: %s", resp2)
 	}
+	if text2 := toolText(t, resp2); !strings.Contains(text2, "session-marker-root2.txt") {
+		t.Fatalf("key2 git.status missing root2 marker; got: %s", text2)
+	}
 
-	// Concurrent calls: start N goroutines using key1 and N using key2;
-	// confirm none surfaces an error (which would indicate wrong root resolution).
+	// Concurrent calls: N goroutines each using key1 and N using key2.
+	// Every response must contain the marker for that key's expected root.
 	const workers = 8
 	var wg sync.WaitGroup
+	type result struct{ id int; err string }
 	errs := make([]string, workers*2)
+
 	for i := 0; i < workers; i++ {
 		idx := i
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			var buf bytes.Buffer
-			line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"git.status","arguments":{"session_key":%q}}}`, idx*2, key1)
+			line := fmt.Sprintf(
+				`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"git.status","arguments":{"session_key":%q}}}`,
+				idx*2, key1)
 			_ = server.ServeStdio(context.Background(), strings.NewReader(line), &buf)
 			resp := strings.TrimSpace(buf.String())
 			var r struct {
 				Result struct {
-					IsError bool `json:"isError"`
+					IsError bool            `json:"isError"`
+					Content []struct{ Text string `json:"text"` } `json:"content"`
 				} `json:"result"`
 			}
 			if jerr := json.Unmarshal([]byte(resp), &r); jerr != nil {
-				errs[idx*2] = fmt.Sprintf("parse error for key1 worker %d: %v", idx, jerr)
-			} else if r.Result.IsError {
-				errs[idx*2] = fmt.Sprintf("key1 worker %d got isError response: %s", idx, resp)
+				errs[idx*2] = fmt.Sprintf("key1 worker %d parse error: %v", idx, jerr)
+				return
+			}
+			if r.Result.IsError {
+				errs[idx*2] = fmt.Sprintf("key1 worker %d got isError: %s", idx, resp)
+				return
+			}
+			text := ""
+			if len(r.Result.Content) > 0 {
+				text = r.Result.Content[0].Text
+			}
+			if !strings.Contains(text, "session-marker-root1.txt") {
+				errs[idx*2] = fmt.Sprintf("key1 worker %d resolved wrong root; response: %s", idx, text)
 			}
 		}()
 		go func() {
 			defer wg.Done()
 			var buf bytes.Buffer
-			line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"git.status","arguments":{"session_key":%q}}}`, idx*2+1, key2)
+			line := fmt.Sprintf(
+				`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"git.status","arguments":{"session_key":%q}}}`,
+				idx*2+1, key2)
 			_ = server.ServeStdio(context.Background(), strings.NewReader(line), &buf)
 			resp := strings.TrimSpace(buf.String())
 			var r struct {
 				Result struct {
-					IsError bool `json:"isError"`
+					IsError bool            `json:"isError"`
+					Content []struct{ Text string `json:"text"` } `json:"content"`
 				} `json:"result"`
 			}
 			if jerr := json.Unmarshal([]byte(resp), &r); jerr != nil {
-				errs[idx*2+1] = fmt.Sprintf("parse error for key2 worker %d: %v", idx, jerr)
-			} else if r.Result.IsError {
-				errs[idx*2+1] = fmt.Sprintf("key2 worker %d got isError response: %s", idx, resp)
+				errs[idx*2+1] = fmt.Sprintf("key2 worker %d parse error: %v", idx, jerr)
+				return
+			}
+			if r.Result.IsError {
+				errs[idx*2+1] = fmt.Sprintf("key2 worker %d got isError: %s", idx, resp)
+				return
+			}
+			text := ""
+			if len(r.Result.Content) > 0 {
+				text = r.Result.Content[0].Text
+			}
+			if !strings.Contains(text, "session-marker-root2.txt") {
+				errs[idx*2+1] = fmt.Sprintf("key2 worker %d resolved wrong root; response: %s", idx, text)
 			}
 		}()
 	}
@@ -254,7 +313,7 @@ func TestUnknownSessionKeyReturnsError(t *testing.T) {
 	}
 }
 
-// --- Test 4: capability-scoped key restricts tools; lead key allows all ---
+// --- Test 4: capability-scoped keys restrict tools; lead key allows all ---
 
 func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	useLeadProfile(t)
@@ -263,40 +322,72 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 
 	server := NewServer(root, "test")
 
-	// git.commit is a lead-only tool: roleLeaf blocks it.
+	// git.commit is blocked for roleLeaf.
 	leafKey, err := server.sessions.mint(root, roleLeaf)
 	if err != nil {
 		t.Fatalf("mint leaf key: %v", err)
+	}
+	// agents.register is blocked for roleDelegate.
+	delegateKey, err := server.sessions.mint(root, roleDelegate)
+	if err != nil {
+		t.Fatalf("mint delegate key: %v", err)
 	}
 	leadKey, err := server.sessions.mint(root, roleLead)
 	if err != nil {
 		t.Fatalf("mint lead key: %v", err)
 	}
 
-	// A leaf-scoped key should be denied git.commit.
-	deniedResp := callToolOnce(t, server, 1, "git.commit", map[string]any{
+	assertGateError := func(t *testing.T, label string, resp string, wantCode int) {
+		t.Helper()
+		var r struct {
+			Error *struct{ Code int } `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(resp), &r); err != nil {
+			t.Fatalf("%s: parse response: %v\n%s", label, err, resp)
+		}
+		if r.Error == nil {
+			t.Fatalf("%s: expected JSON-RPC error, got: %s", label, resp)
+		}
+		if r.Error.Code != wantCode {
+			t.Fatalf("%s: error code = %d, want %d; response: %s", label, r.Error.Code, wantCode, resp)
+		}
+	}
+
+	// leaf key: git.commit must be denied with -32601.
+	deniedLeafResp := callToolOnce(t, server, 1, "git.commit", map[string]any{
 		"session_key": leafKey,
 		"paths":       []string{"nonexistent.txt"},
 		"title":       "test",
 		"ai_context":  []string{"test"},
 	})
-	var rDenied struct {
-		Error  *struct{ Code int } `json:"error"`
-		Result *struct {
-			IsError bool `json:"isError"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(deniedResp), &rDenied); err != nil {
-		t.Fatalf("parse denied response: %v\n%s", err, deniedResp)
-	}
-	// Should be a JSON-RPC error (profile denial, not toolTextResponse)
-	if rDenied.Error == nil {
-		t.Fatalf("leaf-scoped key should produce a JSON-RPC error for git.commit, got: %s", deniedResp)
-	}
+	assertGateError(t, "leaf/git.commit", deniedLeafResp, -32601)
 
-	// A lead key must be allowed to proceed (may fail for other reasons like missing files,
-	// but must NOT be rejected by the capability gate — the error would not be a -32601 code).
-	allowedResp := callToolOnce(t, server, 2, "git.commit", map[string]any{
+	// delegate key: config.agents_tier must be denied with -32601 (config.* prefix).
+	// agents.* tools are also blocked for delegates but hit actorGate before the
+	// keyed gate, producing a toolTextResponse error rather than -32601.
+	deniedDelegateResp := callToolOnce(t, server, 2, "config.agents_tier", map[string]any{
+		"session_key": delegateKey,
+		"tier":        "core",
+	})
+	assertGateError(t, "delegate/config.agents_tier", deniedDelegateResp, -32601)
+
+	// Non-lead key calling ws.lead.login must be denied (self-login escalation block).
+	deniedLoginResp := callToolOnce(t, server, 3, "ws.lead.login", map[string]any{
+		"session_key": leafKey,
+		"root":        root,
+	})
+	assertGateError(t, "leaf/ws.lead.login escalation", deniedLoginResp, -32601)
+
+	// Delegate key calling ws.lead.login must also be denied.
+	deniedDelegateLoginResp := callToolOnce(t, server, 4, "ws.lead.login", map[string]any{
+		"session_key": delegateKey,
+		"root":        root,
+	})
+	assertGateError(t, "delegate/ws.lead.login escalation", deniedDelegateLoginResp, -32601)
+
+	// Lead key must NOT be rejected by the capability gate for git.commit
+	// (may fail for other reasons such as missing files, but not -32601 from the gate).
+	allowedResp := callToolOnce(t, server, 5, "git.commit", map[string]any{
 		"session_key": leadKey,
 		"paths":       []string{"nonexistent.txt"},
 		"title":       "test",
@@ -309,11 +400,17 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 		t.Fatalf("parse allowed response: %v\n%s", err, allowedResp)
 	}
 	if rAllowed.Error != nil && rAllowed.Error.Code == -32601 {
-		t.Fatalf("lead-scoped key must NOT be blocked by capability gate, got -32601 error: %s", allowedResp)
+		t.Fatalf("lead key must NOT be blocked by capability gate (-32601): %s", allowedResp)
+	}
+
+	// Keyless caller must still be able to call ws.lead.login (normal bootstrap path).
+	keylessLoginResp := callLogin(t, server, 6, root, nil)
+	if toolIsError(t, keylessLoginResp) {
+		t.Fatalf("keyless ws.lead.login must succeed (additive guarantee): %s", keylessLoginResp)
 	}
 }
 
-// --- Test 5: keyless call still resolves through the existing chain (additive guarantee) ---
+// --- Test 5: keyless call falls through to the existing resolver chain ---
 
 func TestKeylessCallFallsThroughToExistingChain(t *testing.T) {
 	useLeadProfile(t)
@@ -333,7 +430,7 @@ func TestKeylessCallFallsThroughToExistingChain(t *testing.T) {
 		t.Fatalf("keyless git.status returned empty text")
 	}
 
-	// Also confirm that ws.setup root assignment still works (actor model unchanged).
+	// Confirm ws.setup root assignment still works (actor model unchanged).
 	var setupOut bytes.Buffer
 	setupInput := fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"root":%q}}}`,
@@ -348,7 +445,7 @@ func TestKeylessCallFallsThroughToExistingChain(t *testing.T) {
 		t.Fatalf("ws.setup returned isError: %s", setupResp)
 	}
 
-	// Subsequent keyless call should resolve via sessionRoot (set by ws.setup).
+	// Subsequent keyless call must resolve via sessionRoot (set by ws.setup above).
 	var followOut bytes.Buffer
 	followInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`
 	if err := server2.ServeStdio(context.Background(), strings.NewReader(followInput), &followOut); err != nil {

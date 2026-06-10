@@ -27,10 +27,15 @@ func newSessionRegistry() *sessionRegistry {
 
 // mint generates a unique session key and atomically inserts the entry.
 //
-// It uses wskey.Generate to produce candidates outside the write lock, then
-// performs check-and-insert under the write lock, looping on collision. This
-// avoids any lock-ordering deadlock: the generator never calls back into the
-// registry while the registry holds a lock.
+// It calls wskey.Generate directly rather than wskey.GenerateUnique because the
+// registry needs an atomic check-and-insert: generate the candidate OUTSIDE the
+// lock, acquire the write lock, check membership, insert if free, release —
+// looping on the rare collision. wskey.GenerateUnique calls the exists predicate
+// OUTSIDE any lock (intentional for its general use case), which would introduce
+// a TOCTOU window between the predicate check and the subsequent write-lock
+// insert. The inline loop eliminates that window without any lock-ordering issue.
+// wskey.GenerateUnique remains public API for callers that do not need atomic
+// check-and-insert (e.g. the planned word-chain id generalization follow-up).
 func (r *sessionRegistry) mint(root string, scope toolRole) (string, error) {
 	const maxAttempts = 64
 	for i := 0; i < maxAttempts; i++ {

@@ -362,11 +362,17 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	// Keyed capability gate: when a session_key is present and maps to a known
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
 	// are not rejected here; root-aware tools surface the unknown_session error
-	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g. login
-	// itself, runtime.info) silently ignore an unrecognised session_key.
+	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g.
+	// runtime.info) silently ignore an unrecognised session_key.
+	//
+	// ws.lead.* tools are additionally blocked for any non-lead scoped key to
+	// prevent self-login escalation: a delegate or leaf key must not be able to
+	// call ws.lead.login and receive a lead-scoped key, bypassing all capability
+	// restrictions. A KEYLESS caller (no session_key) is unaffected — the normal
+	// lead bootstrap path remains open.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		if entry, found := s.sessions.lookup(keyStr); found && entry.scope != roleLead {
-			if !roleAllowsTool(entry.scope, params.Name) {
+			if strings.HasPrefix(params.Name, "ws.lead.") || !roleAllowsTool(entry.scope, params.Name) {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 			}
 		}
@@ -1327,7 +1333,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	if strings.TrimSpace(rootArg) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("ws.lead.login: root is required"))
 	}
-	canonical, err := canonicalGitRoot(rootArg)
+	canonical, err := canonicalSetupRoot(rootArg)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
