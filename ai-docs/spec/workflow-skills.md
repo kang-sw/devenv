@@ -87,17 +87,16 @@ general-purpose named-agent form; role-specific delegates use `prompts:
 one-off concrete models. CLI adapter syntax belongs only in compatibility or
 testing references. {#260507-mcp-centric-workflow-language}
 
-> [!note] Planned 🚧 {#260610-subquery-explore-delegation-shift}
-> Skill-facing delegation guidance for scoped fact-finding will shift from
-> `ws/subquery` to a per-harness Explore playbook: a native Explore-style
-> subagent, with the async fire-and-forget plus deferred-result shape mapping to
-> native background subagents. The `subquery` prompt-stem text (evidence
-> discipline, scoping) becomes render-kind playbook content with harness-rendered
-> terminology. Native delegation is the default, not the exclusive path — the
-> lead-invokable mercenary surface remains available and the `delegates: true`
-> render tip is its always-on seam. The `ws/subquery` runtime tool stays callable;
-> only shipped skill text stops naming it for new delegation. Current skill text
-> continues to reference `ws/subquery` until implemented.
+Scoped fact-finding delegation uses a per-harness Explore playbook rather than
+`ws/subquery`: shipped skill text delegates scoped exploration to a native
+Explore-style subagent and takes the worker brief from the `explore` render
+playbook, whose harness-aware terminology and `delegates: true` delegation tip
+render through the playbook surface; the async fire-and-forget plus
+deferred-result shape maps to native background subagents. Native delegation is
+the default, not the exclusive path — the lead-invokable mercenary surface
+remains available and the `delegates: true` render tip is its always-on seam. The
+`ws/subquery` runtime tool stays callable, but shipped skills no longer name it
+for new delegation. {#260610-subquery-explore-delegation-shift}
 
 Workflow guidance prefers `model` for both portable aliases and concrete
 overrides. Examples use `model: "core"` or `model: "deep"` for portable

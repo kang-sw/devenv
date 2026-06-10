@@ -8,7 +8,7 @@ sources:
   - agents-plugin/
 related:
   plugin-runtime: "runtime.json and launcher checks consume prompt bundle hash/list metadata; rsrc text changes are decoupled from runtime.json."
-  workflow-skills: "skills register delegate agents by embedded prompt stem."
+  workflow-skills: "skills use embedded prompt stems for named-agent delegation and the explore rsrc playbook for scoped fact-finding."
   api-documentation-cache: "api.ask hard-codes API prompt stems and conditional prompt refs."
 ---
 
@@ -48,6 +48,7 @@ related:
 - Launcher fast-path and fallback checks must report the same prompt bundle hash: `runtime.capabilities`, `runtime.info`, and `runtime.json` drift makes otherwise compatible binaries fail validation.
 - Release asset builds rewrite runtime prompt metadata from the built binary.
 - Skills and API docs code name prompt stems directly; renaming stems requires updating those callers.
+- The `explore` rsrc playbook (`agents-plugin/rsrc/explore/explore.md`, `kind:render`, `delegates:true`) is the canonical skill delegation surface for scoped codebase fact-finding; full-ws workflow skills render it via `ws/playbook.print`/`ws/playbook.render` to hand a worker a brief. Renaming the declared variables (`ExploreAgent`, `SpawnIdiom`, `ContinueIdiom`), removing `delegates:true`, or restructuring the body breaks skill delegation across all call sites without a code-layer compile error.
 - Legacy skeleton prompt stems may remain bundled for compatibility; normal implementation routing does not register `skeleton-populator` or `skeleton-reviewer`.
 - `reference-discovery` (renamed from `project-survey`) and `plan-populator-survey` cover different axes and are frequently conflated by callers: `reference-discovery` is a `light`, docs-only agent that returns a `[Must|Maybe]` list of spec/mental-model/ticket docs and never reads source; `plan-populator-survey` is a `core` agent that reads source and writes a file-backed source reference map. The discriminator is docs-vs-source, not the shared `survey` word; pick by what the caller needs (doc list for the brief vs source map for the plan). Because `tools:` and prose constraints are not runtime-enforced, a caller's free-form spawn prompt can override either agent's scope — match the spawn prompt to the agent's role.
 - `plan-populator-survey` and `plan-populator-research` are stable prompt stems with different responsibilities: survey collects evidence-only risk signals or exits to research, research makes planner judgments and escalation calls.

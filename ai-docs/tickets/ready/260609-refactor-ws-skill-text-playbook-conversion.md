@@ -96,6 +96,31 @@ the native Explore delegation pattern. Verification: skill text no longer names
 `ws/subquery` for new delegation; the Explore playbook renders correctly for
 claude and codex; an unknown harness gets host-neutral text.
 
+### Result (d982d4fe) - 2026-06-10
+
+Implemented on `implement/subquery-explore-playbook` (delegated; survey plan).
+- New `explore` render playbook (`agents-plugin/rsrc/explore/explore.md`,
+  `kind:render`, `delegates:true`, vars `ExploreAgent`/`SpawnIdiom`/`ContinueIdiom`)
+  adapting `SubquerySystemPrompt`; `manifest.json` regenerated (no schema bump).
+- Shifted every `ws/subquery` delegation call site across 11 full-ws skills to the
+  native Explore pattern (`lead-workflow-manual` holds the canonical primitive;
+  other skills reference it). `grep "ws/subquery("` over `agents-plugin/skills` is
+  now empty; one retained one-line note states the tool stays callable but is not
+  the shipped-skill delegation path.
+- Four golden render tests (claude/codex/neutral/junk + delegation tip);
+  `go test ./...` green; `TestValidateRealTree` gates the new playbook.
+- Spec `260610-subquery-explore-delegation-shift` 🚧 stripped (implemented);
+  mental models (prompt-bundle, workflow-skills) updated.
+- Scope held: `ws/subquery` runtime tool and `agents.*` untouched (M3); no
+  internal-body migration / shim reduction (Phase 2); no wsflow edits.
+- Review: partitioned (correctness/fit/test) clean after one fix cycle
+  (`d982d4fe`: ws/ prefix, anti-tautology junk-harness test, wording).
+
+Forward: Phase 2 migrates the 9 internal skill bodies to `playbook.print` and
+reduces the 11 entry shims; `260610-entry-skill-surface-reduction` stays 🚧.
+wsflow mirroring parity for the explore playbook is deferred to follow-up ticket
+`260610-chore-wsflow-explore-playbook-mirroring`.
+
 ### Phase 2: internal skill bodies → playbooks; entry-skill shim reduction
 
 Move the 9 internal skill bodies to `playbook.print` content; reduce the 11

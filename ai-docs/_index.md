@@ -198,14 +198,15 @@ dropped tickets live in hidden archive dirs and git history.
   option-B re-scoping + contract-first spec before ready. Open verification item
   carried forward: Codex non-skill `rsrc/` cache materialization (prereqs
   `260523`, `260524-codex-cache`).
-- `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - direct
-  implementation target: retained-native-subagent delegation replaces
-  `agents.*`/`subquery` skill-text refs (Phase 1: subquery → native Explore
-  playbook; Phase 2: 9 internal skill bodies → `playbook.print`, 11 entry-skill
-  shims, `lead-write-ticket`/`lead-write-spec` orchestration-only). Spec-addressed
-  by planned `260610-entry-skill-surface-reduction` /
-  `260610-subquery-explore-delegation-shift`. Depends on M1 (merged); no runtime
-  deletion (that is M3).
+- `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - **Phase 1
+  done** (`d982d4fe`, on unmerged `implement/subquery-explore-playbook`): `explore`
+  render playbook + all `ws/subquery` skill-text refs shifted to the native
+  Explore pattern; spec `260610-subquery-explore-delegation-shift` implemented.
+  **Next: Phase 2** — 9 internal skill bodies → `playbook.print`, 11 entry-skill
+  shims, `lead-write-ticket`/`lead-write-spec` orchestration-only; spec
+  `260610-entry-skill-surface-reduction` stays 🚧. No runtime deletion (M3).
+  Follow-up `260610-chore-wsflow-explore-playbook-mirroring` (idea) tracks wsflow
+  parity.
 
 ## Session Notes
 
