@@ -187,31 +187,26 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory pivot
-  board; not implementation-ready (board artifact). **M1
-  `260609-feat-ws-playbook-surface-mvp` is done** (`.done/`): `internal/wsrsrc`
-  call-time loader (Phase 1) + `playbook.print`/`playbook.render` MCP tools with
-  harness-aware rendering (Phase 2); spec stems `260609-playbook-tools` /
-  `-harness-rendering` / `-rsrc-playbook-distribution` are implemented (merged to
-  the epic branch at `4bc4efd9`). M3
-  (`260609-refactor-ws-spawn-runtime-deletion-session-auth`, todo) still needs
-  option-B re-scoping + contract-first spec before ready. Open verification item
-  carried forward: Codex non-skill `rsrc/` cache materialization (prereqs
-  `260523`, `260524-codex-cache`).
-- `260609-refactor-ws-skill-text-playbook-conversion` (ready, M2) - **all three
-  phases done; M2 implementation complete**. Phase 1 (`e211f87b`, merged):
-  `explore` render playbook + `ws/subquery` skill-text refs shifted to native
-  Explore; spec `260610-subquery-explore-delegation-shift` implemented. Phase 2
-  (`47fa7368`, merged `--no-ff` into the epic): 9 internal procedures moved off the
-  entry surface to `playbook.print` rsrc playbooks, callers rewired,
-  `lead-write-ticket`/`lead-write-spec` orchestration-only, `lead-skill-authoring`
-  audit target → rsrc; conventions stay inline `convention.read` (single source).
-  Phase 3 (`421a2d78`, on `implement/entry-skill-shim-reduction`, unmerged): all 11
-  entry skills reduced to thin print-and-execute shims over `kind:print` rsrc
-  playbooks (verbatim relocation; `delegates:true` on the 5 spawning bodies). Spec
-  `260610-entry-skill-surface-reduction` 🚧 stripped (implemented). No runtime
-  deletion (M3). **Next: merge Phase 3 to the epic, then M3.** Follow-ups:
-  `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity) and
+- `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
+  not implementation-ready (board artifact). **M0/M1/M2 done.** M1
+  `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
+  `internal/wsrsrc` call-time loader + `playbook.print`/`playbook.render` MCP tools
+  with harness-aware rendering; spec stems `260609-playbook-tools` /
+  `-harness-rendering` / `-rsrc-playbook-distribution` implemented. M2
+  `260609-refactor-ws-skill-text-playbook-conversion` (`.done/`, 2026-06-10, merged
+  `b6850dc3`): all lead-* procedure text moved to `agents-plugin/rsrc/` playbooks —
+  11 thin entry-skill shims + 8 internal procedures; subquery→Explore absorption;
+  spec `260610-entry-skill-surface-reduction` and
+  `260610-subquery-explore-delegation-shift` implemented. `ws/subquery`/`agents.*`
+  runtime stays callable but unreferenced by shipped skill text (reshape/deletion
+  is M3). **Next: M3** (`260609-refactor-ws-spawn-runtime-deletion-session-auth`,
+  todo) — spawn engine → scoped mercenary reshape + ephemeral per-call session-key
+  auth (drops actor/wsstore/authority); still needs option-B re-scoping +
+  contract-first spec before ready. **M4**
+  (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
+  redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
+  materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
+  `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity),
   `260610-bug-wsflow-runtime-contract-playbook-tools-drift` (pre-existing M1
   capability-contract drift).
 

@@ -1,5 +1,6 @@
 ---
 title: ws skill-text conversion — playbooks replace internal skills and subquery
+completed: 2026-06-10
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260605-research-ws-native-subagent-pivot: direction, entry-skill keep-list, subquery absorption decisions

@@ -53,11 +53,17 @@ subagents. Direction, decisions, and evidence live in
   (idea) — agentless capabilities expose `playbook.print`/`playbook.render` but
   the wsflow `runtime.json` contract omits them; pre-existing M1-rollout drift,
   not an M2 regression.
-- `260609-refactor-ws-skill-text-playbook-conversion` (todo, M2 — skill-text
-  conversion): retained-native-subagent delegation patterns replace
+- `260609-refactor-ws-skill-text-playbook-conversion` (done `.done/`, M2 —
+  skill-text conversion): retained-native-subagent delegation patterns replace
   agents.*/subquery references across skills; subquery → Explore absorption;
   entry-skill keep-list (11 entry / 9 playbook); internal skill bodies →
-  playbooks. Depends on M1.
+  playbooks. Depends on M1. **Complete (2026-06-10), merged to epic**: Phase 1
+  (`e211f87b`, subquery→Explore), Phase 2 (`704d96fb`, 9 internal procedures →
+  playbooks, surface narrowed to 11 entry skills), Phase 3 (`b6850dc3`, all 11
+  entry skills → thin shims over `kind:print` playbooks). The entire lead-*
+  procedure corpus now lives in `agents-plugin/rsrc/`; `ws/subquery`/`agents.*`
+  runtime stays callable but unreferenced by shipped skill text (deletion/reshape
+  is M3).
 - `260609-refactor-ws-spawn-runtime-deletion-session-auth` (todo, M3 — spawn
   reshape + session-auth): **reshape** the spawn engine into a first-class scoped
   "mercenary" surface (option B, supersedes the option-C freeze): retain the codex
