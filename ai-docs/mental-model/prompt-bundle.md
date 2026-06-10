@@ -20,7 +20,7 @@ related:
 - `wsprompt.Bundle` and `ContentSHA256` expose prompt bundle metadata to `runtime.info` and `runtime.capabilities`.
 - `wsagent.Manager.Register` materializes prompt chains into each agent's `system.md`. {#260505-agent-prompt-registration-tier-resolution}
 - `wsprompt.RenderSource` returns a single embedded prompt body by bare stem (absolute paths and `..` rejected) for the wsflow `prompt.render` MCP tool. {#260529-prompt-render-tool}
-- `wsrsrc.Load` loads a named playbook from the filesystem rsrc tree (`agents-plugin/rsrc/`): validates manifest schema-version, verifies per-file hashes, applies harness overlay, resolves flat includes, and substitutes declared variables. Phase-2 MCP tool not yet wired. {#260609-rsrc-playbook-distribution}
+- `wsrsrc.Load` loads a named playbook from the filesystem rsrc tree (`agents-plugin/rsrc/`): validates manifest schema-version, verifies per-file hashes, applies harness overlay, resolves flat includes, and substitutes declared variables. MCP tools: `playbook.print` returns rendered text inline; `playbook.render` writes to a worktree-scoped tmp file (via `GeneratePaths("prompt")`) and returns the path. {#260609-rsrc-playbook-distribution} {#260609-playbook-tools}
 
 ## Module Contracts
 
@@ -28,6 +28,9 @@ related:
 - rsrc compatibility is gated on `manifest.schema_version` alone — not content-hash equality. Text-only edits to rsrc files ship without a binary bump as long as `SupportedSchemaVersion` is unchanged; increment it only when the playbook schema shape changes.
 - rsrc failure is always loud: `ErrManifestMissing`, `ErrSchemaMismatch`, `ErrHashMismatch`, and `ErrFileMissing` are returned as typed errors with no embedded fallback. Per-file sha256 hashes in `manifest.json` are tree-integrity checks, not binary-coupling.
 - rsrc variable substitution is declared-only: a key in `vars` absent from `variables:` frontmatter → `ErrUndeclaredVar`; a declared variable whose `{{.Name}}` appears in the body but is absent from `vars` → `ErrUnprovidedVar`; declared variables not used in the body are silently ignored. Substitution is single-pass; replacement values containing `{{.Name}}` literals are never re-expanded.
+- `playbook.print` / `playbook.render` call `wsrsrc.Load` twice per render: a nil-vars first pass obtains the declared variable list without triggering substitution errors; a filtered-vars second pass applies merged vars. Double hash verification is a deliberate trade-off to avoid adding a new public API. Do not collapse to a single call without first exposing a "list declared vars" API on `wsrsrc`. {#260609-playbook-tools}
+- Playbook rendering merges vars in three layers (later wins): caller context → terminology table → model aliases. Only declared vars reach `wsrsrc.Load`; tool-injected vars for idioms not declared in a playbook are silently filtered. Caller-supplied undeclared keys surface `ErrUndeclaredVar` before the merge step. {#260609-playbook-harness-rendering}
+- Harness terminology is a static bundled table (claude/codex/neutral); `terminologyForHarness("")` returns the neutral row for any unrecognized harness. Model aliases (`LightModel`, `CoreModel`, `DeepModel`) resolve from wsconfig at call time — never bundled in `agents-plugin/rsrc/`. Structural per-harness divergence uses harness overlay files. {#260609-playbook-harness-rendering}
 - rsrc includes are flat: names resolve to `<root>/<name>.md` only; nested playbook-subdirectory includes are not supported by design.
 - Embedded prompt discovery includes only top-level Markdown under `prompts/*.md` and `infra/*.md`; nested files are invisible.
 - Embedded prompt specs are bare stems with optional `.md` suffix; absolute paths are valid; relative/slashed specs and specs containing `..` are rejected.
@@ -50,10 +53,11 @@ related:
 - `plan-populator-survey` and `plan-populator-research` are stable prompt stems with different responsibilities: survey collects evidence-only risk signals or exits to research, research makes planner judgments and escalation calls.
 - `prompts` is canonical while `prompt_refs` is a migration alias; when both are present, `prompts` wins.
 - wsflow `prompt.render` owns render-time namespace substitution (word-boundary `\bws/` and `\bws:`) and the five-stem render-eligibility allowlist in the `internal/mcp` tool layer; `RenderSource` stays a generic bundle loader. Adding a render-eligible prompt updates the allowlist in `internal/mcp`, not `wsprompt`, and substitution never touches caller-injected context values. {#260529-prompt-render-tool}
+- `playbook.print` / `playbook.render` pass `rsrcRoot` and `worktreeRoot` as explicit call-site parameters, not process-global lookups; argument parsing uses named JSON keys. Both choices are M3 forward-compat seams: M3 can thread `root_override` and prepend `session_key` without restructuring the dispatch. {#260609-playbook-tools}
 
 ## Extension Points & Change Recipes
 
-- **Add a playbook**: create `agents-plugin/rsrc/<name>/<name>.md`, optional `<name>.<harness>.md` harness overlay, optional flat text deps at `agents-plugin/rsrc/<name>.md`; run `wsrsrc.GenerateManifest` to regenerate `manifest.json`; increment `SupportedSchemaVersion` only when the schema shape changes.
+- **Add a playbook**: create `agents-plugin/rsrc/<name>/<name>.md`, optional `<name>.<harness>.md` harness overlay, optional flat text deps at `agents-plugin/rsrc/<name>.md`; run `wsrsrc.GenerateManifest` to regenerate `manifest.json`; increment `SupportedSchemaVersion` only when the schema shape changes. Declare model alias names (`LightModel`, `CoreModel`, `DeepModel`) or terminology names (`ExploreAgent`, `SpawnIdiom`, `ContinueIdiom`) in `variables:` frontmatter to activate config-sourced or harness-aware injection; callers cannot override these reserved names via the `context` argument — the tool layer wins on collision.
 - **Add an embedded prompt**: create top-level `prompts/<stem>.md` or `infra/<stem>.md`, avoid duplicate stems, update tests/runtime metadata, then call it by bare stem.
 - **Add conditional prompt behavior**: wire `ConditionalPromptRef`; missing binaries are skipped, empty `Binary` errors, empty `PromptRef` defaults to the binary name, and resolved conditional prompts append after primary prompts.
 - **Change delegate orientation**: review all public named-agent workflows and internal suppressions, especially subquery and API docs managers.
@@ -71,3 +75,4 @@ related:
 
 - Static docs can drift from `runtime.json`; runtime metadata is the authoritative prompt bundle inventory.
 - Root-relative prompt paths are not implemented.
+- Codex non-skill rsrc/ cache materialization: `ResolveRoot` defaults to `os.Executable()/../rsrc` in production (with `WS_RSRC_ROOT` dev override), but whether Codex's non-skill plugin mode correctly materializes the `rsrc/` directory at that derived path is an open verification item.

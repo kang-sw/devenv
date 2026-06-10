@@ -13,6 +13,7 @@ related-mental-model:
   - prompt-bundle
   - mcp-runtime
   - workflow-skills
+completed: 2026-06-09
 ---
 
 # ws playbook surface MVP — rsrc loader and playbook.print/render
@@ -232,6 +233,54 @@ lands in M3, and render cannot mint a child key before the session model exists.
 
 Deliverable boundary: the playbook surface is callable and harness-aware. Skill
 bodies are NOT yet migrated to playbooks (M2). Spawn machinery untouched (M3).
+
+### Result (91378dc5) - 2026-06-09
+
+Implemented in `91378dc5` (feat) + `ce1e4a84` (review-fix). Added
+`internal/mcp/playbook_tools.go` (+ `playbook_tools_test.go`) wiring two full-ws
+MCP tools onto the Phase-1 `wsrsrc.Load` seam, and registered them in `tools()` /
+`callTool` (`server.go`) and `agents-plugin/runtime.json`:
+
+- `playbook.print(name, context?)` returns the auto-included, substituted,
+  harness-rendered procedure text **inline**; `playbook.render(name, context?)`
+  writes the rendered prompt to a worktree-scoped tmp file (via the
+  `GeneratePaths` "prompt" kind, mirroring wsflow `prompt.render`) and returns
+  the **path** only — no body leak into the inline result.
+- Both tools are full-ws: absent from `wsflowOnlyTool()` and
+  `noAgentHiddenTool()`; `prompt.render` left untouched (still wsflow-only).
+- Harness-aware rendering: a bundled claude/codex/neutral terminology table
+  (`{{.ExploreAgent}}`/`{{.SpawnIdiom}}`/`{{.ContinueIdiom}}`), config-sourced
+  model aliases (`LightModel`/`CoreModel`/`DeepModel` resolved from `wsconfig`,
+  never bundled), and a delegation tip appended only for `delegates: true`
+  playbooks. Unknown/undetected harness ⇒ host-neutral text.
+- `wsrsrc.ResolveRoot` production default completed: `os.Executable()→../rsrc`,
+  with `WS_RSRC_ROOT` still winning as the dev override (the Phase-1 stub is
+  gone).
+- Added the `delegate-sample` fixture (`delegates: true`, terminology vars) and
+  regenerated `manifest.json` (4 files); `TestValidateRealTree` stays green.
+
+Non-obvious invariants (recorded in `prompt-bundle.md`): two-pass `Load`
+(nil-vars discovery + filtered-vars substitution; deliberate double-hash
+trade-off to avoid a new public API); vars merge order caller-context →
+terminology → model-aliases (later wins), only declared vars reach `Load` so
+unused tool-injected idioms are filtered while caller-supplied undeclared keys
+still raise `ErrUndeclaredVar`.
+
+M3 forward-compat seam honored: `render(name, context?)` ships **without**
+session_key minting; `rsrcRoot`/`worktreeRoot` are explicit call-site params (not
+process-global) and args are named JSON keys, so M3 threads `root_override` and
+prepends `session_key` without restructuring dispatch.
+
+Partitioned review (correctness/fit/test) returned clean after one fix cycle
+(dangling-include test added; golden-render tautology broken with hardcoded
+per-harness strings; three-way terminology distinctness; `ErrUnprovidedVar.Name`
+asserted). Full suite (`go test ./...`, 12 packages) green.
+
+Open verification item (carried from Phase 1): Codex plugin distribution
+materializing non-skill `rsrc/` directories into its cache is still unconfirmed —
+the executable-relative default targets the known plugin-cache layout; the
+distribution-race prerequisites (`260523`, `260524-codex-cache`) remain
+outstanding.
 
 ## Spec
 

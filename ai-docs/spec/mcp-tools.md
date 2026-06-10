@@ -318,7 +318,7 @@ wsflow session does. Advertisement in `tools/list`, explicit-call gating, and
 runtime capability output all follow the selected product mode in both
 directions. {#260529-wsflow-only-tool-surface}
 
-## 🚧 Playbook Tools {#260609-playbook-tools}
+## Playbook Tools {#260609-playbook-tools}
 
 The playbook tools are the ws-distribution surface for serving workflow procedure
 text and subagent-injection prompts from a plain-text resource tree, with content
@@ -372,7 +372,7 @@ continuity-recording file.
 >   other harness, including none detected, gets host-neutral text.
 > - The continuation tip is advisory text, not an enforced or tracked binding.
 
-### 🚧 Resource Tree Distribution {#260609-rsrc-playbook-distribution}
+### Resource Tree Distribution {#260609-rsrc-playbook-distribution}
 
 Playbook and prompt text ships as a plain-text resource tree distributed with the
 plugin and loaded at call time, rather than compiled into the binary. Text-only
