@@ -423,13 +423,18 @@ func TestKeylessRootAwareCallRequiresSessionKey(t *testing.T) {
 	initGit(t, root)
 	server := NewServer(root, "test")
 
-	resp := callToolOnce(t, server, 1, "git.status", map[string]any{})
-	if !toolIsError(t, resp) {
-		t.Fatalf("keyless git.status should be a tool error: %s", resp)
-	}
-	text := toolText(t, resp)
-	if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "ws.lead.login") {
-		t.Fatalf("keyless error missing mandatory login guidance: %q", text)
+	for _, args := range []map[string]any{
+		{},
+		{"root": root},
+	} {
+		resp := callToolOnce(t, server, 1, "git.status", args)
+		if !toolIsError(t, resp) {
+			t.Fatalf("keyless git.status should be a tool error for args %#v: %s", args, resp)
+		}
+		text := toolText(t, resp)
+		if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "ws.lead.login") {
+			t.Fatalf("keyless error missing mandatory login guidance for args %#v: %q", args, text)
+		}
 	}
 }
 

@@ -46,18 +46,18 @@ and expected output.
 
 `wsflow/runtime.info`
 `wsflow/runtime.debug_events`
-`wsflow/setup`
+`wsflow/ws.lead.login`
 `wsflow/config.show`
 
 Use `wsflow/runtime.info` for runtime compatibility checks and feature
 detection; when a package declares a required runtime version, compare the
-returned metadata against that requirement. If startup did not already bind the
-server to the correct repository, call
-`wsflow/setup(root: "<absolute-working-directory>")` with the repository's
-absolute filesystem path. The MCP server cannot infer the agent's current
-directory from placeholders or relative paths. Verify the returned `root`
-matches the intended repository, and rerun setup with the correct absolute path
-if it does not.
+returned metadata against that requirement. Before calling any root-aware
+wsflow tool, call `wsflow/ws.lead.login(root: "<absolute-working-directory>")`
+with the repository's absolute filesystem path and thread the returned
+`session_key` into subsequent root-aware tool calls. The MCP server cannot infer
+the agent's current directory from placeholders or relative paths. Verify the
+returned `root` matches the intended repository, and call login again with the
+correct absolute path if it does not.
 
 ### Project Context
 

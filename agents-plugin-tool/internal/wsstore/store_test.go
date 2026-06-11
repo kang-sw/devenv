@@ -267,6 +267,29 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 	}
 }
 
+func TestRuntimeMetadataInventoryCoversCurrentJSONFields(t *testing.T) {
+	expected := map[RuntimeStateSource]map[string]bool{
+		RuntimeSourceAgentJSON:        jsonFieldSetFromSource(t, "../wsagent/agent.go", "Agent", "agent_json_compatibility"),
+		RuntimeSourceAgentCurrentJSON: jsonFieldSetFromSource(t, "../wsagent/agent.go", "CurrentCall"),
+		RuntimeSourceExecJobJSON:      jsonFieldSetFromSource(t, "../execjob/execjob.go", "Record", "stdout", "stderr", "combined"),
+	}
+	for _, item := range RuntimeMetadataInventory() {
+		fields := expected[item.Source]
+		if fields == nil {
+			t.Fatalf("unexpected inventory source %q", item.Source)
+		}
+		if !fields[item.Field] {
+			t.Fatalf("unexpected field classification for %s %s", item.Source, item.Field)
+		}
+		delete(fields, item.Field)
+	}
+	for source, fields := range expected {
+		for field := range fields {
+			t.Fatalf("missing inventory classification for %s %s", source, field)
+		}
+	}
+}
+
 func TestRuntimeMetadataInventoryKeepsPathsInSQLiteAndPayloadsFileBacked(t *testing.T) {
 	paths := []struct {
 		source RuntimeStateSource
@@ -406,7 +429,7 @@ func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	def := AgentDefinition{AgentKey: key, ActorID: "actor-one", PublicName: "implementer", StatePath: "actor-dir", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "gpt-test", Status: "idle", CreatedAt: "2026-05-25T00:00:00Z", LastSeenAt: "2026-05-25T00:00:00Z", LastOutputPath: "output.md", PromptRefs: []string{"delegate-orientation"}, SystemPromptPath: "system.md", Capabilities: map[string]bool{"resume": true}, Ephemeral: true}
+	def := AgentDefinition{AgentKey: key, PublicName: "implementer", StatePath: "actor-dir", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "gpt-test", Status: "idle", CreatedAt: "2026-05-25T00:00:00Z", LastSeenAt: "2026-05-25T00:00:00Z", LastOutputPath: "output.md", PromptRefs: []string{"delegate-orientation"}, SystemPromptPath: "system.md", Capabilities: map[string]bool{"resume": true}, Ephemeral: true}
 	if err := store.UpsertAgentDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}

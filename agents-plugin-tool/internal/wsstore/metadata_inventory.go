@@ -121,7 +121,7 @@ var runtimeMetadataInventory = func() []RuntimeFieldClassification {
 	var out []RuntimeFieldClassification
 	out = append(out, sqliteFields(RuntimeSourceAgentJSON,
 		"schema_version", "name", "backend", "harness", "tier", "model", "effort", "session_id", "status",
-		"created_at", "last_seen_at", "last_call_at", "prompt_refs", "system_prompt_path", "last_output_path", "child_actor_id", "child_actor_authority", "capabilities", "ephemeral",
+		"created_at", "last_seen_at", "last_call_at", "prompt_refs", "system_prompt_path", "last_output_path", "capabilities", "ephemeral",
 	)...)
 	out = append(out, RuntimeFieldClassification{Source: RuntimeSourceAgentJSON, Field: "agent_json_compatibility", Storage: RuntimeFieldTemporaryCompatOnly, WriteAuthority: RuntimeAuthorityNone, Note: "bounded read-only import, tombstone, or diagnostic bridge; not metadata write authority"})
 

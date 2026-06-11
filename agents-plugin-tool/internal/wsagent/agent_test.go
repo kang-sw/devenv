@@ -2026,7 +2026,7 @@ func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing
 	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", Prompts: []string{filepath.Join(t.TempDir(), "missing.md")}}); err == nil {
 		t.Fatal("expected failed registration with missing prompt")
 	}
-	stillCurrent, err := manager.scopedLayout(repo, "impl", "", false)
+	stillCurrent, err := manager.scopedLayout(repo, "impl", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2070,7 +2070,7 @@ func TestInternalOneShotHidesRoleAndRetainsAgentDirectory(t *testing.T) {
 	if _, err := manager.Agent(repo, "tmp"); err == nil {
 		t.Fatalf("ephemeral role should be hidden after result consumption")
 	}
-	state, err := manager.scopedLayout(repo, "tmp", "", false)
+	state, err := manager.scopedLayout(repo, "tmp", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2432,7 +2432,7 @@ func TestAgentMetadataImportsLegacyAgentJSONReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := manager.registryKey("", "legacy")
+	key, err := manager.registryKey("legacy")
 	if err != nil {
 		t.Fatal(err)
 	}

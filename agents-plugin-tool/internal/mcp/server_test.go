@@ -57,19 +57,6 @@ func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testi
 	}
 }
 
-func assertCompactActorID(t *testing.T, actorID, authority string) {
-	t.Helper()
-	prefix := authority + "-"
-	if !strings.HasPrefix(actorID, prefix) || len(strings.TrimPrefix(actorID, prefix)) != 8 {
-		t.Fatalf("actor id %q does not match compact %s-prefixed shape", actorID, authority)
-	}
-	for _, r := range strings.TrimPrefix(actorID, prefix) {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
-			t.Fatalf("actor id %q contains non-lowercase base36 payload character %q", actorID, r)
-		}
-	}
-}
-
 func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]any {
 	t.Helper()
 	var listResp map[string]any
@@ -186,6 +173,7 @@ func withSessionKeyInToolCalls(t *testing.T, input, key string) string {
 					args = map[string]any{}
 					params["arguments"] = args
 				}
+				delete(args, "root")
 				if _, exists := args["session_key"]; !exists {
 					args["session_key"] = key
 				}
@@ -476,6 +464,42 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	}
 	if !strings.Contains(byID["5"], "tool not available") {
 		t.Fatalf("leaf tools/call did not reject config.show: %s", byID["5"])
+	}
+}
+
+func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_MCP_TOOL_PROFILE", "leaf")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,agents.status,config.show")
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(byID["1"], "runtime.info") {
+		t.Fatalf("explicit allowlist hid role-visible runtime.info: %s", byID["1"])
+	}
+	for _, hidden := range []string{"agents.status", "config.show"} {
+		if strings.Contains(byID["1"], hidden) {
+			t.Fatalf("explicit allowlist bypassed leaf profile for %s: %s", hidden, byID["1"])
+		}
+	}
+	if !strings.Contains(byID["2"], "prompt_bundle") {
+		t.Fatalf("explicit allowlist rejected runtime.info: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "tool not available") {
+		t.Fatalf("explicit allowlist allowed leaf-hidden agents.status: %s", byID["3"])
+	}
+	if !strings.Contains(byID["4"], "tool not available") {
+		t.Fatalf("explicit allowlist allowed leaf-hidden config.show: %s", byID["4"])
 	}
 }
 
@@ -922,9 +946,23 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "subquery") {
 		t.Fatalf("tools/list missing subquery: %s", byID["2"])
 	}
-	subqueryProperties := toolPropertiesByName(t, byID["2"], "subquery")
-	if _, ok := subqueryProperties["root"]; ok {
-		t.Fatalf("subquery publicly advertises root in schema: %s", byID["2"])
+	toolsResult, _ := listResp["result"].(map[string]any)
+	listedTools, _ := toolsResult["tools"].([]any)
+	loginProperties := toolPropertiesByName(t, byID["2"], "ws.lead.login")
+	if _, ok := loginProperties["root"]; !ok {
+		t.Fatalf("ws.lead.login schema missing root bootstrap parameter: %s", byID["2"])
+	}
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if name == "ws.lead.login" {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if _, ok := properties["root"]; ok {
+			t.Fatalf("non-login tool %s publicly advertises root in schema: %s", name, byID["2"])
+		}
 	}
 	if !strings.Contains(byID["2"], "path.generate") {
 		t.Fatalf("tools/list missing path.generate: %s", byID["2"])
@@ -949,20 +987,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
-	}
-	toolsResult, _ := listResp["result"].(map[string]any)
-	listedTools, _ := toolsResult["tools"].([]any)
-	for _, rawTool := range listedTools {
-		tool, _ := rawTool.(map[string]any)
-		name, _ := tool["name"].(string)
-		if !strings.HasPrefix(name, "agents.") {
-			continue
-		}
-		schema, _ := tool["inputSchema"].(map[string]any)
-		properties, _ := schema["properties"].(map[string]any)
-		if _, ok := properties["root"]; ok {
-			t.Fatalf("agents tool %s publicly advertises root in schema: %s", name, byID["2"])
-		}
 	}
 	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
