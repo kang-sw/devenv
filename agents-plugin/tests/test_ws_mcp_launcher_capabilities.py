@@ -287,6 +287,17 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
 
+    def test_local_devenv_build_env_recovers_home_when_absent(self):
+        launcher = load_launcher()
+
+        with mock.patch.object(launcher.Path, "home", return_value=Path("/home/recovered")):
+            with mock.patch.dict(launcher.os.environ, {}, clear=True):
+                env = launcher.local_devenv_build_env()
+                self.assertEqual(env["HOME"], "/home/recovered")
+            with mock.patch.dict(launcher.os.environ, {"HOME": "/home/real"}, clear=True):
+                env = launcher.local_devenv_build_env()
+                self.assertEqual(env["HOME"], "/home/real")
+
     def test_claude_cache_local_devenv_marker_forces_runtime_install(self):
         launcher = load_launcher()
 

@@ -414,11 +414,31 @@ def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     return read_local_devenv_contract(plugin_dir, os_name) is not None
 
 
+def local_devenv_build_env() -> dict:
+    # The MCP host may launch the launcher with a sanitized environment that
+    # lacks HOME (observed on Claude Code launches). `go build` then cannot
+    # locate GOMODCACHE/GOCACHE (default under $HOME) and fails, aborting the
+    # forced local repair. Recover HOME from the password database via
+    # Path.home() so the source build finds the user's module/build cache.
+    build_env = dict(os.environ)
+    if not build_env.get("HOME"):
+        try:
+            build_env["HOME"] = str(Path.home())
+        except Exception:
+            pass
+    return build_env
+
+
 def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict) -> bool:
     tool_dir = local_contract["tool_dir"]
     go_binary = local_contract["go"]
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
-    proc = subprocess.run([str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
+    proc = subprocess.run(
+        [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
+        cwd=str(tool_dir),
+        env=local_devenv_build_env(),
+        check=False,
+    )
     if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
         install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
         return True
