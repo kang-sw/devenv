@@ -287,6 +287,21 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
 
+    def test_claude_cache_local_devenv_marker_forces_runtime_install(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".claude" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.30.0"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=home)
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
+
     def test_invalid_local_devenv_contract_falls_back_to_release_path(self):
         launcher = load_launcher()
 

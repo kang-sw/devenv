@@ -358,14 +358,16 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
     home = Path.home()
-    try:
-        rel = plugin_dir.relative_to(home / ".codex" / "plugins" / "cache" / "kang-sw-devenv")
-    except ValueError:
-        return None
-    parts = rel.parts
-    if len(parts) < 2 or parts[0] not in {"ws", "wsflow"}:
-        return None
-    return parts[0]
+    for host_dir in (".codex", ".claude"):
+        try:
+            rel = plugin_dir.relative_to(home / host_dir / "plugins" / "cache" / "kang-sw-devenv")
+        except ValueError:
+            continue
+        parts = rel.parts
+        if len(parts) < 2 or parts[0] not in {"ws", "wsflow"}:
+            return None
+        return parts[0]
+    return None
 
 
 def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
