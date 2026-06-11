@@ -2,6 +2,7 @@ package wsstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -724,5 +725,156 @@ func TestExecArtifactsPruneEligibilityAndTombstones(t *testing.T) {
 	}
 	if count, err := store.Count(ctx, "artifact_tombstones"); err != nil || count != 1 {
 		t.Fatalf("artifact_tombstones count=%d err=%v", count, err)
+	}
+}
+
+func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+
+	holder, err := sql.Open("sqlite", store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	if _, err := holder.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+
+	busySeen := make(chan struct{}, 1)
+	previousHook := sqliteRetryBusyHook
+	sqliteRetryBusyHook = func(error) {
+		select {
+		case busySeen <- struct{}{}:
+		default:
+		}
+	}
+	defer func() { sqliteRetryBusyHook = previousHook }()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: "contended", PublicName: "contended", StatePath: "contended", SchemaVersion: 1, Status: "idle"})
+	}()
+	select {
+	case <-busySeen:
+	case err := <-errCh:
+		t.Fatalf("contended write finished before observing busy retry: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for busy retry")
+	}
+	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("contended write did not recover: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("contended write timed out")
+	}
+	if _, ok, err := store.AgentDefinition(ctx, "contended"); err != nil || !ok {
+		t.Fatalf("agent definition after contended write ok=%t err=%v", ok, err)
+	}
+}
+
+func TestAgentRolePointerHistoryAndCollision(t *testing.T) {
+	ctx := context.Background()
+	rootA := initRepo(t)
+	rootB := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	storeA, err := NewManager(Options{CacheHome: cache}).Open(rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeA.Close()
+	storeB, err := NewManager(Options{CacheHome: cache}).Open(rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeB.Close()
+	key, err := AgentInternalKey("impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "first", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "old", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
+	if err := storeA.UpsertAgentDefinition(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.StatePath = "second"
+	second.Model = "new"
+	if err := storeA.UpsertAgentDefinition(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	other := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "other-root", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "other", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
+	if err := storeB.UpsertAgentDefinition(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	gotA, ok, err := storeA.AgentDefinition(ctx, key)
+	if err != nil || !ok {
+		t.Fatalf("root A role ok=%t err=%v", ok, err)
+	}
+	gotB, ok, err := storeB.AgentDefinition(ctx, key)
+	if err != nil || !ok {
+		t.Fatalf("root B role ok=%t err=%v", ok, err)
+	}
+	if gotA.StatePath != "second" || gotA.Model != "new" {
+		t.Fatalf("root A pointer = %+v", gotA)
+	}
+	if gotB.StatePath != "other-root" || gotB.Model != "other" {
+		t.Fatalf("root B pointer = %+v", gotB)
+	}
+	count, err := storeA.Count(ctx, "agent_instances")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("root A agent instance count = %d, want 2", count)
+	}
+}
+
+func TestSQLiteRetryRetriesBusyAndLockedErrors(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+	err := withSQLiteRetry(ctx, func() error {
+		attempts++
+		if attempts < 3 {
+			return fmt.Errorf("synthetic SQLITE_BUSY")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retry returned error: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+
+	attempts = 0
+	err = withSQLiteRetry(ctx, func() error {
+		attempts++
+		if attempts < 2 {
+			return fmt.Errorf("synthetic SQLITE_LOCKED")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("locked retry returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("locked attempts = %d, want 2", attempts)
 	}
 }

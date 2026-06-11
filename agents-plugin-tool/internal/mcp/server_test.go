@@ -1,13 +1,17 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,6 +160,46 @@ func canonicalTestPath(t *testing.T, path string) string {
 	return abs
 }
 
+func serveStdioWithSession(t *testing.T, server *Server, root, input string, out *bytes.Buffer) error {
+	t.Helper()
+	key, _ := parseLoginResponse(t, callLogin(t, server, 900001, root, nil))
+	return server.ServeStdio(context.Background(), strings.NewReader(withSessionKeyInToolCalls(t, input, key)), out)
+}
+
+func withSessionKeyInToolCalls(t *testing.T, input, key string) string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(strings.TrimRight(input, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			t.Fatalf("parse test MCP line: %v\n%s", err, line)
+		}
+		if payload["method"] == "tools/call" {
+			params, _ := payload["params"].(map[string]any)
+			name, _ := params["name"].(string)
+			if name != "ws.lead.login" {
+				args, _ := params["arguments"].(map[string]any)
+				if args == nil {
+					args = map[string]any{}
+					params["arguments"] = args
+				}
+				if _, exists := args["session_key"]; !exists {
+					args["session_key"] = key
+				}
+			}
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal test MCP line: %v", err)
+		}
+		out = append(out, string(raw))
+	}
+	return strings.Join(out, "\n") + "\n"
+}
+
 func TestServeStdioConfigAgentsTier(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -221,7 +265,7 @@ func TestWsflowOnlyToolHiddenInFullWsMode(t *testing.T) {
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -349,7 +393,7 @@ func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -382,7 +426,7 @@ func TestServeStdioExposesCancellationNotificationsInDebugEvents(t *testing.T) {
 	}, "\n")
 
 	var out bytes.Buffer
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -408,7 +452,7 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	}, "\n")
 
 	var out bytes.Buffer
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -525,7 +569,7 @@ func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
@@ -545,7 +589,7 @@ func TestServeStdioSpecToolsRejectTicketOnlyArgument(t *testing.T) {
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
@@ -565,7 +609,7 @@ func TestServeStdioMentalModelToolsRejectSpecStemOnStatus(t *testing.T) {
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
@@ -816,4 +860,1081 @@ func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 	if max != 1 {
 		t.Fatalf("same-domain calls were not serialized; max active = %d", max)
 	}
+}
+
+func TestServeStdioToolsListAndCall(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - planned [260503-feat-demo/p1]\n---\n# Demo\n\n## Feature {#260503-spec-demo}\n\nSpec discovery text.\n")
+	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\ndescription: Workflow model\nsources:\n  - ai-docs/spec/demo.md#260503-spec-demo\n---\n# Workflow\n\nReferences {#260503-spec-demo} with discovery text.\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo\n\nMentions 260503-epic-demo.\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"infra.read","arguments":{"name":"impl-playbook"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"path.generate","arguments":{"kind":"review","stems":["direct"]}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
+		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
+		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
+		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"specs.find","arguments":{"query":"discovery","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"query":"discovery","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 15 {
+		t.Fatalf("expected 15 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(byID["2"]), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(byID["2"], "project_tree") {
+		t.Fatalf("tools/list missing project_tree: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "agents.call") {
+		t.Fatalf("tools/list missing agents.call: %s", byID["2"])
+	}
+	if strings.Contains(byID["2"], "agents.call_async") {
+		t.Fatalf("tools/list still includes agents.call_async: %s", byID["2"])
+	}
+	if strings.Contains(byID["2"], "agents.oneshot") {
+		t.Fatalf("tools/list still includes agents.oneshot: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "subquery") {
+		t.Fatalf("tools/list missing subquery: %s", byID["2"])
+	}
+	subqueryProperties := toolPropertiesByName(t, byID["2"], "subquery")
+	if _, ok := subqueryProperties["root"]; ok {
+		t.Fatalf("subquery publicly advertises root in schema: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "path.generate") {
+		t.Fatalf("tools/list missing path.generate: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "runtime.info") {
+		t.Fatalf("tools/list missing runtime.info: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "ws.lead.login") {
+		t.Fatalf("tools/list missing ws.lead.login: %s", byID["2"])
+	}
+	if strings.Contains(byID["2"], "session.set_default_root") || strings.Contains(byID["2"], "session.get_default_root") {
+		t.Fatalf("tools/list still advertises session root compatibility tools: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "config.agents_tier") {
+		t.Fatalf("tools/list missing config.agents_tier: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], `"effort"`) || !strings.Contains(byID["2"], `""`) || !strings.Contains(byID["2"], `"xhigh"`) {
+		t.Fatalf("tools/list missing config.agents_tier effort schema values: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "config.show") {
+		t.Fatalf("tools/list missing config.show: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "\"prompts\"") {
+		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
+	}
+	toolsResult, _ := listResp["result"].(map[string]any)
+	listedTools, _ := toolsResult["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if !strings.HasPrefix(name, "agents.") {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if _, ok := properties["root"]; ok {
+			t.Fatalf("agents tool %s publicly advertises root in schema: %s", name, byID["2"])
+		}
+	}
+	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
+		if !strings.Contains(byID["2"], tool) {
+			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
+		}
+	}
+	if !strings.Contains(byID["2"], `"mental_model_notes"`) {
+		t.Fatalf("tools/list missing git.commit mental_model_notes schema: %s", byID["2"])
+	}
+	if strings.Contains(byID["2"], "agents.recall") {
+		t.Fatalf("tools/list should not advertise agents.recall: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "tickets:") {
+		t.Fatalf("project_tree response missing tickets: %s", byID["3"])
+	}
+	if !strings.Contains(byID["4"], "Implementation Playbook") {
+		t.Fatalf("infra response missing impl-playbook: %s", byID["4"])
+	}
+	if !strings.Contains(byID["5"], "review-paths") || !strings.Contains(byID["5"], "-direct.md") {
+		t.Fatalf("path.generate response missing review path: %s", byID["5"])
+	}
+	if !strings.Contains(byID["6"], "prompt_bundle") || !strings.Contains(byID["6"], "code-reviewer") {
+		t.Fatalf("runtime.info response missing prompt bundle: %s", byID["6"])
+	}
+	if !strings.Contains(toolText(t, byID["7"]), "dirty:") || !strings.Contains(toolText(t, byID["7"]), "ai-docs/") {
+		t.Fatalf("git.status response missing readable status: %s", byID["7"])
+	}
+	if !strings.Contains(toolText(t, byID["8"]), `"event":"request.received"`) {
+		t.Fatalf("runtime.debug_events missing request evidence: %s", byID["8"])
+	}
+	configText := toolText(t, byID["9"])
+	if !strings.Contains(configText, "path:") || !strings.Contains(configText, `config.json`) || !strings.Contains(configText, "model_aliases:") {
+		t.Fatalf("config.show response missing path/config: %s", byID["9"])
+	}
+	ticketsText := toolText(t, byID["10"])
+	if !strings.Contains(ticketsText, "260503-feat-demo") || !strings.Contains(ticketsText, "mentions_ticket_stem") {
+		t.Fatalf("tickets.find response missing mention result: %s", byID["10"])
+	}
+	specsText := toolText(t, byID["11"])
+	if !strings.Contains(specsText, "1 candidate spec for query=\"discovery\"") || !strings.Contains(specsText, "ai-docs/spec/demo.md\tscore=") || strings.Contains(specsText, "matched:") {
+		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
+	}
+	mentalModelsText := toolText(t, byID["12"])
+	if !strings.Contains(mentalModelsText, "1 candidate mental model for query=\"discovery\"") || !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md\tscore=") || strings.Contains(mentalModelsText, "matched:") {
+		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
+	}
+	if !strings.Contains(byID["13"], "matches") || !strings.Contains(byID["13"], "matched_terms") {
+		t.Fatalf("specs.find json missing evidence: %s", byID["13"])
+	}
+	if !strings.Contains(byID["14"], "matches") || !strings.Contains(byID["14"], "matched_terms") {
+		t.Fatalf("mental_models.find json missing evidence: %s", byID["14"])
+	}
+	referencesText := toolText(t, byID["15"])
+	if !strings.Contains(referencesText, "input: spec") || !strings.Contains(referencesText, "tickets:") || !strings.Contains(referencesText, "mental_models:") {
+		t.Fatalf("references.trace response missing graph result: %s", byID["15"])
+	}
+}
+
+func TestServeStdioAgentDebugToolCalls(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), "stdout old\nstdout new\n")
+	mustWrite(t, filepath.Dir(layout.CurrentRuntimeLog), filepath.Base(layout.CurrentRuntimeLog), "runtime old\nruntime new\n")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.debug.stdout","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.debug.runtime_log","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.debug.tail","arguments":{"name":"impl","lines":1}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	if got := toolText(t, byID["1"]); got != "stdout new\n" {
+		t.Fatalf("stdout debug response = %q", got)
+	}
+	if got := toolText(t, byID["2"]); got != "runtime new\n" {
+		t.Fatalf("runtime debug response = %q", got)
+	}
+	if got := toolText(t, byID["3"]); !strings.Contains(got, "== stdout ==") || !strings.Contains(got, "stdout new") || !strings.Contains(got, "== runtime ==") {
+		t.Fatalf("debug tail response mismatch: %q", got)
+	}
+}
+
+func TestServeStdioAgentTailIsBoundedButDebugTailIsRaw(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	largeOutput := strings.Repeat("x", 5000)
+	line := `{"type":"event","aggregated_output":"` + largeOutput + `"}`
+	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), line+"\n")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.tail","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.debug.tail","arguments":{"name":"impl","lines":1}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	normal := toolText(t, byID["1"])
+	if !strings.Contains(normal, "ws-tail truncated field aggregated_output") || strings.Contains(normal, largeOutput) {
+		t.Fatalf("normal tail was not bounded: %q", normal)
+	}
+	debug := toolText(t, byID["2"])
+	if !strings.Contains(debug, largeOutput) || strings.Contains(debug, "ws-tail truncated") {
+		t.Fatalf("debug tail was not raw: %q", debug)
+	}
+}
+
+func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(t.TempDir(), "test")
+	var out bytes.Buffer
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+
+	out.Reset()
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","backend":"codex","model":"gpt-5.4","effort":"medium"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
+		t.Fatalf("ServeStdio config returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	configText := toolText(t, byID["2"])
+	if !strings.Contains(configText, `"claude":{"backend":"codex","model":"gpt-5.4","effort":"medium"}`) {
+		t.Fatalf("config response missing claude harness mapping: %s", byID["2"])
+	}
+
+	out.Reset()
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	if err := serveStdioWithSession(t, server, root, registerInput, &out); err != nil {
+		t.Fatalf("ServeStdio register returned error: %v", err)
+	}
+	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.4") || !strings.Contains(status, "effort: medium") {
+		t.Fatalf("registered status missing configured claude harness mapping:\n%s", status)
+	}
+}
+
+func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260513-feat-agent-tier-effort-config")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	inputs := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.5","effort":"medium"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.4"}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
+	}
+	for _, input := range inputs {
+		out.Reset()
+		if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+			t.Fatalf("ServeStdio returned error: %v", err)
+		}
+	}
+	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "model: gpt-5.4") || strings.Contains(status, "effort: medium") {
+		t.Fatalf("registered status did not clear effort after model update:\n%s", status)
+	}
+}
+
+func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.list","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"impl","prompt":"work"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	list := byID["1"]
+	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup"} {
+		if strings.Contains(list, hidden) {
+			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
+		}
+	}
+	for _, visible := range []string{"api.list", "config.show", "tickets.list"} {
+		if !strings.Contains(list, visible) {
+			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
+		}
+	}
+	if !strings.Contains(list, "wsflow") {
+		t.Fatalf("tools/list did not use namespace override in descriptions: %s", list)
+	}
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "wsflow agentless mode disables agent-backed tool: agents.call") {
+		t.Fatalf("hidden tool did not return clear no-agent error: %s", byID["3"])
+	}
+}
+
+func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer"}}}`, root),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer","context":{"reviewer_scope":"correctness only"}}}}`, root),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"implementer"}}}`, root),
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+
+	// tools/list must include prompt.render in wsflow mode.
+	list := byID["1"]
+	if !strings.Contains(list, "prompt.render") {
+		t.Fatalf("tools/list missing prompt.render in wsflow mode: %s", list)
+	}
+
+	// Render without context: file must exist, contain wsflow/, not contain ws/.
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("prompt.render returned error in wsflow mode: %s", byID["2"])
+	}
+	promptPath := strings.TrimSpace(toolText(t, byID["2"]))
+	if _, err := os.Stat(promptPath); err != nil {
+		t.Fatalf("rendered prompt file does not exist at %q: %v", promptPath, err)
+	}
+	rendered, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("read rendered prompt: %v", err)
+	}
+	renderedText := string(rendered)
+	if strings.Contains(renderedText, "ws/") {
+		t.Fatalf("rendered prompt still contains 'ws/' after substitution:\n%s", renderedText)
+	}
+	if !strings.Contains(renderedText, "wsflow/") {
+		t.Fatalf("rendered prompt missing 'wsflow/' after substitution:\n%s", renderedText)
+	}
+
+	// Render with context: file must contain ## Render Context with injected key/value.
+	if toolIsError(t, byID["3"]) {
+		t.Fatalf("prompt.render with context returned error: %s", byID["3"])
+	}
+	contextPath := strings.TrimSpace(toolText(t, byID["3"]))
+	contextRendered, err := os.ReadFile(contextPath)
+	if err != nil {
+		t.Fatalf("read context-rendered prompt: %v", err)
+	}
+	contextText := string(contextRendered)
+	if !strings.Contains(contextText, "## Render Context") {
+		t.Fatalf("rendered prompt missing ## Render Context block:\n%s", contextText)
+	}
+	if !strings.Contains(contextText, "- reviewer_scope: correctness only") {
+		t.Fatalf("rendered prompt missing injected context key/value:\n%s", contextText)
+	}
+
+	// Ineligible stem returns MCP isError (not a JSON-RPC error).
+	if !toolIsError(t, byID["4"]) {
+		t.Fatalf("prompt.render with ineligible stem 'implementer' should return isError: %s", byID["4"])
+	}
+	if !strings.Contains(toolText(t, byID["4"]), "not render-eligible") {
+		t.Fatalf("ineligible stem error message missing 'not render-eligible': %s", toolText(t, byID["4"]))
+	}
+}
+
+func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260508-feat-claude-harness")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	checkInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"reviewer"}}}`
+
+	var out bytes.Buffer
+	server := NewServer(t.TempDir(), "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, registerInput, &out); err != nil {
+		t.Fatalf("ServeStdio register returned error: %v", err)
+	}
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, checkInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	status := toolText(t, byID["3"])
+	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: claude") || !strings.Contains(status, "model: sonnet") {
+		t.Fatalf("status missing claude alias resolution:\n%s", status)
+	}
+}
+
+func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260508-feat-codex-harness")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
+	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
+	var out bytes.Buffer
+	server := NewServer(t.TempDir(), "test")
+	if err := serveStdioWithSession(t, server, root, setupInput, &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, checkInput, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	status := toolText(t, byID["2"])
+	if !strings.Contains(status, "harness: codex") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.5") {
+		t.Fatalf("status missing codex alias resolution:\n%s", status)
+	}
+}
+
+func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	agent, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := wsagent.NewManager(wsagent.Options{}).BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Status = wsagent.CallStatusRunning
+	call.PID = os.Getpid()
+	if err := os.WriteFile(layout.CurrentStateFile, mustMarshalForTest(t, call), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	outReader, outWriter := io.Pipe()
+	done := make(chan error, 1)
+	streamServer := NewServer(root, "test")
+	go func() {
+		done <- streamServer.ServeStdio(context.Background(), reader, outWriter)
+		_ = outWriter.Close()
+	}()
+
+	key, _ := parseLoginResponse(t, callLogin(t, streamServer, 900002, root, nil))
+	fmt.Fprintln(writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"impl","timeout_seconds":2,"session_key":%q}}}`, key))
+	fmt.Fprintln(writer, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+
+	lineCh := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(outReader)
+		for scanner.Scan() {
+			select {
+			case lineCh <- scanner.Text():
+			default:
+			}
+		}
+	}()
+	select {
+	case line := <-lineCh:
+		if !strings.Contains(line, `"id":2`) || !strings.Contains(line, "tools") {
+			t.Fatalf("first response was not tools/list while wait was running: %s", line)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("tools/list was blocked behind agents.wait")
+	}
+	_ = writer.Close()
+	_ = reader.Close()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ServeStdio did not exit after input close")
+	}
+}
+
+func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	manager := wsagent.NewManager(wsagent.Options{})
+	agent, layout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "subquery-tmp-test", Ephemeral: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := manager.BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Status = wsagent.CallStatusCompleted
+	if err := os.WriteFile(layout.CurrentStateFile, mustMarshalForTest(t, call), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.OutputFile, []byte("ephemeral answer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"subquery-tmp-test"}}}` + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["1"]), "ephemeral answer") {
+		t.Fatalf("agents.result response mismatch: %s", byID["1"])
+	}
+	if _, err := os.Stat(layout.AgentDir); err != nil {
+		t.Fatalf("ephemeral agent dir should remain after MCP result for retention cleanup: %v", err)
+	}
+}
+
+func TestServeStdioGitToolCalls(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+	mustWrite(t, root, "file.txt", "one\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	runGit(t, root, "add", "file.txt", "ai-docs/tickets/todo/260503-feat-demo.md")
+	runGit(t, root, "commit", "-m", "initial", "-m", "body text")
+	head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	mustWrite(t, root, "file.txt", "one\ntwo\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo\n---\n# Demo\n\n### Result (abc123) - 2026-05-04\n\nImplemented.\n")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"],"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true,"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"]}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD"}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 6 {
+		t.Fatalf("expected 6 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+
+	var diff struct {
+		Mode   string   `json:"mode"`
+		Paths  []string `json:"paths"`
+		Output string   `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &diff); err != nil {
+		t.Fatal(err)
+	}
+	if diff.Mode != "name_only" || !strings.Contains(diff.Output, "file.txt") || len(diff.Paths) != 1 || diff.Paths[0] != "file.txt" {
+		t.Fatalf("diff response = %#v", diff)
+	}
+
+	var log struct {
+		Limit       int  `json:"limit"`
+		IncludeBody bool `json:"include_body"`
+		Commits     []struct {
+			Subject string `json:"subject"`
+			Body    string `json:"body"`
+		} `json:"commits"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Limit != 1 || !log.IncludeBody || len(log.Commits) != 1 || log.Commits[0].Subject != "initial" || log.Commits[0].Body != "body text" {
+		t.Fatalf("log response = %#v", log)
+	}
+
+	var mergeBase struct {
+		Base      string `json:"base"`
+		Head      string `json:"head"`
+		MergeBase string `json:"merge_base"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &mergeBase); err != nil {
+		t.Fatal(err)
+	}
+	if mergeBase.Base != "HEAD" || mergeBase.Head != "HEAD" || mergeBase.MergeBase != head {
+		t.Fatalf("merge-base response = %#v, want hash %s", mergeBase, head)
+	}
+	if got := toolText(t, byID["4"]); got != "file.txt\n" {
+		t.Fatalf("git.diff text response = %q", got)
+	}
+	logText := toolText(t, byID["5"])
+	if !strings.Contains(logText, "commit "+head) || !strings.Contains(logText, "subject: initial") || !strings.Contains(logText, "body text") || strings.Contains(logText, `\"body text\"`) {
+		t.Fatalf("git.log text response = %q", logText)
+	}
+	if got := toolText(t, byID["6"]); !strings.Contains(got, "merge_base: "+head) || !strings.Contains(got, "(HEAD HEAD)") {
+		t.Fatalf("git.merge_base text response = %q", got)
+	}
+
+	out.Reset()
+	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."],"mental_model_notes":["git.commit accepts structured Mental Model Notes."]}}}`
+	if err := serveStdioWithSession(t, server, root, commitInput, &out); err != nil {
+		t.Fatalf("ServeStdio commit returned error: %v", err)
+	}
+	commitLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(commitLines) != 1 {
+		t.Fatalf("expected 1 commit response, got %d\n%s", len(commitLines), out.String())
+	}
+	commitByID := responseLinesByID(t, commitLines)
+
+	commitText := toolText(t, commitByID["7"])
+	if !strings.Contains(commitText, "commit: ") ||
+		!strings.Contains(commitText, "title: test: mcp commit") ||
+		!strings.Contains(commitText, "paths:") ||
+		!strings.Contains(commitText, "ticket_changes:") ||
+		strings.Contains(commitText, `"ticket_changes"`) {
+		t.Fatalf("git.commit text response = %q", commitText)
+	}
+	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n### Mental Model Notes\n- git.commit accepts structured Mental Model Notes.") {
+		t.Fatalf("git.commit message missing Mental Model Notes subsection:\n%s", commitBody)
+	}
+
+	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")
+	out.Reset()
+	jsonCommitInput := `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: mcp commit json","ai_context":["User intent: verify git.commit JSON.","Verification: server test."],"format":"json"}}}`
+	if err := serveStdioWithSession(t, server, root, jsonCommitInput, &out); err != nil {
+		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
+	}
+	jsonCommitLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(jsonCommitLines) != 1 {
+		t.Fatalf("expected 1 JSON commit response, got %d\n%s", len(jsonCommitLines), out.String())
+	}
+	jsonCommitByID := responseLinesByID(t, jsonCommitLines)
+
+	var commit struct {
+		Hash          string `json:"hash"`
+		Title         string `json:"title"`
+		TicketChanges []struct {
+			Stem        string `json:"stem"`
+			ResultAdded bool   `json:"result_added"`
+		} `json:"ticket_changes"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, jsonCommitByID["8"])), &commit); err != nil {
+		t.Fatal(err)
+	}
+	if commit.Hash == "" || commit.Title != "test: mcp commit json" || len(commit.TicketChanges) != 0 {
+		t.Fatalf("commit response = %#v", commit)
+	}
+}
+
+func TestServeStdioReferencesTraceRejectsAmbiguousSelectors(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/todo/260504-ticket-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
+	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\n---\n# Demo\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"references.trace","arguments":{"ticket_stem":"260504-ticket-demo","spec_stem":"260504-spec-demo"}}}` + "\n"
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if !strings.Contains(text, "exactly one") || !strings.Contains(out.String(), `"isError":true`) {
+		t.Fatalf("references.trace accepted ambiguous selectors: %s", out.String())
+	}
+}
+
+func TestAPIListDomains(t *testing.T) {
+	root := t.TempDir()
+	useLeadProfile(t)
+	initGit(t, root)
+	server := NewServer(root, "test")
+	domains, err := apiListDomains(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(domains) != 0 {
+		t.Fatalf("empty deps domains = %v", domains)
+	}
+	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
+	mustWrite(t, root, "ai-docs/.deps/.hidden/README.md", "hidden")
+	mustWrite(t, root, "ai-docs/.deps/python/README.md", "python")
+	mustWrite(t, root, "ai-docs/.deps/file.txt", "not dir")
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api.list","arguments":{}}}` + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	got := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if got != "go\npython\n" {
+		t.Fatalf("api.list = %q", got)
+	}
+}
+
+func TestAPIAskMCPExactHintSkipsRouter(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
+	fake := &fakeAPIRuntime{answers: map[string]string{"go": "go answer"}}
+	server := NewServer(root, "test")
+	server.api = fake
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"How do modules work?","domain_hint":"go"}}}` + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(byID["1"], "api.ask") || !strings.Contains(byID["1"], "api.list") {
+		t.Fatalf("tools/list missing api tools: %s", byID["1"])
+	}
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("api.ask returned tool error: %s", byID["2"])
+	}
+	text := toolText(t, byID["2"])
+	if len(fake.routeCalls) != 0 {
+		t.Fatalf("exact hint invoked pre-router: %v", fake.routeCalls)
+	}
+	if !strings.Contains(text, "## Domain: go") || !strings.Contains(text, "go answer") {
+		t.Fatalf("api.ask response missing boundary/answer:\n%s", text)
+	}
+}
+
+func TestAPIAskMCPAllDomainFailureReturnsToolErrorWithMetadata(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	fake := &fakeAPIRuntime{errs: map[string]error{"go": fmt.Errorf("go failed"), "python": fmt.Errorf("python failed")}}
+	server := NewServer(root, "test")
+	server.api = fake
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"question"}}}` + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) {
+		t.Fatalf("expected api.ask tool error: %s", byID["1"])
+	}
+	text := toolText(t, byID["1"])
+	if !strings.Contains(text, "## Domain: go\nERROR: go failed") ||
+		!strings.Contains(text, "## Domain: python\nERROR: python failed") ||
+		!strings.Contains(text, "api.ask failed for all resolved domains") {
+		t.Fatalf("all failure text missing metadata:\n%s", text)
+	}
+}
+
+func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	mustWrite(t, root, "sub/.keep", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		toolCallLine(t, 2, "exec.spawn", map[string]any{"cmd": os.Args[0], "args": []string{"-test.run=TestMCPExecHelperProcess", "--", "flow"}, "env": map[string]string{"GO_WANT_MCP_EXEC_HELPER": "1"}, "working_dir": "sub"}),
+		toolCallLine(t, 9, "exec.shell", mcpShellShapeArgs()),
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for _, name := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+		if !strings.Contains(byID["1"], name) {
+			t.Fatalf("tools/list missing %s: %s", name, byID["1"])
+		}
+	}
+	text := toolText(t, byID["2"])
+	shellText := toolText(t, byID["9"])
+	if !strings.Contains(shellText, "shell-shape") || !strings.Contains(shellText, execToolJSONPath(root)) {
+		t.Fatalf("shell response = %s", byID["9"])
+	}
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "status: succeeded") || !strings.Contains(text, execToolJSONPath(filepath.Join(root, "sub"))) || !strings.Contains(text, "========== stdout ==========") || !strings.Contains(text, "========== stderr ==========") || !strings.Contains(text, "err") {
+		t.Fatalf("spawn response = %s", byID["2"])
+	}
+	launch := execToolResponse{ExecKey: execKeyFromText(t, text)}
+
+	input = strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":%q,"stream":"stdout","lines":1}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"exec.raw.read","arguments":{"exec_key":%q,"stream":"stderr","offset":0,"limit":20}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta42"}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta[0-9]+","regex":true}}}`, launch.ExecKey),
+	}, "\n") + "\n"
+	out.Reset()
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for id, want := range map[string]string{"3": "result_ready:", "4": "========== stdout ==========", "5": "beta42", "6": "next_offset:", "7": "beta42", "8": "beta42"} {
+		if !strings.Contains(byID[id], want) {
+			t.Fatalf("response %s missing %s: %s", id, want, byID[id])
+		}
+	}
+	tailText := toolText(t, byID["5"])
+	if strings.HasPrefix(strings.TrimSpace(tailText), "{") || !strings.Contains(tailText, "exec_key: ") || !strings.Contains(tailText, "stream: stdout") || !strings.Contains(tailText, "========== text ==========") {
+		t.Fatalf("tail response was not readable text: %s", byID["5"])
+	}
+	readText := toolText(t, byID["6"])
+	if strings.HasPrefix(strings.TrimSpace(readText), "{") || !strings.Contains(readText, "stream: stderr") || !strings.Contains(readText, "offset: 0") || !strings.Contains(readText, "========== text ==========") {
+		t.Fatalf("read response was not readable text: %s", byID["6"])
+	}
+	for _, id := range []string{"7", "8"} {
+		grepText := toolText(t, byID[id])
+		if strings.HasPrefix(strings.TrimSpace(grepText), "{") || !strings.Contains(grepText, "stream: stdout") || !strings.Contains(grepText, "matches: 1") || !strings.Contains(grepText, "========== matches ==========") {
+			t.Fatalf("grep response %s was not readable text: %s", id, byID[id])
+		}
+	}
+
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	out.Reset()
+	input = `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"echo"}}}` + "\n" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":"exec-1-0000000000000000"}}}` + "\n"
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], "exec.spawn") || strings.Contains(byID["1"], "exec.raw.tail") {
+		t.Fatalf("no-agent listed exec tools: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "agentless mode disables") || !strings.Contains(byID["3"], "agentless mode disables") {
+		t.Fatalf("no-agent calls not rejected: %s\n%s", byID["2"], byID["3"])
+	}
+}
+
+func TestExecMCPRunningLargeAndAbort(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	input := toolCallLine(t, 1, "exec.shell", mcpLongShellArgs()) + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	text := toolText(t, byID["1"])
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "status: running") || !strings.Contains(text, "exec.ask") || strings.Contains(text, "done") {
+		t.Fatalf("running launch response = %s", byID["1"])
+	}
+	running := execToolResponse{ExecKey: execKeyFromText(t, text)}
+	out.Reset()
+	input = strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, running.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":0}}}`, running.ExecKey),
+	}, "\n") + "\n"
+	started := time.Now()
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("non-blocking result calls took %s", elapsed)
+	}
+	resultByID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for _, id := range []string{"10", "11"} {
+		resultText := toolText(t, resultByID[id])
+		if strings.Contains(resultByID[id], `"isError":true`) || strings.HasPrefix(strings.TrimSpace(resultText), "{") || !strings.Contains(resultText, "status: running") || !strings.Contains(resultText, "guidance:") || strings.Contains(resultText, "done") {
+			t.Fatalf("non-blocking result %s = %s", id, resultByID[id])
+		}
+	}
+	out.Reset()
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var abortText string
+	for time.Now().Before(deadline) {
+		out.Reset()
+		input = fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+		if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+			t.Fatal(err)
+		}
+		abortText = toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+		if strings.Contains(abortText, "status: cancelled") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(abortText, "status: cancelled") {
+		t.Fatalf("abort status = %s", abortText)
+	}
+
+	out.Reset()
+	input = toolCallLine(t, 4, "exec.shell", mcpLargeShellArgs()) + "\n"
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
+	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, "combined_bytes: 5000") || !strings.Contains(largeText, "exec.raw.*") {
+		t.Fatalf("large response = %s", largeText)
+	}
+}
+
+func TestExecMCPResultReadableJSONStdoutAndTimeout(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	jsonArgs := map[string]any{"command": `printf '{"ok":true}\n'`}
+	if runtime.GOOS == "windows" {
+		jsonArgs = map[string]any{"shell": "powershell", "command": `Write-Output '{"ok":true}'`}
+	}
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, toolCallLine(t, 1, "exec.shell", jsonArgs)+"\n", &out); err != nil {
+		t.Fatal(err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if strings.HasPrefix(strings.TrimSpace(text), "{") || !strings.Contains(text, "========== stdout ==========") || !strings.Contains(text, `{"ok":true}`) || strings.Contains(text, `\"ok\"`) {
+		t.Fatalf("json stdout response = %s", text)
+	}
+
+	out.Reset()
+	if err := serveStdioWithSession(t, server, root, toolCallLine(t, 2, "exec.shell", mcpLongShellArgs())+"\n", &out); err != nil {
+		t.Fatal(err)
+	}
+	running := execKeyFromText(t, toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["2"]))
+	out.Reset()
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q,"timeout_seconds":3}}}`, running) + "\n"
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	waitText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+	if !strings.Contains(waitText, "status: succeeded") || !strings.Contains(waitText, "done") {
+		t.Fatalf("timeout result = %s", waitText)
+	}
+}
+
+type execToolResponse struct {
+	ExecKey string `json:"exec_key"`
+}
+
+func execKeyFromText(t *testing.T, text string) string {
+	t.Helper()
+	re := regexp.MustCompile(`(?m)^exec_key: (exec-(?:[0-9a-f]{8}|[0-9]+-[0-9a-f]{16}))$`)
+	match := re.FindStringSubmatch(text)
+	if len(match) != 2 {
+		t.Fatalf("exec_key not found in text: %s", text)
+	}
+	return match[1]
+}
+
+func toolCallLine(t *testing.T, id int, name string, arguments map[string]any) string {
+	t.Helper()
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      name,
+			"arguments": arguments,
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func mcpShellShapeArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "cd && echo shell-shape"}
+	}
+	return map[string]any{"command": "pwd; printf shell-shape"}
+}
+
+func mcpLongShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "echo start & ping -n 7 127.0.0.1 >NUL & echo done"}
+	}
+	return map[string]any{"command": "echo start; sleep 6; echo done"}
+}
+
+func mcpLargeShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"shell": "powershell", "command": "[Console]::Out.Write(('x' * 5000))"}
+	}
+	return map[string]any{"command": "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"}
+}
+
+func execToolJSONPath(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ReplaceAll(path, `\`, `\\`)
+	}
+	return path
+}
+
+func TestMCPExecHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_MCP_EXEC_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			switch args[i+1] {
+			case "flow":
+				wd, _ := os.Getwd()
+				_, _ = os.Stdout.WriteString(wd + "\nalpha\nbeta42\n")
+				_, _ = os.Stderr.WriteString("err\n")
+			default:
+				_, _ = os.Stdout.WriteString(args[i+1] + "\n")
+			}
+			os.Exit(0)
+		}
+	}
+	os.Exit(2)
 }
