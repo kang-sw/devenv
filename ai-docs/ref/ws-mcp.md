@@ -216,6 +216,31 @@ path before building. Legacy fixed-name source-cache binaries such as
 If no compatible local runtime can be installed while a valid marker is active,
 startup fails instead of falling back to the published release asset.
 
+### Enabling the local dogfood loop (manual setup)
+
+The marker is per-machine and gitignored, so place it once in the source
+checkout, then let `install.sh` propagate it into the plugin cache:
+
+1. Write `agents-plugin/.local-devenv-runtime` with this machine's absolute
+   paths (use `command -v go` for the Go path):
+
+   ```json
+   {
+     "schema_version": 1,
+     "source_root": "/home/you/devenv",
+     "tool_dir": "/home/you/devenv/agents-plugin-tool",
+     "go": "/home/linuxbrew/.linuxbrew/bin/go"
+   }
+   ```
+
+2. Run `./install.sh update`. The `rsync` step copies the marker into the
+   plugin snapshot and `claude plugin install` carries it into the versioned
+   cache, so the next MCP launch source-builds the current checkout.
+
+After setup, editing the Go source and reconnecting the MCP server is enough to
+pick up changes — no rebuild-and-stage step. To disable, delete the marker and
+re-run `install.sh update` (the launcher reverts to the cache/release path).
+
 This path exists only for the repository-local Codex or Claude plugin
 development loop. The marker file is gitignored and should not exist in normal
 GitHub release installs, downstream repositories, or Windows installs.
