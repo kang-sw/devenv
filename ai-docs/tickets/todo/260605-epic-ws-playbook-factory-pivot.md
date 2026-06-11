@@ -80,15 +80,17 @@ subagents. Direction, decisions, and evidence live in
   (phases 1+2a+2b+2c+3, --no-ff). Remaining fill (delegate role/tier asset +
   per-spawn/per-role tier routing + reviewer-tier default) re-homed to
   `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`.
-- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (todo — tier taxonomy
-  + delegate tier routing): first-class `small/medium/large/xlarge` tier vocab,
-  `light/core/deep` demoted to concrete-model aliases, shipped delegate
-  `role:`/`tier:` playbook asset (child-key splice + model vars), mercenary
-  per-spawn tier plumbing into `RegisterOptions`, reviewer-tier default
-  re-authored in first-class vocab. Re-homes the 260609 Phase 2c Editions.
-  **Unblocked (2026-06-11):** research `260611-...delegation-tuning-config`
-  resolved the first-class axis (capability) + alias mapping; ready for
-  promotion. Depends on M3.
+- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**ready** — tier
+  taxonomy + delegate tier routing + delegate-prompt convergence): first-class
+  `small/medium/large/xlarge` tier vocab, `light/core/deep` demoted to
+  concrete-model aliases, shipped delegate `role:`/`tier:` playbook asset
+  (child-key splice + model vars), mercenary per-spawn tier plumbing into
+  `RegisterOptions`, reviewer-tier default re-authored in first-class vocab
+  (Phases 1-3). **Absorbed 2026-06-12:** the full delegate-prompt convergence —
+  port delegate prompts to rsrc (P4), migrate skills off `register(prompts)`
+  (P5), retire the `wsprompt` loader incl. `api.ask`/wsflow `RenderSource` rewire
+  (P6). Re-homes the 260609 Phase 2c Editions. Promoted to `ready/` 2026-06-11
+  (`88e646c5`). Depends on M3; P6 coordinates `api.ask` prompt source with M4.
 - `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
   corpus-routed api-doc playbook, cache index/staleness conventions, async job
   surface removal. Depends on M1; coordinated with M3.
@@ -163,6 +165,22 @@ subagents. Direction, decisions, and evidence live in
   Owned by research `260611-research-ws-per-role-delegation-tuning-config` and
   child `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (the 260609
   Phase 2c Editions re-home there).
+
+- **Delegate-prompt convergence + wsprompt retirement (confirmed 2026-06-12):**
+  the "shared playbook/text core unifies" intent (above) resolves concretely to
+  *a single prompt source of truth at `agents-plugin/rsrc/`*. M3 Phase 2c already
+  moved the mercenary delegate prompt onto `playbook.render` (removed
+  `register(prompts:[stems])`); the remaining work converges every delegate
+  (implementer, reviewer family, reference-discovery, mental-model-updater,
+  plan-populator) onto rsrc playbooks, migrates skill call sites off the removed
+  register field, and **retires the `wsprompt` go:embed loader entirely** —
+  including its non-delegate consumers (`api.ask` hard-coded stems, the wsflow
+  `prompt.render` `RenderSource`). This crosses into M4 (`api.ask` prompt source
+  → rsrc). Mental-model `prompt-bundle.md` line 27 ("deliberately parallel,
+  non-overlapping loaders") is 2c drift, rewritten at closeout, not a binding
+  constraint. Owned by child `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`
+  (absorbed there per 2026-06-12; the user chose absorption over a new milestone);
+  M4 coordinates the `api.ask` prompt-source move.
 
 ## Completion Criteria
 

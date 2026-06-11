@@ -1,5 +1,5 @@
 ---
-title: ws tier taxonomy (first-class small/…/xlarge) + delegate tier routing
+title: ws tier taxonomy (first-class small/…/xlarge) + delegate tier routing + delegate-prompt convergence (wsprompt retirement)
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: re-homes its two Phase 2c Editions (delegate role/tier asset + per-spawn tier routing); all 260609 phases merged to epic
@@ -37,6 +37,32 @@ abstract delegation tier becomes first-class `small/medium/large/xlarge`, and
 (alongside `haiku`/`sonnet`/`opus`). Frontmatter declares the first-class tier;
 mercenary delegation is opt-in.
 
+**Expanded scope — delegate-prompt convergence + wsprompt retirement (confirmed
+2026-06-12).** Investigating the Phase 1 shipped delegate asset surfaced that M3
+Phase 2c already converged the *mercenary* delegate prompt onto rsrc
+`playbook.render` (it removed the `agents.register(prompts:[stems])` MCP schema —
+`server.go:2334` now reads "the former prompts/tier/model registration fields are
+removed; use a self-contained prompt from playbook.render"). But the migration is
+incomplete and the two prompt trees still duplicate delegate content:
+
+- The shipped `lead-implement` playbook (and peers) still instruct the lead to
+  call `ws/agents.register(name: …, prompts: […])` (lines 61/64/91/102) — a now
+  semantically-stale schema field; the self-contained prompt must instead come
+  from `playbook.render`.
+- `agents-plugin-tool/internal/wsprompt/prompts/` still holds the canonical
+  delegate prompt bodies (`implementer.md`, `code-reviewer.md`,
+  `reference-discovery.md`, `mental-model-updater.md`, `plan-populator-survey/
+  research.md`), duplicated against the rsrc delegate playbooks this ticket adds.
+
+The `explore` rsrc playbook is the existing precedent (skills already delegate it
+via `playbook.render`). The confirmed direction completes that pattern for every
+delegate, then retires the `wsprompt` (go:embed) loader entirely — including its
+remaining non-delegate consumers (`api.ask` hard-coded stems, the wsflow
+`prompt.render` `RenderSource` loader) — so `agents-plugin/rsrc/` becomes the
+single prompt source of truth. Mental-model `prompt-bundle.md` line 27
+("deliberately parallel, non-overlapping loaders") is 2c drift, not a binding
+constraint, and is rewritten at closeout.
+
 ## Decisions
 
 (See research 260611 for the full taxonomy model.)
@@ -59,6 +85,22 @@ mercenary delegation is opt-in.
   (`tier × harness → {backend, model, effort}`) → subprocess `--model`.
 - The existing `config.agents_tier` surface is unchanged by the vocabulary
   split (it stays the mercenary concretion layer).
+- **Delegate-prompt convergence (confirmed 2026-06-12).** Every delegate prompt
+  (implementer, reviewer family, reference-discovery, mental-model-updater,
+  plan-populator-survey/research) becomes a canonical rsrc playbook rendered via
+  `playbook.render`; skills delegate by rendering the playbook (mint-injected
+  child key + self-contained prompt) and spawning native/mercenary, never via
+  `register(prompts:[stems])`. The shipped delegate asset content (incl. Phase 1
+  implementer/reviewer) is a **port of the canonical `wsprompt/prompts/` body**,
+  not invented text.
+- **wsprompt retirement is the end state (confirmed 2026-06-12), full not
+  partial.** The `wsprompt` go:embed loader is removed once all consumers move
+  off it: delegate prompts → rsrc playbooks; `api.ask` hard-coded stems → rsrc;
+  wsflow `prompt.render` `RenderSource` → rsrc. Temporary two-tree duplication
+  during the migration is accepted; the embedded copy of a delegate prompt is
+  deleted only after both the skill migration (Phase 5) and the loader retirement
+  (Phase 6) remove its last consumer. Rejected: keep `wsprompt` for non-delegate
+  internal callers (the user chose full retirement so rsrc is the single source).
 
 ## Constraints
 
@@ -70,6 +112,16 @@ mercenary delegation is opt-in.
   `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`).
 - wsflow mirror: any shipped `lead-implement` / delegate playbook text change
   must mirror into `agents-plugin-wsflow` with no ws-only references.
+- Convergence phase order is a hard dependency chain: Phase 4 (port delegate
+  bodies to rsrc) → Phase 5 (migrate skill call sites off `register(prompts)`) →
+  Phase 6 (retire the loader). An embedded delegate prompt is deleted only in
+  Phase 6, after Phase 5 removed its last skill consumer; deleting earlier breaks
+  live delegation. Phases 1-3 (tier surface) are independent of 4-6 and can land
+  first.
+- Phase 6 must not strand `api.ask` or wsflow `prompt.render` callers: their
+  prompt source moves to rsrc in the same phase that removes `wsprompt`, and the
+  launcher fast-path/fallback bundle-hash validation must stay self-consistent
+  after the embedded-bundle metadata is collapsed.
 
 ## Phases
 
@@ -86,6 +138,15 @@ credential block fires on a real shipped playbook and (b) the model vars resolve
 to the expected per-harness model strings. Existing unit tests pass on in-memory
 fixtures and do not catch a missing shipped asset, so the shipped-asset e2e is
 the key new coverage. Closes 260609 Edition `379ff5e5` gaps 1+2.
+
+**Asset content = canonical port (per the convergence decision):** the
+implementer/reviewer playbook bodies port the canonical
+`wsprompt/prompts/implementer.md` and `code-reviewer.md` content (adapted to
+self-contained `playbook.render` form + the child-key/model-var frontmatter), not
+minimal invented stubs. This makes the Phase 1 assets the canonical delegate
+source the later phases migrate skills onto. (The exploratory invented stubs from
+the paused WIP are discarded.) The `Tier` parse field + shipped-manifest guard
+test from the paused WIP are retained.
 
 ### Phase 2: MCP-reachable per-spawn/per-role tier routing (mercenary plumbing)
 
@@ -114,6 +175,50 @@ mental-model text that frames `light/core/deep` as "the tier abstraction" to the
 alias-layer framing. Adds the `(skill, role) → first-class tier` config override
 surface only if research 260611 promotes that surface into this ticket.
 
+### Phase 4: port remaining delegate prompts to canonical rsrc playbooks
+
+Port the remaining delegate prompt bodies from `wsprompt/prompts/` to rsrc
+playbooks (self-contained `playbook.render` form, `role:` + first-class `tier:`
+frontmatter, model vars where the role carries model guidance): `code-reviewer`
++ the `code-review-correctness/fit/test` partition prompts, `reference-discovery`,
+`mental-model-updater`, `plan-populator-survey`, `plan-populator-research`.
+Reviewer is already added in Phase 1; this phase completes the delegate set so
+every skill-spawned delegate has a canonical rsrc source. Regenerate the manifest;
+mirror into `agents-plugin-wsflow`. The embedded copies are NOT deleted yet (still
+referenced by skill text until Phase 5). Verification: each ported playbook
+renders via `playbook.render` with the expected child-key/vars; manifest guard
+green. Boundary: does not change skill delegation call sites (Phase 5) or remove
+`wsprompt` (Phase 6).
+
+### Phase 5: migrate skill delegation off register(prompts:[stems])
+
+Rewrite the shipped skill playbooks (`lead-implement` and any peer that registers
+a prompt-stem delegate: reference-discovery, implementer, reviewer family,
+mental-model-updater, plan-populator) to delegate via `playbook.render` (mint
+child key + self-contained prompt) + `agents.call`/native spawn, removing every
+`register(prompts:[stems])` / `prompts:`-field call against the post-2c schema.
+Mirror each change into `agents-plugin-wsflow` with no ws-only references; manifest
+regen. Verification: no shipped skill text references the removed `prompts`
+register field; a representative delegation (e.g. lead-implement → implementer)
+renders + spawns end-to-end on both ws and wsflow. Boundary: leaves the now-unused
+embedded delegate prompts in place for Phase 6 to delete.
+
+### Phase 6: retire the wsprompt loader entirely
+
+Move `wsprompt`'s remaining non-delegate consumers onto rsrc and remove the
+go:embed loader: rewire `api.ask` hard-coded prompt stems to rsrc playbooks;
+rewire the wsflow `prompt.render` MCP tool off `wsprompt.RenderSource` onto rsrc
+loading (reconcile the `#260529-prompt-render-tool` contract + the five-stem
+render-eligibility allowlist); delete the now-orphaned embedded delegate prompt
+bodies and the `wsprompt` package; collapse the prompt-bundle-hash / `runtime.json`
+bundle-metadata machinery that only served embedded prompts (verify launcher
+fast-path/fallback validation still agrees). Rewrite mental-model `prompt-bundle.md`
+line 27 (and related entry-point/coupling text) to the single-rsrc-source-of-truth
+model. Verification: `wsprompt` package gone; `go build/vet/test ./...` green;
+wsflow `prompt.render` still serves its allowlisted stems from rsrc; launcher
+validation green; `api.ask` resolves its prompts from rsrc. Boundary: this is the
+last phase; it depends on Phases 4+5 having moved every delegate consumer first.
+
 ## Spec Impact
 
 **Target spec areas + caller-visible change (per phase):**
@@ -134,12 +239,31 @@ surface only if research 260611 promotes that surface into this ticket.
   tier vocabulary `small/medium/large/xlarge` (capability axis) sits above the
   existing `light/core/deep` alias layer; frontmatter declares `role:` + `tier:`
   in first-class vocab; locked mapping `light↦small`/`core↦medium`/`deep↦large`.
+- **Phase 4** (port delegate prompts to rsrc) — no caller-visible contract; adds
+  rsrc playbook assets + manifest entries. Internal source convergence only.
+- **Phase 5** (skill delegation migration) — touches `ai-docs/spec/workflow-skills.md`
+  delegation/registration text: skills delegate via `playbook.render` + spawn,
+  no longer via `register(prompts:[stems])` (the register field was already
+  removed by `260508-agents-register-model-alias-field` spec-remove in M3; this
+  reconciles the skill-side delegation contract to match).
+- **Phase 6** (wsprompt retirement) — touches `#260529-prompt-render-tool` in
+  `ai-docs/spec/mcp-tools.md`: the wsflow `prompt.render` tool's source changes
+  from the embedded `wsprompt.RenderSource` bundle to rsrc loading (the
+  render-eligibility allowlist + namespace-substitution contract are preserved;
+  the backing loader is reconciled). `api.ask`'s prompt source moves to rsrc.
+  Removes the embedded-prompt-bundle hash/`runtime.json` metadata surface from the
+  launcher-validation contract.
 
 **Contract-first spec: no.** The full tier-vocabulary contract (first-class set,
 capability axis, alias mapping, frontmatter `tier:`/`role:`) is already captured
 in this ticket's `## Decisions` and research `260611`; the surfaces being
-extended are already spec'd (`260610`, `260508`, `260513`). The spec entries are
+extended are already spec'd (`260610`, `260508`, `260513`). The convergence
+phases (4-6) preserve observable behavior — they migrate the *source* of delegate
+prompts and the wsflow `prompt.render` backing loader without changing the
+rendered output or the render-eligibility/namespace contract — so they reconcile
+existing stems (`#260529-prompt-render-tool`, `workflow-skills.md` delegation
+text) at closeout rather than fixing a new contract up front. The spec entries are
 best authored at closeout against the concrete implemented anchors (exact field
-names, the `config.agents_tier` first-class indexing). The doc-pre-pass
-`lead-update-spec` run reconciles `mcp-tools.md` + `workflow-skills.md` within
-each phase's commit range.
+names, the `config.agents_tier` first-class indexing, the post-retirement
+`prompt.render` source). The doc-pre-pass `lead-update-spec` run reconciles
+`mcp-tools.md` + `workflow-skills.md` within each phase's commit range.
