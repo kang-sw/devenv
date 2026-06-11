@@ -533,7 +533,7 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		t.Fatalf("default deep tier = %#v", deep)
 	}
 
-	show("config", "agents-tier", "--tier", "light", "--model", "gemini-3-1-pro")
+	show("config", "agents-tier", "--tier", "light", "--model", "claude-sonnet-4")
 
 	var after struct {
 		Path   string `json:"path"`
@@ -554,7 +554,7 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &after)
 	light := after.Config.Agents.Tiers["light"]
-	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
+	if after.Path != wantConfigPath() || light.Backend != "claude" || light.Model != "claude-sonnet-4" {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
 	}
 

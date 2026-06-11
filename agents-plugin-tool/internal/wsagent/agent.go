@@ -1655,7 +1655,7 @@ func backendInvocationError(agent Agent, err error) error {
 	b.WriteString("\n\nhint:\n")
 	b.WriteString("If the configured backend is unavailable on this machine, fix that backend and retry, or switch explicitly.\n")
 	b.WriteString("PATH-detected backend binaries:\n")
-	for _, backend := range []string{"codex", "claude", "gemini"} {
+	for _, backend := range []string{"codex", "claude"} {
 		if path, lookErr := exec.LookPath(backend); lookErr == nil {
 			fmt.Fprintf(&b, "- %s: %s\n", backend, path)
 		} else {

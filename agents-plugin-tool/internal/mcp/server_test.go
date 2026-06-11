@@ -108,7 +108,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 		t.Fatalf("config.show json response mismatch: %s", byID["1"])
 	}
 
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "gemini-3-1-pro", "low"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "claude-sonnet-4", "low"); err != nil {
 		t.Fatalf("SetAgentsTier returned error: %v", err)
 	}
 	out.Reset()
@@ -119,7 +119,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 	}
 	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	showAfter := toolText(t, byID["2"])
-	if !strings.Contains(showAfter, `"backend":"gemini"`) || !strings.Contains(showAfter, `"model":"gemini-3-1-pro"`) || !strings.Contains(showAfter, `"effort":"low"`) {
+	if !strings.Contains(showAfter, `"backend":"claude"`) || !strings.Contains(showAfter, `"model":"claude-sonnet-4"`) || !strings.Contains(showAfter, `"effort":"low"`) {
 		t.Fatalf("config.show response missing tier mapping: %s", byID["2"])
 	}
 
@@ -196,13 +196,13 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"gemini-3-1-pro"}}}`+"\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"claude-sonnet-4"}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	configText := toolText(t, byID["1"])
-	if !strings.Contains(configText, `"backend":"gemini"`) || !strings.Contains(configText, `"model":"gemini-3-1-pro"`) {
+	if !strings.Contains(configText, `"backend":"claude"`) || !strings.Contains(configText, `"model":"claude-sonnet-4"`) {
 		t.Fatalf("config response missing tier mapping: %s", byID["1"])
 	}
 

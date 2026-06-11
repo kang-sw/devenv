@@ -345,7 +345,7 @@ func configAgentsTier(args []string) {
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
 	effort := fs.String("effort", "", "portable reasoning effort for this alias: none, low, medium, high, or xhigh")
-	harness := fs.String("harness", "", "harness alias key to configure: codex, claude, gemini, or default")
+	harness := fs.String("harness", "", "harness alias key to configure: codex, claude, or default")
 	_ = fs.Parse(args)
 
 	var effortProvided bool
