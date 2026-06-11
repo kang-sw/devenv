@@ -43,6 +43,22 @@ spawn-removal, or adapter boundaries (the Prep step today calls `mental_models.f
 but does not pull the migration anchor). Verification: a gap-handling rule the lead
 follows + (if enforced) a Prep/route step that loads the anchor for in-scope tasks.
 
+### Phase 3: Ticket-write consent gate (persist only confirmed decisions)
+
+Dogfood (2026-06-12, same tier-taxonomy discussion). While parking a follow-up,
+the lead wrote a *mechanism* decision (`render-param forwarding`) into the ticket
+`## Decisions` BEFORE the user had confirmed it — the user had agreed only to
+parking the `ws.mercenary.*` rename, and the mechanism was still under discussion
+(it was later superseded by a different design). The lead-write-ticket /
+lead-proceed surfaces should gate decision capture on explicit user agreement:
+persist only decisions the user has confirmed, and before a ticket-cleanup pass,
+surface the full set of open items and get agreement on ALL of them at once rather
+than committing a draft decision that then needs correction/revert. Likely
+surface: `lead-write-ticket` Apply-Ticket-Content / Intent-Review guidance + a
+"confirmed-only" capture rule. Verification: a rule the lead follows + a
+representative discussion where unconfirmed decisions are held back until
+agreement.
+
 ## Notes
 
 - Captured at `todo` (accepted backlog), not spec-addressed; slicing and spec

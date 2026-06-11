@@ -101,29 +101,49 @@ constraint, and is rewritten at closeout.
   deleted only after both the skill migration (Phase 5) and the loader retirement
   (Phase 6) remove its last consumer. Rejected: keep `wsprompt` for non-delegate
   internal callers (the user chose full retirement so rsrc is the single source).
-- **Mercenary spawn = render-param forwarding (confirmed 2026-06-12).** The
-  delegation-spawn tool accepts the `playbook.render` parameters (`name`,
-  `context?`, `root_override?`) plus an agent-role `name`/optional `backend`, and
-  renders the playbook *internally* (one server-side mint + splice + tier
-  resolution) instead of taking a pre-rendered `system_prompt_text`. This is the
-  mechanism by which frontmatter `tier:` reaches `RegisterOptions.Tier`: render
-  and register collapse into one handler, so tier never travels between two MCP
-  calls and needs no credential-block parsing or caller-typed tier value.
-  `playbook.render` stays standalone for the native path (host subagent reads the
-  rendered file); only the mercenary path renders inside the spawn (no double
-  mint). `system_prompt_text` is retained as the path for non-playbook internal
-  callers (api_docs). Rejected: re-adding a caller-chosen `tier` arg (reverses 2c
-  spec-remove `260508`) and scanning the spliced key out of `system_prompt_text`
-  (brittle prompt coupling).
+- **Tier routing = render-returned recommended tier + register pass-through
+  (confirmed 2026-06-12).** `playbook.render`/`print` is the single delegation
+  entry point — called exactly once per delegation (no double-render) — and returns
+  a structured `recommended-tier` (first-class) read from the playbook frontmatter
+  alongside the rendered body. The lead reuses that one value for BOTH paths: a
+  native subagent takes it as a host model-selection guide; a mercenary passes it
+  to `agents.register` (re-introduced `tier` arg) which maps first-class→alias and
+  sets `RegisterOptions.Tier`. The register `tier` arg is a *pass-through of the
+  render-returned value* (origin = frontmatter), NOT a caller-chosen workload tier —
+  so 2c's intent (declarative tier, caller does not hand-pick) is preserved while
+  the previously-missing routing bridge is finally built. Why this over the
+  alternatives: native delegation also needs the tier, so a render-returned value
+  serves both paths through one entry point. Rejected: register internally
+  re-rendering the playbook ("absorb" form — splits the native vs mercenary render
+  path and risks a double mint/double render); scanning the spliced key/tier out of
+  `system_prompt_text` (brittle prompt coupling). spec `260508`/`260610` reconcile
+  to "register tier = render pass-through channel".
+- **Tier is single-sourced in frontmatter; the body never hardcodes it (confirmed
+  2026-06-12).** A delegate playbook declares its base tier ONLY in frontmatter
+  `tier:` (one maintenance point). The body / spawn-guidance text must not restate a
+  literal tier — the Phase 1 "Suggested capability tier: medium" body line is
+  exactly this duplication and is removed. When guidance text must reference a tier,
+  it pulls it from frontmatter via a variable (e.g. `<suggested-tier>`, or an
+  "elevated to `{{.DeepTier}}`"-style phrase), never a hardcoded literal. Corollary:
+  if a tier guide is duplicated between a lead playbook and a delegate frontmatter,
+  the lead-playbook copy is the one that goes (tooling/frontmatter is the source) —
+  see Phase 3.
+- **multi-prompt combine respects the first (primary) playbook's tier (confirmed
+  2026-06-12).** Delegate prompt families that combine multiple prompts (e.g.
+  reviewer = code-reviewer + correctness/fit/test) combine at render time as
+  separate rsrc playbooks — NOT merged into one playbook, which would duplicate the
+  shared Process/Output sections heavily. When combined tiers differ, the first
+  (primary-role) playbook's tier wins. Scoped to Phase 4; Phase 2 handles a single
+  playbook's tier only.
 - **`ws.mercenary.*` surface migration (confirmed 2026-06-12; future phase).**
   The delegation spawn/lifecycle tools migrate from the generic `agents.*`
   namespace to a dedicated `ws.mercenary.*` surface. Rationale: tool naming
   materially affects LLM behavioral clarity — `ws.mercenary.spawn` makes the
   delegation intent legible where `agents.register` is generic. Parked as Phase 7
   (after the Phase 5 skill migration) to avoid churning the contract twice:
-  Phase 2 builds the render-param-forwarding spawn on the current
-  `agents.register` name; Phase 7 renames the converged surface + migrates
-  skills/spec/wsflow.
+  Phase 2 builds the tier-aware `agents.register` (render-returned tier
+  pass-through) on the current name; Phase 7 renames the converged surface +
+  migrates skills/spec/wsflow.
 
 ## Constraints
 
@@ -224,13 +244,18 @@ Thread a first-class tier from frontmatter (default) into the render-minted
 child's `RegisterOptions.Tier` so a mercenary spawn resolves against the user's
 custom `config.agents_tier` entry instead of being pinned to core
 (`agent.go` hardcodes `opts.Tier = "core"` when no tier flows in).
-**Mechanism (confirmed 2026-06-12): render-param forwarding** — the spawn tool
-(`agents.register` for now; renamed to `ws.mercenary.*` in Phase 7) gains the
-`playbook.render` params (`name`/`context?`/`root_override?`) and renders the
-playbook internally (mint + splice + frontmatter tier), maps first-class→alias,
-and sets `RegisterOptions.Tier`; `playbook.render` stays standalone for the
-native path and `system_prompt_text` is retained for non-playbook internal
-callers (api_docs). **Per-spawn override path (resolved at promotion):
+**Mechanism (confirmed 2026-06-12): render returns recommended-tier, register
+passes it through** — `playbook.render`/`print` returns a structured first-class
+`recommended-tier` (read from frontmatter) alongside the body, called once per
+delegation. `agents.register` (renamed to `ws.mercenary.*` in Phase 7) regains a
+`tier` arg that is a *pass-through* of that render-returned value; the handler
+maps first-class→alias and sets `RegisterOptions.Tier`. The one returned value
+serves both paths — native (host model-selection guide) and mercenary (register
+tier). `system_prompt_text` stays for non-playbook internal callers (api_docs).
+The playbook body must not hardcode a tier literal — frontmatter `tier:` is the
+single source — so the Phase 1 "Suggested capability tier: medium" body line is
+removed here (guidance text, if any, pulls the tier via a variable like
+`<suggested-tier>`). **Per-spawn override path (resolved at promotion):
 frontmatter-only first** — the
 frontmatter `tier:` (mapped first-class→alias) is the sole tier source for this
 phase; a per-render `tier` override arg on `playbook.render` is explicitly
@@ -251,6 +276,13 @@ the locked `deep↦large`, `core↦medium` mapping) — in the
 mental-model text that frames `light/core/deep` as "the tier abstraction" to the
 alias-layer framing. Adds the `(skill, role) → first-class tier` config override
 surface only if research 260611 promotes that surface into this ticket.
+
+Also resolve the tier-guide single-source (per the frontmatter-single-source
+decision): where a delegate's tier is stated in BOTH a lead playbook (e.g. the
+`review-allocation` table) and the delegate's frontmatter, the lead-playbook copy
+is reduced to a pointer/variable so the delegate frontmatter `tier:` stays the one
+maintenance point. The `recommended-tier` that `playbook.render` returns (Phase 2)
+is the runtime channel for that single source.
 
 ### Phase 4: port remaining delegate prompts to canonical rsrc playbooks
 
@@ -300,8 +332,8 @@ consumer first.
 ### Phase 7: migrate the delegation surface to `ws.mercenary.*`
 
 Rename the delegation spawn/lifecycle tools from the generic `agents.*` namespace
-to a dedicated `ws.mercenary.*` surface (e.g. `ws.mercenary.spawn` for the
-render-param-forwarding spawn built in Phase 2, plus `call`/`status`/`result`/
+to a dedicated `ws.mercenary.*` surface (e.g. `ws.mercenary.spawn`/`register` for
+the tier-aware register built in Phase 2, plus `call`/`status`/`result`/
 `cancel`/diagnostics as the retained mercenary lifecycle dictates), updating the
 MCP dispatch, the full `runtime.json`, skill/playbook text, and the wsflow mirror.
 Rationale: tool naming materially drives LLM behavioral clarity (decision
@@ -322,10 +354,15 @@ delegation spawns end-to-end on both ws and wsflow under the new names; spec
   keys) and `260609-playbook-tools` (`playbook.render` variable substitution);
   the asset just makes that behavior reachable on the shipped surface.
 - **Phase 2** (per-spawn tier routing) — extends
-  `260610-mercenary-delegation-surface` in `ai-docs/spec/mcp-tools.md`:
-  caller-visible change is that a mercenary's model now resolves from its
-  frontmatter `tier:` (first-class→alias→`config.agents_tier`) instead of being
-  pinned to `core`. Frontmatter-only tier source (no new `playbook.render` arg).
+  `260610-mercenary-delegation-surface` + the `agents.register` / `playbook.render`
+  entries in `ai-docs/spec/mcp-tools.md`: `playbook.render`/`print` now returns a
+  structured first-class `recommended-tier` (read from frontmatter), and
+  `agents.register` regains a `tier` arg that is a *pass-through* of that value
+  (origin = frontmatter, not caller-chosen), mapping
+  first-class→alias→`config.agents_tier`. Caller-visible change: a mercenary's
+  model resolves from its playbook frontmatter `tier:` instead of being pinned to
+  `core`; this reconciles the 2c `260508` tier-removal to "register tier = render
+  pass-through channel" (the value origin stays declarative).
 - **Phase 3** (first-class vocabulary) — touches the alias-config spec
   (`260508-model-alias-config-tools` / `260513-harness-local-agent-tier-config`
   in `ai-docs/spec/mcp-tools.md`) and the reviewer-allocation default in
