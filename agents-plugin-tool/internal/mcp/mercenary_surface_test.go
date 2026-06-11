@@ -362,3 +362,84 @@ func TestAgentCallHandleTextShape(t *testing.T) {
 		}
 	}
 }
+
+// shippedRsrcRootForTest is the real shipped rsrc tree
+// (internal/mcp → repo root → agents-plugin/rsrc).
+func shippedRsrcRootForTest() string {
+	return filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+}
+
+// TestRenderGoldenShippedDelegateChildKey exercises the render-minted child-key
+// splice on the REAL shipped delegate playbooks (implementer, reviewer), not an
+// in-memory fixture. This is the coverage that catches "the mechanism exists but
+// no shipped asset declares role:" — the gap that 260609 Edition 379ff5e5
+// described (every real render had meta.Role == "" so the credential block never
+// fired). Closes 260611 Phase 1 gap 1.
+func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+	mintRoot := "/work/tree-a"
+
+	for _, name := range []string{"implementer", "reviewer"} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServerWithHarness(t, "claude")
+			body, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, false)
+			if err != nil {
+				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
+			}
+			if !strings.Contains(body, "Your ws session_key") {
+				t.Fatalf("shipped %s render missing credential block:\n%s", name, body)
+			}
+			key := extractSplicedKey(t, body)
+			entry, ok := s.sessions.lookup(key)
+			if !ok {
+				t.Fatalf("minted key %q not found in registry", key)
+			}
+			if entry.root != mintRoot {
+				t.Errorf("minted key root = %q, want %q", entry.root, mintRoot)
+			}
+			if entry.scope != roleDelegate {
+				t.Errorf("minted key scope = %q, want %q (delegate role)", entry.scope, roleDelegate)
+			}
+		})
+	}
+}
+
+// TestRenderGoldenShippedDelegateModelVarsPerHarness verifies the tier model vars
+// resolve to per-harness model strings on the REAL shipped delegate playbooks.
+// implementer declares {{.CoreModel}} (tier medium↦core alias); reviewer declares
+// {{.DeepModel}} (tier large↦deep alias). An isolated empty CacheHome yields the
+// built-in default aliases (claude: core→sonnet, deep→opus; codex: core/deep→gpt-5.5),
+// so the assertions are deterministic and config-independent. Closes 260611 Phase 1
+// gap 2 (260609 Edition 379ff5e5: tier model vars never surfaced on a shipped asset).
+func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+
+	render := func(t *testing.T, name, harness string) string {
+		t.Helper()
+		s := newTestServerWithHarness(t, harness)
+		body, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", false)
+		if err != nil {
+			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
+		}
+		return body
+	}
+
+	// implementer → CoreModel: claude=sonnet, codex=gpt-5.5 (distinct per harness).
+	implClaude := render(t, "implementer", "claude")
+	implCodex := render(t, "implementer", "codex")
+	if !strings.Contains(implClaude, "sonnet") {
+		t.Errorf("implementer (claude) body must surface CoreModel 'sonnet':\n%s", implClaude)
+	}
+	if !strings.Contains(implCodex, "gpt-5.5") {
+		t.Errorf("implementer (codex) body must surface CoreModel 'gpt-5.5':\n%s", implCodex)
+	}
+	if implClaude == implCodex {
+		t.Error("implementer render did not diverge per harness — model var not resolved per harness")
+	}
+
+	// reviewer → DeepModel: claude=opus.
+	revClaude := render(t, "reviewer", "claude")
+	if !strings.Contains(revClaude, "opus") {
+		t.Errorf("reviewer (claude) body must surface DeepModel 'opus':\n%s", revClaude)
+	}
+}
