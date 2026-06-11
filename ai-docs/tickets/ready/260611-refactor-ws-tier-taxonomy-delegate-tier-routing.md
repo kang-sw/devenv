@@ -267,6 +267,57 @@ mercenary to each, and asserts the subprocess resolves to the custom
 backend/model (not core). Closes 260609 Edition `0c7c0f50` gap 3 + the oneShot
 flag.
 
+### Result (54e53d70) - 2026-06-12
+
+Landed on `implement/ws-tier-taxonomy-phase2` (stacked on the unmerged Phase 1
+tip `6876249f`). A mercenary now resolves its model from the playbook frontmatter
+`tier:` via `config.agents_tier` instead of being pinned to `core` (closes 260609
+Edition `0c7c0f50` gap 3 + the oneShot flag).
+
+Mechanism is the user-confirmed render-returned-tier + register pass-through (NOT
+the prematurely-recorded "render-param forwarding"):
+- `renderPlaybookBody` now returns `(body, recommendedTier, err)`; the
+  `playbook.print`/`playbook.render` handlers append a `recommended-tier:
+  <first-class>` line via `withRecommendedTier` (omitted when no tier). One render
+  call routes both paths — native model guide + mercenary register tier.
+- `agents.register` regains a `tier` arg (schema + handler) that is a pass-through
+  of that value, mapped first-class→alias by `firstClassTierToAlias`
+  (`small↦light`, `medium↦core`, `large↦deep`, `xlarge↦deep`; aliases pass through;
+  empty/unknown → `""` so Register keeps its default). `prompts`/`prompt_refs`/
+  `model` stay removed.
+- Removed `Manager.oneShot()`/`oneShotOptions` + its test (test-only dead code);
+  `syncCall`/`syncCallOptions` retained (other tests use them).
+- rsrc: dropped the hardcoded tier literal from the shipped implementer/reviewer
+  bodies (frontmatter `tier:` is the single source); kept the `{{.CoreModel}}`/
+  `{{.DeepModel}}` model var so Phase 1 gap-2 coverage holds. Manifest regenerated.
+- Tests: `TestFirstClassTierToAlias`, `TestWithRecommendedTier`,
+  `TestRenderReturnsFrontmatterRecommendedTier` (shipped playbooks surface
+  medium/large), `TestMercenaryTierRoutingResolvesCustomModel` (custom light&deep
+  via `config.agents_tier` resolve to the custom backend/model, not core — the
+  ticket e2e); updated `TestRegisterSchemaDropsLegacyFields` (tier now kept).
+
+Verification: `go build/vet ./...` clean; `go test ./... -count=1` green (all 13
+packages; mcp 16.8s incl. new tier tests + manifest guard). Spec
+`#260610-mercenary-delegation-surface` reconciled (`4564d682`); mental models
+`prompt-bundle`/`named-agent-runtime` updated (`a7958683`).
+
+Deviations / notes:
+- Review was a single native subagent (returned `[clean]` first pass, 0
+  Critical/Important), not a ws mercenary reviewer — the post-2c ws delegation
+  path still needs the crash-prone subprocess backend and `register(prompts)` is
+  the removed surface Phase 5 migrates; proportionate for a contained diff.
+  Recorded deviation from "named-agent delegation first" (continues Phase 1).
+- Process correction: the mechanism was first recorded prematurely (`379e7bda`)
+  before user confirmation, then corrected (`37445d3a`); the consent-gate dogfood
+  is captured in `260611-chore-lead-discussion-gap-discipline` Phase 3.
+- rsrc-only prompt change → prompt bundle hash decoupled, `runtime.json`
+  unchanged; wsflow is agentless (no rsrc tree, `agents.*` hidden) → no mirror.
+
+> Forward (Phase 3): teach `wsconfig` the first-class vocabulary (retire the
+> MCP-layer `firstClassTierToAlias` bridge), re-author the `review-allocation`
+> reviewer-tier default in first-class vocab, and unify the lead-playbook tier
+> guide onto the frontmatter/`recommended-tier` single source.
+
 ### Phase 3: first-class tier vocabulary adoption + migration
 
 Re-author the `judge: review-allocation` reviewer-tier default (dropped

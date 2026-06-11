@@ -244,12 +244,17 @@ dropped tickets live in hidden archive dirs and git history.
   re-authored in first-class vocab. **Absorbed 2026-06-12:** full delegate-prompt
   convergence — port delegate prompts to rsrc (P4), migrate skills off
   `register(prompts)` (P5), retire the `wsprompt` loader incl. `api.ask`/wsflow
-  `RenderSource` rewire (P6). 6 phases (1-3 tier surface independent of 4-6
+  `RenderSource` rewire (P6); migrate the delegation surface to `ws.mercenary.*`
+  (P7, naming clarity). 7 phases (1-3 tier surface independent of 4-6
   convergence); spec addressed via `## Spec Impact` (Contract-first: no — closeout
   reconciles `mcp-tools.md` + `workflow-skills.md` per phase). **Phase 1 done**
   (`3019ade9`): shipped implementer/reviewer delegate playbooks (canonical ports)
-  + parse-only Tier field + shipped-asset e2e. Next: Phase 2 (MCP-reachable
-  per-spawn tier routing).
+  + parse-only Tier field + shipped-asset e2e. **Phase 2 done** (`54e53d70`):
+  `playbook.render`/`print` return a `recommended-tier` line + `agents.register`
+  tier pass-through (`firstClassTierToAlias`) so a mercenary follows its frontmatter
+  tier instead of core, + `oneShot` dead-code removal. Next: Phase 3 (first-class
+  vocab adoption in wsconfig + reviewer-tier default + lead-playbook tier-guide
+  unification).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
