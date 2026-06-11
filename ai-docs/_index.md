@@ -218,8 +218,15 @@ dropped tickets live in hidden archive dirs and git history.
   guidance flip + always-on tip, register schema narrowed (`prompts`/`tier`/`model`
   dropped), native-shaped `agentId=` handle; diagnostic minimization a deliberate
   no-op (spec retains debug.*); bugs `260517`+`260524` re-triaged as live (not
-  dropped). **Phase 3 next** (exec stateless + capability-scope enforcement +
-  dashboard build-fix). **M4**
+  dropped). **Phase 3 complete** (`ec2ad888`, stacked on 2a+2b+2c): exec fully
+  stateless (`exec_jobs.owner_actor_id` dropped via generalized recreate-table
+  migration); capability-scope enforcement folded into the keyed session-key gate
+  (`WS_MCP_TOOL_PROFILE` retired — `Server.role`/`requestedToolRole`/env
+  propagation removed; keyed `callTool` gate is sole authority); dashboard
+  build-fix (test-fixture only, no feature change). All numbered phases done;
+  **2a+2b+2c+3 unmerged, pending one combined merge to the epic**; open fill = the
+  two Phase 2c Editions (delegate `role:`/`tier:` asset + per-spawn/per-role tier
+  routing). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
@@ -243,10 +250,14 @@ dropped tickets live in hidden archive dirs and git history.
   `260523-agents-root-schema-invisibility` removed. **2b complete** (`60015691`,
   stacked on unmerged 2a): gemini runner impl + subquery runtime + retired-path
   diagnostics deleted (Runner interface kept as deferred plug), 3 bug tickets
-  dropped to `.dropped/`, spec/mental-model reconciled. **2c next** (codex
-  `agents.*` → mercenary reshape + render-minted child keys + `260508`
-  register-schema drop + routing gate + bug re-triage). Depends M2 (done), coordinated
-  with M4. Largest milestone. Session keys use a reusable word-chain generator
+  dropped to `.dropped/`, spec/mental-model reconciled. **2c complete**
+  (`0c7c0f50`): `agents.*` reshaped to the mercenary surface, render-minted child
+  keys, `260508` register-schema drop, native `agentId=` handle. **Phase 3
+  complete** (`ec2ad888`): exec stateless + capability-scope fold
+  (`WS_MCP_TOOL_PROFILE` retired) + dashboard build-fix. All numbered phases done;
+  **2a+2b+2c+3 unmerged, pending one combined merge to the epic**; open fill = two
+  2c Editions (delegate asset + per-role tier routing). Depends M2 (done),
+  coordinated with M4. Largest milestone. Session keys use a reusable word-chain generator
   (EFF large diceware, 7772 usable words after dropping 4 hyphenated entries,
   vendored + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it
   to other id surfaces is reserved as `260610-refactor-ws-wordchain-id-generalization`

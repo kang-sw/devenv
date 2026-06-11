@@ -731,6 +731,81 @@ separate dashboard ticket). Verification: exec works without any actor;
 capability-scoped keys gate delegate tools; the dashboard builds and runs against
 the reshaped surface.
 
+### Result (ec2ad888) - 2026-06-11
+
+Final phase landed on `implement/ws-session-auth-phase3` (renamed from
+`...-phase2c`; stacked on unmerged 2a+2b+2c — all four pending a combined merge to
+the epic). Code commits `466d103c..ec2ad888`; review was clean first pass (no
+separate fix commit, so the result hash is the last implementation commit). Lead
+pre-surveyed the three areas via native Explore passes — the survey collapsed the
+phase to a smaller surface than the sketch.
+
+Delivered:
+- **exec fully stateless.** `owner_actor_id` removed from the `exec_jobs` record,
+  DDL, INSERT/ON CONFLICT/SELECT/scan, and the exec→artifact linkage. A
+  drop-column migration generalizes the existing Phase 2a
+  `recreateTableWithoutColumns` helper (added createSQL/removedColumns/tempSuffix
+  params, shared with the agent-table callers) and recreates legacy `exec_jobs`
+  without the column. exec already resolved root via mandatory `session_key` only;
+  `owner_actor_id` (always empty post-2a) was the sole remaining actor residue.
+  The shared `artifacts.owner_actor_id` column is left in place (named-agent
+  infra, out of scope).
+- **Capability-scope fold — the keyed scope is now the sole authority.** Removed
+  the process-wide env role layer: `Server.role`, `requestedToolRole()`, the
+  `roleAllowsTool(s.role, …)` coupling in `toolAllowed`, and the
+  `WS_MCP_TOOL_PROFILE=` env append in `codex.go`/`claude.go`; the now-dead
+  `RegisterOptions`/`RunnerRequest.ToolProfile` field was removed (it terminated at
+  the env seam, no lifecycle widening). The keyed `callTool` gate
+  (`roleAllowsTool(entry.scope, …)` + `ws.lead.*` block for non-lead keys) is
+  unchanged and is the sole tool-permission boundary; `tools/list` advertises the
+  full lead surface (advisory). `WS_MCP_ALLOWED_TOOLS` preserved as a
+  role-independent visibility allowlist. No containment regression: the env layer
+  was verified non-functional and the working replacement (render-minted child
+  key) already shipped in 2c.
+- **Dashboard build-fix.** `cargo build` already succeeded against the reshaped
+  schema (production queries never read actor columns) — confirmed, no production
+  change needed. Aligned the one stale test fixture
+  (`crates/daemon/tests/routes.rs`): dropped the `agent_defs` `actor_id` column
+  from the CREATE, INSERT list, and bind. No Activity feature change
+  (port-vs-remove stays deferred to a separate dashboard ticket).
+
+Tests: realigned the env-profile tests (`TestServeStdioFiltersToolsByProfile` →
+keyed-scope; `TestExplicitAllowedToolsCannotBypassEffectiveRole`) to exercise a
+leaf **session key** through the keyed gate (coverage preserved, not deleted);
+added an `exec_jobs` migration test (legacy column dropped + row data preserved;
+fresh DB omits the column). `go build/vet/test ./... -count=1` green (13/13
+packages); `cargo build` + daemon crate tests green.
+
+Pre-existing red (NOT Phase 3): the Python suites `agents-plugin/tests` and
+`agents-plugin-wsflow/tests` fail on stale skill-dispatch/bundle contracts
+(lead-workflow-manual absent under `agents-plugin/skills/`; lead-proceed route
+text moved to the playbook). Verified identical at epic base `c917c9f0`, and the
+Phase 3 diff is disjoint (Go+Rust only). Captured as idea
+`260611-bug-skill-dispatch-contract-tests-stale-after-entry-shim-migration`.
+
+Review: partitioned (correctness/fit/test), all `[clean]` first pass. Two
+non-blocking notes accepted: the dropped `tools/list`-hidden assertion is
+by-design (schema is advisory post-fold), and the generalized-migration
+agent-table branch is transitively covered by the green 2a migration tests.
+Reviewers ran native (default delegation; the user did not request mercenary); a
+reviewer-tier policy (correctness→deep, fit/test→core) was adopted for future
+delegations.
+
+Spec: `#260505-tool-profile-gating` reconciled (`WS_MCP_TOOL_PROFILE` retired as
+authority; the keyed gate is the enforcement; Planned callout dropped) plus the
+stale exec `actor/session binding` wording (`12140a70`). Mental models
+mcp-runtime + named-agent-runtime updated (`9d0d15d0`); the mental-model-updater
+was lead-authored due to host-neutral delegation friction (register dropped the
+prompt-bundle field; a native delegate lacks the bundle).
+
+> Forward: the two Phase 2c Editions (delegate playbook `role:`/`tier:` asset +
+> MCP-reachable per-spawn/per-role tier routing) remain open fill scope the user
+> elected to complete; the per-role/per-partition delegation-tuning config idea
+> (`260611-research-ws-per-role-delegation-tuning-config`) generalizes the tier
+> direction. Re-triaged bugs `260517` + `260524` stay live on the retained
+> mercenary path. All of 2a+2b+2c+3 await a single combined merge to epic
+> `260605` by user decision (this phase was run "without merging").
+
 Phase order: 1 → 2a → 2b → 2c → 3, strictly sequential. Phase 1 (additive
 session-auth) before 2a (session-auth must exist before the actor model is
 deleted). 2a (sever the actor dependency + mandatory key) before 2b (the retired
