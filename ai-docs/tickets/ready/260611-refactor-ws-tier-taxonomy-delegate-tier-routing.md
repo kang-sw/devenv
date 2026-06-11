@@ -92,9 +92,12 @@ the key new coverage. Closes 260609 Edition `379ff5e5` gaps 1+2.
 Thread a first-class tier from frontmatter (default) into the render-minted
 child's `RegisterOptions.Tier` so a mercenary spawn resolves against the user's
 custom `config.agents_tier` entry instead of being pinned to core
-(`agent.go` hardcodes `opts.Tier = "core"` when no tier flows in). Decide the
-per-spawn override path at ready promotion (a per-render `tier` arg vs
-frontmatter-only first). Remove the `Manager.oneShot()` / `oneShotOptions` dead
+(`agent.go` hardcodes `opts.Tier = "core"` when no tier flows in). **Per-spawn
+override path (resolved at promotion): frontmatter-only first** — the
+frontmatter `tier:` (mapped first-class→alias) is the sole tier source for this
+phase; a per-render `tier` override arg on `playbook.render` is explicitly
+deferred to the `(skill, role) → tier` role-config surface in research 260611,
+not built here. Remove the `Manager.oneShot()` / `oneShotOptions` dead
 code (test-only despite the 2c Result's "live caller" note). Verification: an
 e2e test that customizes light & deep via `config.agents_tier`, routes a
 mercenary to each, and asserts the subprocess resolves to the custom
@@ -113,7 +116,30 @@ surface only if research 260611 promotes that surface into this ticket.
 
 ## Spec Impact
 
-Deferred to ready promotion. Per-spawn tier routing + frontmatter `tier:` are
-caller-visible MCP/playbook behavior; the likely targets are the existing
-`260610-mercenary-delegation-surface` and `playbook.render` (`260609-playbook-tools`)
-stems plus a vocabulary-migration pass. Contract-first spec: TBD at promotion.
+**Target spec areas + caller-visible change (per phase):**
+
+- **Phase 1** (shipped delegate asset) — no new contract. Exercises behavior
+  already specified by `260610-mercenary-delegation-surface` (render-minted child
+  keys) and `260609-playbook-tools` (`playbook.render` variable substitution);
+  the asset just makes that behavior reachable on the shipped surface.
+- **Phase 2** (per-spawn tier routing) — extends
+  `260610-mercenary-delegation-surface` in `ai-docs/spec/mcp-tools.md`:
+  caller-visible change is that a mercenary's model now resolves from its
+  frontmatter `tier:` (first-class→alias→`config.agents_tier`) instead of being
+  pinned to `core`. Frontmatter-only tier source (no new `playbook.render` arg).
+- **Phase 3** (first-class vocabulary) — touches the alias-config spec
+  (`260508-model-alias-config-tools` / `260513-harness-local-agent-tier-config`
+  in `ai-docs/spec/mcp-tools.md`) and the reviewer-allocation default in
+  `ai-docs/spec/workflow-skills.md`. Caller-visible change: a new first-class
+  tier vocabulary `small/medium/large/xlarge` (capability axis) sits above the
+  existing `light/core/deep` alias layer; frontmatter declares `role:` + `tier:`
+  in first-class vocab; locked mapping `light↦small`/`core↦medium`/`deep↦large`.
+
+**Contract-first spec: no.** The full tier-vocabulary contract (first-class set,
+capability axis, alias mapping, frontmatter `tier:`/`role:`) is already captured
+in this ticket's `## Decisions` and research `260611`; the surfaces being
+extended are already spec'd (`260610`, `260508`, `260513`). The spec entries are
+best authored at closeout against the concrete implemented anchors (exact field
+names, the `config.agents_tier` first-class indexing). The doc-pre-pass
+`lead-update-spec` run reconciles `mcp-tools.md` + `workflow-skills.md` within
+each phase's commit range.
