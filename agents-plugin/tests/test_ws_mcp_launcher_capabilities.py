@@ -305,6 +305,32 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             # A non-plugin path must not activate local repair.
             self.assertIsNone(launcher.local_devenv_cache_package(home / "somewhere" / "ws"))
 
+    def test_apply_rsrc_root_env_points_runtime_at_staged_rsrc_tree(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            rsrc_root = plugin_dir / "rsrc"
+            rsrc_root.mkdir()
+
+            # When the rsrc tree is staged and the caller did not set the seam,
+            # the launcher hands the runtime the real <plugin>/rsrc location
+            # (the runtime's own <dir(exe)>/../rsrc derivation would miss it
+            # because the binary lives under <plugin>/.runtime/<platform>/).
+            env = {}
+            launcher.apply_rsrc_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_RSRC_ROOT"], str(rsrc_root))
+
+            # A caller-provided WS_RSRC_ROOT is preserved.
+            env = {"WS_RSRC_ROOT": "/custom/rsrc"}
+            launcher.apply_rsrc_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_RSRC_ROOT"], "/custom/rsrc")
+
+            # No rsrc tree staged: leave resolution to the runtime default.
+            env = {}
+            launcher.apply_rsrc_root_env(plugin_dir / "nope", env)
+            self.assertNotIn("WS_RSRC_ROOT", env)
+
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()
 

@@ -639,6 +639,19 @@ def detect_project_root(plugin_dir: Path) -> None:
             return
 
 
+def apply_rsrc_root_env(plugin_dir: Path, env: dict) -> None:
+    """Point the runtime at the staged rsrc tree through its WS_RSRC_ROOT seam.
+
+    The runtime derives the rsrc tree as <dir(exe)>/../rsrc, but the launcher
+    installs the binary under <plugin>/.runtime/<platform>/ -- two levels below
+    the plugin root where the rsrc/ tree is staged -- so the derived path misses
+    <plugin>/rsrc. Set the seam unless the caller already provided it.
+    """
+    rsrc_root = plugin_dir / "rsrc"
+    if rsrc_root.is_dir() and not env.get("WS_RSRC_ROOT"):
+        env["WS_RSRC_ROOT"] = str(rsrc_root)
+
+
 def main() -> int:
     launcher_path = Path(__file__).resolve()
     plugin_dir = launcher_path.parent.parent
@@ -680,6 +693,7 @@ def main() -> int:
     note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
 
     os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
+    apply_rsrc_root_env(plugin_dir, os.environ)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":
         return subprocess.call(args)
