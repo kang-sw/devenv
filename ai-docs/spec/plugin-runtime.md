@@ -181,7 +181,6 @@ doctor
 runtime
 serve
 smoke
-subquery
 config
 path
 agents

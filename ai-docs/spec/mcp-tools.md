@@ -277,18 +277,6 @@ non-move ticket changes rather than inventing a destination status.
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
-`subquery` starts an asynchronous scoped codebase or documentation query and
-returns a generated subquery key immediately. Callers collect the result through
-the named-agent result/status/tail/cancel surfaces.
-
-> [!note] Planned 🚧
-> The `subquery` tool runtime is removed. Scoped exploration, survey, and
-> one-turn fact-finding move to host-native subagents rendered through the
-> playbook surface (`#260609-playbook-harness-rendering`); the mercenary surface
-> (`#260610-mercenary-delegation-surface`) is scoped to implementer/reviewer only
-> and does not cover exploration. The skill-facing `subquery` contract is retired;
-> `path.generate` is unaffected. Current behavior is unchanged until removal lands.
-
 `path.generate` allocates worktree-scoped writable artifact paths, such as review
 files, so workflow agents can exchange file paths without inventing cache
 locations.
@@ -297,15 +285,15 @@ locations.
 
 The MCP server supports an environment-selected agentless product mode for the
 internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
-omit named-agent, subquery, model-alias configuration, and agent-backed API
-documentation surfaces: `agents.*`, `subquery`, `config.agents_tier`,
+omit named-agent, model-alias configuration, and agent-backed API
+documentation surfaces: `agents.*`, `config.agents_tier`,
 `api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel`.
 `api.list` remains available as read-only cache discovery.
 
 Explicit calls to hidden agent-backed tools fail with a clear disabled error and
 do not start named-agent workers. Runtime capability output and CLI command
 surfaces match the selected mode, so no-agent mode omits the hidden MCP tools
-and matching CLI groups such as `agents`, `subquery`, and
+and matching CLI groups such as `agents` and
 `config agents-tier`.
 
 `WS_MCP_NAMESPACE=wsflow` changes ordinary user-facing namespace text to
@@ -441,9 +429,8 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 > are dropped in favor of a single self-contained prompt from `playbook.render`;
 > the former actor-scoped root invisibility contract is already removed under
 > mandatory session keys (Phase 2a); mercenaries are scoped to implementer/reviewer
-> roles only; and the
-> gemini runner, the `subquery` runtime, exploration-purpose spawns, and
-> diagnostic sprawl beyond mercenary needs are removed. The cancel-retry guidance
+> roles only; and diagnostic sprawl beyond mercenary needs is reduced. The
+> cancel-retry guidance
 > (`#260512-agent-cancel-resume-guidance`) and hidden `agents.recall`
 > (`#260512-agent-recall-hidden-surface`) carry over to the mercenary path. Current
 > behavior is unchanged until the reshape lands.
@@ -453,7 +440,7 @@ or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
 immediately. Named-agent calls resolve their root from the mandatory `session_key`
 like every other root-aware tool (`#260610-ephemeral-session-auth-model`): no
-`agents.*` or `subquery` schema advertises a `root` argument, and there is no
+`agents.*` schema advertises a `root` argument, and there is no
 actor scope, hidden explicit-root dispatch, or persistent child-actor credential
 injection. The named-agent registry namespaces role pointers by the resolved
 worktree root, so the same public agent name stays distinct across distinct
@@ -673,10 +660,8 @@ environment variables consistently.
 
 `WS_MCP_TOOL_PROFILE` is an optional profile filter, not an authority boundary.
 When the host successfully propagates it, `delegate` and `leaf` receive narrower
-tool sets for dogfood containment and tests. Delegate access to generated
-subquery agents is scoped to subquery result, status, tail, cancel, and
-print-style operations. Leaf also hides recursive orchestration and selected
-mutation tools.
+tool sets for dogfood containment and tests. Leaf also hides recursive
+orchestration and selected mutation tools.
 
 When profile environment propagation fails, delegated agents may see the full
 lead MCP surface. Workflow containment therefore depends on prompt rules such as
@@ -701,7 +686,7 @@ The `ws-mcp` binary mirrors selected MCP behavior as CLI commands for smoke
 tests, compatibility probes, and fallback usage.
 
 CLI mirrors exist for runtime info, single-process smoke checks, config, path
-generation, subquery, named agents, Git, tickets, specs, selected mental-model
+generation, named agents, Git, tickets, specs, selected mental-model
 discovery, and reference tracing. Not every MCP tool has a CLI mirror; the MCP
 surface is the canonical host-neutral interface, and CLI coverage is limited to
 the surfaces needed for runtime checks and workflow fallback use.
