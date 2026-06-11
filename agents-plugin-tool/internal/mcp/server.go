@@ -1881,7 +1881,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -1892,7 +1891,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"prompt":      stringProperty("API documentation question to answer."),
 					"domain_hint": stringProperty("Optional API documentation domain hint."),
 				},
@@ -1905,7 +1903,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"prompt":      stringProperty("API documentation question to answer asynchronously."),
 					"domain_hint": stringProperty("Optional API documentation domain hint."),
 				},
@@ -1918,7 +1915,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"api_job_key": stringProperty("Recoverable async API documentation job key."),
 				},
 				"required": []string{"api_job_key"},
@@ -1930,7 +1926,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"api_job_key": stringProperty("Recoverable async API documentation job key."),
 				},
 				"required": []string{"api_job_key"},
@@ -1942,7 +1937,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"api_job_key": stringProperty("Recoverable async API documentation job key."),
 				},
 				"required": []string{"api_job_key"},
@@ -2019,7 +2013,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -2030,7 +2023,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"range":  stringProperty("Optional revision range."),
 					"paths":  stringArrayProperty("Optional path filters appended after --."),
 					"mode":   enumStringProperty("Diff mode. Defaults to stat.", []string{"full", "stat", "name_only"}),
@@ -2044,7 +2036,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":         stringProperty("Repository root. Defaults to the server root."),
 					"range":        stringProperty("Optional revision range."),
 					"limit":        integerProperty("Maximum commits to return. Defaults to 20 and is capped at 100."),
 					"include_body": boolProperty("Include commit body text."),
@@ -2058,7 +2049,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"base":   stringProperty("Base revision."),
 					"head":   stringProperty("Head revision."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
@@ -2072,7 +2062,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":                  stringProperty("Repository root. Defaults to the server root."),
 					"paths":                 stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
 					"title":                 stringProperty("Single-line commit title."),
 					"description":           stringProperty("Optional commit message body before AI Context."),
@@ -2164,7 +2153,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -2175,7 +2163,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"query":       stringProperty("Optional case-insensitive text query."),
 					"spec_stem":   stringProperty("Optional exact spec anchor stem."),
 					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
@@ -2189,7 +2176,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":      stringProperty("Repository root. Defaults to the server root."),
 					"spec_stem": stringProperty("Spec anchor stem to inspect."),
 					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
@@ -2215,7 +2201,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":      stringProperty("Repository root. Defaults to the server root."),
 					"query":     stringProperty("Optional case-insensitive text query."),
 					"spec_stem": stringProperty("Optional spec anchor stem referenced by the mental model."),
 					"domain":    stringProperty("Optional mental-model domain."),
@@ -2229,7 +2214,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"domain": stringProperty("Optional mental-model domain."),
 					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
@@ -2242,7 +2226,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"ticket_stem": stringProperty("Optional ticket stem to trace."),
 					"spec_stem":   stringProperty("Optional spec anchor stem to trace."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
@@ -2260,7 +2243,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":                 stringProperty("Repository root. Defaults to the server root."),
 					"statuses":             stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
 					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
@@ -2277,7 +2259,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"ticket_stem":     stringProperty("Ticket stem to inspect."),
 					"include_done":    boolProperty("Allow lookup under ai-docs/tickets/.done when true."),
 					"include_dropped": boolProperty("Allow lookup under ai-docs/tickets/.dropped when true."),
@@ -2304,7 +2285,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":  stringProperty("Repository root. Defaults to the server root."),
 					"kind":  stringProperty("Generated path kind. Initially supports review."),
 					"stems": stringArrayProperty("Logical file stems to allocate in stable order."),
 				},
@@ -2317,7 +2297,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":    stringProperty("Repository root. Defaults to the server root."),
 					"stem":    stringProperty("Bundled prompt stem to render (e.g. code-reviewer, reference-discovery)."),
 					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional string key-value pairs injected as a ## Render Context block at the end of the rendered prompt."},
 				},
@@ -2342,7 +2321,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":    stringProperty("Repository root for the tmp file. Defaults to the server root."),
 					"name":    stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
 					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
 				},
@@ -2867,7 +2845,6 @@ func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"root":            stringProperty("Repository root. Defaults to the server root."),
 			"statuses":        stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
 			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
