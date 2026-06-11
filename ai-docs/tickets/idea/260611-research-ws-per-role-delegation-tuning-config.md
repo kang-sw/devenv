@@ -4,6 +4,7 @@ related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: the 2c Edition #2 per-role tier routing is the mechanism this surface would expose as config; this idea generalizes it
   260610-refactor-ws-wordchain-id-generalization: sibling "generalize a per-call concept into a reusable surface" follow-up
   260513-harness-local-agent-tier-config: existing config.agents_tier (tier -> backend/model/effort) that this would extend toward role -> tier
+  260611-refactor-ws-tier-taxonomy-delegate-tier-routing: the actionable derived from this research; implements the taxonomy + re-homes the 260609 Phase 2c Editions
 ---
 
 # Config surface for per-role / per-partition delegation tuning (tier + prompt) at the ws level
@@ -32,6 +33,50 @@ host-neutrally, "reviewer.test runs at core, reviewer.correctness at deep,
 implementer at core, reference-discovery at light" — let alone tune the *prompt*
 (verbosity / extra instructions) per delegated role.
 
+## Tier taxonomy (resolved direction, 2026-06-11)
+
+Sorting out the two planes the tier vocabulary straddles — the source of the
+`light/core/deep` dual-meaning confusion (it was both "the abstraction" and "the
+`config.agents_tier` index"). Two distinct layers, each with its own vocabulary
+so they stop colliding:
+
+- **First-class tier (the abstraction)** — `small / medium / large / xlarge`
+  (4 levels; `xlarge` added now that a top model class, fable, exists). The ONLY
+  tier users, skills, and the reviewer-allocation default speak in; plane-neutral.
+  Its axis (subscription plan vs. capability level) is still open (see Open
+  questions).
+- **Concrete model layer** — actual model names. `light / core / deep` are
+  **demoted** out of "the abstraction" down to this layer: conventional aliases
+  sitting alongside vendor-native names (`haiku`/`sonnet`/`opus`, `gpt-…`), i.e.
+  just convenience aliases for concrete models. A `light ↦ small` style mapping
+  connects an alias to a first-class tier.
+
+Two delegation planes resolve the abstraction differently:
+
+- **Native subagent (default)** — ws does NOT launch the process; the host
+  harness does and owns model selection. ws's only levers are the rendered
+  prompt's tier guidance and `{{.*Model}}` guidance text. First-class tier maps
+  to the host's native model.
+- **Mercenary (opt-in)** — ws launches a real subprocess, so it needs the full
+  concretion `{backend, model, effort}`. The first-class tier indexes into
+  `config.agents_tier` (`tier × harness → {backend, model, effort}`), the
+  mercenary concretion config; here the tier is just the index, the real launch
+  config is the triple.
+
+Frontmatter declares the **first-class** tier (`role:` + `tier:`), never
+`backend`/`model`/`effort` (that is user config, not a per-playbook concern).
+
+Config layering this implies (do not conflate):
+1. `(skill, role) → first-class tier` — the role-config override of the
+   frontmatter default (this ticket's core idea).
+2. `first-class tier → concrete (alias/model)` — convenience mapping.
+3. `config.agents_tier` (`tier × harness → {backend, model, effort}`) — the
+   existing mercenary concretion surface; unchanged by the vocabulary split.
+
+Resolution chain: frontmatter first-class tier (default) → overridden by
+`(skill, role)` config if present → native: host model / mercenary: concretion
+via `config.agents_tier`.
+
 ## The idea
 
 A ws-level config surface that parameterizes per-role (and ideally
@@ -50,12 +95,21 @@ default* of this config rather than hardcoded-only text.
 - Lets users tune cost/rigor per delegated role without forking playbooks.
 - Unifies the three scattered levers (skill text, `config.agents_tier`,
   per-call model) into one addressable surface.
-- Host-neutral: expressed in ws tier vocabulary (`light/core/deep`); the harness
-  adapter maps tier -> concrete model, so it works for native and (once the 2c
+- Host-neutral: expressed in the first-class tier vocabulary
+  (`small/medium/large/xlarge`); each plane concretizes (native → host model;
+  mercenary → `config.agents_tier`), so it works for native and (once the 2c
   Edition lands) mercenary delegation alike.
 
 ## Open questions
 
+- **First-class axis (the big one):** is `small/medium/large/xlarge` a
+  subscription-plan axis or a capability-level axis? This drives what the tier
+  *means* and how it maps to host-native models. Unresolved — gates ready
+  promotion of `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`.
+- **Mapping cardinality:** first-class (4: small/medium/large/xlarge) → alias
+  (3: light/core/deep) is not 1:1 — e.g. `light↦small`, `core↦medium`,
+  `deep↦large`, with `xlarge` (fable-class) having no legacy alias. Define the
+  mapping (and what the reviewer-allocation default becomes in first-class vocab).
 - **Granularity:** role only, or `role.partition` (e.g. `reviewer.test`)? Which
   roles are addressable (reviewer partitions, implementer, reference-discovery,
   plan-populator, mental-model-updater)?
@@ -80,3 +134,8 @@ default* of this config rather than hardcoded-only text.
   into a config-backed default.
 - Likely a multi-phase actionable ticket once promoted (role->tier config first;
   per-role prompt tuning as a later, larger phase).
+- The two 260609 Phase 2c Editions (delegate role/tier asset + per-spawn tier
+  routing) and the reviewer-tier skill default (dropped commit `e6aadfc9`)
+  re-home to the derived actionable
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`. This research must
+  resolve the first-class axis + alias mapping before that ticket is ready.
