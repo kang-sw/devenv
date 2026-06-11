@@ -43,8 +43,13 @@ so they stop colliding:
 - **First-class tier (the abstraction)** — `small / medium / large / xlarge`
   (4 levels; `xlarge` added now that a top model class, fable, exists). The ONLY
   tier users, skills, and the reviewer-allocation default speak in; plane-neutral.
-  Its axis (subscription plan vs. capability level) is still open (see Open
-  questions).
+  **Axis = capability level** (resolved 2026-06-11), NOT a subscription/plan
+  bracket: the tier names the reasoning depth a task requires (task-intrinsic,
+  portable across users/plans/hosts), so frontmatter stays host-neutral and cost
+  /plan concerns live entirely in the layer-2/3 user config (a user maps
+  `large↦opus` etc.). A plan-bracket axis was rejected as leaky — it would bake a
+  user-specific entitlement into shared shipped playbook frontmatter and lose the
+  capability guarantee when a playbook moves between plans.
 - **Concrete model layer** — actual model names. `light / core / deep` are
   **demoted** out of "the abstraction" down to this layer: conventional aliases
   sitting alongside vendor-native names (`haiku`/`sonnet`/`opus`, `gpt-…`), i.e.
@@ -102,14 +107,15 @@ default* of this config rather than hardcoded-only text.
 
 ## Open questions
 
-- **First-class axis (the big one):** is `small/medium/large/xlarge` a
-  subscription-plan axis or a capability-level axis? This drives what the tier
-  *means* and how it maps to host-native models. Unresolved — gates ready
-  promotion of `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`.
-- **Mapping cardinality:** first-class (4: small/medium/large/xlarge) → alias
-  (3: light/core/deep) is not 1:1 — e.g. `light↦small`, `core↦medium`,
-  `deep↦large`, with `xlarge` (fable-class) having no legacy alias. Define the
-  mapping (and what the reviewer-allocation default becomes in first-class vocab).
+- **First-class axis — RESOLVED 2026-06-11: capability level** (not
+  subscription/plan). The tier names task-intrinsic reasoning depth; cost/plan
+  mapping is pushed to the layer-2/3 user config. This unblocks ready promotion
+  of `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`.
+- **Mapping cardinality — RESOLVED 2026-06-11:** first-class (4) → alias (3) is
+  not 1:1. Locked mapping: `light↦small`, `core↦medium`, `deep↦large`; `xlarge`
+  (fable-class top) has no legacy alias. The capability axis keeps this mapping
+  meaning-preserving (light=shallow … deep=deepest). Reviewer-allocation default
+  in first-class vocab: correctness→large, fit/test→medium.
 - **Granularity:** role only, or `role.partition` (e.g. `reviewer.test`)? Which
   roles are addressable (reviewer partitions, implementer, reference-discovery,
   plan-populator, mental-model-updater)?
@@ -137,5 +143,6 @@ default* of this config rather than hardcoded-only text.
 - The two 260609 Phase 2c Editions (delegate role/tier asset + per-spawn tier
   routing) and the reviewer-tier skill default (dropped commit `e6aadfc9`)
   re-home to the derived actionable
-  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`. This research must
-  resolve the first-class axis + alias mapping before that ticket is ready.
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`. The first-class axis
+  (capability) + alias mapping are now resolved (2026-06-11), so that ticket is
+  unblocked for ready promotion.

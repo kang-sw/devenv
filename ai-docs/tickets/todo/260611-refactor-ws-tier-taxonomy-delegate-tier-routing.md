@@ -39,10 +39,15 @@ mercenary delegation is opt-in.
 
 ## Decisions
 
-(See research 260611 for the full taxonomy model and the open axis question.)
+(See research 260611 for the full taxonomy model.)
 
 - **First-class tier = `small/medium/large/xlarge`** — the only tier abstraction
   skills, users, and the reviewer-allocation default speak; plane-neutral.
+- **First-class axis = capability level** (resolved 2026-06-11), NOT a
+  subscription/plan bracket: the tier names task-intrinsic reasoning depth, so
+  frontmatter stays host/plan-neutral and cost/plan mapping lives in the
+  layer-2/3 user config. Locked alias mapping: `light↦small`, `core↦medium`,
+  `deep↦large`; `xlarge` (fable-class) has no legacy alias.
 - **`light/core/deep` = conventional aliases** at the concrete-model layer, not
   the abstraction; a `light ↦ small` style mapping connects an alias to a
   first-class tier.
@@ -57,9 +62,10 @@ mercenary delegation is opt-in.
 
 ## Constraints
 
-- **Blocked on research 260611** resolving the first-class axis (subscription
-  plan vs capability level) and the first-class→alias mapping cardinality before
-  ready promotion.
+- ~~Blocked on research 260611~~ **Unblocked (2026-06-11):** first-class axis
+  (capability level) and the `light↦small`/`core↦medium`/`deep↦large` mapping are
+  resolved in research 260611. Ready for promotion (pending spec-address +
+  slice-boundary refinement at promotion).
 - Shipped-rsrc edits require manifest regen (see
   `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`).
 - wsflow mirror: any shipped `lead-implement` / delegate playbook text change
@@ -98,8 +104,8 @@ flag.
 ### Phase 3: first-class tier vocabulary adoption + migration
 
 Re-author the `judge: review-allocation` reviewer-tier default (dropped
-`e6aadfc9`) in first-class vocab (mapping pending the axis decision: e.g.
-correctness→large, fit/test→medium under `deep↦large`, `core↦medium`) in the
+`e6aadfc9`) in first-class vocab — **correctness→large, fit/test→medium** (under
+the locked `deep↦large`, `core↦medium` mapping) — in the
 `lead-implement` playbook + wsflow mirror + manifest regen; migrate spec and
 mental-model text that frames `light/core/deep` as "the tier abstraction" to the
 alias-layer framing. Adds the `(skill, role) → first-class tier` config override

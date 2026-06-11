@@ -227,8 +227,8 @@ dropped tickets live in hidden archive dirs and git history.
   epic** (`be8c39e6`, combined --no-ff); 260609 closed `.done/`. Open fill
   (delegate `role:`/`tier:` asset + per-spawn/per-role tier routing +
   reviewer-tier default) re-homed to
-  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (todo, blocked on
-  research `260611`). **M4**
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (todo, unblocked
+  2026-06-11 — ready for promotion). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
@@ -240,13 +240,15 @@ dropped tickets live in hidden archive dirs and git history.
   `light/core/deep` demoted to concrete-model aliases, shipped delegate
   `role:`/`tier:` playbook asset (child-key splice + model vars), mercenary
   per-spawn tier plumbing into `RegisterOptions`, `oneShot` dead-code cleanup,
-  reviewer-tier default re-authored in first-class vocab. Blocked on research
-  `260611` (first-class axis); not implementation-ready.
+  reviewer-tier default re-authored in first-class vocab. Unblocked 2026-06-11
+  (research `260611` resolved the axis = **capability level**, mapping
+  `light↦small`/`core↦medium`/`deep↦large`); ready for promotion via proceed.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
-  layer; native vs opt-in mercenary) + the open first-class axis (subscription
-  plan vs capability) and the first-class→alias mapping; gates the actionable
-  above. The session-key word-chain generator generalization to other id
+  layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
+  **capability level** (subscription/plan rejected as leaky); alias mapping
+  `light↦small`/`core↦medium`/`deep↦large` locked; the actionable above is now
+  unblocked. The session-key word-chain generator generalization to other id
   surfaces remains reserved as `260610-refactor-ws-wordchain-id-generalization`
   (todo, follow-up).
 

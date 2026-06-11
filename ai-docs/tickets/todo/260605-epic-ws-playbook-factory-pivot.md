@@ -86,8 +86,9 @@ subagents. Direction, decisions, and evidence live in
   `role:`/`tier:` playbook asset (child-key splice + model vars), mercenary
   per-spawn tier plumbing into `RegisterOptions`, reviewer-tier default
   re-authored in first-class vocab. Re-homes the 260609 Phase 2c Editions.
-  Blocked on research `260611-research-ws-per-role-delegation-tuning-config`
-  (first-class axis). Depends on M3.
+  **Unblocked (2026-06-11):** research `260611-...delegation-tuning-config`
+  resolved the first-class axis (capability) + alias mapping; ready for
+  promotion. Depends on M3.
 - `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
   corpus-routed api-doc playbook, cache index/staleness conventions, async job
   surface removal. Depends on M1; coordinated with M3.
@@ -154,7 +155,11 @@ subagents. Direction, decisions, and evidence live in
   first-class `small/medium/large/xlarge`; `light/core/deep` are demoted to
   concrete-model aliases (alongside `haiku`/`sonnet`/`opus`). Frontmatter
   declares the first-class tier; mercenary is opt-in; `config.agents_tier` stays
-  the mercenary concretion layer (`tier × harness → backend/model/effort`).
+  the mercenary concretion layer (`tier × harness → backend/model/effort`). The
+  first-class **axis is capability level** (not subscription/plan); locked alias
+  mapping `light↦small`/`core↦medium`/`deep↦large` (`xlarge` = fable-class, no
+  legacy alias); reviewer-allocation default in first-class vocab is
+  correctness→large, fit/test→medium.
   Owned by research `260611-research-ws-per-role-delegation-tuning-config` and
   child `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (the 260609
   Phase 2c Editions re-home there).
