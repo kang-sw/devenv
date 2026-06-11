@@ -622,6 +622,52 @@ keyed signature documented (`5cc57c64`). Mental models updated (`095184bc`).
 > `owner_actor_id` deferred here). Re-triaged bugs `260517` + `260524` remain live
 > on the retained mercenary path for a dedicated fix.
 
+#### Edition (379ff5e5) - 2026-06-11
+
+Follow-up scope identified during live 2c dogfooding (post-merge of the
+WS_RSRC_ROOT launcher fix, `379ff5e5`): two delegate-surface behaviors that 2c
+built the runtime/mechanism for are **unreachable on the shipped surface**
+because the rsrc asset that would exercise them is missing. The user elected to
+fill these within this ticket (they are expected behaviors of the surface 2c
+already shipped, not new Phase 3 scope). Both gaps close with one root asset.
+
+- **Gap 1 — render-minted child-key splice never fires on shipped playbooks.**
+  `renderPlaybookBody` (`internal/mcp/playbook_tools.go`) only mints + splices
+  the credential block when the caller is lead AND
+  `childRoleForPlaybookRole(meta.Role)` is ok (role ∈
+  `implementer|reviewer|delegate|leaf`). The mechanism, `PlaybookMeta.Role`
+  frontmatter parse, and unit tests (`mercenary_surface_test.go`,
+  `session_auth_test.go` via in-memory role fixtures) all exist, but
+  `grep -rl '^role:' agents-plugin/rsrc/*/*.md` matches nothing — no shipped
+  playbook declares a role, so every real render has `meta.Role == ""` and the
+  credential block is never spliced.
+- **Gap 2 — light/core/deep → per-harness model vars are never surfaced.**
+  `resolveModelVars(harness, config)` resolves `{{.LightModel}}`/`{{.CoreModel}}`/
+  `{{.DeepModel}}` per harness via config `ModelAliases`; defaults diverge
+  correctly (`claude` → haiku/sonnet/opus, `codex`/default →
+  gpt-5.4-mini/gpt-5.5/gpt-5.5). But no shipped `rsrc/` playbook nor any
+  `internal/wsprompt/prompts/` prompt declares or uses these tier vars, so the
+  harness-diverged model guidance is never rendered into a delegate prompt.
+
+Fill (single root asset): add the missing shipped delegate playbook asset(s)
+under `agents-plugin/rsrc/` with `role: implementer` / `role: reviewer`
+frontmatter that ALSO declare and use the `{{.LightModel}}`/`{{.CoreModel}}`/
+`{{.DeepModel}}` tier vars in their guidance text; regenerate the rsrc manifest
+(shipped-rsrc edits require regen — see `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`);
+add an end-to-end test that renders a SHIPPED delegate playbook with a lead key
+and asserts (a) the credential block is present and (b) the tier vars resolve to
+the expected per-harness model strings. The existing unit tests pass on
+in-memory fixtures and do not catch a missing shipped asset, so the
+shipped-asset e2e assertion is the key new coverage. This delivers the
+"single self-contained prompt from `playbook.render`" + "scope mercenary to
+implementer/reviewer roles only" 2c contract end-to-end (the self-contained
+prompt IS this delegate playbook asset).
+
+Absorbed: idea `260611-bug-no-delegate-role-playbook-asset-renders-child-key-unreachable`
+(moved to `.dropped/`). Distinct sibling dogfood findings kept open:
+`260611-bug-rsrc-load-unknown-playbook-misleading-error` and
+`260611-bug-launcher-repair-failure-opaque-mcp-error`.
+
 ### Phase 3: exec stateless + role-containment fold + dashboard build-fix
 
 Confirm exec is a stateless `exec_key` capability anchored at the session root;

@@ -6,6 +6,8 @@ related:
 
 # render-minted child-key splice is unreachable -- no shipped playbook declares a delegate role
 
+> **Dropped 2026-06-11:** absorbed into `260609-refactor-ws-spawn-runtime-deletion-session-auth` Phase 2c Edition (filled as one delegate-playbook asset). Kept for history.
+
 ## Background
 
 Dogfooding 2c's render-minted child-key path on the Claude plugin install:
