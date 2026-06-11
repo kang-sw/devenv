@@ -40,9 +40,6 @@ func main() {
 		serve(os.Args[2:])
 	case "smoke":
 		smoke(os.Args[2:])
-	case "subquery":
-		fatalIfNoAgentCommand("subquery")
-		subquery(os.Args[2:])
 	case "config":
 		configCommand(os.Args[2:])
 	case "path":
@@ -71,7 +68,7 @@ func usage() {
 		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|specs|mental-models|references>")
 		return
 	}
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|subquery|config|path|agents|git|tickets|specs|mental-models|references>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|agents|git|tickets|specs|mental-models|references>")
 }
 
 func doctor(args []string) {
@@ -251,7 +248,6 @@ func runtimeCapabilityCommandNames() []string {
 		"specs.find",
 		"specs.list",
 		"specs.status",
-		"subquery",
 		"tickets.find",
 		"tickets.list",
 		"tickets.status",
@@ -266,7 +262,7 @@ func runtimeCapabilityCommandNames() []string {
 func filterNoAgentCommands(commands []string) []string {
 	out := make([]string, 0, len(commands))
 	for _, command := range commands {
-		if strings.HasPrefix(command, "agents.") || command == "subquery" || command == "config.agents-tier" {
+		if strings.HasPrefix(command, "agents.") || command == "config.agents-tier" {
 			continue
 		}
 		out = append(out, command)
@@ -279,30 +275,6 @@ func fatalIfNoAgentCommand(command string) {
 		return
 	}
 	fatal(command, fmt.Errorf("%s agentless mode disables agent-backed command: %s", mcp.RuntimeNamespace(), command))
-}
-
-func subquery(args []string) {
-	fs := flag.NewFlagSet("subquery", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	deepResearch := fs.Bool("deep-research", false, "use deep model alias for broad tracing or research")
-	harness := fs.String("harness", "", "MCP host harness for model alias resolution")
-	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
-	_ = fs.Parse(args)
-
-	prompt, err := promptFromArgs(fs.Args(), *promptFile)
-	if err != nil {
-		fatal("subquery", err)
-	}
-	text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
-		Root:         defaultRoot(*root),
-		Question:     prompt,
-		DeepResearch: *deepResearch,
-		Harness:      *harness,
-	})
-	if err != nil {
-		fatal("subquery", err)
-	}
-	fmt.Print(text)
 }
 
 func configCommand(args []string) {

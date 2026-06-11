@@ -943,8 +943,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if strings.Contains(byID["2"], "agents.oneshot") {
 		t.Fatalf("tools/list still includes agents.oneshot: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], "subquery") {
-		t.Fatalf("tools/list missing subquery: %s", byID["2"])
+	if strings.Contains(byID["2"], "subquery") {
+		t.Fatalf("tools/list still advertises removed subquery tool: %s", byID["2"])
 	}
 	toolsResult, _ := listResp["result"].(map[string]any)
 	listedTools, _ := toolsResult["tools"].([]any)
@@ -1422,7 +1422,7 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	manager := wsagent.NewManager(wsagent.Options{})
-	agent, layout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "subquery-tmp-test", Ephemeral: true})
+	agent, layout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "ephemeral-tmp-test", Ephemeral: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1438,7 +1438,7 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"subquery-tmp-test"}}}` + "\n"
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"ephemeral-tmp-test"}}}` + "\n"
 	var out bytes.Buffer
 	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
@@ -1449,6 +1449,27 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 	}
 	if _, err := os.Stat(layout.AgentDir); err != nil {
 		t.Fatalf("ephemeral agent dir should remain after MCP result for retention cleanup: %v", err)
+	}
+}
+
+func TestSubqueryToolRemovedFromListAndCallRejected(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"subquery","arguments":{"question":"where is X?"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], `"subquery"`) {
+		t.Fatalf("tools/list still advertises subquery: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "not available") && !strings.Contains(byID["2"], "unknown") {
+		t.Fatalf("subquery tools/call was not rejected: %s", byID["2"])
 	}
 }
 

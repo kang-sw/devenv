@@ -12,9 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -62,8 +60,6 @@ var tailLargeFieldKeys = map[string]struct{}{
 }
 
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
-
-var subquerySeq atomic.Uint64
 
 type Clock func() time.Time
 
@@ -202,13 +198,6 @@ type oneShotOptions struct {
 	Prompt              string
 	Timeout             time.Duration
 	SuppressOrientation bool
-}
-
-type SubqueryOptions struct {
-	Root         string
-	Question     string
-	DeepResearch bool
-	Harness      string
 }
 
 type SelfWorkerStarter struct{}
@@ -1145,38 +1134,6 @@ func promptSpecs(prompts, promptRefs []string) []string {
 		return append([]string(nil), prompts...)
 	}
 	return append([]string(nil), promptRefs...)
-}
-
-func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
-	tier := "light"
-	if opts.DeepResearch {
-		tier = "deep"
-	}
-	name := fmt.Sprintf("subquery-tmp%s-%s",
-		strconv.FormatInt(m.now().UTC().UnixNano(), 36),
-		strconv.FormatUint(subquerySeq.Add(1), 36),
-	)
-	_, _, err := m.Register(RegisterOptions{
-		Root:                opts.Root,
-		Name:                name,
-		Harness:             opts.Harness,
-		Tier:                tier,
-		SystemPromptText:    SubquerySystemPrompt,
-		SuppressOrientation: true,
-		Ephemeral:           true,
-	})
-	if err != nil {
-		return "", err
-	}
-	result, err := m.Call(CallOptions{
-		Root:   opts.Root,
-		Name:   name,
-		Prompt: opts.Question,
-	})
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("subquery_key: %s\nagent_name: %s\nstatus: %s\npid: %d\nfollow_up: agents.result(name: %q, timeout_seconds: 600) | agents.status(name: %q) | agents.tail(name: %q) | agents.cancel(name: %q)\n", result.AgentName, result.AgentName, result.Status, result.PID, result.AgentName, result.AgentName, result.AgentName, result.AgentName), nil
 }
 
 func (m Manager) Print(root, name string) (string, error) {

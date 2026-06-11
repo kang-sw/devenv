@@ -308,9 +308,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
-	if !s.subqueryAgentAccessAllowed(params.Name, params.Arguments) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("tool available only for subquery-* agents in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
-	}
 	// Keyed capability gate: when a session_key is present and maps to a known
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
 	// are not rejected here; root-aware tools surface the unknown_session error
@@ -762,23 +759,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
-	case "subquery":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		question, _ := params.Arguments["question"].(string)
-		if question == "" {
-			question, _ = params.Arguments["prompt"].(string)
-		}
-		deepResearch, _ := params.Arguments["deep_research"].(bool)
-		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
-			Root:         root,
-			Question:     question,
-			DeepResearch: deepResearch,
-			Harness:      s.currentHarness(),
-		})
-		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2249,18 +2229,6 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "subquery",
-			"description": "Start an async scoped codebase or documentation query and return a subquery key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"question":      stringProperty("Scoped question to answer."),
-					"deep_research": boolProperty("Use deep model alias for broad tracing or research."),
-				},
-				"required": []string{"question"},
-			},
-		},
-		{
 			"name":        "path.generate",
 			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
 			"inputSchema": map[string]any{
@@ -2563,12 +2531,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		if isSubqueryAgentTool(name) {
-			return true
-		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -2639,7 +2604,7 @@ func noAgentHiddenTool(name string) bool {
 		return true
 	}
 	switch name {
-	case "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel":
+	case "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel":
 		return true
 	default:
 		return false
@@ -2709,31 +2674,6 @@ func renderPrompt(root, stem string, context map[string]string) (string, error) 
 		return "", fmt.Errorf("write prompt %s: %w", generated[0].Path, err)
 	}
 	return generated[0].Path, nil
-}
-
-func (s *Server) subqueryAgentAccessAllowed(toolName string, arguments map[string]any) bool {
-	if s.role == roleLead || !isSubqueryAgentTool(toolName) {
-		return true
-	}
-	name, _ := arguments["name"].(string)
-	if name != "" && !strings.HasPrefix(name, "subquery-") {
-		return false
-	}
-	for _, item := range stringList(arguments["names"]) {
-		if !strings.HasPrefix(item, "subquery-") {
-			return false
-		}
-	}
-	return name != "" || len(stringList(arguments["names"])) > 0
-}
-
-func isSubqueryAgentTool(name string) bool {
-	switch name {
-	case "agents.wait", "agents.result", "agents.status", "agents.tail", "agents.cancel", "agents.print":
-		return true
-	default:
-		return false
-	}
 }
 
 func explicitAllowedTools() map[string]bool {

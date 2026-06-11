@@ -141,7 +141,6 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "subquery", args: []string{"subquery", "question"}, want: "wsflow agentless mode disables agent-backed command: subquery"},
 		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: agents"},
 		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config agents-tier"},
 	} {
