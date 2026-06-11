@@ -892,7 +892,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// subagent id so the lead reuses one continuation idiom across both paths.
 		// Handle format: agentId=<name> matches the native agentId shape referenced
 		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
-		return toolTextResponse(req.ID, fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
+		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2645,6 +2645,13 @@ func namespaceValue(value any) any {
 	default:
 		return value
 	}
+}
+
+// agentCallHandleText formats the agents.call response. The handle is shaped as
+// agentId=<name> so the lead reuses one native-shaped continuation idiom across
+// the native-subagent and mercenary paths (Phase 2c interface parity).
+func agentCallHandleText(name, status string, pid int) string {
+	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", name, status, pid)
 }
 
 func noAgentHiddenTool(name string) bool {

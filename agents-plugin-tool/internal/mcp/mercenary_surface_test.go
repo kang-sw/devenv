@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -91,10 +92,9 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 		t.Errorf("minted key root = %q, want %q", entry.root, mintRoot)
 	}
 	if entry.scope != roleDelegate {
+		// roleDelegate != roleLead, so this assertion also guarantees the child
+		// key is never lead-scoped.
 		t.Errorf("minted key scope = %q, want %q (implementer → delegate)", entry.scope, roleDelegate)
-	}
-	if entry.scope == roleLead {
-		t.Errorf("child key must never be lead-scoped")
 	}
 
 	// A second render mints a DISTINCT key (registry uniqueness).
@@ -127,7 +127,9 @@ func TestRenderNoMintForNonLeadCaller(t *testing.T) {
 }
 
 func TestRenderNoMintForNonDelegateRole(t *testing.T) {
-	// delegatePlaybookContent has delegates:true but NO role → not delegate-eligible.
+	// delegatePlaybookContent is defined in playbook_tools_test.go (same package):
+	// delegates:true but NO `role:` field → childRoleForPlaybookRole returns false,
+	// so a lead caller still mints nothing.
 	root := buildTestRsrcTree(t, map[string]string{
 		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
 	})
@@ -307,5 +309,56 @@ func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 	// ws.lead.login stays visible (wsflow still needs bootstrap).
 	if !strings.Contains(byID["1"], `"name":"ws.lead.login"`) {
 		t.Fatalf("ws.lead.login must remain visible in no-agent mode: %s", byID["1"])
+	}
+}
+
+// TestPreferMercenaryRejectedForNonLeadKey exercises the lead-only failure path:
+// a delegate-scoped key calling ws.lead.prefer_mercenary is rejected by the
+// server-side keyed-handler ws.lead.* gate (not by a tool-local check).
+func TestPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	// Mint a delegate-scoped key directly (a delegate never logs in; it receives
+	// a render-minted key). The keyed gate must reject its ws.lead.* call.
+	delegateKey, err := server.sessions.mint(root, roleDelegate)
+	if err != nil {
+		t.Fatalf("mint delegate key: %v", err)
+	}
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.lead.prefer_mercenary","arguments":{"session_key":"` + delegateKey + `"}}}` + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio: %v", err)
+	}
+	line := strings.TrimSpace(out.String())
+	if strings.Contains(line, "prefer_mercenary: enabled") {
+		t.Fatalf("delegate key must NOT enable prefer_mercenary: %s", line)
+	}
+	if !strings.Contains(line, "ws.lead.prefer_mercenary") || !strings.Contains(line, `"error"`) {
+		t.Fatalf("expected a keyed-gate error rejecting ws.lead.prefer_mercenary: %s", line)
+	}
+	// The delegate key's preferMercenary flag must remain unset.
+	if entry, _ := server.sessions.lookup(delegateKey); entry.preferMercenary {
+		t.Fatalf("rejected call must not have flipped the delegate key's flag")
+	}
+}
+
+// TestAgentCallHandleTextShape verifies the native-shaped continuation handle
+// (agentId=<name>) so the lead reuses one continuation idiom across the native
+// and mercenary paths (Phase 2c parity). Unit-tested directly because the full
+// agents.call dispatch would require spawning a real backend.
+func TestAgentCallHandleTextShape(t *testing.T) {
+	got := agentCallHandleText("implementer", "running", 4242)
+	if !strings.HasPrefix(got, "agentId=implementer\t") {
+		t.Errorf("handle must lead with agentId=<name>: %q", got)
+	}
+	for _, want := range []string{"status=running", "pid=4242", "SendMessage(to: agentId)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("handle text missing %q: %q", want, got)
+		}
 	}
 }

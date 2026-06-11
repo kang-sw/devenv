@@ -201,11 +201,12 @@ func mercenaryGuidanceBlock() string {
 }
 
 // resolveRsrcRoot resolves the rsrc tree root for a playbook tool call.
-// rsrcRootOverride is intended for M3 root_override support; pass "" in Phase 2.
-// Falls back to wsrsrc.ResolveRoot() (WS_RSRC_ROOT env → exe-derived path).
+// rsrcRootOverride carries playbook.render's root_override (Phase 2c, active): a
+// non-empty value rebinds the auto-include resolution root; pass "" to fall back
+// to wsrsrc.ResolveRoot() (WS_RSRC_ROOT env → exe-derived path).
 //
-// This is the call-site-overridable seam required by the M3 forward-compatibility
-// guardrail: the caller, not the internal logic, decides the rsrc root.
+// This is the call-site-overridable seam: the caller, not the internal logic,
+// decides the rsrc root.
 func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 	if strings.TrimSpace(rsrcRootOverride) != "" {
 		return rsrcRootOverride, nil
