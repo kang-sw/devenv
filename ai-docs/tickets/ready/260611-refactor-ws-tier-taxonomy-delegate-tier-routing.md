@@ -148,6 +148,49 @@ source the later phases migrate skills onto. (The exploratory invented stubs fro
 the paused WIP are discarded.) The `Tier` parse field + shipped-manifest guard
 test from the paused WIP are retained.
 
+### Result (3019ade9) - 2026-06-12
+
+Landed on `implement/ws-tier-taxonomy-phase1` (base `f7d14671`). The render-minted
+child-key splice and per-harness tier model vars are now reachable on the shipped
+surface (closes 260609 Edition `379ff5e5` gaps 1+2).
+
+Delivered:
+- Shipped delegate playbooks `agents-plugin/rsrc/implementer/implementer.md`
+  (`role: implementer`, `tier: medium`, uses `{{.CoreModel}}`) and
+  `reviewer/reviewer.md` (`role: reviewer`, `tier: large`, uses `{{.DeepModel}}`).
+  Bodies are canonical ports of `wsprompt/prompts/{implementer,code-reviewer}.md`;
+  the implementer port drops the stale `ws/subquery` reference (removed in M3 2b)
+  and the legacy skeleton-amendment constraint. Manifest regenerated (+2 entries).
+- `PlaybookMeta.Tier` parse-only field (`wsrsrc.go`) + `case "tier":`
+  (`loader.go`, mirrors `role:`) + `TestLoaderParsesRoleAndTier` (parses + no Extra
+  leak). Honoring the tier for mercenary model routing is Phase 2.
+- `TestShippedManifestUpToDate` guard + env-gated `TestRegenerateShippedManifest`
+  (`manifest_shipped_test.go`) — catches edited-shipped-asset-without-regen
+  (`260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`).
+- Shipped-asset e2e (`mercenary_surface_test.go`): renders the REAL shipped
+  implementer/reviewer with a lead mint root → credential block fires + child key
+  is delegate-scoped (gap 1); per-harness render → tier model var resolves to the
+  built-in default (claude sonnet/opus, codex gpt-5.5) and diverges per harness
+  (gap 2). Non-tautological (hardcoded model literals).
+
+Verification: `go build/vet` clean; `go test ./internal/mcp ./internal/wsrsrc
+-count=1` green (mcp 16s incl. new e2e + manifest guard; wsrsrc parse test).
+
+Deviations / notes:
+- Review was a single native subagent, not a ws mercenary reviewer: the post-2c ws
+  path (`playbook.render` + `agents.call`) needs a configured subprocess backend
+  that has been crash-prone (M3 2c evidence), and the `register(prompts:[stems])`
+  path is the removed surface Phase 5 migrates; for a low-risk content+test diff a
+  native review was proportionate. Recorded as a deviation from "named-agent
+  delegation first." Reviewer returned `[clean]` first pass (no Critical/Important).
+- rsrc-only change: prompt bundle hash decoupled (prompt-bundle.md line 47) →
+  `runtime.json` unchanged. wsflow has no rsrc tree (agentless) → no Phase 1 mirror.
+
+> Forward (Phase 2): honor the parsed first-class `tier:` by threading it
+> (first-class→alias) into the render-minted child's `RegisterOptions.Tier` so a
+> mercenary spawn resolves the user's custom `config.agents_tier` entry instead of
+> the hardcoded `core`; remove `Manager.oneShot()` dead code.
+
 ### Phase 2: MCP-reachable per-spawn/per-role tier routing (mercenary plumbing)
 
 Thread a first-class tier from frontmatter (default) into the render-minted

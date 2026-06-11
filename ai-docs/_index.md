@@ -241,9 +241,15 @@ dropped tickets live in hidden archive dirs and git history.
   demoted to concrete-model aliases, shipped delegate `role:`/`tier:` playbook
   asset (child-key splice + model vars), mercenary per-spawn tier plumbing into
   `RegisterOptions`, `oneShot` dead-code cleanup, reviewer-tier default
-  re-authored in first-class vocab. 3 phases; spec addressed via `## Spec Impact`
-  (Contract-first: no — closeout reconciles `mcp-tools.md` + `workflow-skills.md`
-  per phase). Next: proceed routes Phase 1 to `lead-implement`.
+  re-authored in first-class vocab. **Absorbed 2026-06-12:** full delegate-prompt
+  convergence — port delegate prompts to rsrc (P4), migrate skills off
+  `register(prompts)` (P5), retire the `wsprompt` loader incl. `api.ask`/wsflow
+  `RenderSource` rewire (P6). 6 phases (1-3 tier surface independent of 4-6
+  convergence); spec addressed via `## Spec Impact` (Contract-first: no — closeout
+  reconciles `mcp-tools.md` + `workflow-skills.md` per phase). **Phase 1 done**
+  (`3019ade9`): shipped implementer/reviewer delegate playbooks (canonical ports)
+  + parse-only Tier field + shipped-asset e2e. Next: Phase 2 (MCP-reachable
+  per-spawn tier routing).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
