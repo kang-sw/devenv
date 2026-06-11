@@ -357,16 +357,21 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
-    home = Path.home()
-    for host_dir in (".codex", ".claude"):
-        try:
-            rel = plugin_dir.relative_to(home / host_dir / "plugins" / "cache" / "kang-sw-devenv")
-        except ValueError:
-            continue
-        parts = rel.parts
-        if len(parts) < 2 or parts[0] not in {"ws", "wsflow"}:
-            return None
-        return parts[0]
+    # Recognize the repo-local plugin install regardless of on-disk layout.
+    # Claude Code runs a directory-source marketplace plugin from the install.sh
+    # snapshot (~/.claude/plugins/ws-plugin/<pkg>), while Codex/Claude package
+    # installs live under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>.
+    # Match the ws/wsflow package segment under any per-user (.codex/.claude)
+    # plugin tree; the gitignored .local-devenv-runtime marker is the actual
+    # dev opt-in, validated separately. This is HOME-independent.
+    parts = plugin_dir.resolve().parts
+    if "plugins" not in parts:
+        return None
+    if not any(host in parts for host in (".codex", ".claude")):
+        return None
+    for seg in parts[parts.index("plugins") + 1:]:
+        if seg in {"ws", "wsflow"}:
+            return seg
     return None
 
 

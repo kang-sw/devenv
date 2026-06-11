@@ -287,6 +287,24 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
 
+    def test_install_sh_snapshot_layout_is_recognized_for_local_devenv(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            # install.sh directory-marketplace snapshot layout (the path Claude
+            # actually runs from), NOT the cache/kang-sw-devenv/<pkg>/<ver> layout.
+            plugin_dir = home / ".claude" / "plugins" / "ws-plugin" / "ws"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=home)
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+            # A non-plugin path must not activate local repair.
+            self.assertIsNone(launcher.local_devenv_cache_package(home / "somewhere" / "ws"))
+
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()
 
