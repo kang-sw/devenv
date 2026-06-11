@@ -99,9 +99,6 @@ func runClaude(req RunnerRequest, args []string, sessionID string) (RunnerResult
 		configureRunnerCommand(cmd)
 	}
 	cmd.Dir = req.Root
-	if req.ToolProfile != "" {
-		cmd.Env = append(cmd.Environ(), "WS_MCP_TOOL_PROFILE="+req.ToolProfile)
-	}
 	var stderr bytes.Buffer
 	if req.Stderr != nil {
 		cmd.Stderr = io.MultiWriter(&stderr, req.Stderr)

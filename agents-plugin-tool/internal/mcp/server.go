@@ -29,7 +29,6 @@ type Server struct {
 	root           string
 	version        string
 	sourceCommit   string
-	role           toolRole
 	api            apiRuntime
 	rootMu         sync.RWMutex
 	sessionHarness string
@@ -90,8 +89,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 		commit = sourceCommit[0]
 	}
 	cleanRoot := filepath.Clean(root)
-	role := requestedToolRole()
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, role: role, sessions: newSessionRegistry()}
+	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionRegistry()}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -2552,26 +2550,10 @@ func (s *Server) toolAllowed(name string) bool {
 	if !NoAgentMode() && wsflowOnlyTool(name) {
 		return false
 	}
-	if !roleAllowsTool(s.role, name) {
-		return false
-	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
 		return allowed[name]
 	}
 	return true
-}
-
-func requestedToolRole() toolRole {
-	switch strings.TrimSpace(os.Getenv("WS_MCP_TOOL_PROFILE")) {
-	case "", "lead":
-		return roleLead
-	case "delegate":
-		return roleDelegate
-	case "leaf":
-		return roleLeaf
-	default:
-		return roleLead
-	}
 }
 
 func roleAllowsTool(role toolRole, name string) bool {

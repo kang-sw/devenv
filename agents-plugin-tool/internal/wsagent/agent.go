@@ -667,7 +667,6 @@ func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
 		Prompt:         opts.Prompt,
 		CaptureStreams: false,
 		Timeout:        opts.Timeout,
-		ToolProfile:    "delegate",
 	})
 	return agent, text, err
 }
@@ -676,7 +675,6 @@ type executeCallOptions struct {
 	Prompt         string
 	CaptureStreams bool
 	Timeout        time.Duration
-	ToolProfile    string
 }
 
 func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions) (string, Agent, error) {
@@ -786,7 +784,6 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		OnSessionID:          onSessionID,
 		Timeout:              opts.Timeout,
 		InheritProcessGroup:  opts.CaptureStreams,
-		ToolProfile:          opts.ToolProfile,
 	})
 	if err != nil {
 		diagnostic := backendInvocationError(agent, err)
@@ -1079,7 +1076,6 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	text, resultAgent, runErr := m.executeCall(layout, agent, executeCallOptions{
 		Prompt:         string(prompt),
 		CaptureStreams: true,
-		ToolProfile:    "leaf",
 	})
 	if runErr != nil {
 		_ = appendRuntimeLog(layout, m.now(), "state.finalize.begin", map[string]any{"status": CallStatusFailed})

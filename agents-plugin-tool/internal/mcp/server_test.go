@@ -426,86 +426,117 @@ func TestServeStdioExposesCancellationNotificationsInDebugEvents(t *testing.T) {
 	}
 }
 
-func TestServeStdioFiltersToolsByProfile(t *testing.T) {
-	t.Setenv("WS_MCP_ALLOWED_TOOLS", "")
+// TestKeyedScopeGatesRestrictedTools is the post-fold replacement for the old
+// WS_MCP_TOOL_PROFILE-driven TestServeStdioFiltersToolsByProfile. The env profile
+// no longer gates the served tool surface; tool-permission containment for a
+// restricted scope flows entirely through the capability scope minted into a
+// session key. This preserves the original intent (a leaf scope cannot reach
+// restricted tools) against the keyed call gate, and confirms tools/list now
+// advertises the full lead surface regardless of any restricted scope.
+func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
-	t.Setenv("WS_MCP_TOOL_PROFILE", "leaf")
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"gpt-5.2"}}}`,
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
-	}, "\n")
 
-	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
+	server := NewServer(root, "test")
+	leafKey, err := server.sessions.mint(root, roleLeaf)
+	if err != nil {
+		t.Fatalf("mint leaf key: %v", err)
 	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "config.agents_tier") || strings.Contains(byID["1"], "config.show") {
-		t.Fatalf("leaf tools/list exposed recursive tools: %s", byID["1"])
+
+	// tools/list advertises the full lead surface (schema visibility is advisory;
+	// the keyed call gate is the enforcement). Restricted tools remain visible.
+	listResp := callToolsList(t, server)
+	for _, name := range []string{"agents.status", "config.agents_tier", "config.show", "runtime.info"} {
+		if !strings.Contains(listResp, name) {
+			t.Fatalf("tools/list must advertise full lead surface, missing %s: %s", name, listResp)
+		}
 	}
-	if strings.Contains(byID["1"], "ws.setup") {
-		t.Fatalf("leaf tools/list exposed setup mutation tool: %s", byID["1"])
+	if strings.Contains(listResp, "ws.setup") {
+		t.Fatalf("tools/list exposed deleted setup mutation tool: %s", listResp)
 	}
-	if !strings.Contains(byID["1"], "runtime.info") {
-		t.Fatalf("leaf tools/list hid runtime.info: %s", byID["1"])
+
+	// A leaf-scoped key is rejected by the keyed gate for restricted tools.
+	deniedStatus := callToolOnce(t, server, 2, "agents.status", map[string]any{
+		"session_key": leafKey,
+		"name":        "impl",
+	})
+	if !strings.Contains(deniedStatus, "tool not available") {
+		t.Fatalf("leaf key not rejected for agents.status: %s", deniedStatus)
 	}
-	if !strings.Contains(byID["2"], "tool not available") {
-		t.Fatalf("leaf tools/call did not reject agents.status: %s", byID["2"])
+	deniedTier := callToolOnce(t, server, 3, "config.agents_tier", map[string]any{
+		"session_key": leafKey,
+		"tier":        "light",
+		"model":       "gpt-5.2",
+	})
+	if !strings.Contains(deniedTier, "tool not available") {
+		t.Fatalf("leaf key not rejected for config.agents_tier: %s", deniedTier)
 	}
-	if !strings.Contains(byID["3"], "prompt_bundle") {
-		t.Fatalf("leaf tools/call rejected runtime.info: %s", byID["3"])
+	deniedShow := callToolOnce(t, server, 4, "config.show", map[string]any{
+		"session_key": leafKey,
+	})
+	if !strings.Contains(deniedShow, "tool not available") {
+		t.Fatalf("leaf key not rejected for config.show: %s", deniedShow)
 	}
-	if !strings.Contains(byID["4"], "tool not available") {
-		t.Fatalf("leaf tools/call did not reject config.agents_tier: %s", byID["4"])
-	}
-	if !strings.Contains(byID["5"], "tool not available") {
-		t.Fatalf("leaf tools/call did not reject config.show: %s", byID["5"])
+
+	// runtime.info is permitted for a leaf scope (not a restricted prefix).
+	allowedInfo := callToolOnce(t, server, 5, "runtime.info", map[string]any{
+		"session_key": leafKey,
+	})
+	if !strings.Contains(allowedInfo, "prompt_bundle") {
+		t.Fatalf("leaf key wrongly rejected runtime.info: %s", allowedInfo)
 	}
 }
 
+// TestExplicitAllowedToolsCannotBypassEffectiveRole verifies that the
+// WS_MCP_ALLOWED_TOOLS visibility allowlist cannot regain a tool that the keyed
+// capability scope denies. After the WS_MCP_TOOL_PROFILE fold, the allowlist is a
+// schema-visibility filter only; the keyed call gate remains the role authority,
+// so an allowlisted-but-scope-denied tool is still rejected on call.
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
-	t.Setenv("WS_MCP_TOOL_PROFILE", "leaf")
 	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,agents.status,config.show")
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
-	}, "\n")
 
-	var out bytes.Buffer
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input+"\n"), &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
+	server := NewServer(root, "test")
+	leafKey, err := server.sessions.mint(root, roleLeaf)
+	if err != nil {
+		t.Fatalf("mint leaf key: %v", err)
 	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(byID["1"], "runtime.info") {
-		t.Fatalf("explicit allowlist hid role-visible runtime.info: %s", byID["1"])
+
+	// The allowlist constrains tools/list visibility (only allowlisted tools show).
+	listResp := callToolsList(t, server)
+	if !strings.Contains(listResp, "runtime.info") {
+		t.Fatalf("allowlist hid allowlisted runtime.info: %s", listResp)
 	}
-	for _, hidden := range []string{"agents.status", "config.show"} {
-		if strings.Contains(byID["1"], hidden) {
-			t.Fatalf("explicit allowlist bypassed leaf profile for %s: %s", hidden, byID["1"])
-		}
+
+	// runtime.info is both allowlisted and scope-permitted: it is callable.
+	allowedInfo := callToolOnce(t, server, 2, "runtime.info", map[string]any{
+		"session_key": leafKey,
+	})
+	if !strings.Contains(allowedInfo, "prompt_bundle") {
+		t.Fatalf("allowlist+leaf wrongly rejected runtime.info: %s", allowedInfo)
 	}
-	if !strings.Contains(byID["2"], "prompt_bundle") {
-		t.Fatalf("explicit allowlist rejected runtime.info: %s", byID["2"])
+
+	// agents.status and config.show are allowlisted but DENIED by the leaf scope.
+	// The keyed gate must still reject them — the allowlist cannot regain them.
+	deniedStatus := callToolOnce(t, server, 3, "agents.status", map[string]any{
+		"session_key": leafKey,
+		"name":        "impl",
+	})
+	if !strings.Contains(deniedStatus, "tool not available") {
+		t.Fatalf("allowlist let leaf-denied agents.status through: %s", deniedStatus)
 	}
-	if !strings.Contains(byID["3"], "tool not available") {
-		t.Fatalf("explicit allowlist allowed leaf-hidden agents.status: %s", byID["3"])
-	}
-	if !strings.Contains(byID["4"], "tool not available") {
-		t.Fatalf("explicit allowlist allowed leaf-hidden config.show: %s", byID["4"])
+	deniedShow := callToolOnce(t, server, 4, "config.show", map[string]any{
+		"session_key": leafKey,
+	})
+	if !strings.Contains(deniedShow, "tool not available") {
+		t.Fatalf("allowlist let leaf-denied config.show through: %s", deniedShow)
 	}
 }
 
 func useLeadProfile(t *testing.T) {
 	t.Helper()
-	t.Setenv("WS_MCP_TOOL_PROFILE", "lead")
 	t.Setenv("WS_MCP_ALLOWED_TOOLS", "")
 }
 
@@ -640,6 +671,18 @@ func TestServeStdioMentalModelToolsRejectSpecStemOnStatus(t *testing.T) {
 	if !strings.Contains(text, "domain or path") || !strings.Contains(out.String(), `"isError":true`) {
 		t.Fatalf("mental_models.status accepted spec_stem argument: %s", out.String())
 	}
+}
+
+// callToolsList issues a single tools/list request and returns the raw response
+// line. Used by capability-scope tests to assert advertised schema visibility.
+func callToolsList(t *testing.T, server *Server) string {
+	t.Helper()
+	line := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(line), &out); err != nil {
+		t.Fatalf("ServeStdio error: %v", err)
+	}
+	return strings.TrimSpace(out.String())
 }
 
 func responseLinesByID(t *testing.T, lines []string) map[string]string {
