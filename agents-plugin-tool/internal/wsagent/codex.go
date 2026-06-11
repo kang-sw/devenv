@@ -30,7 +30,6 @@ type RunnerRequest struct {
 	OnSessionID          func(string) error
 	Timeout              time.Duration
 	InheritProcessGroup  bool
-	ToolProfile          string
 }
 
 type RunnerResult struct {
@@ -48,8 +47,6 @@ func runnerForBackend(backend string) (Runner, error) {
 		return CodexRunner{}, nil
 	case "claude":
 		return ClaudeRunner{}, nil
-	case "gemini":
-		return GeminiRunner{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported agent backend %q", backend)
 	}
@@ -86,9 +83,6 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		configureRunnerCommand(cmd)
 	}
 	cmd.Dir = req.Root
-	if req.ToolProfile != "" {
-		cmd.Env = append(cmd.Environ(), "WS_MCP_TOOL_PROFILE="+req.ToolProfile)
-	}
 	if invocation.PromptDelivery == "stdin" {
 		cmd.Stdin = strings.NewReader(invocation.PromptStdin)
 	}

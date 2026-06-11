@@ -75,7 +75,7 @@ operations, API documentation lookup, and project/convention reads. Skills name
 only primitives available in the runtime; when a needed surface is not exposed
 yet, skill text describes the required MCP contract instead of naming a
 host-specific helper.
-Prompts sent to `ws/subquery`, `ws/agents.call`, and wsflow subagents are
+Prompts sent to `ws/agents.call` and wsflow subagents are
 written in English so delegated work products stay consistent with English
 AI-authored repository artifacts.
 
@@ -94,8 +94,8 @@ render through the playbook surface; the async fire-and-forget plus
 deferred-result shape maps to native background subagents. Native delegation is
 the default, not the exclusive path — the lead-invokable mercenary surface
 remains available and the `delegates: true` render tip is its always-on seam. The
-`ws/subquery` runtime tool stays callable, but shipped skills no longer name it
-for new delegation. {#260610-subquery-explore-delegation-shift}
+`ws/subquery` runtime tool has been removed; scoped exploration now uses the
+native Explore subagent exclusively. {#260610-subquery-explore-delegation-shift}
 
 Workflow guidance prefers `model` for both portable aliases and concrete
 overrides. Examples use `model: "core"` or `model: "deep"` for portable
@@ -313,7 +313,7 @@ repeated routing failures.
 `lead-salvage` handles failed large implementations, sprints, branches, and
 agent runs where a wrong premise may require rollback or recovery. It freezes
 evidence before cleanup, interviews the user to confirm the failure claim and
-invalidated premises, fans out named-agent or subquery surveys for code blast
+invalidated premises, fans out named-agent surveys for code blast
 radius, ticket graph contamination, spec and mental-model impact, and preserved
 evidence, then classifies artifacts as keep, rework, discard, or unknown. It
 classifies affected tickets as keep, rewrite, drop, absorb, or unknown before
@@ -329,7 +329,7 @@ edits. {#260510-salvage-recovery-workflow-skill}
 
 `lead-verify-discussion` gives users an explicit lightweight verification and
 validation checkpoint during discussion. It checks the current assumptions or
-structure choices through scoped `ws/subquery` calls, searches for already
+structure choices through scoped named-agent surveys, searches for already
 implemented items that can be reused or merged to avoid duplication, synthesizes
 corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, checks for over-alignment signals such as weak premise handling or
@@ -537,7 +537,7 @@ routing, `lead-proceed` compares active conversation decisions and the ticket
 artifact only; when settled decisions are missing from the ticket, it routes
 through `lead-write-ticket` edit, re-reads the refreshed ticket, and then
 continues scope resolution. When freshness is uncertain, it stops for
-discussion instead of delegating hidden conversation context to a subquery.
+discussion instead of delegating hidden conversation context to a background subagent.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected scope as

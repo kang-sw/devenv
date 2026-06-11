@@ -25,14 +25,12 @@ HIDDEN_TOOLS = {
     "agents.cancel",
     "agents.print",
     "agents.erase",
-    "subquery",
     "config.agents_tier",
     "api.ask",
     "api.ask_async",
     "api.status",
     "api.result",
     "api.cancel",
-    "ws.setup",
     "exec.spawn",
     "exec.shell",
     "exec.status",
@@ -61,7 +59,6 @@ HIDDEN_COMMANDS = {
     "agents.cancel",
     "agents.print",
     "agents.erase",
-    "subquery",
     "config.agents-tier",
 }
 
@@ -113,7 +110,6 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertEqual(set(contract["commands"]), set(payload["commands"]))
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
         self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
-        self.assertIn("setup", contract["tools"])
         self.assertIn("api.list", contract["tools"])
         self.assertIn("prompt.render", contract["tools"])
 

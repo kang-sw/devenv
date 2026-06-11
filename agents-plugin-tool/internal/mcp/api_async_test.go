@@ -275,6 +275,19 @@ func callMCPToolForTestNoFatal(server *Server, name string, args map[string]any)
 	if err != nil {
 		return "", err
 	}
+	root, err := canonicalGitRoot(server.root)
+	if err != nil {
+		return "", err
+	}
+	key, err := server.sessions.mint(root, roleLead)
+	if err != nil {
+		return "", err
+	}
+	args["session_key"] = key
+	rawArgs, err = json.Marshal(args)
+	if err != nil {
+		return "", err
+	}
 	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, name, rawArgs) + "\n"
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {

@@ -178,6 +178,10 @@ func metaFromFrontmatter(fm map[string]any) PlaybookMeta {
 			if s, ok := v.(string); ok {
 				meta.Delegates = s == "true"
 			}
+		case "role":
+			if s, ok := v.(string); ok {
+				meta.Role = s
+			}
 		case "includes":
 			if list, ok := v.([]string); ok {
 				meta.Includes = list

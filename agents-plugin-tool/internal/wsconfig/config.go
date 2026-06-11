@@ -212,8 +212,6 @@ func InferBackend(model string) string {
 	switch {
 	case value == "":
 		return ""
-	case strings.Contains(value, "gemini"):
-		return "gemini"
 	case strings.HasPrefix(value, "gpt-") || strings.Contains(value, "codex"):
 		return "codex"
 	case strings.Contains(value, "haiku") || strings.Contains(value, "sonnet") ||
@@ -345,8 +343,6 @@ func normalizedHarness(value string) string {
 		return "codex"
 	case "claude":
 		return "claude"
-	case "gemini":
-		return "gemini"
 	default:
 		return ""
 	}
@@ -360,7 +356,7 @@ func aliasTargetKey(harness string) (string, error) {
 	if key := normalizedHarness(value); key != "" {
 		return key, nil
 	}
-	return "", fmt.Errorf("harness must be codex, claude, gemini, or default")
+	return "", fmt.Errorf("harness must be codex, claude, or default")
 }
 
 func normalizeOptionalEffort(values ...string) (string, bool, error) {

@@ -20,6 +20,10 @@ type PlaybookMeta struct {
 	Kind string
 	// Delegates indicates whether this playbook delegates to a sub-agent.
 	Delegates bool
+	// Role is the delegation role of this playbook.
+	// Values: lead | delegate | leaf | implementer | reviewer.
+	// Empty when absent from frontmatter.
+	Role string
 	// Includes is the ordered list of bare text-dep names to auto-include.
 	Includes []string
 	// Variables is the ordered list of declared substitution variable names.

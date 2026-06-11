@@ -9,14 +9,24 @@ related-mental-model:
 
 # ws named agent empty result after long tool-use run
 
-## Pending Removal (2026-06-09)
+## Re-triage (2026-06-11, M3 Phase 2c — option B)
 
-Resolved-by-deletion candidate under `260605-epic-ws-playbook-factory-pivot`.
-The named-agent (`agents.*`) spawn machinery this bug lives in is removed
-wholesale at milestone M3 (delegation moves to harness-native subagents). Do not
-invest in a standalone fix; drop this ticket to `.dropped/` in the same commit
-that deletes the spawn machinery. Retained in place until then so git blame and
-ticket scans surface the coupling.
+The earlier "Pending Removal / resolved-by-deletion" disposition assumed option C
+(total spawn-machinery removal). That is **superseded**: under option B the codex
+and claude runner backends are RETAINED as the mercenary surface
+(`260609-refactor-ws-spawn-runtime-deletion-session-auth`, `## Decisions`). This
+bug therefore **lives on, not dropped**.
+
+Phase 2c reshaped the agents.* surface (single self-contained prompt, drop
+`register(prompts:[stems])`, render-minted child keys, native-shaped continuation
+handle) but did NOT touch the backend result-capture path. The empty-result-after-
+tool-use failure mode (backend ends in `tool_use` / `hook_stopped` with an empty
+final `result`) is orthogonal to the reshape and **persists on the retained
+path**. It needs a dedicated result-capture fix, out of Phase 2c's reshape scope.
+
+Stays in `todo/`. Adjacent fresh evidence (2026-06-11): a Phase 2c implementer
+mercenary run terminated with `backend invocation failed: claude failed: exit
+status 1` — a distinct crash mode, but the same retained-path robustness surface.
 
 ## Background
 

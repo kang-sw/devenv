@@ -287,6 +287,76 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
 
+    def test_install_sh_snapshot_layout_is_recognized_for_local_devenv(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            # install.sh directory-marketplace snapshot layout (the path Claude
+            # actually runs from), NOT the cache/kang-sw-devenv/<pkg>/<ver> layout.
+            plugin_dir = home / ".claude" / "plugins" / "ws-plugin" / "ws"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=home)
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+            # A non-plugin path must not activate local repair.
+            self.assertIsNone(launcher.local_devenv_cache_package(home / "somewhere" / "ws"))
+
+    def test_apply_rsrc_root_env_points_runtime_at_staged_rsrc_tree(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            rsrc_root = plugin_dir / "rsrc"
+            rsrc_root.mkdir()
+
+            # When the rsrc tree is staged and the caller did not set the seam,
+            # the launcher hands the runtime the real <plugin>/rsrc location
+            # (the runtime's own <dir(exe)>/../rsrc derivation would miss it
+            # because the binary lives under <plugin>/.runtime/<platform>/).
+            env = {}
+            launcher.apply_rsrc_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_RSRC_ROOT"], str(rsrc_root))
+
+            # A caller-provided WS_RSRC_ROOT is preserved.
+            env = {"WS_RSRC_ROOT": "/custom/rsrc"}
+            launcher.apply_rsrc_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_RSRC_ROOT"], "/custom/rsrc")
+
+            # No rsrc tree staged: leave resolution to the runtime default.
+            env = {}
+            launcher.apply_rsrc_root_env(plugin_dir / "nope", env)
+            self.assertNotIn("WS_RSRC_ROOT", env)
+
+    def test_local_devenv_build_env_recovers_home_when_absent(self):
+        launcher = load_launcher()
+
+        with mock.patch.object(launcher.Path, "home", return_value=Path("/home/recovered")):
+            with mock.patch.dict(launcher.os.environ, {}, clear=True):
+                env = launcher.local_devenv_build_env()
+                self.assertEqual(env["HOME"], "/home/recovered")
+            with mock.patch.dict(launcher.os.environ, {"HOME": "/home/real"}, clear=True):
+                env = launcher.local_devenv_build_env()
+                self.assertEqual(env["HOME"], "/home/real")
+
+    def test_claude_cache_local_devenv_marker_forces_runtime_install(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".claude" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.30.0"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=home)
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
+
     def test_invalid_local_devenv_contract_falls_back_to_release_path(self):
         launcher = load_launcher()
 

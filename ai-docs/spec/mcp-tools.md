@@ -59,78 +59,28 @@ server behavior without reading process-local files directly.
 
 ## MCP Session Root Defaults {#260505-mcp-session-default-root}
 
-Root-aware MCP tools resolve omitted `root` arguments through the current MCP
-server session before falling back to startup state. The priority is:
+Root-aware MCP tools resolve their repository root exclusively from a mandatory
+`session_key` argument; root resolution is the ephemeral session-auth model
+(`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
+call without a `session_key` is rejected with mandatory-login guidance naming
+`ws.lead.login(root)`; a call whose key is absent from the in-memory registry is
+rejected with the `unknown_session` recovery contract. `ws.lead.login(root)` is
+the sole bootstrap verb and the only tool that accepts a `root` argument.
 
-1. Explicit tool argument `root`.
-2. Volatile session default root.
-3. Host workspace metadata when the host provides exactly one workspace.
-4. Explicit non-dot server startup root.
-5. `WS_MCP_PROJECT_ROOT`.
-6. Server startup root.
+The former resolution sources are removed: the explicit per-tool `root` argument,
+the volatile session default root, host-workspace metadata, the explicit server
+startup root, `WS_MCP_PROJECT_ROOT` as a resolution source, the `ws.setup` public
+setup surface (both the bare root-session form and the
+`lead-workflow-bootstrap` actor form), and the persistent actor / authority /
+child-actor bootstrap. With root carried by a per-call key rather than a
+process-global default field, concurrent distinct worktree roots resolve without
+clobber and without the former request-order setup fence.
 
-`ws.setup` is the public setup surface for session state. When called with
-`root`, it validates that the path is inside a Git worktree, stores the
-canonical worktree root in the current server process, and returns setup state.
-The root-only value is volatile and does not write user config, ws cache config,
-or repository files. Calling `ws.setup` without `root`, `method`, or `id`
-reports current setup state, including the detected session harness when one has
-been observed, and does not mint lead authority. The default response is compact
-labeled text. Structured JSON remains accepted as hidden compatibility dispatch,
-but the public setup schema does not advertise a `format` argument. Legacy
-`session.*` root tools may remain callable as hidden compatibility dispatch, but
-they are not advertised as canonical tools.
+## Ephemeral Session-Auth Model {#260610-ephemeral-session-auth-model}
 
-`ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
-creates a cooperative lead actor for a workflow session and returns an actor id
-with explicit recovery guidance. New actor ids are short opaque recovery tokens
-with an authority prefix and lowercase payload, such as `lead-k9f2p7qx`; callers
-must treat the token as opaque and recover with the exact returned value rather
-than parsing worktree routing details out of it. Callers must pass the absolute
-repository path as a filesystem path; the MCP server cannot infer the agent's
-current directory from placeholders or relative paths.
-`ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
-and binds the current session root to the actor root. Root-omitted actor-owned
-tools such as agent registration, agent calls, and subqueries require either a
-current actor binding or a hidden explicit-root compatibility argument. When
-that binding is missing, root-omitted actor-owned tools return compact recovery
-guidance pointing to `ws.setup(id: "<actor-id>")`; the full lead bootstrap
-ceremony remains in workflow guidance rather than repeated in each tool error.
-The actor model is a cooperative workflow guard, not a hard security boundary.
-{#260524-mcp-actor-setup-bootstrap}
-
-> [!note] Planned 🚧
-> The actor / authority / child-actor bootstrap (`actor_id`, `restoreActor`,
-> `ensureChildActor`) is replaced by the ephemeral session-auth model
-> (`#260610-ephemeral-session-auth-model`): `ws.lead.login(root)` returns a
-> word-chain session key, every call carries a key, and child actors give way to
-> render-minted child keys. Current actor behavior is unchanged until that model
-> lands.
-
-When host metadata names multiple workspaces and no higher-priority root exists,
-root-aware tools refuse to guess and return an actionable error asking the caller
-to pass the absolute repository path explicitly or call `ws.setup` with that
-absolute path.
-
-An explicit non-dot server startup root is treated as authoritative before the
-launcher-provided project-root environment fallback. If that explicit startup
-root is invalid, root-aware tools fail closed instead of silently falling back to
-`WS_MCP_PROJECT_ROOT`.
-
-> [!note] Planned 🚧
-> The volatile session-default-root resolution and the `ws.setup` actor-bootstrap
-> contract (`#260524-mcp-actor-setup-bootstrap`) are replaced by the ephemeral
-> session-auth model (`#260610-ephemeral-session-auth-model`). Root will be
-> carried by a per-call session key rather than a process-global default field,
-> so concurrent distinct worktree roots resolve without clobber. Current behavior
-> is unchanged until that model lands.
-
-## 🚧 Ephemeral Session-Auth Model {#260610-ephemeral-session-auth-model}
-
-The persistent actor / authority / child-actor model
-(`#260524-mcp-actor-setup-bootstrap`) is replaced by an ephemeral, in-memory
-session-auth model. This is the caller-visible authentication contract for ws
-tool calls; it is not yet implemented.
+The former persistent actor / authority / child-actor model has been replaced by
+an ephemeral, in-memory session-auth model. This is the caller-visible
+authentication contract for ws tool calls.
 
 A lead-centric bootstrap verb mints a session:
 `ws.lead.login(root) -> session_key`. The returned key is an LLM-friendly
@@ -162,10 +112,10 @@ with its own known root and retries. Because the caller-visible contract
 a later persistent session store is a pure implementation swap with no contract
 migration.
 
-Key issuance reserves an optional capability/role-scope parameter from the first
-cut (`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys
-for delegates even if the first implementation honors only a single default
-profile.
+Key issuance accepts an optional capability/role-scope parameter
+(`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys for
+delegates; the keyed `tools/call` handler enforces that scope (see Tool Profile
+Gating).
 
 > [!note] Constraints
 > - The session key is mandatory on every ws call; there is no keyless lead
@@ -327,18 +277,6 @@ non-move ticket changes rather than inventing a destination status.
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
-`subquery` starts an asynchronous scoped codebase or documentation query and
-returns a generated subquery key immediately. Callers collect the result through
-the named-agent result/status/tail/cancel surfaces.
-
-> [!note] Planned 🚧
-> The `subquery` tool runtime is removed. Scoped exploration, survey, and
-> one-turn fact-finding move to host-native subagents rendered through the
-> playbook surface (`#260609-playbook-harness-rendering`); the mercenary surface
-> (`#260610-mercenary-delegation-surface`) is scoped to implementer/reviewer only
-> and does not cover exploration. The skill-facing `subquery` contract is retired;
-> `path.generate` is unaffected. Current behavior is unchanged until removal lands.
-
 `path.generate` allocates worktree-scoped writable artifact paths, such as review
 files, so workflow agents can exchange file paths without inventing cache
 locations.
@@ -347,15 +285,15 @@ locations.
 
 The MCP server supports an environment-selected agentless product mode for the
 internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
-omit named-agent, subquery, model-alias configuration, and agent-backed API
-documentation surfaces: `agents.*`, `subquery`, `config.agents_tier`,
+omit named-agent, model-alias configuration, and agent-backed API
+documentation surfaces: `agents.*`, `config.agents_tier`,
 `api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel`.
 `api.list` remains available as read-only cache discovery.
 
 Explicit calls to hidden agent-backed tools fail with a clear disabled error and
 do not start named-agent workers. Runtime capability output and CLI command
 surfaces match the selected mode, so no-agent mode omits the hidden MCP tools
-and matching CLI groups such as `agents`, `subquery`, and
+and matching CLI groups such as `agents` and
 `config agents-tier`.
 
 `WS_MCP_NAMESPACE=wsflow` changes ordinary user-facing namespace text to
@@ -409,12 +347,18 @@ inline in the tool result, with `context` values substituted and declared
 includes resolved. It is the lead-facing successor of internal workflow-skill
 bodies.
 
-`playbook.render(name, context?)` materializes the named playbook as a
-context-injected, harness-rendered prompt, writes it to a worktree-scoped
-temporary file, and returns that file path. The caller hands the path to a
-host-native subagent. Like `prompt.render`, it carries no routing or strategy
-decision — the caller selects `name`, and the tool only materializes a rendered
-copy.
+`playbook.render(session_key, name, context?, root_override?)` materializes the
+named playbook as a context-injected, harness-rendered prompt, writes it to a
+worktree-scoped temporary file, and returns that file path. The caller hands the
+path to a host-native subagent or a mercenary. Like `prompt.render`, it carries
+no routing or strategy decision — the caller selects `name`, and the tool only
+materializes a rendered copy. `root_override`, when set, rebinds both the
+auto-include resolution root and the child-key binding root for a delegate
+running in a different worktree. When the calling `session_key` is lead-scoped
+and the playbook frontmatter declares a delegate-eligible role, the render mints
+a fresh child session key and splices it into the rendered prompt, so both native
+and mercenary delegates receive a prompt with their key already embedded
+(`#260610-mercenary-delegation-surface`).
 
 A playbook is selected by `name`; the tool does not decide which playbook to use.
 A load or render failure for a requested `name` is a loud error, not a silent
@@ -483,69 +427,26 @@ refresh.
 
 The `agents.*` tool family exposes durable named-agent orchestration.
 
-> [!note] Planned 🚧
-> The `agents.*` family is reshaped — not wholly removed — into the scoped
-> mercenary delegation surface (`#260610-mercenary-delegation-surface`). The
-> retained surface is smaller: `agents.register(prompts: [stems])` and the
-> model-alias registration field (`#260508-agents-register-model-alias-field`)
-> are dropped in favor of a single self-contained prompt from `playbook.render`;
-> the actor-scoped root invisibility contract
-> (`#260523-agents-root-schema-invisibility`) is obsolete under mandatory session
-> keys; mercenaries are scoped to implementer/reviewer roles only; and the
-> gemini runner, the `subquery` runtime, exploration-purpose spawns, and
-> diagnostic sprawl beyond mercenary needs are removed. The cancel-retry guidance
-> (`#260512-agent-cancel-resume-guidance`) and hidden `agents.recall`
-> (`#260512-agent-recall-hidden-surface`) carry over to the mercenary path. Current
-> behavior is unchanged until the reshape lands.
+The `agents.*` family is the reshaped scoped **mercenary** delegation surface
+(`#260610-mercenary-delegation-surface`): codex and claude runners retained,
+scoped to implementer/reviewer roles, invoked with a single self-contained prompt
+from `playbook.render`.
 
-`agents.register` creates or updates an agent record with backend, model alias
-or compatibility tier field, resolved model, prompt references, or materialized
-system prompt text. `agents.call` starts an asynchronous call and returns
-immediately. Public named-agent workflows use `ws.setup` for session root
-selection; explicit root arguments may remain accepted as a hidden compatibility
-override. Public and generated actor-owned schemas for `agents.*` and `subquery`
-omit `root` end-to-end, including raw advertised schema metadata and
-host-visible generated metadata, while preserving intentional hidden
-explicit-root dispatch compatibility.
-{#260523-agents-root-schema-invisibility}
-
-> [!note] Planned 🚧
-> This contract is retired by the session-auth model. Under mandatory per-call
-> session keys (`#260610-ephemeral-session-auth-model`) there is no actor-root to
-> hide: root is carried by the key, so the root-schema-invisibility surface is
-> removed rather than reshaped.
-
-When the parent MCP session is bound to an actor and the call targets that actor
-root, named-agent registration/calls receive a persistent delegated child actor
-id in agent metadata plus a child setup instruction in the system prompt.
-Rootless actor-scoped subqueries receive ephemeral reader child actors with the
-same recovery instruction shape and do not receive the lead bootstrap method.
-
-Root-omitted actor-owned MCP calls in an actor-bound MCP session resolve through
-the current actor scope. For `agents.*`, this includes registration, call, wait,
-result, status, tail, interrupt, cancel, print, and erase. Root-omitted
-`subquery` starts the generated subquery agent in the same actor scope as the
-printed rootless follow-up commands. Hidden explicit-root compatibility calls
-use the unbound global namespace, so an actor-bound session can still inspect or
-manage a global compatibility registration explicitly without shadowing the
-actor-local agent of the same public name.
-
-`agents.register` prefers `model` as the public model-selection field.
-`model: "light"`, `model: "core"`, and `model: "deep"` select portable
-aliases; concrete provider model names select a one-off backend model. The
-`tier` field remains a deprecated compatibility input. Alias resolution may
-supply optional effort metadata; `agents.register` does not accept direct effort
-input, and backend calls apply effort only when the selected alias resolves a
-non-empty effort.
-{#260508-agents-register-model-alias-field}
-
-> [!note] Planned 🚧
-> This registration contract is retired. Mercenaries are invoked with a single
-> self-contained prompt from `playbook.render`
-> (`#260610-mercenary-delegation-surface`), so `agents.register(prompts: [stems])`
-> and the registration-time model-alias/`tier` field are removed; per-mercenary
-> model selection moves into the rendered prompt and harness config
-> (`#260513-harness-local-agent-tier-config`).
+`agents.register` registers a mercenary agent with an optional `backend` (codex
+or claude) and a self-contained `system_prompt_text` produced by
+`playbook.render`. The former `prompts: [stems]`/`prompt_refs` references and the
+registration-time model-alias/`tier` fields are removed: per-mercenary model
+selection moves into the rendered prompt and harness config
+(`#260513-harness-local-agent-tier-config`). `agents.call` starts an asynchronous
+call, returns immediately, and yields a native-shaped continuation handle
+(`agentId=<name>`) so the lead reuses one continuation idiom across the native
+and mercenary paths. Named-agent calls resolve their root from the mandatory
+`session_key` like every other root-aware tool
+(`#260610-ephemeral-session-auth-model`): no `agents.*` schema advertises a
+`root` argument, and there is no actor scope, hidden explicit-root dispatch, or
+persistent child-actor credential injection. The named-agent registry namespaces
+role pointers by the resolved worktree root, so the same public agent name stays
+distinct across distinct worktree roots without an actor dimension.
 
 `agents.wait` waits for one or more agents to become ready and returns readiness
 metadata, not final output. `agents.result` is the result-consumption surface and
@@ -573,13 +474,12 @@ remains a deprecated compatibility reader over the resolved current instance.
 worktree and actor scope; historical instance payloads are removed later by the
 named-agent retention cleanup policy rather than synchronously during erase.
 
-## 🚧 Mercenary Delegation Surface {#260610-mercenary-delegation-surface}
+## Mercenary Delegation Surface {#260610-mercenary-delegation-surface}
 
 The reshaped delegation surface. A **mercenary** is a ws-spawned external
 subprocess agent — a deliberately distinct term from a harness-native
 **subagent**, so callers never confuse the two delegation paths. This section is
-the planned caller-visible contract for the reshaped `agents.*` family; it is not
-yet implemented.
+the caller-visible contract for the reshaped `agents.*` family.
 
 **Default is native; mercenary is always available.** Default delegation is
 always to a host-native subagent. The mercenary path is always available to the
@@ -726,7 +626,7 @@ exec runtime metadata into SQLite authority. The gate keeps public `agents.*`
 and `exec.*` MCP APIs stable while separating lifecycle metadata from
 file-backed payload bodies. Named-agent registry metadata and exec job metadata
 are SQLite-backed. SQLite metadata may track identities, lifecycle state,
-actor/session binding, path indexes, byte counts, retention visibility, leases,
+session binding, path indexes, byte counts, retention visibility, leases,
 tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
 transcripts, backend raw output, and final output bodies remain file-backed.
 
@@ -737,34 +637,33 @@ short and must not hold a transaction across subprocess or model execution.
 
 ## Tool Profile Gating {#260505-tool-profile-gating}
 
-The MCP server defaults to the `lead` tool surface. It does not derive authority
-from worktree-local locks or startup-root ownership, because plugin-managed hosts
-can start the server from cache directories and can fail to propagate
-environment variables consistently.
+The MCP server defaults to the `lead` tool surface, and `tools/list` advertises
+the full lead surface regardless of any caller environment. Schema visibility is
+advisory, not an authority boundary, because plugin-managed hosts can start the
+server from cache directories and can fail to propagate environment variables
+consistently.
 
-`WS_MCP_TOOL_PROFILE` is an optional profile filter, not an authority boundary.
-When the host successfully propagates it, `delegate` and `leaf` receive narrower
-tool sets for dogfood containment and tests. Delegate access to generated
-subquery agents is scoped to subquery result, status, tail, cancel, and
-print-style operations. Leaf also hides recursive orchestration and selected
-mutation tools.
+Tool-permission enforcement is the server-side capability check in the keyed
+`tools/call` handler. A session key carries `{root + capability scope}` —
+`lead`, `delegate`, or `leaf` — minted by `ws.lead.login(capability)` or as a
+render-minted child key. When a call presents a known non-lead key, the handler
+rejects any tool that scope disallows (`delegate` cannot call `agents.*`,
+`config.*`, or `session.*`; `leaf` additionally cannot call `api.*` or
+`git.commit`) and rejects any `ws.lead.*` call from any non-lead key (self-login
+escalation block). Keyless callers and lead keys are not restricted by this gate,
+so the keyless `ws.lead.login` bootstrap stays open; a delegate can therefore
+keyless-re-`login` to re-escalate. The scope is a soft defense-in-depth guard
+layered on the host's own subagent tool restriction, not a hard sandbox.
 
-When profile environment propagation fails, delegated agents may see the full
-lead MCP surface. Workflow containment therefore depends on prompt rules such as
-delegate orientation and lead-owned orchestration instructions, not on MCP
-tool-surface filtering. `WS_MCP_ALLOWED_TOOLS` can further narrow the visible
-surface for tests or debugging, but it cannot expand access beyond the selected
-profile.
-
-> [!note] Planned 🚧
-> Role containment folds into capability-scoped session keys
-> (`#260610-ephemeral-session-auth-model`): a key carries `{root + optional
-> capability/role scope}`, and enforcement is the server-side role check in the
-> keyed `tools/call` handler (`#260610-mercenary-delegation-surface`). The
-> `WS_MCP_TOOL_PROFILE` env profile is verified non-functional for containment
-> (it is a soft-guard only, lost whenever the host fails to propagate the env
-> var) and is retained as defense-in-depth, not as the enforcement boundary.
-> Current behavior is unchanged until the keyed-handler check lands.
+`WS_MCP_TOOL_PROFILE` no longer gates the served tool surface and is not
+propagated to spawned mercenary subprocesses; the env-profile role mechanism is
+retired in favor of the keyed capability gate, having been verified
+non-functional for containment (it was lost whenever the host failed to propagate
+the env var). Delegate tool scope now travels in-band through the render-minted
+child key rather than the environment. `WS_MCP_ALLOWED_TOOLS` is retained as an
+optional visibility allowlist for tests and debugging, independent of capability
+scope: it can narrow the visible surface but cannot expand access beyond what the
+keyed gate permits.
 
 ## CLI Mirror Coverage {#260505-cli-mirror-coverage}
 
@@ -772,7 +671,7 @@ The `ws-mcp` binary mirrors selected MCP behavior as CLI commands for smoke
 tests, compatibility probes, and fallback usage.
 
 CLI mirrors exist for runtime info, single-process smoke checks, config, path
-generation, subquery, named agents, Git, tickets, specs, selected mental-model
+generation, named agents, Git, tickets, specs, selected mental-model
 discovery, and reference tracing. Not every MCP tool has a CLI mirror; the MCP
 surface is the canonical host-neutral interface, and CLI coverage is limited to
 the surfaces needed for runtime checks and workflow fallback use.

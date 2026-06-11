@@ -201,7 +201,10 @@ func TestSessionKeyResolvesRoot(t *testing.T) {
 	// Every response must contain the marker for that key's expected root.
 	const workers = 8
 	var wg sync.WaitGroup
-	type result struct{ id int; err string }
+	type result struct {
+		id  int
+		err string
+	}
 	errs := make([]string, workers*2)
 
 	for i := 0; i < workers; i++ {
@@ -217,8 +220,10 @@ func TestSessionKeyResolvesRoot(t *testing.T) {
 			resp := strings.TrimSpace(buf.String())
 			var r struct {
 				Result struct {
-					IsError bool            `json:"isError"`
-					Content []struct{ Text string `json:"text"` } `json:"content"`
+					IsError bool `json:"isError"`
+					Content []struct {
+						Text string `json:"text"`
+					} `json:"content"`
 				} `json:"result"`
 			}
 			if jerr := json.Unmarshal([]byte(resp), &r); jerr != nil {
@@ -247,8 +252,10 @@ func TestSessionKeyResolvesRoot(t *testing.T) {
 			resp := strings.TrimSpace(buf.String())
 			var r struct {
 				Result struct {
-					IsError bool            `json:"isError"`
-					Content []struct{ Text string `json:"text"` } `json:"content"`
+					IsError bool `json:"isError"`
+					Content []struct {
+						Text string `json:"text"`
+					} `json:"content"`
 				} `json:"result"`
 			}
 			if jerr := json.Unmarshal([]byte(resp), &r); jerr != nil {
@@ -410,49 +417,65 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	}
 }
 
-// --- Test 5: keyless call falls through to the existing resolver chain ---
-
-func TestKeylessCallFallsThroughToExistingChain(t *testing.T) {
+func TestKeylessRootAwareCallRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
-
 	server := NewServer(root, "test")
 
-	// A keyless git.status call with no session_key must still work via the
-	// existing root resolver chain (server root fallback).
-	resp := callToolOnce(t, server, 1, "git.status", map[string]any{})
-	if toolIsError(t, resp) {
-		t.Fatalf("keyless git.status unexpectedly returned isError: %s", resp)
+	for _, args := range []map[string]any{
+		{},
+		{"root": root},
+	} {
+		resp := callToolOnce(t, server, 1, "git.status", args)
+		if !toolIsError(t, resp) {
+			t.Fatalf("keyless git.status should be a tool error for args %#v: %s", args, resp)
+		}
+		text := toolText(t, resp)
+		if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "ws.lead.login") {
+			t.Fatalf("keyless error missing mandatory login guidance for args %#v: %q", args, text)
+		}
+	}
+}
+
+func TestSetupCallsReturnUnknownTool(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	for _, args := range []map[string]any{
+		{"root": root},
+		{"method": "lead-workflow-bootstrap", "root": root},
+	} {
+		resp := callToolOnce(t, server, 1, "ws.setup", args)
+		var raw struct {
+			Error *struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(resp), &raw); err != nil {
+			t.Fatalf("parse ws.setup response: %v\n%s", err, resp)
+		}
+		if raw.Error == nil || raw.Error.Code != -32602 || !strings.Contains(raw.Error.Message, "unknown tool") {
+			t.Fatalf("ws.setup should return unknown-tool JSON-RPC error: %s", resp)
+		}
+	}
+}
+
+func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callToolOnce(t, server, 1, "agents.status", map[string]any{"name": "worker"})
+	if !toolIsError(t, resp) {
+		t.Fatalf("keyless agents.status should be a tool error: %s", resp)
 	}
 	text := toolText(t, resp)
-	if text == "" {
-		t.Fatalf("keyless git.status returned empty text")
-	}
-
-	// Confirm ws.setup root assignment still works (actor model unchanged).
-	var setupOut bytes.Buffer
-	setupInput := fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"root":%q}}}`,
-		root,
-	)
-	server2 := NewServer(".", "test")
-	if err := server2.ServeStdio(context.Background(), strings.NewReader(setupInput), &setupOut); err != nil {
-		t.Fatalf("ServeStdio error: %v", err)
-	}
-	setupResp := strings.TrimSpace(setupOut.String())
-	if toolIsError(t, setupResp) {
-		t.Fatalf("ws.setup returned isError: %s", setupResp)
-	}
-
-	// Subsequent keyless call must resolve via sessionRoot (set by ws.setup above).
-	var followOut bytes.Buffer
-	followInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`
-	if err := server2.ServeStdio(context.Background(), strings.NewReader(followInput), &followOut); err != nil {
-		t.Fatalf("ServeStdio follow-up error: %v", err)
-	}
-	followResp := strings.TrimSpace(followOut.String())
-	if toolIsError(t, followResp) {
-		t.Fatalf("keyless follow-up git.status unexpectedly returned isError: %s", followResp)
+	if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "ws.lead.login") {
+		t.Fatalf("agent keyless error missing mandatory login guidance: %q", text)
 	}
 }

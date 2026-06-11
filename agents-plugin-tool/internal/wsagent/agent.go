@@ -3,8 +3,6 @@ package wsagent
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -65,8 +61,6 @@ var tailLargeFieldKeys = map[string]struct{}{
 
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-var subquerySeq atomic.Uint64
-
 type Clock func() time.Time
 
 type Options struct {
@@ -80,7 +74,6 @@ type Options struct {
 
 type RegisterOptions struct {
 	Root                  string
-	ActorID               string
 	Name                  string
 	Backend               string
 	Harness               string
@@ -92,9 +85,6 @@ type RegisterOptions struct {
 	SystemPromptText      string
 	SuppressOrientation   bool
 	Ephemeral             bool
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
 }
 
 type ConditionalPromptRef struct {
@@ -103,25 +93,19 @@ type ConditionalPromptRef struct {
 }
 
 type CallOptions struct {
-	Root                  string
-	ActorID               string
-	Name                  string
-	Prompt                string
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
+	Root   string
+	Name   string
+	Prompt string
 }
 
 type RecallOptions struct {
-	Root    string
-	ActorID string
-	Name    string
-	Prompt  string
+	Root   string
+	Name   string
+	Prompt string
 }
 
 type InterruptOptions struct {
 	Root    string
-	ActorID string
 	Name    string
 	Message string
 }
@@ -144,7 +128,6 @@ type InterruptResult struct {
 
 type WaitOptions struct {
 	Root    string
-	ActorID string
 	Name    string
 	Names   []string
 	Timeout time.Duration
@@ -154,7 +137,6 @@ type WaitOptions struct {
 
 type ResultOptions struct {
 	Root              string
-	ActorID           string
 	Name              string
 	Timeout           time.Duration
 	Poll              time.Duration
@@ -163,24 +145,21 @@ type ResultOptions struct {
 }
 
 type TailOptions struct {
-	Root    string
-	ActorID string
-	Name    string
-	Lines   int
-	Raw     bool
+	Root  string
+	Name  string
+	Lines int
+	Raw   bool
 }
 
 type DiagnosticStreamOptions struct {
-	Root    string
-	ActorID string
-	Name    string
-	Stream  string
-	Lines   int
+	Root   string
+	Name   string
+	Stream string
+	Lines  int
 }
 
 type AsyncWorkerRequest struct {
 	Root       string
-	ActorID    string
 	Name       string
 	PromptPath string
 	StdoutPath string
@@ -201,40 +180,24 @@ type asyncWorkerCommand struct {
 
 type syncCallOptions struct {
 	Root    string
-	ActorID string
 	Name    string
 	Prompt  string
 	Timeout time.Duration
 }
 
 type oneShotOptions struct {
-	Root                  string
-	ActorID               string
-	Name                  string
-	Backend               string
-	Harness               string
-	Tier                  string
-	Model                 string
-	Prompts               []string
-	PromptRefs            []string
-	SystemPromptText      string
-	Prompt                string
-	Timeout               time.Duration
-	SuppressOrientation   bool
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
-}
-
-type SubqueryOptions struct {
-	Root                  string
-	ActorID               string
-	Question              string
-	DeepResearch          bool
-	Harness               string
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
+	Root                string
+	Name                string
+	Backend             string
+	Harness             string
+	Tier                string
+	Model               string
+	Prompts             []string
+	PromptRefs          []string
+	SystemPromptText    string
+	Prompt              string
+	Timeout             time.Duration
+	SuppressOrientation bool
 }
 
 type SelfWorkerStarter struct{}
@@ -279,9 +242,6 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 func asyncWorkerArgs(worker asyncWorkerCommand, req AsyncWorkerRequest) []string {
 	args := append([]string{}, worker.Args...)
 	args = append(args, "agents", "run-current", "--root", req.Root, "--name", req.Name)
-	if strings.TrimSpace(req.ActorID) != "" {
-		args = append(args, "--actor-id", req.ActorID)
-	}
 	return args
 }
 
@@ -357,25 +317,23 @@ func regularFileExists(path string) bool {
 }
 
 type Agent struct {
-	SchemaVersion       int             `json:"schema_version"`
-	Name                string          `json:"name"`
-	Backend             string          `json:"backend"`
-	Harness             string          `json:"harness,omitempty"`
-	Tier                string          `json:"tier"`
-	Model               string          `json:"model"`
-	Effort              string          `json:"effort,omitempty"`
-	SessionID           string          `json:"session_id"`
-	Status              string          `json:"status"`
-	CreatedAt           string          `json:"created_at"`
-	LastSeenAt          string          `json:"last_seen_at"`
-	LastCallAt          string          `json:"last_call_at"`
-	LastOutputPath      string          `json:"last_output_path"`
-	PromptRefs          []string        `json:"prompt_refs"`
-	SystemPromptPath    string          `json:"system_prompt_path"`
-	ChildActorID        string          `json:"child_actor_id,omitempty"`
-	ChildActorAuthority string          `json:"child_actor_authority,omitempty"`
-	Capabilities        map[string]bool `json:"capabilities"`
-	Ephemeral           bool            `json:"ephemeral,omitempty"`
+	SchemaVersion    int             `json:"schema_version"`
+	Name             string          `json:"name"`
+	Backend          string          `json:"backend"`
+	Harness          string          `json:"harness,omitempty"`
+	Tier             string          `json:"tier"`
+	Model            string          `json:"model"`
+	Effort           string          `json:"effort,omitempty"`
+	SessionID        string          `json:"session_id"`
+	Status           string          `json:"status"`
+	CreatedAt        string          `json:"created_at"`
+	LastSeenAt       string          `json:"last_seen_at"`
+	LastCallAt       string          `json:"last_call_at"`
+	LastOutputPath   string          `json:"last_output_path"`
+	PromptRefs       []string        `json:"prompt_refs"`
+	SystemPromptPath string          `json:"system_prompt_path"`
+	Capabilities     map[string]bool `json:"capabilities"`
+	Ephemeral        bool            `json:"ephemeral,omitempty"`
 }
 
 type Message struct {
@@ -409,7 +367,6 @@ type CurrentCall struct {
 
 type Layout struct {
 	Root              string
-	ActorID           string
 	Name              string
 	AgentDir          string
 	AgentFile         string
@@ -439,54 +396,49 @@ func (m Manager) registryStore(root string) (*wsstore.Store, error) {
 	return wsstore.NewManager(wsstore.Options{CacheHome: m.opts.CacheHome, Now: wsstore.Clock(m.now)}).Open(root)
 }
 
-func agentDefinitionFromAgent(key, actorID, statePath string, agent Agent) wsstore.AgentDefinition {
+func agentDefinitionFromAgent(key, statePath string, agent Agent) wsstore.AgentDefinition {
 	return wsstore.AgentDefinition{
-		AgentKey:            key,
-		ActorID:             strings.TrimSpace(actorID),
-		PublicName:          agent.Name,
-		StatePath:           statePath,
-		SchemaVersion:       agent.SchemaVersion,
-		Backend:             agent.Backend,
-		Harness:             agent.Harness,
-		Tier:                agent.Tier,
-		Model:               agent.Model,
-		Effort:              agent.Effort,
-		SessionID:           agent.SessionID,
-		Status:              agent.Status,
-		CreatedAt:           agent.CreatedAt,
-		LastSeenAt:          agent.LastSeenAt,
-		LastCallAt:          agent.LastCallAt,
-		LastOutputPath:      agent.LastOutputPath,
-		PromptRefs:          append([]string(nil), agent.PromptRefs...),
-		SystemPromptPath:    agent.SystemPromptPath,
-		ChildActorID:        agent.ChildActorID,
-		ChildActorAuthority: agent.ChildActorAuthority,
-		Capabilities:        copyCapabilities(agent.Capabilities),
-		Ephemeral:           agent.Ephemeral,
+		AgentKey:         key,
+		PublicName:       agent.Name,
+		StatePath:        statePath,
+		SchemaVersion:    agent.SchemaVersion,
+		Backend:          agent.Backend,
+		Harness:          agent.Harness,
+		Tier:             agent.Tier,
+		Model:            agent.Model,
+		Effort:           agent.Effort,
+		SessionID:        agent.SessionID,
+		Status:           agent.Status,
+		CreatedAt:        agent.CreatedAt,
+		LastSeenAt:       agent.LastSeenAt,
+		LastCallAt:       agent.LastCallAt,
+		LastOutputPath:   agent.LastOutputPath,
+		PromptRefs:       append([]string(nil), agent.PromptRefs...),
+		SystemPromptPath: agent.SystemPromptPath,
+		Capabilities:     copyCapabilities(agent.Capabilities),
+		Ephemeral:        agent.Ephemeral,
 	}
 }
 
 func agentFromDefinition(def wsstore.AgentDefinition) Agent {
 	return Agent{
-		SchemaVersion:       def.SchemaVersion,
-		Name:                def.PublicName,
-		Backend:             def.Backend,
-		Harness:             def.Harness,
-		Tier:                def.Tier,
-		Model:               def.Model,
-		Effort:              def.Effort,
-		SessionID:           def.SessionID,
-		Status:              def.Status,
-		CreatedAt:           def.CreatedAt,
-		LastSeenAt:          def.LastSeenAt,
-		LastCallAt:          def.LastCallAt,
-		LastOutputPath:      def.LastOutputPath,
-		PromptRefs:          append([]string(nil), def.PromptRefs...),
-		SystemPromptPath:    def.SystemPromptPath,
-		ChildActorID:        def.ChildActorID,
-		ChildActorAuthority: def.ChildActorAuthority,
-		Capabilities:        copyCapabilities(def.Capabilities),
-		Ephemeral:           def.Ephemeral,
+		SchemaVersion:    def.SchemaVersion,
+		Name:             def.PublicName,
+		Backend:          def.Backend,
+		Harness:          def.Harness,
+		Tier:             def.Tier,
+		Model:            def.Model,
+		Effort:           def.Effort,
+		SessionID:        def.SessionID,
+		Status:           def.Status,
+		CreatedAt:        def.CreatedAt,
+		LastSeenAt:       def.LastSeenAt,
+		LastCallAt:       def.LastCallAt,
+		LastOutputPath:   def.LastOutputPath,
+		PromptRefs:       append([]string(nil), def.PromptRefs...),
+		SystemPromptPath: def.SystemPromptPath,
+		Capabilities:     copyCapabilities(def.Capabilities),
+		Ephemeral:        def.Ephemeral,
 	}
 }
 
@@ -501,22 +453,17 @@ func copyCapabilities(in map[string]bool) map[string]bool {
 	return out
 }
 
-func actorScopedDirKey(internalKey, name string) string {
-	sum := sha256.Sum256([]byte(internalKey))
-	return "actor-" + hex.EncodeToString(sum[:8]) + "-" + AgentKey(name)
+func (m Manager) registryKey(name string) (string, error) {
+	return wsstore.AgentInternalKey(name)
 }
 
-func (m Manager) registryKey(actorID, name string) (string, error) {
-	return wsstore.AgentInternalKey(strings.TrimSpace(actorID), name)
-}
-
-func (m Manager) readAgentMetadata(layout Layout, name, actorID string) (Agent, error) {
+func (m Manager) readAgentMetadata(layout Layout, name string) (Agent, error) {
 	store, err := m.registryStore(layout.Root)
 	if err != nil {
 		return Agent{}, err
 	}
 	defer store.Close()
-	key, err := m.registryKey(actorID, name)
+	key, err := m.registryKey(name)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -525,9 +472,6 @@ func (m Manager) readAgentMetadata(layout Layout, name, actorID string) (Agent, 
 	} else if ok {
 		return agentFromDefinition(def), nil
 	}
-	if strings.TrimSpace(actorID) != "" {
-		return Agent{}, fmt.Errorf("agent %q is not registered for actor scope", name)
-	}
 	legacy, err := readAgent(layout.AgentFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -535,7 +479,7 @@ func (m Manager) readAgentMetadata(layout Layout, name, actorID string) (Agent, 
 		}
 		return Agent{}, fmt.Errorf("legacy agent.json recovery required for %q: %w", name, err)
 	}
-	def := agentDefinitionFromAgent(key, "", AgentKey(name), legacy)
+	def := agentDefinitionFromAgent(key, AgentKey(name), legacy)
 	if err := store.UpsertAgentDefinition(context.Background(), def); err != nil {
 		return Agent{}, fmt.Errorf("import legacy agent.json for %q: %w", name, err)
 	}
@@ -545,30 +489,27 @@ func (m Manager) readAgentMetadata(layout Layout, name, actorID string) (Agent, 
 	return legacy, nil
 }
 
-func (m Manager) writeAgentMetadata(layout Layout, agent Agent, actorID string) error {
-	if strings.TrimSpace(actorID) == "" {
-		actorID = layout.ActorID
-	}
+func (m Manager) writeAgentMetadata(layout Layout, agent Agent) error {
 	store, err := m.registryStore(layout.Root)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	key, err := m.registryKey(actorID, agent.Name)
+	key, err := m.registryKey(agent.Name)
 	if err != nil {
 		return err
 	}
 	statePath := filepath.Base(layout.AgentDir)
-	return store.UpsertAgentDefinition(context.Background(), agentDefinitionFromAgent(key, actorID, statePath, agent))
+	return store.UpsertAgentDefinition(context.Background(), agentDefinitionFromAgent(key, statePath, agent))
 }
 
-func (m Manager) deleteAgentMetadata(root, name, actorID string) error {
+func (m Manager) deleteAgentMetadata(root, name string) error {
 	store, err := m.registryStore(root)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	key, err := m.registryKey(actorID, name)
+	key, err := m.registryKey(name)
 	if err != nil {
 		return err
 	}
@@ -597,7 +538,6 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if err != nil {
 		return Agent{}, Layout{}, err
 	}
-	resolved.Text = withChildSetupInstruction(resolved.Text, opts.ChildSetupInstruction)
 	if strings.TrimSpace(opts.Tier) == "" {
 		opts.Tier = resolved.Tier
 	}
@@ -616,7 +556,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	}
 	opts.Backend = resolvedBackend
 	opts.Model = resolvedModel
-	existingLayout, err := m.scopedLayout(opts.Root, name, opts.ActorID, false)
+	existingLayout, err := m.scopedLayout(opts.Root, name, false)
 	if err != nil {
 		return Agent{}, Layout{}, err
 	}
@@ -627,29 +567,27 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Agent{}, Layout{}, err
 	}
-	layout, err := m.scopedLayout(opts.Root, name, opts.ActorID, true)
+	layout, err := m.scopedLayout(opts.Root, name, true)
 	if err != nil {
 		return Agent{}, Layout{}, err
 	}
 
 	now := m.now().UTC().Format(time.RFC3339)
 	agent := Agent{
-		SchemaVersion:       schemaVersion,
-		Name:                name,
-		Backend:             opts.Backend,
-		Harness:             opts.Harness,
-		Tier:                opts.Tier,
-		Model:               opts.Model,
-		Effort:              resolvedEffort,
-		Status:              StatusIdle,
-		CreatedAt:           now,
-		LastSeenAt:          now,
-		LastOutputPath:      "output.md",
-		PromptRefs:          append([]string(nil), promptSpecs...),
-		SystemPromptPath:    "",
-		ChildActorID:        strings.TrimSpace(opts.ChildActorID),
-		ChildActorAuthority: strings.TrimSpace(opts.ChildActorAuthority),
-		Ephemeral:           opts.Ephemeral,
+		SchemaVersion:    schemaVersion,
+		Name:             name,
+		Backend:          opts.Backend,
+		Harness:          opts.Harness,
+		Tier:             opts.Tier,
+		Model:            opts.Model,
+		Effort:           resolvedEffort,
+		Status:           StatusIdle,
+		CreatedAt:        now,
+		LastSeenAt:       now,
+		LastOutputPath:   "output.md",
+		PromptRefs:       append([]string(nil), promptSpecs...),
+		SystemPromptPath: "",
+		Ephemeral:        opts.Ephemeral,
 		Capabilities: map[string]bool{
 			"resume":      true,
 			"interrupt":   false,
@@ -670,25 +608,21 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	}); err != nil {
 		return Agent{}, Layout{}, err
 	}
-	if err := m.writeAgentMetadata(layout, agent, opts.ActorID); err != nil {
+	if err := m.writeAgentMetadata(layout, agent); err != nil {
 		return Agent{}, Layout{}, err
 	}
 	return agent, layout, nil
 }
 
 func (m Manager) Agent(root, name string) (Agent, error) {
-	return m.AgentScoped(root, name, "")
-}
-
-func (m Manager) AgentScoped(root, name, actorID string) (Agent, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
+	layout, err := m.scopedLayout(root, name, false)
 	if err != nil {
 		return Agent{}, err
 	}
-	return m.readAgentMetadata(layout, name, actorID)
+	return m.readAgentMetadata(layout, name)
 }
 
 func (m Manager) resolveConditionalPromptRefs(refs []ConditionalPromptRef) ([]string, error) {
@@ -717,11 +651,11 @@ func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return Agent{}, "", err
 	}
-	agent, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID)
+	agent, err := m.readAgentMetadata(layout, opts.Name)
 	if err != nil {
 		return Agent{}, "", err
 	}
@@ -733,7 +667,6 @@ func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
 		Prompt:         opts.Prompt,
 		CaptureStreams: false,
 		Timeout:        opts.Timeout,
-		ToolProfile:    "delegate",
 	})
 	return agent, text, err
 }
@@ -742,7 +675,6 @@ type executeCallOptions struct {
 	Prompt         string
 	CaptureStreams bool
 	Timeout        time.Duration
-	ToolProfile    string
 }
 
 func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions) (string, Agent, error) {
@@ -750,7 +682,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	agent.Status = StatusRunning
 	agent.LastSeenAt = now
 	agent.LastCallAt = now
-	if err := m.writeAgentMetadata(layout, agent, layout.ActorID); err != nil {
+	if err := m.writeAgentMetadata(layout, agent); err != nil {
 		return "", agent, err
 	}
 	if err := appendEvent(layout.EventsFile, m.now(), "call.started", map[string]any{
@@ -792,7 +724,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 			diagnostic := backendInvocationError(agent, err)
 			agent.Status = StatusFailed
 			agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
-			_ = m.writeAgentMetadata(layout, agent, layout.ActorID)
+			_ = m.writeAgentMetadata(layout, agent)
 			_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": diagnostic.Error()})
 			_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": diagnostic.Error()})
 			return "", agent, diagnostic
@@ -800,7 +732,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	}
 	hookCommand := ""
 	if opts.CaptureStreams {
-		hookCommand = interruptHookCommand(layout.Root, agent.Name, layout.ActorID)
+		hookCommand = interruptHookCommand(layout.Root, agent.Name)
 	}
 	var onSessionID func(string) error
 	if opts.CaptureStreams {
@@ -810,7 +742,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 			}
 			agent.SessionID = sessionID
 			agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
-			if err := m.writeAgentMetadata(layout, agent, layout.ActorID); err != nil {
+			if err := m.writeAgentMetadata(layout, agent); err != nil {
 				return err
 			}
 			if _, err := m.MarkCurrentCallRunning(layout, os.Getpid(), sessionID); err != nil {
@@ -852,13 +784,12 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		OnSessionID:          onSessionID,
 		Timeout:              opts.Timeout,
 		InheritProcessGroup:  opts.CaptureStreams,
-		ToolProfile:          opts.ToolProfile,
 	})
 	if err != nil {
 		diagnostic := backendInvocationError(agent, err)
 		agent.Status = StatusFailed
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
-		_ = m.writeAgentMetadata(layout, agent, layout.ActorID)
+		_ = m.writeAgentMetadata(layout, agent)
 		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": diagnostic.Error()})
 		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": diagnostic.Error()})
 		return "", agent, diagnostic
@@ -886,10 +817,10 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 	if err := os.WriteFile(layout.OutputFile, []byte(result.Text), 0o644); err != nil {
 		agent.Status = StatusFailed
-		_ = m.writeAgentMetadata(layout, agent, layout.ActorID)
+		_ = m.writeAgentMetadata(layout, agent)
 		return "", agent, fmt.Errorf("write output: %w", err)
 	}
-	if err := m.writeAgentMetadata(layout, agent, layout.ActorID); err != nil {
+	if err := m.writeAgentMetadata(layout, agent); err != nil {
 		return "", agent, err
 	}
 	if err := appendEvent(layout.EventsFile, m.now(), "call.completed", map[string]any{
@@ -907,21 +838,16 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return CallResult{}, err
 	}
-	agent, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID)
+	agent, err := m.readAgentMetadata(layout, opts.Name)
 	if err != nil {
 		return CallResult{}, err
 	}
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return CallResult{}, errors.New("prompt is required")
-	}
-	if strings.TrimSpace(opts.ChildSetupInstruction) != "" {
-		if err := ensureAgentChildSetup(layout, &agent, opts.ChildActorID, opts.ChildActorAuthority, opts.ChildSetupInstruction); err != nil {
-			return CallResult{}, err
-		}
 	}
 
 	unlock, err := m.acquireCurrentCallLock(layout)
@@ -949,7 +875,7 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	agent.Status = StatusRunning
 	agent.LastSeenAt = now
 	agent.LastCallAt = now
-	if err := m.writeAgentMetadata(layout, agent, layout.ActorID); err != nil {
+	if err := m.writeAgentMetadata(layout, agent); err != nil {
 		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("mark agent running: %v", err), nil)
 		return CallResult{}, err
 	}
@@ -968,7 +894,6 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	}
 	pid, err := starter.StartAsyncCall(AsyncWorkerRequest{
 		Root:       opts.Root,
-		ActorID:    opts.ActorID,
 		Name:       agent.Name,
 		PromptPath: promptPath,
 		StdoutPath: layout.CurrentStdout,
@@ -977,7 +902,7 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	if err != nil {
 		agent.Status = StatusFailed
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
-		_ = m.writeAgentMetadata(layout, agent, layout.ActorID)
+		_ = m.writeAgentMetadata(layout, agent)
 		_, _ = m.FailCurrentCall(layout, err.Error(), nil)
 		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
 		return CallResult{}, err
@@ -1007,17 +932,17 @@ func (m Manager) Recall(opts RecallOptions) (string, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return "", err
 	}
-	if _, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID); err != nil {
+	if _, err := m.readAgentMetadata(layout, opts.Name); err != nil {
 		return "", err
 	}
 	cancelled := false
 	if call, err := m.reconcileActiveCall(layout); err == nil && isActiveCallStatus(call.Status) {
 		cancelled = true
-		if _, err := m.cancelScoped(opts.Root, opts.Name, opts.ActorID); err != nil {
+		if _, err := m.cancelScoped(opts.Root, opts.Name); err != nil {
 			return "", err
 		}
 		cancelledCall, err := readCurrentCall(layout.CurrentStateFile)
@@ -1025,7 +950,7 @@ func (m Manager) Recall(opts RecallOptions) (string, error) {
 			return "", err
 		}
 		if cancelledCall.CleanupNeeded {
-			status, statusErr := m.statusScoped(opts.Root, opts.Name, opts.ActorID)
+			status, statusErr := m.statusScoped(opts.Root, opts.Name)
 			if statusErr != nil {
 				return "", statusErr
 			}
@@ -1040,10 +965,9 @@ func (m Manager) Recall(opts RecallOptions) (string, error) {
 		prompt = defaultRecallPrompt
 	}
 	result, err := m.Call(CallOptions{
-		Root:    opts.Root,
-		ActorID: opts.ActorID,
-		Name:    opts.Name,
-		Prompt:  prompt,
+		Root:   opts.Root,
+		Name:   opts.Name,
+		Prompt: prompt,
 	})
 	if err != nil {
 		return "", err
@@ -1065,11 +989,11 @@ func (m Manager) Interrupt(opts InterruptOptions) (InterruptResult, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return InterruptResult{}, err
 	}
-	agent, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID)
+	agent, err := m.readAgentMetadata(layout, opts.Name)
 	if err != nil {
 		return InterruptResult{}, err
 	}
@@ -1095,18 +1019,14 @@ func (m Manager) Interrupt(opts InterruptOptions) (InterruptResult, error) {
 }
 
 func (m Manager) RunCurrent(root, name string) (err error) {
-	return m.RunCurrentScoped(root, name, "")
-}
-
-func (m Manager) RunCurrentScoped(root, name, actorID string) (err error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
+	layout, err := m.scopedLayout(root, name, false)
 	if err != nil {
 		return err
 	}
-	agent, err := m.readAgentMetadata(layout, name, actorID)
+	agent, err := m.readAgentMetadata(layout, name)
 	if err != nil {
 		return err
 	}
@@ -1156,7 +1076,6 @@ func (m Manager) RunCurrentScoped(root, name, actorID string) (err error) {
 	text, resultAgent, runErr := m.executeCall(layout, agent, executeCallOptions{
 		Prompt:         string(prompt),
 		CaptureStreams: true,
-		ToolProfile:    "leaf",
 	})
 	if runErr != nil {
 		_ = appendRuntimeLog(layout, m.now(), "state.finalize.begin", map[string]any{"status": CallStatusFailed})
@@ -1179,20 +1098,16 @@ func (m Manager) oneShot(opts oneShotOptions) (string, error) {
 		name = fmt.Sprintf("oneshot-%d", m.now().UTC().UnixNano())
 	}
 	_, _, err := m.Register(RegisterOptions{
-		Root:                  opts.Root,
-		ActorID:               opts.ActorID,
-		Name:                  name,
-		Backend:               opts.Backend,
-		Harness:               opts.Harness,
-		Tier:                  opts.Tier,
-		Model:                 opts.Model,
-		Prompts:               opts.Prompts,
-		PromptRefs:            opts.PromptRefs,
-		SystemPromptText:      opts.SystemPromptText,
-		SuppressOrientation:   opts.SuppressOrientation,
-		ChildActorID:          opts.ChildActorID,
-		ChildActorAuthority:   opts.ChildActorAuthority,
-		ChildSetupInstruction: opts.ChildSetupInstruction,
+		Root:                opts.Root,
+		Name:                name,
+		Backend:             opts.Backend,
+		Harness:             opts.Harness,
+		Tier:                opts.Tier,
+		Model:               opts.Model,
+		Prompts:             opts.Prompts,
+		PromptRefs:          opts.PromptRefs,
+		SystemPromptText:    opts.SystemPromptText,
+		SuppressOrientation: opts.SuppressOrientation,
 	})
 	if err != nil {
 		return "", err
@@ -1217,104 +1132,15 @@ func promptSpecs(prompts, promptRefs []string) []string {
 	return append([]string(nil), promptRefs...)
 }
 
-const (
-	childSetupStart = "<!-- ws-child-actor-setup:start -->"
-	childSetupEnd   = "<!-- ws-child-actor-setup:end -->"
-)
-
-func withChildSetupInstruction(systemText, instruction string) string {
-	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return systemText
-	}
-	block := childSetupStart + "\n" + instruction + "\n" + childSetupEnd
-	start := strings.Index(systemText, childSetupStart)
-	end := strings.Index(systemText, childSetupEnd)
-	if start >= 0 && end >= start {
-		end += len(childSetupEnd)
-		return strings.TrimSpace(systemText[:start]) + "\n\n" + block + "\n\n" + strings.TrimSpace(systemText[end:])
-	}
-	if strings.TrimSpace(systemText) == "" {
-		return block + "\n"
-	}
-	return strings.TrimRight(systemText, "\n") + "\n\n" + block + "\n"
-}
-
-func ensureAgentChildSetup(layout Layout, agent *Agent, childActorID, authority, instruction string) error {
-	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return nil
-	}
-	system := ""
-	if strings.TrimSpace(agent.SystemPromptPath) != "" {
-		raw, err := os.ReadFile(absOptional(layout.AgentDir, agent.SystemPromptPath))
-		if err != nil {
-			return fmt.Errorf("read system prompt: %w", err)
-		}
-		system = string(raw)
-	}
-	next := withChildSetupInstruction(system, instruction)
-	if strings.TrimSpace(agent.SystemPromptPath) == "" {
-		agent.SystemPromptPath = "system.md"
-	}
-	if err := os.WriteFile(absOptional(layout.AgentDir, agent.SystemPromptPath), []byte(next), 0o644); err != nil {
-		return fmt.Errorf("write system prompt: %w", err)
-	}
-	agent.ChildActorID = strings.TrimSpace(childActorID)
-	agent.ChildActorAuthority = strings.TrimSpace(authority)
-	return nil
-}
-
-func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
-	tier := "light"
-	if opts.DeepResearch {
-		tier = "deep"
-	}
-	name := fmt.Sprintf("subquery-tmp%s-%s",
-		strconv.FormatInt(m.now().UTC().UnixNano(), 36),
-		strconv.FormatUint(subquerySeq.Add(1), 36),
-	)
-	_, _, err := m.Register(RegisterOptions{
-		Root:                  opts.Root,
-		ActorID:               opts.ActorID,
-		Name:                  name,
-		Harness:               opts.Harness,
-		Tier:                  tier,
-		SystemPromptText:      SubquerySystemPrompt,
-		SuppressOrientation:   true,
-		Ephemeral:             true,
-		ChildActorID:          opts.ChildActorID,
-		ChildActorAuthority:   opts.ChildActorAuthority,
-		ChildSetupInstruction: opts.ChildSetupInstruction,
-	})
-	if err != nil {
-		return "", err
-	}
-	result, err := m.Call(CallOptions{
-		Root:    opts.Root,
-		ActorID: opts.ActorID,
-		Name:    name,
-		Prompt:  opts.Question,
-	})
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("subquery_key: %s\nagent_name: %s\nstatus: %s\npid: %d\nfollow_up: agents.result(name: %q, timeout_seconds: 600) | agents.status(name: %q) | agents.tail(name: %q) | agents.cancel(name: %q)\n", result.AgentName, result.AgentName, result.Status, result.PID, result.AgentName, result.AgentName, result.AgentName, result.AgentName), nil
-}
-
 func (m Manager) Print(root, name string) (string, error) {
-	return m.PrintScoped(root, name, "")
-}
-
-func (m Manager) PrintScoped(root, name, actorID string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
+	layout, err := m.scopedLayout(root, name, false)
 	if err != nil {
 		return "", err
 	}
-	if _, err := m.readAgentMetadata(layout, name, actorID); err != nil {
+	if _, err := m.readAgentMetadata(layout, name); err != nil {
 		return "", err
 	}
 	raw, err := os.ReadFile(layout.OutputFile)
@@ -1331,7 +1157,7 @@ func (m Manager) Result(opts ResultOptions) (string, error) {
 	if opts.Poll <= 0 {
 		opts.Poll = 200 * time.Millisecond
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return "", err
 	}
@@ -1356,7 +1182,7 @@ func (m Manager) Result(opts ResultOptions) (string, error) {
 		}
 		switch call.Status {
 		case CallStatusCompleted:
-			agent, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID)
+			agent, err := m.readAgentMetadata(layout, opts.Name)
 			if err != nil {
 				return "", err
 			}
@@ -1369,7 +1195,7 @@ func (m Manager) Result(opts ResultOptions) (string, error) {
 			}
 			text := string(raw)
 			if agent.Ephemeral {
-				if err := m.eraseScoped(opts.Root, opts.Name, opts.ActorID); err != nil {
+				if err := m.Erase(opts.Root, opts.Name); err != nil {
 					return "", err
 				}
 				if opts.OnEphemeralErased != nil {
@@ -1406,7 +1232,7 @@ func (m Manager) Result(opts ResultOptions) (string, error) {
 }
 
 func (m Manager) resultStatusText(layout Layout, name, prefix string) (string, error) {
-	status, err := m.statusScoped(layout.Root, name, layout.ActorID)
+	status, err := m.statusScoped(layout.Root, name)
 	if err != nil {
 		return "", err
 	}
@@ -1435,7 +1261,7 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 	}
 	layouts := make(map[string]Layout, len(names))
 	for _, name := range names {
-		layout, err := m.scopedLayout(opts.Root, name, opts.ActorID, false)
+		layout, err := m.scopedLayout(opts.Root, name, false)
 		if err != nil {
 			return "", err
 		}
@@ -1511,7 +1337,7 @@ func (m Manager) readinessText(root string, names []string, layouts map[string]L
 }
 
 func (m Manager) readinessBlock(name string, layout Layout) (string, error) {
-	agent, err := m.readAgentMetadata(layout, name, layout.ActorID)
+	agent, err := m.readAgentMetadata(layout, name)
 	if err != nil {
 		return "", err
 	}
@@ -1541,25 +1367,21 @@ func (m Manager) readinessBlock(name string, layout Layout) (string, error) {
 }
 
 func (m Manager) Status(root, name string) (string, error) {
-	return m.statusScoped(root, name, "")
+	return m.statusScoped(root, name)
 }
 
-func (m Manager) StatusScoped(root, name, actorID string) (string, error) {
-	return m.statusScoped(root, name, actorID)
-}
-
-func (m Manager) statusScoped(root, name, actorID string) (string, error) {
+func (m Manager) statusScoped(root, name string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
+	layout, err := m.scopedLayout(root, name, false)
 	if err != nil {
 		return "", err
 	}
 	if _, err := m.reconcileActiveCall(layout); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	agent, err := m.readAgentMetadata(layout, name, actorID)
+	agent, err := m.readAgentMetadata(layout, name)
 	if err != nil {
 		return "", err
 	}
@@ -1650,7 +1472,7 @@ func (m Manager) Inspect(root, name string) (Agent, bool, error) {
 	if _, err := m.reconcileActiveCall(layout); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Agent{}, false, err
 	}
-	agent, err := m.readAgentMetadata(layout, name, "")
+	agent, err := m.readAgentMetadata(layout, name)
 	if err != nil {
 		return Agent{}, false, err
 	}
@@ -1671,11 +1493,11 @@ func (m Manager) Tail(opts TailOptions) (string, error) {
 	if opts.Lines <= 0 {
 		opts.Lines = 40
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return "", err
 	}
-	if _, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID); err != nil {
+	if _, err := m.readAgentMetadata(layout, opts.Name); err != nil {
 		return "", err
 	}
 	sections := []struct {
@@ -1786,7 +1608,7 @@ func backendInvocationError(agent Agent, err error) error {
 	b.WriteString("\n\nhint:\n")
 	b.WriteString("If the configured backend is unavailable on this machine, fix that backend and retry, or switch explicitly.\n")
 	b.WriteString("PATH-detected backend binaries:\n")
-	for _, backend := range []string{"codex", "claude", "gemini"} {
+	for _, backend := range []string{"codex", "claude"} {
 		if path, lookErr := exec.LookPath(backend); lookErr == nil {
 			fmt.Fprintf(&b, "- %s: %s\n", backend, path)
 		} else {
@@ -1814,11 +1636,11 @@ func (m Manager) DiagnosticStream(opts DiagnosticStreamOptions) (string, error) 
 	if opts.Lines <= 0 {
 		opts.Lines = 40
 	}
-	layout, err := m.scopedLayout(opts.Root, opts.Name, opts.ActorID, false)
+	layout, err := m.scopedLayout(opts.Root, opts.Name, false)
 	if err != nil {
 		return "", err
 	}
-	if _, err := m.readAgentMetadata(layout, opts.Name, opts.ActorID); err != nil {
+	if _, err := m.readAgentMetadata(layout, opts.Name); err != nil {
 		return "", err
 	}
 	path, err := diagnosticStreamPath(layout, opts.Stream)
@@ -1854,22 +1676,18 @@ func diagnosticStreamPath(layout Layout, stream string) (string, error) {
 }
 
 func (m Manager) Cancel(root, name string) (string, error) {
-	return m.cancelScoped(root, name, "")
+	return m.cancelScoped(root, name)
 }
 
-func (m Manager) CancelScoped(root, name, actorID string) (string, error) {
-	return m.cancelScoped(root, name, actorID)
-}
-
-func (m Manager) cancelScoped(root, name, actorID string) (string, error) {
+func (m Manager) cancelScoped(root, name string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
+	layout, err := m.scopedLayout(root, name, false)
 	if err != nil {
 		return "", err
 	}
-	agent, err := m.readAgentMetadata(layout, name, actorID)
+	agent, err := m.readAgentMetadata(layout, name)
 	if err != nil {
 		return "", err
 	}
@@ -1878,7 +1696,7 @@ func (m Manager) cancelScoped(root, name, actorID string) (string, error) {
 		return "", err
 	}
 	if !isActiveCallStatus(call.Status) {
-		return m.statusScoped(root, name, actorID)
+		return m.statusScoped(root, name)
 	}
 	cancelledPID := call.PID
 	_ = appendRuntimeLog(layout, m.now(), "cancel.begin", map[string]any{
@@ -1904,7 +1722,7 @@ func (m Manager) cancelScoped(root, name, actorID string) (string, error) {
 	now := m.now().UTC().Format(time.RFC3339)
 	agent.Status = StatusIdle
 	agent.LastSeenAt = now
-	if err := m.writeAgentMetadata(layout, agent, layout.ActorID); err != nil {
+	if err := m.writeAgentMetadata(layout, agent); err != nil {
 		return "", err
 	}
 	errText := ""
@@ -1927,7 +1745,7 @@ func (m Manager) cancelScoped(root, name, actorID string) (string, error) {
 		"error":          errText,
 		"cleanup_needed": cleanupNeeded,
 	})
-	return m.statusScoped(root, name, actorID)
+	return m.statusScoped(root, name)
 }
 
 func (m Manager) BeginCurrentCall(layout Layout, agent Agent) (CurrentCall, error) {
@@ -2105,13 +1923,13 @@ func (m Manager) reconcileActiveCall(layout Layout) (CurrentCall, error) {
 }
 
 func (m Manager) markAgentFailed(layout Layout, errText string) (Agent, error) {
-	agent, err := m.readAgentMetadata(layout, layout.Name, layout.ActorID)
+	agent, err := m.readAgentMetadata(layout, layout.Name)
 	if err != nil {
 		return agent, err
 	}
 	agent.Status = StatusFailed
 	agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
-	if err := m.writeAgentMetadata(layout, agent, layout.ActorID); err != nil {
+	if err := m.writeAgentMetadata(layout, agent); err != nil {
 		return agent, err
 	}
 	_ = appendEvent(layout.EventsFile, m.now(), "agent.failed", map[string]any{"error": errText})
@@ -2242,17 +2060,13 @@ func (m Manager) deliverPendingInbox(layout Layout, route string) ([]Message, er
 }
 
 func (m Manager) DeliverPendingInbox(root, name, route string) ([]Message, error) {
-	return m.DeliverPendingInboxScoped(root, name, "", route)
-}
-
-func (m Manager) DeliverPendingInboxScoped(root, name, actorID, route string) ([]Message, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
 	if route == "" {
 		route = "manual"
 	}
-	layout, err := m.scopedLayout(root, name, actorID, false)
+	layout, err := m.scopedLayout(root, name, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2321,28 +2135,20 @@ func composeLeadMessagePrompt(messages []Message, prompt string) string {
 }
 
 func (m Manager) Erase(root, name string) error {
-	return m.eraseScoped(root, name, "")
-}
-
-func (m Manager) EraseScoped(root, name, actorID string) error {
-	return m.eraseScoped(root, name, actorID)
-}
-
-func (m Manager) eraseScoped(root, name, actorID string) error {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
-	if err := m.deleteAgentMetadata(root, name, actorID); err != nil {
+	if err := m.deleteAgentMetadata(root, name); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (m Manager) layout(root, name string, create bool) (Layout, error) {
-	return m.scopedLayout(root, name, "", create)
+	return m.scopedLayout(root, name, create)
 }
 
-func (m Manager) scopedLayout(root, name, actorID string, create bool) (Layout, error) {
+func (m Manager) scopedLayout(root, name string, create bool) (Layout, error) {
 	state, _, _, err := wsstate.NewManager(wsstate.Options{
 		CacheHome: m.opts.CacheHome,
 		Now:       wsstate.Clock(m.now),
@@ -2354,15 +2160,11 @@ func (m Manager) scopedLayout(root, name, actorID string, create bool) (Layout, 
 	if key == "" {
 		return Layout{}, errors.New("agent name resolves to empty path key")
 	}
-	trimmedActorID := strings.TrimSpace(actorID)
-	internalKey, err := m.registryKey(trimmedActorID, name)
+	internalKey, err := m.registryKey(name)
 	if err != nil {
 		return Layout{}, err
 	}
 	dirKey := key
-	if trimmedActorID != "" {
-		dirKey = actorScopedDirKey(internalKey, name)
-	}
 	hasCurrentRole := false
 	if store, err := m.registryStore(root); err == nil {
 		if def, ok, defErr := store.AgentDefinition(context.Background(), internalKey); defErr == nil && ok && strings.TrimSpace(def.StatePath) != "" {
@@ -2375,11 +2177,7 @@ func (m Manager) scopedLayout(root, name, actorID string, create bool) (Layout, 
 	}
 	if create && hasCurrentRole {
 		stamp := m.now().UTC().Format("20060102T150405.000000000Z")
-		if trimmedActorID != "" {
-			dirKey = actorScopedDirKey(internalKey, name) + "-" + stamp
-		} else {
-			dirKey = key + "-" + stamp
-		}
+		dirKey = key + "-" + stamp
 		for i := 0; pathExists(filepath.Join(state.AgentsDir, dirKey)) && i < 1000; i++ {
 			dirKey = fmt.Sprintf("%s-%03d", dirKey, i+1)
 		}
@@ -2387,7 +2185,6 @@ func (m Manager) scopedLayout(root, name, actorID string, create bool) (Layout, 
 	dir := filepath.Join(state.AgentsDir, dirKey)
 	layout := Layout{
 		Root:              root,
-		ActorID:           trimmedActorID,
 		Name:              name,
 		AgentDir:          dir,
 		AgentFile:         filepath.Join(dir, "agent.json"),
@@ -2484,15 +2281,12 @@ func followUpForCall(call CurrentCall) string {
 	}
 }
 
-func interruptHookCommand(root, name, actorID string) string {
+func interruptHookCommand(root, name string) string {
 	exe, err := os.Executable()
 	if err != nil || exe == "" {
 		exe = "ws-mcp"
 	}
 	cmd := shellQuote(exe) + " agents check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
-	if strings.TrimSpace(actorID) != "" {
-		cmd += " --actor-id " + shellQuote(actorID)
-	}
 	return cmd
 }
 

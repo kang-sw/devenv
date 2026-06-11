@@ -44,15 +44,13 @@ include only local arguments that affect the current step.
 
 ### Session setup
 
-`ws/setup`
+`ws.lead.login`
 
 At the start of any lead workflow session, call
-`ws/setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`.
-Pass the repository's absolute filesystem path as `root`; the MCP server cannot
-infer the agent's current directory from placeholders or relative paths. Record
-the returned `actor_id`; if MCP restarts, recover with
-`ws/setup(id: "<actor-id>")` before any agent or exploration call that omits
-`root`.
+`ws.lead.login(root: "<absolute-working-directory>")`. Pass the repository's
+absolute filesystem path as `root`; the MCP server cannot infer the agent's
+current directory from placeholders or relative paths. Thread the returned
+`session_key` through every subsequent root-aware ws tool call.
 
 ### Scoped Exploration (native Explore)
 
@@ -65,8 +63,6 @@ worker a brief file, or `ws/playbook.print(name: "explore")` for inline); spawn 
 native Explore-style subagent with the rendered brief; collect the deferred result.
 For parallel dispatch, spawn multiple concurrent subagents in a single turn and
 collect all before synthesizing. Use a broad-tracing scope for wide structural surveys.
-
-`ws/subquery` remains callable but is not the shipped-skill delegation path.
 
 ### Persistent agents
 

@@ -357,15 +357,22 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
-    home = Path.home()
-    try:
-        rel = plugin_dir.relative_to(home / ".codex" / "plugins" / "cache" / "kang-sw-devenv")
-    except ValueError:
+    # Recognize the repo-local plugin install regardless of on-disk layout.
+    # Claude Code runs a directory-source marketplace plugin from the install.sh
+    # snapshot (~/.claude/plugins/ws-plugin/<pkg>), while Codex/Claude package
+    # installs live under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>.
+    # Match the ws/wsflow package segment under any per-user (.codex/.claude)
+    # plugin tree; the gitignored .local-devenv-runtime marker is the actual
+    # dev opt-in, validated separately. This is HOME-independent.
+    parts = plugin_dir.resolve().parts
+    if "plugins" not in parts:
         return None
-    parts = rel.parts
-    if len(parts) < 2 or parts[0] not in {"ws", "wsflow"}:
+    if not any(host in parts for host in (".codex", ".claude")):
         return None
-    return parts[0]
+    for seg in parts[parts.index("plugins") + 1:]:
+        if seg in {"ws", "wsflow"}:
+            return seg
+    return None
 
 
 def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
@@ -412,11 +419,31 @@ def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     return read_local_devenv_contract(plugin_dir, os_name) is not None
 
 
+def local_devenv_build_env() -> dict:
+    # The MCP host may launch the launcher with a sanitized environment that
+    # lacks HOME (observed on Claude Code launches). `go build` then cannot
+    # locate GOMODCACHE/GOCACHE (default under $HOME) and fails, aborting the
+    # forced local repair. Recover HOME from the password database via
+    # Path.home() so the source build finds the user's module/build cache.
+    build_env = dict(os.environ)
+    if not build_env.get("HOME"):
+        try:
+            build_env["HOME"] = str(Path.home())
+        except Exception:
+            pass
+    return build_env
+
+
 def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict) -> bool:
     tool_dir = local_contract["tool_dir"]
     go_binary = local_contract["go"]
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
-    proc = subprocess.run([str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
+    proc = subprocess.run(
+        [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
+        cwd=str(tool_dir),
+        env=local_devenv_build_env(),
+        check=False,
+    )
     if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
         install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
         return True
@@ -612,6 +639,19 @@ def detect_project_root(plugin_dir: Path) -> None:
             return
 
 
+def apply_rsrc_root_env(plugin_dir: Path, env: dict) -> None:
+    """Point the runtime at the staged rsrc tree through its WS_RSRC_ROOT seam.
+
+    The runtime derives the rsrc tree as <dir(exe)>/../rsrc, but the launcher
+    installs the binary under <plugin>/.runtime/<platform>/ -- two levels below
+    the plugin root where the rsrc/ tree is staged -- so the derived path misses
+    <plugin>/rsrc. Set the seam unless the caller already provided it.
+    """
+    rsrc_root = plugin_dir / "rsrc"
+    if rsrc_root.is_dir() and not env.get("WS_RSRC_ROOT"):
+        env["WS_RSRC_ROOT"] = str(rsrc_root)
+
+
 def main() -> int:
     launcher_path = Path(__file__).resolve()
     plugin_dir = launcher_path.parent.parent
@@ -653,6 +693,7 @@ def main() -> int:
     note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
 
     os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
+    apply_rsrc_root_env(plugin_dir, os.environ)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":
         return subprocess.call(args)

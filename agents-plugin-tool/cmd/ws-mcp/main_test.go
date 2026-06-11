@@ -112,7 +112,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list", "setup"} {
+	for _, visible := range []string{"api.list", "config.show", "tickets.list"} {
 		if !slices.Contains(got.Tools, visible) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
@@ -141,7 +141,6 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "subquery", args: []string{"subquery", "question"}, want: "wsflow agentless mode disables agent-backed command: subquery"},
 		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: agents"},
 		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config agents-tier"},
 	} {
@@ -533,7 +532,7 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		t.Fatalf("default deep tier = %#v", deep)
 	}
 
-	show("config", "agents-tier", "--tier", "light", "--model", "gemini-3-1-pro")
+	show("config", "agents-tier", "--tier", "light", "--model", "claude-sonnet-4")
 
 	var after struct {
 		Path   string `json:"path"`
@@ -554,7 +553,7 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &after)
 	light := after.Config.Agents.Tiers["light"]
-	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
+	if after.Path != wantConfigPath() || light.Backend != "claude" || light.Model != "claude-sonnet-4" {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
 	}
 

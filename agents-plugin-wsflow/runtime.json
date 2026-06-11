@@ -36,7 +36,6 @@
   "tools": {
     "runtime.info": ">=0.30.0-dev <0.31.0",
     "runtime.debug_events": ">=0.30.0-dev <0.31.0",
-    "setup": ">=0.30.0-dev <0.31.0",
     "ws.lead.login": ">=0.30.0-dev <0.31.0",
     "config.show": ">=0.30.0-dev <0.31.0",
     "project_tree": ">=0.30.0-dev <0.31.0",
@@ -55,6 +54,8 @@
     "tickets.find": ">=0.30.0-dev <0.31.0",
     "tickets.status": ">=0.30.0-dev <0.31.0",
     "path.generate": ">=0.30.0-dev <0.31.0",
+    "playbook.print": ">=0.30.0-dev <0.31.0",
+    "playbook.render": ">=0.30.0-dev <0.31.0",
     "git.status": ">=0.30.0-dev <0.31.0",
     "git.diff": ">=0.30.0-dev <0.31.0",
     "git.log": ">=0.30.0-dev <0.31.0",

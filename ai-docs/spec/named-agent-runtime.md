@@ -1,6 +1,6 @@
 ---
 title: Named Agent Runtime
-summary: Durable ws named-agent sessions, asynchronous lifecycle control, subquery fan-out, diagnostics, and backend adapter behavior.
+summary: Durable ws named-agent sessions, asynchronous lifecycle control, diagnostics, and backend adapter behavior.
 ---
 
 # Named Agent Runtime
@@ -106,25 +106,6 @@ can read an already completed result or wait up to an explicit timeout. Running,
 failed, cancelled, timed-out, and non-ready calls return status text rather than
 successful output. Successful result reads hide ephemeral role pointers, but the
 ephemeral instance payload remains subject to the normal retention cleanup path.
-
-## Async Subquery Ephemeral Agents {#260505-async-subquery-ephemeral-agent}
-
-`subquery` starts a scoped read-only query as an asynchronous named-agent call
-and returns immediately with a generated subquery key. Deep-research requests use
-the `deep` model alias; ordinary requests use the `light` model alias.
-
-Generated subquery agents are marked ephemeral and suppress delegate orientation
-because their system prompt is self-contained. Callers collect answers with
-`agents.result(name: <subquery-key>, timeout_seconds: 600)` and can use
-`agents.status`, `agents.tail`, or `agents.cancel` for diagnostics or recovery.
-The public `subquery` MCP schema omits `root`, matching the actor-owned
-`agents.*` schema invariant. When launched rootlessly from an actor-bound lead
-MCP session, each subquery runs in the current actor scope and receives its own
-reader child actor setup instruction without receiving the lead bootstrap
-method. Hidden explicit-root compatibility launches remain in the global
-compatibility namespace and do not receive reader child actor setup. Successful
-result consumption erases the ephemeral agent and marks the reader actor
-inactive.
 
 ## Diagnostics, Tail, And Debug Streams {#260505-agent-diagnostics-tail-debug}
 
@@ -241,37 +222,6 @@ registration from a Codex MCP session resolves through Codex alias defaults,
 while the same alias from a Claude MCP session resolves through Claude alias
 defaults. Unknown harnesses use a deterministic configured default.
 {#260508-mcp-harness-detection}
-
-## Gemini Agent Runner {#260512-gemini-agent-runner}
-
-Named-agent registrations with `backend: gemini` execute through the same agent
-lifecycle as Codex- and Claude-backed agents. Callers use
-`agents.register`, `agents.call`, `agents.wait`, `agents.result`,
-`agents.status`, `agents.tail`, `agents.interrupt`, and `agents.cancel` without
-switching to a Gemini-specific registry, queue, status, or result surface.
-
-The Gemini adapter invokes Gemini CLI in headless `stream-json` mode, delivers
-prompts through stdin, passes concrete models when configured, and resumes with
-the stored Gemini session id when available. If an agent has a resolved system
-prompt, the adapter includes it in the stdin prompt using a clear
-system-instruction boundary instead of relying on backend-specific persistent
-configuration.
-
-Gemini stream parsing tolerates non-JSON stdout notices before or between valid
-JSON events while preserving raw stdout and stderr in the existing diagnostic
-streams. Caller-facing result text is accumulated from assistant
-`message.content` chunks, terminal success requires a
-`result.status == "success"` event, and terminal error events or missing
-terminal/session/text data fail through the shared backend invocation
-diagnostics path.
-
-Gemini authentication remains external to ws. The runtime will not read, write,
-or probe Gemini credentials during registration, configuration, or calls; auth
-failures surface as backend invocation failures with the same diagnostic and
-reconfiguration hints as other local backends. Live hook-style interrupt delivery
-is not part of the Gemini contract: pending inbox messages may
-be prepended to the next resumed call until a stable Gemini live-delivery
-mechanism exists.
 
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 

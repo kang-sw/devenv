@@ -4484,7 +4484,6 @@ fn upsert_agent_def(
         .execute_batch(
             "CREATE TABLE IF NOT EXISTS agent_defs (
                 agent_key TEXT PRIMARY KEY,
-                actor_id TEXT,
                 public_name TEXT,
                 state_path TEXT,
                 schema_version INTEGER,
@@ -4506,10 +4505,10 @@ fn upsert_agent_def(
     connection
         .execute(
             "INSERT OR REPLACE INTO agent_defs (
-                agent_key, actor_id, public_name, state_path, schema_version,
+                agent_key, public_name, state_path, schema_version,
                 backend, harness, tier, model, effort, session_id, status,
                 created_at, updated_at, last_seen_at, last_call_at, last_output_path
-            ) VALUES (?1, '', ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, '', '', '', ?11, ?12)",
+            ) VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, '', '', '', ?11, ?12)",
             params![
                 agent_key,
                 public_name,

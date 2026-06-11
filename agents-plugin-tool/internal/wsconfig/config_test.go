@@ -8,18 +8,18 @@ import (
 
 func TestSetAgentsTierInfersBackend(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
-	cfg, err := SetAgentsTier(Options{CacheHome: cache}, "light", "", "gemini-3-1-pro")
+	cfg, err := SetAgentsTier(Options{CacheHome: cache}, "light", "", "claude-sonnet-4")
 	if err != nil {
 		t.Fatalf("SetAgentsTier returned error: %v", err)
 	}
-	if got := cfg.Agents.Tiers["light"].Backend; got != "gemini" {
+	if got := cfg.Agents.Tiers["light"].Backend; got != "claude" {
 		t.Fatalf("backend = %q", got)
 	}
 	backend, model, err := ResolveAgent(Options{CacheHome: cache}, "light", "", "")
 	if err != nil {
 		t.Fatalf("ResolveAgent returned error: %v", err)
 	}
-	if backend != "gemini" || model != "gemini-3-1-pro" {
+	if backend != "claude" || model != "claude-sonnet-4" {
 		t.Fatalf("resolved backend/model = %q/%q", backend, model)
 	}
 }
@@ -307,7 +307,7 @@ func TestShowReturnsPathAndDefaultWithoutCreatingFile(t *testing.T) {
 
 func TestShowReturnsConfiguredMapping(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := SetAgentsTier(Options{CacheHome: cache}, "light", "", "gemini-3-1-pro"); err != nil {
+	if _, err := SetAgentsTier(Options{CacheHome: cache}, "light", "", "claude-sonnet-4"); err != nil {
 		t.Fatalf("SetAgentsTier returned error: %v", err)
 	}
 	view, err := Show(Options{CacheHome: cache})
@@ -315,7 +315,7 @@ func TestShowReturnsConfiguredMapping(t *testing.T) {
 		t.Fatalf("Show returned error: %v", err)
 	}
 	mapping := view.Config.Agents.Tiers["light"]
-	if mapping.Backend != "gemini" || mapping.Model != "gemini-3-1-pro" {
+	if mapping.Backend != "claude" || mapping.Model != "claude-sonnet-4" {
 		t.Fatalf("light mapping = %#v", mapping)
 	}
 }

@@ -67,7 +67,7 @@ the full ws contract.
 
 Unset environment variables preserve the full ws contract. wsflow contract
 validation does not treat tool profiles as product modes; profile filters remain
-containment and test surfaces only. A wsflow runtime contract may set
+test and debug surfaces only. A wsflow runtime contract may set
 `runtime_capabilities.match` to `exact`; when it does, launcher compatibility
 requires the reported tool and command sets to equal the package contract and
 does not fall back to weaker required-surface probes after a capability mismatch.
@@ -181,7 +181,6 @@ doctor
 runtime
 serve
 smoke
-subquery
 config
 path
 agents
