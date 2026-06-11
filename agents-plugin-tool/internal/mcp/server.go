@@ -83,7 +83,6 @@ const leadWorkflowBootstrapMethod = "lead-workflow-bootstrap"
 const (
 	envNoAgent   = "WS_MCP_NO_AGENT"
 	envNamespace = "WS_MCP_NAMESPACE"
-	envSetupTool = "WS_MCP_SETUP_TOOL"
 )
 
 var debugEvents = struct {
@@ -140,18 +139,6 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		reqCtx, cancel := context.WithCancel(ctx)
 		id := rawMessageString(req.ID)
-		if isSetupFenceRequest(req) {
-			wg.Wait()
-			requests.Store(id, cancel)
-			resp := s.handle(reqCtx, req)
-			cancel()
-			requests.Delete(id)
-			if err := writeResponse(resp); err != nil {
-				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
-				return err
-			}
-			continue
-		}
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
@@ -166,19 +153,6 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	err := scanner.Err()
 	wg.Wait()
 	return err
-}
-
-func isSetupFenceRequest(req request) bool {
-	if req.Method != "tools/call" {
-		return false
-	}
-	var params struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return false
-	}
-	return params.Name == "ws.setup" || params.Name == setupToolName()
 }
 
 func (s *Server) handleNotification(req request, requests *sync.Map) {
@@ -318,14 +292,6 @@ func RuntimeNamespace() string {
 	return value
 }
 
-func setupToolName() string {
-	value := strings.TrimSpace(os.Getenv(envSetupTool))
-	if value == "" {
-		return "ws.setup"
-	}
-	return value
-}
-
 func (s *Server) callTool(ctx context.Context, req request) response {
 	var params struct {
 		Name      string         `json:"name"`
@@ -338,7 +304,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
-	requestedToolName := params.Name
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
@@ -352,13 +317,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if !s.subqueryAgentAccessAllowed(params.Name, params.Arguments) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool available only for subquery-* agents in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
-	if setupToolName() != "ws.setup" && params.Name == setupToolName() {
-		params.Name = "ws.setup"
-	}
-	if err := s.actorGate(params.Name, params.Arguments); err != nil {
-		return toolTextResponse(req.ID, "", err)
-	}
-
 	// Keyed capability gate: when a session_key is present and maps to a known
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
 	// are not rejected here; root-aware tools surface the unknown_session error
@@ -391,31 +349,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
-	case "ws.setup":
-		if err := s.applySetup(ctx, params.Arguments); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		state := s.setupState(requestedToolName)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, state, nil)
-		}
-		return toolTextResponse(req.ID, formatSetupState(state), nil)
 	case "session.set_default_root":
-		root, _ := params.Arguments["root"].(string)
-		canonical, err := canonicalGitRoot(root)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		s.rootMu.Lock()
-		s.sessionRoot = canonical
-		s.rootMu.Unlock()
-		return toolJSONResponse(req.ID, s.setupState("session.compat"), nil)
+		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; call ws.lead.login(root) and pass session_key"))
 	case "session.get_default_root":
-		result := s.setupState("session.compat")
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, nil)
-		}
-		return toolTextResponse(req.ID, formatSetupState(result), nil)
+		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; call ws.lead.login(root) and pass session_key"))
 	case "ws.lead.login":
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -1247,9 +1184,9 @@ func formatSetupState(values map[string]any) string {
 
 func recoveryGuidance(actorID string) string {
 	if actorID == "" {
-		return fmt.Sprintf("Lead bootstrap requires %s(method: %q, root: \"<absolute-working-directory>\").", setupToolName(), leadWorkflowBootstrapMethod)
+		return "Lead bootstrap requires ws.lead.login(root)."
 	}
-	return fmt.Sprintf("Do not forget this actor_id. If MCP restarts, call %s(id: %q).", setupToolName(), actorID)
+	return "Actor recovery was removed; call ws.lead.login(root) and pass session_key."
 }
 
 func (s *Server) applySetup(ctx context.Context, arguments map[string]any) error {
@@ -1402,7 +1339,7 @@ func (s *Server) restoreActor(ctx context.Context, actorID string) error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<absolute-working-directory>\") to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
+		return fmt.Errorf("actor id %q was not found; actor bootstrap was removed; call ws.lead.login(root)", actorID)
 	}
 	if actor.Status != "" && actor.Status != "active" {
 		return fmt.Errorf("actor id %q is not active: %s", actorID, actor.Status)
@@ -1654,7 +1591,7 @@ func (s *Server) actorGate(name string, arguments map[string]any) error {
 	if hasActor {
 		return nil
 	}
-	return fmt.Errorf("setup required before root-omitted %s; call %s(id: \"<actor-id>\")", name, setupToolName())
+	return fmt.Errorf("session_key required before root-omitted %s; call ws.lead.login(root)", name)
 }
 
 func rootOmittedActorTool(name string) bool {
@@ -2110,7 +2047,7 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 	if key, ok := arguments["session_key"].(string); ok && strings.TrimSpace(key) != "" {
 		entry, found := s.sessions.lookup(key)
 		if !found {
-			return "", fmt.Errorf("unknown_session: session key not found in registry; "+
+			return "", fmt.Errorf("unknown_session: session key not found in registry; " +
 				"re-login via ws.lead.login(root) with your known root and retry the call")
 		}
 		return entry.root, nil
@@ -2387,19 +2324,6 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
-				},
-			},
-		},
-		{
-			"name":        "ws.setup",
-			"description": "Configure ws MCP session state, including lead actor bootstrap and repository root recovery for this server process.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method": stringProperty(`Optional setup method. Use "lead-workflow-bootstrap" to create a recoverable lead actor.`),
-					"id":     stringProperty("Recover a previously returned actor_id and bind it to this MCP server process."),
-					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass the repository's absolute filesystem path.`),
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
@@ -3086,7 +3010,7 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "agents.") && name != "ws.setup" {
+	if !strings.HasPrefix(name, "agents.") {
 		return clone
 	}
 	schema, ok := clone["inputSchema"].(map[string]any)
@@ -3101,9 +3025,6 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 		propertiesClone := make(map[string]any, len(properties))
 		for key, value := range properties {
 			if strings.HasPrefix(name, "agents.") && key == "root" {
-				continue
-			}
-			if name == "ws.setup" && key == "format" {
 				continue
 			}
 			propertiesClone[key] = value
@@ -3148,7 +3069,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleLead:
 		return true
 	case roleDelegate:
-		if strings.HasPrefix(name, "session.") || name == "ws.setup" || name == setupToolName() {
+		if strings.HasPrefix(name, "session.") || name == "ws.setup" {
 			return false
 		}
 		if isSubqueryAgentTool(name) {
@@ -3156,16 +3077,13 @@ func roleAllowsTool(role toolRole, name string) bool {
 		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != setupToolName() && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != "subquery" && name != "git.commit"
 	default:
 		return false
 	}
 }
 
 func advertisedToolName(name string) string {
-	if name == "ws.setup" {
-		return setupToolName()
-	}
 	return name
 }
 
