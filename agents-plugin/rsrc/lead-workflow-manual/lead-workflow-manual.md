@@ -44,15 +44,13 @@ include only local arguments that affect the current step.
 
 ### Session setup
 
-`ws/setup`
+`ws.lead.login`
 
 At the start of any lead workflow session, call
-`ws/setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`.
-Pass the repository's absolute filesystem path as `root`; the MCP server cannot
-infer the agent's current directory from placeholders or relative paths. Record
-the returned `actor_id`; if MCP restarts, recover with
-`ws/setup(id: "<actor-id>")` before any agent or exploration call that omits
-`root`.
+`ws.lead.login(root: "<absolute-working-directory>")`. Pass the repository's
+absolute filesystem path as `root`; the MCP server cannot infer the agent's
+current directory from placeholders or relative paths. Thread the returned
+`session_key` through every subsequent root-aware ws tool call.
 
 ### Scoped Exploration (native Explore)
 

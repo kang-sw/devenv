@@ -32,7 +32,6 @@ HIDDEN_TOOLS = {
     "api.status",
     "api.result",
     "api.cancel",
-    "ws.setup",
     "exec.spawn",
     "exec.shell",
     "exec.status",
@@ -113,7 +112,6 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertEqual(set(contract["commands"]), set(payload["commands"]))
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
         self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
-        self.assertIn("setup", contract["tools"])
         self.assertIn("api.list", contract["tools"])
         self.assertIn("prompt.render", contract["tools"])
 

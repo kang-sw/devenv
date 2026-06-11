@@ -33,7 +33,6 @@
   "tools": {
     "runtime.info": ">=0.30.0-dev <0.31.0",
     "runtime.debug_events": ">=0.30.0-dev <0.31.0",
-    "ws.setup": ">=0.30.0-dev <0.31.0",
     "ws.lead.login": ">=0.30.0-dev <0.31.0",
     "config.show": ">=0.30.0-dev <0.31.0",
     "config.agents_tier": ">=0.30.0-dev <0.31.0",
