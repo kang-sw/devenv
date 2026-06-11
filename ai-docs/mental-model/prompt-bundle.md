@@ -39,7 +39,6 @@ related:
 - Embedded prompt frontmatter uses `model: light|core|deep` for portable aliases; Claude compatibility aliases remain accepted inputs, not shared authoring style.
 - If no explicit `model` or legacy `tier` and no prompt frontmatter sets one, registration defaults to the `core` alias before harness-aware backend/model resolution.
 - Public named agents get `delegate-orientation` prepended unless suppressed or already first. {#260505-workflow-delegate-prompt-boundaries}
-- Subquery uses inline `SubquerySystemPrompt` and suppresses orientation because it is self-contained. {#260505-async-subquery-ephemeral-agent}
 
 ## Coupling
 
@@ -61,7 +60,7 @@ related:
 - **Add a playbook**: create `agents-plugin/rsrc/<name>/<name>.md`, optional `<name>.<harness>.md` harness overlay, optional flat text deps at `agents-plugin/rsrc/<name>.md`; run `wsrsrc.GenerateManifest` to regenerate `manifest.json`; increment `SupportedSchemaVersion` only when the schema shape changes. Set `delegates:true` in frontmatter when the playbook spawns subagents. Declare model alias names (`LightModel`, `CoreModel`, `DeepModel`) or terminology names (`ExploreAgent`, `SpawnIdiom`, `ContinueIdiom`) in `variables:` frontmatter to activate config-sourced or harness-aware injection; callers cannot override these reserved names via the `context` argument — the tool layer wins on collision.
 - **Add an embedded prompt**: create top-level `prompts/<stem>.md` or `infra/<stem>.md`, avoid duplicate stems, update tests/runtime metadata, then call it by bare stem.
 - **Add conditional prompt behavior**: wire `ConditionalPromptRef`; missing binaries are skipped, empty `Binary` errors, empty `PromptRef` defaults to the binary name, and resolved conditional prompts append after primary prompts.
-- **Change delegate orientation**: review all public named-agent workflows and internal suppressions, especially subquery and API docs managers.
+- **Change delegate orientation**: review all public named-agent workflows and internal suppressions, especially API docs managers.
 
 ## Common Mistakes
 

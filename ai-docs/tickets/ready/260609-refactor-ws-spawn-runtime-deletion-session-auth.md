@@ -460,6 +460,59 @@ Verification: no gemini / subquery / exploration spawn remains; the
 runner-backend interface is still present and pluggable (codex still attaches
 through it); the three dropped bug tickets are in `.dropped/`.
 
+### Result (60015691) - 2026-06-11
+
+Deleted the retired spawn surfaces on branch `implement/ws-session-auth-phase2b`
+(stacked on unmerged Phase 2a; both pending a combined merge to the epic).
+
+Delivered:
+- Gemini runner implementation removed (`gemini.go`/`gemini_test.go`, the
+  `runnerForBackend` gemini case, config harness alias/detection, the
+  `ClaudeRunner` shorthand entry). The harness-neutral `Runner` interface +
+  `RunnerRequest`/`RunnerResult` + Codex/Claude runners are unchanged; gemini is
+  now a deferred plug (`runnerForBackend("gemini")` returns the
+  unsupported-backend error). Guard: `TestRunnerForBackendGeminiIsUnsupported`.
+- `subquery` tool runtime removed end-to-end: wsagent `Subquery`/
+  `SubqueryOptions`/`SubquerySystemPrompt`, the MCP `subquery` tool (schema +
+  dispatch + the `subqueryAgentAccessAllowed`/`isSubqueryAgentTool` gating), and
+  the CLI `subquery` subcommand; `agents-plugin/runtime.json` contract updated.
+  Guard: `TestSubqueryToolRemovedFromListAndCallRejected`.
+- Exploration-purpose spawn was the subquery path (removed). The `ExploreAgent`
+  playbook terminology vars were retained — they are native-subagent render
+  idioms (the direction the epic moves toward), not the retired path.
+- The 3 resolved-by-deletion bug tickets moved to `.dropped/` in the removing
+  commits: `260524-bug-wsstore-ci-sqlite-busy`,
+  `260524-bug-subquery-non-head-history-evidence`,
+  `260524-bug-subquery-working-directory-stderr`.
+
+Deviation from literal Phase 2b text: general `agents.status/tail/debug.*`
+diagnostic minimization was DEFERRED to Phase 2c. "Minimize to what the retained
+mercenary lifecycle needs" cannot be done correctly before 2c defines that
+lifecycle; 2b removed only diagnostics/gating coupled to deleted paths to avoid
+speculative delete-then-re-add churn. The general diagnostic surface (serving the
+live Codex runner) is retained.
+
+Verification: `go build/vet/test ./... -count=1` green; wsflow runtime contract
+test green. No gemini/subquery/exploration spawn code remains; the runner-backend
+interface is present and pluggable (codex attaches through it); the 3 bug tickets
+are under `.dropped/`.
+
+Review: partitioned (correctness/fit/test). Correctness + fit clean first pass;
+test non-clean (vacuous deleted-tool assertions in profile-filter lists) → fixed
+in `c5865894`, one finding partially rejected (kept the subquery-removal
+regression guard) and reviewer-accepted on re-review.
+
+Docs: spec reconciled (`4fe1a7e0` — subquery + gemini sections removed, Phase-2c
+planned callout trimmed); mental models reconciled (`df0740a2` — dangling
+`#260512-gemini-agent-runner` / `#260505-async-subquery-ephemeral-agent` anchors
+cleaned); a doc-pre-pass-discovered shipped-guidance gap fixed (`bb2d3558` —
+`lead-workflow-manual` no longer points at the removed `subquery` tool).
+
+Forward (2c): codex `agents.*` reshape, `register(prompts:[stems])` drop,
+native-handle parity, mercenary routing gate, render-minted child keys, and the
+deferred general-diagnostic minimization. Phase 3: exec stateless + capability
+enforcement + dashboard build-fix.
+
 ### Phase 2c: codex mercenary reshape + parity + routing gate
 
 Reshape the retained **codex** runner backend plus the `agents.*` call/lifecycle

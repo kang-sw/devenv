@@ -205,10 +205,13 @@ dropped tickets live in hidden archive dirs and git history.
   contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
   `260610-mercenary-delegation-surface`). **M3 Phase 1 (additive session-auth)
   merged to the epic branch** (`c917c9f0` no-ff; Phase 1 result `447946f4`).
-  **Phase 2a complete** (`9649a4bf`, branch `implement/ws-session-auth-phase2a`,
-  pending merge): actor model + `ws.setup` + setup-fence deleted, mandatory
-  `session_key`, `root` stripped from all schemas, registry re-keyed off actorID.
-  **Phase 2b next** (gemini/subquery/exploration deletion + bug drops; then 2c codex
+  **Phase 2a complete** (`9649a4bf`): actor model + `ws.setup` + setup-fence
+  deleted, mandatory `session_key`, `root` stripped from all schemas, registry
+  re-keyed off actorID. **Phase 2b complete** (`60015691`, branch
+  `implement/ws-session-auth-phase2b`, stacked on unmerged 2a — both pending a
+  combined merge): gemini runner impl + subquery runtime + retired-path
+  diagnostics deleted (harness-neutral Runner interface kept as deferred plug), 3
+  resolved-by-deletion bug tickets dropped. **Phase 2c next** (codex `agents.*`
   mercenary reshape + render-minted child keys). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
@@ -230,10 +233,12 @@ dropped tickets live in hidden archive dirs and git history.
   2a→2b→2c→3. **2a complete** (`9649a4bf`, pending merge): actor/`ws.setup`/fence
   deleted, mandatory `session_key`, `root` stripped from all schemas, registry
   re-keyed; spec `260610-ephemeral-session-auth-model` 🚧 stripped and
-  `260523-agents-root-schema-invisibility` removed. **2b next** (gemini/subquery/
-  exploration deletion + resolved-by-deletion bug drops); 2c (codex `agents.*` →
-  mercenary reshape + render-minted child keys + `260508` register-schema drop +
-  routing gate + bug re-triage). Depends M2 (done), coordinated
+  `260523-agents-root-schema-invisibility` removed. **2b complete** (`60015691`,
+  stacked on unmerged 2a): gemini runner impl + subquery runtime + retired-path
+  diagnostics deleted (Runner interface kept as deferred plug), 3 bug tickets
+  dropped to `.dropped/`, spec/mental-model reconciled. **2c next** (codex
+  `agents.*` → mercenary reshape + render-minted child keys + `260508`
+  register-schema drop + routing gate + bug re-triage). Depends M2 (done), coordinated
   with M4. Largest milestone. Session keys use a reusable word-chain generator
   (EFF large diceware, 7772 usable words after dropping 4 hyphenated entries,
   vendored + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it
