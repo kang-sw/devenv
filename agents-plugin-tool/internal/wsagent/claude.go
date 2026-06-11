@@ -194,7 +194,7 @@ func newClaudeSessionID() (string, error) {
 
 func isBackendShorthand(model string) bool {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "claude", "codex", "gemini":
+	case "claude", "codex":
 		return true
 	default:
 		return false
