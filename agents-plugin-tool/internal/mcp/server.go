@@ -39,6 +39,7 @@ type Server struct {
 	sessionHarness        string
 	sessionActorID        string
 	sessionActorAuthority string
+	sessions              *sessionRegistry
 }
 
 type toolRole string
@@ -97,7 +98,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 	}
 	cleanRoot := filepath.Clean(root)
 	role := requestedToolRole()
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, role: role}
+	return &Server{root: cleanRoot, version: version, sourceCommit: commit, role: role, sessions: newSessionRegistry()}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -358,6 +359,25 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", err)
 	}
 
+	// Keyed capability gate: when a session_key is present and maps to a known
+	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
+	// are not rejected here; root-aware tools surface the unknown_session error
+	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g.
+	// runtime.info) silently ignore an unrecognised session_key.
+	//
+	// ws.lead.* tools are additionally blocked for any non-lead scoped key to
+	// prevent self-login escalation: a delegate or leaf key must not be able to
+	// call ws.lead.login and receive a lead-scoped key, bypassing all capability
+	// restrictions. A KEYLESS caller (no session_key) is unaffected — the normal
+	// lead bootstrap path remains open.
+	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+		if entry, found := s.sessions.lookup(keyStr); found && entry.scope != roleLead {
+			if strings.HasPrefix(params.Name, "ws.lead.") || !roleAllowsTool(entry.scope, params.Name) {
+				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
+			}
+		}
+	}
+
 	switch params.Name {
 	case "runtime.info":
 		info, err := runtimeInfo(s.version, s.sourceCommit)
@@ -396,6 +416,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, result, nil)
 		}
 		return toolTextResponse(req.ID, formatSetupState(result), nil)
+	case "ws.lead.login":
+		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1303,6 +1325,47 @@ func canonicalSetupRoot(root string) (string, error) {
 	return canonicalGitRoot(root)
 }
 
+// handleLeadLogin implements the ws.lead.login tool: canonicalize root, mint an
+// ephemeral session key, store the {root, scope} entry in the registry, and
+// return the key to the caller. It does NOT participate in the ws.setup fence.
+func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) response {
+	rootArg, _ := arguments["root"].(string)
+	if strings.TrimSpace(rootArg) == "" {
+		return toolTextResponse(id, "", fmt.Errorf("ws.lead.login: root is required"))
+	}
+	canonical, err := canonicalSetupRoot(rootArg)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	scope := parseCapabilityScope(arguments["capability"])
+	key, err := s.sessions.mint(canonical, scope)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	result := map[string]any{
+		"session_key": key,
+		"root":        canonical,
+	}
+	if wantsJSON(arguments) {
+		return toolJSONResponse(id, result, nil)
+	}
+	return toolTextResponse(id, fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical), nil)
+}
+
+// parseCapabilityScope maps the optional capability argument to a toolRole.
+// An absent, nil, or "lead" capability maps to roleLead (unrestricted).
+func parseCapabilityScope(raw any) toolRole {
+	s, _ := raw.(string)
+	switch strings.TrimSpace(s) {
+	case "delegate":
+		return roleDelegate
+	case "leaf":
+		return roleLeaf
+	default:
+		return roleLead
+	}
+}
+
 func (s *Server) restoreActor(ctx context.Context, actorID string) error {
 	actorID = strings.ToLower(strings.TrimSpace(actorID))
 	if _, err := actorAuthority(actorID); err != nil {
@@ -2042,6 +2105,17 @@ func isHexString(value string) bool {
 }
 
 func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) (string, error) {
+	// Session-key branch: highest priority. When present, the key authoritatively
+	// resolves the root, bypassing every fallback in the chain below.
+	if key, ok := arguments["session_key"].(string); ok && strings.TrimSpace(key) != "" {
+		entry, found := s.sessions.lookup(key)
+		if !found {
+			return "", fmt.Errorf("unknown_session: session key not found in registry; "+
+				"re-login via ws.lead.login(root) with your known root and retry the call")
+		}
+		return entry.root, nil
+	}
+
 	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
 		return canonicalGitRoot(value)
 	}
@@ -2363,6 +2437,19 @@ func tools() []map[string]any {
 					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass the repository's absolute filesystem path.`),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
+			},
+		},
+		{
+			"name":        "ws.lead.login",
+			"description": "Mint an ephemeral word-chain session key for the given repository root. The returned session_key may be passed to any root-aware ws tool to identify the call root without relying on the server session state. The key is opaque; do not parse it.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":       stringProperty("Absolute Git worktree root to bind to the session key."),
+					"capability": enumStringProperty(`Optional capability scope. Omit or pass "lead" for unrestricted access. Pass "delegate" or "leaf" to restrict the key to that role's allowed tools.`, []string{"lead", "delegate", "leaf"}),
+					"format":     stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"root"},
 			},
 		},
 		{
