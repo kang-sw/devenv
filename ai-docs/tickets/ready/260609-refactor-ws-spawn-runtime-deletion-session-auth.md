@@ -371,6 +371,70 @@ fence/serialization and no clobber; a keyless call is hard-rejected (not silentl
 defaulted to a foreign root); `unknown_session` still yields the re-login
 recovery contract; no actor/authority/child-actor code remains.
 
+### Result (9649a4bf) - 2026-06-11
+
+Landed on `implement/ws-session-auth-phase2a` (from epic tip `c917c9f0` +
+slice commit `29bbf19a`). The auth-model cutover is complete: the persistent
+actor/authority/child-actor model, `ws.setup` (both forms), and the setup-fence
+are deleted; `session_key` is mandatory for every root-aware tool; `ws.lead.login(root)`
+is the sole bootstrap and the only `root` acceptor.
+
+Delivered:
+- `resolveToolRoot` collapsed to key-only: known key → root; absent →
+  `mandatory_session_key` reject; unknown → `unknown_session` reject. All silent
+  fallbacks removed (explicit `root` arg, volatile sessionRoot, host metadata,
+  `WS_MCP_PROJECT_ROOT`, startup root) (`79fe8bfa`).
+- `ws.setup` removed — schema, dispatch, alias, and the request-order fence
+  (`isSetupFenceRequest`/`wg.Wait`); explicit calls now fall through as unknown
+  tools (`24569308`). Server actor scope/binding/gate deleted (`1e6e1932`).
+- `wsstore` actor records deleted and the named-agent registry re-keyed off
+  `actorID` — `AgentInternalKey(publicName)` namespaced by the resolved worktree
+  store; child-actor credential injection removed; idempotent transactional
+  migration rebuilds existing DBs without the actor columns (`67d640ad`,
+  `9649a4bf`).
+- `root` parameter stripped from every root-aware tool schema; `ws.lead.login` is
+  the only advertised root acceptor (`f2d2422f`).
+- ws + wsflow skill bootstrap text migrated `ws.setup` → `ws.lead.login` /
+  `wsflow/ws.lead.login` (`ec1d80fb`, `9649a4bf`); CLI `--actor-id` flags dropped
+  (`6dd18196`).
+
+User-locked decisions honored: (Q1) full key-only in 2a — `root` stripped from all
+schemas and `260523-agents-root-schema-invisibility` removed; (Q2) `ws.setup`
+removed entirely with skill-text migration in 2a.
+
+Deviations / notes:
+- The `plan-populator-survey` named agent hit the 200k context limit mapping this
+  large surface ("Prompt is too long"); the lead authored the source-survey plan
+  from targeted recon instead. Captured as a dogfood `idea/` ticket
+  (`260611-bug-agent-context-exhaustion-opaque-failure`).
+- A delegated test pass first over-deleted ~37 out-of-scope tests (git/api/exec/
+  config/etc.) to force a green suite; caught in pre-review, corrected with a
+  `serveStdioWithSession` harness that logs in and threads `session_key` and strips
+  non-login `root` args so restored tests genuinely exercise the mandatory-key path.
+- CLI `--root` flags retained (lead ruling, reviewer-accepted): CLI mirrors are a
+  session-less local adapter; the mandatory-key model governs MCP tool calls, not
+  CLI invocations. This corrected a brief over-specification.
+- Review: partitioned correctness/fit/test, 2 cycles, all clean. Verification:
+  `go build/vet/test ./... -count=1` green; wsflow contract test green.
+
+Spec: `260610-ephemeral-session-auth-model` 🚧 stripped (implemented); removed
+`260524-mcp-actor-setup-bootstrap` and `260523-agents-root-schema-invisibility`;
+`260505-mcp-session-default-root` rewritten to key-only (`f3f50dcb`). Mental models
+updated (`58b97bf0`). Planned markers kept for 2b/2c/Phase-3 (mercenary surface,
+`260508` register reshape, tool-profile capability-scope enforcement).
+
+> Forward (Phase 2b): the spawn path currently compiles WITHOUT child credentials
+> (render-minted child keys are 2c). Delete the gemini runner impl, subquery
+> runtime, exploration spawn, and diagnostic sprawl; drop the three
+> resolved-by-deletion bug tickets.
+> Forward (Phase 2c): agents.* mercenary reshape (drop register-with-stems,
+> native-handle parity, routing gate, `prefer_mercenary`) + render-minted child
+> keys via `playbook.render`; `260508` register-schema removal lands here.
+> Forward (Phase 3): exec stateless + capability-scope ENFORCEMENT (the key already
+> carries a reserved scope) + dashboard build-fix — the `actors` table and
+> AgentDefinition actor columns are gone, but the dashboard was not yet adapted;
+> exec-job `owner_actor_id` is left in place for the Phase 3 exec rework.
+
 ### Phase 2b: delete genuinely-retired spawn surfaces
 
 Delete the parts that are retired outright, now that 2a severed the actor

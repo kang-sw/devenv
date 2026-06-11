@@ -59,78 +59,28 @@ server behavior without reading process-local files directly.
 
 ## MCP Session Root Defaults {#260505-mcp-session-default-root}
 
-Root-aware MCP tools resolve omitted `root` arguments through the current MCP
-server session before falling back to startup state. The priority is:
+Root-aware MCP tools resolve their repository root exclusively from a mandatory
+`session_key` argument; root resolution is the ephemeral session-auth model
+(`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
+call without a `session_key` is rejected with mandatory-login guidance naming
+`ws.lead.login(root)`; a call whose key is absent from the in-memory registry is
+rejected with the `unknown_session` recovery contract. `ws.lead.login(root)` is
+the sole bootstrap verb and the only tool that accepts a `root` argument.
 
-1. Explicit tool argument `root`.
-2. Volatile session default root.
-3. Host workspace metadata when the host provides exactly one workspace.
-4. Explicit non-dot server startup root.
-5. `WS_MCP_PROJECT_ROOT`.
-6. Server startup root.
+The former resolution sources are removed: the explicit per-tool `root` argument,
+the volatile session default root, host-workspace metadata, the explicit server
+startup root, `WS_MCP_PROJECT_ROOT` as a resolution source, the `ws.setup` public
+setup surface (both the bare root-session form and the
+`lead-workflow-bootstrap` actor form), and the persistent actor / authority /
+child-actor bootstrap. With root carried by a per-call key rather than a
+process-global default field, concurrent distinct worktree roots resolve without
+clobber and without the former request-order setup fence.
 
-`ws.setup` is the public setup surface for session state. When called with
-`root`, it validates that the path is inside a Git worktree, stores the
-canonical worktree root in the current server process, and returns setup state.
-The root-only value is volatile and does not write user config, ws cache config,
-or repository files. Calling `ws.setup` without `root`, `method`, or `id`
-reports current setup state, including the detected session harness when one has
-been observed, and does not mint lead authority. The default response is compact
-labeled text. Structured JSON remains accepted as hidden compatibility dispatch,
-but the public setup schema does not advertise a `format` argument. Legacy
-`session.*` root tools may remain callable as hidden compatibility dispatch, but
-they are not advertised as canonical tools.
+## Ephemeral Session-Auth Model {#260610-ephemeral-session-auth-model}
 
-`ws.setup(method: "lead-workflow-bootstrap", root: "<absolute-working-directory>")`
-creates a cooperative lead actor for a workflow session and returns an actor id
-with explicit recovery guidance. New actor ids are short opaque recovery tokens
-with an authority prefix and lowercase payload, such as `lead-k9f2p7qx`; callers
-must treat the token as opaque and recover with the exact returned value rather
-than parsing worktree routing details out of it. Callers must pass the absolute
-repository path as a filesystem path; the MCP server cannot infer the agent's
-current directory from placeholders or relative paths.
-`ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
-and binds the current session root to the actor root. Root-omitted actor-owned
-tools such as agent registration, agent calls, and subqueries require either a
-current actor binding or a hidden explicit-root compatibility argument. When
-that binding is missing, root-omitted actor-owned tools return compact recovery
-guidance pointing to `ws.setup(id: "<actor-id>")`; the full lead bootstrap
-ceremony remains in workflow guidance rather than repeated in each tool error.
-The actor model is a cooperative workflow guard, not a hard security boundary.
-{#260524-mcp-actor-setup-bootstrap}
-
-> [!note] Planned 🚧
-> The actor / authority / child-actor bootstrap (`actor_id`, `restoreActor`,
-> `ensureChildActor`) is replaced by the ephemeral session-auth model
-> (`#260610-ephemeral-session-auth-model`): `ws.lead.login(root)` returns a
-> word-chain session key, every call carries a key, and child actors give way to
-> render-minted child keys. Current actor behavior is unchanged until that model
-> lands.
-
-When host metadata names multiple workspaces and no higher-priority root exists,
-root-aware tools refuse to guess and return an actionable error asking the caller
-to pass the absolute repository path explicitly or call `ws.setup` with that
-absolute path.
-
-An explicit non-dot server startup root is treated as authoritative before the
-launcher-provided project-root environment fallback. If that explicit startup
-root is invalid, root-aware tools fail closed instead of silently falling back to
-`WS_MCP_PROJECT_ROOT`.
-
-> [!note] Planned 🚧
-> The volatile session-default-root resolution and the `ws.setup` actor-bootstrap
-> contract (`#260524-mcp-actor-setup-bootstrap`) are replaced by the ephemeral
-> session-auth model (`#260610-ephemeral-session-auth-model`). Root will be
-> carried by a per-call session key rather than a process-global default field,
-> so concurrent distinct worktree roots resolve without clobber. Current behavior
-> is unchanged until that model lands.
-
-## 🚧 Ephemeral Session-Auth Model {#260610-ephemeral-session-auth-model}
-
-The persistent actor / authority / child-actor model
-(`#260524-mcp-actor-setup-bootstrap`) is replaced by an ephemeral, in-memory
-session-auth model. This is the caller-visible authentication contract for ws
-tool calls; it is not yet implemented.
+The former persistent actor / authority / child-actor model has been replaced by
+an ephemeral, in-memory session-auth model. This is the caller-visible
+authentication contract for ws tool calls.
 
 A lead-centric bootstrap verb mints a session:
 `ws.lead.login(root) -> session_key`. The returned key is an LLM-friendly
@@ -489,9 +439,9 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 > retained surface is smaller: `agents.register(prompts: [stems])` and the
 > model-alias registration field (`#260508-agents-register-model-alias-field`)
 > are dropped in favor of a single self-contained prompt from `playbook.render`;
-> the actor-scoped root invisibility contract
-> (`#260523-agents-root-schema-invisibility`) is obsolete under mandatory session
-> keys; mercenaries are scoped to implementer/reviewer roles only; and the
+> the former actor-scoped root invisibility contract is already removed under
+> mandatory session keys (Phase 2a); mercenaries are scoped to implementer/reviewer
+> roles only; and the
 > gemini runner, the `subquery` runtime, exploration-purpose spawns, and
 > diagnostic sprawl beyond mercenary needs are removed. The cancel-retry guidance
 > (`#260512-agent-cancel-resume-guidance`) and hidden `agents.recall`
@@ -501,34 +451,13 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 `agents.register` creates or updates an agent record with backend, model alias
 or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
-immediately. Public named-agent workflows use `ws.setup` for session root
-selection; explicit root arguments may remain accepted as a hidden compatibility
-override. Public and generated actor-owned schemas for `agents.*` and `subquery`
-omit `root` end-to-end, including raw advertised schema metadata and
-host-visible generated metadata, while preserving intentional hidden
-explicit-root dispatch compatibility.
-{#260523-agents-root-schema-invisibility}
-
-> [!note] Planned 🚧
-> This contract is retired by the session-auth model. Under mandatory per-call
-> session keys (`#260610-ephemeral-session-auth-model`) there is no actor-root to
-> hide: root is carried by the key, so the root-schema-invisibility surface is
-> removed rather than reshaped.
-
-When the parent MCP session is bound to an actor and the call targets that actor
-root, named-agent registration/calls receive a persistent delegated child actor
-id in agent metadata plus a child setup instruction in the system prompt.
-Rootless actor-scoped subqueries receive ephemeral reader child actors with the
-same recovery instruction shape and do not receive the lead bootstrap method.
-
-Root-omitted actor-owned MCP calls in an actor-bound MCP session resolve through
-the current actor scope. For `agents.*`, this includes registration, call, wait,
-result, status, tail, interrupt, cancel, print, and erase. Root-omitted
-`subquery` starts the generated subquery agent in the same actor scope as the
-printed rootless follow-up commands. Hidden explicit-root compatibility calls
-use the unbound global namespace, so an actor-bound session can still inspect or
-manage a global compatibility registration explicitly without shadowing the
-actor-local agent of the same public name.
+immediately. Named-agent calls resolve their root from the mandatory `session_key`
+like every other root-aware tool (`#260610-ephemeral-session-auth-model`): no
+`agents.*` or `subquery` schema advertises a `root` argument, and there is no
+actor scope, hidden explicit-root dispatch, or persistent child-actor credential
+injection. The named-agent registry namespaces role pointers by the resolved
+worktree root, so the same public agent name stays distinct across distinct
+worktree roots without an actor dimension.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable

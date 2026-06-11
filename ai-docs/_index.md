@@ -205,9 +205,11 @@ dropped tickets live in hidden archive dirs and git history.
   contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
   `260610-mercenary-delegation-surface`). **M3 Phase 1 (additive session-auth)
   merged to the epic branch** (`c917c9f0` no-ff; Phase 1 result `447946f4`).
-  **Phase 2 sliced into 2a/2b/2c** (2a: caller migration + actor-model deletion +
-  fence removal + mandatory key; 2b: gemini/subquery/exploration deletion + bug
-  drops; 2c: codex mercenary reshape + parity + routing); **2a next**. **M4**
+  **Phase 2a complete** (`9649a4bf`, branch `implement/ws-session-auth-phase2a`,
+  pending merge): actor model + `ws.setup` + setup-fence deleted, mandatory
+  `session_key`, `root` stripped from all schemas, registry re-keyed off actorID.
+  **Phase 2b next** (gemini/subquery/exploration deletion + bug drops; then 2c codex
+  mercenary reshape + render-minted child keys). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
@@ -224,11 +226,14 @@ dropped tickets live in hidden archive dirs and git history.
   `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth:
   `ws.lead.login`, `internal/wskey`, in-memory `{key→root}` registry, keyed root
   resolution, `unknown_session` contract, capability gate) **complete + merged to
-  epic** (`447946f4`, merge `c917c9f0`). Phase 2 sliced 2a/2b/2c (2a: caller
-  migration + actor-model deletion + `ws.setup` fence removal + mandatory-key hard
-  reject; 2b: gemini/subquery/exploration spawn deletion + resolved-by-deletion
-  bug drops; 2c: codex `agents.*` → mercenary reshape + register-schema drop +
-  routing gate + bug re-triage), strict order 2a→2b→2c→3; **2a next**. Depends M2 (done), coordinated
+  epic** (`447946f4`, merge `c917c9f0`). Phase 2 sliced 2a/2b/2c, strict order
+  2a→2b→2c→3. **2a complete** (`9649a4bf`, pending merge): actor/`ws.setup`/fence
+  deleted, mandatory `session_key`, `root` stripped from all schemas, registry
+  re-keyed; spec `260610-ephemeral-session-auth-model` 🚧 stripped and
+  `260523-agents-root-schema-invisibility` removed. **2b next** (gemini/subquery/
+  exploration deletion + resolved-by-deletion bug drops); 2c (codex `agents.*` →
+  mercenary reshape + render-minted child keys + `260508` register-schema drop +
+  routing gate + bug re-triage). Depends M2 (done), coordinated
   with M4. Largest milestone. Session keys use a reusable word-chain generator
   (EFF large diceware, 7772 usable words after dropping 4 hyphenated entries,
   vendored + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it
