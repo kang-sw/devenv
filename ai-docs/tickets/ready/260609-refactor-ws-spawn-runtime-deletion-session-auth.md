@@ -668,6 +668,59 @@ Absorbed: idea `260611-bug-no-delegate-role-playbook-asset-renders-child-key-unr
 `260611-bug-rsrc-load-unknown-playbook-misleading-error` and
 `260611-bug-launcher-repair-failure-opaque-mcp-error`.
 
+#### Edition (0c7c0f50) - 2026-06-11
+
+(Hash points at the 2c reshape commit that introduced this regression; this
+Edition records a follow-up gap, not yet implemented. Continues the
+delegate-surface gap analysis from the prior Edition — same root, third axis.)
+
+Audit (sonnet Explore, two passes) of the mercenary layer vs. the pre-2c
+`ws.agents` surface found that **per-spawn / per-role tier (and concrete model)
+selection was lost from the MCP surface as direct collateral of the
+register-schema removal** (Unit 4 of `0c7c0f50` dropped `tier`/`model`/`prompts`/
+`prompt_refs` from `agents.register`).
+
+- **Was reachable pre-2c, now is not.** Pre-2c a lead could
+  `agents.register(tier: "deep")` (or `model: …`) and route the spawn through
+  `ResolveAgentForHarnessConfig` to the user's custom deep-tier backend/model
+  config. Post-2c the MCP handler reads no tier/model (`server.go:857-875`), and
+  `Manager.Register` hardcodes `opts.Tier = "core"` whenever no tier flows in
+  (`agent.go:550-552`) — which is always, from MCP. Every MCP-spawned mercenary
+  resolves against the **core** tier only.
+- **The custom-tier routing mechanism itself is intact but unreachable.**
+  `config.agents_tier` still exposes the full `SetAgentsTierForHarness`
+  (`tier`/`backend`/`model`/`harness`/`effort`; tiers constrained to
+  light/core/deep by `normalizedTier`, harness to default/codex/claude). But on
+  the shipped MCP surface only the **core** entry is ever consulted for a
+  mercenary. Custom **light**/**deep** configs are reachable only by the two
+  hardcoded internal `api_docs.go` callers (pre-router=light, manager=core); the
+  **deep** tier config is consumed by **no live code path at all**. A user who
+  sets `light → {claude, haiku}` / `deep → {codex, gpt-5.5-pro}` sees it applied
+  to no mercenary spawn (and, for deep, to nothing).
+- The 2c Result's "per-mercenary model moves to the rendered prompt + harness
+  config" is only half true: the harness-config path works but is pinned to
+  core; the rendered-prompt path injects `{{.Light/Core/DeepModel}}` into prompt
+  *text* only and never sets the subprocess `--model`/`-m`.
+
+Fill (extends the same delegate-asset work in the prior Edition — close all
+three together): restore an MCP-reachable per-spawn/per-role tier (optionally a
+concrete model) selection so a lead can route a specific mercenary to
+light/core/deep and thus to the user's custom backend/model config. Decide the
+path at implementation — candidates: a `tier` arg on `agents.call` and/or
+`playbook.render`; OR have `playbook.render` read a `tier:` frontmatter (reusing
+the same shipped delegate playbook that carries `role:`) and thread it into the
+minted child's `RegisterOptions`; OR bind a tier into the render-minted child
+key. The delegate playbook asset added for the child-key/model-var gaps should
+ALSO declare the role's default tier so one asset closes all three. Verification
+addition: an e2e test that customizes light & deep via `config.agents_tier`,
+spawns a mercenary routed to each, and asserts the subprocess resolves to the
+custom backend/model (not core).
+
+Also flagged (incomplete-migration markers, fold into the same pass):
+`Manager.oneShot()` (`agent.go:1099`) + `oneShotOptions` have no production
+caller (test-only) despite the 2c Result citing oneShot as a "live internal
+caller" that justifies retaining the `RegisterOptions` tier/model fields.
+
 ### Phase 3: exec stateless + role-containment fold + dashboard build-fix
 
 Confirm exec is a stateless `exec_key` capability anchored at the session root;
