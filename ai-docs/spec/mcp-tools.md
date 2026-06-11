@@ -112,10 +112,10 @@ with its own known root and retries. Because the caller-visible contract
 a later persistent session store is a pure implementation swap with no contract
 migration.
 
-Key issuance reserves an optional capability/role-scope parameter from the first
-cut (`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys
-for delegates even if the first implementation honors only a single default
-profile.
+Key issuance accepts an optional capability/role-scope parameter
+(`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys for
+delegates; the keyed `tools/call` handler enforces that scope (see Tool Profile
+Gating).
 
 > [!note] Constraints
 > - The session key is mandatory on every ws call; there is no keyless lead
@@ -626,7 +626,7 @@ exec runtime metadata into SQLite authority. The gate keeps public `agents.*`
 and `exec.*` MCP APIs stable while separating lifecycle metadata from
 file-backed payload bodies. Named-agent registry metadata and exec job metadata
 are SQLite-backed. SQLite metadata may track identities, lifecycle state,
-actor/session binding, path indexes, byte counts, retention visibility, leases,
+session binding, path indexes, byte counts, retention visibility, leases,
 tombstones, and prune bookkeeping. Prompts, streams, runtime logs, event JSONL,
 transcripts, backend raw output, and final output bodies remain file-backed.
 
@@ -637,32 +637,33 @@ short and must not hold a transaction across subprocess or model execution.
 
 ## Tool Profile Gating {#260505-tool-profile-gating}
 
-The MCP server defaults to the `lead` tool surface. It does not derive authority
-from worktree-local locks or startup-root ownership, because plugin-managed hosts
-can start the server from cache directories and can fail to propagate
-environment variables consistently.
+The MCP server defaults to the `lead` tool surface, and `tools/list` advertises
+the full lead surface regardless of any caller environment. Schema visibility is
+advisory, not an authority boundary, because plugin-managed hosts can start the
+server from cache directories and can fail to propagate environment variables
+consistently.
 
-`WS_MCP_TOOL_PROFILE` is an optional profile filter, not an authority boundary.
-When the host successfully propagates it, `delegate` and `leaf` receive narrower
-tool sets for dogfood containment and tests. Leaf also hides recursive
-orchestration and selected mutation tools.
+Tool-permission enforcement is the server-side capability check in the keyed
+`tools/call` handler. A session key carries `{root + capability scope}` —
+`lead`, `delegate`, or `leaf` — minted by `ws.lead.login(capability)` or as a
+render-minted child key. When a call presents a known non-lead key, the handler
+rejects any tool that scope disallows (`delegate` cannot call `agents.*`,
+`config.*`, or `session.*`; `leaf` additionally cannot call `api.*` or
+`git.commit`) and rejects any `ws.lead.*` call from any non-lead key (self-login
+escalation block). Keyless callers and lead keys are not restricted by this gate,
+so the keyless `ws.lead.login` bootstrap stays open; a delegate can therefore
+keyless-re-`login` to re-escalate. The scope is a soft defense-in-depth guard
+layered on the host's own subagent tool restriction, not a hard sandbox.
 
-When profile environment propagation fails, delegated agents may see the full
-lead MCP surface. Workflow containment therefore depends on prompt rules such as
-delegate orientation and lead-owned orchestration instructions, not on MCP
-tool-surface filtering. `WS_MCP_ALLOWED_TOOLS` can further narrow the visible
-surface for tests or debugging, but it cannot expand access beyond the selected
-profile.
-
-> [!note] Planned 🚧
-> Role containment folds into capability-scoped session keys
-> (`#260610-ephemeral-session-auth-model`): a key carries `{root + optional
-> capability/role scope}`, and enforcement is the server-side role check in the
-> keyed `tools/call` handler (`#260610-mercenary-delegation-surface`). The
-> `WS_MCP_TOOL_PROFILE` env profile is verified non-functional for containment
-> (it is a soft-guard only, lost whenever the host fails to propagate the env
-> var) and is retained as defense-in-depth, not as the enforcement boundary.
-> Current behavior is unchanged until the keyed-handler check lands.
+`WS_MCP_TOOL_PROFILE` no longer gates the served tool surface and is not
+propagated to spawned mercenary subprocesses; the env-profile role mechanism is
+retired in favor of the keyed capability gate, having been verified
+non-functional for containment (it was lost whenever the host failed to propagate
+the env var). Delegate tool scope now travels in-band through the render-minted
+child key rather than the environment. `WS_MCP_ALLOWED_TOOLS` is retained as an
+optional visibility allowlist for tests and debugging, independent of capability
+scope: it can narrow the visible surface but cannot expand access beyond what the
+keyed gate permits.
 
 ## CLI Mirror Coverage {#260505-cli-mirror-coverage}
 
