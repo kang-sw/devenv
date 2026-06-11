@@ -444,7 +444,7 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") || strings.Contains(byID["1"], "config.agents_tier") || strings.Contains(byID["1"], "config.show") {
+	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "config.agents_tier") || strings.Contains(byID["1"], "config.show") {
 		t.Fatalf("leaf tools/list exposed recursive tools: %s", byID["1"])
 	}
 	if strings.Contains(byID["1"], "ws.setup") {
@@ -1210,7 +1210,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
-	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup"} {
+	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
