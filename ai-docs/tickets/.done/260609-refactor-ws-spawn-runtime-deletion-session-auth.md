@@ -20,6 +20,7 @@ related-mental-model:
   - named-agent-runtime
   - mcp-runtime
   - prompt-bundle
+completed: 2026-06-11
 ---
 
 # ws spawn-runtime deletion and ephemeral session-auth model
@@ -805,6 +806,20 @@ prompt-bundle field; a native delegate lacks the bundle).
 > direction. Re-triaged bugs `260517` + `260524` stay live on the retained
 > mercenary path. All of 2a+2b+2c+3 await a single combined merge to epic
 > `260605` by user decision (this phase was run "without merging").
+
+#### Edition (be8c39e6) - 2026-06-11
+
+Milestone closeout. Phases 2a+2b+2c+3 merged to epic `260605` in the combined
+`merge(m3)` commit `be8c39e6` (Phase 1 was already at the epic base `c917c9f0`;
+--no-ff, per-phase Result history preserved). The two Phase 2c Editions' fill
+scope (delegate `role:`/`tier:` asset + MCP-reachable per-spawn/per-role tier
+routing + `Manager.oneShot()` cleanup) and the reviewer-tier skill default
+(deferred, dropped commit `e6aadfc9e42297ba97af6b78d98f46d2fa411d4b`) are
+re-homed to `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`, gated on
+the tier-taxonomy redesign (research
+`260611-research-ws-per-role-delegation-tuning-config`). All numbered phases are
+complete and merged; this ticket moves to `.done/`. Live bugs `260517` +
+`260524` remain on the retained mercenary path (their own tickets).
 
 Phase order: 1 → 2a → 2b → 2c → 3, strictly sequential. Phase 1 (additive
 session-auth) before 2a (session-auth must exist before the actor model is

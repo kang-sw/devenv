@@ -64,8 +64,8 @@ subagents. Direction, decisions, and evidence live in
   procedure corpus now lives in `agents-plugin/rsrc/`; `ws/subquery`/`agents.*`
   runtime stays callable but unreferenced by shipped skill text (deletion/reshape
   is M3).
-- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (todo, M3 — spawn
-  reshape + session-auth): **reshape** the spawn engine into a first-class scoped
+- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (done `.done/`, M3 —
+  spawn reshape + session-auth): **reshape** the spawn engine into a first-class scoped
   "mercenary" surface (option B, supersedes the option-C freeze): retain the codex
   runner live (claude OPEN), drop gemini/subquery/exploration-spawn/diagnostic
   sprawl, scope mercenary to implementer/reviewer (exploration + mental-model
@@ -76,7 +76,18 @@ subagents. Direction, decisions, and evidence live in
   exec stateless; role-containment folded into capability-scoped keys; dashboard
   agent-audit strip. Bug-ticket disposition SPLITS (subquery/wsstore-busy dropped;
   agent-empty-result/register-stale re-triaged on the retained path). Depends on
-  M2; coordinated with M4.
+  M2; coordinated with M4. **Complete (2026-06-11), merged to epic `be8c39e6`**
+  (phases 1+2a+2b+2c+3, --no-ff). Remaining fill (delegate role/tier asset +
+  per-spawn/per-role tier routing + reviewer-tier default) re-homed to
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`.
+- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (todo — tier taxonomy
+  + delegate tier routing): first-class `small/medium/large/xlarge` tier vocab,
+  `light/core/deep` demoted to concrete-model aliases, shipped delegate
+  `role:`/`tier:` playbook asset (child-key splice + model vars), mercenary
+  per-spawn tier plumbing into `RegisterOptions`, reviewer-tier default
+  re-authored in first-class vocab. Re-homes the 260609 Phase 2c Editions.
+  Blocked on research `260611-research-ws-per-role-delegation-tuning-config`
+  (first-class axis). Depends on M3.
 - `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
   corpus-routed api-doc playbook, cache index/staleness conventions, async job
   surface removal. Depends on M1; coordinated with M3.
@@ -138,6 +149,15 @@ subagents. Direction, decisions, and evidence live in
   filtering is likewise only a harness-owned soft-guard — containment must be
   enforced **server-side in the keyed `tools/call` handler** by session-key role,
   not via the env var or schema omission.
+
+- **Tier vocabulary (resolved 2026-06-11):** the abstract delegation tier is
+  first-class `small/medium/large/xlarge`; `light/core/deep` are demoted to
+  concrete-model aliases (alongside `haiku`/`sonnet`/`opus`). Frontmatter
+  declares the first-class tier; mercenary is opt-in; `config.agents_tier` stays
+  the mercenary concretion layer (`tier × harness → backend/model/effort`).
+  Owned by research `260611-research-ws-per-role-delegation-tuning-config` and
+  child `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (the 260609
+  Phase 2c Editions re-home there).
 
 ## Completion Criteria
 

@@ -188,7 +188,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Focus
 
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
-  not implementation-ready (board artifact). **M0/M1/M2 done.** M1
+  not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
   `internal/wsrsrc` call-time loader + `playbook.print`/`playbook.render` MCP tools
   with harness-aware rendering; spec stems `260609-playbook-tools` /
@@ -199,8 +199,8 @@ dropped tickets live in hidden archive dirs and git history.
   spec `260610-entry-skill-surface-reduction` and
   `260610-subquery-explore-delegation-shift` implemented. `ws/subquery`/`agents.*`
   runtime stays callable but unreferenced by shipped skill text (reshape/deletion
-  is M3). **Next: M3** (`260609-refactor-ws-spawn-runtime-deletion-session-auth`,
-  **ready**) — spawn engine → scoped mercenary reshape + ephemeral per-call
+  is M3). **M3 done** (`260609-refactor-ws-spawn-runtime-deletion-session-auth`,
+  `.done/`, merged `be8c39e6`) — spawn engine → scoped mercenary reshape + ephemeral per-call
   session-key auth (drops actor/wsstore/authority); promoted to ready with
   contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
   `260610-mercenary-delegation-surface`). **M3 Phase 1 (additive session-auth)
@@ -223,44 +223,31 @@ dropped tickets live in hidden archive dirs and git history.
   migration); capability-scope enforcement folded into the keyed session-key gate
   (`WS_MCP_TOOL_PROFILE` retired — `Server.role`/`requestedToolRole`/env
   propagation removed; keyed `callTool` gate is sole authority); dashboard
-  build-fix (test-fixture only, no feature change). All numbered phases done;
-  **2a+2b+2c+3 unmerged, pending one combined merge to the epic**; open fill = the
-  two Phase 2c Editions (delegate `role:`/`tier:` asset + per-spawn/per-role tier
-  routing). **M4**
+  build-fix (test-fixture only, no feature change). **All phases merged to the
+  epic** (`be8c39e6`, combined --no-ff); 260609 closed `.done/`. Open fill
+  (delegate `role:`/`tier:` asset + per-spawn/per-role tier routing +
+  reviewer-tier default) re-homed to
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (todo, blocked on
+  research `260611`). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
   `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity),
   `260610-bug-wsflow-runtime-contract-playbook-tools-drift` (pre-existing M1
   capability-contract drift).
-- `260609-refactor-ws-spawn-runtime-deletion-session-auth` (ready) — M3, direct
-  implementation target. Spawn-runtime reshape to a scoped mercenary surface
-  (codex+claude live, implementer/reviewer only; native is default) + ephemeral
-  `ws.lead.login` session-key auth replacing the actor/wsstore/authority model.
-  Contract-first spec `260610-ephemeral-session-auth-model` +
-  `260610-mercenary-delegation-surface` (`spec-remove`:
-  `260508-agents-register-model-alias-field`,
-  `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth:
-  `ws.lead.login`, `internal/wskey`, in-memory `{key→root}` registry, keyed root
-  resolution, `unknown_session` contract, capability gate) **complete + merged to
-  epic** (`447946f4`, merge `c917c9f0`). Phase 2 sliced 2a/2b/2c, strict order
-  2a→2b→2c→3. **2a complete** (`9649a4bf`, pending merge): actor/`ws.setup`/fence
-  deleted, mandatory `session_key`, `root` stripped from all schemas, registry
-  re-keyed; spec `260610-ephemeral-session-auth-model` 🚧 stripped and
-  `260523-agents-root-schema-invisibility` removed. **2b complete** (`60015691`,
-  stacked on unmerged 2a): gemini runner impl + subquery runtime + retired-path
-  diagnostics deleted (Runner interface kept as deferred plug), 3 bug tickets
-  dropped to `.dropped/`, spec/mental-model reconciled. **2c complete**
-  (`0c7c0f50`): `agents.*` reshaped to the mercenary surface, render-minted child
-  keys, `260508` register-schema drop, native `agentId=` handle. **Phase 3
-  complete** (`ec2ad888`): exec stateless + capability-scope fold
-  (`WS_MCP_TOOL_PROFILE` retired) + dashboard build-fix. All numbered phases done;
-  **2a+2b+2c+3 unmerged, pending one combined merge to the epic**; open fill = two
-  2c Editions (delegate asset + per-role tier routing). Depends M2 (done),
-  coordinated with M4. Largest milestone. Session keys use a reusable word-chain generator
-  (EFF large diceware, 7772 usable words after dropping 4 hyphenated entries,
-  vendored + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it
-  to other id surfaces is reserved as `260610-refactor-ws-wordchain-id-generalization`
+- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (todo, refactor) -
+  re-homed M3 fill scope: first-class `small/medium/large/xlarge` tier vocab,
+  `light/core/deep` demoted to concrete-model aliases, shipped delegate
+  `role:`/`tier:` playbook asset (child-key splice + model vars), mercenary
+  per-spawn tier plumbing into `RegisterOptions`, `oneShot` dead-code cleanup,
+  reviewer-tier default re-authored in first-class vocab. Blocked on research
+  `260611` (first-class axis); not implementation-ready.
+- `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
+  the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
+  layer; native vs opt-in mercenary) + the open first-class axis (subscription
+  plan vs capability) and the first-class→alias mapping; gates the actionable
+  above. The session-key word-chain generator generalization to other id
+  surfaces remains reserved as `260610-refactor-ws-wordchain-id-generalization`
   (todo, follow-up).
 
 ## Session Notes
