@@ -798,20 +798,61 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, body+"\n", err)
 
 	case "playbook.render":
-		// Phase 2: name + context; worktree root for tmp file; rsrc root overridable.
+		// Phase 2c: name + context + root_override; child-key mint for lead callers.
 		name, _ := params.Arguments["name"].(string)
 		callerContext := stringMapArgument(params.Arguments["context"])
-		worktreeRoot, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rootOverride = strings.TrimSpace(rootOverride)
+
+		// Determine worktree root: root_override (when set) or session-bound root.
+		var worktreeRoot string
+		if rootOverride != "" {
+			worktreeRoot = rootOverride
+		} else {
+			var err error
+			worktreeRoot, err = s.resolveToolRoot(params.Arguments, params.Meta)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+		}
+		// Rsrc root: root_override rebinds the auto-include resolution root when set.
+		rsrcRoot, err := resolveRsrcRoot(rootOverride)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// M3 forward-compat: rsrc root resolved here so M3 can pass root_override.
-		rsrcRoot, err := resolveRsrcRoot("")
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
+
+		// Lead-gate: check caller entry to determine whether to mint a child key.
+		// mintRoot is empty when caller is not a lead (no mint).
+		var mintRoot string
+		var preferMercenary bool
+		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+			if entry, found := s.sessions.lookup(keyStr); found && entry.scope == roleLead {
+				// Child key binding root: root_override when set, else caller's bound root.
+				if rootOverride != "" {
+					mintRoot = rootOverride
+				} else {
+					mintRoot = entry.root
+				}
+				preferMercenary = entry.preferMercenary
+			}
 		}
-		path, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{})
+
+		path, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, preferMercenary)
 		return toolTextResponse(req.ID, path+"\n", err)
+
+	case "ws.lead.prefer_mercenary":
+		// Lead-only tool to flip the render mode for this session key.
+		// The ws.lead.* prefix gate in callTool (lines 311-328) already blocks
+		// non-lead keys — do not add a second role check here.
+		keyStr, _ := params.Arguments["session_key"].(string)
+		keyStr = strings.TrimSpace(keyStr)
+		if keyStr == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
+		}
+		if !s.sessions.setPreferMercenary(keyStr) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; re-login via ws.lead.login(root) and retry"))
+		}
+		return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
 
 	case "agents.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -820,18 +861,15 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
-		tier, _ := params.Arguments["tier"].(string)
-		model, _ := params.Arguments["model"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
+		// Unit 4: prompts/prompt_refs/tier/model are removed from the MCP schema.
+		// The MCP layer no longer reads or passes those fields; internal RegisterOptions
+		// struct fields are retained for internal callers (api_docs, oneShot, etc.).
 		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
 			Root:             root,
 			Name:             name,
 			Backend:          backend,
 			Harness:          s.currentHarness(),
-			Tier:             tier,
-			Model:            model,
-			Prompts:          stringList(params.Arguments["prompts"]),
-			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
 			SystemPromptText: systemPromptText,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
@@ -850,7 +888,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
+		// Unit 5: native-shaped continuation handle — same shape as a host-native
+		// subagent id so the lead reuses one continuation idiom across both paths.
+		// Handle format: agentId=<name> matches the native agentId shape referenced
+		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
+		return toolTextResponse(req.ID, fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1856,6 +1898,17 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "ws.lead.prefer_mercenary",
+			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws/agents.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
 			"name":        "api.list",
 			"description": "Return sorted API documentation cache domain names under ai-docs/.deps.",
 			"inputSchema": map[string]any{
@@ -2266,29 +2319,27 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Full ws; not wsflow-only."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Full ws; not wsflow-only."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name":    stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
-					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
+					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
+					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"root_override": stringProperty("Optional path to override both the auto-include resolution root and the child-key binding root. Use when the delegate runs in a different worktree."),
 				},
 				"required": []string{"name"},
 			},
 		},
 		{
 			"name":        "agents.register",
-			"description": "Register a durable ws agent session for the current worktree.",
+			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text; the former prompts/tier/model registration fields are removed.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name":               stringProperty("Agent name."),
-					"backend":            stringProperty("Optional backend name. Model aliases use the detected harness when omitted."),
-					"tier":               stringProperty("Deprecated compatibility alias selector: light, core, or deep."),
-					"model":              stringProperty("Optional model alias or concrete backend model. Aliases: light, core, deep."),
-					"prompts":            stringArrayProperty("Embedded prompt stems or absolute prompt paths."),
-					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
-					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
+					"backend":            stringProperty("Optional backend name (codex or claude). Uses harness default when omitted."),
+					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/tier/model registration fields."),
 				},
 				"required": []string{"name"},
 			},
@@ -2605,6 +2656,11 @@ func noAgentHiddenTool(name string) bool {
 	}
 	switch name {
 	case "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel":
+		return true
+	case "ws.lead.prefer_mercenary":
+		// Mercenary render-mode control is ws-only; the agentless wsflow surface
+		// has no mercenary path, so prefer_mercenary is hidden there. ws.lead.login
+		// stays visible (wsflow still needs session-key bootstrap).
 		return true
 	default:
 		return false

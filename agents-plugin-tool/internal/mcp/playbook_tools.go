@@ -149,7 +149,8 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 }
 
 // delegationTip returns the harness-aware continuity tip fragment appended to the
-// rendered body of delegates:true playbooks.
+// rendered body of delegates:true playbooks. It includes the always-on mercenary tip
+// noting the ws/agents.call path is always reachable on request.
 func delegationTip(harness string) string {
 	term := terminologyForHarness(harness)
 	continueIdiom := term["ContinueIdiom"]
@@ -161,7 +162,42 @@ func delegationTip(harness string) string {
 	sb.WriteString("` to send follow-up messages to the same agent rather than spawning a new one. ")
 	sb.WriteString("The playbook surface keeps no agent registry; ")
 	sb.WriteString("record the agent id in your workflow state if you need it across turns.")
+	// Unit 3: always-on mercenary tip — present in every delegates:true rendering.
+	sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
+	sb.WriteString(" (mercenary) is always reachable on request via `ws/agents.call`, even without")
+	sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
+	sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
+	sb.WriteString(" agent id you can resume with the same continuation idiom.")
 	return sb.String()
+}
+
+// childRoleForPlaybookRole maps a playbook frontmatter role string to the child key scope.
+// Returns (scope, true) for delegate-eligible roles; ("", false) for non-eligible roles
+// (lead, empty, or unknown).
+//
+// Mapping:
+//   - "implementer", "reviewer", "delegate" → roleDelegate
+//   - "leaf" → roleLeaf
+//   - "lead", "", unknown → ("", false): lead playbooks never mint child keys.
+func childRoleForPlaybookRole(role string) (toolRole, bool) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "implementer", "reviewer", "delegate":
+		return roleDelegate, true
+	case "leaf":
+		return roleLeaf, true
+	default:
+		return "", false
+	}
+}
+
+// mercenaryGuidanceBlock returns the prefer-mercenary guidance text fragment for
+// implementer/reviewer delegation playbooks when preferMercenary is true.
+// When preferMercenary is false, the always-on tip in delegationTip already
+// mentions the mercenary path as available on request.
+func mercenaryGuidanceBlock() string {
+	return "\n\n**Delegation mode (prefer_mercenary active):** Default guidance for this session is" +
+		" to use the mercenary path (`ws/agents.call`) rather than a host-native subagent." +
+		" The native subagent path remains available if you prefer it."
 }
 
 // resolveRsrcRoot resolves the rsrc tree root for a playbook tool call.
@@ -184,9 +220,18 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 //
 // The delegation tip is appended after substitution when meta.Delegates is true.
 //
-// rsrcRoot is a call-site-overridable seam (M3 root_override will be threaded here).
+// rsrcRoot is a call-site-overridable seam (root_override is threaded here).
 // configOpts is forwarded to resolveModelVars; tests pass Options{CacheHome:tmpDir}.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, error) {
+//
+// mintRoot: when non-empty, the caller is a lead and this function will mint a
+// fresh child key (role taken from the playbook's Meta.Role) bound to mintRoot.
+// The minted key is spliced as a clearly-delimited block into the rendered body
+// so the delegate's ws calls are pre-keyed. When mintRoot is empty or the playbook
+// role is not delegate-eligible, no key is minted and the body is unchanged.
+//
+// preferMercenary: when true and the playbook is an implementer/reviewer role,
+// appends a guidance block advising the mercenary spawn idiom as primary.
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, error) {
 	harness := s.currentHarness()
 
 	// Pass 1: nil vars → load metadata without triggering substitution errors.
@@ -195,54 +240,85 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		return "", err
 	}
 
+	var body string
+
 	// Fast path: no declared variables and no caller context.
 	if len(metaOnly.Meta.Variables) == 0 && len(callerContext) == 0 {
-		body := metaOnly.Body
+		body = metaOnly.Body
 		if metaOnly.Meta.Delegates {
 			body += delegationTip(harness)
 		}
-		return body, nil
+	} else {
+		// Build filtered vars: check caller context, inject terminology + model aliases.
+		vars, err := buildPlaybookVars(metaOnly.Meta.Variables, callerContext, harness, configOpts)
+		if err != nil {
+			return "", err
+		}
+
+		// Pass 2: load with full vars for actual substitution.
+		pb, err := wsrsrc.Load(rsrcRoot, name, harness, vars)
+		if err != nil {
+			return "", err
+		}
+
+		body = pb.Body
+		if pb.Meta.Delegates {
+			body += delegationTip(harness)
+		}
 	}
 
-	// Build filtered vars: check caller context, inject terminology + model aliases.
-	vars, err := buildPlaybookVars(metaOnly.Meta.Variables, callerContext, harness, configOpts)
-	if err != nil {
-		return "", err
+	// Unit 2: prefer_mercenary guidance — implementer/reviewer only.
+	if preferMercenary {
+		switch strings.ToLower(strings.TrimSpace(metaOnly.Meta.Role)) {
+		case "implementer", "reviewer":
+			body += mercenaryGuidanceBlock()
+		}
 	}
 
-	// Pass 2: load with full vars for actual substitution.
-	pb, err := wsrsrc.Load(rsrcRoot, name, harness, vars)
-	if err != nil {
-		return "", err
+	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
+	if strings.TrimSpace(mintRoot) != "" {
+		if childScope, ok := childRoleForPlaybookRole(metaOnly.Meta.Role); ok {
+			childKey, err := s.sessions.mint(mintRoot, childScope)
+			if err != nil {
+				return "", fmt.Errorf("mint child session key: %w", err)
+			}
+			// Splice a clearly-delimited credential block into the body so the
+			// delegate's ws calls are pre-keyed. Prepended so the delegate sees
+			// the key before any procedure text.
+			credBlock := "---\n" +
+				"**Your ws session_key: `" + childKey + "`**\n" +
+				"Use this key in all ws tool calls. Do not call `ws.lead.login` or `ws.lead.*` tools.\n" +
+				"---\n\n"
+			body = credBlock + body
+		}
 	}
 
-	body := pb.Body
-	if pb.Meta.Delegates {
-		body += delegationTip(harness)
-	}
 	return body, nil
 }
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
 // Zero-logic wrapper over renderPlaybookBody: the indirection is intentional
-// forward-compat for M3, where print and render may diverge (e.g., different
+// forward-compat, where print and render may diverge (e.g., different
 // session-scoped output constraints or inline vs. path semantics).
+// printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
 //
-// rsrcRoot is a call-site-overridable seam for M3 root_override support.
+// rsrcRoot is a call-site-overridable seam for root_override support.
 // configOpts controls config-backed model alias resolution.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, error) {
-	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts)
+	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", false)
 }
 
-// renderPlaybook loads a playbook, renders it, writes it to a worktree-scoped
-// tmp file, and returns the file path. The caller hands this path to a host-native
-// subagent. Like prompt.render, it carries no routing decision.
+// renderPlaybook loads a playbook, renders it (with optional child-key mint and
+// splice), writes it to a worktree-scoped tmp file, and returns the file path.
+// The caller hands this path to a host-native subagent or mercenary.
 //
-// rsrcRoot and worktreeRoot are call-site-overridable seams for M3 support.
+// rsrcRoot and worktreeRoot are call-site-overridable seams for root_override support.
+// mintRoot: when non-empty, caller is a lead and a child key is minted for the delegate.
+// preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, error) {
-	body, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts)
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, error) {
+	body, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, mintRoot, preferMercenary)
 	if err != nil {
 		return "", err
 	}

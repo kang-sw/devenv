@@ -319,7 +319,7 @@ func TestPlaybookRenderWritesTmpFile(t *testing.T) {
 
 	s := newTestServerWithHarness(t, "claude")
 
-	path, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome})
+	path, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", false)
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}

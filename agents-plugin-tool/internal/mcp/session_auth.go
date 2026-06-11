@@ -10,8 +10,9 @@ import (
 // sessionEntry associates a canonical repository root and a capability scope
 // with an ephemeral session key minted by ws.lead.login.
 type sessionEntry struct {
-	root  string
-	scope toolRole
+	root            string
+	scope           toolRole
+	preferMercenary bool
 }
 
 // sessionRegistry is a concurrency-safe in-memory store mapping session keys to
@@ -62,4 +63,18 @@ func (r *sessionRegistry) lookup(key string) (sessionEntry, bool) {
 	defer r.mu.RUnlock()
 	entry, ok := r.entries[key]
 	return entry, ok
+}
+
+// setPreferMercenary flips the preferMercenary flag for the given key under the write lock.
+// Returns true if the key was found and updated, false if the key was not found.
+func (r *sessionRegistry) setPreferMercenary(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.entries[key]
+	if !ok {
+		return false
+	}
+	entry.preferMercenary = true
+	r.entries[key] = entry
+	return true
 }
