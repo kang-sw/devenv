@@ -8,14 +8,24 @@ related-mental-model:
 
 # Investigate ws agent stale registration and post-test result hang
 
-## Pending Removal (2026-06-09)
+## Re-triage (2026-06-11, M3 Phase 2c — option B)
 
-Resolved-by-deletion candidate under `260605-epic-ws-playbook-factory-pivot`.
-The `agents.register`/named-agent spawn machinery this hang lives in is removed
-wholesale at milestone M3 (delegation moves to harness-native subagents). Do not
-invest in a standalone fix; drop this ticket to `.dropped/` in the same commit
-that deletes the spawn machinery. Retained in place until then so git blame and
-ticket scans surface the coupling.
+The earlier "Pending Removal / resolved-by-deletion" disposition assumed option C
+(total spawn-machinery removal). That is **superseded**: under option B the
+`agents.register`/runner machinery is RETAINED as the mercenary surface
+(`260609-refactor-ws-spawn-runtime-deletion-session-auth`, `## Decisions`). This
+bug therefore **lives on, not dropped**.
+
+Phase 2c dropped the `register(prompts:[stems])`/tier/model schema fields, but
+that does NOT obsolete this bug: the failure is the **stale agent-directory reset**
+(`reset agent directory ... directory not empty`) plus the register→call ordering
+race and the post-tool-use **result hang** — all in the agent-directory/lifecycle
+path, independent of the prompt-stems input that was removed. `register` still
+creates and may need to reset an agent directory. The result-hang half overlaps
+`260517-bug-ws-agent-empty-result-after-tool-use`.
+
+Stays in `idea/` (retained, live defect on the mercenary path). Candidate for
+promotion alongside the 260517 result-capture fix.
 
 ## Background
 
