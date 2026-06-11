@@ -25,7 +25,6 @@ HIDDEN_TOOLS = {
     "agents.cancel",
     "agents.print",
     "agents.erase",
-    "subquery",
     "config.agents_tier",
     "api.ask",
     "api.ask_async",
@@ -60,7 +59,6 @@ HIDDEN_COMMANDS = {
     "agents.cancel",
     "agents.print",
     "agents.erase",
-    "subquery",
     "config.agents-tier",
 }
 

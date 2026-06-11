@@ -64,8 +64,6 @@ native Explore-style subagent with the rendered brief; collect the deferred resu
 For parallel dispatch, spawn multiple concurrent subagents in a single turn and
 collect all before synthesizing. Use a broad-tracing scope for wide structural surveys.
 
-`ws/subquery` remains callable but is not the shipped-skill delegation path.
-
 ### Persistent agents
 
 `ws/agents.register`
