@@ -337,22 +337,96 @@ with the still-live actor model.
 > Forward (Phase 3): exec stateless + full role-containment fold (capability-scoped keys
 > replace `WS_MCP_TOOL_PROFILE`) + dashboard build-fix.
 
-### Phase 2: mercenary reshape + actor model deletion (option B)
+> Phase 2 was sliced into 2a/2b/2c at implementation time (sub-phase labels keep
+> the stable Phase 3 number unrenumbered per ticket conventions). The original
+> single-phase sketch ("mercenary reshape + actor model deletion") is preserved by
+> the union of 2a+2b+2c; the binding decisions stay in `## Decisions` above. The
+> three slices have distinct review/rollback boundaries and a hard dependency
+> order (2a → 2b → 2c), which is why they are separate reviewable units.
 
-Delete the actor/authority/child-actor machinery, the **gemini** runner backend,
-the `subquery` runtime, exploration-purpose spawn paths, and diagnostic sprawl
-beyond mercenary needs. **Retain and reshape** the **codex** runner backend
-(claude OPEN) plus the `agents.*` call/lifecycle core into the mercenary surface:
-rewire the spawn path onto session keys (pre-allocate + system-prompt splice),
-drop the `register(prompts: [stems])` schema for a single self-contained prompt,
-align the continuation handle to the native agentId shape, and scope mercenary to
-implementer/reviewer with the user-explicit / config-advised routing. Drop the
-subquery and wsstore-sqlite-busy bug tickets here (their code is removed); the
-agent-empty-result and register-stale-dir bugs are NOT auto-resolved — they live
-in the retained mercenary path and must be FIXED or re-triaged (see below).
-Verification: native is the default delegation path; mercenary spawns only for
-implementer/reviewer via the routing gate; the actor model is gone; no gemini /
-subquery / exploration spawn remains.
+### Phase 2a: caller migration to session keys + actor model deletion
+
+The highest-risk core; lands first because every later deletion depends on the
+actor dependency already being gone. Migrate the live callers (the still-additive
+Phase 1 session-auth path becomes mandatory) onto session keys, then delete the
+persistent actor/authority/child-actor machinery and the `ws.setup` setup-fence,
+and harden the keyless path into a hard rejection (mandatory key, REST-bearer
+style — no keyless fallback to a foreign root). See `## Decisions` → "Ephemeral
+session-auth model" (mandatory key, no keyless fallback; in-memory map replaces
+the setup-fence) and "root vs cwd" (root stays session-carried, no cwd arg on
+root-bound tools).
+
+Removed here: `actor_id`-as-identity, the authority field, `ensureChildActor` /
+`childActorInstruction`, `restoreActor` / `bindActor` persistence, wsstore actor
+records, `isSetupFenceRequest` / `wg.Wait()` fence. The retained mercenary spawn
+path (reshaped in 2c) is rewired onto session keys via pre-allocate +
+system-prompt splice; in 2a only the actor dependency is severed.
+
+Boundary: does NOT delete gemini/subquery/exploration spawn (2b) and does NOT
+reshape the codex `agents.*` surface (2c); those still compile against the
+session-keyed core after 2a.
+
+Verification: parallel distinct-root calls each resolve their own root with no
+fence/serialization and no clobber; a keyless call is hard-rejected (not silently
+defaulted to a foreign root); `unknown_session` still yields the re-login
+recovery contract; no actor/authority/child-actor code remains.
+
+### Phase 2b: delete genuinely-retired spawn surfaces
+
+Delete the parts that are retired outright, now that 2a severed the actor
+dependency. See `## Decisions` → "Spawn-runtime reshape to mercenary" (Delete
+list) and "Resolved-by-deletion bug tickets".
+
+Delete: the **gemini** (`gemini.go`) runner **implementation** — but **keep the
+harness-neutral runner-backend interface** so gemini/antigravity/custom harnesses
+remain a deferred plug, not a structural exclusion; the `subquery` tool runtime
+(exploration → native subagents); the exploration-purpose spawn paths; and the
+diagnostic sprawl beyond mercenary needs (`agents.tail/status/debug` minimized to
+what the retained mercenary lifecycle needs).
+
+Drop resolved-by-deletion bug tickets to `.dropped/` in the removing commits (use
+`git mv`): `260524-bug-wsstore-ci-sqlite-busy` (wsstore actor records gone — note
+the in-memory map already landed in 2a), `260524-bug-subquery-non-head-history-evidence`,
+and `260524-bug-subquery-working-directory-stderr` (subquery runtime removed).
+
+Boundary: does NOT reshape the codex `agents.*` call/lifecycle surface (2c). The
+codex runner stays live and callable through 2b; only retired backends/paths go.
+
+Verification: no gemini / subquery / exploration spawn remains; the
+runner-backend interface is still present and pluggable (codex still attaches
+through it); the three dropped bug tickets are in `.dropped/`.
+
+### Phase 2c: codex mercenary reshape + parity + routing gate
+
+Reshape the retained **codex** runner backend plus the `agents.*` call/lifecycle
+core into the first-class **mercenary** surface. See `## Decisions` → "Spawn-runtime
+reshape to mercenary" (Retain/reshape, Routing, Child-key acquisition, parity) and
+"`ws.lead` namespace + keyed-handler containment".
+
+Reshape: rewire the spawn path onto session keys (pre-allocate + system-prompt
+splice — `ensureAgentChildSetup`, token swapped actor-id → session key); drop the
+`register(prompts: [stems])` schema for a single self-contained prompt from
+`playbook.render`; align the mercenary continuation handle to the native agentId
+shape (interface parity); scope mercenary to **implementer/reviewer roles only**
+with the finalized routing — default delegation always native, mercenary always
+available to the lead, primary-guidance flip via `ws/lead.prefer_mercenary(session_key)`
+(lead-only, `ws.lead.*`) plus the always-on tip fragment so the on-request path is
+reachable without the toggle. Child-key acquisition is render-minted
+(`playbook.render` mints + splices the child key when `session_key.role == lead`);
+coordinate the keyed `playbook.render` signature + `root_override` + lead-gated
+mint branch with M1.
+
+Bug re-triage (NOT auto-resolved — these live in the retained codex path):
+`260517-bug-ws-agent-empty-result-after-tool-use` (likely persists; needs a real
+fix on the reshaped path) and `260524-bug-ws-agent-register-stale-dir-result-hang`
+(may be obsoleted by dropping the register-with-stems schema; re-triage once the
+single-prompt contract lands).
+
+Verification: native is the default delegation path; the mercenary spawns only for
+implementer/reviewer via the routing gate (user-explicit or `prefer_mercenary`
+flip); the continuation handle matches the native agentId shape; the
+register-with-stems schema is gone; the two re-triaged bugs have an explicit
+disposition (fixed or a recorded follow-up).
 
 ### Phase 3: exec stateless + role-containment fold + dashboard build-fix
 
@@ -364,8 +438,15 @@ separate dashboard ticket). Verification: exec works without any actor;
 capability-scoped keys gate delegate tools; the dashboard builds and runs against
 the reshaped surface.
 
-Phase order: Phase 1 before Phase 2 (session-auth must replace the actor
-dependency before the actor model is deleted).
+Phase order: 1 → 2a → 2b → 2c → 3, strictly sequential. Phase 1 (additive
+session-auth) before 2a (session-auth must exist before the actor model is
+deleted). 2a (sever the actor dependency + mandatory key) before 2b (the retired
+backends/paths only compile against the session-keyed core once the actor model
+is gone) and before 2c (the codex reshape rewires the spawn path onto session
+keys). 2b before 2c is the lower-risk ordering (delete the retired surfaces while
+the codex path is still in its pre-reshape shape, then reshape the smaller
+remaining surface). Phase 3 (exec stateless + role-containment fold + dashboard
+build-fix) last.
 
 ## Spec Impact
 

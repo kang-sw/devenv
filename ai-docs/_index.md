@@ -204,8 +204,10 @@ dropped tickets live in hidden archive dirs and git history.
   session-key auth (drops actor/wsstore/authority); promoted to ready with
   contract-first spec authored (`77a9322a`: `260610-ephemeral-session-auth-model`,
   `260610-mercenary-delegation-surface`). **M3 Phase 1 (additive session-auth)
-  implemented** on `implement/ws-session-auth-phase1` (`447946f4`, pending merge);
-  Phase 2 (actor-model deletion + mercenary reshape) next. **M4**
+  merged to the epic branch** (`c917c9f0` no-ff; Phase 1 result `447946f4`).
+  **Phase 2 sliced into 2a/2b/2c** (2a: caller migration + actor-model deletion +
+  fence removal + mandatory key; 2b: gemini/subquery/exploration deletion + bug
+  drops; 2c: codex mercenary reshape + parity + routing); **2a next**. **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
@@ -221,9 +223,12 @@ dropped tickets live in hidden archive dirs and git history.
   `260508-agents-register-model-alias-field`,
   `260523-agents-root-schema-invisibility`). Phase 1 (additive session-auth:
   `ws.lead.login`, `internal/wskey`, in-memory `{key→root}` registry, keyed root
-  resolution, `unknown_session` contract, capability gate) **complete**
-  (`447946f4`, branch `implement/ws-session-auth-phase1`, pending merge); Phase 2
-  (actor-model deletion + mercenary reshape) next. Depends M2 (done), coordinated
+  resolution, `unknown_session` contract, capability gate) **complete + merged to
+  epic** (`447946f4`, merge `c917c9f0`). Phase 2 sliced 2a/2b/2c (2a: caller
+  migration + actor-model deletion + `ws.setup` fence removal + mandatory-key hard
+  reject; 2b: gemini/subquery/exploration spawn deletion + resolved-by-deletion
+  bug drops; 2c: codex `agents.*` → mercenary reshape + register-schema drop +
+  routing gate + bug re-triage), strict order 2a→2b→2c→3; **2a next**. Depends M2 (done), coordinated
   with M4. Largest milestone. Session keys use a reusable word-chain generator
   (EFF large diceware, 7772 usable words after dropping 4 hyphenated entries,
   vendored + `go:embed`, 4 words + 2-digit, mint-time uniqueness); generalizing it
