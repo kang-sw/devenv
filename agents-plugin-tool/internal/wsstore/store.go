@@ -93,7 +93,6 @@ type AgentInstanceCleanupResult struct {
 
 type ExecJob struct {
 	ExecKey         string
-	OwnerActorID    string
 	Status          string
 	LeaseID         string
 	SchemaVersion   int
@@ -295,6 +294,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err := migrateExecJobsColumns(ctx, tx); err != nil {
 			return err
 		}
+		if err := migrateDropExecJobOwnerActor(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)`, schemaVersion, now); err != nil {
 			return err
 		}
@@ -303,10 +305,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 }
 
 func migrateDropActorTablesAndColumns(ctx context.Context, tx *sql.Tx) error {
-	if err := recreateTableWithoutColumns(ctx, tx, "agent_defs", agentDefColumnsNoActor); err != nil {
+	if err := recreateTableWithoutColumns(ctx, tx, "agent_defs", agentDefsCreateSQL, agentDefColumnsNoActor, "_phase2a", []string{"actor_id", "child_actor_id", "child_actor_authority"}); err != nil {
 		return err
 	}
-	if err := recreateTableWithoutColumns(ctx, tx, "agent_instances", agentInstanceColumnsNoActor); err != nil {
+	if err := recreateTableWithoutColumns(ctx, tx, "agent_instances", agentInstancesCreateSQL, agentInstanceColumnsNoActor, "_phase2a", []string{"actor_id", "child_actor_id", "child_actor_authority"}); err != nil {
 		return err
 	}
 	for _, table := range []string{"actors", "mcp_sessions"} {
@@ -317,7 +319,11 @@ func migrateDropActorTablesAndColumns(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func recreateTableWithoutColumns(ctx context.Context, tx *sql.Tx, table string, columns []string) error {
+func migrateDropExecJobOwnerActor(ctx context.Context, tx *sql.Tx) error {
+	return recreateTableWithoutColumns(ctx, tx, "exec_jobs", execJobsCreateSQL, execJobColumnsNoActor, "_phase3", []string{"owner_actor_id"})
+}
+
+func recreateTableWithoutColumns(ctx context.Context, tx *sql.Tx, table, createSQL string, columns []string, tempSuffix string, removedColumns []string) error {
 	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
 		return err
@@ -342,7 +348,7 @@ func recreateTableWithoutColumns(ctx context.Context, tx *sql.Tx, table string, 
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, removed := range []string{"actor_id", "child_actor_id", "child_actor_authority"} {
+	for _, removed := range removedColumns {
 		if existing[removed] {
 			goto recreate
 		}
@@ -350,15 +356,11 @@ func recreateTableWithoutColumns(ctx context.Context, tx *sql.Tx, table string, 
 	return nil
 
 recreate:
-	temp := table + "_phase2a"
+	temp := table + tempSuffix
 	if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+temp); err != nil {
 		return err
 	}
-	create := agentDefsCreateSQL
-	if table == "agent_instances" {
-		create = agentInstancesCreateSQL
-	}
-	if _, err := tx.ExecContext(ctx, strings.Replace(create, `CREATE TABLE IF NOT EXISTS `+table, `CREATE TABLE `+temp, 1)); err != nil {
+	if _, err := tx.ExecContext(ctx, strings.Replace(createSQL, `CREATE TABLE IF NOT EXISTS `+table, `CREATE TABLE `+temp, 1)); err != nil {
 		return fmt.Errorf("create %s: %w", temp, err)
 	}
 	columnList := strings.Join(columns, ", ")
@@ -693,10 +695,9 @@ func (s *Store) UpsertExecJob(ctx context.Context, job ExecJob) error {
 		updatedAt = now
 	}
 	_, err = s.execWrite(ctx, `
-INSERT INTO exec_jobs(exec_key, owner_actor_id, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO exec_jobs(exec_key, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(exec_key) DO UPDATE SET
-  owner_actor_id=excluded.owner_actor_id,
   status=excluded.status,
   lease_id=excluded.lease_id,
   schema_version=excluded.schema_version,
@@ -725,7 +726,7 @@ ON CONFLICT(exec_key) DO UPDATE SET
   expires_at=excluded.expires_at,
   cleanup_state=excluded.cleanup_state,
   updated_at=excluded.updated_at`,
-		job.ExecKey, job.OwnerActorID, job.Status, job.LeaseID, job.SchemaVersion, job.Root, job.WorkingDir, string(argv), job.Command, job.Shell, blankDefault(job.EnvJSON, "{}"), boolInt(job.StdinPresent), job.StdinBytes, job.PID, job.StartedAt, job.CompletedAt, job.ExitCode, job.Error, boolInt(job.CancelRequested), boolInt(job.LostWorker), job.StdoutPath, job.StderrPath, job.CombinedPath, job.StdoutBytes, job.StderrBytes, job.CombinedBytes, boolInt(job.Pinned), job.ExpiresAt, job.CleanupState, createdAt, updatedAt)
+		job.ExecKey, job.Status, job.LeaseID, job.SchemaVersion, job.Root, job.WorkingDir, string(argv), job.Command, job.Shell, blankDefault(job.EnvJSON, "{}"), boolInt(job.StdinPresent), job.StdinBytes, job.PID, job.StartedAt, job.CompletedAt, job.ExitCode, job.Error, boolInt(job.CancelRequested), boolInt(job.LostWorker), job.StdoutPath, job.StderrPath, job.CombinedPath, job.StdoutBytes, job.StderrBytes, job.CombinedBytes, boolInt(job.Pinned), job.ExpiresAt, job.CleanupState, createdAt, updatedAt)
 	if err != nil {
 		return err
 	}
@@ -752,7 +753,7 @@ func (s *Store) upsertExecStreamArtifacts(ctx context.Context, job ExecJob) erro
 			ArtifactID:   "exec:" + job.ExecKey + ":" + stream.name,
 			Kind:         "exec." + stream.name,
 			Path:         stream.path,
-			OwnerActorID: job.OwnerActorID,
+			OwnerActorID: "",
 			State:        state,
 			ByteCount:    stream.bytes,
 			Pinned:       job.Pinned,
@@ -785,11 +786,11 @@ func execArtifactState(job ExecJob) string {
 }
 
 func (s *Store) ExecJob(ctx context.Context, key string) (ExecJob, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT exec_key, owner_actor_id, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, updated_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state FROM exec_jobs WHERE exec_key = ?`, key)
+	row := s.db.QueryRowContext(ctx, `SELECT exec_key, status, lease_id, schema_version, root_path, working_dir, argv_json, command, shell, env_json, stdin_present, stdin_bytes, pid, started_at, updated_at, completed_at, exit_code, error, cancel_requested, lost_worker, stdout_path, stderr_path, combined_path, stdout_bytes, stderr_bytes, combined_bytes, pinned, expires_at, cleanup_state FROM exec_jobs WHERE exec_key = ?`, key)
 	var job ExecJob
 	var argvJSON string
 	var stdinPresent, cancelRequested, lostWorker, pinned int
-	if err := row.Scan(&job.ExecKey, &job.OwnerActorID, &job.Status, &job.LeaseID, &job.SchemaVersion, &job.Root, &job.WorkingDir, &argvJSON, &job.Command, &job.Shell, &job.EnvJSON, &stdinPresent, &job.StdinBytes, &job.PID, &job.StartedAt, &job.UpdatedAt, &job.CompletedAt, &job.ExitCode, &job.Error, &cancelRequested, &lostWorker, &job.StdoutPath, &job.StderrPath, &job.CombinedPath, &job.StdoutBytes, &job.StderrBytes, &job.CombinedBytes, &pinned, &job.ExpiresAt, &job.CleanupState); err != nil {
+	if err := row.Scan(&job.ExecKey, &job.Status, &job.LeaseID, &job.SchemaVersion, &job.Root, &job.WorkingDir, &argvJSON, &job.Command, &job.Shell, &job.EnvJSON, &stdinPresent, &job.StdinBytes, &job.PID, &job.StartedAt, &job.UpdatedAt, &job.CompletedAt, &job.ExitCode, &job.Error, &cancelRequested, &lostWorker, &job.StdoutPath, &job.StderrPath, &job.CombinedPath, &job.StdoutBytes, &job.StderrBytes, &job.CombinedBytes, &pinned, &job.ExpiresAt, &job.CleanupState); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ExecJob{}, false, nil
 		}
@@ -1263,29 +1264,8 @@ var agentDefColumnsNoActor = []string{"agent_key", "public_name", "state_path", 
 
 var agentInstanceColumnsNoActor = []string{"instance_id", "agent_key", "public_name", "state_path", "schema_version", "backend", "harness", "tier", "model", "effort", "session_id", "status", "created_at", "updated_at", "last_seen_at", "last_call_at", "last_output_path", "prompt_refs_json", "system_prompt_path", "capabilities_json", "ephemeral", "retention_eligible_at", "retention_checked_at", "retention_next_check_at", "cleanup_state", "cleanup_attempted_at", "cleanup_error", "pinned"}
 
-var schemaStatements = []string{
-	`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version INTEGER PRIMARY KEY,
-		applied_at TEXT NOT NULL
-	)`,
-	agentDefsCreateSQL,
-	agentInstancesCreateSQL,
-	`CREATE INDEX IF NOT EXISTS agent_instances_role_idx ON agent_instances(agent_key, created_at)`,
-	`CREATE INDEX IF NOT EXISTS agent_instances_cleanup_idx ON agent_instances(cleanup_state, retention_next_check_at, retention_eligible_at)`,
-	`CREATE TABLE IF NOT EXISTS agent_calls (
-		call_id TEXT PRIMARY KEY,
-		agent_key TEXT NOT NULL,
-		owner_actor_id TEXT NOT NULL DEFAULT '',
-		status TEXT NOT NULL,
-		lease_id TEXT NOT NULL DEFAULT '',
-		prompt_path TEXT NOT NULL DEFAULT '',
-		output_path TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL DEFAULT '',
-		updated_at TEXT NOT NULL DEFAULT ''
-	)`,
-	`CREATE TABLE IF NOT EXISTS exec_jobs (
+const execJobsCreateSQL = `CREATE TABLE IF NOT EXISTS exec_jobs (
 		exec_key TEXT PRIMARY KEY,
-		owner_actor_id TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL,
 		lease_id TEXT NOT NULL DEFAULT '',
 		schema_version INTEGER NOT NULL DEFAULT 0,
@@ -1315,7 +1295,31 @@ var schemaStatements = []string{
 		cleanup_state TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL DEFAULT '',
 		updated_at TEXT NOT NULL DEFAULT ''
+	)`
+
+var execJobColumnsNoActor = []string{"exec_key", "status", "lease_id", "schema_version", "root_path", "working_dir", "argv_json", "command", "shell", "env_json", "stdin_present", "stdin_bytes", "pid", "started_at", "completed_at", "exit_code", "error", "cancel_requested", "lost_worker", "stdout_path", "stderr_path", "combined_path", "stdout_bytes", "stderr_bytes", "combined_bytes", "pinned", "expires_at", "cleanup_state", "created_at", "updated_at"}
+
+var schemaStatements = []string{
+	`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL
 	)`,
+	agentDefsCreateSQL,
+	agentInstancesCreateSQL,
+	`CREATE INDEX IF NOT EXISTS agent_instances_role_idx ON agent_instances(agent_key, created_at)`,
+	`CREATE INDEX IF NOT EXISTS agent_instances_cleanup_idx ON agent_instances(cleanup_state, retention_next_check_at, retention_eligible_at)`,
+	`CREATE TABLE IF NOT EXISTS agent_calls (
+		call_id TEXT PRIMARY KEY,
+		agent_key TEXT NOT NULL,
+		owner_actor_id TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		lease_id TEXT NOT NULL DEFAULT '',
+		prompt_path TEXT NOT NULL DEFAULT '',
+		output_path TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL DEFAULT ''
+	)`,
+	execJobsCreateSQL,
 	`CREATE TABLE IF NOT EXISTS worker_leases (
 		lease_id TEXT PRIMARY KEY,
 		owner_kind TEXT NOT NULL,

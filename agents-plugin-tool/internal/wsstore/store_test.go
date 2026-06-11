@@ -901,3 +901,96 @@ func TestSQLiteRetryRetriesBusyAndLockedErrors(t *testing.T) {
 		t.Fatalf("locked attempts = %d, want 2", attempts)
 	}
 }
+
+// execJobsHasOwnerActorColumn reports whether the exec_jobs table currently
+// defines an owner_actor_id column.
+func execJobsHasOwnerActorColumn(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `PRAGMA table_info(exec_jobs)`)
+	if err != nil {
+		t.Fatalf("table_info(exec_jobs): %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		if name == "owner_actor_id" {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	return false
+}
+
+// TestFreshDBOmitsExecJobOwnerActorColumn verifies a freshly created database
+// has no owner_actor_id column on exec_jobs.
+func TestFreshDBOmitsExecJobOwnerActorColumn(t *testing.T) {
+	root := initRepo(t)
+	store, err := NewManager(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if execJobsHasOwnerActorColumn(t, store.db) {
+		t.Fatal("fresh exec_jobs unexpectedly has owner_actor_id column")
+	}
+}
+
+// TestMigrateDropsExecJobOwnerActorColumn proves that an existing DB carrying the
+// legacy exec_jobs.owner_actor_id column migrates without error and that the
+// column is dropped while the surviving row data is preserved.
+func TestMigrateDropsExecJobOwnerActorColumn(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+
+	// Open once to materialize the layout/database path, then re-introduce the
+	// legacy owner_actor_id column with a populated row to simulate a pre-Phase-3
+	// database.
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := store.Path()
+	if _, err := store.db.ExecContext(ctx, `ALTER TABLE exec_jobs ADD COLUMN owner_actor_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatalf("add legacy column: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO exec_jobs(exec_key, owner_actor_id, status, command) VALUES('legacy-1', 'actor-xyz', 'completed', 'echo hi')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if !execJobsHasOwnerActorColumn(t, store.db) {
+		t.Fatal("legacy fixture should have owner_actor_id column before migration")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen: Open runs Migrate, which must drop the column without error.
+	reopened, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatalf("reopen/migrate legacy DB: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.Path() != path {
+		t.Fatalf("reopened path = %q, want %q", reopened.Path(), path)
+	}
+	if execJobsHasOwnerActorColumn(t, reopened.db) {
+		t.Fatal("migration did not drop exec_jobs.owner_actor_id")
+	}
+	// Surviving row data must be preserved through the table recreate.
+	job, ok, err := reopened.ExecJob(ctx, "legacy-1")
+	if err != nil || !ok {
+		t.Fatalf("legacy row lookup ok=%t err=%v", ok, err)
+	}
+	if job.Status != "completed" || job.Command != "echo hi" {
+		t.Fatalf("legacy row not preserved: %#v", job)
+	}
+}
