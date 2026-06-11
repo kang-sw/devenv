@@ -54,15 +54,12 @@ func RuntimeField(source RuntimeStateSource, field string) (RuntimeFieldClassifi
 	return RuntimeFieldClassification{}, false
 }
 
-func AgentInternalKey(actorID, publicName string) (string, error) {
+func AgentInternalKey(publicName string) (string, error) {
 	name := strings.TrimSpace(publicName)
 	if name == "" {
 		return "", errors.New("agent public name is required")
 	}
-	if strings.TrimSpace(actorID) == "" {
-		return "global:" + url.QueryEscape(name), nil
-	}
-	return "actor:" + url.QueryEscape(strings.TrimSpace(actorID)) + ":name:" + url.QueryEscape(name), nil
+	return "name:" + url.QueryEscape(name), nil
 }
 
 type PayloadConsistency string

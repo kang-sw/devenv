@@ -52,16 +52,6 @@ var (
 	writeLocks   = map[string]*sync.Mutex{}
 )
 
-type Actor struct {
-	ActorID       string
-	Authority     string
-	RootPath      string
-	WorktreeKey   string
-	ParentActorID string
-	Status        string
-	Pinned        bool
-}
-
 type AgentDefinition struct {
 	AgentKey             string
 	ActorID              string
@@ -172,6 +162,13 @@ func NewManager(opts Options) Manager {
 	return Manager{opts: opts}
 }
 
+func (m Manager) now() time.Time {
+	if m.opts.Now != nil {
+		return m.opts.Now()
+	}
+	return time.Now()
+}
+
 func (m Manager) Open(root string) (*Store, error) {
 	if m.opts.CacheHome != "" {
 		if err := os.MkdirAll(m.opts.CacheHome, 0o755); err != nil {
@@ -242,54 +239,6 @@ func (m Manager) OpenWorktreeKey(worktreeKey string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
-}
-
-func (m Manager) FindActor(ctx context.Context, id string) (Actor, bool, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return Actor{}, false, errors.New("actor_id is required")
-	}
-	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: m.opts.CacheHome})
-	if err != nil {
-		return Actor{}, false, err
-	}
-	matches, err := filepath.Glob(filepath.Join(cacheRoot, "proj", "*", "state.sqlite"))
-	if err != nil {
-		return Actor{}, false, err
-	}
-	var found Actor
-	foundOK := false
-	for _, path := range matches {
-		worktreeKey := filepath.Base(filepath.Dir(path))
-		store, err := m.OpenWorktreeKey(worktreeKey)
-		if err != nil {
-			return Actor{}, false, err
-		}
-		actor, ok, actorErr := store.Actor(ctx, id)
-		closeErr := store.Close()
-		if actorErr != nil {
-			return Actor{}, false, actorErr
-		}
-		if closeErr != nil {
-			return Actor{}, false, closeErr
-		}
-		if !ok {
-			continue
-		}
-		if foundOK && found.WorktreeKey != actor.WorktreeKey {
-			return Actor{}, false, fmt.Errorf("actor id %q is ambiguous across worktrees", id)
-		}
-		found = actor
-		foundOK = true
-	}
-	return found, foundOK, nil
-}
-
-func (m Manager) now() time.Time {
-	if m.opts.Now != nil {
-		return m.opts.Now()
-	}
-	return time.Now()
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -512,40 +461,6 @@ var execJobColumnMigrations = []struct{ name, sql string }{
 	{"pinned", `pinned INTEGER NOT NULL DEFAULT 0`},
 	{"expires_at", `expires_at TEXT NOT NULL DEFAULT ''`},
 	{"cleanup_state", `cleanup_state TEXT NOT NULL DEFAULT ''`},
-}
-
-func (s *Store) UpsertActor(ctx context.Context, actor Actor) error {
-	if actor.ActorID == "" {
-		return errors.New("actor_id is required")
-	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
-	_, err := s.execWrite(ctx, `
-INSERT INTO actors(actor_id, authority, root_path, worktree_key, parent_actor_id, status, pinned, created_at, last_seen_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(actor_id) DO UPDATE SET
-  authority=excluded.authority,
-  root_path=excluded.root_path,
-  worktree_key=excluded.worktree_key,
-  parent_actor_id=excluded.parent_actor_id,
-  status=excluded.status,
-  pinned=excluded.pinned,
-  last_seen_at=excluded.last_seen_at`,
-		actor.ActorID, actor.Authority, actor.RootPath, actor.WorktreeKey, actor.ParentActorID, blankDefault(actor.Status, "active"), boolInt(actor.Pinned), now, now)
-	return err
-}
-
-func (s *Store) Actor(ctx context.Context, id string) (Actor, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT actor_id, authority, root_path, worktree_key, parent_actor_id, status, pinned FROM actors WHERE actor_id = ?`, id)
-	var actor Actor
-	var pinned int
-	if err := row.Scan(&actor.ActorID, &actor.Authority, &actor.RootPath, &actor.WorktreeKey, &actor.ParentActorID, &actor.Status, &pinned); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Actor{}, false, nil
-		}
-		return Actor{}, false, err
-	}
-	actor.Pinned = pinned != 0
-	return actor, true, nil
 }
 
 func (s *Store) UpsertAgentDefinition(ctx context.Context, def AgentDefinition) error {

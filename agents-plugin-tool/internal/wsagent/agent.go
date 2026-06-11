@@ -92,9 +92,6 @@ type RegisterOptions struct {
 	SystemPromptText      string
 	SuppressOrientation   bool
 	Ephemeral             bool
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
 }
 
 type ConditionalPromptRef struct {
@@ -103,13 +100,10 @@ type ConditionalPromptRef struct {
 }
 
 type CallOptions struct {
-	Root                  string
-	ActorID               string
-	Name                  string
-	Prompt                string
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
+	Root    string
+	ActorID string
+	Name    string
+	Prompt  string
 }
 
 type RecallOptions struct {
@@ -208,33 +202,27 @@ type syncCallOptions struct {
 }
 
 type oneShotOptions struct {
-	Root                  string
-	ActorID               string
-	Name                  string
-	Backend               string
-	Harness               string
-	Tier                  string
-	Model                 string
-	Prompts               []string
-	PromptRefs            []string
-	SystemPromptText      string
-	Prompt                string
-	Timeout               time.Duration
-	SuppressOrientation   bool
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
+	Root                string
+	ActorID             string
+	Name                string
+	Backend             string
+	Harness             string
+	Tier                string
+	Model               string
+	Prompts             []string
+	PromptRefs          []string
+	SystemPromptText    string
+	Prompt              string
+	Timeout             time.Duration
+	SuppressOrientation bool
 }
 
 type SubqueryOptions struct {
-	Root                  string
-	ActorID               string
-	Question              string
-	DeepResearch          bool
-	Harness               string
-	ChildActorID          string
-	ChildActorAuthority   string
-	ChildSetupInstruction string
+	Root         string
+	ActorID      string
+	Question     string
+	DeepResearch bool
+	Harness      string
 }
 
 type SelfWorkerStarter struct{}
@@ -279,9 +267,6 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 func asyncWorkerArgs(worker asyncWorkerCommand, req AsyncWorkerRequest) []string {
 	args := append([]string{}, worker.Args...)
 	args = append(args, "agents", "run-current", "--root", req.Root, "--name", req.Name)
-	if strings.TrimSpace(req.ActorID) != "" {
-		args = append(args, "--actor-id", req.ActorID)
-	}
 	return args
 }
 
@@ -357,25 +342,23 @@ func regularFileExists(path string) bool {
 }
 
 type Agent struct {
-	SchemaVersion       int             `json:"schema_version"`
-	Name                string          `json:"name"`
-	Backend             string          `json:"backend"`
-	Harness             string          `json:"harness,omitempty"`
-	Tier                string          `json:"tier"`
-	Model               string          `json:"model"`
-	Effort              string          `json:"effort,omitempty"`
-	SessionID           string          `json:"session_id"`
-	Status              string          `json:"status"`
-	CreatedAt           string          `json:"created_at"`
-	LastSeenAt          string          `json:"last_seen_at"`
-	LastCallAt          string          `json:"last_call_at"`
-	LastOutputPath      string          `json:"last_output_path"`
-	PromptRefs          []string        `json:"prompt_refs"`
-	SystemPromptPath    string          `json:"system_prompt_path"`
-	ChildActorID        string          `json:"child_actor_id,omitempty"`
-	ChildActorAuthority string          `json:"child_actor_authority,omitempty"`
-	Capabilities        map[string]bool `json:"capabilities"`
-	Ephemeral           bool            `json:"ephemeral,omitempty"`
+	SchemaVersion    int             `json:"schema_version"`
+	Name             string          `json:"name"`
+	Backend          string          `json:"backend"`
+	Harness          string          `json:"harness,omitempty"`
+	Tier             string          `json:"tier"`
+	Model            string          `json:"model"`
+	Effort           string          `json:"effort,omitempty"`
+	SessionID        string          `json:"session_id"`
+	Status           string          `json:"status"`
+	CreatedAt        string          `json:"created_at"`
+	LastSeenAt       string          `json:"last_seen_at"`
+	LastCallAt       string          `json:"last_call_at"`
+	LastOutputPath   string          `json:"last_output_path"`
+	PromptRefs       []string        `json:"prompt_refs"`
+	SystemPromptPath string          `json:"system_prompt_path"`
+	Capabilities     map[string]bool `json:"capabilities"`
+	Ephemeral        bool            `json:"ephemeral,omitempty"`
 }
 
 type Message struct {
@@ -441,52 +424,48 @@ func (m Manager) registryStore(root string) (*wsstore.Store, error) {
 
 func agentDefinitionFromAgent(key, actorID, statePath string, agent Agent) wsstore.AgentDefinition {
 	return wsstore.AgentDefinition{
-		AgentKey:            key,
-		ActorID:             strings.TrimSpace(actorID),
-		PublicName:          agent.Name,
-		StatePath:           statePath,
-		SchemaVersion:       agent.SchemaVersion,
-		Backend:             agent.Backend,
-		Harness:             agent.Harness,
-		Tier:                agent.Tier,
-		Model:               agent.Model,
-		Effort:              agent.Effort,
-		SessionID:           agent.SessionID,
-		Status:              agent.Status,
-		CreatedAt:           agent.CreatedAt,
-		LastSeenAt:          agent.LastSeenAt,
-		LastCallAt:          agent.LastCallAt,
-		LastOutputPath:      agent.LastOutputPath,
-		PromptRefs:          append([]string(nil), agent.PromptRefs...),
-		SystemPromptPath:    agent.SystemPromptPath,
-		ChildActorID:        agent.ChildActorID,
-		ChildActorAuthority: agent.ChildActorAuthority,
-		Capabilities:        copyCapabilities(agent.Capabilities),
-		Ephemeral:           agent.Ephemeral,
+		AgentKey:         key,
+		ActorID:          strings.TrimSpace(actorID),
+		PublicName:       agent.Name,
+		StatePath:        statePath,
+		SchemaVersion:    agent.SchemaVersion,
+		Backend:          agent.Backend,
+		Harness:          agent.Harness,
+		Tier:             agent.Tier,
+		Model:            agent.Model,
+		Effort:           agent.Effort,
+		SessionID:        agent.SessionID,
+		Status:           agent.Status,
+		CreatedAt:        agent.CreatedAt,
+		LastSeenAt:       agent.LastSeenAt,
+		LastCallAt:       agent.LastCallAt,
+		LastOutputPath:   agent.LastOutputPath,
+		PromptRefs:       append([]string(nil), agent.PromptRefs...),
+		SystemPromptPath: agent.SystemPromptPath,
+		Capabilities:     copyCapabilities(agent.Capabilities),
+		Ephemeral:        agent.Ephemeral,
 	}
 }
 
 func agentFromDefinition(def wsstore.AgentDefinition) Agent {
 	return Agent{
-		SchemaVersion:       def.SchemaVersion,
-		Name:                def.PublicName,
-		Backend:             def.Backend,
-		Harness:             def.Harness,
-		Tier:                def.Tier,
-		Model:               def.Model,
-		Effort:              def.Effort,
-		SessionID:           def.SessionID,
-		Status:              def.Status,
-		CreatedAt:           def.CreatedAt,
-		LastSeenAt:          def.LastSeenAt,
-		LastCallAt:          def.LastCallAt,
-		LastOutputPath:      def.LastOutputPath,
-		PromptRefs:          append([]string(nil), def.PromptRefs...),
-		SystemPromptPath:    def.SystemPromptPath,
-		ChildActorID:        def.ChildActorID,
-		ChildActorAuthority: def.ChildActorAuthority,
-		Capabilities:        copyCapabilities(def.Capabilities),
-		Ephemeral:           def.Ephemeral,
+		SchemaVersion:    def.SchemaVersion,
+		Name:             def.PublicName,
+		Backend:          def.Backend,
+		Harness:          def.Harness,
+		Tier:             def.Tier,
+		Model:            def.Model,
+		Effort:           def.Effort,
+		SessionID:        def.SessionID,
+		Status:           def.Status,
+		CreatedAt:        def.CreatedAt,
+		LastSeenAt:       def.LastSeenAt,
+		LastCallAt:       def.LastCallAt,
+		LastOutputPath:   def.LastOutputPath,
+		PromptRefs:       append([]string(nil), def.PromptRefs...),
+		SystemPromptPath: def.SystemPromptPath,
+		Capabilities:     copyCapabilities(def.Capabilities),
+		Ephemeral:        def.Ephemeral,
 	}
 }
 
@@ -507,7 +486,8 @@ func actorScopedDirKey(internalKey, name string) string {
 }
 
 func (m Manager) registryKey(actorID, name string) (string, error) {
-	return wsstore.AgentInternalKey(strings.TrimSpace(actorID), name)
+	_ = strings.TrimSpace(actorID)
+	return wsstore.AgentInternalKey(name)
 }
 
 func (m Manager) readAgentMetadata(layout Layout, name, actorID string) (Agent, error) {
@@ -597,7 +577,6 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if err != nil {
 		return Agent{}, Layout{}, err
 	}
-	resolved.Text = withChildSetupInstruction(resolved.Text, opts.ChildSetupInstruction)
 	if strings.TrimSpace(opts.Tier) == "" {
 		opts.Tier = resolved.Tier
 	}
@@ -634,22 +613,20 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 
 	now := m.now().UTC().Format(time.RFC3339)
 	agent := Agent{
-		SchemaVersion:       schemaVersion,
-		Name:                name,
-		Backend:             opts.Backend,
-		Harness:             opts.Harness,
-		Tier:                opts.Tier,
-		Model:               opts.Model,
-		Effort:              resolvedEffort,
-		Status:              StatusIdle,
-		CreatedAt:           now,
-		LastSeenAt:          now,
-		LastOutputPath:      "output.md",
-		PromptRefs:          append([]string(nil), promptSpecs...),
-		SystemPromptPath:    "",
-		ChildActorID:        strings.TrimSpace(opts.ChildActorID),
-		ChildActorAuthority: strings.TrimSpace(opts.ChildActorAuthority),
-		Ephemeral:           opts.Ephemeral,
+		SchemaVersion:    schemaVersion,
+		Name:             name,
+		Backend:          opts.Backend,
+		Harness:          opts.Harness,
+		Tier:             opts.Tier,
+		Model:            opts.Model,
+		Effort:           resolvedEffort,
+		Status:           StatusIdle,
+		CreatedAt:        now,
+		LastSeenAt:       now,
+		LastOutputPath:   "output.md",
+		PromptRefs:       append([]string(nil), promptSpecs...),
+		SystemPromptPath: "",
+		Ephemeral:        opts.Ephemeral,
 		Capabilities: map[string]bool{
 			"resume":      true,
 			"interrupt":   false,
@@ -918,11 +895,6 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return CallResult{}, errors.New("prompt is required")
 	}
-	if strings.TrimSpace(opts.ChildSetupInstruction) != "" {
-		if err := ensureAgentChildSetup(layout, &agent, opts.ChildActorID, opts.ChildActorAuthority, opts.ChildSetupInstruction); err != nil {
-			return CallResult{}, err
-		}
-	}
 
 	unlock, err := m.acquireCurrentCallLock(layout)
 	if err != nil {
@@ -1179,20 +1151,17 @@ func (m Manager) oneShot(opts oneShotOptions) (string, error) {
 		name = fmt.Sprintf("oneshot-%d", m.now().UTC().UnixNano())
 	}
 	_, _, err := m.Register(RegisterOptions{
-		Root:                  opts.Root,
-		ActorID:               opts.ActorID,
-		Name:                  name,
-		Backend:               opts.Backend,
-		Harness:               opts.Harness,
-		Tier:                  opts.Tier,
-		Model:                 opts.Model,
-		Prompts:               opts.Prompts,
-		PromptRefs:            opts.PromptRefs,
-		SystemPromptText:      opts.SystemPromptText,
-		SuppressOrientation:   opts.SuppressOrientation,
-		ChildActorID:          opts.ChildActorID,
-		ChildActorAuthority:   opts.ChildActorAuthority,
-		ChildSetupInstruction: opts.ChildSetupInstruction,
+		Root:                opts.Root,
+		ActorID:             opts.ActorID,
+		Name:                name,
+		Backend:             opts.Backend,
+		Harness:             opts.Harness,
+		Tier:                opts.Tier,
+		Model:               opts.Model,
+		Prompts:             opts.Prompts,
+		PromptRefs:          opts.PromptRefs,
+		SystemPromptText:    opts.SystemPromptText,
+		SuppressOrientation: opts.SuppressOrientation,
 	})
 	if err != nil {
 		return "", err
@@ -1217,54 +1186,6 @@ func promptSpecs(prompts, promptRefs []string) []string {
 	return append([]string(nil), promptRefs...)
 }
 
-const (
-	childSetupStart = "<!-- ws-child-actor-setup:start -->"
-	childSetupEnd   = "<!-- ws-child-actor-setup:end -->"
-)
-
-func withChildSetupInstruction(systemText, instruction string) string {
-	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return systemText
-	}
-	block := childSetupStart + "\n" + instruction + "\n" + childSetupEnd
-	start := strings.Index(systemText, childSetupStart)
-	end := strings.Index(systemText, childSetupEnd)
-	if start >= 0 && end >= start {
-		end += len(childSetupEnd)
-		return strings.TrimSpace(systemText[:start]) + "\n\n" + block + "\n\n" + strings.TrimSpace(systemText[end:])
-	}
-	if strings.TrimSpace(systemText) == "" {
-		return block + "\n"
-	}
-	return strings.TrimRight(systemText, "\n") + "\n\n" + block + "\n"
-}
-
-func ensureAgentChildSetup(layout Layout, agent *Agent, childActorID, authority, instruction string) error {
-	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return nil
-	}
-	system := ""
-	if strings.TrimSpace(agent.SystemPromptPath) != "" {
-		raw, err := os.ReadFile(absOptional(layout.AgentDir, agent.SystemPromptPath))
-		if err != nil {
-			return fmt.Errorf("read system prompt: %w", err)
-		}
-		system = string(raw)
-	}
-	next := withChildSetupInstruction(system, instruction)
-	if strings.TrimSpace(agent.SystemPromptPath) == "" {
-		agent.SystemPromptPath = "system.md"
-	}
-	if err := os.WriteFile(absOptional(layout.AgentDir, agent.SystemPromptPath), []byte(next), 0o644); err != nil {
-		return fmt.Errorf("write system prompt: %w", err)
-	}
-	agent.ChildActorID = strings.TrimSpace(childActorID)
-	agent.ChildActorAuthority = strings.TrimSpace(authority)
-	return nil
-}
-
 func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	tier := "light"
 	if opts.DeepResearch {
@@ -1275,17 +1196,14 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 		strconv.FormatUint(subquerySeq.Add(1), 36),
 	)
 	_, _, err := m.Register(RegisterOptions{
-		Root:                  opts.Root,
-		ActorID:               opts.ActorID,
-		Name:                  name,
-		Harness:               opts.Harness,
-		Tier:                  tier,
-		SystemPromptText:      SubquerySystemPrompt,
-		SuppressOrientation:   true,
-		Ephemeral:             true,
-		ChildActorID:          opts.ChildActorID,
-		ChildActorAuthority:   opts.ChildActorAuthority,
-		ChildSetupInstruction: opts.ChildSetupInstruction,
+		Root:                opts.Root,
+		ActorID:             opts.ActorID,
+		Name:                name,
+		Harness:             opts.Harness,
+		Tier:                tier,
+		SystemPromptText:    SubquerySystemPrompt,
+		SuppressOrientation: true,
+		Ephemeral:           true,
 	})
 	if err != nil {
 		return "", err
