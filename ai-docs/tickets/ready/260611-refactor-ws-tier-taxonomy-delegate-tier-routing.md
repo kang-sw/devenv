@@ -101,6 +101,29 @@ constraint, and is rewritten at closeout.
   deleted only after both the skill migration (Phase 5) and the loader retirement
   (Phase 6) remove its last consumer. Rejected: keep `wsprompt` for non-delegate
   internal callers (the user chose full retirement so rsrc is the single source).
+- **Mercenary spawn = render-param forwarding (confirmed 2026-06-12).** The
+  delegation-spawn tool accepts the `playbook.render` parameters (`name`,
+  `context?`, `root_override?`) plus an agent-role `name`/optional `backend`, and
+  renders the playbook *internally* (one server-side mint + splice + tier
+  resolution) instead of taking a pre-rendered `system_prompt_text`. This is the
+  mechanism by which frontmatter `tier:` reaches `RegisterOptions.Tier`: render
+  and register collapse into one handler, so tier never travels between two MCP
+  calls and needs no credential-block parsing or caller-typed tier value.
+  `playbook.render` stays standalone for the native path (host subagent reads the
+  rendered file); only the mercenary path renders inside the spawn (no double
+  mint). `system_prompt_text` is retained as the path for non-playbook internal
+  callers (api_docs). Rejected: re-adding a caller-chosen `tier` arg (reverses 2c
+  spec-remove `260508`) and scanning the spliced key out of `system_prompt_text`
+  (brittle prompt coupling).
+- **`ws.mercenary.*` surface migration (confirmed 2026-06-12; future phase).**
+  The delegation spawn/lifecycle tools migrate from the generic `agents.*`
+  namespace to a dedicated `ws.mercenary.*` surface. Rationale: tool naming
+  materially affects LLM behavioral clarity — `ws.mercenary.spawn` makes the
+  delegation intent legible where `agents.register` is generic. Parked as Phase 7
+  (after the Phase 5 skill migration) to avoid churning the contract twice:
+  Phase 2 builds the render-param-forwarding spawn on the current
+  `agents.register` name; Phase 7 renames the converged surface + migrates
+  skills/spec/wsflow.
 
 ## Constraints
 
@@ -122,6 +145,10 @@ constraint, and is rewritten at closeout.
   prompt source moves to rsrc in the same phase that removes `wsprompt`, and the
   launcher fast-path/fallback bundle-hash validation must stay self-consistent
   after the embedded-bundle metadata is collapsed.
+- Phase 5 ↔ Phase 7 coordination: Phase 5 migrates skills onto render+spawn under
+  the current `agents.*` names; Phase 7 renames that converged surface to
+  `ws.mercenary.*`. Phase 7 runs after Phase 5 so the rename touches one
+  already-converged call shape, not the legacy `register(prompts)` sites.
 
 ## Phases
 
@@ -196,8 +223,15 @@ Deviations / notes:
 Thread a first-class tier from frontmatter (default) into the render-minted
 child's `RegisterOptions.Tier` so a mercenary spawn resolves against the user's
 custom `config.agents_tier` entry instead of being pinned to core
-(`agent.go` hardcodes `opts.Tier = "core"` when no tier flows in). **Per-spawn
-override path (resolved at promotion): frontmatter-only first** — the
+(`agent.go` hardcodes `opts.Tier = "core"` when no tier flows in).
+**Mechanism (confirmed 2026-06-12): render-param forwarding** — the spawn tool
+(`agents.register` for now; renamed to `ws.mercenary.*` in Phase 7) gains the
+`playbook.render` params (`name`/`context?`/`root_override?`) and renders the
+playbook internally (mint + splice + frontmatter tier), maps first-class→alias,
+and sets `RegisterOptions.Tier`; `playbook.render` stays standalone for the
+native path and `system_prompt_text` is retained for non-playbook internal
+callers (api_docs). **Per-spawn override path (resolved at promotion):
+frontmatter-only first** — the
 frontmatter `tier:` (mapped first-class→alias) is the sole tier source for this
 phase; a per-render `tier` override arg on `playbook.render` is explicitly
 deferred to the `(skill, role) → tier` role-config surface in research 260611,
@@ -260,7 +294,24 @@ line 27 (and related entry-point/coupling text) to the single-rsrc-source-of-tru
 model. Verification: `wsprompt` package gone; `go build/vet/test ./...` green;
 wsflow `prompt.render` still serves its allowlisted stems from rsrc; launcher
 validation green; `api.ask` resolves its prompts from rsrc. Boundary: this is the
-last phase; it depends on Phases 4+5 having moved every delegate consumer first.
+last convergence phase; it depends on Phases 4+5 having moved every delegate
+consumer first.
+
+### Phase 7: migrate the delegation surface to `ws.mercenary.*`
+
+Rename the delegation spawn/lifecycle tools from the generic `agents.*` namespace
+to a dedicated `ws.mercenary.*` surface (e.g. `ws.mercenary.spawn` for the
+render-param-forwarding spawn built in Phase 2, plus `call`/`status`/`result`/
+`cancel`/diagnostics as the retained mercenary lifecycle dictates), updating the
+MCP dispatch, the full `runtime.json`, skill/playbook text, and the wsflow mirror.
+Rationale: tool naming materially drives LLM behavioral clarity (decision
+2026-06-12). Keep `agents.*` only where a non-delegation internal consumer still
+needs it (api_docs), or alias for one release if a compatibility window is wanted.
+Depends on Phase 5 (skills already delegate via render+spawn) so the rename
+touches a single, already-converged call shape. Verification: no shipped
+skill/playbook references the old delegation tool names; a representative
+delegation spawns end-to-end on both ws and wsflow under the new names; spec
+`#260610-mercenary-delegation-surface` reconciled to the `ws.mercenary.*` names.
 
 ## Spec Impact
 
@@ -296,6 +347,11 @@ last phase; it depends on Phases 4+5 having moved every delegate consumer first.
   the backing loader is reconciled). `api.ask`'s prompt source moves to rsrc.
   Removes the embedded-prompt-bundle hash/`runtime.json` metadata surface from the
   launcher-validation contract.
+- **Phase 7** (`ws.mercenary.*` rename) — touches
+  `#260610-mercenary-delegation-surface` in `ai-docs/spec/mcp-tools.md`: the
+  delegation spawn/lifecycle tool names change from `agents.*` to
+  `ws.mercenary.*` (caller-visible tool-name change). Reconciled at closeout
+  unless promotion elects contract-first for the rename.
 
 **Contract-first spec: no.** The full tier-vocabulary contract (first-class set,
 capability axis, alias mapping, frontmatter `tier:`/`role:`) is already captured
