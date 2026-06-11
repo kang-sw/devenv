@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
@@ -79,7 +80,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	mintRoot := "/work/tree-a"
 
-	body, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, false)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, false)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	}
 
 	// A second render mints a DISTINCT key (registry uniqueness).
-	body2, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, false)
+	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, false)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (2nd): %v", err)
 	}
@@ -114,7 +115,7 @@ func TestRenderNoMintForNonLeadCaller(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// mintRoot empty → caller is not a lead → no mint, no key block.
-	body, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", false)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", false)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestRenderNoMintForNonDelegateRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Lead caller (mintRoot set) but the playbook role is not delegate-eligible → no mint.
-	body, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", false)
+	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", false)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 
 	// renderPlaybookBody binds the minted key to mintRoot; the dispatch passes
 	// root_override as mintRoot when set (server.go playbook.render handler).
-	body, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, false)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, false)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
 
 	// preferMercenary=false: always-on mercenary tip present (delegates:true),
 	// but the prefer-mercenary "Delegation mode" guidance block absent.
-	bodyOff, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", false)
+	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", false)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody off: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
 	}
 
 	// preferMercenary=true on an implementer playbook: guidance block present.
-	bodyOn, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", true)
+	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", true)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody on: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestPreferMercenaryGuidanceAbsentForNonImplementerRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// preferMercenary=true but role is leaf (not implementer/reviewer): no guidance block.
-	body, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", true)
+	body, _, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", true)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -253,12 +254,14 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	props := toolPropertiesByName(t, byID["1"], "agents.register")
-	for _, dropped := range []string{"prompts", "prompt_refs", "tier", "model"} {
+	// prompts/prompt_refs/model stay removed; `tier` is re-introduced in Phase 2
+	// (260611) as a pass-through of playbook.render's recommended-tier.
+	for _, dropped := range []string{"prompts", "prompt_refs", "model"} {
 		if _, present := props[dropped]; present {
 			t.Errorf("agents.register schema still exposes removed field %q", dropped)
 		}
 	}
-	for _, kept := range []string{"name", "backend", "system_prompt_text"} {
+	for _, kept := range []string{"name", "backend", "system_prompt_text", "tier"} {
 		if _, present := props[kept]; !present {
 			t.Errorf("agents.register schema missing expected field %q", kept)
 		}
@@ -382,7 +385,7 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 	for _, name := range []string{"implementer", "reviewer"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, false)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, false)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -417,7 +420,7 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	render := func(t *testing.T, name, harness string) string {
 		t.Helper()
 		s := newTestServerWithHarness(t, harness)
-		body, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", false)
+		body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", false)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
@@ -441,5 +444,108 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	revClaude := render(t, "reviewer", "claude")
 	if !strings.Contains(revClaude, "opus") {
 		t.Errorf("reviewer (claude) body must surface DeepModel 'opus':\n%s", revClaude)
+	}
+}
+
+// --- Phase 2 (260611): tier routing — render-returned recommended tier + register pass-through ---
+
+// TestFirstClassTierToAlias pins the first-class→alias bridge the register handler
+// applies to the render-returned recommended tier before wsconfig resolution.
+func TestFirstClassTierToAlias(t *testing.T) {
+	cases := map[string]string{
+		"small":    "light",
+		"medium":   "core",
+		"large":    "deep",
+		"xlarge":   "deep",  // no legacy alias → highest configured tier until Phase 3
+		"light":    "light", // alias passes through
+		"core":     "core",
+		"deep":     "deep",
+		"Large":    "deep", // case-insensitive
+		" medium ": "core", // trimmed
+		"":         "",     // empty → default at Register
+		"bogus":    "",     // unknown → default at Register
+	}
+	for in, want := range cases {
+		if got := firstClassTierToAlias(in); got != want {
+			t.Errorf("firstClassTierToAlias(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestWithRecommendedTier verifies the render/print return channel: a declared tier
+// appends a `recommended-tier:` line; an empty tier leaves the payload unchanged.
+func TestWithRecommendedTier(t *testing.T) {
+	if got := withRecommendedTier("body", "medium"); got != "body\nrecommended-tier: medium" {
+		t.Errorf("withRecommendedTier with tier = %q", got)
+	}
+	if got := withRecommendedTier("body", "  "); got != "body" {
+		t.Errorf("withRecommendedTier with blank tier must be unchanged, got %q", got)
+	}
+	if got := withRecommendedTier("path", "large"); got != "path\nrecommended-tier: large" {
+		t.Errorf("withRecommendedTier path = %q", got)
+	}
+}
+
+// TestRenderReturnsFrontmatterRecommendedTier verifies renderPlaybookBody surfaces
+// the first-class frontmatter tier from the REAL shipped delegate playbooks. This
+// is the value the lead routes to both native (model guide) and mercenary (register).
+func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+	want := map[string]string{"implementer": "medium", "reviewer": "large"}
+	for name, wantTier := range want {
+		s := newTestServerWithHarness(t, "claude")
+		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", false)
+		if err != nil {
+			t.Fatalf("renderPlaybookBody(%s): %v", name, err)
+		}
+		if tier != wantTier {
+			t.Errorf("shipped %s recommended tier = %q, want %q (from frontmatter)", name, tier, wantTier)
+		}
+	}
+}
+
+// TestMercenaryTierRoutingResolvesCustomModel is the Phase 2 key coverage: with
+// light & deep customized via config.agents_tier, a mercenary registered for a
+// small-tier role resolves the custom light model and a large-tier role resolves
+// the custom deep model — NOT the built-in core default. firstClassTierToAlias is
+// exactly what the agents.register handler applies to the render-returned tier
+// before Register; this exercises that mapping + the config resolution end to end.
+// (A real subprocess is not spawned; Register resolves the backend/model the call
+// would use.) Closes 260609 Edition 0c7c0f50 gap 3.
+func TestMercenaryTierRoutingResolvesCustomModel(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	cache := filepath.Join(t.TempDir(), "cache")
+	// Custom light & deep models distinct from the core default (gpt-5.5): a
+	// resolved custom model proves the first-class tier flowed through.
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "light", "", "claude-custom-light"); err != nil {
+		t.Fatalf("set light tier: %v", err)
+	}
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "deep", "", "gpt-custom-deep"); err != nil {
+		t.Fatalf("set deep tier: %v", err)
+	}
+	mgr := wsagent.NewManager(wsagent.Options{CacheHome: cache})
+	cases := []struct {
+		name, firstClass, wantBackend, wantModel string
+	}{
+		{"impl", "small", "claude", "claude-custom-light"},
+		{"rev", "large", "codex", "gpt-custom-deep"},
+	}
+	for _, tc := range cases {
+		agent, _, err := mgr.Register(wsagent.RegisterOptions{
+			Root:             root,
+			Name:             tc.name,
+			Tier:             firstClassTierToAlias(tc.firstClass), // handler's pass-through mapping
+			SystemPromptText: "x",
+		})
+		if err != nil {
+			t.Fatalf("Register %s: %v", tc.name, err)
+		}
+		if agent.Backend != tc.wantBackend || agent.Model != tc.wantModel {
+			t.Errorf("%s (first-class %q → alias %q): backend/model = %q/%q, want %q/%q (must not pin to core)",
+				tc.name, tc.firstClass, firstClassTierToAlias(tc.firstClass),
+				agent.Backend, agent.Model, tc.wantBackend, tc.wantModel)
+		}
 	}
 }

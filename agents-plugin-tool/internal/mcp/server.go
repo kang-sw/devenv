@@ -792,8 +792,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{})
-		return toolTextResponse(req.ID, body+"\n", err)
+		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{})
+		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
 	case "playbook.render":
 		// Phase 2c: name + context + root_override; child-key mint for lead callers.
@@ -835,8 +835,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 		}
 
-		path, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, preferMercenary)
-		return toolTextResponse(req.ID, path+"\n", err)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, preferMercenary)
+		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
 		// Lead-only tool to flip the render mode for this session key.
@@ -860,15 +860,22 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		// Unit 4: prompts/prompt_refs/tier/model are removed from the MCP schema.
-		// The MCP layer no longer reads or passes those fields; internal RegisterOptions
-		// struct fields are retained for internal callers (api_docs, oneShot, etc.).
+		// Phase 2 (260611): `tier` is re-introduced as a PASS-THROUGH of the
+		// first-class recommended tier that playbook.render returns (origin =
+		// playbook frontmatter, not a caller-chosen workload tier). It is mapped
+		// first-class→alias here before wsconfig resolution; empty/unknown tier
+		// leaves RegisterOptions.Tier empty so Register applies its built-in
+		// default instead of pinning to core when a tier WAS declared. The other
+		// former fields (prompts/prompt_refs/model) stay removed from the MCP
+		// schema; RegisterOptions struct fields remain for internal callers (api_docs).
+		tier, _ := params.Arguments["tier"].(string)
 		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
 			Root:             root,
 			Name:             name,
 			Backend:          backend,
 			Harness:          s.currentHarness(),
 			SystemPromptText: systemPromptText,
+			Tier:             firstClassTierToAlias(tier),
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
 	case "agents.call":
@@ -2331,13 +2338,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agents.register",
-			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text; the former prompts/tier/model registration fields are removed.",
+			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name":               stringProperty("Agent name."),
 					"backend":            stringProperty("Optional backend name (codex or claude). Uses harness default when omitted."),
-					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/tier/model registration fields."),
+					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/model registration fields."),
+					"tier":               stringProperty("Optional first-class capability tier (small/medium/large/xlarge) to pass through from playbook.render's recommended-tier. Selects the mercenary's model via config.agents_tier; omit to use the default."),
 				},
 				"required": []string{"name"},
 			},

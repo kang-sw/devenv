@@ -185,21 +185,6 @@ type syncCallOptions struct {
 	Timeout time.Duration
 }
 
-type oneShotOptions struct {
-	Root                string
-	Name                string
-	Backend             string
-	Harness             string
-	Tier                string
-	Model               string
-	Prompts             []string
-	PromptRefs          []string
-	SystemPromptText    string
-	Prompt              string
-	Timeout             time.Duration
-	SuppressOrientation bool
-}
-
 type SelfWorkerStarter struct{}
 
 func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
@@ -1090,39 +1075,6 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	_ = appendRuntimeLog(layout, m.now(), "state.finalize.end", map[string]any{"status": CallStatusCompleted})
 	_ = text
 	return nil
-}
-
-func (m Manager) oneShot(opts oneShotOptions) (string, error) {
-	name := strings.TrimSpace(opts.Name)
-	if name == "" {
-		name = fmt.Sprintf("oneshot-%d", m.now().UTC().UnixNano())
-	}
-	_, _, err := m.Register(RegisterOptions{
-		Root:                opts.Root,
-		Name:                name,
-		Backend:             opts.Backend,
-		Harness:             opts.Harness,
-		Tier:                opts.Tier,
-		Model:               opts.Model,
-		Prompts:             opts.Prompts,
-		PromptRefs:          opts.PromptRefs,
-		SystemPromptText:    opts.SystemPromptText,
-		SuppressOrientation: opts.SuppressOrientation,
-	})
-	if err != nil {
-		return "", err
-	}
-	_, text, callErr := m.syncCall(syncCallOptions{
-		Root:    opts.Root,
-		Name:    name,
-		Prompt:  opts.Prompt,
-		Timeout: opts.Timeout,
-	})
-	eraseErr := m.Erase(opts.Root, name)
-	if callErr != nil {
-		return "", callErr
-	}
-	return text, eraseErr
 }
 
 func promptSpecs(prompts, promptRefs []string) []string {

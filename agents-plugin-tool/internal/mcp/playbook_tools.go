@@ -171,6 +171,45 @@ func delegationTip(harness string) string {
 	return sb.String()
 }
 
+// firstClassTierToAlias maps a first-class capability tier (small/medium/large/
+// xlarge) declared in playbook frontmatter to the conventional alias layer
+// (light/core/deep) that wsconfig understands today. Alias values pass through
+// unchanged so a playbook may still declare an alias directly. xlarge has no
+// legacy alias and maps to deep (the highest configured tier) until the
+// first-class vocabulary is adopted in wsconfig (Phase 3). Empty/unknown returns
+// "" so the register path falls back to its built-in default rather than routing
+// an unrecognized tier.
+//
+// This is the first-class→alias bridge for the render-returned recommended tier:
+// playbook.render surfaces the first-class frontmatter tier, and agents.register
+// maps it here before setting RegisterOptions.Tier.
+func firstClassTierToAlias(tier string) string {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "small", "light":
+		return "light"
+	case "medium", "core":
+		return "core"
+	case "large", "deep":
+		return "deep"
+	case "xlarge":
+		return "deep"
+	default:
+		return ""
+	}
+}
+
+// withRecommendedTier appends a `recommended-tier: <first-class>` metadata line to
+// a playbook tool payload when the playbook declares a tier. Empty tier leaves the
+// payload unchanged. This is the render/print return channel the lead reads to
+// route a delegation's model selection — native uses it as a host model-selection
+// guide, mercenary passes it to agents.register's pass-through tier arg.
+func withRecommendedTier(payload, tier string) string {
+	if strings.TrimSpace(tier) == "" {
+		return payload
+	}
+	return payload + "\nrecommended-tier: " + strings.TrimSpace(tier)
+}
+
 // childRoleForPlaybookRole maps a playbook frontmatter role string to the child key scope.
 // Returns (scope, true) for delegate-eligible roles; ("", false) for non-eligible roles
 // (lead, empty, or unknown).
@@ -232,14 +271,24 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 //
 // preferMercenary: when true and the playbook is an implementer/reviewer role,
 // appends a guidance block advising the mercenary spawn idiom as primary.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, error) {
+//
+// Returns (body, recommendedTier, error): recommendedTier is the first-class tier
+// declared in the playbook frontmatter, surfaced so one render call routes both
+// delegation paths — native uses it as a host model-selection guide, mercenary
+// passes it to agents.register's pass-through tier arg.
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
 	harness := s.currentHarness()
 
 	// Pass 1: nil vars → load metadata without triggering substitution errors.
 	metaOnly, err := wsrsrc.Load(rsrcRoot, name, harness, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+
+	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
+	// the caller so it can route both delegation paths from one render call: native
+	// uses it as a host model-selection guide, mercenary passes it to agents.register.
+	recommendedTier := metaOnly.Meta.Tier
 
 	var body string
 
@@ -253,13 +302,13 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		// Build filtered vars: check caller context, inject terminology + model aliases.
 		vars, err := buildPlaybookVars(metaOnly.Meta.Variables, callerContext, harness, configOpts)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		// Pass 2: load with full vars for actual substitution.
 		pb, err := wsrsrc.Load(rsrcRoot, name, harness, vars)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		body = pb.Body
@@ -281,7 +330,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		if childScope, ok := childRoleForPlaybookRole(metaOnly.Meta.Role); ok {
 			childKey, err := s.sessions.mint(mintRoot, childScope)
 			if err != nil {
-				return "", fmt.Errorf("mint child session key: %w", err)
+				return "", "", fmt.Errorf("mint child session key: %w", err)
 			}
 			// Splice a clearly-delimited credential block into the body so the
 			// delegate's ws calls are pre-keyed. Prepended so the delegate sees
@@ -294,7 +343,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		}
 	}
 
-	return body, nil
+	return body, recommendedTier, nil
 }
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
@@ -306,7 +355,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 //
 // rsrcRoot is a call-site-overridable seam for root_override support.
 // configOpts controls config-backed model alias resolution.
-func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, error) {
+func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, string, error) {
 	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", false)
 }
 
@@ -318,17 +367,17 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // mintRoot: when non-empty, caller is a lead and a child key is minted for the delegate.
 // preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, error) {
-	body, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, mintRoot, preferMercenary)
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, mintRoot, preferMercenary)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(worktreeRoot, "prompt", []string{name})
 	if err != nil {
-		return "", fmt.Errorf("allocate playbook path: %w", err)
+		return "", "", fmt.Errorf("allocate playbook path: %w", err)
 	}
 	if err := os.WriteFile(generated[0].Path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("write playbook %s: %w", generated[0].Path, err)
+		return "", "", fmt.Errorf("write playbook %s: %w", generated[0].Path, err)
 	}
-	return generated[0].Path, nil
+	return generated[0].Path, recommendedTier, nil
 }

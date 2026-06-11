@@ -1942,37 +1942,6 @@ func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing
 	}
 }
 
-func TestInternalOneShotHidesRoleAndRetainsAgentDirectory(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-		Runner:    &fakeRunner{},
-	})
-	text, err := manager.oneShot(oneShotOptions{Root: repo, Name: "tmp", Prompt: "hello"})
-	if err != nil {
-		t.Fatalf("oneShot returned error: %v", err)
-	}
-	if text != "reply: hello\n" {
-		t.Fatalf("oneshot text = %q", text)
-	}
-	if _, err := manager.Agent(repo, "tmp"); err == nil {
-		t.Fatalf("ephemeral role should be hidden after result consumption")
-	}
-	state, err := manager.scopedLayout(repo, "tmp", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(state.AgentDir), "tmp*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("ephemeral instance dir should remain for retention cleanup")
-	}
-}
-
 func TestParseCodexJSONL(t *testing.T) {
 	raw := []byte(strings.Join([]string{
 		`{"type":"thread.started","thread_id":"019test"}`,
