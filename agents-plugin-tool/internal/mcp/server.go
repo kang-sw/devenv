@@ -2116,43 +2116,7 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 		return entry.root, nil
 	}
 
-	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
-		return canonicalGitRoot(value)
-	}
-
-	s.rootMu.RLock()
-	sessionRoot := s.sessionRoot
-	s.rootMu.RUnlock()
-	if sessionRoot != "" {
-		return sessionRoot, nil
-	}
-
-	workspaces := codexWorkspaceRoots(meta)
-	if len(workspaces) == 1 {
-		return canonicalGitRoot(workspaces[0])
-	}
-	if len(workspaces) > 1 {
-		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call %s with root set to the current directory before using root-omitted %s tools", setupToolName(), RuntimeNamespace())
-	}
-
-	serverRoot := strings.TrimSpace(s.root)
-	if serverRoot != "" && serverRoot != "." {
-		root, err := canonicalGitRoot(serverRoot)
-		if err != nil {
-			return "", fmt.Errorf("could not resolve the MCP server root; pass root explicitly or call %s with root set to the current directory: %w", setupToolName(), err)
-		}
-		return root, nil
-	}
-
-	if envRoot := strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")); envRoot != "" {
-		return canonicalGitRoot(envRoot)
-	}
-
-	root, err := canonicalGitRoot(s.root)
-	if err != nil {
-		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call %s with root set to the current directory: %w", setupToolName(), err)
-	}
-	return root, nil
+	return "", fmt.Errorf("mandatory_session_key: root-aware ws tools require session_key; call ws.lead.login(root) first and pass the returned session_key")
 }
 
 func canonicalGitRoot(root string) (string, error) {
