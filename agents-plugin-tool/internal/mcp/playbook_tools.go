@@ -21,19 +21,19 @@ import (
 // render time via resolveModelVars. Only non-model idioms belong here.
 var playbookTerminologyTable = map[string]map[string]string{
 	"claude": {
-		"ExploreAgent": "the Explore agent",
-		"SpawnIdiom":   `Agent({subagent_type: "general-purpose", ...})`,
+		"ExploreAgent":  "the Explore agent",
+		"SpawnIdiom":    `Agent({subagent_type: "general-purpose", ...})`,
 		"ContinueIdiom": "SendMessage(to: <agentId>)",
 	},
 	"codex": {
-		"ExploreAgent": "a search agent",
-		"SpawnIdiom":   "creating a new Codex task",
+		"ExploreAgent":  "a search agent",
+		"SpawnIdiom":    "creating a new Codex task",
 		"ContinueIdiom": "resuming the agent using its task id",
 	},
 	// "" = host-neutral fallback for unknown/undetected harness.
 	"": {
-		"ExploreAgent": "an exploration agent",
-		"SpawnIdiom":   "spawning a subagent",
+		"ExploreAgent":  "an exploration agent",
+		"SpawnIdiom":    "spawning a subagent",
 		"ContinueIdiom": "resuming the agent using its returned id",
 	},
 }

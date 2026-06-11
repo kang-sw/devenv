@@ -1099,7 +1099,7 @@ func canonicalSetupRoot(root string) (string, error) {
 
 // handleLeadLogin implements the ws.lead.login tool: canonicalize root, mint an
 // ephemeral session key, store the {root, scope} entry in the registry, and
-// return the key to the caller. It does NOT participate in the ws.setup fence.
+// return the key to the caller.
 func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) response {
 	rootArg, _ := arguments["root"].(string)
 	if strings.TrimSpace(rootArg) == "" {
@@ -2079,13 +2079,8 @@ func tools() []map[string]any {
 			"name":        "project_tree",
 			"description": "Render the ws project document map, spec inventory, and active ticket inventory.",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
-				},
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -2126,10 +2121,6 @@ func tools() []map[string]any {
 						"type":        "string",
 						"description": "Descriptive slug seed.",
 					},
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
 				},
 				"required": []string{"slug"},
 			},
@@ -2138,13 +2129,8 @@ func tools() []map[string]any {
 			"name":        "spec_index.verify",
 			"description": "Verify basic spec anchor index health.",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
-				},
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -2186,13 +2172,8 @@ func tools() []map[string]any {
 			"name":        "mental_models.list",
 			"description": "List mental-model documents with domains, descriptions, and sources.",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
-				},
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -2537,9 +2518,6 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		propertiesClone := make(map[string]any, len(properties))
 		for key, value := range properties {
-			if strings.HasPrefix(name, "agents.") && key == "root" {
-				continue
-			}
 			propertiesClone[key] = value
 		}
 		schemaClone["properties"] = propertiesClone
@@ -2582,7 +2560,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleLead:
 		return true
 	case roleDelegate:
-		if strings.HasPrefix(name, "session.") || name == "ws.setup" {
+		if strings.HasPrefix(name, "session.") {
 			return false
 		}
 		if isSubqueryAgentTool(name) {
@@ -2590,7 +2568,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
 	default:
 		return false
 	}
