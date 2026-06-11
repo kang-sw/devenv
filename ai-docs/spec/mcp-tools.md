@@ -347,12 +347,18 @@ inline in the tool result, with `context` values substituted and declared
 includes resolved. It is the lead-facing successor of internal workflow-skill
 bodies.
 
-`playbook.render(name, context?)` materializes the named playbook as a
-context-injected, harness-rendered prompt, writes it to a worktree-scoped
-temporary file, and returns that file path. The caller hands the path to a
-host-native subagent. Like `prompt.render`, it carries no routing or strategy
-decision — the caller selects `name`, and the tool only materializes a rendered
-copy.
+`playbook.render(session_key, name, context?, root_override?)` materializes the
+named playbook as a context-injected, harness-rendered prompt, writes it to a
+worktree-scoped temporary file, and returns that file path. The caller hands the
+path to a host-native subagent or a mercenary. Like `prompt.render`, it carries
+no routing or strategy decision — the caller selects `name`, and the tool only
+materializes a rendered copy. `root_override`, when set, rebinds both the
+auto-include resolution root and the child-key binding root for a delegate
+running in a different worktree. When the calling `session_key` is lead-scoped
+and the playbook frontmatter declares a delegate-eligible role, the render mints
+a fresh child session key and splices it into the rendered prompt, so both native
+and mercenary delegates receive a prompt with their key already embedded
+(`#260610-mercenary-delegation-surface`).
 
 A playbook is selected by `name`; the tool does not decide which playbook to use.
 A load or render failure for a requested `name` is a loud error, not a silent
@@ -421,47 +427,26 @@ refresh.
 
 The `agents.*` tool family exposes durable named-agent orchestration.
 
-> [!note] Planned 🚧
-> The `agents.*` family is reshaped — not wholly removed — into the scoped
-> mercenary delegation surface (`#260610-mercenary-delegation-surface`). The
-> retained surface is smaller: `agents.register(prompts: [stems])` and the
-> model-alias registration field (`#260508-agents-register-model-alias-field`)
-> are dropped in favor of a single self-contained prompt from `playbook.render`;
-> the former actor-scoped root invisibility contract is already removed under
-> mandatory session keys (Phase 2a); mercenaries are scoped to implementer/reviewer
-> roles only; and diagnostic sprawl beyond mercenary needs is reduced. The
-> cancel-retry guidance
-> (`#260512-agent-cancel-resume-guidance`) and hidden `agents.recall`
-> (`#260512-agent-recall-hidden-surface`) carry over to the mercenary path. Current
-> behavior is unchanged until the reshape lands.
+The `agents.*` family is the reshaped scoped **mercenary** delegation surface
+(`#260610-mercenary-delegation-surface`): codex and claude runners retained,
+scoped to implementer/reviewer roles, invoked with a single self-contained prompt
+from `playbook.render`.
 
-`agents.register` creates or updates an agent record with backend, model alias
-or compatibility tier field, resolved model, prompt references, or materialized
-system prompt text. `agents.call` starts an asynchronous call and returns
-immediately. Named-agent calls resolve their root from the mandatory `session_key`
-like every other root-aware tool (`#260610-ephemeral-session-auth-model`): no
-`agents.*` schema advertises a `root` argument, and there is no
-actor scope, hidden explicit-root dispatch, or persistent child-actor credential
-injection. The named-agent registry namespaces role pointers by the resolved
-worktree root, so the same public agent name stays distinct across distinct
-worktree roots without an actor dimension.
-
-`agents.register` prefers `model` as the public model-selection field.
-`model: "light"`, `model: "core"`, and `model: "deep"` select portable
-aliases; concrete provider model names select a one-off backend model. The
-`tier` field remains a deprecated compatibility input. Alias resolution may
-supply optional effort metadata; `agents.register` does not accept direct effort
-input, and backend calls apply effort only when the selected alias resolves a
-non-empty effort.
-{#260508-agents-register-model-alias-field}
-
-> [!note] Planned 🚧
-> This registration contract is retired. Mercenaries are invoked with a single
-> self-contained prompt from `playbook.render`
-> (`#260610-mercenary-delegation-surface`), so `agents.register(prompts: [stems])`
-> and the registration-time model-alias/`tier` field are removed; per-mercenary
-> model selection moves into the rendered prompt and harness config
-> (`#260513-harness-local-agent-tier-config`).
+`agents.register` registers a mercenary agent with an optional `backend` (codex
+or claude) and a self-contained `system_prompt_text` produced by
+`playbook.render`. The former `prompts: [stems]`/`prompt_refs` references and the
+registration-time model-alias/`tier` fields are removed: per-mercenary model
+selection moves into the rendered prompt and harness config
+(`#260513-harness-local-agent-tier-config`). `agents.call` starts an asynchronous
+call, returns immediately, and yields a native-shaped continuation handle
+(`agentId=<name>`) so the lead reuses one continuation idiom across the native
+and mercenary paths. Named-agent calls resolve their root from the mandatory
+`session_key` like every other root-aware tool
+(`#260610-ephemeral-session-auth-model`): no `agents.*` schema advertises a
+`root` argument, and there is no actor scope, hidden explicit-root dispatch, or
+persistent child-actor credential injection. The named-agent registry namespaces
+role pointers by the resolved worktree root, so the same public agent name stays
+distinct across distinct worktree roots without an actor dimension.
 
 `agents.wait` waits for one or more agents to become ready and returns readiness
 metadata, not final output. `agents.result` is the result-consumption surface and
@@ -489,13 +474,12 @@ remains a deprecated compatibility reader over the resolved current instance.
 worktree and actor scope; historical instance payloads are removed later by the
 named-agent retention cleanup policy rather than synchronously during erase.
 
-## 🚧 Mercenary Delegation Surface {#260610-mercenary-delegation-surface}
+## Mercenary Delegation Surface {#260610-mercenary-delegation-surface}
 
 The reshaped delegation surface. A **mercenary** is a ws-spawned external
 subprocess agent — a deliberately distinct term from a harness-native
 **subagent**, so callers never confuse the two delegation paths. This section is
-the planned caller-visible contract for the reshaped `agents.*` family; it is not
-yet implemented.
+the caller-visible contract for the reshaped `agents.*` family.
 
 **Default is native; mercenary is always available.** Default delegation is
 always to a host-native subagent. The mercenary path is always available to the

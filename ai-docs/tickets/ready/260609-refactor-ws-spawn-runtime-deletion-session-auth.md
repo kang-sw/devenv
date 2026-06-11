@@ -545,6 +545,83 @@ flip); the continuation handle matches the native agentId shape; the
 register-with-stems schema is gone; the two re-triaged bugs have an explicit
 disposition (fixed or a recorded follow-up).
 
+### Result (0c7c0f50) - 2026-06-11
+
+Reshaped the retained codex/claude runner + `agents.*` core into the first-class
+mercenary surface on branch `implement/ws-session-auth-phase2c` (stacked on the
+unmerged 2a+2b; all three pending a combined merge to the epic). Code result-commit
+`0c7c0f50`; review fixes `b2c13f02`.
+
+Delivered:
+- **Render-minted child keys** — `playbook.render(session_key, name, context?,
+  root_override?)` mints a fresh child session key when the caller key is
+  lead-scoped AND the playbook frontmatter `role` is delegate-eligible
+  (`implementer`/`reviewer`/`delegate`→`roleDelegate`, `leaf`→`roleLeaf`), binds it
+  to `root_override`-or-caller-root, and splices a credential block into the
+  rendered body. Added `PlaybookMeta.Role` + frontmatter parse. Non-lead callers
+  and non-delegate-role playbooks never mint; a second render mints a distinct key.
+  Filled M1's deliberately-placed seams (no `playbook.render` redesign).
+- **`ws.lead.prefer_mercenary(session_key)`** — lead-only render-mode flip
+  (`sessionEntry.preferMercenary`); enforced by the existing 2a keyed-handler
+  `ws.lead.*` gate (no second check). Flips only the default delegation *guidance*
+  for implementer/reviewer renderings; an always-on mercenary tip in every
+  `delegates:true` rendering keeps the on-request path reachable without the flip.
+  ws-only: hidden in agentless wsflow (`noAgentHiddenTool`); `ws.lead.login` stays
+  visible.
+- **Register narrowing** — dropped `prompts`/`prompt_refs`/`tier`/`model` from the
+  `agents.register` MCP schema + dispatch (satisfies `spec-remove`
+  `260508-agents-register-model-alias-field`); `RegisterOptions` struct fields
+  retained for live internal callers (api_docs/oneShot). **Native-shaped handle** —
+  `agents.call` returns `agentId=<name>` for one continuation idiom across native
+  and mercenary paths.
+- **Spawn depth strictly 1** preserved (child keys are non-lead → keyed gate
+  rejects `ws.lead.*` → a child cannot login/mint); no recursion counter, no
+  capability ENFORCEMENT added (Phase 3).
+
+Deviation — **diagnostic minimization is a deliberate no-op** (lead ruling): the
+contract-first spec (`#260508`/`#260512`) still documents `agents.debug.*`/status/
+tail for the live mercenary lifecycle, and 2b already removed the subquery/gemini
+coupling, so removing more would contradict the binding spec. Nothing was
+orphaned by the reshape. Carried-over scope from 2b discharged as "retain".
+
+Bug re-triage (U7) — both kept, neither dropped (option B retains the path,
+superseding the stale option-C "Pending Removal" notes which were reconciled,
+`eec9f6d1`): `260517-bug-ws-agent-empty-result-after-tool-use` persists (result-
+capture path untouched by the reshape; stays `todo/`, needs a dedicated fix);
+`260524-bug-ws-agent-register-stale-dir-result-hang` not obsoleted by the
+register-stems drop (stale-dir reset + result-hang live in the agent-dir/lifecycle
+path; stays `idea/`).
+
+Execution deviation — the implementer mercenary completed Units 1-5 then its
+claude backend crashed (`backend invocation failed: exit status 1`); the
+mental-model-updater mercenary likewise completed its edits then crashed on the
+report phase (two backend crashes this run). Delegation-first was honored; the
+lead finished Units 6-7, the new-test coverage, and the review fixes directly from
+the high-quality partial work. Fresh evidence for the `260517` retained-path
+robustness class; also surfaced a Phase 2b regression (shipped-rsrc edit without
+manifest regen left the tree red — fixed `a21241e6`, dogfood idea
+`260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`).
+
+Verification: `go build/vet/test ./... -count=1` green; wsflow contract test green
+(3/3); `prefer_mercenary` in full ws `runtime.json`, absent from wsflow.
+
+Review: partitioned (correctness/fit/test). Correctness clean; fit non-clean
+minor-only (file naming, fixture comment) all addressed; test non-clean 2 important
+(prefer_mercenary delegate-rejection coverage, native-handle untested) fixed in
+`b2c13f02` (extracted `agentCallHandleText` helper + unit test; added the rejection
+test). Re-review lead-adjudicated (reviewers are crash-prone mercenaries; findings
+were coverage/cosmetic, fixes verified green). No unresolved disputes.
+
+Spec: `260610-mercenary-delegation-surface` 🚧 stripped (implemented);
+`260508-agents-register-model-alias-field` removed; `#260609` `playbook.render`
+keyed signature documented (`5cc57c64`). Mental models updated (`095184bc`).
+
+> Forward (Phase 3): exec stateless + capability-scope ENFORCEMENT (the
+> `WS_MCP_TOOL_PROFILE` fold; the keyed gate already does `roleAllowsTool`) +
+> dashboard build-fix (actors table / AgentDefinition actor columns gone; exec-job
+> `owner_actor_id` deferred here). Re-triaged bugs `260517` + `260524` remain live
+> on the retained mercenary path for a dedicated fix.
+
 ### Phase 3: exec stateless + role-containment fold + dashboard build-fix
 
 Confirm exec is a stateless `exec_key` capability anchored at the session root;

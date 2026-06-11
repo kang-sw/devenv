@@ -211,8 +211,15 @@ dropped tickets live in hidden archive dirs and git history.
   `implement/ws-session-auth-phase2b`, stacked on unmerged 2a — both pending a
   combined merge): gemini runner impl + subquery runtime + retired-path
   diagnostics deleted (harness-neutral Runner interface kept as deferred plug), 3
-  resolved-by-deletion bug tickets dropped. **Phase 2c next** (codex `agents.*`
-  mercenary reshape + render-minted child keys). **M4**
+  resolved-by-deletion bug tickets dropped. **Phase 2c complete** (`0c7c0f50`,
+  branch `implement/ws-session-auth-phase2c`, stacked on unmerged 2a+2b — all
+  three pending a combined merge): `agents.*` reshaped to the mercenary surface —
+  render-minted child keys via keyed `playbook.render`, `ws.lead.prefer_mercenary`
+  guidance flip + always-on tip, register schema narrowed (`prompts`/`tier`/`model`
+  dropped), native-shaped `agentId=` handle; diagnostic minimization a deliberate
+  no-op (spec retains debug.*); bugs `260517`+`260524` re-triaged as live (not
+  dropped). **Phase 3 next** (exec stateless + capability-scope enforcement +
+  dashboard build-fix). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
   materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
