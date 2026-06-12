@@ -101,6 +101,36 @@ constraint, and is rewritten at closeout.
   deleted only after both the skill migration (Phase 5) and the loader retirement
   (Phase 6) remove its last consumer. Rejected: keep `wsprompt` for non-delegate
   internal callers (the user chose full retirement so rsrc is the single source).
+- **wsflow rsrc provisioning + cross-package source policy (confirmed 2026-06-12).**
+  The single source of truth (`agents-plugin/rsrc/`) is enforced *across packages*:
+  the same prompt stem's body must NEVER diverge between ws and wsflow. Body
+  divergence is assumed not to exist; if a wsflow-only variant is ever genuinely
+  needed it is added as a SEPARATE rsrc file that only wsflow renders and ws does not
+  reference — never a divergent body of a shared stem. Because wsflow is a separately
+  distributed package that (unlike ws) ships no rsrc tree today, Phase 6's "rewire
+  wsflow `prompt.render` onto rsrc" requires wsflow to carry an rsrc tree at runtime.
+  That tree is a **generated/copied artifact** produced from canonical
+  `agents-plugin/rsrc/` at build/package time, following the existing per-package
+  real-file-copy precedent (`ws-mcp-launcher.py` is byte-identical and committed as a
+  real file in both packages; git content-dedupes, so the on-disk per-package copy is
+  the intended end state and storage cost is ~0). **Symlink is rejected:** Claude
+  `install.sh` removes wsflow from the plugin cache (no co-located sibling to point
+  at), independent distribution cannot assume the two packages are co-located, git
+  symlinks are fragile on the Windows desktop target, and the repo has zero
+  committed-symlink precedent. The pain being solved is **drift, not storage** — so a
+  drift-guard test asserting the wsflow rsrc copy is render-equivalent to canonical
+  (post `ws/`→`wsflow/` namespace substitution) is mandatory; its absence is exactly
+  why the `wsprompt` embedded copies silently drifted from rsrc. **Doctrine
+  carve-out:** the `wsflow-mirroring.md` "drift visibility over generated sameness"
+  rule stays for *skills*, but the rsrc subtree is explicitly the one place where
+  **generated sameness IS the contract**. Open (resolve at implementation): where the
+  generation step lives (launcher install-time copy vs standalone gen script vs
+  test-driven regen mirroring the `WS_REGEN_MANIFEST` pattern); whether wsflow needs
+  an on-disk copy vs a launcher tweak pointing `WS_RSRC_ROOT` at a shared tree when
+  co-located (leaning on-disk because co-location is not guaranteed and Claude removes
+  wsflow); and the retain-or-retire verdict for the non-render-eligible `wsprompt`
+  embeds that have rsrc twins (`code-review-correctness/fit/test`, `executor-wrapup`,
+  `impl-playbook`, `implementer`) vs genuinely ws-internal embeds with no rsrc twin.
 - **Tier routing = render-returned recommended tier + register pass-through
   (confirmed 2026-06-12).** `playbook.render`/`print` is the single delegation
   entry point — called exactly once per delegation (no double-render) — and returns
@@ -170,8 +200,12 @@ constraint, and is rewritten at closeout.
   slice-boundary refinement at promotion).
 - Shipped-rsrc edits require manifest regen (see
   `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`).
-- wsflow mirror: any shipped `lead-implement` / delegate playbook text change
-  must mirror into `agents-plugin-wsflow` with no ws-only references.
+- wsflow mirror: shipped skill (`lead-*`) text changes mirror into
+  `agents-plugin-wsflow` with no ws-only references. For the **rsrc delegate
+  playbooks** specifically, Phase 4 found wsflow ships no rsrc tree today, so there
+  is no manual mirror target; Phase 6 resolves this by provisioning wsflow's rsrc as
+  a generated copy of canonical (see the wsflow-rsrc-provisioning decision) — mirror
+  becomes regenerate, not hand-copy.
 - Convergence phase order is a hard dependency chain: Phase 4 (port delegate
   bodies to rsrc) → Phase 5 (migrate skill call sites off `register(prompts)`) →
   Phase 6 (retire the loader). An embedded delegate prompt is deleted only in
@@ -531,7 +565,13 @@ Move `wsprompt`'s remaining non-delegate consumers onto rsrc and remove the
 go:embed loader: rewire `api.ask` hard-coded prompt stems to rsrc playbooks;
 rewire the wsflow `prompt.render` MCP tool off `wsprompt.RenderSource` onto rsrc
 loading (reconcile the `#260529-prompt-render-tool` contract + the five-stem
-render-eligibility allowlist); delete the now-orphaned embedded delegate prompt
+render-eligibility allowlist) — this requires **provisioning wsflow's distributed
+package with a generated rsrc tree** copied from canonical `agents-plugin/rsrc/`
+(symlink rejected; per-package generated copy per the wsflow-rsrc-provisioning
+decision), adding a **drift-guard test** that the wsflow rsrc copy renders
+equivalently to canonical (post `ws/`→`wsflow/` substitution), and carving the rsrc
+subtree out of `wsflow-mirroring.md`'s "drift visibility over generated sameness"
+doctrine as the one generated-sameness exception; delete the now-orphaned embedded delegate prompt
 bodies and the `wsprompt` package; collapse the prompt-bundle-hash / `runtime.json`
 bundle-metadata machinery that only served embedded prompts (verify launcher
 fast-path/fallback validation still agrees). Rewrite mental-model `prompt-bundle.md`
@@ -596,7 +636,10 @@ delegation spawns end-to-end on both ws and wsflow under the new names; spec
   render-eligibility allowlist + namespace-substitution contract are preserved;
   the backing loader is reconciled). `api.ask`'s prompt source moves to rsrc.
   Removes the embedded-prompt-bundle hash/`runtime.json` metadata surface from the
-  launcher-validation contract.
+  launcher-validation contract. Also touches
+  `#260513-wsflow-agentless-plugin-package` in `ai-docs/spec/plugin-runtime.md`:
+  wsflow now carries a **generated rsrc subtree** (it previously shipped none), so
+  the agentless-package description gains a generated-rsrc provisioning note.
 - **Phase 7** (`ws.mercenary.*` rename) — touches
   `#260610-mercenary-delegation-surface` in `ai-docs/spec/mcp-tools.md`: the
   delegation spawn/lifecycle tool names change from `agents.*` to
