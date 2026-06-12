@@ -172,17 +172,20 @@ func delegationTip(harness string) string {
 }
 
 // firstClassTierToAlias maps a first-class capability tier (small/medium/large/
-// xlarge) declared in playbook frontmatter to the conventional alias layer
-// (light/core/deep) that wsconfig understands today. Alias values pass through
-// unchanged so a playbook may still declare an alias directly. xlarge has no
-// legacy alias and maps to deep (the highest configured tier) until the
-// first-class vocabulary is adopted in wsconfig (Phase 3). Empty/unknown returns
-// "" so the register path falls back to its built-in default rather than routing
-// an unrecognized tier.
+// xlarge) declared in playbook frontmatter down to the conventional alias layer
+// (light/core/deep) that config.agents_tier is keyed by. This is the intended
+// translation boundary between the two tier planes — the abstraction layer
+// (first-class tier, spoken by frontmatter/skills/defaults) and the concrete-model
+// layer (aliases alongside vendor model names, where per-harness model config
+// lives) — not a temporary shim: config.agents_tier stays alias-keyed by design,
+// since the taxonomy demotes light/core/deep to the concrete-model layer. Alias
+// values pass through unchanged so a playbook may declare an alias directly.
+// xlarge has no legacy alias and maps to deep (the highest configured tier).
+// Empty/unknown returns "" so the register path falls back to its built-in
+// default rather than routing an unrecognized tier.
 //
-// This is the first-class→alias bridge for the render-returned recommended tier:
-// playbook.render surfaces the first-class frontmatter tier, and agents.register
-// maps it here before setting RegisterOptions.Tier.
+// playbook.render surfaces the first-class frontmatter tier as a recommended
+// tier, and agents.register maps it here before setting RegisterOptions.Tier.
 func firstClassTierToAlias(tier string) string {
 	switch strings.ToLower(strings.TrimSpace(tier)) {
 	case "small", "light":
