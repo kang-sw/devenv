@@ -58,10 +58,10 @@ Review
 7. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 8. Call `ws/infra.read(name: "impl-playbook")`.
 9. Identify integration test paths and their run command.
-10. If `plan-depth` ≥ survey: discover reference docs via `ws/agents.register(name: "reference-discovery", prompts: ["reference-discovery"])` → `ws/agents.call`; capture `[Must|Maybe]` doc references. This agent reads docs only; source-level reference mapping happens in step 12 via `plan-populator-survey`.
+10. If `plan-depth` ≥ survey: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in step 12 via `plan-populator-survey`.
 11. If `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; audit against target; commit.
-12. If `plan-depth` ≥ survey: run plan populator with **Plan prompts**; if survey returns `[escalate-to-research]`, re-run as research; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
-13. If delegated: register implementer via `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
+12. If `plan-depth` ≥ survey: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
+13. If delegated: render the implementer prompt via `ws/playbook.render(name: "implementer")` per **Delegate dispatch** (captures the child-key-spliced self-contained prompt + `recommended-tier`); spawn it in the Edit stage.
 14. Create and maintain task list:
 
 ```text
@@ -81,15 +81,15 @@ Review
 1. If direct-edit: edit directly per target and impl-playbook; commit logical checkpoints.
 2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
 3. If delegated and referenced tests exist: run baseline verification.
-4. If delegated: call `ws/agents.call(name: "implementer", prompt: ...)` with **Implementer spawn prompt**.
-5. If delegated: read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary; capture `<first-commit>..<last-commit>`.
+4. If delegated: spawn the implementer per **Delegate dispatch** (native default; mercenary on request) with the **Implementer spawn prompt** as the task-specific input.
+5. If delegated: read the implementer result (native subagent return, or `ws/agents.result(name: "implementer", timeout_seconds: 600)` for a mercenary) only if the async result lacks a usable summary; capture `<first-commit>..<last-commit>`.
 6. Capture `<commit-range>` and `<result-commit>`.
 
 ### 5. Review
 
 1. If lead-only: record rationale; skip to step 8.
-2. If single: register reviewer via `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`; generate path via `ws/path.generate(kind: "review", stems: ["direct"])`.
-3. If partitioned: choose partition subset from Tier 2; for each, register reviewer from **Reviewer partition table**; generate paths via `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
+2. If single: dispatch the `reviewer` playbook per **Delegate dispatch** (the general reviewer; its shared base covers correctness, standards, contract, and security); generate path via `ws/path.generate(kind: "review", stems: ["direct"])`.
+3. If partitioned: choose partition subset from Tier 2; for each, dispatch its partition playbook from the **Reviewer partition table** per **Delegate dispatch**; generate paths via `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
 4. Call reviewer(s) with **Reviewer prompt frame**.
 5. If all reviewers return `[clean]`, proceed to Review cleanup.
 6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call reviewer with rejected list. Repeat until `[clean]` or 2 cycles.
@@ -99,9 +99,8 @@ Review
 ### 6. Doc Pre-Pass
 
 1. Call `ws/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<commit-range>`.
-2. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
-3. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <commit-range>")`.
-4. Wait for completion; commit file changes.
+2. Dispatch `mental-model-updater` per **Delegate dispatch** (task input: `Commit range: <commit-range>` plus the target output path).
+3. Wait for completion; commit file changes.
 
 Run mental-model-updater after update-spec so it sees implemented-marker changes.
 
@@ -225,6 +224,18 @@ Native delegation treats the tier as a model-selection guide; mercenary delegati
 Proceeding with implementation.
 ```
 
+### Delegate dispatch
+
+Canonical render+spawn idiom for every bundled delegate (`reference-discovery`,
+`implementer`, `reviewer` / review partitions, `mental-model-updater`,
+`plan-populator-survey`/`plan-populator-research`). Native is the default;
+mercenary is available on user request or under `ws.lead.prefer_mercenary`.
+
+1. Render the delegate playbook: `ws/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
+2. Native (default): spawn a native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide.
+3. Mercenary (on request): `ws/agents.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws/agents.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws/agents.result(name: "<name>", timeout_seconds: 600)`.
+4. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus the target output path. File-writing delegates write to their caller-created output path or return content; free-response delegates return text the lead integrates.
+
 ### Brief template
 
 Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
@@ -326,11 +337,11 @@ Instructions:
 
 ### Reviewer partition table
 
-| Partition | Reviewer name | Prompts | Required check |
-|-----------|---------------|---------|----------------|
-| Correctness | `reviewer-correctness` | `["code-reviewer", "code-review-correctness"]` | Verify correctness invariants. |
-| Fit | `reviewer-fit` | `["code-reviewer", "code-review-fit"]` | Verify brief contract, future-phase fit, ticket-driven decisions. |
-| Test | `reviewer-test` | `["code-reviewer", "code-review-test"]` | Verify coverage, assertions, integration-test instructions. |
+| Partition | Reviewer name | Render playbook | Required check |
+|-----------|---------------|-----------------|----------------|
+| Correctness | `reviewer-correctness` | `code-review-correctness` | Verify correctness invariants. |
+| Fit | `reviewer-fit` | `code-review-fit` | Verify brief contract, future-phase fit, ticket-driven decisions. |
+| Test | `reviewer-test` | `code-review-test` | Verify coverage, assertions, integration-test instructions. |
 
 ### Reviewer prompt frame
 

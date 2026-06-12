@@ -76,18 +76,19 @@ collect all before synthesizing. Use a broad-tracing scope for wide structural s
 `ws/agents.cancel`
 `ws/agents.erase`
 
-Register a stable task name with optional prompt stems or a self-contained
-system prompt. Omit `prompts` for a general-purpose named agent; registration
-uses delegate orientation and the default `core` model alias. Use
-`model: "light" | "core" | "deep"` for portable model selection and concrete
-provider model names only for intentional one-off overrides. `tier` remains a
-compatibility input. Call the agent for each continuity turn.
-Bundled prompt stems are registered through `prompts: ["<prompt-stem>"]`.
-`reference-discovery` is a prompt stem, not a workflow skill; when a skill asks
-for `reference-discovery`, register it with
-`ws/agents.register(name: "reference-discovery", prompts: ["reference-discovery"])`,
-call it with a self-contained survey brief, and collect the result through
-`ws/agents.result`.
+Register a stable task name with a self-contained system prompt. Registration
+takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
+`prompts`/`prompt_refs`/`model` fields are gone. Omit `system_prompt_text` for a
+general-purpose named agent; registration applies delegate orientation and the
+default model alias. Call the agent for each continuity turn.
+Bundled delegate prompts are not registered by stem — render them. Obtain a
+delegate's self-contained prompt with `ws/playbook.render(name: "<delegate>")`
+(model-alias vars auto-inject; a lead key splices a child-key credential block and
+the call returns a `recommended-tier`). Hand the rendered prompt to a native
+subagent (default), or pass it as `system_prompt_text` with `tier:
+<recommended-tier>` to a mercenary `ws/agents.register` + `ws/agents.call`, then
+collect through `ws/agents.result`. `reference-discovery` is such a delegate
+playbook, not a workflow skill.
 `ws/agents.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,
@@ -200,8 +201,8 @@ for parallel dispatch, spawn multiple concurrent subagents in a single turn; col
 
 Persistent task:
 call `ws/agents.register(name: "<agent-name>")` for a general-purpose delegate.
-call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.
-call `ws/agents.call(name: "<agent-name>", prompt: <block below>)`.
+for a bundled delegate, render its prompt: `ws/playbook.render(name: "<delegate>")`, then spawn a native subagent or register a mercenary with `system_prompt_text: <rendered>` and `tier: <recommended-tier>`.
+call `ws/agents.call(name: "<agent-name>", prompt: <block below>)` for the mercenary path.
 wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.
 erase the task-scoped agent when cleanup matters.
 
