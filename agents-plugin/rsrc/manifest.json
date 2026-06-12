@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "files": {
+    "code-review-correctness/code-review-correctness.md": "81417eb323db929cd6ec24c7470c557b62aaba84de72e989083da8f747e8f288",
+    "code-review-fit/code-review-fit.md": "5efdebd7dd8e1f72cdeb84b4b75c4ba8161cc765b82c32c2241753cb80055d62",
+    "code-review-test/code-review-test.md": "5c1b2d17310e69c1b85c1eed64e2f4cf51b98497f4ca28cb0883eeffe3b6fbe2",
+    "code-reviewer.md": "c0e0b5b50e6d0198499c9505395ddc1081810f26cf305783cb92d8a0fdea2d98",
     "delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
     "explore/explore.md": "ccc32c776f8ddd4499af5b12f4f903eff539d30c28a13bf885cb74cd64dfe32c",
     "implementer/implementer.md": "1253162737050e1396db04eadd665cbca9911bbf823ee654c7835f33c9bc0f14",
@@ -23,6 +27,10 @@
     "lead-workflow-manual/lead-workflow-manual.md": "b0d3604de87d3e2a4817e12664551897c6197782c430e363cee5d3c94f04d34a",
     "lead-write-spec/lead-write-spec.md": "b7692fbccd5159c474ee32670f646db70565e3697465bb62cb68e9cde2c8503f",
     "lead-write-ticket/lead-write-ticket.md": "a1039f16ef9a419cc1d21c762c0f4b6c8342e1350ac51ab15be37a4f3fdd25b2",
+    "mental-model-updater/mental-model-updater.md": "23e318a6883304b8dc2f42dafa262910fbe95a7a88bd9d148db3102f697b572c",
+    "plan-populator-research/plan-populator-research.md": "42a46203e459640eba29c9d09bedfa0c5b13cf2e8dad2abbbcea09782ec1ecb2",
+    "plan-populator-survey/plan-populator-survey.md": "e37faab0e4fbdb4bad335d0280fdac98b62332507a13e6ef24a77864ad4210fa",
+    "reference-discovery/reference-discovery.md": "f069eae4b572bd93e1dfa3b9700ae2f08d8820b46c5fbd19280a38fc21a487fa",
     "reviewer/reviewer.md": "c52e5a85cc70eae25048d46ed5b4edbc1df5f5b0b581b9a7f6a762d3215dfd6b",
     "sample-conventions.md": "fd90dadec24fbd89a8489172239a7abe97d450ec16526b54818c9c7634aaeb91",
     "sample-playbook/sample-playbook.codex.md": "ce77a56088246fcaf1996e0fb45c5a4da2d1f7122653862fe6742fc4f5cf1df5",
