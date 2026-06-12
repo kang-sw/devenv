@@ -7,8 +7,11 @@
     "code-review-fit/code-review-fit.md": "5efdebd7dd8e1f72cdeb84b4b75c4ba8161cc765b82c32c2241753cb80055d62",
     "code-review-test/code-review-test.md": "5c1b2d17310e69c1b85c1eed64e2f4cf51b98497f4ca28cb0883eeffe3b6fbe2",
     "code-reviewer.md": "c0e0b5b50e6d0198499c9505395ddc1081810f26cf305783cb92d8a0fdea2d98",
+    "delegate-orientation.md": "c7f63b64496d7aaf4af85ff5036767feef9fa652dc6ff48e7a2c7a6318d245be",
     "delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
+    "executor-wrapup.md": "8904b871b3fdbf68886f7bf2e68676c6a760bbfb7c6692e6d1aa79f520426ec0",
     "explore/explore.md": "ccc32c776f8ddd4499af5b12f4f903eff539d30c28a13bf885cb74cd64dfe32c",
+    "impl-playbook.md": "e8721caa3dae05334819b86e512e133b75d25c84b8f8e4a23db1c468fc84bec0",
     "implementer/implementer.md": "1253162737050e1396db04eadd665cbca9911bbf823ee654c7835f33c9bc0f14",
     "lead-add-rule/lead-add-rule.md": "4060426700f610fac45047d7bfc5b52e68a6493486671ebc6d4c9a888bd61dc1",
     "lead-bootstrap/lead-bootstrap.md": "cd75ba51c2e36a9472d8f112a94914cdb9f26a8853fc77732b7f27f4e84af7bc",
@@ -37,6 +40,7 @@
     "reviewer/reviewer.md": "c52e5a85cc70eae25048d46ed5b4edbc1df5f5b0b581b9a7f6a762d3215dfd6b",
     "sample-conventions.md": "fd90dadec24fbd89a8489172239a7abe97d450ec16526b54818c9c7634aaeb91",
     "sample-playbook/sample-playbook.codex.md": "ce77a56088246fcaf1996e0fb45c5a4da2d1f7122653862fe6742fc4f5cf1df5",
-    "sample-playbook/sample-playbook.md": "f813e57e9c3af21a911072c992f19afa7e8fd63b085d7527c315665543762673"
+    "sample-playbook/sample-playbook.md": "f813e57e9c3af21a911072c992f19afa7e8fd63b085d7527c315665543762673",
+    "subagent-rules.md": "3ccddda3ffa9098277d9a3e84cba3cc41d92b6c2e2d5d804e000ba014c4ce827"
   }
 }
