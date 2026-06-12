@@ -82,6 +82,17 @@ Resolution chain: frontmatter first-class tier (default) → overridden by
 `(skill, role)` config if present → native: host model / mercenary: concretion
 via `config.agents_tier`.
 
+**Naming (confirmed 2026-06-12).** Reserve "tier" for layer-1 (the abstraction);
+the concrete-model layer uses "alias"/"model". Surface names: layer-3
+`config.agents_tier` → **`config.model_alias`** (alias-keyed concrete-model config,
+read by both the mercenary register path and the native `{{.*Model}}` render-var
+substitution — a mechanism-layer surface, not mercenary-only, so `mercenary_alias`
+was rejected); the layer-1 override (item 1 above) = **`config.role_tier`** (role
+primary key, skill secondary). The first-class→alias mapping (`firstClassTierToAlias`)
+is the intended plane boundary, kept by design (layer 3 stays alias-keyed). Both are
+caller-visible renames/additions deferred to a dedicated config-surface slice or
+Phase 7 coordination in `260611-refactor-ws-tier-taxonomy-delegate-tier-routing`.
+
 ## The idea
 
 A ws-level config surface that parameterizes per-role (and ideally

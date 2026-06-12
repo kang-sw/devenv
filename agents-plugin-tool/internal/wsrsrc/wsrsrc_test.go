@@ -277,6 +277,33 @@ func TestLoaderBase(t *testing.T) {
 	}
 }
 
+// TestLoaderParsesRoleAndTier verifies the first-class tier frontmatter field is
+// recognized (parse-only; honoring is a later phase) and does not leak into Extra.
+func TestLoaderParsesRoleAndTier(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "impl/impl.md", "---\nkind: render\ndelegates: true\nrole: implementer\ntier: medium\n---\nbody\n")
+	m, err := GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	pb, err := Load(root, "impl", "", nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if pb.Meta.Role != "implementer" {
+		t.Errorf("Role = %q, want implementer", pb.Meta.Role)
+	}
+	if pb.Meta.Tier != "medium" {
+		t.Errorf("Tier = %q, want medium", pb.Meta.Tier)
+	}
+	if _, ok := pb.Meta.Extra["tier"]; ok {
+		t.Errorf("tier leaked into Extra (should be a recognized field): %v", pb.Meta.Extra)
+	}
+}
+
 func TestLoaderHarnessVariant(t *testing.T) {
 	root := buildMinimalTree(t)
 	pb, err := Load(root, "sample", "codex", map[string]string{"Name": "Agent"})

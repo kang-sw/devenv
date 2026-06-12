@@ -241,9 +241,32 @@ dropped tickets live in hidden archive dirs and git history.
   demoted to concrete-model aliases, shipped delegate `role:`/`tier:` playbook
   asset (child-key splice + model vars), mercenary per-spawn tier plumbing into
   `RegisterOptions`, `oneShot` dead-code cleanup, reviewer-tier default
-  re-authored in first-class vocab. 3 phases; spec addressed via `## Spec Impact`
-  (Contract-first: no — closeout reconciles `mcp-tools.md` + `workflow-skills.md`
-  per phase). Next: proceed routes Phase 1 to `lead-implement`.
+  re-authored in first-class vocab. **Absorbed 2026-06-12:** full delegate-prompt
+  convergence — port delegate prompts to rsrc (P4), migrate skills off
+  `register(prompts)` (P5), retire the `wsprompt` loader incl. `api.ask`/wsflow
+  `RenderSource` rewire (P6); migrate the delegation surface to `ws.mercenary.*`
+  (P7, naming clarity). 7 phases (1-3 tier surface independent of 4-6
+  convergence); spec addressed via `## Spec Impact` (Contract-first: no — closeout
+  reconciles `mcp-tools.md` + `workflow-skills.md` per phase). **Phase 1 done**
+  (`3019ade9`): shipped implementer/reviewer delegate playbooks (canonical ports)
+  + parse-only Tier field + shipped-asset e2e. **Phase 2 done** (`54e53d70`):
+  `playbook.render`/`print` return a `recommended-tier` line + `agents.register`
+  tier pass-through (`firstClassTierToAlias`) so a mercenary follows its frontmatter
+  tier instead of core, + `oneShot` dead-code removal. **Phase 3 done**
+  (`fc1cdc5f` source; spec `10be8183`, mental-model `94eafada`): reviewer-tier
+  default re-authored in first-class vocab (correctness `large`, fit/test `medium`)
+  in rsrc + wsflow + manifest; first-class capability vocabulary established in spec
+  (`#260612-first-class-tier-vocabulary`) with `light/core/deep` as the alias layer;
+  tier-guide single-source resolved at note/precedence level. **wsconfig flag
+  resolved** (`45f32b80`, Phase 3 Edition): the `wsconfig` first-class adoption the
+  Phase 2 Forward note anticipated was an unconfirmed assistant hint contradicting
+  the confirmed `config.agents_tier`-unchanged decision; `config.agents_tier` is
+  alias-keyed by design and `firstClassTierToAlias` is the intended plane boundary
+  (not debt). **Naming decisions (2026-06-12, exec deferred):** `config.agents_tier`
+  → `config.model_alias`, new override `config.role_tier`, "tier" reserved for the
+  abstraction layer — recorded in `## Decisions` + research `260611`; renames are a
+  config-surface slice / Phase 7-coordinated, not Phase 3. Next: Phase 4 (port
+  remaining delegate prompts to rsrc; convergence chain P4→P5→P6, P7 rename).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

@@ -3,13 +3,14 @@
   "files": {
     "delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
     "explore/explore.md": "ccc32c776f8ddd4499af5b12f4f903eff539d30c28a13bf885cb74cd64dfe32c",
+    "implementer/implementer.md": "1253162737050e1396db04eadd665cbca9911bbf823ee654c7835f33c9bc0f14",
     "lead-add-rule/lead-add-rule.md": "4060426700f610fac45047d7bfc5b52e68a6493486671ebc6d4c9a888bd61dc1",
     "lead-bootstrap/lead-bootstrap.md": "cd75ba51c2e36a9472d8f112a94914cdb9f26a8853fc77732b7f27f4e84af7bc",
     "lead-check-blockers/lead-check-blockers.md": "3681e4ce6b4298c62d8bdacc5c52d1fbabdac7965e2490acf2129b209c7d0212",
     "lead-discuss/lead-discuss.md": "e68058ab7aa6b0409aa5f7fd768947eb7b2416fd0a279a757b8e3b313ec0a35a",
     "lead-forge-mental-model/lead-forge-mental-model.md": "4fdae66924a94929ee30479bd022dee3a600223c22db106f39856b163325a775",
     "lead-forge-spec/lead-forge-spec.md": "940763abf9f456fb5615de43bfac441b3ea5ee8a69bbe0c536d882104c47feec",
-    "lead-implement/lead-implement.md": "d0f8b7b59b11f225eb1943ac5c03b37c0009f6b9362b2dcc3a2de3ab22ef56af",
+    "lead-implement/lead-implement.md": "b455fbf76ad3c892e4531e75d1b034e290a01715edf06aa0802718543e8d0c21",
     "lead-proceed/lead-proceed.md": "aa64310f3e635a02133a25dd6b0a1d793b7adb44794ce13a6c4c590a932921df",
     "lead-review/lead-review.md": "1cdf52f982b77f4a1dce2816dda5c1659badcc7790fc52a827385e61ae014750",
     "lead-salvage/lead-salvage.md": "33d940fe6deb148a84eeedbd4b72d83e9d294978599fb727efd8851ce3dbf7e1",
@@ -22,6 +23,7 @@
     "lead-workflow-manual/lead-workflow-manual.md": "b0d3604de87d3e2a4817e12664551897c6197782c430e363cee5d3c94f04d34a",
     "lead-write-spec/lead-write-spec.md": "b7692fbccd5159c474ee32670f646db70565e3697465bb62cb68e9cde2c8503f",
     "lead-write-ticket/lead-write-ticket.md": "a1039f16ef9a419cc1d21c762c0f4b6c8342e1350ac51ab15be37a4f3fdd25b2",
+    "reviewer/reviewer.md": "c52e5a85cc70eae25048d46ed5b4edbc1df5f5b0b581b9a7f6a762d3215dfd6b",
     "sample-conventions.md": "fd90dadec24fbd89a8489172239a7abe97d450ec16526b54818c9c7634aaeb91",
     "sample-playbook/sample-playbook.codex.md": "ce77a56088246fcaf1996e0fb45c5a4da2d1f7122653862fe6742fc4f5cf1df5",
     "sample-playbook/sample-playbook.md": "f813e57e9c3af21a911072c992f19afa7e8fd63b085d7527c315665543762673"

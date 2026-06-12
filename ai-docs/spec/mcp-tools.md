@@ -151,6 +151,17 @@ Configuration exposes harness-aware model alias mappings. `light`, `core`, and
 migrated or wrapped for compatibility, and new documentation speaks in terms of
 model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 
+The delegation tier abstraction is the first-class capability vocabulary
+`small`/`medium`/`large`/`xlarge`, which names task-intrinsic reasoning depth
+independent of host or subscription plan. `light`/`core`/`deep` are conventional
+aliases at the concrete-model layer (alongside provider model names), connected
+to the capability axis by the locked mapping `light↦small`, `core↦medium`,
+`deep↦large`; `xlarge` (fable-class) has no legacy alias. Playbook frontmatter
+declares `role:` and `tier:` in the first-class vocabulary; a first-class tier is
+resolved to a concrete backend/model by mapping through the alias layer into
+`config.agents_tier` (`#260513-harness-local-agent-tier-config`), which remains
+keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
+
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active
@@ -349,8 +360,12 @@ bodies.
 
 `playbook.render(session_key, name, context?, root_override?)` materializes the
 named playbook as a context-injected, harness-rendered prompt, writes it to a
-worktree-scoped temporary file, and returns that file path. The caller hands the
-path to a host-native subagent or a mercenary. Like `prompt.render`, it carries
+worktree-scoped temporary file, and returns that file path together with a
+`recommended-tier` line carrying the playbook's first-class frontmatter tier (when
+declared). The caller hands the path to a host-native subagent or a mercenary and
+routes the recommended tier to whichever path it picks — as a host model-selection
+guide for a native subagent, or as `agents.register`'s pass-through `tier` for a
+mercenary. `playbook.print` surfaces the same `recommended-tier` line. Like `prompt.render`, it carries
 no routing or strategy decision — the caller selects `name`, and the tool only
 materializes a rendered copy. `root_override`, when set, rebinds both the
 auto-include resolution root and the child-key binding root for a delegate
@@ -434,10 +449,13 @@ from `playbook.render`.
 
 `agents.register` registers a mercenary agent with an optional `backend` (codex
 or claude) and a self-contained `system_prompt_text` produced by
-`playbook.render`. The former `prompts: [stems]`/`prompt_refs` references and the
-registration-time model-alias/`tier` fields are removed: per-mercenary model
-selection moves into the rendered prompt and harness config
-(`#260513-harness-local-agent-tier-config`). `agents.call` starts an asynchronous
+`playbook.render`. The former `prompts: [stems]`/`prompt_refs` and `model`
+registration fields are removed. The `tier` field is a *pass-through* of the
+first-class recommended tier that `playbook.render` returns — its origin is the
+playbook frontmatter, not a caller-chosen workload tier: `agents.register` maps it
+to the alias layer and resolves the per-mercenary backend/model from harness config
+(`#260513-harness-local-agent-tier-config`), so a mercenary's model follows its
+playbook frontmatter `tier:` rather than defaulting to core. `agents.call` starts an asynchronous
 call, returns immediately, and yields a native-shaped continuation handle
 (`agentId=<name>`) so the lead reuses one continuation idiom across the native
 and mercenary paths. Named-agent calls resolve their root from the mandatory
@@ -505,7 +523,11 @@ deferred plug, not a structural exclusion.
 
 **Single self-contained prompt; native-shaped handle.** A mercenary is invoked
 with one self-contained prompt produced by `playbook.render`
-(`#260609-playbook-tools`); there is no `register(prompts: [stems])` step. A
+(`#260609-playbook-tools`); there is no `register(prompts: [stems])` step. The
+playbook's first-class frontmatter `tier:` is surfaced by `playbook.render` as a
+recommended tier and passed through to `agents.register`'s `tier` arg, which
+selects the mercenary's model via config — the caller never hand-picks a workload
+tier. A
 mercenary call returns a continuation handle of the same shape as a native
 subagent id, so the lead reuses one continuation idiom across both paths.
 

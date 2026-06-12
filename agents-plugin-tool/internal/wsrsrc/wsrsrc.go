@@ -24,6 +24,11 @@ type PlaybookMeta struct {
 	// Values: lead | delegate | leaf | implementer | reviewer.
 	// Empty when absent from frontmatter.
 	Role string
+	// Tier is the first-class delegation tier this playbook declares.
+	// Values: small | medium | large | xlarge (capability axis).
+	// Recognized here (parse-only); honoring it for mercenary model routing is
+	// a later phase. Empty when absent from frontmatter.
+	Tier string
 	// Includes is the ordered list of bare text-dep names to auto-include.
 	Includes []string
 	// Variables is the ordered list of declared substitution variable names.

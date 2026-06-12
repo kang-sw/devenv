@@ -185,13 +185,14 @@ Tier 1 - depth:
 
 Tier 2 - partitions (only when Tier 1 = Partitioned):
 
-| Partition | When |
-|-----------|------|
-| Correctness | New logic, modified error paths, contract/security surface |
-| Fit | Existing components reused/modified, new pattern, or ticket-driven decision preservation |
-| Test | Tests added/modified, or new code paths lack coverage |
+| Partition | Default tier | When |
+|-----------|--------------|------|
+| Correctness | large | New logic, modified error paths, contract/security surface |
+| Fit | medium | Existing components reused/modified, new pattern, or ticket-driven decision preservation |
+| Test | medium | Tests added/modified, or new code paths lack coverage |
 
 Choose the smallest partition set that covers material risk. Reserve all three for cross-cutting behavior plus runtime/tooling plus test surface.
+Default reviewer tier per partition in first-class vocabulary (`small`/`medium`/`large`/`xlarge`); raise a partition's tier for unusually subtle risk. Map the first-class tier through the `light↦small`/`core↦medium`/`deep↦large` alias layer to a concrete model wherever the dispatch path exposes a model/tier lever.
 
 ## Templates
 
