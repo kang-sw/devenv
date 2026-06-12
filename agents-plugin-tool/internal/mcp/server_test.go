@@ -287,6 +287,9 @@ func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	// Phase 6: prompt.render now sources from rsrc; point at the shipped tree.
+	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+	s := NewServer(root, "test")
 
 	// (a) Namespace substitution replaces ws/ and ws: at word boundaries only.
 	//     Tokens like "workflows/", "news/", "rows:" must NOT be mangled.
@@ -311,7 +314,7 @@ func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
 
 	// (b) Render code-reviewer; the rendered file must contain wsflow/ (ws/ substituted)
 	//     and must not contain bare ws/ tokens.
-	path1, err := renderPrompt(root, "code-reviewer", nil)
+	path1, err := s.renderPrompt(root, "code-reviewer", nil)
 	if err != nil {
 		t.Fatalf("renderPrompt code-reviewer: %v", err)
 	}
@@ -335,12 +338,12 @@ func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
 	}
 
 	// (c) Ineligible stem and unknown stem both return errors.
-	if _, err := renderPrompt(root, "implementer", nil); err == nil {
+	if _, err := s.renderPrompt(root, "implementer", nil); err == nil {
 		t.Error("renderPrompt with ineligible stem 'implementer' returned nil error")
 	} else if !strings.Contains(err.Error(), "not render-eligible") {
 		t.Errorf("ineligible stem error message unexpected: %v", err)
 	}
-	if _, err := renderPrompt(root, "no-such-prompt", nil); err == nil {
+	if _, err := s.renderPrompt(root, "no-such-prompt", nil); err == nil {
 		t.Error("renderPrompt with unknown stem 'no-such-prompt' returned nil error")
 	} else if !strings.Contains(err.Error(), "not render-eligible") {
 		t.Errorf("unknown stem error message unexpected: %v", err)
@@ -348,7 +351,7 @@ func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
 
 	// (d) Context values containing ws/ are NOT substituted (context is appended
 	//     after the substitution pass).
-	path2, err := renderPrompt(root, "code-reviewer", map[string]string{
+	path2, err := s.renderPrompt(root, "code-reviewer", map[string]string{
 		"note": "see ws/specs.find for details",
 	})
 	if err != nil {
@@ -364,6 +367,42 @@ func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
 	}
 	if !strings.Contains(text2, "ws/specs.find") {
 		t.Error("context value containing 'ws/specs.find' was unexpectedly substituted in the context block")
+	}
+}
+
+// TestRenderPromptAllEligibleStemsFromRsrc verifies every wsflow-eligible stem
+// renders from the shipped rsrc tree (Phase 6 source move) with model-alias vars
+// fully substituted — covering the subdir playbooks (reference-discovery,
+// plan-populator-*, mental-model-updater) alongside the flat code-reviewer dep.
+func TestRenderPromptAllEligibleStemsFromRsrc(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+	s := NewServer(root, "test")
+
+	for _, stem := range []string{
+		"reference-discovery", "plan-populator-survey",
+		"plan-populator-research", "code-reviewer", "mental-model-updater",
+	} {
+		t.Run(stem, func(t *testing.T) {
+			path, err := s.renderPrompt(root, stem, nil)
+			if err != nil {
+				t.Fatalf("renderPrompt(%s): %v", stem, err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read rendered %s: %v", stem, err)
+			}
+			text := string(data)
+			if strings.TrimSpace(text) == "" {
+				t.Fatalf("rendered %s is empty", stem)
+			}
+			if strings.Contains(text, "{{.") {
+				t.Errorf("rendered %s has an unsubstituted placeholder:\n%s", stem, text)
+			}
+		})
 	}
 }
 
@@ -1287,6 +1326,9 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	// Phase 6: prompt.render sources from rsrc; point at the shipped tree (in
+	// production the wsflow launcher sets this to the packaged rsrc copy).
+	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,

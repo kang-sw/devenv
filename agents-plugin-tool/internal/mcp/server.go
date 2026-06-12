@@ -778,7 +778,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		stem, _ := params.Arguments["stem"].(string)
-		promptPath, err := renderPrompt(root, stem, stringMapArgument(params.Arguments["context"]))
+		promptPath, err := s.renderPrompt(root, stem, stringMapArgument(params.Arguments["context"]))
 		return toolTextResponse(req.ID, promptPath+"\n", err)
 
 	case "playbook.print":
@@ -2689,14 +2689,26 @@ var wsflowRenderEligibleStems = map[string]bool{
 	"mental-model-updater":    true,
 }
 
-// renderPrompt loads a bundled prompt by stem, applies namespace substitution,
-// appends an optional injected context block, writes the result to a
-// worktree-scoped tmp file, and returns the path.
-func renderPrompt(root, stem string, context map[string]string) (string, error) {
+// renderPrompt loads a render-eligible delegate prompt by stem from the rsrc
+// tree, applies wsflow namespace substitution, appends an optional injected
+// context block, writes the result to a worktree-scoped tmp file, and returns
+// the path. Phase 6 (260611) moved the source from the embedded wsprompt bundle
+// to rsrc; the five-stem allowlist and render-time namespace substitution are
+// preserved per spec #260529-prompt-render-tool.
+func (s *Server) renderPrompt(root, stem string, context map[string]string) (string, error) {
 	if !wsflowRenderEligibleStems[stem] {
 		return "", fmt.Errorf("prompt stem %q is not render-eligible in wsflow", stem)
 	}
-	body, err := wsprompt.RenderSource(stem)
+	rsrcRoot, err := resolveRsrcRoot("")
+	if err != nil {
+		return "", err
+	}
+	// wsflow is agentless: no child-key mint (mintRoot="") and no mercenary
+	// guidance. These delegate playbooks declare only model-alias vars, which
+	// renderPlaybookBody auto-injects (nil caller context); the caller `context`
+	// is appended as a free-text block below, preserving the prompt.render
+	// contract from before the rsrc move (context is data, not substitution vars).
+	body, _, err := renderPlaybookBody(s, rsrcRoot, stem, nil, wsconfig.Options{}, "", false)
 	if err != nil {
 		return "", fmt.Errorf("load prompt %q: %w", stem, err)
 	}
