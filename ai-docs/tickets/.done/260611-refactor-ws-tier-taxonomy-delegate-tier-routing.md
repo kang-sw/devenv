@@ -10,6 +10,7 @@ related-mental-model:
   - prompt-bundle
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-06-12
 ---
 
 # ws tier taxonomy (first-class small/…/xlarge) + delegate tier routing
@@ -830,6 +831,81 @@ touches a single, already-converged call shape. Verification: no shipped
 skill/playbook references the old delegation tool names; a representative
 delegation spawns end-to-end on both ws and wsflow under the new names; spec
 `#260610-mercenary-delegation-surface` reconciled to the `ws.mercenary.*` names.
+
+### Result (d18883a0) - 2026-06-12
+
+Landed on `implement/ws-tier-taxonomy-phase7` (stacked on the unmerged Phase 6b
+tip `dc77c5fe`; merge-target = epic `260605`). The `agents.*` delegation surface
+is renamed to `ws.mercenary.*` — the last convergence phase.
+
+Naming resolved at implementation (user-confirmed):
+- **MCP tool ids** carry `ws.` (`ws.mercenary.register/call/wait/result/status/
+  interrupt/tail/debug.*/cancel/recall/print/erase`), mirroring the sibling
+  `ws.lead.*` lead-control surface; written bare in skill text (no `ws/` prefix),
+  matching the `ws.lead.login` convention.
+- **CLI** group keyword `mercenary`; command identifiers `mercenary.*` (no `ws.`
+  prefix) following the house MCP/CLI split already present for
+  `config.agents_tier`(MCP)/`config.agents-tier`(CLI) and `git.merge_base`/`merge-base`.
+- **register kept, NOT renamed to spawn**: "spawn" implies create+execute in
+  English, misleading for the retained register-then-call two-step; the
+  `mercenary.` namespace already delivers the behavioral-legibility goal.
+- **Hard rename, no compatibility alias**: skills already delegate via
+  render+spawn (Phase 5) and no external consumer depends on the old names in the
+  `0.30.0-dev` pre-release window.
+
+Delivered (source commits `d18883a0` rename + `d13cbb2a` rsrc text + `d87cab33`
+review fix):
+- `server.go` dispatch cases, `tools()` schema names, the agents-tool schema-clone
+  gate, role-gate + no-agent-hide prefix checks, `debug.*` TrimPrefix,
+  `agentCallHandleText` follow_up (the `agentId=` continuation handle is unchanged).
+- `wsagent/agent.go` hint strings + subprocess CLI invocations
+  (`mercenary run-current`/`check-inbox`). `cmd/ws-mcp/main.go` CLI group/dispatch/
+  usage, flagset/fatal labels, `runtimeCapabilityCommandNames` (`mercenary.*`),
+  no-agent CLI gate. `playbook_tools.go` always-on mercenary tip + comments.
+- `agents-plugin/runtime.json`: tools block (`ws.mercenary.*`) + commands block
+  (`mercenary.*`). rsrc skill text (lead-implement/lead-workflow-manual/lead-salvage/
+  lead-verify-design) + manifest + wsflow rsrc mirror regenerated.
+- Untouched by design: `config.agents_tier`/`config.agents-tier` (deferred
+  config-surface slice), internal Go identifiers/`wsagent` package/`AgentsDir`
+  storage path, the config `agents` JSON key, the `api.ask` surface (uses the
+  internal `wsagent` package, not the `agents.*` MCP/CLI names).
+
+Verification: `go build/vet ./...` clean; full Go suite green (13 packages,
+manifest + wsflow-mirror drift guards included). ws launcher-capabilities python
+suite green (20 OK); wsflow runtime-contract rename assertions (HIDDEN_TOOLS=
+`ws.mercenary.*`, HIDDEN_COMMANDS=`mercenary.*`) green. Partitioned review
+(correctness + fit + test, independent native reviewers): fit + test `[clean]`
+first pass; correctness caught one `ws/ws.mercenary.call` double-prefix in the
+`ws.lead.prefer_mercenary` description (fixed `d87cab33`), `[clean]` on re-review.
+spec `22dbcb8c` (mcp-tools / named-agent-runtime / workflow-skills); mental-model
++ ref `c56c07ef` (mcp-runtime / named-agent-runtime / prompt-bundle /
+wsflow-mirroring forbidden-list).
+
+Deviations / open items:
+- *Lead-driven edit + native partitioned review* (continues the M3/260611 Phase
+  1-6b deviation): the surface being renamed IS the ws delegate path, so
+  delegating the rename is self-referential and the ws delegate path is
+  crash-prone; authoritative verification was the Go/python layers + grep.
+- *`ref/ws-agent-runtime.md` left unpatched*: it is broadly pre-M3-stale (still
+  documents removed `subquery`, the removed register `prompts` field, and the
+  `delegate-orientation` prepend), so a tool-name-only patch would create a
+  misleading hybrid; needs a dedicated cleanup, out of Phase 7 scope.
+- *`lead-verify-design` keeps `model: "deep"`*: only the tool name was renamed;
+  the inline-prompt-reviewer model/tier path stays the open Phase 5 follow-up
+  (it renders no playbook, so no `recommended-tier` to pass through).
+- *Pre-existing, NOT a Phase 7 regression*:
+  `test_skill_dispatch_contracts.py` (stale SKILL.md text from the P5 migration,
+  tracked in `260611-bug-skill-dispatch-contract-tests-stale-after-entry-shim-migration`)
+  and the wsflow `lead-workflow-manual` `ws.lead.login` dotted-namespace failure
+  (`260612-bug-wsflow-skill-ws-dotted-namespace-ref`) both persist; no Phase 7
+  commit touches `agents-plugin/skills/`.
+
+All 7 phases complete; ticket moves to `.done/`. The P4-7 epic-merge (the
+21-commit convergence stack; P1-3 are already merged to the epic at `016c1425`)
+remains a pending user decision. Deferred follow-ups
+(separate slices): config-surface renames (`config.agents_tier`→`config.model_alias`,
+`config.role_tier`), the `(skill, role)→tier` override surface, and the
+`lead-verify-design` inline-reviewer model/tier path.
 
 ## Spec Impact
 

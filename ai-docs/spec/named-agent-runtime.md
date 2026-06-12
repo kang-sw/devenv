@@ -75,7 +75,7 @@ empty instead of producing a cross-backend mismatch.
 
 ## Async Single-Call Lifecycle {#260505-agent-async-single-call-lifecycle}
 
-`agents.call` starts one asynchronous current call for a registered agent and
+`ws.mercenary.call` starts one asynchronous current call for a registered agent and
 returns before backend completion. The call snapshot records the prompt path,
 execution id, worker pid, stream paths, status, timestamps, exit code, error,
 and session id when known.
@@ -97,12 +97,12 @@ state, and inbox as the parent MCP tool dispatch.
 
 ## Readiness And Result Split {#260505-agent-readiness-result-split}
 
-`agents.wait` waits for one or more named agents and returns readiness metadata
+`ws.mercenary.wait` waits for one or more named agents and returns readiness metadata
 when any requested call is terminal. It does not return final output. If the
 timeout expires, the response includes timeout and per-agent ready/pending
 metadata. The default wait timeout is 10 minutes.
 
-`agents.result` is the result-consumption surface for a single named agent. It
+`ws.mercenary.result` is the result-consumption surface for a single named agent. It
 can read an already completed result or wait up to an explicit timeout. Running,
 failed, cancelled, timed-out, and non-ready calls return status text rather than
 successful output. Successful result reads hide ephemeral role pointers, but the
@@ -110,19 +110,19 @@ ephemeral instance payload remains subject to the normal retention cleanup path.
 
 ## Diagnostics, Tail, And Debug Streams {#260505-agent-diagnostics-tail-debug}
 
-`agents.status` reports registry state and current-call state, including agent
+`ws.mercenary.status` reports registry state and current-call state, including agent
 status, backend, tier, model, session id, call status, execution id, pid,
 timestamps, exit code, error text, cleanup flags, diagnostic stream paths, and
 follow-up guidance.
 
-`agents.tail` reads recent event, runtime, stdout, stderr, and output lines
+`ws.mercenary.tail` reads recent event, runtime, stdout, stderr, and output lines
 without invoking the backend. Normal tail output is context-bounded: large JSON
 fields and long lines are truncated with an explicit `ws-tail truncated` marker.
-Raw inspection remains available through the `agents.debug.*` diagnostic tools.
+Raw inspection remains available through the `ws.mercenary.debug.*` diagnostic tools.
 
 ## Inbox Interrupt Delivery {#260505-agent-inbox-interrupt-delivery}
 
-`agents.interrupt` appends a durable pending message to the target agent's
+`ws.mercenary.interrupt` appends a durable pending message to the target agent's
 inbox. Pending messages are marked delivered when the runtime injects them into
 a backend input path; delivery does not claim model compliance.
 
@@ -134,15 +134,15 @@ messages to the next resumed backend call.
 
 ## Cancel And Disk-Backed Recovery {#260505-agent-cancel-recovery}
 
-`agents.cancel` performs best-effort local process cancellation for the stored
+`ws.mercenary.cancel` performs best-effort local process cancellation for the stored
 worker pid and marks the current call cancelled. Cancellation is the urgent
-termination path; normal redirects should use `agents.interrupt`. When
+termination path; normal redirects should use `ws.mercenary.interrupt`. When
 cancellation followed an agent no-response timeout and no result is available,
-cancelled status output tells callers to retry `agents.call` on the same
+cancelled status output tells callers to retry `ws.mercenary.call` on the same
 registered agent with a recovery prompt so stored-session backends can resume.
 
-After an MCP process restart, disk state remains sufficient for `agents.wait`,
-`agents.result`, `agents.status`, `agents.tail`, and compatibility output reads.
+After an MCP process restart, disk state remains sufficient for `ws.mercenary.wait`,
+`ws.mercenary.result`, `ws.mercenary.status`, `ws.mercenary.tail`, and compatibility output reads.
 If the stored worker pid for a running call is no longer alive, readiness and
 result paths reconcile the call to a failed terminal state with diagnostic
 information.
@@ -158,17 +158,17 @@ bounded check without moving payload bytes into SQLite.
 
 ## Recall Recovery {#260511-agent-recall-recovery}
 
-`agents.recall` is a recovery-only retry path for a registered agent after
-`agents.result(timeout_seconds: 600)` times out and `agents.tail` shows no useful
+`ws.mercenary.recall` is a recovery-only retry path for a registered agent after
+`ws.mercenary.result(timeout_seconds: 600)` times out and `ws.mercenary.tail` shows no useful
 activity. It is not the normal continuation or redirect surface.
 
 When the current call is active, recall first performs the same best-effort
-cancellation as `agents.cancel`. If cancellation reports `cleanup_needed`, recall
+cancellation as `ws.mercenary.cancel`. If cancellation reports `cleanup_needed`, recall
 does not start a replacement call and returns manual-cleanup guidance. Otherwise
-it starts a new resumed `agents.call` with either the caller's recovery prompt or
+it starts a new resumed `ws.mercenary.call` with either the caller's recovery prompt or
 a default prompt that identifies the retry as timeout-and-no-activity recovery.
 This compatibility implementation is not advertised as the normal model-visible
-MCP recovery surface; ordinary recovery guidance points callers to `agents.call`
+MCP recovery surface; ordinary recovery guidance points callers to `ws.mercenary.call`
 on the same registered agent.
 
 ## Codex Session And JSONL Handling {#260505-codex-agent-session-jsonl-handling}
@@ -201,8 +201,8 @@ prompt contents by default. {#260508-codex-prompt-delivery-diagnostics}
 
 Named-agent registrations with `backend: claude` execute through the same
 agent lifecycle as Codex-backed agents. Callers will use the existing
-`agents.register`, `agents.call`, `agents.wait`, `agents.result`,
-`agents.status`, `agents.tail`, `agents.interrupt`, and diagnostics tools
+`ws.mercenary.register`, `ws.mercenary.call`, `ws.mercenary.wait`, `ws.mercenary.result`,
+`ws.mercenary.status`, `ws.mercenary.tail`, `ws.mercenary.interrupt`, and diagnostics tools
 without switching to a Claude-specific registry or output surface.
 
 The Claude adapter starts first calls with a runtime-managed Claude session id,

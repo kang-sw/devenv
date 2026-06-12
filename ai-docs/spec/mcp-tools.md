@@ -300,7 +300,7 @@ locations.
 The MCP server supports an environment-selected agentless product mode for the
 internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
 omit named-agent, model-alias configuration, and agent-backed API
-documentation surfaces: `agents.*`, `config.agents_tier`,
+documentation surfaces: `ws.mercenary.*`, `config.agents_tier`,
 `api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel`.
 `api.list` remains available as read-only cache discovery.
 
@@ -372,7 +372,7 @@ worktree-scoped temporary file, and returns that file path together with a
 `recommended-tier` line carrying the playbook's first-class frontmatter tier (when
 declared). The caller hands the path to a host-native subagent or a mercenary and
 routes the recommended tier to whichever path it picks — as a host model-selection
-guide for a native subagent, or as `agents.register`'s pass-through `tier` for a
+guide for a native subagent, or as `ws.mercenary.register`'s pass-through `tier` for a
 mercenary. `playbook.print` surfaces the same `recommended-tier` line. Like `prompt.render`, it carries
 no routing or strategy decision — the caller selects `name`, and the tool only
 materializes a rendered copy. `root_override`, when set, rebinds both the
@@ -448,55 +448,55 @@ refresh.
 
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 
-The `agents.*` tool family exposes durable named-agent orchestration.
+The `ws.mercenary.*` tool family exposes durable named-agent orchestration.
 
-The `agents.*` family is the reshaped scoped **mercenary** delegation surface
+The `ws.mercenary.*` family is the reshaped scoped **mercenary** delegation surface
 (`#260610-mercenary-delegation-surface`): codex and claude runners retained,
 scoped to implementer/reviewer roles, invoked with a single self-contained prompt
 from `playbook.render`.
 
-`agents.register` registers a mercenary agent with an optional `backend` (codex
+`ws.mercenary.register` registers a mercenary agent with an optional `backend` (codex
 or claude) and a self-contained `system_prompt_text` produced by
 `playbook.render`. The former `prompts: [stems]`/`prompt_refs` and `model`
 registration fields are removed. The `tier` field is a *pass-through* of the
 first-class recommended tier that `playbook.render` returns — its origin is the
-playbook frontmatter, not a caller-chosen workload tier: `agents.register` maps it
+playbook frontmatter, not a caller-chosen workload tier: `ws.mercenary.register` maps it
 to the alias layer and resolves the per-mercenary backend/model from harness config
 (`#260513-harness-local-agent-tier-config`), so a mercenary's model follows its
-playbook frontmatter `tier:` rather than defaulting to core. `agents.call` starts an asynchronous
+playbook frontmatter `tier:` rather than defaulting to core. `ws.mercenary.call` starts an asynchronous
 call, returns immediately, and yields a native-shaped continuation handle
 (`agentId=<name>`) so the lead reuses one continuation idiom across the native
 and mercenary paths. Named-agent calls resolve their root from the mandatory
 `session_key` like every other root-aware tool
-(`#260610-ephemeral-session-auth-model`): no `agents.*` schema advertises a
+(`#260610-ephemeral-session-auth-model`): no `ws.mercenary.*` schema advertises a
 `root` argument, and there is no actor scope, hidden explicit-root dispatch, or
 persistent child-actor credential injection. The named-agent registry namespaces
 role pointers by the resolved worktree root, so the same public agent name stays
 distinct across distinct worktree roots without an actor dimension.
 
-`agents.wait` waits for one or more agents to become ready and returns readiness
-metadata, not final output. `agents.result` is the result-consumption surface and
+`ws.mercenary.wait` waits for one or more agents to become ready and returns readiness
+metadata, not final output. `ws.mercenary.result` is the result-consumption surface and
 may optionally wait for completion; successful ephemeral agents are erased after
 their result is consumed.
 
-`agents.status`, `agents.tail`, and `agents.cancel` inspect or control current
-agent work. Cancelled status text points callers toward retrying `agents.call`
+`ws.mercenary.status`, `ws.mercenary.tail`, and `ws.mercenary.cancel` inspect or control current
+agent work. Cancelled status text points callers toward retrying `ws.mercenary.call`
 on the same registered agent when no result is available, so timeout-driven
 cancellation does not look like a final erase-only state.
 {#260512-agent-cancel-resume-guidance}
 
-`agents.recall` is hidden from the advertised MCP tool surface and workflow
+`ws.mercenary.recall` is hidden from the advertised MCP tool surface and workflow
 guidance. The implementation may remain as a manual or compatibility path, but
-ordinary model-visible recovery uses `agents.call` on the same registered agent.
+ordinary model-visible recovery uses `ws.mercenary.call` on the same registered agent.
 {#260512-agent-recall-hidden-surface}
 
-Normal `agents.tail` is context-bounded. Raw diagnostic inspection is available
-through `agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
-`agents.debug.runtime_log`, and `agents.debug.events`.
+Normal `ws.mercenary.tail` is context-bounded. Raw diagnostic inspection is available
+through `ws.mercenary.debug.tail`, `ws.mercenary.debug.stdout`, `ws.mercenary.debug.stderr`,
+`ws.mercenary.debug.runtime_log`, and `ws.mercenary.debug.events`.
 
-`agents.interrupt` queues a redirect message for a running agent. `agents.print`
+`ws.mercenary.interrupt` queues a redirect message for a running agent. `ws.mercenary.print`
 remains a deprecated compatibility reader over the resolved current instance.
-`agents.erase` removes or hides the resolved role pointer for the current
+`ws.mercenary.erase` removes or hides the resolved role pointer for the current
 worktree and actor scope; historical instance payloads are removed later by the
 named-agent retention cleanup policy rather than synchronously during erase.
 
@@ -505,7 +505,7 @@ named-agent retention cleanup policy rather than synchronously during erase.
 The reshaped delegation surface. A **mercenary** is a ws-spawned external
 subprocess agent — a deliberately distinct term from a harness-native
 **subagent**, so callers never confuse the two delegation paths. This section is
-the caller-visible contract for the reshaped `agents.*` family.
+the caller-visible contract for the reshaped `ws.mercenary.*` family.
 
 **Default is native; mercenary is always available.** Default delegation is
 always to a host-native subagent. The mercenary path is always available to the
@@ -533,7 +533,7 @@ deferred plug, not a structural exclusion.
 with one self-contained prompt produced by `playbook.render`
 (`#260609-playbook-tools`); there is no `register(prompts: [stems])` step. The
 playbook's first-class frontmatter `tier:` is surfaced by `playbook.render` as a
-recommended tier and passed through to `agents.register`'s `tier` arg, which
+recommended tier and passed through to `ws.mercenary.register`'s `tier` arg, which
 selects the mercenary's model via config — the caller never hand-picks a workload
 tier. A
 mercenary call returns a continuation handle of the same shape as a native
@@ -652,7 +652,7 @@ as readable line blocks with any requested context.
 ## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
 
 The ws runtime has a SQLite metadata migration gate for moving named-agent and
-exec runtime metadata into SQLite authority. The gate keeps public `agents.*`
+exec runtime metadata into SQLite authority. The gate keeps public `ws.mercenary.*`
 and `exec.*` MCP APIs stable while separating lifecycle metadata from
 file-backed payload bodies. Named-agent registry metadata and exec job metadata
 are SQLite-backed. SQLite metadata may track identities, lifecycle state,
@@ -677,7 +677,7 @@ Tool-permission enforcement is the server-side capability check in the keyed
 `tools/call` handler. A session key carries `{root + capability scope}` —
 `lead`, `delegate`, or `leaf` — minted by `ws.lead.login(capability)` or as a
 render-minted child key. When a call presents a known non-lead key, the handler
-rejects any tool that scope disallows (`delegate` cannot call `agents.*`,
+rejects any tool that scope disallows (`delegate` cannot call `ws.mercenary.*`,
 `config.*`, or `session.*`; `leaf` additionally cannot call `api.*` or
 `git.commit`) and rejects any `ws.lead.*` call from any non-lead key (self-login
 escalation block). Keyless callers and lead keys are not restricted by this gate,

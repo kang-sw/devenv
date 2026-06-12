@@ -160,9 +160,9 @@ Forbidden distributed-skill references include:
 - `ws:`
 - `ws.`
 - `subquery`
-- `agents.register`
-- `agents.call`
-- `agents.result`
+- `ws.mercenary.register`
+- `ws.mercenary.call`
+- `ws.mercenary.result`
 - `lead-write-code`
 - `lead-write-skeleton`
 - `lead-salvage`

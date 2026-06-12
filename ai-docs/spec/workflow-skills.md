@@ -75,12 +75,12 @@ operations, API documentation lookup, and project/convention reads. Skills name
 only primitives available in the runtime; when a needed surface is not exposed
 yet, skill text describes the required MCP contract instead of naming a
 host-specific helper.
-Prompts sent to `ws/agents.call` and wsflow subagents are
+Prompts sent to `ws.mercenary.call` and wsflow subagents are
 written in English so delegated work products stay consistent with English
 AI-authored repository artifacts.
 
 Codex-facing workflow skill guidance presents MCP primitives as the primary ws
-runtime surface. Promptless `ws/agents.register(name: "<agent-name>")` is the
+runtime surface. Promptless `ws.mercenary.register(name: "<agent-name>")` is the
 general-purpose named-agent form; role-specific delegates obtain a self-contained
 prompt from `ws/playbook.render` and run natively by default or as a mercenary via
 `system_prompt_text` plus the render-returned `recommended-tier` (`tier`). The
