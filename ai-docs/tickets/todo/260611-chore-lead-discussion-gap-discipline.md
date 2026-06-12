@@ -59,6 +59,17 @@ surface: `lead-write-ticket` Apply-Ticket-Content / Intent-Review guidance + a
 representative discussion where unconfirmed decisions are held back until
 agreement.
 
+Second instance (2026-06-12, same tier-taxonomy work). The lead wrote a *forward
+note* — "teach `wsconfig` the first-class vocabulary / retire the
+`firstClassTierToAlias` bridge" — into the Phase 2 Result Forward note, a source
+comment, and the `_index` "Next" line as implementation narrative. It contradicted
+the user-confirmed Decisions bullet "config.agents_tier unchanged by the vocabulary
+split" and surfaced only when the user questioned it and an Explore audit traced the
+contradiction. Reinforces the rule and extends its scope beyond `## Decisions`:
+assistant-authored forward/next-phase hints (in Result Forward notes, focus "Next"
+lines, or code comments) are not confirmed decisions — a Result Forward note must
+not assert future scope that the Decisions log contradicts.
+
 ## Notes
 
 - Captured at `todo` (accepted backlog), not spec-addressed; slicing and spec

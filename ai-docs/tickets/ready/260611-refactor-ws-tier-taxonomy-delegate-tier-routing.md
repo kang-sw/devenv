@@ -144,6 +144,23 @@ constraint, and is rewritten at closeout.
   Phase 2 builds the tier-aware `agents.register` (render-returned tier
   pass-through) on the current name; Phase 7 renames the converged surface +
   migrates skills/spec/wsflow.
+- **Tier vocabulary naming rule + config-surface renames (confirmed 2026-06-12).**
+  "tier" is reserved for the first-class abstraction layer; the concrete-model layer
+  uses "alias"/"model". Consequently: (a) `config.agents_tier` is renamed
+  `config.model_alias` — it is keyed by the `light/core/deep` alias and is read by
+  BOTH the mercenary register path (`agent.go`) and the native-facing `{{.*Model}}`
+  render-var substitution (`playbook_tools.go`), so it is a concrete-model-layer
+  surface, NOT mercenary-only (the rejected `mercenary_alias` name would
+  misattribute a mechanism-layer surface to one consumer). (b) The deferred
+  `(skill, role)→first-class-tier` override surface (research `260611`) is named
+  `config.role_tier` (role is the primary key; skill is a secondary key). (c)
+  `firstClassTierToAlias` is the intended plane-translation boundary, kept by design;
+  `config.agents_tier`/`config.model_alias` stays alias-keyed — this supersedes the
+  Phase 2 Forward note's unconfirmed "teach wsconfig first-class" hint, which
+  contradicted the "config.agents_tier unchanged" decision. Execution is
+  caller-visible churn (MCP tool name + CLI mirror + config-file key + spec
+  `260513`/`260508` + user-config compat read) deferred to the research-`260611`
+  config-surface slice or coordinated with Phase 7, NOT Phase 3.
 
 ## Constraints
 
@@ -394,6 +411,27 @@ Deviations / open items:
 > `plan-populator-survey/research`) from `wsprompt/prompts/` to canonical rsrc
 > playbooks with `role:` + first-class `tier:` frontmatter; embedded copies stay
 > until Phase 5 removes their last skill consumer.
+
+#### Edition (45f32b80) - 2026-06-12
+
+Resolved the Phase 3 Result's `wsconfig` adoption scope flag: it is **not** an open
+routing decision. An Explore audit of the tier-taxonomy history (research `260611`)
+found the "teach `wsconfig` the first-class vocabulary / retire the
+`firstClassTierToAlias` bridge" intent originated as assistant-authored
+implementation narrative (Phase 2 source comment `54e53d70`, propagated into the
+Phase 2 Forward note + `_index` "Next"), and that it directly contradicts the
+user-confirmed `## Decisions` bullet "the existing `config.agents_tier` surface is
+unchanged by the vocabulary split". Per the finalized taxonomy, `config.agents_tier`
+is the concrete-model layer (alias-keyed) and `firstClassTierToAlias` is the intended
+plane-translation boundary, correct-by-design — not debt. The source comment was
+reframed (`45f32b80`); no `wsconfig` change is owed. Recorded as a second instance of
+the consent-gate pattern in `260611-chore-lead-discussion-gap-discipline` Phase 3.
+
+Naming decisions confirmed 2026-06-12 (see `## Decisions`; execution deferred to the
+research-`260611` config-surface slice / Phase 7 coordination, NOT this phase): "tier"
+is reserved for the abstraction layer, `config.agents_tier` is renamed
+`config.model_alias`, and the deferred `(skill, role)→tier` override surface is named
+`config.role_tier`.
 
 ### Phase 4: port remaining delegate prompts to canonical rsrc playbooks
 

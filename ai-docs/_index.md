@@ -257,11 +257,15 @@ dropped tickets live in hidden archive dirs and git history.
   default re-authored in first-class vocab (correctness `large`, fit/test `medium`)
   in rsrc + wsflow + manifest; first-class capability vocabulary established in spec
   (`#260612-first-class-tier-vocabulary`) with `light/core/deep` as the alias layer;
-  tier-guide single-source resolved at note/precedence level. **Scope flag:** the
-  `wsconfig` first-class adoption / `firstClassTierToAlias` bridge retirement the
-  Phase 2 Forward note + this "Next" anticipated is NOT in the Phase 3 plan-text
-  deliverables — left as an open routing decision (Edition/new-phase/defer); the
-  bridge stays MCP-layer and `wsconfig` remains alias-keyed. Next: Phase 4 (port
+  tier-guide single-source resolved at note/precedence level. **wsconfig flag
+  resolved** (`45f32b80`, Phase 3 Edition): the `wsconfig` first-class adoption the
+  Phase 2 Forward note anticipated was an unconfirmed assistant hint contradicting
+  the confirmed `config.agents_tier`-unchanged decision; `config.agents_tier` is
+  alias-keyed by design and `firstClassTierToAlias` is the intended plane boundary
+  (not debt). **Naming decisions (2026-06-12, exec deferred):** `config.agents_tier`
+  → `config.model_alias`, new override `config.role_tier`, "tier" reserved for the
+  abstraction layer — recorded in `## Decisions` + research `260611`; renames are a
+  config-surface slice / Phase 7-coordinated, not Phase 3. Next: Phase 4 (port
   remaining delegate prompts to rsrc; convergence chain P4→P5→P6, P7 rename).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
