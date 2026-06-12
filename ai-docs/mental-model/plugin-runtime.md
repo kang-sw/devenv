@@ -7,7 +7,7 @@ sources:
   - agents-plugin/bin/
 related:
   mcp-runtime: "Launcher compatibility uses runtime.capabilities first, with runtime.info, tools/list, and CLI probes as fallback checks."
-  prompt-bundle: "runtime.json prompt bundle metadata must match embedded prompt content."
+  prompt-bundle: "rsrc is the single prompt source of truth; runtime.json no longer carries prompt bundle metadata (260611 Phase 6b)."
 ---
 
 # Plugin Runtime
@@ -26,8 +26,8 @@ related:
 
 - The launcher writes diagnostics to stderr only; any stdout before `exec "$binary" "$@"` corrupts stdio MCP JSON-RPC.
 - `.mcp.json` cwd is the plugin cache, so repo root defaults must flow through `WS_MCP_PROJECT_ROOT`, not process cwd.
-- `runtime.json` plugin patch version, tool names, command names, and prompt bundle metadata are compared against the binary by the launcher; stale patch versions, names, or prompt metadata can make a working binary get replaced or rejected.
-- The launcher tries `ws-mcp runtime capabilities` as the single-process fast path and accepts only a complete JSON payload matching version, MCP protocol, prompt bundle hash, required lead tools, and required CLI commands. Contracts can opt into `runtime_capabilities.match: exact`; exact contracts reject extra tools or commands and do not use weaker fallback validation after a capability mismatch. Missing, invalid, or partial capability output falls through to bounded legacy validation only for non-exact contracts. {#260506-runtime-capabilities-single-probe}
+- `runtime.json` plugin patch version, tool names, and command names are compared against the binary by the launcher; stale patch versions or names can make a working binary get replaced or rejected. (Prompt bundle metadata was removed from the contract in 260611 Phase 6b — the rsrc tree is not part of binary compatibility.)
+- The launcher tries `ws-mcp runtime capabilities` as the single-process fast path and accepts only a complete JSON payload matching version, MCP protocol, required lead tools, and required CLI commands (the prompt bundle hash check was removed in 260611 Phase 6b). Contracts can opt into `runtime_capabilities.match: exact`; exact contracts reject extra tools or commands and do not use weaker fallback validation after a capability mismatch. Missing, invalid, or partial capability output falls through to bounded legacy validation only for non-exact contracts. {#260506-runtime-capabilities-single-probe}
 - Runtime capability output is mode-sensitive only for explicit product modes such as wsflow no-agent; tool-profile and allowed-tool filters remain ignored for the full ws launcher contract. {#260513-wsflow-runtime-contract-mode}
 - The launcher's `.compatibility.json` stamp is a hot-path optimization, not a new trust boundary: only an exact stamp keyed to `runtime.json` content, the accepted runtime patch version, resolved binary path, size, and mtime can skip full validation; unreadable, missing, or mismatched stamps fail closed into `runtime_fully_compatible`. {#260506-launcher-hot-path-compatibility-cache}
 - Release repair requires matching binary asset names and `SHA256SUMS`; local dev repair is gated to the local installed plugin cache, a valid `.local-devenv-runtime` JSON contract, and non-Windows platforms. Bootstrap binary/URL inputs and active local devenv repair intentionally force install before compatibility-stamp reuse so plugin-cache dogfood can exercise a fresh local runtime; invalid local contracts are inactive and fall back to cache/release repair, while valid contracts build with their declared `go` and `tool_dir` and fail startup rather than silently using release assets when local repair cannot install a compatible runtime. {#260505-release-asset-build-checksum-pipeline}
@@ -43,8 +43,7 @@ related:
 - Add or rename an MCP tool: update `internal/mcp/server.go` dispatch, `tools()` schema, tests, `agents-plugin/runtime.json`, and any skill guidance that names the tool; the capabilities fast path will compare `runtime.json` against the lead tool registry.
 - Change the exec job surface or runtime contract: include the full `exec.*` MCP tool set in the full ws runtime contract, keep it out of the wsflow no-agent contract, and verify explicit hidden-tool calls fail rather than starting command jobs. `exec.*` is an MCP surface; do not add launcher-required exec CLI mirrors unless the CLI contract is explicitly revised. {#260524-exec-runtime-contract-surface}
 - Add or rename a CLI command: update `cmd/ws-mcp/main.go`, `runtimeCapabilityCommandNames`, command tests, `runtime.json.commands`, launcher command probing assumptions, and docs. {#260505-runtime-cli-entrypoints}
-- Edit embedded prompts: update `agents-plugin/runtime.json` prompt bundle hash/list or build release assets so the script rewrites it.
-- Edit rsrc playbook text (`agents-plugin/rsrc/`): regenerate `manifest.json` via `wsrsrc.GenerateManifest`; no `runtime.json` refresh or binary bump required unless `SupportedSchemaVersion` increments. Also regenerate the wsflow rsrc mirror with `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMirror`, or `TestWsflowRsrcMirrorUpToDate` fails.
+- Edit any prompt/playbook/infra text (`agents-plugin/rsrc/`): regenerate `manifest.json` via `wsrsrc.GenerateManifest`; no `runtime.json` refresh or binary bump required unless `SupportedSchemaVersion` increments. Also regenerate the wsflow rsrc mirror with `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMirror`, or `TestWsflowRsrcMirrorUpToDate` fails. (The embedded prompt bundle and its `runtime.json` hash/list were retired in 260611 Phase 6b — there is no embedded-prompt edit path.)
 - Change `.mcp.json` timeouts or command path: verify installed plugin cache startup, not only source-tree execution.
 
 ## Extension Points & Change Recipes
@@ -59,7 +58,7 @@ related:
 ## Common Mistakes
 
 - Removing `.mcp.json` `cwd: "."` makes Codex resolve `./bin/ws-mcp-launcher.py` from the workspace instead of the plugin cache.
-- Treating `runtime.json` as release notes leaves launcher repair with stale tool, command, or prompt-bundle expectations.
+- Treating `runtime.json` as release notes leaves launcher repair with stale tool or command expectations.
 - Treating the compatibility stamp as sufficient after changing validation logic, `runtime.json`, or the binary identity; the stamp should force a miss unless the validated contract/binary pair is unchanged.
 - Adding a launcher-required CLI command only to `runtime.json.commands`; the capabilities fast path has a separate manually maintained command list.
 - Printing debug output to stdout from the launcher breaks MCP startup.

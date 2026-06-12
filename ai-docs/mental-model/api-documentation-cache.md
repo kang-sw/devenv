@@ -34,8 +34,8 @@ related:
 
 - `api.ask` depends on named-agent registration, result timeout, ephemeral pre-router cleanup, per-domain manager reuse, and current harness-aware alias resolution. Inactive managers older than the five-minute hot-cache TTL are erased and re-registered; active managers are preserved. {#260505-api-docs-manager-sessions} {#260512-api-doc-agent-backend-selection}
 - Async cancellation must reach both pre-router and per-domain manager waits through `wsagent.Manager.Cancel`; merely marking the API job cancelled leaves router/manager agents running until their own timeout.
-- Prompt stems in `api_docs.go` must match embedded prompt filenames and runtime bundle metadata.
-- `api-doc-cargo-brief` is conditional on a binary existing on `PATH`; changing this requires `ConditionalPromptRef` behavior. {#260505-api-docs-conditional-prompts}
+- Prompt stems in `api_docs.go` must match rsrc playbook names (`renderAPIPrompt` loads them via `wsrsrc.Load`); there is no runtime bundle metadata to keep in sync (260611 Phase 6b).
+- `api-doc-cargo-brief` is conditional on a binary existing on `PATH`; the gate is an inline `exec.LookPath("cargo-brief")` in `api_docs.go` that appends the rendered rsrc prompt (the registration-time `ConditionalPromptRef` mechanism was retired in 260611 Phase 6b). {#260505-api-docs-conditional-prompts}
 - Cache domain names are filesystem directory names; validation must remain strict enough to prevent path traversal.
 
 ## Extension Points & Change Recipes
@@ -43,7 +43,7 @@ related:
 - **Change routing behavior**: edit `pre-router.md` but preserve slug-only output or update `parseAPIRouterDomains`.
 - **Change cache policy**: edit `api-doc-manager.md`; Go code does not inspect `meta.yaml` or fetch docs itself.
 - **Change async job lifecycle**: update `api_async.go`, MCP dispatch/schema, runtime metadata, and recovery/cancellation tests together; preserve synchronous `api.ask` behavior.
-- **Add a conditional brief**: add an embedded infra prompt, wire `ConditionalPromptRef`, and update prompt bundle metadata.
+- **Add a conditional brief**: add an rsrc prompt, regenerate `manifest.json`, and gate its append in `api_docs.go` with `exec.LookPath` (the `api-doc-cargo-brief` pattern).
 
 ## Common Mistakes
 
@@ -51,7 +51,7 @@ related:
 - Assuming fuzzy `domain_hint` creates or selects a domain directly.
 - Treating async jobs as cross-process resumable work; fresh servers recover job records and terminal results, but stale active workers are reconciled to failed or cancelled.
 - Removing `## Domain: <domain>` aggregation headers and breaking caller/test boundaries.
-- Editing API docs prompts without refreshing `agents-plugin/runtime.json`.
+- Editing API docs prompts without regenerating the rsrc `manifest.json` (and the wsflow mirror); they are rsrc files now, decoupled from `runtime.json`.
 
 ## Technical Debt
 

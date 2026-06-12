@@ -5,7 +5,6 @@ sources:
   - agents-plugin/skills/
   - agents-plugin/rsrc/
   - agents-plugin-wsflow/skills/
-  - agents-plugin-tool/internal/wsprompt/
 related:
   documentation-system: "write-spec and write-ticket enforce documentation traceability before implementation."
   prompt-bundle: "delegated workflow skills render rsrc delegate playbooks via playbook.render; register(prompts:[stems]) is gone."
@@ -95,7 +94,7 @@ related:
 - **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
 - **Change a full workflow skill excluded from wsflow**: check `ai-docs/ref/wsflow-mirroring.md` and update wsflow docs, workflow manual text, or exclusion rationale if the excluded skill's meaning changed.
 - **Change bootstrap baseline behavior**: update both `lead-bootstrap` packages when applicable, but bump each package's `AGENTS.template.md` version only inside that package's own lineage.
-- **Add a delegate prompt to a workflow**: register by embedded stem through `ws/agents.register`, use portable `model` aliases for default selection, and omit `prompts` only for general-purpose delegates. Update runtime prompt bundle metadata and keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
+- **Add a delegate prompt to a workflow**: author it as an rsrc playbook under `agents-plugin/rsrc/` (regenerate `manifest.json`), then have the skill render it via `ws/playbook.render` and spawn native/mercenary — the `register(prompts:[stems])` path and its runtime prompt bundle metadata were retired (260611 Phase 6b). Keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
 
 ## Common Mistakes
 

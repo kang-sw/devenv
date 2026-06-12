@@ -47,14 +47,15 @@ error instead of silently disappearing.
 
 ## Prompt Registration And Model Alias Resolution {#260505-agent-prompt-registration-tier-resolution}
 
-Agent registration accepts a prompt chain as logical prompt names or absolute
-prompt paths. Bare logical names resolve from the embedded runtime prompt bundle;
-ambiguous relative paths are rejected. Public delegate registrations prepend the
-embedded delegate-orientation prompt unless the caller explicitly suppresses it
-for an internal helper.
+Agent registration accepts a single self-contained system prompt text (the
+caller renders it via `playbook.render`); the former prompt-stem chain
+(logical names / absolute paths resolved from an embedded prompt bundle) was
+retired with the embedded bundle. Public delegate registrations prepend the
+`delegate-orientation` document — now loaded from the rsrc tree — unless the
+caller explicitly suppresses it for an internal helper.
 
-The runtime strips prompt frontmatter, concatenates prompt bodies in caller
-order, and writes the resolved text to the agent's `system.md`. `light`,
+The runtime joins the orientation document and the system prompt text and
+writes the resolved text to the agent's `system.md`. `light`,
 `core`, and `deep` are portable model aliases. `model` may name one of those
 aliases or a concrete backend model; concrete model names override alias and
 harness defaults. Legacy `tier` inputs remain accepted as compatibility alias

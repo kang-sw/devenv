@@ -292,9 +292,18 @@ dropped tickets live in hidden archive dirs and git history.
   (`WS_REGEN_WSFLOW_RSRC`) + `wsflow-mirroring.md` carve-out. Gen-mechanism = committed
   copy + test-driven regen; drift guard = byte-equality (substitution is render-time).
   Dogfood: pre-existing wsflow python test failure (`wsflow/ws.lead.login`) captured as
-  `260612-bug-wsflow-skill-ws-dotted-namespace-ref` (not a Phase 6 regression). Next:
-  **Phase 6b** (`infra.read`→rsrc + dead-stem disposition + bundle-hash collapse +
-  `wsprompt` package deletion + prompt-bundle line-27 rewrite), then P7 rename.
+  `260612-bug-wsflow-skill-ws-dotted-namespace-ref` (not a Phase 6 regression).
+  **Phase 6b done** (`6873b480` source; spec `024e109a`, mental-model `8b0b261a`):
+  `wsprompt` go:embed loader fully retired — rsrc is now the single prompt source of
+  truth. 4 infra docs → flat rsrc, `infra.read`→rsrc (`wsdoc.ReadInfra`), `Register`
+  prompt path → rsrc orientation + `SystemPromptText` (removed `Prompts`/`PromptRefs`/
+  `ConditionalPromptRefs` + CLI `register --prompt`), `prompt_bundle` metadata +
+  launcher hash validation collapsed (runtime.json + both launchers), `internal/wsprompt`
+  deleted (incl. dead skeleton/sprint stems). prompt-bundle.md line-27 rewrite done.
+  Review: 3 native partition reviewers `[clean]`. Pre-existing-unrelated:
+  `test_skill_dispatch_contracts.py` (stale SKILL.md text from the P5 skill→playbook
+  migration). **Next: Phase 7** (`agents.*`→`ws.mercenary.*` rename — last phase). The
+  P1-6b epic-merge decision (combined stacked merge to `260605`) is still pending.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

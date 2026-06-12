@@ -760,6 +760,61 @@ Verification: `wsprompt` package gone; `go build/vet/test ./...` green; `infra.r
 serves its docs from rsrc; launcher validation green. Boundary: depends on Phase 6
 (render/api consumers already moved); this is the last convergence phase.
 
+### Result (6873b480) - 2026-06-12
+
+Landed on `implement/ws-tier-taxonomy-phase6b` (stacked on the unmerged Phase 6 tip
+`18953d0a`; merge-target = epic `260605`). The `wsprompt` go:embed loader is fully
+retired — `agents-plugin/rsrc/` is now the single prompt source of truth.
+
+Delivered (4 source commits):
+- **Infra docs → rsrc** (`96e9c5b6`): ported `executor-wrapup`, `impl-playbook`,
+  `subagent-rules`, `delegate-orientation` to flat rsrc files; manifest + wsflow
+  rsrc mirror regenerated (both up-to-date guards green).
+- **`infra.read` → rsrc** (`36aaeb7f`): `wsdoc.ReadInfra` loads from rsrc via
+  `wsrsrc.Load`/`ResolveRoot`, preserving bare-stem/path-traversal rejection.
+- **Register prompt path → rsrc** (`64699c0d`): `wsagent.Register` replaced
+  `wsprompt.Resolve` with `loadDelegateOrientation` (rsrc) + `SystemPromptText`
+  join; removed `RegisterOptions.Prompts/PromptRefs/ConditionalPromptRefs`, the
+  `ConditionalPromptRef` type, `promptSpecs`/`resolveConditionalPromptRefs`, and
+  the CLI `agents register --prompt`/`--prompt-ref` flags. Added package
+  `TestMain` (WS_RSRC_ROOT default) to wsagent/mcp/cmd test packages.
+- **Bundle collapse + package deletion** (`6873b480`): removed
+  `wsprompt.Bundle`/`ContentSHA256`/`BundleInfo` from `runtime.info` and the CLI
+  runtime info/capabilities; dropped `prompt_bundle` from both `runtime.json`;
+  removed the launcher's `prompt_bundle_compatible` + the capabilities hash block
+  (both ws + wsflow launchers, kept byte-identical); **deleted the entire
+  `internal/wsprompt/` package** (loader + 11 embedded prompt bodies incl. the
+  confirmed-dead `skeleton-populator`/`skeleton-reviewer`/`sprint-survey` stems +
+  8 infra docs). The launcher's guards already no-op on an absent contract hash,
+  so validation stays self-consistent.
+
+**Verification.** `go build/vet ./...` clean; full module suite green (13
+packages, manifest + drift guards included). Partitioned review (correctness +
+fit + test, independent native reviewers) all `[clean]`. Launcher-capabilities
+python suite green (20 OK); wsflow runtime-contract python suite green; `infra.read`
+verified live. spec `024e109a` (plugin-runtime/mcp-tools/named-agent-runtime/
+api-documentation-cache reconciled); mental-model `8b0b261a` (prompt-bundle.md
+line-27 rewrite to single-source + 5 peer docs).
+
+**Deviations / open items.**
+- *Lead-driven edit + native partitioned review* (continues the M3/260611 Phase
+  1-6 deviation): the ws delegate path is crash-prone and the live MCP server
+  reads a cached rsrc root, so authoritative verification was the Go layer + grep.
+- *AgentDefinition.PromptRefs persisted field kept* (now records only the
+  `delegate-orientation` marker) to avoid an out-of-scope wsstore schema change;
+  the input-side `RegisterOptions` prompt fields are gone.
+- *Pre-existing, unrelated test failures (NOT Phase 6b):*
+  `agents-plugin/tests/test_skill_dispatch_contracts.py` (3) asserts old inline
+  SKILL.md text the Phase 5 skill→playbook migration replaced with thin stubs;
+  the wsflow `lead-workflow-manual` ws-dotted-namespace failure
+  (`260612-bug-wsflow-skill-ws-dotted-namespace-ref`) also persists. No Phase 6b
+  commit touches `agents-plugin/skills/`.
+
+> Forward (Phase 7): with every prompt/infra/delegate consumer on rsrc and the
+> embedded bundle gone, the `agents.*`→`ws.mercenary.*` rename now touches a
+> single already-converged call shape (render+spawn), not the legacy
+> `register(prompts)` sites.
+
 ### Phase 7: migrate the delegation surface to `ws.mercenary.*`
 
 Rename the delegation spawn/lifecycle tools from the generic `agents.*` namespace

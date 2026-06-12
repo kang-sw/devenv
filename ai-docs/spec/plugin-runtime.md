@@ -41,12 +41,15 @@ can complete without relying on user-local Codex configuration.
 ## Runtime Contract Metadata {#260505-runtime-contract-metadata}
 
 The plugin runtime contract declares the plugin version, compatible `ws-mcp`
-version range, release repository and tag, embedded prompt bundle metadata, and
-the required MCP tool and CLI command surfaces.
+version range, release repository and tag, and the required MCP tool and CLI
+command surfaces. It no longer carries prompt bundle metadata: the embedded
+prompt bundle was retired in favor of the filesystem rsrc tree, so the prompt
+source of truth is `agents-plugin/rsrc/` (not a binary-embedded, hash-validated
+bundle).
 
 The launcher and release checks use this metadata as the caller-visible
 compatibility contract. A runtime is considered stale when it cannot satisfy the
-declared plugin patch version, tool list, command list, or prompt bundle hash.
+declared plugin patch version, tool list, or command list.
 Development binaries such as `X.Y.Z-dev` are compatible with plugin version
 `X.Y.Z`; older or newer patch releases are not reused from cache.
 
@@ -202,17 +205,21 @@ mental-models
 references
 ```
 
-`serve --stdio` is the MCP server entrypoint. `runtime info` reports runtime
-version and prompt bundle metadata. `doctor` reports repository health. The
+`serve --stdio` is the MCP server entrypoint. `runtime info` reports the runtime
+version and source commit. `doctor` reports repository health. The
 grouped commands mirror MCP behavior where a CLI fallback is part of the public
 runtime surface.
 
 ### Single-Probe Runtime Capabilities {#260506-runtime-capabilities-single-probe}
 
 `ws-mcp runtime capabilities` reports the runtime surfaces the plugin
-launcher needs for compatibility checks in one JSON response. The response will
-include the runtime version, source commit, MCP protocol version, prompt bundle
-metadata, the exposed MCP tool names, and the public CLI command surface.
+launcher needs for compatibility checks in one JSON response. The response
+includes the runtime version, source commit, MCP protocol version, the exposed
+MCP tool names, and the public CLI command surface. It no longer reports prompt
+bundle metadata, and the launcher no longer validates a prompt bundle hash
+(neither on the capabilities fast path nor in the legacy fallback); the rsrc
+tree is the prompt source of truth and is not part of the binary-compatibility
+contract.
 
 The capability response is the launcher-facing compatibility probe for new
 runtimes. It must describe the full lead runtime surface used by the plugin

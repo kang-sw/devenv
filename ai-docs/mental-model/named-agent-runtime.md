@@ -7,7 +7,7 @@ sources:
   - agents-plugin-tool/internal/wsstore/
 related:
   mcp-runtime: "agents.* MCP and CLI handlers are thin wrappers around wsagent.Manager."
-  prompt-bundle: "registration resolves embedded prompts into each agent system prompt."
+  prompt-bundle: "registration writes system.md from a self-contained rendered prompt plus the rsrc-sourced delegate-orientation (260611 Phase 6b retired the embedded prompt bundle)."
   ws-web-dashboard: "Activity Console reads agent metadata/current state/output/session records as daemon-private projection inputs."
 ---
 
@@ -53,7 +53,7 @@ related:
 - Agent-instance cleanup participates in prune-run diagnostics but keeps retry metadata on `agent_instances`, not artifact tombstones; instance cleanup deletes directories and must not imply artifact payload ownership or retry semantics.
 - MCP `agents.*` lifecycle tools require the caller's mandatory `session_key`; `mcp.resolveToolRoot` converts that key to the worktree root passed into `wsagent.Manager`. There is no actor binding, hidden explicit-root namespace, or actor-scoped dispatch path. {#260610-ephemeral-session-auth-model}
 - Phase 2a removed injected child credentials (`ensureChildActor`, `childActorInstruction`, persistent child actor ids, actor-scoped registration/dispatch/inbox, child-inactivation on ephemeral result consumption). Phase 2c render-minted child keys are implemented: `playbook.render` mints a fresh child key for lead callers when the playbook frontmatter `role` is delegate-eligible (`implementer`/`reviewer`/`delegate`→`roleDelegate`, `leaf`→`roleLeaf`), binds it to `root_override`-or-caller-root, and splices a credential block into the rendered body. A child key is non-lead, so the keyed gate rejects `ws.lead.*` calls — spawn depth stays strictly 1. {#260610-mercenary-delegation-surface}
-- Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
+- Prompt registration is static: `system.md` is written once at registration time (the rsrc-sourced `delegate-orientation` joined with the caller's self-contained `SystemPromptText`), so existing agents do not pick up later prompt edits. The former embedded prompt-stem chain (`Prompts`/`PromptRefs`/`ConditionalPromptRefs`) was removed in 260611 Phase 6b. {#260505-agent-prompt-registration-tier-resolution}
 - Agent status includes the detected harness when one influenced registration plus the resolved effort when an alias mapping supplied one; backend error diagnostics include the harness to make alias misrouting visible.
 - Registered effort is applied at call time through `RunnerRequest`: Codex emits `model_reasoning_effort`, Claude emits `--effort`, and empty/no-override effort emits no backend option. New backends must opt into their own mapping instead of assuming the manager path is sufficient. {#260505-codex-agent-session-jsonl-handling} {#260505-claude-agent-runner}
 

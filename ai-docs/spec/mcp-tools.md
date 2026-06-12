@@ -47,9 +47,10 @@ harness. The detected harness is exposed through session inspection output.
 
 ## Runtime And Debug Metadata Tools {#260505-runtime-debug-metadata-tools}
 
-`runtime.info` returns runtime compatibility metadata, including the runtime
-version, source commit, and prompt bundle metadata. Launchers and workflow
-checks use this output to detect stale or incompatible runtime binaries.
+`runtime.info` returns runtime compatibility metadata: the runtime version and
+source commit. (Prompt bundle metadata was removed when the embedded prompt
+bundle was retired in favor of the rsrc tree.) Launchers and workflow checks use
+this output to detect stale or incompatible runtime binaries.
 The default response is compact labeled text; callers that need stable fields
 can request structured JSON.
 
@@ -167,8 +168,10 @@ keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
 `project_tree` renders the project document map, spec inventory, and active
 ticket inventory for the current repository.
 
-`infra.read` reads bundled ws infra documents shipped with the runtime by bare
-stem or filename.
+`infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
+filename (path-escaping names are rejected). The backing source is the rsrc
+loader; the embedded prompt bundle that previously served these documents was
+retired.
 `convention.read` reads bundled convention documents shipped with the runtime,
 such as ticket, spec, or mental-model conventions. Shared workflow skills use
 these tools instead of hard-coded repository-local convention paths.
