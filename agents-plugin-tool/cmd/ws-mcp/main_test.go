@@ -66,16 +66,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	}
 
 	var got struct {
-		Version      string `json:"version"`
-		SourceCommit string `json:"source_commit"`
-		MCPProtocol  string `json:"mcp_protocol"`
-		PromptBundle struct {
-			SourceCommit  string   `json:"source_commit"`
-			ContentSHA256 string   `json:"content_sha256"`
-			Prompts       []string `json:"prompts"`
-		} `json:"prompt_bundle"`
-		Tools    []string `json:"tools"`
-		Commands []string `json:"commands"`
+		Version      string   `json:"version"`
+		SourceCommit string   `json:"source_commit"`
+		MCPProtocol  string   `json:"mcp_protocol"`
+		Tools        []string `json:"tools"`
+		Commands     []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
 	if got.Version == "" || got.SourceCommit == "" {
@@ -83,9 +78,6 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	}
 	if got.MCPProtocol != contract.MCPProtocol {
 		t.Fatalf("mcp_protocol = %q, want %q", got.MCPProtocol, contract.MCPProtocol)
-	}
-	if got.PromptBundle.ContentSHA256 != contract.PromptBundle.ContentSHA256 || len(got.PromptBundle.Prompts) == 0 {
-		t.Fatalf("prompt bundle = %#v, want hash %q with prompt list", got.PromptBundle, contract.PromptBundle.ContentSHA256)
 	}
 	wantTools := sortedMapKeys(contract.Tools)
 	slices.Sort(got.Tools)
@@ -594,12 +586,9 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 }
 
 type runtimeContractTest struct {
-	MCPProtocol  string `json:"mcp_protocol"`
-	PromptBundle struct {
-		ContentSHA256 string `json:"content_sha256"`
-	} `json:"prompt_bundle"`
-	Tools    map[string]string `json:"tools"`
-	Commands map[string]string `json:"commands"`
+	MCPProtocol string            `json:"mcp_protocol"`
+	Tools       map[string]string `json:"tools"`
+	Commands    map[string]string `json:"commands"`
 }
 
 func readRuntimeContractTest(t *testing.T) runtimeContractTest {

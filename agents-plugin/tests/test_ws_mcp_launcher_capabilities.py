@@ -48,7 +48,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         return {
             "plugin_version": "0.18.1",
             "mcp_protocol": "2025-03-26",
-            "prompt_bundle": {"content_sha256": "abc123"},
             "tools": {"runtime.info": ">=0.18.1-dev <0.19.0"},
             "commands": {"runtime.info": ">=0.18.1-dev <0.19.0"},
         }
@@ -58,7 +57,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             "version": "0.18.1",
             "source_commit": "dev",
             "mcp_protocol": "2025-03-26",
-            "prompt_bundle": {"content_sha256": "abc123", "prompts": ["delegate-orientation"]},
             "tools": ["runtime.info"],
             "commands": ["runtime.info"],
         }
@@ -99,7 +97,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             "version": lambda payload: payload.update({"version": "0.17.9"}),
             "patch_version": lambda payload: payload.update({"version": "0.18.0"}),
             "protocol": lambda payload: payload.update({"mcp_protocol": "2024-11-05"}),
-            "prompt_bundle": lambda payload: payload.update({"prompt_bundle": {"content_sha256": "wrong"}}),
             "tools": lambda payload: payload.update({"tools": []}),
             "commands": lambda payload: payload.update({"commands": []}),
         }
@@ -151,7 +148,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
             launcher.tools_compatible = forbidden_fallback
             launcher.commands_compatible = forbidden_fallback
-            launcher.prompt_bundle_compatible = forbidden_fallback
 
             self.assertFalse(launcher.runtime_fully_compatible(binary, contract, temp))
 
@@ -172,7 +168,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.run_binary = forbidden_fanout
             launcher.tools_compatible = forbidden_fanout
             launcher.commands_compatible = forbidden_fanout
-            launcher.prompt_bundle_compatible = forbidden_fanout
 
             self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
 
@@ -196,7 +191,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.run_binary = fake_run_binary
             launcher.tools_compatible = lambda got_binary, contract, runtime_dir: True
             launcher.commands_compatible = lambda got_binary, contract: True
-            launcher.prompt_bundle_compatible = lambda got_binary, contract: True
 
             self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
             self.assertEqual(calls, [("runtime", "capabilities"), ("version",)])

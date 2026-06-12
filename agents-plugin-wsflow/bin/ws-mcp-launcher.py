@@ -186,23 +186,6 @@ def commands_compatible(binary: Path, contract: dict) -> bool:
     return True
 
 
-def prompt_bundle_compatible(binary: Path, contract: dict) -> bool:
-    expected = contract.get("prompt_bundle", {}).get("content_sha256")
-    if not expected:
-        return True
-    try:
-        proc = run_binary(binary, ["runtime", "info"])
-        if proc.returncode != 0 or not proc.stdout:
-            return False
-        info = json.loads(proc.stdout)
-    except Exception:
-        return False
-    if info.get("prompt_bundle", {}).get("content_sha256") != expected:
-        note("runtime prompt bundle hash mismatch")
-        return False
-    return True
-
-
 def _capabilities_string_list(payload: dict, key: str) -> list[str] | None:
     values = payload.get(key)
     if not isinstance(values, list):
@@ -547,13 +530,6 @@ def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
         note("runtime capabilities MCP protocol mismatch")
         return False
 
-    expected_prompt_hash = contract.get("prompt_bundle", {}).get("content_sha256")
-    if expected_prompt_hash:
-        prompt_bundle = payload.get("prompt_bundle")
-        if not isinstance(prompt_bundle, dict) or prompt_bundle.get("content_sha256") != expected_prompt_hash:
-            note("runtime capabilities prompt bundle hash mismatch")
-            return False
-
     exact = _capabilities_match_exact(contract)
     if not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
         return False
@@ -574,7 +550,7 @@ def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) ->
         return False
     if proc.returncode != 0 or not version_compatible(proc.stdout.strip(), contract):
         return False
-    return tools_compatible(binary, contract, runtime_dir) and commands_compatible(binary, contract) and prompt_bundle_compatible(binary, contract)
+    return tools_compatible(binary, contract, runtime_dir) and commands_compatible(binary, contract)
 
 
 def parent_env_value(key: str) -> str:

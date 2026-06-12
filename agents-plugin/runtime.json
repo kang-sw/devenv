@@ -5,31 +5,6 @@
   "mcp_protocol": "2025-03-26",
   "release_repository": "kang-sw/devenv",
   "release_tag": "v0.30.0",
-  "prompt_bundle": {
-    "source_commit": "dev",
-    "content_sha256": "ec8548729c616f17242ce17bfe78121a884c6857d5ef92f1239147a323c8786d",
-    "prompts": [
-      "api-doc-cargo-brief",
-      "api-doc-manager",
-      "code-review-correctness",
-      "code-review-fit",
-      "code-review-test",
-      "code-reviewer",
-      "delegate-orientation",
-      "executor-wrapup",
-      "impl-playbook",
-      "implementer",
-      "mental-model-updater",
-      "plan-populator-research",
-      "plan-populator-survey",
-      "pre-router",
-      "reference-discovery",
-      "skeleton-populator",
-      "skeleton-reviewer",
-      "sprint-survey",
-      "subagent-rules"
-    ]
-  },
   "tools": {
     "runtime.info": ">=0.30.0-dev <0.31.0",
     "runtime.debug_events": ">=0.30.0-dev <0.31.0",

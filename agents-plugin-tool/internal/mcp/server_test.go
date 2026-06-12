@@ -533,7 +533,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	allowedInfo := callToolOnce(t, server, 5, "runtime.info", map[string]any{
 		"session_key": leafKey,
 	})
-	if !strings.Contains(allowedInfo, "prompt_bundle") {
+	if !strings.Contains(allowedInfo, "version:") {
 		t.Fatalf("leaf key wrongly rejected runtime.info: %s", allowedInfo)
 	}
 }
@@ -564,7 +564,7 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	allowedInfo := callToolOnce(t, server, 2, "runtime.info", map[string]any{
 		"session_key": leafKey,
 	})
-	if !strings.Contains(allowedInfo, "prompt_bundle") {
+	if !strings.Contains(allowedInfo, "version:") {
 		t.Fatalf("allowlist+leaf wrongly rejected runtime.info: %s", allowedInfo)
 	}
 
@@ -1106,8 +1106,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["5"], "review-paths") || !strings.Contains(byID["5"], "-direct.md") {
 		t.Fatalf("path.generate response missing review path: %s", byID["5"])
 	}
-	if !strings.Contains(byID["6"], "prompt_bundle") || !strings.Contains(byID["6"], "code-reviewer") {
-		t.Fatalf("runtime.info response missing prompt bundle: %s", byID["6"])
+	if !strings.Contains(byID["6"], "version:") || !strings.Contains(byID["6"], "source_commit:") {
+		t.Fatalf("runtime.info response missing version/source_commit: %s", byID["6"])
 	}
 	if !strings.Contains(toolText(t, byID["7"]), "dirty:") || !strings.Contains(toolText(t, byID["7"]), "ai-docs/") {
 		t.Fatalf("git.status response missing readable status: %s", byID["7"])

@@ -16,7 +16,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -137,7 +136,7 @@ func runSmoke(root string, out io.Writer) error {
 		return fmt.Errorf("stdio smoke failed: %w", err)
 	}
 	text := responses.String()
-	for _, want := range []string{"runtime.info", "project_tree", "prompt_bundle", "ai-docs/"} {
+	for _, want := range []string{"runtime.info", "project_tree", "ai-docs/"} {
 		if !strings.Contains(text, want) {
 			return fmt.Errorf("stdio smoke response missing %q", want)
 		}
@@ -170,42 +169,25 @@ func runtimeInfo(args []string) {
 	fs := flag.NewFlagSet("runtime info", flag.ExitOnError)
 	_ = fs.Parse(args)
 
-	bundle, err := wsprompt.Bundle(sourceCommit)
-	if err != nil {
-		fatal("runtime info", err)
-	}
-	fmt.Printf("{\"version\":%q,\"source_commit\":%q,\"prompt_bundle\":{\"source_commit\":%q,\"content_sha256\":%q,\"prompts\":[", version, sourceCommit, bundle.SourceCommit, bundle.ContentSHA256)
-	for i, prompt := range bundle.Prompts {
-		if i > 0 {
-			fmt.Print(",")
-		}
-		fmt.Printf("%q", prompt)
-	}
-	fmt.Println("]}}")
+	fmt.Printf("{\"version\":%q,\"source_commit\":%q}\n", version, sourceCommit)
 }
 
 type runtimeCapabilitiesPayload struct {
-	Version      string              `json:"version"`
-	SourceCommit string              `json:"source_commit"`
-	MCPProtocol  string              `json:"mcp_protocol"`
-	PromptBundle wsprompt.BundleInfo `json:"prompt_bundle"`
-	Tools        []string            `json:"tools"`
-	Commands     []string            `json:"commands"`
+	Version      string   `json:"version"`
+	SourceCommit string   `json:"source_commit"`
+	MCPProtocol  string   `json:"mcp_protocol"`
+	Tools        []string `json:"tools"`
+	Commands     []string `json:"commands"`
 }
 
 func runtimeCapabilities(args []string) {
 	fs := flag.NewFlagSet("runtime capabilities", flag.ExitOnError)
 	_ = fs.Parse(args)
 
-	bundle, err := wsprompt.Bundle(sourceCommit)
-	if err != nil {
-		fatal("runtime capabilities", err)
-	}
 	payload := runtimeCapabilitiesPayload{
 		Version:      version,
 		SourceCommit: sourceCommit,
 		MCPProtocol:  mcp.ProtocolVersion,
-		PromptBundle: bundle,
 		Tools:        mcp.LeadToolNames(),
 		Commands:     runtimeCapabilityCommandNames(),
 	}

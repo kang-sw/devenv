@@ -21,7 +21,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -1035,14 +1034,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 }
 
 func runtimeInfo(version, sourceCommit string) (map[string]any, error) {
-	bundle, err := wsprompt.Bundle(sourceCommit)
-	if err != nil {
-		return nil, err
-	}
 	return map[string]any{
 		"version":       version,
 		"source_commit": sourceCommit,
-		"prompt_bundle": bundle,
 	}, nil
 }
 
@@ -1059,61 +1053,7 @@ func formatRuntimeInfo(info map[string]any) string {
 	if commit, _ := info["source_commit"].(string); commit != "" {
 		fmt.Fprintf(&b, "source_commit: %s\n", commit)
 	}
-	if bundle, ok := info["prompt_bundle"].(wsprompt.BundleInfo); ok {
-		formatPromptBundle(&b, bundle)
-	} else if bundle, ok := info["prompt_bundle"].(map[string]any); ok {
-		formatPromptBundleMap(&b, bundle)
-	}
 	return b.String()
-}
-
-func formatPromptBundle(b *strings.Builder, bundle wsprompt.BundleInfo) {
-	fmt.Fprintf(b, "prompt_bundle: %d prompts", len(bundle.Prompts))
-	if bundle.ContentSHA256 != "" {
-		fmt.Fprintf(b, " sha256=%s", bundle.ContentSHA256)
-	}
-	if bundle.SourceCommit != "" {
-		fmt.Fprintf(b, " source_commit=%s", bundle.SourceCommit)
-	}
-	b.WriteString("\n")
-	if len(bundle.Prompts) > 0 {
-		b.WriteString("prompts:\n")
-		for _, prompt := range bundle.Prompts {
-			fmt.Fprintf(b, "  - %s\n", prompt)
-		}
-	}
-}
-
-func formatPromptBundleMap(b *strings.Builder, bundle map[string]any) {
-	prompts := stringAnySlice(bundle["prompts"])
-	fmt.Fprintf(b, "prompt_bundle: %d prompts", len(prompts))
-	if sha, _ := bundle["content_sha256"].(string); sha != "" {
-		fmt.Fprintf(b, " sha256=%s", sha)
-	}
-	if commit, _ := bundle["source_commit"].(string); commit != "" {
-		fmt.Fprintf(b, " source_commit=%s", commit)
-	}
-	b.WriteString("\n")
-	if len(prompts) > 0 {
-		b.WriteString("prompts:\n")
-		for _, prompt := range prompts {
-			fmt.Fprintf(b, "  - %s\n", prompt)
-		}
-	}
-}
-
-func stringAnySlice(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if text, ok := item.(string); ok {
-			out = append(out, text)
-		}
-	}
-	return out
 }
 
 func canonicalSetupRoot(root string) (string, error) {

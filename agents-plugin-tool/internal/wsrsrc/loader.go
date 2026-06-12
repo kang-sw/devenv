@@ -321,8 +321,7 @@ func substituteVars(body string, declared []string, vars map[string]string) (str
 }
 
 // isBareStem reports whether spec is a safe bare stem: non-empty, not "." or
-// "..", and free of path separators and "..". Copied verbatim from
-// internal/wsprompt/prompts.go.
+// "..", and free of path separators and "..".
 func isBareStem(spec string) bool {
 	if spec == "" || spec == "." || spec == ".." {
 		return false
