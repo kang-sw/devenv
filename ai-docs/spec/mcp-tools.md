@@ -151,6 +151,17 @@ Configuration exposes harness-aware model alias mappings. `light`, `core`, and
 migrated or wrapped for compatibility, and new documentation speaks in terms of
 model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 
+The delegation tier abstraction is the first-class capability vocabulary
+`small`/`medium`/`large`/`xlarge`, which names task-intrinsic reasoning depth
+independent of host or subscription plan. `light`/`core`/`deep` are conventional
+aliases at the concrete-model layer (alongside provider model names), connected
+to the capability axis by the locked mapping `light↦small`, `core↦medium`,
+`deep↦large`; `xlarge` (fable-class) has no legacy alias. Playbook frontmatter
+declares `role:` and `tier:` in the first-class vocabulary; a first-class tier is
+resolved to a concrete backend/model by mapping through the alias layer into
+`config.agents_tier` (`#260513-harness-local-agent-tier-config`), which remains
+keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
+
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active

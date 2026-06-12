@@ -335,6 +335,66 @@ is reduced to a pointer/variable so the delegate frontmatter `tier:` stays the o
 maintenance point. The `recommended-tier` that `playbook.render` returns (Phase 2)
 is the runtime channel for that single source.
 
+### Result (fc1cdc5f) - 2026-06-12
+
+Landed on `implement/ws-tier-taxonomy-phase3` (stacked on the unmerged Phase 2 tip
+`a184b6df`). The reviewer-tier default is re-authored in first-class vocabulary and
+the first-class capability vocabulary is now established in spec + mental-model.
+
+Delivered:
+- Reviewer-tier default re-authored in the `lead-implement` `judge:
+  review-allocation` Tier 2 table — **correctness `large`, fit/test `medium`** (the
+  dropped `e6aadfc9` intent, now in first-class vocab under `deep↦large`/`core↦medium`)
+  — in both the rsrc playbook and the wsflow mirror, manifest regenerated (only the
+  lead-implement hash changed). Source commit `fc1cdc5f`.
+- Tier-guide single-source (frontmatter-single-source decision) resolved at the
+  note/precedence level: the ws note declares that when a delegate playbook sets
+  its own `tier:`, the `recommended-tier` from `ws/playbook.render` is authoritative
+  for that delegate and the table is the allocation default. No literal tier is
+  duplicated between this playbook and an existing delegate frontmatter today
+  (partition playbooks arrive in Phase 4). wsflow note stays host-neutral (no `ws/`
+  reference; keeps the alias→model mapping hint).
+- Spec (`10be8183`): `#260612-first-class-tier-vocabulary` (mcp-tools.md) establishes
+  `small/medium/large/xlarge` as the capability-axis abstraction with `light/core/deep`
+  as the concrete-model alias layer (locked `light↦small`/`core↦medium`/`deep↦large`;
+  `xlarge` no legacy alias); `#260612-reviewer-allocation-tier-default`
+  (workflow-skills.md) documents the per-partition default + recommended-tier
+  precedence. The pre-existing `260508` alias entries already framed `light/core/deep`
+  as *model aliases* (not "the tier abstraction"), so they needed no rewrite.
+- Mental model (`94eafada`): disambiguated the legacy `tier` model-selection input
+  (compatibility-only) from the current first-class `tier:` frontmatter in
+  `workflow-skills.md`; `prompt-bundle`/`named-agent-runtime` already carried the
+  first-class vocab from Phase 2; `mcp-runtime` correctly describes `wsconfig` as
+  alias-keyed and was left unchanged.
+
+Verification: `go build/vet ./...` clean; `go test ./... -count=1` green (all 13
+packages incl. the manifest guard; the previously-flaky exec timing test passed);
+`ws/spec_index.verify` ok; review `[clean]` first pass (single fit-focused native
+subagent, 0 findings on all six binding checks + skill-authoring lens).
+
+Deviations / open items:
+- Review was a single native subagent and the mental-model reconciliation was
+  lead-driven, both because the ws delegate path (`agents.register(prompts:[stems])`
+  → mental-model-updater / reviewer) is the schema surface removed in M3 2c that
+  Phase 5 migrates; proportionate for a contained doc/skill-text diff. Continues the
+  recorded Phase 1/2 deviation from "named-agent delegation first."
+- **Scope flag — `wsconfig` first-class adoption NOT done.** The Phase 2 `> Forward
+  (Phase 3)` note and the `_index` focus "Next" line both anticipated "teach
+  `wsconfig` the first-class vocabulary (retire the MCP-layer `firstClassTierToAlias`
+  bridge)" in Phase 3, but the Phase 3 plan text above does not list a `wsconfig`
+  change among its deliverables. Honoring the plan-text scope as the hard boundary,
+  the MCP-layer `firstClassTierToAlias` bridge stays in place and `wsconfig` remains
+  alias-keyed (the spec/mental-model framing reflects this current state). Routing
+  the `wsconfig` adoption (Phase 3 Edition vs new phase vs defer) is left to the user.
+- The conditional `(skill, role) → first-class tier` config override surface was
+  skipped: research `260611` has not promoted that surface into this ticket.
+
+> Forward (Phase 4): port the remaining delegate prompt bodies (`code-reviewer` +
+> partition prompts, `reference-discovery`, `mental-model-updater`,
+> `plan-populator-survey/research`) from `wsprompt/prompts/` to canonical rsrc
+> playbooks with `role:` + first-class `tier:` frontmatter; embedded copies stay
+> until Phase 5 removes their last skill consumer.
+
 ### Phase 4: port remaining delegate prompts to canonical rsrc playbooks
 
 Port the remaining delegate prompt bodies from `wsprompt/prompts/` to rsrc

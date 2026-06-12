@@ -419,8 +419,14 @@ skill. See `#260529-wsflow-converged-implement-spine`.
 
 Review is a single stage for both modes. `judge: review-allocation` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
-test) when partitioned. Relay cap is 2 cycles for single-reviewer, 3 cycles for
+test) when partitioned. Each partition carries a default reviewer tier in the
+first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
+correctness `large`, fit and test `medium` — raised for unusually subtle risk.
+When a delegate playbook declares its own `tier:`, the `recommended-tier`
+returned by `playbook.render` is authoritative for that delegate and the table is
+the allocation default. Relay cap is 2 cycles for single-reviewer, 3 cycles for
 partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
+{#260612-reviewer-allocation-tier-default}
 
 Plan population is an either/or depth choice for delegated mode. When plan depth
 is `survey`, `plan-populator-survey` produces file-backed reference-map evidence

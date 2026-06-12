@@ -252,9 +252,17 @@ dropped tickets live in hidden archive dirs and git history.
   + parse-only Tier field + shipped-asset e2e. **Phase 2 done** (`54e53d70`):
   `playbook.render`/`print` return a `recommended-tier` line + `agents.register`
   tier pass-through (`firstClassTierToAlias`) so a mercenary follows its frontmatter
-  tier instead of core, + `oneShot` dead-code removal. Next: Phase 3 (first-class
-  vocab adoption in wsconfig + reviewer-tier default + lead-playbook tier-guide
-  unification).
+  tier instead of core, + `oneShot` dead-code removal. **Phase 3 done**
+  (`fc1cdc5f` source; spec `10be8183`, mental-model `94eafada`): reviewer-tier
+  default re-authored in first-class vocab (correctness `large`, fit/test `medium`)
+  in rsrc + wsflow + manifest; first-class capability vocabulary established in spec
+  (`#260612-first-class-tier-vocabulary`) with `light/core/deep` as the alias layer;
+  tier-guide single-source resolved at note/precedence level. **Scope flag:** the
+  `wsconfig` first-class adoption / `firstClassTierToAlias` bridge retirement the
+  Phase 2 Forward note + this "Next" anticipated is NOT in the Phase 3 plan-text
+  deliverables — left as an open routing decision (Edition/new-phase/defer); the
+  bridge stays MCP-layer and `wsconfig` remains alias-keyed. Next: Phase 4 (port
+  remaining delegate prompts to rsrc; convergence chain P4→P5→P6, P7 rename).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
