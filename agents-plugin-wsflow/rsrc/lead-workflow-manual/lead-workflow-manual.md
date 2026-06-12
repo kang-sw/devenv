@@ -23,7 +23,7 @@ Write MCP calls as `ws/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
-Write prompts sent to native Explore-style subagents and `ws/agents.call` in English.
+Write prompts sent to native Explore-style subagents and `ws.mercenary.call` in English.
 
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
@@ -66,15 +66,15 @@ collect all before synthesizing. Use a broad-tracing scope for wide structural s
 
 ### Persistent agents
 
-`ws/agents.register`
-`ws/agents.call`
-`ws/agents.wait`
-`ws/agents.result`
-`ws/agents.status`
-`ws/agents.tail`
-`ws/agents.print`
-`ws/agents.cancel`
-`ws/agents.erase`
+`ws.mercenary.register`
+`ws.mercenary.call`
+`ws.mercenary.wait`
+`ws.mercenary.result`
+`ws.mercenary.status`
+`ws.mercenary.tail`
+`ws.mercenary.print`
+`ws.mercenary.cancel`
+`ws.mercenary.erase`
 
 Register a stable task name with a self-contained system prompt. Registration
 takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
@@ -86,10 +86,10 @@ delegate's self-contained prompt with `ws/playbook.render(name: "<delegate>")`
 (model-alias vars auto-inject; a lead key splices a child-key credential block and
 the call returns a `recommended-tier`). Hand the rendered prompt to a native
 subagent (default), or pass it as `system_prompt_text` with `tier:
-<recommended-tier>` to a mercenary `ws/agents.register` + `ws/agents.call`, then
-collect through `ws/agents.result`. `reference-discovery` is such a delegate
+<recommended-tier>` to a mercenary `ws.mercenary.register` + `ws.mercenary.call`, then
+collect through `ws.mercenary.result`. `reference-discovery` is such a delegate
 playbook, not a workflow skill.
-`ws/agents.call` starts async and returns promptly. Use
+`ws.mercenary.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,
 `tail(lines: 3)` for small diagnostics, `print` only as a compatibility output
@@ -186,8 +186,8 @@ stop the job.
 
 Treat active-agent listing and broad message-queue semantics as planned contract
 surfaces unless the runtime exposes the exact tool. Basic async cancellation
-exists through `ws/agents.cancel`; retry the same registered agent with
-`ws/agents.call` for no-result cancellation recovery. Check runtime before
+exists through `ws.mercenary.cancel`; retry the same registered agent with
+`ws.mercenary.call` for no-result cancellation recovery. Check runtime before
 assuming richer interrupt behavior.
 
 ## Usage Pattern
@@ -200,9 +200,9 @@ collect the result when the subagent returns.
 for parallel dispatch, spawn multiple concurrent subagents in a single turn; collect all before synthesizing.
 
 Persistent task:
-call `ws/agents.register(name: "<agent-name>")` for a general-purpose delegate.
+call `ws.mercenary.register(name: "<agent-name>")` for a general-purpose delegate.
 for a bundled delegate, render its prompt: `ws/playbook.render(name: "<delegate>")`, then spawn a native subagent or register a mercenary with `system_prompt_text: <rendered>` and `tier: <recommended-tier>`.
-call `ws/agents.call(name: "<agent-name>", prompt: <block below>)` for the mercenary path.
+call `ws.mercenary.call(name: "<agent-name>", prompt: <block below>)` for the mercenary path.
 wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.
 erase the task-scoped agent when cleanup matters.
 

@@ -45,9 +45,9 @@ Scope
 
 ### 3. Fresh Review
 
-1. Register a fresh unique reviewer through `ws/agents.register(name: "design-reviewer-<unique-suffix>", model: "deep")`; do not reuse an existing reviewer session.
-2. Call `ws/agents.call(name: "design-reviewer-<unique-suffix>", prompt: <Design Reviewer prompt>)`.
-3. Read `ws/agents.result(name: "design-reviewer-<unique-suffix>", timeout_seconds: 600)`; if the call fails or times out, delete artifacts and return review failure with premise status, failure reason, and next action.
+1. Register a fresh unique reviewer through `ws.mercenary.register(name: "design-reviewer-<unique-suffix>", model: "deep")`; do not reuse an existing reviewer session.
+2. Call `ws.mercenary.call(name: "design-reviewer-<unique-suffix>", prompt: <Design Reviewer prompt>)`.
+3. Read `ws.mercenary.result(name: "design-reviewer-<unique-suffix>", timeout_seconds: 600)`; if the call fails or times out, delete artifacts and return review failure with premise status, failure reason, and next action.
 4. If the reviewer wrote `<review-path>`, read it; otherwise use the final result text.
 5. If neither `<review-path>` nor usable final text exists, delete artifacts and return review failure with premise status, failure reason, and next action.
 6. Classify findings as fatal issue, important risk, minor polish, acceptable trade-off, reviewer-overreach, or out of scope; list simpler alternatives only under the separate Simpler Alternatives section.

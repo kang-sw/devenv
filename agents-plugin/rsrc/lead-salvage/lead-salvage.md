@@ -52,7 +52,7 @@ Call `ws/project_tree()`.
 4. Use named agents for broad or stateful surveys:
    a. Register one agent per independent survey, such as `salvage-blast-radius`, `salvage-ticket-graph`, `salvage-doc-impact`, or `salvage-evidence`.
    b. Call each agent with the **Survey Prompt** for its assigned question.
-   c. Collect each result through `ws/agents.result(name: "<agent-name>", timeout_seconds: 600)`.
+   c. Collect each result through `ws.mercenary.result(name: "<agent-name>", timeout_seconds: 600)`.
 5. Summarize survey outputs into the **Salvage Report** before treating them as durable evidence.
 6. Do not convert survey outputs into decisions without user confirmation.
 7. Enter **Premise Interview**.

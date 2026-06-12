@@ -82,7 +82,7 @@ Review
 2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
 3. If delegated and referenced tests exist: run baseline verification.
 4. If delegated: spawn the implementer per **Delegate dispatch** (native default; mercenary on request) with the **Implementer spawn prompt** as the task-specific input.
-5. If delegated: read the implementer result (native subagent return, or `ws/agents.result(name: "implementer", timeout_seconds: 600)` for a mercenary) only if the async result lacks a usable summary; capture `<first-commit>..<last-commit>`.
+5. If delegated: read the implementer result (native subagent return, or `ws.mercenary.result(name: "implementer", timeout_seconds: 600)` for a mercenary) only if the async result lacks a usable summary; capture `<first-commit>..<last-commit>`.
 6. Capture `<commit-range>` and `<result-commit>`.
 
 ### 5. Review
@@ -233,7 +233,7 @@ mercenary is available on user request or under `ws.lead.prefer_mercenary`.
 
 1. Render the delegate playbook: `ws/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
 2. Native (default): spawn a native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide.
-3. Mercenary (on request): `ws/agents.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws/agents.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws/agents.result(name: "<name>", timeout_seconds: 600)`.
+3. Mercenary (on request): `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`.
 4. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus the target output path. File-writing delegates write to their caller-created output path or return content; free-response delegates return text the lead integrates.
 
 ### Brief template
