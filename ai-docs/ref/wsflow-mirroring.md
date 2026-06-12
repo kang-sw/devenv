@@ -71,10 +71,11 @@ Excluded:
 ## Prompt Render Dispatch
 
 `wsflow/prompt.render(stem, context)` is the wsflow-only mechanism for handing a
-bundled delegate prompt to a native subagent. It loads the prompt by stem,
-applies render-time `ws/` -> `wsflow/` namespace substitution, injects `context`
-values, writes the result to a tmp file, and returns `prompt_path`. The lead
-hands `prompt_path` to a native subagent.
+bundled delegate prompt to a native subagent. It loads the prompt by stem from
+the wsflow rsrc tree (see **Rsrc Tree Provisioning**), applies render-time
+`ws/` -> `wsflow/` namespace substitution, appends `context` as a free-text
+Render Context block, writes the result to a tmp file, and returns `prompt_path`.
+The lead hands `prompt_path` to a native subagent.
 
 - Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
@@ -90,6 +91,35 @@ hands `prompt_path` to a native subagent.
 wsflow product mode and is hidden from the full ws surface. This is the mirror of
 the agentless hidden-tool gate (full ws hides `agents.*`, `subquery`, and other
 agent-backed tools in wsflow). The two gates are symmetric and must stay so.
+
+## Rsrc Tree Provisioning
+
+`wsflow/prompt.render` loads from an rsrc tree, so the wsflow package ships one:
+`agents-plugin-wsflow/rsrc/`. It is a **generated, byte-identical copy** of
+canonical `agents-plugin/rsrc/`, committed as a real on-disk tree (not a symlink,
+not a release-only artifact). The `ws/` -> `wsflow/` substitution is applied at
+render time in the `prompt.render` tool layer, not in the stored files, so the
+copy is byte-for-byte identical to canonical — including `manifest.json`.
+
+- **Generation / drift guard:** `TestWsflowRsrcMirrorUpToDate` (in
+  `internal/wsrsrc`) asserts byte-equality between the two trees; regenerate the
+  copy with `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run
+  TestRegenerateWsflowRsrcMirror` after any canonical rsrc change (mirrors the
+  `WS_REGEN_MANIFEST` pattern). git content-dedupes the copy, so storage cost is
+  ~0.
+- **Runtime:** the wsflow launcher's `apply_rsrc_root_env` sets `WS_RSRC_ROOT` to
+  the sibling `rsrc/` when present, so the committed copy is resolved with no
+  launcher change.
+
+**Generated-sameness carve-out.** The rsrc subtree is the one explicit exception
+to this document's "drift visibility over generated sameness" doctrine. For
+skills, byte-identical mirroring is forbidden (curation and forbidden-reference
+checks force an explicit wsflow review). For the rsrc subtree, **generated
+sameness IS the contract**: the bodies must not diverge between packages (the
+namespace difference is a render-time transform, not a stored edit), and the
+drift guard — not curation — is what keeps the copy honest. A wsflow-only prompt
+variant, if ever needed, is added as a SEPARATE rsrc file that only wsflow
+renders, never as a divergent body of a shared stem.
 
 ## Bootstrap Template Rules
 
@@ -148,3 +178,8 @@ wsflow mirroring optimizes for **drift visibility without generated sameness**.
 The full ws distribution remains canonical, but wsflow is a curated product
 with different runtime capabilities. When ambiguous, force an explicit
 wsflow review instead of assuming a text-identical mirror is correct.
+
+The single carve-out is the rsrc subtree (see **Rsrc Tree Provisioning**): there,
+generated sameness IS the contract and an automated byte-equality drift guard
+replaces curation. The carve-out is narrow — it covers the generated rsrc copy
+only, never distributed skill text.
