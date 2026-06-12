@@ -851,7 +851,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
 
-	case "agents.register":
+	case "ws.mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -877,7 +877,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Tier:             firstClassTierToAlias(tier),
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "agents.call":
+	case "ws.mercenary.call":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -897,7 +897,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Handle format: agentId=<name> matches the native agentId shape referenced
 		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
 		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
-	case "agents.wait":
+	case "ws.mercenary.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -912,7 +912,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.result":
+	case "ws.mercenary.result":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -925,7 +925,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.status":
+	case "ws.mercenary.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -933,7 +933,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "agents.interrupt":
+	case "ws.mercenary.interrupt":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -949,7 +949,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
-	case "agents.tail":
+	case "ws.mercenary.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -962,7 +962,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Lines: lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.debug.tail":
+	case "ws.mercenary.debug.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -976,14 +976,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Raw:   true,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
+	case "ws.mercenary.debug.stdout", "ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
-		stream := strings.TrimPrefix(params.Name, "agents.debug.")
+		stream := strings.TrimPrefix(params.Name, "ws.mercenary.debug.")
 		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
 			Root:   root,
 			Name:   name,
@@ -991,7 +991,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Lines:  lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.cancel":
+	case "ws.mercenary.cancel":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -999,7 +999,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "agents.recall":
+	case "ws.mercenary.recall":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1012,7 +1012,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Prompt: prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.print":
+	case "ws.mercenary.print":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1020,7 +1020,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "agents.erase":
+	case "ws.mercenary.erase":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1844,7 +1844,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.lead.prefer_mercenary",
-			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws/agents.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws/ws.mercenary.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2277,7 +2277,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.register",
+			"name":        "ws.mercenary.register",
 			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2291,7 +2291,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.call",
+			"name":        "ws.mercenary.call",
 			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2303,7 +2303,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.wait",
+			"name":        "ws.mercenary.wait",
 			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2315,7 +2315,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.result",
+			"name":        "ws.mercenary.result",
 			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2327,7 +2327,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.status",
+			"name":        "ws.mercenary.status",
 			"description": "Return current status for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2338,7 +2338,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.interrupt",
+			"name":        "ws.mercenary.interrupt",
 			"description": "Queue an interrupt or redirect message for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2350,7 +2350,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.tail",
+			"name":        "ws.mercenary.tail",
 			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2362,32 +2362,32 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.debug.tail",
+			"name":        "ws.mercenary.debug.tail",
 			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
 			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.stdout",
+			"name":        "ws.mercenary.debug.stdout",
 			"description": "Debug only: return recent raw stdout lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.stderr",
+			"name":        "ws.mercenary.debug.stderr",
 			"description": "Debug only: return recent raw stderr lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.runtime_log",
+			"name":        "ws.mercenary.debug.runtime_log",
 			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.events",
+			"name":        "ws.mercenary.debug.events",
 			"description": "Debug only: return recent raw agent events log lines.",
 			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.cancel",
+			"name":        "ws.mercenary.cancel",
 			"description": "Best-effort cancel the current async call for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2398,7 +2398,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.print",
+			"name":        "ws.mercenary.print",
 			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2409,7 +2409,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.erase",
+			"name":        "ws.mercenary.erase",
 			"description": "Erase a registered ws agent directory for the current worktree.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2469,7 +2469,7 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "agents.") {
+	if !strings.HasPrefix(name, "ws.mercenary.") {
 		return clone
 	}
 	schema, ok := clone["inputSchema"].(map[string]any)
@@ -2512,9 +2512,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
+		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "git.commit"
+		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -2577,18 +2577,18 @@ func namespaceValue(value any) any {
 	}
 }
 
-// agentCallHandleText formats the agents.call response. The handle is shaped as
+// agentCallHandleText formats the ws.mercenary.call response. The handle is shaped as
 // agentId=<name> so the lead reuses one native-shaped continuation idiom across
 // the native-subagent and mercenary paths (Phase 2c interface parity).
 func agentCallHandleText(name, status string, pid int) string {
-	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", name, status, pid)
+	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", name, status, pid)
 }
 
 func noAgentHiddenTool(name string) bool {
 	if strings.HasPrefix(name, "exec.") {
 		return true
 	}
-	if strings.HasPrefix(name, "agents.") {
+	if strings.HasPrefix(name, "ws.mercenary.") {
 		return true
 	}
 	switch name {

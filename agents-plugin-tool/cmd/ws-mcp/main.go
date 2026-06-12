@@ -43,8 +43,8 @@ func main() {
 		configCommand(os.Args[2:])
 	case "path":
 		path(os.Args[2:])
-	case "agents":
-		fatalIfNoAgentCommand("agents")
+	case "mercenary":
+		fatalIfNoAgentCommand("mercenary")
 		agents(os.Args[2:])
 	case "git":
 		gitCommand(os.Args[2:])
@@ -67,7 +67,7 @@ func usage() {
 		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|specs|mental-models|references>")
 		return
 	}
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|agents|git|tickets|specs|mental-models|references>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|mercenary|git|tickets|specs|mental-models|references>")
 }
 
 func doctor(args []string) {
@@ -196,23 +196,23 @@ func runtimeCapabilities(args []string) {
 
 func runtimeCapabilityCommandNames() []string {
 	commands := []string{
-		"agents.call",
-		"agents.cancel",
-		"agents.check-inbox",
-		"agents.debug.events",
-		"agents.debug.runtime-log",
-		"agents.debug.stderr",
-		"agents.debug.stdout",
-		"agents.debug.tail",
-		"agents.erase",
-		"agents.interrupt",
-		"agents.print",
-		"agents.register",
-		"agents.result",
-		"agents.run-current",
-		"agents.status",
-		"agents.tail",
-		"agents.wait",
+		"mercenary.call",
+		"mercenary.cancel",
+		"mercenary.check-inbox",
+		"mercenary.debug.events",
+		"mercenary.debug.runtime-log",
+		"mercenary.debug.stderr",
+		"mercenary.debug.stdout",
+		"mercenary.debug.tail",
+		"mercenary.erase",
+		"mercenary.interrupt",
+		"mercenary.print",
+		"mercenary.register",
+		"mercenary.result",
+		"mercenary.run-current",
+		"mercenary.status",
+		"mercenary.tail",
+		"mercenary.wait",
 		"config.agents-tier",
 		"config.show",
 		"git.commit",
@@ -244,7 +244,7 @@ func runtimeCapabilityCommandNames() []string {
 func filterNoAgentCommands(commands []string) []string {
 	out := make([]string, 0, len(commands))
 	for _, command := range commands {
-		if strings.HasPrefix(command, "agents.") || command == "config.agents-tier" {
+		if strings.HasPrefix(command, "mercenary.") || command == "config.agents-tier" {
 			continue
 		}
 		out = append(out, command)
@@ -865,7 +865,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|recall|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp mercenary <register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|recall|print|erase>")
 }
 
 type multiFlag []string
@@ -880,7 +880,7 @@ func (m *multiFlag) Set(value string) error {
 }
 
 func agentsRegister(args []string) {
-	fs := flag.NewFlagSet("agents register", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary register", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	backend := fs.String("backend", "", "agent backend")
@@ -892,7 +892,7 @@ func agentsRegister(args []string) {
 
 	systemText, err := readOptionalFile(*systemFile)
 	if err != nil {
-		fatal("agents register", err)
+		fatal("mercenary register", err)
 	}
 	agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
 		Root:             defaultRoot(*root),
@@ -904,13 +904,13 @@ func agentsRegister(args []string) {
 		SystemPromptText: systemText,
 	})
 	if err != nil {
-		fatal("agents register", err)
+		fatal("mercenary register", err)
 	}
 	fmt.Printf("%s\n", agent.Name)
 }
 
 func agentsCall(args []string) {
-	fs := flag.NewFlagSet("agents call", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary call", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
@@ -918,7 +918,7 @@ func agentsCall(args []string) {
 
 	prompt, err := promptFromArgs(fs.Args(), *promptFile)
 	if err != nil {
-		fatal("agents call", err)
+		fatal("mercenary call", err)
 	}
 	result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
 		Root:   defaultRoot(*root),
@@ -926,24 +926,24 @@ func agentsCall(args []string) {
 		Prompt: prompt,
 	})
 	if err != nil {
-		fatal("agents call", err)
+		fatal("mercenary call", err)
 	}
-	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID)
+	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", result.AgentName, result.Status, result.PID)
 }
 
 func agentsRunCurrent(args []string) {
-	fs := flag.NewFlagSet("agents run-current", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary run-current", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
 	if err := wsagent.NewManager(wsagent.Options{}).RunCurrent(defaultRoot(*root), *name); err != nil {
-		fatal("agents run-current", err)
+		fatal("mercenary run-current", err)
 	}
 }
 
 func agentsWait(args []string) {
-	fs := flag.NewFlagSet("agents wait", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary wait", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	var names multiFlag
 	fs.Var(&names, "name", "agent name; may be repeated")
@@ -957,13 +957,13 @@ func agentsWait(args []string) {
 		Timeout: *timeout,
 	})
 	if err != nil {
-		fatal("agents wait", err)
+		fatal("mercenary wait", err)
 	}
 	fmt.Print(text)
 }
 
 func agentsResult(args []string) {
-	fs := flag.NewFlagSet("agents result", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary result", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	timeout := fs.Duration("timeout", 0, "maximum wait duration; defaults to non-blocking")
@@ -975,26 +975,26 @@ func agentsResult(args []string) {
 		Timeout: *timeout,
 	})
 	if err != nil {
-		fatal("agents result", err)
+		fatal("mercenary result", err)
 	}
 	fmt.Print(text)
 }
 
 func agentsStatus(args []string) {
-	fs := flag.NewFlagSet("agents status", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary status", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
 	text, err := wsagent.NewManager(wsagent.Options{}).Status(defaultRoot(*root), *name)
 	if err != nil {
-		fatal("agents status", err)
+		fatal("mercenary status", err)
 	}
 	fmt.Print(text)
 }
 
 func agentsInterrupt(args []string) {
-	fs := flag.NewFlagSet("agents interrupt", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary interrupt", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	messageFile := fs.String("message-file", "", "message file; use - for stdin")
@@ -1002,7 +1002,7 @@ func agentsInterrupt(args []string) {
 
 	message, err := promptFromArgs(fs.Args(), *messageFile)
 	if err != nil {
-		fatal("agents interrupt", err)
+		fatal("mercenary interrupt", err)
 	}
 	result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
 		Root:    defaultRoot(*root),
@@ -1010,20 +1010,20 @@ func agentsInterrupt(args []string) {
 		Message: message,
 	})
 	if err != nil {
-		fatal("agents interrupt", err)
+		fatal("mercenary interrupt", err)
 	}
 	fmt.Printf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID)
 }
 
 func agentsCheckInbox(args []string) {
-	fs := flag.NewFlagSet("agents check-inbox", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary check-inbox", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
 	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInbox(defaultRoot(*root), *name, "hook")
 	if err != nil {
-		fatal("agents check-inbox", err)
+		fatal("mercenary check-inbox", err)
 	}
 	if len(messages) > 0 {
 		fmt.Fprint(os.Stderr, wsagent.ComposeLeadMessageFeedback(messages))
@@ -1036,7 +1036,7 @@ func agentsTail(args []string) {
 }
 
 func agentsTailRaw(args []string, raw bool) {
-	fs := flag.NewFlagSet("agents tail", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary tail", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	lines := fs.Int("lines", 40, "number of lines per section")
@@ -1049,7 +1049,7 @@ func agentsTailRaw(args []string, raw bool) {
 		Raw:   raw,
 	})
 	if err != nil {
-		fatal("agents tail", err)
+		fatal("mercenary tail", err)
 	}
 	fmt.Print(text)
 }
@@ -1077,11 +1077,11 @@ func agentsDebug(args []string) {
 }
 
 func agentsDebugUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents debug <tail|stdout|stderr|runtime-log|events>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp mercenary debug <tail|stdout|stderr|runtime-log|events>")
 }
 
 func agentsDebugStream(stream string, args []string) {
-	fs := flag.NewFlagSet("agents debug "+stream, flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary debug "+stream, flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	lines := fs.Int("lines", 40, "number of lines")
@@ -1094,26 +1094,26 @@ func agentsDebugStream(stream string, args []string) {
 		Lines:  *lines,
 	})
 	if err != nil {
-		fatal("agents debug "+stream, err)
+		fatal("mercenary debug "+stream, err)
 	}
 	fmt.Print(text)
 }
 
 func agentsCancel(args []string) {
-	fs := flag.NewFlagSet("agents cancel", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary cancel", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
 	text, err := wsagent.NewManager(wsagent.Options{}).Cancel(defaultRoot(*root), *name)
 	if err != nil {
-		fatal("agents cancel", err)
+		fatal("mercenary cancel", err)
 	}
 	fmt.Print(text)
 }
 
 func agentsRecall(args []string) {
-	fs := flag.NewFlagSet("agents recall", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary recall", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	promptFile := fs.String("prompt-file", "", "recovery prompt file; use - for stdin")
@@ -1121,7 +1121,7 @@ func agentsRecall(args []string) {
 
 	prompt, err := optionalPromptFromArgs(fs.Args(), *promptFile)
 	if err != nil {
-		fatal("agents recall", err)
+		fatal("mercenary recall", err)
 	}
 	text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
 		Root:   defaultRoot(*root),
@@ -1129,32 +1129,32 @@ func agentsRecall(args []string) {
 		Prompt: prompt,
 	})
 	if err != nil {
-		fatal("agents recall", err)
+		fatal("mercenary recall", err)
 	}
 	fmt.Print(text)
 }
 
 func agentsPrint(args []string) {
-	fs := flag.NewFlagSet("agents print", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary print", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
 	text, err := wsagent.NewManager(wsagent.Options{}).Print(defaultRoot(*root), *name)
 	if err != nil {
-		fatal("agents print", err)
+		fatal("mercenary print", err)
 	}
 	fmt.Print(text)
 }
 
 func agentsErase(args []string) {
-	fs := flag.NewFlagSet("agents erase", flag.ExitOnError)
+	fs := flag.NewFlagSet("mercenary erase", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
 	if err := wsagent.NewManager(wsagent.Options{}).Erase(defaultRoot(*root), *name); err != nil {
-		fatal("agents erase", err)
+		fatal("mercenary erase", err)
 	}
 }
 

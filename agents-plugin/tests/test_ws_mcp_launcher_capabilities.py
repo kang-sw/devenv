@@ -117,7 +117,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         contract["runtime_capabilities"] = {"match": "exact"}
 
         payload = self.capability_payload()
-        payload["tools"] = ["runtime.info", "agents.call"]
+        payload["tools"] = ["runtime.info", "ws.mercenary.call"]
         payload["commands"] = ["runtime.info"]
         launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
             [str(got_binary), *args], 0, stdout=json.dumps(payload), stderr=""

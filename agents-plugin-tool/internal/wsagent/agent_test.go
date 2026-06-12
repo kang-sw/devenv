@@ -858,7 +858,7 @@ func TestRecallCancelsActiveCallAndStartsRecoveryRetry(t *testing.T) {
 	if !strings.Contains(text, "recall_recovery_only: true") ||
 		!strings.Contains(text, "recall_cancelled_active_call: true") ||
 		!strings.Contains(text, "impl\trunning\tpid=4567") ||
-		!strings.Contains(text, "follow_up: agents.result --timeout 10m | agents.tail | agents.status | agents.cancel") {
+		!strings.Contains(text, "follow_up: ws.mercenary.result --timeout 10m | ws.mercenary.tail | ws.mercenary.status | ws.mercenary.cancel") {
 		t.Fatalf("recall text mismatch:\n%s", text)
 	}
 	if len(starter.requests) != 2 {
@@ -1444,7 +1444,7 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 		!strings.Contains(err.Error(), "backend exploded") ||
 		!strings.Contains(err.Error(), "backend invocation failed") ||
 		!strings.Contains(err.Error(), "- claude: "+claudePath) ||
-		!strings.Contains(err.Error(), "re-run agents.register") ||
+		!strings.Contains(err.Error(), "re-run ws.mercenary.register") ||
 		!strings.Contains(err.Error(), "config.agents_tier") {
 		t.Fatalf("RunCurrent error = %v", err)
 	}
@@ -1518,7 +1518,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		`unsupported agent backend "bogus"`,
 		"backend: bogus",
 		"model: bogus-model",
-		"re-run agents.register",
+		"re-run ws.mercenary.register",
 		"config.agents_tier",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -1578,7 +1578,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if !strings.Contains(timeoutText, "wait_timeout: true") ||
 		!strings.Contains(timeoutText, "call_status: running") ||
 		!strings.Contains(timeoutText, "active: true") ||
-		!strings.Contains(timeoutText, "follow_up: agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel") {
+		!strings.Contains(timeoutText, "follow_up: ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel") {
 		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -1600,7 +1600,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 		!strings.Contains(cancelled, "cancel_pid: 2468") ||
 		!strings.Contains(cancelled, "cleanup_needed: false") ||
 		!strings.Contains(cancelled, "cancel_recovery_tip: If this was cancelled because the agent did not respond") ||
-		!strings.Contains(cancelled, "follow_up: agents.call | agents.tail | agents.erase") {
+		!strings.Contains(cancelled, "follow_up: ws.mercenary.call | ws.mercenary.tail | ws.mercenary.erase") {
 		t.Fatalf("cancel status mismatch:\n%s", cancelled)
 	}
 	call, err := readCurrentCall(layout.CurrentStateFile)
@@ -1648,7 +1648,7 @@ func TestCancelReportsCleanupNeededWhenOwnedProcessSurvives(t *testing.T) {
 	if !strings.Contains(status, "call_status: cancelled") ||
 		!strings.Contains(status, "cancel_pid: 1357") ||
 		!strings.Contains(status, "cleanup_needed: true") ||
-		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | agents.erase") {
+		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | ws.mercenary.erase") {
 		t.Fatalf("cleanup-needed status mismatch:\n%s", status)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})

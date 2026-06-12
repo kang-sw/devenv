@@ -14,7 +14,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so `agents register`
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so `mercenary register`
 // can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
 // go:embed bundle).
 func TestMain(m *testing.M) {
@@ -109,7 +109,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
@@ -119,7 +119,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
 	}
-	for _, hidden := range []string{"agents.call", "agents.cancel", "agents.run-current", "subquery", "config.agents-tier"} {
+	for _, hidden := range []string{"mercenary.call", "mercenary.cancel", "mercenary.run-current", "subquery", "config.agents-tier"} {
 		if slices.Contains(got.Commands, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
 		}
@@ -143,7 +143,7 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: agents"},
+		{name: "mercenary", args: []string{"mercenary", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: mercenary"},
 		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config agents-tier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -438,10 +438,10 @@ func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "stdout", args: []string{"agents", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
-		{name: "stderr", args: []string{"agents", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
-		{name: "runtime-log", args: []string{"agents", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
-		{name: "events", args: []string{"agents", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
+		{name: "stdout", args: []string{"mercenary", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
+		{name: "stderr", args: []string{"mercenary", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
+		{name: "runtime-log", args: []string{"mercenary", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
+		{name: "events", args: []string{"mercenary", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(bin, tc.args...)
@@ -455,10 +455,10 @@ func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
 		})
 	}
 
-	cmd := exec.Command(bin, "agents", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
+	cmd := exec.Command(bin, "mercenary", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("ws-mcp agents debug tail failed: %v\n%s", err, string(out))
+		t.Fatalf("ws-mcp mercenary debug tail failed: %v\n%s", err, string(out))
 	}
 	if text := string(out); !strings.Contains(text, "== events ==") || !strings.Contains(text, "event new") || !strings.Contains(text, "== stdout ==") {
 		t.Fatalf("debug tail output mismatch: %q", text)

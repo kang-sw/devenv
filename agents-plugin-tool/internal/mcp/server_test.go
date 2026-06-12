@@ -243,7 +243,7 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(byID["1"], "agents.register") || !strings.Contains(byID["1"], "agents.call") || !strings.Contains(byID["1"], "config.show") {
+	if !strings.Contains(byID["1"], "ws.mercenary.register") || !strings.Contains(byID["1"], "ws.mercenary.call") || !strings.Contains(byID["1"], "config.show") {
 		t.Fatalf("default profile hid lead tools: %s", byID["1"])
 	}
 }
@@ -497,7 +497,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	// tools/list advertises the full lead surface (schema visibility is advisory;
 	// the keyed call gate is the enforcement). Restricted tools remain visible.
 	listResp := callToolsList(t, server)
-	for _, name := range []string{"agents.status", "config.agents_tier", "config.show", "runtime.info"} {
+	for _, name := range []string{"ws.mercenary.status", "config.agents_tier", "config.show", "runtime.info"} {
 		if !strings.Contains(listResp, name) {
 			t.Fatalf("tools/list must advertise full lead surface, missing %s: %s", name, listResp)
 		}
@@ -507,12 +507,12 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	}
 
 	// A leaf-scoped key is rejected by the keyed gate for restricted tools.
-	deniedStatus := callToolOnce(t, server, 2, "agents.status", map[string]any{
+	deniedStatus := callToolOnce(t, server, 2, "ws.mercenary.status", map[string]any{
 		"session_key": leafKey,
 		"name":        "impl",
 	})
 	if !strings.Contains(deniedStatus, "tool not available") {
-		t.Fatalf("leaf key not rejected for agents.status: %s", deniedStatus)
+		t.Fatalf("leaf key not rejected for ws.mercenary.status: %s", deniedStatus)
 	}
 	deniedTier := callToolOnce(t, server, 3, "config.agents_tier", map[string]any{
 		"session_key": leafKey,
@@ -546,7 +546,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
-	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,agents.status,config.show")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,ws.mercenary.status,config.show")
 
 	server := NewServer(root, "test")
 	leafKey, err := server.sessions.mint(root, roleLeaf)
@@ -568,14 +568,14 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 		t.Fatalf("allowlist+leaf wrongly rejected runtime.info: %s", allowedInfo)
 	}
 
-	// agents.status and config.show are allowlisted but DENIED by the leaf scope.
+	// ws.mercenary.status and config.show are allowlisted but DENIED by the leaf scope.
 	// The keyed gate must still reject them — the allowlist cannot regain them.
-	deniedStatus := callToolOnce(t, server, 3, "agents.status", map[string]any{
+	deniedStatus := callToolOnce(t, server, 3, "ws.mercenary.status", map[string]any{
 		"session_key": leafKey,
 		"name":        "impl",
 	})
 	if !strings.Contains(deniedStatus, "tool not available") {
-		t.Fatalf("allowlist let leaf-denied agents.status through: %s", deniedStatus)
+		t.Fatalf("allowlist let leaf-denied ws.mercenary.status through: %s", deniedStatus)
 	}
 	deniedShow := callToolOnce(t, server, 4, "config.show", map[string]any{
 		"session_key": leafKey,
@@ -1027,14 +1027,14 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "project_tree") {
 		t.Fatalf("tools/list missing project_tree: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], "agents.call") {
-		t.Fatalf("tools/list missing agents.call: %s", byID["2"])
+	if !strings.Contains(byID["2"], "ws.mercenary.call") {
+		t.Fatalf("tools/list missing ws.mercenary.call: %s", byID["2"])
 	}
-	if strings.Contains(byID["2"], "agents.call_async") {
-		t.Fatalf("tools/list still includes agents.call_async: %s", byID["2"])
+	if strings.Contains(byID["2"], "ws.mercenary.call_async") {
+		t.Fatalf("tools/list still includes ws.mercenary.call_async: %s", byID["2"])
 	}
-	if strings.Contains(byID["2"], "agents.oneshot") {
-		t.Fatalf("tools/list still includes agents.oneshot: %s", byID["2"])
+	if strings.Contains(byID["2"], "ws.mercenary.oneshot") {
+		t.Fatalf("tools/list still includes ws.mercenary.oneshot: %s", byID["2"])
 	}
 	if strings.Contains(byID["2"], "subquery") {
 		t.Fatalf("tools/list still advertises removed subquery tool: %s", byID["2"])
@@ -1078,15 +1078,15 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "config.show") {
 		t.Fatalf("tools/list missing config.show: %s", byID["2"])
 	}
-	// Unit 4: agents.register prompts/tier/model fields removed from schema.
+	// Unit 4: ws.mercenary.register prompts/tier/model fields removed from schema.
 	// Verify system_prompt_text is still present and prompts is absent.
 	if strings.Contains(byID["2"], "\"prompts\"") {
-		t.Fatalf("tools/list agents.register schema still has removed 'prompts' field: %s", byID["2"])
+		t.Fatalf("tools/list ws.mercenary.register schema still has removed 'prompts' field: %s", byID["2"])
 	}
 	if !strings.Contains(byID["2"], "\"system_prompt_text\"") {
-		t.Fatalf("tools/list agents.register schema missing system_prompt_text: %s", byID["2"])
+		t.Fatalf("tools/list ws.mercenary.register schema missing system_prompt_text: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout", "ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events", "ws.mercenary.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -1094,8 +1094,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], `"mental_model_notes"`) {
 		t.Fatalf("tools/list missing git.commit mental_model_notes schema: %s", byID["2"])
 	}
-	if strings.Contains(byID["2"], "agents.recall") {
-		t.Fatalf("tools/list should not advertise agents.recall: %s", byID["2"])
+	if strings.Contains(byID["2"], "ws.mercenary.recall") {
+		t.Fatalf("tools/list should not advertise ws.mercenary.recall: %s", byID["2"])
 	}
 	if !strings.Contains(byID["3"], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", byID["3"])
@@ -1157,9 +1157,9 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	mustWrite(t, filepath.Dir(layout.CurrentRuntimeLog), filepath.Base(layout.CurrentRuntimeLog), "runtime old\nruntime new\n")
 
 	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.debug.stdout","arguments":{"name":"impl","lines":1}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.debug.runtime_log","arguments":{"name":"impl","lines":1}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.debug.tail","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.debug.stdout","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.debug.runtime_log","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.debug.tail","arguments":{"name":"impl","lines":1}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -1198,8 +1198,8 @@ func TestServeStdioAgentTailIsBoundedButDebugTailIsRaw(t *testing.T) {
 	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), line+"\n")
 
 	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.tail","arguments":{"name":"impl","lines":1}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.debug.tail","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.tail","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.debug.tail","arguments":{"name":"impl","lines":1}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -1246,7 +1246,7 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 
 	out.Reset()
-	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
 	if err := serveStdioWithSession(t, server, root, registerInput, &out); err != nil {
 		t.Fatalf("ServeStdio register returned error: %v", err)
 	}
@@ -1269,7 +1269,7 @@ func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.
 	inputs := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.5","effort":"medium"}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.4"}}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
 	}
 	for _, input := range inputs {
 		out.Reset()
@@ -1298,7 +1298,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"impl","prompt":"work"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.call","arguments":{"name":"impl","prompt":"work"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1308,7 +1308,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
-	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel"} {
+	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
@@ -1324,7 +1324,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
 	}
-	if !strings.Contains(byID["3"], "wsflow agentless mode disables agent-backed tool: agents.call") {
+	if !strings.Contains(byID["3"], "wsflow agentless mode disables agent-backed tool: ws.mercenary.call") {
 		t.Fatalf("hidden tool did not return clear no-agent error: %s", byID["3"])
 	}
 }
@@ -1412,8 +1412,8 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
-	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
-	checkInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"reviewer"}}}`
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	checkInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.status","arguments":{"name":"reviewer"}}}`
 
 	var out bytes.Buffer
 	server := NewServer(t.TempDir(), "test")
@@ -1440,8 +1440,8 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	root := initTicketRepo(t, "260508-feat-codex-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
-	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
-	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
+	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
 	var out bytes.Buffer
 	server := NewServer(t.TempDir(), "test")
 	if err := serveStdioWithSession(t, server, root, setupInput, &out); err != nil {
@@ -1487,7 +1487,7 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	}()
 
 	key, _ := parseLoginResponse(t, callLogin(t, streamServer, 900002, root, nil))
-	fmt.Fprintln(writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"impl","timeout_seconds":2,"session_key":%q}}}`, key))
+	fmt.Fprintln(writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.wait","arguments":{"name":"impl","timeout_seconds":2,"session_key":%q}}}`, key))
 	fmt.Fprintln(writer, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 
 	lineCh := make(chan string, 1)
@@ -1506,7 +1506,7 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 			t.Fatalf("first response was not tools/list while wait was running: %s", line)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("tools/list was blocked behind agents.wait")
+		t.Fatal("tools/list was blocked behind ws.mercenary.wait")
 	}
 	_ = writer.Close()
 	_ = reader.Close()
@@ -1539,14 +1539,14 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"ephemeral-tmp-test"}}}` + "\n"
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.result","arguments":{"name":"ephemeral-tmp-test"}}}` + "\n"
 	var out bytes.Buffer
 	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	if !strings.Contains(toolText(t, byID["1"]), "ephemeral answer") {
-		t.Fatalf("agents.result response mismatch: %s", byID["1"])
+		t.Fatalf("ws.mercenary.result response mismatch: %s", byID["1"])
 	}
 	if _, err := os.Stat(layout.AgentDir); err != nil {
 		t.Fatalf("ephemeral agent dir should remain after MCP result for retention cleanup: %v", err)
