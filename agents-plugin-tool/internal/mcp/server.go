@@ -1844,7 +1844,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.lead.prefer_mercenary",
-			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws/ws.mercenary.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
