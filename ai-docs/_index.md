@@ -265,8 +265,15 @@ dropped tickets live in hidden archive dirs and git history.
   (not debt). **Naming decisions (2026-06-12, exec deferred):** `config.agents_tier`
   → `config.model_alias`, new override `config.role_tier`, "tier" reserved for the
   abstraction layer — recorded in `## Decisions` + research `260611`; renames are a
-  config-surface slice / Phase 7-coordinated, not Phase 3. Next: Phase 4 (port
-  remaining delegate prompts to rsrc; convergence chain P4→P5→P6, P7 rename).
+  config-surface slice / Phase 7-coordinated, not Phase 3. **Phase 4 done**
+  (`5a26b1d6` source; mental-model `9f7e311b`): remaining delegate prompts ported
+  to rsrc (3 review partitions sharing a flat `code-reviewer` base via `includes`,
+  + reference-discovery/mental-model-updater/plan-populator-survey/research as
+  `role: delegate`), manifest 26→34, shipped-render tests cover child-key/vars/
+  includes. No wsflow mirror (agentless, no rsrc tree); dogfood
+  `260612-bug-ws-rsrc-dev-server-new-file-staleness` filed (dev server caches rsrc
+  file set, new files appear missing until restart). Next: Phase 5 (migrate skill
+  delegation off `register(prompts:[stems])`; convergence chain P5→P6, P7 rename).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

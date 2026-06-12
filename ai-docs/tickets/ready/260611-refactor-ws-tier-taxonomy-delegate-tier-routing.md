@@ -448,6 +448,70 @@ renders via `playbook.render` with the expected child-key/vars; manifest guard
 green. Boundary: does not change skill delegation call sites (Phase 5) or remove
 `wsprompt` (Phase 6).
 
+### Result (5a26b1d6) - 2026-06-12
+
+Ported the remaining delegate prompts to canonical rsrc playbooks. Source commit
+`5a26b1d6` (rsrc assets + manifest regen + shipped-render tests); mental-model
+`9f7e311b`. Manifest grew 26→34 files.
+
+Created assets (`agents-plugin/rsrc/`):
+
+| Playbook | role | tier | model var | notes |
+|----------|------|------|-----------|-------|
+| `code-reviewer.md` (flat dep) | — | — | — | shared reviewer base, no frontmatter, var-free |
+| `code-review-correctness/` | reviewer | large | DeepModel | `includes: [code-reviewer]` |
+| `code-review-fit/` | reviewer | medium | CoreModel | `includes: [code-reviewer]` |
+| `code-review-test/` | reviewer | medium | CoreModel | `includes: [code-reviewer]` |
+| `reference-discovery/` | delegate | small | LightModel | `delegates: false` |
+| `mental-model-updater/` | delegate | medium | CoreModel | `delegates: false` |
+| `plan-populator-survey/` | delegate | medium | CoreModel | `delegates: false` |
+| `plan-populator-research/` | delegate | large | DeepModel | `delegates: false` |
+
+Tiers follow the locked alias mapping (`light↦small`/`core↦medium`/`deep↦large`)
+applied to each source `model:`; the three review partitions take the Phase 3
+reviewer-allocation default (correctness `large`, fit/test `medium`).
+
+**Composition decision.** The three partition reviewers reuse a single flat
+shared base `code-reviewer.md` via `includes:` rather than inlining the base
+three times. A subdir playbook cannot be an include target (includes resolve
+flat to `<root>/<name>.md`), so the base lives as a root-level flat dep and is
+the canonical "code-reviewer" rsrc port. The base is var-free so partitions with
+different tiers do not collide on an undeclared model var. Each partition still
+renders to one self-contained prompt (the 2c "single self-contained prompt"
+shape), since includes are appended at render time. `role:`/`delegates:` are
+orthogonal: `role` gates render-minted child-key eligibility, `delegates` gates
+the mercenary tip — the four auxiliary workers are `role: delegate` (child-key
+eligible) but `delegates: false` (read-only / no-spawn).
+
+**Verification.** Authoritative verification is the Go render layer
+(`internal/mcp/mercenary_surface_test.go`): `TestRenderGoldenShippedPhase4Delegates`
+asserts child-key splice (scope `roleDelegate`) + full var substitution for all
+seven renderable playbooks; `TestRenderGoldenShippedReviewPartitionIncludesBase`
+asserts the partitions resolve the shared base. Manifest guard + full module
+suite green. Fit review clean (content fidelity vs source, frontmatter, tier/var
+consistency, manifest hashes all confirmed).
+
+**Deviations.**
+- *No wsflow mirror.* The plan-text "mirror into `agents-plugin-wsflow`" has no
+  target: wsflow is agentless with no rsrc tree (Phase 1 finding, `3019ade9`).
+  Delegate-asset convergence for wsflow stays tracked by
+  `260610-chore-wsflow-explore-playbook-mirroring` (idea).
+- *Lead-driven direct edit + native review.* The ws delegation surface
+  (`agents.register(prompts:[stems])`) is mid-migration and depends on these very
+  assets, so this continues the documented M3 Phase 1/2 lead-driven deviation
+  rather than ws named-agent delegation; review ran via a native subagent.
+- *Live MCP server could not verify renders.* The running `0.30.0-dev` server
+  re-reads `manifest.json` per call but caches its rsrc file SET in-process, so
+  newly added files surface as `manifest-listed file missing` until restart even
+  with `WS_RSRC_ROOT` on the live tree. Captured as a dogfood idea ticket
+  (`260612-bug-ws-rsrc-dev-server-new-file-staleness`).
+
+> Forward (Phase 5/6): the base reviewer text is intentionally duplicated between
+> `code-reviewer.md` (flat dep) and `reviewer/reviewer.md` (Phase 1 subdir
+> playbook) because a subdir playbook cannot be an include target. Phase 5/6
+> should reconcile this when it migrates call sites — decide the single-reviewer
+> path target (`reviewer` vs a `code-reviewer` playbook) and whether to dedupe.
+
 ### Phase 5: migrate skill delegation off register(prompts:[stems])
 
 Rewrite the shipped skill playbooks (`lead-implement` and any peer that registers
