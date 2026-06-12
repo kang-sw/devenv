@@ -272,8 +272,18 @@ dropped tickets live in hidden archive dirs and git history.
   `role: delegate`), manifest 26→34, shipped-render tests cover child-key/vars/
   includes. No wsflow mirror (agentless, no rsrc tree); dogfood
   `260612-bug-ws-rsrc-dev-server-new-file-staleness` filed (dev server caches rsrc
-  file set, new files appear missing until restart). Next: Phase 5 (migrate skill
-  delegation off `register(prompts:[stems])`; convergence chain P5→P6, P7 rename).
+  file set, new files appear missing until restart). **Phase 5 done** (`5023562c`
+  source; spec `d5f158c7`, mental-model `3032e469`): shipped skill delegation
+  migrated off `register(prompts:[stems])` to `playbook.render` + native/mercenary
+  spawn (lead-implement/lead-sprint/lead-workflow-manual; centralized **Delegate
+  dispatch** template; single-reviewer→`reviewer`, partitioned→`code-review-*`
+  resolving the P4 Forward note). wsflow already converged (0 register(prompts));
+  `lead-verify-design`'s `register(model:"deep")` inline-reviewer flagged as
+  out-of-scope follow-up. **Phase 5 design decision recorded** (`024a4874`): wsflow
+  rsrc provisioning = build-time generated copy (symlink rejected) + drift guard +
+  rsrc-only "generated sameness" carve-out — implemented in P6. Next: Phase 6 (retire
+  `wsprompt` loader: `api.ask` + wsflow `RenderSource` → rsrc, provision wsflow's
+  generated rsrc tree + drift test, delete embedded delegate bodies; P7 rename).
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

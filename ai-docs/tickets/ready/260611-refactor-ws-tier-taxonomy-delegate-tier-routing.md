@@ -559,6 +559,64 @@ register field; a representative delegation (e.g. lead-implement → implementer
 renders + spawns end-to-end on both ws and wsflow. Boundary: leaves the now-unused
 embedded delegate prompts in place for Phase 6 to delete.
 
+### Result (5023562c) - 2026-06-12
+
+Migrated shipped skill delegation off `register(prompts:[stems])` to
+`ws/playbook.render` + native/mercenary spawn. Source `5023562c` (rsrc + manifest);
+spec `d5f158c7`; mental-model `3032e469`. Landed on `implement/ws-tier-taxonomy-phase5`
+(base = phase4 tip + the Phase 6 decision commit `024a4874`).
+
+Migrated playbooks (the only ws rsrc files that registered prompt-stem delegates):
+- `lead-implement` — added a centralized **Delegate dispatch** template (render →
+  native default / mercenary `register(system_prompt_text)`+`call`; no caller
+  `context` since these delegates declare only auto-injected model-alias vars; task
+  input handed to the worker, not the render call). Converted reference-discovery
+  (step 10), plan-populator (step 12), implementer (step 13 + Edit 4/5),
+  single/partitioned reviewer (Review 2/3 + partition table column), and
+  mental-model-updater (Doc Pre-Pass).
+- `lead-sprint` — mental-model-updater dispatch.
+- `lead-workflow-manual` — the Persistent-agents primitive guidance + usage pattern.
+
+**Single-reviewer path target resolved** (Phase 4 Forward note): single review → the
+`reviewer` playbook (general reviewer; its shared base covers
+correctness/standards/contract/security); partitioned → `code-review-correctness`/
+`fit`/`test` (each includes the `code-reviewer` base). The base-text SOURCE dedup
+(`code-reviewer.md` flat dep vs `reviewer/reviewer.md` subdir) stays deferred to
+Phase 6.
+
+**Verification.** No residual `register(prompts)`/`prompts:`/`prompt_refs` in any
+delegation site (only prose noting the fields are gone). Manifest regenerated (3 file
+hashes). `go build/vet ./...` clean; full module suite green (13 packages, manifest
+guard included). Single native fit + skill-authoring review `[clean]` (six checks:
+removal completeness, idiom correctness, reference validity, ticket-decision
+preservation, skill-authoring fit, scope discipline); two low/non-blocking notes
+rejected with reasons (the mercenary framing is lead-side-correct; the Review-step-4
+redundancy is pre-existing / out-of-diff). spec `workflow-skills.md`
+`#260507`/`#260505` reconciled; mental-models `prompt-bundle`/`workflow-skills`
+reconciled.
+
+**Deviations / open items.**
+- *`lead-verify-design` excluded.* Its `ws/agents.register(name, model: "deep")`
+  drives an inline-prompt design-reviewer using the removed `model` field — not a
+  `register(prompts)` site, so outside Phase 5's enumerated delegate scope. Open
+  follow-up: how an inline-prompt reviewer sets its model/tier post-2c (it renders no
+  playbook, so there is no `recommended-tier` to pass through).
+- *Lead-driven edit + native review* (continues the M3 Phase 1-4 deviation): the ws
+  delegate path is the surface being migrated and is crash-prone; native review
+  proportionate for a skill-text diff.
+- *Live MCP server staleness, broadened.* `playbook.print(lead-implement)` on the
+  running `0.30.0-dev` server returned PRE-edit (Phase 4) content for an EXISTING
+  edited file — broader than `260612`'s "existing-file edits are seen live" note; the
+  server reads a cached/installed rsrc root, not the working tree. Authoritative
+  verification was the Go layer (working-tree rsrc) + grep; the three edited playbooks
+  are `kind:print` with no vars/includes, so render = verbatim body (no substitution
+  risk). Extends dogfood ticket `260612`.
+
+> Forward (Phase 6): the single-reviewer target is now `reviewer` and partitions are
+> `code-review-*`; Phase 6's base-text dedup should reconcile `code-reviewer.md` (flat
+> dep) vs `reviewer/reviewer.md` (subdir) against these call sites. Also wire the
+> wsflow rsrc generated-copy provisioning + drift guard recorded in `## Decisions`.
+
 ### Phase 6: retire the wsprompt loader entirely
 
 Move `wsprompt`'s remaining non-delegate consumers onto rsrc and remove the

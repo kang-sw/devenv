@@ -8,7 +8,7 @@ sources:
   - agents-plugin-tool/internal/wsprompt/
 related:
   documentation-system: "write-spec and write-ticket enforce documentation traceability before implementation."
-  prompt-bundle: "delegated workflow skills register embedded prompt chains by stem."
+  prompt-bundle: "delegated workflow skills render rsrc delegate playbooks via playbook.render; register(prompts:[stems]) is gone."
 ---
 
 # Workflow Skills
@@ -80,7 +80,7 @@ related:
 
 ## Coupling
 
-- Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
+- Skill text that names a delegate playbook must match an rsrc playbook name under `agents-plugin/rsrc/` (manifest-checked), not an embedded prompt stem.
 - Legacy skeleton prompts may remain bundled for compatibility; normal implementation routing does not register skeleton-populator or skeleton-reviewer.
 - Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec-address gate and focus checks.
 - Moving updater dispatch into the Edit stage can double-run documentation updates; implementation doc pre-pass and sprint-edit episode closure own their separate doc pipeline calls.
