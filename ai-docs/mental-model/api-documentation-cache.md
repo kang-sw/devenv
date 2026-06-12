@@ -3,12 +3,12 @@ domain: api-documentation-cache
 description: "API docs domain routing, manager agents, cache ownership, sync asks, and async jobs."
 sources:
   - agents-plugin-tool/internal/mcp/
-  - agents-plugin-tool/internal/wsprompt/
+  - agents-plugin/rsrc/
   - ai-docs/.deps/
 related:
   named-agent-runtime: "API docs asks and async jobs use transient router agents and durable per-domain manager agents."
   mcp-runtime: "API docs exposes both synchronous and recoverable async MCP tool surfaces."
-  prompt-bundle: "API docs behavior is mostly prompt-owned and prompt stems are hard-coded."
+  prompt-bundle: "API docs behavior is mostly prompt-owned; the api-doc prompt stems render from rsrc via renderAPIPrompt (260611 Phase 6), not the embedded bundle."
 ---
 
 # API Documentation Cache
@@ -18,7 +18,7 @@ related:
 - `api.list` returns non-hidden domain directories under `ai-docs/.deps/`. {#260505-api-docs-mcp-surface}
 - `api.ask` resolves domains, starts a pre-router if needed, fans out manager calls, and aggregates sections. {#260505-api-docs-domain-routing}
 - `api.ask_async`, `api.status`, `api.result`, and `api.cancel` wrap the same routing/manager path in recoverable job state. {#260508-api-docs-async-jobs} {#260508-api-documentation-async-mcp-tools}
-- `api-doc-manager`, `pre-router`, and `api-doc-cargo-brief` prompts own cache behavior and answer quality.
+- `api-doc-manager`, `pre-router`, and `api-doc-cargo-brief` prompts own cache behavior and answer quality. They are var-free `kind: print` rsrc playbooks rendered to `SystemPromptText` by `renderAPIPrompt` (260611 Phase 6); `api-doc-cargo-brief` is appended only when `exec.LookPath("cargo-brief")` succeeds, replacing the former `ConditionalPromptRef`.
 
 ## Module Contracts
 

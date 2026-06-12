@@ -281,9 +281,20 @@ dropped tickets live in hidden archive dirs and git history.
   `lead-verify-design`'s `register(model:"deep")` inline-reviewer flagged as
   out-of-scope follow-up. **Phase 5 design decision recorded** (`024a4874`): wsflow
   rsrc provisioning = build-time generated copy (symlink rejected) + drift guard +
-  rsrc-only "generated sameness" carve-out — implemented in P6. Next: Phase 6 (retire
-  `wsprompt` loader: `api.ask` + wsflow `RenderSource` → rsrc, provision wsflow's
-  generated rsrc tree + drift test, delete embedded delegate bodies; P7 rename).
+  rsrc-only "generated sameness" carve-out — implemented in P6. **Phase 6 re-sliced
+  + done** (`6be3bb64` source; spec `9f6db8f5`, mental-model `9112a632`; re-slice
+  `1e4d4a1f`): a source survey found `wsprompt` also backs `infra.read`/`ReadInfra`
+  + runtime `Bundle`/`ContentSHA256`, so full retirement + package deletion moved to
+  **Phase 6b**; Phase 6 landed the convergence headline — flat-playbook fallback
+  (`code-reviewer` loadable), `api.ask` prompts → rsrc (`renderAPIPrompt`, +3 rsrc
+  ports), wsflow `prompt.render` → rsrc (`renderPlaybookBody`), and a committed
+  byte-identical `agents-plugin-wsflow/rsrc/` copy with a byte-equality drift guard
+  (`WS_REGEN_WSFLOW_RSRC`) + `wsflow-mirroring.md` carve-out. Gen-mechanism = committed
+  copy + test-driven regen; drift guard = byte-equality (substitution is render-time).
+  Dogfood: pre-existing wsflow python test failure (`wsflow/ws.lead.login`) captured as
+  `260612-bug-wsflow-skill-ws-dotted-namespace-ref` (not a Phase 6 regression). Next:
+  **Phase 6b** (`infra.read`→rsrc + dead-stem disposition + bundle-hash collapse +
+  `wsprompt` package deletion + prompt-bundle line-27 rewrite), then P7 rename.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

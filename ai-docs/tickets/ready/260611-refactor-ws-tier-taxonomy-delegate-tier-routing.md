@@ -678,6 +678,64 @@ allowlisted stems from the wsflow rsrc copy; drift guard green; `api.ask` resolv
 its prompts from rsrc; `go build/vet/test ./...` green. Depends on Phases 4+5 having
 moved every delegate consumer first.
 
+### Result (6be3bb64) - 2026-06-12
+
+Landed on `implement/ws-tier-taxonomy-phase6` (stacked on the unmerged Phase 5 tip
+`5c6fb71a`; merge-target = epic `260605`). The render/api consumers are off the
+embedded bundle and wsflow ships a generated rsrc tree; `wsprompt` stays in place
+for `infra.read`/runtime metadata (Phase 6b).
+
+Source survey (two Explore agents) drove the re-slice (`1e4d4a1f`): `wsprompt` had
+more consumers than the plan text enumerated (`ReadInfra`→`infra.read`,
+`Bundle`/`ContentSHA256`→runtime metadata + launcher hash validation), so full
+retirement + package deletion moved to Phase 6b.
+
+Delivered (4 source commits):
+- **Flat-playbook fallback** (`42bbcd46`, `wsrsrc/loader.go`): `Load` falls back to
+  a flat `<root>/<name>.md` when the subdir playbook is absent (subdir wins), so the
+  var-free `code-reviewer` flat dep is loadable as a playbook. Chosen over flipping
+  the wsflow allowlist stem to `reviewer` (smaller contract blast). +2 unit tests.
+- **api.ask → rsrc** (`2698341c`): added `kind:print` rsrc ports `pre-router`,
+  `api-doc-manager`, `api-doc-cargo-brief`; `wsagentAPIRuntime` renders each via
+  `renderAPIPrompt` (nil-vars `Load`) into `SystemPromptText`; the cargo-brief
+  `ConditionalPromptRef` became an inline `exec.LookPath("cargo-brief")` gate.
+  Manifest regenerated (+3). `Model`/`SuppressOrientation` preserved.
+- **wsflow `prompt.render` → rsrc** (`3bed684a`): `renderPrompt` became a `*Server`
+  method routing through `renderPlaybookBody` (mintRoot="", nil vars); 5-stem
+  allowlist + render-time `ws/`→`wsflow/` substitution preserved; context stays a
+  free-text Render Context block. `wsprompt.RenderSource` is now orphaned.
+- **wsflow rsrc provisioning** (`6be3bb64`): committed `agents-plugin-wsflow/rsrc/`
+  as a byte-identical copy of canonical (38 files incl. manifest);
+  `TestWsflowRsrcMirrorUpToDate` byte-equality drift guard + `WS_REGEN_WSFLOW_RSRC`
+  regen; `wsflow-mirroring.md` doctrine carve-out (rsrc = the one generated-sameness
+  exception).
+
+**Verification.** `go build/vet ./...` clean; full module suite green (13 packages,
+manifest guard + drift guard included; one known-flaky exec-timing test passed on
+re-run). Partitioned review (correctness + fit + test, independent native
+reviewers) all `[clean]`. spec `9f6db8f5` (#260529 source + #260513 provisioning);
+mental-model `9112a632` (prompt-bundle / api-documentation-cache / plugin-runtime).
+
+**Deviations / open items.**
+- *Lead-driven edit + native partitioned review* (continues the M3/260611 Phase 1-5
+  deviation): the ws delegate path is crash-prone and the live MCP server reads a
+  cached rsrc root, so authoritative verification was the Go layer + grep.
+- *Pre-existing wsflow python test failure (not a Phase 6 regression).* `python3 -m
+  unittest discover agents-plugin-wsflow/tests` fails on
+  `lead-workflow-manual/SKILL.md: full ws dotted namespace` (`wsflow/ws.lead.login`,
+  introduced in `9649a4bf`, present at the Phase 5 tip). Captured as idea ticket
+  `260612-bug-wsflow-skill-ws-dotted-namespace-ref`; out of Phase 6 (rsrc) scope.
+- *cargo-brief conditional not unit-tested* (test reviewer note, accepted): a 4-line
+  `exec.LookPath` gate whose unit test would need a real binary; the rsrc-load layer
+  is covered.
+
+> Forward (Phase 6b): move `wsprompt.ReadInfra` (`infra.read`) onto rsrc (migrate the
+> embed-only infra docs); confirm-and-delete the dead `skeleton-*`/`sprint-survey`
+> stems; collapse `Bundle`/`ContentSHA256` + the `runtime.json` bundle-hash metadata
+> + launcher fast-path/fallback validation; delete the embedded bodies + the
+> `wsprompt` package + the CLI `register --prompts`/internal `Prompts`→`Resolve` path;
+> rewrite `prompt-bundle.md` line 27 to the single-rsrc-source-of-truth model.
+
 ### Phase 6b: finish wsprompt retirement + package deletion
 
 Move the remaining consumers off `wsprompt` and delete the go:embed loader:
