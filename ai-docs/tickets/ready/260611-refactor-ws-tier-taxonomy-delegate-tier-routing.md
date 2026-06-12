@@ -123,14 +123,36 @@ constraint, and is rewritten at closeout.
   why the `wsprompt` embedded copies silently drifted from rsrc. **Doctrine
   carve-out:** the `wsflow-mirroring.md` "drift visibility over generated sameness"
   rule stays for *skills*, but the rsrc subtree is explicitly the one place where
-  **generated sameness IS the contract**. Open (resolve at implementation): where the
-  generation step lives (launcher install-time copy vs standalone gen script vs
-  test-driven regen mirroring the `WS_REGEN_MANIFEST` pattern); whether wsflow needs
-  an on-disk copy vs a launcher tweak pointing `WS_RSRC_ROOT` at a shared tree when
-  co-located (leaning on-disk because co-location is not guaranteed and Claude removes
-  wsflow); and the retain-or-retire verdict for the non-render-eligible `wsprompt`
-  embeds that have rsrc twins (`code-review-correctness/fit/test`, `executor-wrapup`,
-  `impl-playbook`, `implementer`) vs genuinely ws-internal embeds with no rsrc twin.
+  **generated sameness IS the contract**. **Resolved at implementation (2026-06-12,
+  Phase 6 source survey):** (a) the generation step is **test-driven regen** — a Go
+  test asserts byte-equality between `agents-plugin-wsflow/rsrc/` and canonical and
+  regenerates the committed copy under `WS_REGEN_WSFLOW_RSRC=1` (mirrors the existing
+  `WS_REGEN_MANIFEST` pattern); chosen over a release-build copy (no committed tree →
+  no dev/test rsrc, drift caught only at release) and a launcher shared-tree pointer
+  (rejected: co-location not guaranteed, Claude removes wsflow). (b) **on-disk
+  committed copy** — the launcher's existing `apply_rsrc_root_env` already sets
+  `WS_RSRC_ROOT` when a sibling `rsrc/` exists, so a committed `agents-plugin-wsflow/
+  rsrc/` just works with no launcher change. (c) The stored wsflow rsrc files are
+  **byte-identical** to canonical because `ws/`→`wsflow/` namespace substitution
+  happens at render time in the `prompt.render` tool layer, not in stored files — so
+  the drift guard is a tree/manifest **byte-equality** check (simpler than the
+  earlier "render-equivalent post-substitution" framing). (d) **retain-or-retire
+  verdict:** api-doc / infra-doc embeds migrate to rsrc; legacy `skeleton-populator`/
+  `skeleton-reviewer`/`sprint-survey` are confirmed-dead-then-deleted (handled in
+  Phase 6b).
+- **Phase 6 re-slice (confirmed 2026-06-12).** A Phase 6 source survey found
+  `wsprompt` has more consumers than the original plan text enumerated: besides the
+  delegate prompts / `api.ask` stems / wsflow `prompt.render`, `wsprompt.ReadInfra`
+  backs the `infra.read` tool (8 infra docs, most embed-only) and `wsprompt.Bundle`/
+  `ContentSHA256` back runtime metadata + the launcher hash-validation chain. "Retire
+  entirely" therefore requires migrating those too. To keep slices reviewable, full
+  retirement is split: **Phase 6** lands the convergence headline (wsflow rsrc
+  provisioning + `prompt.render`→rsrc + `api.ask`→rsrc + doctrine carve-out, leaving
+  `wsprompt` in place for `infra.read`/runtime metadata); **Phase 6b** finishes
+  retirement (`infra.read`→rsrc, dead-stem disposition, runtime/bundle-hash collapse,
+  package deletion, `prompt-bundle.md` rewrite). This is a clean intermediate, not a
+  stranded caller: after Phase 6 every render/api consumer is on rsrc and `wsprompt`
+  only backs the still-embedded `infra.read`/`Bundle` paths.
 - **Tier routing = render-returned recommended tier + register pass-through
   (confirmed 2026-06-12).** `playbook.render`/`print` is the single delegation
   entry point — called exactly once per delegation (no double-render) — and returns
@@ -208,14 +230,16 @@ constraint, and is rewritten at closeout.
   becomes regenerate, not hand-copy.
 - Convergence phase order is a hard dependency chain: Phase 4 (port delegate
   bodies to rsrc) → Phase 5 (migrate skill call sites off `register(prompts)`) →
-  Phase 6 (retire the loader). An embedded delegate prompt is deleted only in
-  Phase 6, after Phase 5 removed its last skill consumer; deleting earlier breaks
-  live delegation. Phases 1-3 (tier surface) are independent of 4-6 and can land
-  first.
-- Phase 6 must not strand `api.ask` or wsflow `prompt.render` callers: their
-  prompt source moves to rsrc in the same phase that removes `wsprompt`, and the
-  launcher fast-path/fallback bundle-hash validation must stay self-consistent
-  after the embedded-bundle metadata is collapsed.
+  Phase 6 (wsflow provisioning + render/api convergence) → Phase 6b (finish
+  retirement + delete the loader). An embedded delegate prompt is deleted only in
+  Phase 6b, after Phase 5 removed its last skill consumer and Phase 6 moved the
+  render/api consumers; deleting earlier breaks live delegation. Phases 1-3 (tier
+  surface) are independent of 4-6b and can land first.
+- Phase 6 must not strand `api.ask` or wsflow `prompt.render` callers: their prompt
+  source moves to rsrc in Phase 6 while `wsprompt` stays in place for the still-
+  embedded `infra.read`/`Bundle` paths (a clean intermediate). Phase 6b collapses the
+  launcher fast-path/fallback bundle-hash validation; that collapse must stay
+  self-consistent after the embedded-bundle metadata is removed.
 - Phase 5 ↔ Phase 7 coordination: Phase 5 migrates skills onto render+spawn under
   the current `agents.*` names; Phase 7 renames that converged surface to
   `ws.mercenary.*`. Phase 7 runs after Phase 5 so the rename touches one
@@ -617,28 +641,66 @@ reconciled.
 > dep) vs `reviewer/reviewer.md` (subdir) against these call sites. Also wire the
 > wsflow rsrc generated-copy provisioning + drift guard recorded in `## Decisions`.
 
-### Phase 6: retire the wsprompt loader entirely
+### Phase 6: wsflow rsrc provisioning + render/api.ask convergence
 
-Move `wsprompt`'s remaining non-delegate consumers onto rsrc and remove the
-go:embed loader: rewire `api.ask` hard-coded prompt stems to rsrc playbooks;
-rewire the wsflow `prompt.render` MCP tool off `wsprompt.RenderSource` onto rsrc
-loading (reconcile the `#260529-prompt-render-tool` contract + the five-stem
-render-eligibility allowlist) — this requires **provisioning wsflow's distributed
-package with a generated rsrc tree** copied from canonical `agents-plugin/rsrc/`
-(symlink rejected; per-package generated copy per the wsflow-rsrc-provisioning
-decision), adding a **drift-guard test** that the wsflow rsrc copy renders
-equivalently to canonical (post `ws/`→`wsflow/` substitution), and carving the rsrc
-subtree out of `wsflow-mirroring.md`'s "drift visibility over generated sameness"
-doctrine as the one generated-sameness exception; delete the now-orphaned embedded delegate prompt
-bodies and the `wsprompt` package; collapse the prompt-bundle-hash / `runtime.json`
-bundle-metadata machinery that only served embedded prompts (verify launcher
-fast-path/fallback validation still agrees). Rewrite mental-model `prompt-bundle.md`
-line 27 (and related entry-point/coupling text) to the single-rsrc-source-of-truth
-model. Verification: `wsprompt` package gone; `go build/vet/test ./...` green;
-wsflow `prompt.render` still serves its allowlisted stems from rsrc; launcher
-validation green; `api.ask` resolves its prompts from rsrc. Boundary: this is the
-last convergence phase; it depends on Phases 4+5 having moved every delegate
-consumer first.
+> Re-sliced 2026-06-12 (see the Phase 6 re-slice decision). A source survey found
+> `wsprompt` has more consumers than the original plan text enumerated, so full
+> retirement + package deletion moved to Phase 6b; Phase 6 lands the convergence
+> headline.
+
+Provision wsflow's distributed package with a generated rsrc tree and move the two
+render-time consumers onto it:
+
+- **wsflow rsrc provisioning.** Commit `agents-plugin-wsflow/rsrc/` as a real tree
+  that is a **byte-identical** copy of canonical `agents-plugin/rsrc/` (symlink
+  rejected). Stored files are byte-identical because the `ws/`→`wsflow/` namespace
+  substitution happens at render time in the `prompt.render` tool layer, not in
+  stored files — so the drift guard is a tree/manifest **byte-equality** check.
+  Mechanism: committed copy + **test-driven regen** — a Go test asserts byte-equality
+  and regenerates the copy under `WS_REGEN_WSFLOW_RSRC=1` (mirrors `WS_REGEN_MANIFEST`).
+  The committed tree means wsflow resolves rsrc uniformly in dev/test/release and the
+  launcher's existing `apply_rsrc_root_env` (sets `WS_RSRC_ROOT` when a sibling
+  `rsrc/` exists) needs no change.
+- **wsflow `prompt.render` → rsrc.** Rewire the tool off `wsprompt.RenderSource` onto
+  rsrc loading; reconcile the `#260529-prompt-render-tool` contract + the five-stem
+  render-eligibility allowlist; render-time namespace substitution is preserved.
+- **`api.ask` hard-coded stems → rsrc.** Move `api-doc-manager`, `pre-router`,
+  `api-doc-cargo-brief` to rsrc playbooks rendered into the agent `system_prompt_text`
+  (removing the internal `prompts:[stems]`→`wsprompt.Resolve` path for `api.ask`).
+- **Doctrine carve-out.** Carve the rsrc subtree out of `wsflow-mirroring.md`'s
+  "drift visibility over generated sameness" doctrine as the one generated-sameness
+  exception.
+
+Boundary: leaves `wsprompt` in place (still backing `infra.read`/`ReadInfra` and
+runtime `Bundle`/`ContentSHA256`); does NOT delete the package or collapse the
+bundle-hash metadata (Phase 6b). Verification: wsflow `prompt.render` serves its
+allowlisted stems from the wsflow rsrc copy; drift guard green; `api.ask` resolves
+its prompts from rsrc; `go build/vet/test ./...` green. Depends on Phases 4+5 having
+moved every delegate consumer first.
+
+### Phase 6b: finish wsprompt retirement + package deletion
+
+Move the remaining consumers off `wsprompt` and delete the go:embed loader:
+
+- **`infra.read` → rsrc.** Rewire `wsprompt.ReadInfra` (via `wsdoc.ReadInfra`) onto
+  rsrc; migrate the embed-only infra docs (`executor-wrapup`, `impl-playbook`,
+  `subagent-rules`, `delegate-orientation`) to rsrc (`code-review-{correctness,fit,
+  test}` already have rsrc twins).
+- **Dead-stem disposition.** Confirm-and-delete the legacy embed-only stems with no
+  live consumer (`skeleton-populator`, `skeleton-reviewer`, `sprint-survey`); migrate
+  any that prove live.
+- **Runtime metadata collapse.** Retire `wsprompt.Bundle`/`ContentSHA256`; collapse
+  the prompt-bundle-hash / `runtime.json` bundle-metadata machinery that only served
+  embedded prompts and the launcher fast-path/fallback hash validation (verify
+  launcher validation stays self-consistent after the embedded-bundle metadata is
+  removed).
+- **Delete** the now-orphaned embedded prompt bodies and the `wsprompt` package.
+- **Rewrite** mental-model `prompt-bundle.md` line 27 (and related entry-point/
+  coupling text) to the single-rsrc-source-of-truth model.
+
+Verification: `wsprompt` package gone; `go build/vet/test ./...` green; `infra.read`
+serves its docs from rsrc; launcher validation green. Boundary: depends on Phase 6
+(render/api consumers already moved); this is the last convergence phase.
 
 ### Phase 7: migrate the delegation surface to `ws.mercenary.*`
 
@@ -688,16 +750,22 @@ delegation spawns end-to-end on both ws and wsflow under the new names; spec
   no longer via `register(prompts:[stems])` (the register field was already
   removed by `260508-agents-register-model-alias-field` spec-remove in M3; this
   reconciles the skill-side delegation contract to match).
-- **Phase 6** (wsprompt retirement) — touches `#260529-prompt-render-tool` in
-  `ai-docs/spec/mcp-tools.md`: the wsflow `prompt.render` tool's source changes
-  from the embedded `wsprompt.RenderSource` bundle to rsrc loading (the
-  render-eligibility allowlist + namespace-substitution contract are preserved;
-  the backing loader is reconciled). `api.ask`'s prompt source moves to rsrc.
-  Removes the embedded-prompt-bundle hash/`runtime.json` metadata surface from the
-  launcher-validation contract. Also touches
-  `#260513-wsflow-agentless-plugin-package` in `ai-docs/spec/plugin-runtime.md`:
-  wsflow now carries a **generated rsrc subtree** (it previously shipped none), so
-  the agentless-package description gains a generated-rsrc provisioning note.
+- **Phase 6** (wsflow provisioning + render/api convergence) — touches
+  `#260529-prompt-render-tool` in `ai-docs/spec/mcp-tools.md`: the wsflow
+  `prompt.render` tool's source changes from the embedded `wsprompt.RenderSource`
+  bundle to rsrc loading (the render-eligibility allowlist + namespace-substitution
+  contract are preserved; the backing loader is reconciled). `api.ask`'s prompt
+  source moves to rsrc. Also touches `#260513-wsflow-agentless-plugin-package` in
+  `ai-docs/spec/plugin-runtime.md`: wsflow now carries a **generated rsrc subtree**
+  (it previously shipped none), so the agentless-package description gains a
+  generated-rsrc provisioning note. Boundary: does NOT touch the bundle-hash metadata
+  contract (Phase 6b).
+- **Phase 6b** (finish retirement + package deletion) — `infra.read`'s doc source
+  moves from the embedded bundle to rsrc. Removes the embedded-prompt-bundle
+  hash/`runtime.json` metadata surface from the launcher-validation contract
+  (`prompt_bundle.content_sha256` and the prompt list drop out of the
+  `runtime.info`/`runtime.capabilities`/`runtime.json` contract). Reconciles any
+  spec text that described the embedded prompt bundle as the prompt source of truth.
 - **Phase 7** (`ws.mercenary.*` rename) — touches
   `#260610-mercenary-delegation-surface` in `ai-docs/spec/mcp-tools.md`: the
   delegation spawn/lifecycle tool names change from `agents.*` to
