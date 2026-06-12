@@ -14,6 +14,16 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so `agents register`
+// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
+// go:embed bundle).
+func TestMain(m *testing.M) {
+	if os.Getenv("WS_RSRC_ROOT") == "" {
+		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	}
+	os.Exit(m.Run())
+}
+
 func TestDefaultRootUsesExplicitRoot(t *testing.T) {
 	t.Setenv("WS_MCP_PROJECT_ROOT", "/env/root")
 	if got := defaultRoot("/explicit/root"); got != "/explicit/root" {

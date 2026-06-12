@@ -906,10 +906,6 @@ func agentsRegister(args []string) {
 	tier := fs.String("tier", "", "deprecated model alias selector")
 	model := fs.String("model", "", "model alias or concrete backend model")
 	systemFile := fs.String("system-prompt-file", "", "system prompt file")
-	var prompts multiFlag
-	var promptRefs multiFlag
-	fs.Var(&prompts, "prompt", "embedded prompt stem or absolute prompt path")
-	fs.Var(&promptRefs, "prompt-ref", "logical prompt reference")
 	_ = fs.Parse(args)
 
 	systemText, err := readOptionalFile(*systemFile)
@@ -923,8 +919,6 @@ func agentsRegister(args []string) {
 		Harness:          *harness,
 		Tier:             *tier,
 		Model:            *model,
-		Prompts:          prompts,
-		PromptRefs:       promptRefs,
 		SystemPromptText: systemText,
 	})
 	if err != nil {

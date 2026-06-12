@@ -23,6 +23,17 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so agent registration
+// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
+// go:embed bundle). Tests that exercise a custom rsrc tree override it per-test
+// with t.Setenv.
+func TestMain(m *testing.M) {
+	if os.Getenv("WS_RSRC_ROOT") == "" {
+		_ = os.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+	}
+	os.Exit(m.Run())
+}
+
 func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
 	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/plugin-runtime.md", MatchScore: 18, Matches: []wsdoc.MatchEvidence{{Line: 18, MatchedTerms: []string{"marketplace"}, Snippet: "marketplace release packaging"}}}}
 	text := formatSpecFind("wsflow installer marketplace release packaging", specs)
