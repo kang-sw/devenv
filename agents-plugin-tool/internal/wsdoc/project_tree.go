@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kang-sw/devenv/internal/wsprompt"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 var ticketRefRE = regexp.MustCompile(`\[(\d{6}-[\w-]+/p\d+)\]`)
@@ -36,8 +36,28 @@ func ProjectTree(root string) (string, error) {
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 
+// ReadInfra returns an infra document body by bare stem, loaded from the rsrc
+// tree (260611 Phase 6b retired the wsprompt go:embed bundle). Path-escaping
+// names are rejected so callers cannot read outside the rsrc root.
 func ReadInfra(name string) (string, error) {
-	return wsprompt.ReadInfra(name)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("infra document name is required")
+	}
+	stem := strings.TrimSuffix(name, ".md")
+	if stem == "" || stem == "." || stem == ".." ||
+		strings.ContainsAny(stem, `/\`) || strings.Contains(stem, "..") {
+		return "", fmt.Errorf("infra document name must be a bare filename or stem")
+	}
+	root, err := wsrsrc.ResolveRoot()
+	if err != nil {
+		return "", fmt.Errorf("resolve rsrc root: %w", err)
+	}
+	pb, err := wsrsrc.Load(root, stem, "", nil)
+	if err != nil {
+		return "", err
+	}
+	return pb.Body, nil
 }
 
 func renderAIDocs(b *strings.Builder, aiDocs string) {
