@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "files": {
+    "api-doc-cargo-brief/api-doc-cargo-brief.md": "cffde26527327298c50bd640b3ca9224e3fdc3e1d04955a91424d366350a271f",
+    "api-doc-manager/api-doc-manager.md": "e6f96c92a49ca0b4abb9264de3f5c687cdfd0bdf1d12eaffe13d26ef7d2b1294",
     "code-review-correctness/code-review-correctness.md": "81417eb323db929cd6ec24c7470c557b62aaba84de72e989083da8f747e8f288",
     "code-review-fit/code-review-fit.md": "5efdebd7dd8e1f72cdeb84b4b75c4ba8161cc765b82c32c2241753cb80055d62",
     "code-review-test/code-review-test.md": "5c1b2d17310e69c1b85c1eed64e2f4cf51b98497f4ca28cb0883eeffe3b6fbe2",
@@ -30,6 +32,7 @@
     "mental-model-updater/mental-model-updater.md": "23e318a6883304b8dc2f42dafa262910fbe95a7a88bd9d148db3102f697b572c",
     "plan-populator-research/plan-populator-research.md": "42a46203e459640eba29c9d09bedfa0c5b13cf2e8dad2abbbcea09782ec1ecb2",
     "plan-populator-survey/plan-populator-survey.md": "e37faab0e4fbdb4bad335d0280fdac98b62332507a13e6ef24a77864ad4210fa",
+    "pre-router/pre-router.md": "687eeed9afa3c2cd090072345b593a0fcad938d5ad7f3f38dfa7ee7c0ea88b54",
     "reference-discovery/reference-discovery.md": "f069eae4b572bd93e1dfa3b9700ae2f08d8820b46c5fbd19280a38fc21a487fa",
     "reviewer/reviewer.md": "c52e5a85cc70eae25048d46ed5b4edbc1df5f5b0b581b9a7f6a762d3215dfd6b",
     "sample-conventions.md": "fd90dadec24fbd89a8489172239a7abe97d450ec16526b54818c9c7634aaeb91",

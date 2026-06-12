@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 const (
@@ -39,15 +41,35 @@ type apiDomainResult struct {
 	err    error
 }
 
+// renderAPIPrompt loads an api-doc prompt from the rsrc tree and returns its
+// body. The api-doc prompts (pre-router, api-doc-manager, api-doc-cargo-brief)
+// are var-free `kind: print` rsrc playbooks, so a nil-vars Load returns the
+// verbatim body. Phase 6 (260611) moved these off the embedded wsprompt bundle.
+func renderAPIPrompt(harness, stem string) (string, error) {
+	rsrcRoot, err := wsrsrc.ResolveRoot()
+	if err != nil {
+		return "", fmt.Errorf("resolve rsrc root: %w", err)
+	}
+	pb, err := wsrsrc.Load(rsrcRoot, stem, harness, nil)
+	if err != nil {
+		return "", fmt.Errorf("load api prompt %q: %w", stem, err)
+	}
+	return pb.Body, nil
+}
+
 func (rt wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
 	mgr := wsagent.NewManager(wsagent.Options{})
 	name := fmt.Sprintf("api-doc-pre-router-%d", time.Now().UTC().UnixNano())
-	_, _, err := mgr.Register(wsagent.RegisterOptions{
+	sys, err := renderAPIPrompt(rt.harness, apiPreRouterPrompt)
+	if err != nil {
+		return "", err
+	}
+	_, _, err = mgr.Register(wsagent.RegisterOptions{
 		Root:                root,
 		Name:                name,
 		Harness:             rt.harness,
 		Model:               "light",
-		Prompts:             []string{apiPreRouterPrompt},
+		SystemPromptText:    sys,
 		SuppressOrientation: true,
 	})
 	if err != nil {
@@ -71,15 +93,26 @@ func (rt wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt
 		err = os.ErrNotExist
 	}
 	if err != nil {
+		sys, renderErr := renderAPIPrompt(rt.harness, apiDocManagerPrompt)
+		if renderErr != nil {
+			return "", renderErr
+		}
+		// Conditional cargo-brief: append the cargo-brief guidance only when the
+		// binary is present (replaces the former ConditionalPromptRef, which
+		// resolved through the embedded bundle).
+		if _, lookErr := exec.LookPath("cargo-brief"); lookErr == nil {
+			brief, briefErr := renderAPIPrompt(rt.harness, apiCargoBriefPrompt)
+			if briefErr != nil {
+				return "", briefErr
+			}
+			sys = sys + "\n\n" + brief
+		}
 		if _, _, regErr := mgr.Register(wsagent.RegisterOptions{
-			Root:    root,
-			Name:    name,
-			Harness: rt.harness,
-			Model:   "core",
-			Prompts: []string{apiDocManagerPrompt},
-			ConditionalPromptRefs: []wsagent.ConditionalPromptRef{
-				{Binary: "cargo-brief", PromptRef: apiCargoBriefPrompt},
-			},
+			Root:                root,
+			Name:                name,
+			Harness:             rt.harness,
+			Model:               "core",
+			SystemPromptText:    sys,
 			SuppressOrientation: true,
 		}); regErr != nil {
 			return "", regErr
