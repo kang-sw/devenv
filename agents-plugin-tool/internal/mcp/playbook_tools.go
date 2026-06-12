@@ -150,7 +150,7 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 
 // delegationTip returns the harness-aware continuity tip fragment appended to the
 // rendered body of delegates:true playbooks. It includes the always-on mercenary tip
-// noting the ws/agents.call path is always reachable on request.
+// noting the ws.mercenary.call path is always reachable on request.
 func delegationTip(harness string) string {
 	term := terminologyForHarness(harness)
 	continueIdiom := term["ContinueIdiom"]
@@ -164,7 +164,7 @@ func delegationTip(harness string) string {
 	sb.WriteString("record the agent id in your workflow state if you need it across turns.")
 	// Unit 3: always-on mercenary tip — present in every delegates:true rendering.
 	sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
-	sb.WriteString(" (mercenary) is always reachable on request via `ws/agents.call`, even without")
+	sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
 	sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
 	sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
 	sb.WriteString(" agent id you can resume with the same continuation idiom.")
@@ -185,7 +185,7 @@ func delegationTip(harness string) string {
 // default rather than routing an unrecognized tier.
 //
 // playbook.render surfaces the first-class frontmatter tier as a recommended
-// tier, and agents.register maps it here before setting RegisterOptions.Tier.
+// tier, and ws.mercenary.register maps it here before setting RegisterOptions.Tier.
 func firstClassTierToAlias(tier string) string {
 	switch strings.ToLower(strings.TrimSpace(tier)) {
 	case "small", "light":
@@ -205,7 +205,7 @@ func firstClassTierToAlias(tier string) string {
 // a playbook tool payload when the playbook declares a tier. Empty tier leaves the
 // payload unchanged. This is the render/print return channel the lead reads to
 // route a delegation's model selection — native uses it as a host model-selection
-// guide, mercenary passes it to agents.register's pass-through tier arg.
+// guide, mercenary passes it to ws.mercenary.register's pass-through tier arg.
 func withRecommendedTier(payload, tier string) string {
 	if strings.TrimSpace(tier) == "" {
 		return payload
@@ -238,7 +238,7 @@ func childRoleForPlaybookRole(role string) (toolRole, bool) {
 // mentions the mercenary path as available on request.
 func mercenaryGuidanceBlock() string {
 	return "\n\n**Delegation mode (prefer_mercenary active):** Default guidance for this session is" +
-		" to use the mercenary path (`ws/agents.call`) rather than a host-native subagent." +
+		" to use the mercenary path (`ws.mercenary.call`) rather than a host-native subagent." +
 		" The native subagent path remains available if you prefer it."
 }
 
@@ -278,7 +278,7 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // Returns (body, recommendedTier, error): recommendedTier is the first-class tier
 // declared in the playbook frontmatter, surfaced so one render call routes both
 // delegation paths — native uses it as a host model-selection guide, mercenary
-// passes it to agents.register's pass-through tier arg.
+// passes it to ws.mercenary.register's pass-through tier arg.
 func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
 	harness := s.currentHarness()
 
@@ -290,7 +290,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 
 	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
 	// the caller so it can route both delegation paths from one render call: native
-	// uses it as a host model-selection guide, mercenary passes it to agents.register.
+	// uses it as a host model-selection guide, mercenary passes it to ws.mercenary.register.
 	recommendedTier := metaOnly.Meta.Tier
 
 	var body string

@@ -1134,7 +1134,7 @@ func TestPlaybookPrintGoldenLeadSprint(t *testing.T) {
 	if !strings.Contains(body, "session continuity across exploratory workflow turns") {
 		t.Errorf("body %q: expected doctrine text 'session continuity across exploratory workflow turns'", body)
 	}
-	// delegates:true (ws/agents.register + explore playbook delegation) — tip must appear.
+	// delegates:true (ws.mercenary.register + explore playbook delegation) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
@@ -1179,7 +1179,7 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadSalvage verifies lead-salvage resolves from the
-// real rsrc tree and is delegates:true (explore playbook + ws/agents.register — tip must appear).
+// real rsrc tree and is delegates:true (explore playbook + ws.mercenary.register — tip must appear).
 func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")

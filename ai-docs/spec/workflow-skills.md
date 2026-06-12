@@ -75,15 +75,17 @@ operations, API documentation lookup, and project/convention reads. Skills name
 only primitives available in the runtime; when a needed surface is not exposed
 yet, skill text describes the required MCP contract instead of naming a
 host-specific helper.
-Prompts sent to `ws/agents.call` and wsflow subagents are
+Prompts sent to `ws.mercenary.call` and wsflow subagents are
 written in English so delegated work products stay consistent with English
 AI-authored repository artifacts.
 
 Codex-facing workflow skill guidance presents MCP primitives as the primary ws
-runtime surface. Promptless `ws/agents.register(name: "<agent-name>")` is the
-general-purpose named-agent form; role-specific delegates use `prompts:
-["<prompt-stem>"]`, and optional `model` arguments select portable aliases or
-one-off concrete models. CLI adapter syntax belongs only in compatibility or
+runtime surface. Promptless `ws.mercenary.register(name: "<agent-name>")` is the
+general-purpose named-agent form; role-specific delegates obtain a self-contained
+prompt from `ws/playbook.render` and run natively by default or as a mercenary via
+`system_prompt_text` plus the render-returned `recommended-tier` (`tier`). The
+removed `prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no longer
+appear in shipped skill text. CLI adapter syntax belongs only in compatibility or
 testing references. {#260507-mcp-centric-workflow-language}
 
 Scoped fact-finding delegation uses a per-harness Explore playbook rather than
@@ -678,10 +680,11 @@ step.
 
 ## Delegate Prompt Boundaries {#260505-workflow-delegate-prompt-boundaries}
 
-Workflow skills use embedded prompt chains for named delegates such as
-implementers, reviewers, survey workers, and documentation updaters. Public
-named-agent registrations receive delegate-orientation
-instructions before role-specific prompt material.
+Workflow skills source named-delegate prompts (implementers, reviewers, survey
+workers, documentation updaters) from rendered rsrc delegate playbooks via
+`ws/playbook.render`, not from register-time prompt stems. Public named-agent
+registrations receive delegate-orientation instructions before role-specific
+prompt material.
 
 Delegate orientation reserves lifecycle orchestration, reviewer fanout,
 workflow-stage routing, and final documentation ownership for the lead unless a

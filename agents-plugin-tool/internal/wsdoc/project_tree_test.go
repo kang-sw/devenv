@@ -39,6 +39,7 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 }
 
 func TestReadInfraRequiresBareName(t *testing.T) {
+	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
 	got, err := ReadInfra("impl-playbook")
 	if err != nil {
 		t.Fatalf("ReadInfra returned error: %v", err)

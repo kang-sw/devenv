@@ -130,6 +130,20 @@ func resolvePlaybookPath(root, name, harness string) (string, bool, error) {
 		}
 	}
 	basePath := filepath.Join(dir, name+".md")
+	// Flat-playbook fallback: when no subdir playbook exists at
+	// <root>/<name>/<name>.md, fall back to a flat root-level file at
+	// <root>/<name>.md. This lets a var-free flat dep (e.g. code-reviewer,
+	// which doubles as a flat include target for the review partitions) be
+	// loaded as a playbook in its own right — the wsflow prompt.render
+	// "code-reviewer" stem resolves through here. Subdir playbooks always win
+	// (checked first) so existing resolution is unchanged; the fallback only
+	// fires when the subdir base file is absent.
+	if _, err := os.Stat(basePath); err != nil {
+		flatPath := filepath.Join(root, name+".md")
+		if _, flatErr := os.Stat(flatPath); flatErr == nil {
+			return flatPath, false, nil
+		}
+	}
 	return basePath, false, nil
 }
 
@@ -307,8 +321,7 @@ func substituteVars(body string, declared []string, vars map[string]string) (str
 }
 
 // isBareStem reports whether spec is a safe bare stem: non-empty, not "." or
-// "..", and free of path separators and "..". Copied verbatim from
-// internal/wsprompt/prompts.go.
+// "..", and free of path separators and "..".
 func isBareStem(spec string) bool {
 	if spec == "" || spec == "." || spec == ".." {
 		return false

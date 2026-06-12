@@ -84,7 +84,6 @@ func WriteManifest(root string, m Manifest) error {
 
 // fileHash computes the hex-encoded sha256 of a file's content after
 // normalizing line endings (\r\n → \n) for cross-platform stability.
-// Mirrors wsprompt.normalizePromptHashContent + sha256 pattern.
 func fileHash(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -101,7 +100,6 @@ func hashHex(data []byte) string {
 }
 
 // normalizeHashContent normalizes \r\n → \n for cross-platform-stable hashing.
-// Copied verbatim from internal/wsprompt/prompts.go normalizePromptHashContent.
 func normalizeHashContent(data []byte) []byte {
 	return []byte(strings.ReplaceAll(string(data), "\r\n", "\n"))
 }

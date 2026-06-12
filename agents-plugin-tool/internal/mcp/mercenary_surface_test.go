@@ -253,17 +253,17 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	props := toolPropertiesByName(t, byID["1"], "agents.register")
+	props := toolPropertiesByName(t, byID["1"], "ws.mercenary.register")
 	// prompts/prompt_refs/model stay removed; `tier` is re-introduced in Phase 2
 	// (260611) as a pass-through of playbook.render's recommended-tier.
 	for _, dropped := range []string{"prompts", "prompt_refs", "model"} {
 		if _, present := props[dropped]; present {
-			t.Errorf("agents.register schema still exposes removed field %q", dropped)
+			t.Errorf("ws.mercenary.register schema still exposes removed field %q", dropped)
 		}
 	}
 	for _, kept := range []string{"name", "backend", "system_prompt_text", "tier"} {
 		if _, present := props[kept]; !present {
-			t.Errorf("agents.register schema missing expected field %q", kept)
+			t.Errorf("ws.mercenary.register schema missing expected field %q", kept)
 		}
 	}
 }
@@ -353,7 +353,7 @@ func TestPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
 // TestAgentCallHandleTextShape verifies the native-shaped continuation handle
 // (agentId=<name>) so the lead reuses one continuation idiom across the native
 // and mercenary paths (Phase 2c parity). Unit-tested directly because the full
-// agents.call dispatch would require spawning a real backend.
+// ws.mercenary.call dispatch would require spawning a real backend.
 func TestAgentCallHandleTextShape(t *testing.T) {
 	got := agentCallHandleText("implementer", "running", 4242)
 	if !strings.HasPrefix(got, "agentId=implementer\t") {
@@ -447,6 +447,71 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	}
 }
 
+// TestRenderGoldenShippedPhase4Delegates exercises the remaining shipped delegate
+// playbooks ported in Phase 4 (260611): the three review partitions and the four
+// auxiliary delegates. Each declares a delegate-eligible `role:` so a lead render
+// must splice a render-minted child key (scope roleDelegate), and each declares a
+// tier model var that must fully substitute (no leftover placeholder).
+func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+	mintRoot := "/work/tree-p4"
+
+	names := []string{
+		"code-review-correctness", "code-review-fit", "code-review-test",
+		"reference-discovery", "mental-model-updater",
+		"plan-populator-survey", "plan-populator-research",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServerWithHarness(t, "claude")
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, false)
+			if err != nil {
+				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
+			}
+			if !strings.Contains(body, "Your ws session_key") {
+				t.Fatalf("shipped %s render missing credential block:\n%s", name, body)
+			}
+			key := extractSplicedKey(t, body)
+			entry, ok := s.sessions.lookup(key)
+			if !ok {
+				t.Fatalf("minted key %q not found in registry", key)
+			}
+			if entry.root != mintRoot {
+				t.Errorf("%s minted key root = %q, want %q", name, entry.root, mintRoot)
+			}
+			if entry.scope != roleDelegate {
+				t.Errorf("%s minted key scope = %q, want %q", name, entry.scope, roleDelegate)
+			}
+			if strings.Contains(body, "{{.") {
+				t.Errorf("%s render has an unsubstituted variable placeholder:\n%s", name, body)
+			}
+		})
+	}
+}
+
+// TestRenderGoldenShippedReviewPartitionIncludesBase verifies the partition
+// reviewer playbooks resolve their `includes: [code-reviewer]` flat dep, so the
+// shared reviewer base (severity model, output template, doctrine) renders
+// alongside the partition-specific scope and checklist.
+func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test"} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServerWithHarness(t, "claude")
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", false)
+			if err != nil {
+				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
+			}
+			if !strings.Contains(body, "defect signal density") {
+				t.Errorf("%s missing included code-reviewer base content:\n%s", name, body)
+			}
+			if !strings.Contains(body, "Partition scope") {
+				t.Errorf("%s missing partition-specific scope section:\n%s", name, body)
+			}
+		})
+	}
+}
+
 // --- Phase 2 (260611): tier routing — render-returned recommended tier + register pass-through ---
 
 // TestFirstClassTierToAlias pins the first-class→alias bridge the register handler
@@ -508,7 +573,7 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 // light & deep customized via config.agents_tier, a mercenary registered for a
 // small-tier role resolves the custom light model and a large-tier role resolves
 // the custom deep model — NOT the built-in core default. firstClassTierToAlias is
-// exactly what the agents.register handler applies to the render-returned tier
+// exactly what the ws.mercenary.register handler applies to the render-returned tier
 // before Register; this exercises that mapping + the config resolution end to end.
 // (A real subprocess is not spawned; Register resolves the backend/model the call
 // would use.) Closes 260609 Edition 0c7c0f50 gap 3.

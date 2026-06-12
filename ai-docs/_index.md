@@ -227,7 +227,7 @@ dropped tickets live in hidden archive dirs and git history.
   epic** (`be8c39e6`, combined --no-ff); 260609 closed `.done/`. Open fill
   (delegate `role:`/`tier:` asset + per-spawn/per-role tier routing +
   reviewer-tier default) re-homed to
-  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (ready, promoted
+  `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (done, was promoted
   2026-06-11). **M4**
   (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
   redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
@@ -235,38 +235,19 @@ dropped tickets live in hidden archive dirs and git history.
   `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity),
   `260610-bug-wsflow-runtime-contract-playbook-tools-drift` (pre-existing M1
   capability-contract drift).
-- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (ready, refactor) -
-  re-homed M3 fill scope, promoted 2026-06-11: first-class
-  `small/medium/large/xlarge` tier vocab (capability axis), `light/core/deep`
-  demoted to concrete-model aliases, shipped delegate `role:`/`tier:` playbook
-  asset (child-key splice + model vars), mercenary per-spawn tier plumbing into
-  `RegisterOptions`, `oneShot` dead-code cleanup, reviewer-tier default
-  re-authored in first-class vocab. **Absorbed 2026-06-12:** full delegate-prompt
-  convergence — port delegate prompts to rsrc (P4), migrate skills off
-  `register(prompts)` (P5), retire the `wsprompt` loader incl. `api.ask`/wsflow
-  `RenderSource` rewire (P6); migrate the delegation surface to `ws.mercenary.*`
-  (P7, naming clarity). 7 phases (1-3 tier surface independent of 4-6
-  convergence); spec addressed via `## Spec Impact` (Contract-first: no — closeout
-  reconciles `mcp-tools.md` + `workflow-skills.md` per phase). **Phase 1 done**
-  (`3019ade9`): shipped implementer/reviewer delegate playbooks (canonical ports)
-  + parse-only Tier field + shipped-asset e2e. **Phase 2 done** (`54e53d70`):
-  `playbook.render`/`print` return a `recommended-tier` line + `agents.register`
-  tier pass-through (`firstClassTierToAlias`) so a mercenary follows its frontmatter
-  tier instead of core, + `oneShot` dead-code removal. **Phase 3 done**
-  (`fc1cdc5f` source; spec `10be8183`, mental-model `94eafada`): reviewer-tier
-  default re-authored in first-class vocab (correctness `large`, fit/test `medium`)
-  in rsrc + wsflow + manifest; first-class capability vocabulary established in spec
-  (`#260612-first-class-tier-vocabulary`) with `light/core/deep` as the alias layer;
-  tier-guide single-source resolved at note/precedence level. **wsconfig flag
-  resolved** (`45f32b80`, Phase 3 Edition): the `wsconfig` first-class adoption the
-  Phase 2 Forward note anticipated was an unconfirmed assistant hint contradicting
-  the confirmed `config.agents_tier`-unchanged decision; `config.agents_tier` is
-  alias-keyed by design and `firstClassTierToAlias` is the intended plane boundary
-  (not debt). **Naming decisions (2026-06-12, exec deferred):** `config.agents_tier`
-  → `config.model_alias`, new override `config.role_tier`, "tier" reserved for the
-  abstraction layer — recorded in `## Decisions` + research `260611`; renames are a
-  config-surface slice / Phase 7-coordinated, not Phase 3. Next: Phase 4 (port
-  remaining delegate prompts to rsrc; convergence chain P4→P5→P6, P7 rename).
+- `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,
+  refactor; ready→.done 2026-06-12) - first-class `small/medium/large/xlarge` tier
+  vocab + `light/core/deep` alias demotion, mercenary per-spawn tier routing, full
+  delegate-prompt convergence onto rsrc, `wsprompt` loader retirement, and the
+  `agents.*`→`ws.mercenary.*` delegation-surface rename. All 7 phases complete
+  (P1 `3019ade9`, P2 `54e53d70`, P3 `fc1cdc5f`+`45f32b80`, P4 `5a26b1d6`,
+  P5 `5023562c`, P6 `6be3bb64`, P6b `6873b480`, P7 `d18883a0` — agents.*→
+  ws.mercenary.* MCP/CLI/runtime/rsrc/spec rename, hard rename no alias). **Live
+  follow-ups:** the P4-7 epic-merge (21-commit convergence stack; P1-3 already merged at `016c1425`) is a
+  pending user decision; deferred config-surface slice (`config.agents_tier`→
+  `config.model_alias`, `config.role_tier`), the `(skill,role)→tier` override
+  surface, the `lead-verify-design` inline-reviewer model/tier path, and
+  `ref/ws-agent-runtime.md` pre-M3 staleness cleanup.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

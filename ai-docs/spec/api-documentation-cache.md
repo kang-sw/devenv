@@ -116,8 +116,9 @@ official source URLs as citations.
 API-doc manager registration can include conditional prompt material based on
 available local tooling.
 
-When `cargo-brief` is available on `PATH`, the runtime appends the embedded
-`api-doc-cargo-brief` prompt to API-doc managers. That prompt guides Rust API
+When `cargo-brief` is available on `PATH`, the runtime appends the
+`api-doc-cargo-brief` prompt (rendered from the rsrc tree) to API-doc managers.
+That prompt guides Rust API
 lookups toward the local cargo-brief workflow before falling back to ordinary
 cache behavior.
 

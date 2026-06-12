@@ -17,6 +17,17 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
+// TestMain points WS_RSRC_ROOT at the shipped rsrc tree so Register can load
+// delegate-orientation (260611 Phase 6b moved it off the wsprompt go:embed
+// bundle onto rsrc). Tests that need an orientation-load failure override this
+// per-test with t.Setenv.
+func TestMain(m *testing.M) {
+	if os.Getenv("WS_RSRC_ROOT") == "" {
+		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	}
+	os.Exit(m.Run())
+}
+
 var testNow = time.Date(2026, 5, 3, 14, 0, 0, 0, time.UTC)
 
 type fakeRunner struct {
@@ -228,7 +239,6 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		Backend:          "codex",
 		Tier:             "core",
 		Model:            "gpt-test",
-		PromptRefs:       []string{"code-reviewer"},
 		SystemPromptText: "system prompt\n",
 	})
 	if err != nil {
@@ -248,47 +258,6 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
-	}
-}
-
-func TestRegisterResolvesPromptChain(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-
-	agent, layout, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "reviewer",
-		Prompts: []string{"code-reviewer", "code-review-correctness", "code-review-fit"},
-	})
-	if err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if agent.Tier != "core" || agent.Model != "gpt-5.5" {
-		t.Fatalf("tier/model = %q/%q", agent.Tier, agent.Model)
-	}
-	if agent.SystemPromptPath != "system.md" {
-		t.Fatalf("system prompt path = %q", agent.SystemPromptPath)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
-	if strings.Contains(text, "model: core") {
-		t.Fatalf("frontmatter was not stripped:\n%s", text)
-	}
-	if !strings.Contains(text, "You are a delegated worker") ||
-		!strings.Contains(text, "You are a code reviewer.") ||
-		!strings.Contains(text, "Correctness Partition") ||
-		!strings.Contains(text, "Fit Partition") {
-		t.Fatalf("materialized prompt missing expected sections:\n%s", text)
-	}
-	if len(agent.PromptRefs) != 4 || agent.PromptRefs[0] != "delegate-orientation" || agent.PromptRefs[1] != "code-reviewer" {
-		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
 	}
 }
 
@@ -324,7 +293,7 @@ func TestRegisterInjectsDelegateOrientationForInlineSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
+func TestRegisterExplicitTierWins(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{
@@ -333,92 +302,16 @@ func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
 	})
 
 	agent, _, err := manager.Register(RegisterOptions{
-		Root:       repo,
-		Name:       "reviewer",
-		Tier:       "deep",
-		PromptRefs: []string{"code-reviewer"},
+		Root:             repo,
+		Name:             "reviewer",
+		Tier:             "deep",
+		SystemPromptText: "reviewer role",
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
 	if agent.Tier != "deep" {
 		t.Fatalf("tier = %q", agent.Tier)
-	}
-}
-
-func TestRegisterConditionalPromptRefPresent(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	binDir := t.TempDir()
-	toolName := "ws-test-tool"
-	bin := filepath.Join(binDir, toolName)
-	script := "#!/bin/sh\nexit 0\n"
-	if runtime.GOOS == "windows" {
-		bin += ".cmd"
-		script = "@echo off\r\nexit /b 0\r\n"
-	}
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-
-	agent, layout, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "conditional",
-		Prompts: []string{"code-reviewer"},
-		ConditionalPromptRefs: []ConditionalPromptRef{
-			{Binary: toolName, PromptRef: "code-review-fit"},
-		},
-		SuppressOrientation: true,
-	})
-	if err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if len(agent.PromptRefs) != 2 || agent.PromptRefs[0] != "code-reviewer" || agent.PromptRefs[1] != "code-review-fit" {
-		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "Fit Partition") {
-		t.Fatalf("conditional prompt was not materialized:\n%s", raw)
-	}
-}
-
-func TestRegisterConditionalPromptRefAbsent(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-
-	agent, layout, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "conditional",
-		Prompts: []string{"code-reviewer"},
-		ConditionalPromptRefs: []ConditionalPromptRef{
-			{Binary: "ws-test-tool-definitely-missing", PromptRef: "code-review-fit"},
-		},
-		SuppressOrientation: true,
-	})
-	if err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if len(agent.PromptRefs) != 1 || agent.PromptRefs[0] != "code-reviewer" {
-		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "Fit Partition") {
-		t.Fatalf("absent conditional prompt was materialized:\n%s", raw)
 	}
 }
 
@@ -434,9 +327,9 @@ func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 	})
 
 	agent, _, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "reviewer",
-		Prompts: []string{"code-reviewer"},
+		Root:             repo,
+		Name:             "reviewer",
+		SystemPromptText: "reviewer role",
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
@@ -965,7 +858,7 @@ func TestRecallCancelsActiveCallAndStartsRecoveryRetry(t *testing.T) {
 	if !strings.Contains(text, "recall_recovery_only: true") ||
 		!strings.Contains(text, "recall_cancelled_active_call: true") ||
 		!strings.Contains(text, "impl\trunning\tpid=4567") ||
-		!strings.Contains(text, "follow_up: agents.result --timeout 10m | agents.tail | agents.status | agents.cancel") {
+		!strings.Contains(text, "follow_up: ws.mercenary.result --timeout 10m | ws.mercenary.tail | ws.mercenary.status | ws.mercenary.cancel") {
 		t.Fatalf("recall text mismatch:\n%s", text)
 	}
 	if len(starter.requests) != 2 {
@@ -1551,7 +1444,7 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 		!strings.Contains(err.Error(), "backend exploded") ||
 		!strings.Contains(err.Error(), "backend invocation failed") ||
 		!strings.Contains(err.Error(), "- claude: "+claudePath) ||
-		!strings.Contains(err.Error(), "re-run agents.register") ||
+		!strings.Contains(err.Error(), "re-run ws.mercenary.register") ||
 		!strings.Contains(err.Error(), "config.agents_tier") {
 		t.Fatalf("RunCurrent error = %v", err)
 	}
@@ -1625,7 +1518,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		`unsupported agent backend "bogus"`,
 		"backend: bogus",
 		"model: bogus-model",
-		"re-run agents.register",
+		"re-run ws.mercenary.register",
 		"config.agents_tier",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -1685,7 +1578,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if !strings.Contains(timeoutText, "wait_timeout: true") ||
 		!strings.Contains(timeoutText, "call_status: running") ||
 		!strings.Contains(timeoutText, "active: true") ||
-		!strings.Contains(timeoutText, "follow_up: agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel") {
+		!strings.Contains(timeoutText, "follow_up: ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel") {
 		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -1707,7 +1600,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 		!strings.Contains(cancelled, "cancel_pid: 2468") ||
 		!strings.Contains(cancelled, "cleanup_needed: false") ||
 		!strings.Contains(cancelled, "cancel_recovery_tip: If this was cancelled because the agent did not respond") ||
-		!strings.Contains(cancelled, "follow_up: agents.call | agents.tail | agents.erase") {
+		!strings.Contains(cancelled, "follow_up: ws.mercenary.call | ws.mercenary.tail | ws.mercenary.erase") {
 		t.Fatalf("cancel status mismatch:\n%s", cancelled)
 	}
 	call, err := readCurrentCall(layout.CurrentStateFile)
@@ -1755,7 +1648,7 @@ func TestCancelReportsCleanupNeededWhenOwnedProcessSurvives(t *testing.T) {
 	if !strings.Contains(status, "call_status: cancelled") ||
 		!strings.Contains(status, "cancel_pid: 1357") ||
 		!strings.Contains(status, "cleanup_needed: true") ||
-		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | agents.erase") {
+		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | ws.mercenary.erase") {
 		t.Fatalf("cleanup-needed status mismatch:\n%s", status)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -1913,9 +1806,14 @@ func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing
 	if _, err := os.Stat(oldLayout.OutputFile); err != nil {
 		t.Fatalf("old output should remain for history: %v", err)
 	}
-	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", Prompts: []string{filepath.Join(t.TempDir(), "missing.md")}}); err == nil {
-		t.Fatal("expected failed registration with missing prompt")
+	// Force a failed re-registration: point the rsrc root at a nonexistent tree so
+	// the delegate-orientation load fails before the current pointer advances.
+	goodRsrc := os.Getenv("WS_RSRC_ROOT")
+	t.Setenv("WS_RSRC_ROOT", filepath.Join(t.TempDir(), "nonexistent-rsrc"))
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", SystemPromptText: "new2"}); err == nil {
+		t.Fatal("expected failed registration when delegate-orientation cannot load")
 	}
+	t.Setenv("WS_RSRC_ROOT", goodRsrc)
 	stillCurrent, err := manager.scopedLayout(repo, "impl", false)
 	if err != nil {
 		t.Fatal(err)
@@ -2047,7 +1945,7 @@ func TestSQLiteAgentMetadataRoundTripIncludesContractFields(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
-	_, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "reviewer", PromptRefs: []string{"code-reviewer"}})
+	_, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "reviewer", SystemPromptText: "reviewer role"})
 	if err != nil {
 		t.Fatal(err)
 	}

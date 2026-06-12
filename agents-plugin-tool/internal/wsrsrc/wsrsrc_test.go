@@ -304,6 +304,52 @@ func TestLoaderParsesRoleAndTier(t *testing.T) {
 	}
 }
 
+// TestLoaderFlatPlaybook verifies a flat root-level file <root>/<name>.md is
+// loadable as a playbook when no subdir playbook exists. This is how the
+// var-free code-reviewer flat dep (also a flat include target) is rendered as a
+// playbook in its own right (wsflow prompt.render "code-reviewer" stem).
+func TestLoaderFlatPlaybook(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "code-reviewer.md", "Shared reviewer base text.\n")
+	m, err := GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	pb, err := Load(root, "code-reviewer", "", nil)
+	if err != nil {
+		t.Fatalf("Load flat playbook: %v", err)
+	}
+	if !strings.Contains(pb.Body, "Shared reviewer base text.") {
+		t.Errorf("Body = %q, want flat dep body", pb.Body)
+	}
+}
+
+// TestLoaderSubdirWinsOverFlat verifies the subdir playbook is preferred when
+// both <root>/<name>/<name>.md and <root>/<name>.md exist, so the flat fallback
+// never shadows an existing subdir playbook.
+func TestLoaderSubdirWinsOverFlat(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "dup.md", "FLAT body\n")
+	writeFile(t, root, "dup/dup.md", "SUBDIR body\n")
+	m, err := GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	pb, err := Load(root, "dup", "", nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(pb.Body, "SUBDIR body") {
+		t.Errorf("Body = %q, want subdir body to win", pb.Body)
+	}
+}
+
 func TestLoaderHarnessVariant(t *testing.T) {
 	root := buildMinimalTree(t)
 	pb, err := Load(root, "sample", "codex", map[string]string{"Name": "Agent"})

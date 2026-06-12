@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
-	"github.com/kang-sw/devenv/internal/wsprompt"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wsstore"
 )
@@ -73,23 +73,15 @@ type Options struct {
 }
 
 type RegisterOptions struct {
-	Root                  string
-	Name                  string
-	Backend               string
-	Harness               string
-	Tier                  string
-	Model                 string
-	Prompts               []string
-	PromptRefs            []string
-	ConditionalPromptRefs []ConditionalPromptRef
-	SystemPromptText      string
-	SuppressOrientation   bool
-	Ephemeral             bool
-}
-
-type ConditionalPromptRef struct {
-	Binary    string
-	PromptRef string
+	Root                string
+	Name                string
+	Backend             string
+	Harness             string
+	Tier                string
+	Model               string
+	SystemPromptText    string
+	SuppressOrientation bool
+	Ephemeral           bool
 }
 
 type CallOptions struct {
@@ -226,7 +218,7 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 
 func asyncWorkerArgs(worker asyncWorkerCommand, req AsyncWorkerRequest) []string {
 	args := append([]string{}, worker.Args...)
-	args = append(args, "agents", "run-current", "--root", req.Root, "--name", req.Name)
+	args = append(args, "mercenary", "run-current", "--root", req.Root, "--name", req.Name)
 	return args
 }
 
@@ -510,25 +502,26 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		return Agent{}, Layout{}, errors.New("agent name is required")
 	}
 	explicitBackend := strings.TrimSpace(opts.Backend)
-	promptSpecs := promptSpecs(opts.Prompts, opts.PromptRefs)
-	if !opts.SuppressOrientation && (len(promptSpecs) == 0 || promptSpecs[0] != "delegate-orientation") {
-		promptSpecs = append([]string{"delegate-orientation"}, promptSpecs...)
+	// 260611 Phase 6b retired the wsprompt go:embed bundle. The only remaining
+	// auto-injected prompt is delegate-orientation (loaded from rsrc unless
+	// suppressed); the caller's self-contained prompt arrives as SystemPromptText
+	// from playbook.render. Per-stem prompt resolution and conditional refs are gone.
+	var promptRefs []string
+	var systemParts []string
+	if !opts.SuppressOrientation {
+		orientation, err := loadDelegateOrientation(opts.Harness)
+		if err != nil {
+			return Agent{}, Layout{}, err
+		}
+		if strings.TrimSpace(orientation) != "" {
+			systemParts = append(systemParts, strings.TrimSpace(orientation))
+			promptRefs = append(promptRefs, "delegate-orientation")
+		}
 	}
-	conditionalSpecs, err := m.resolveConditionalPromptRefs(opts.ConditionalPromptRefs)
-	if err != nil {
-		return Agent{}, Layout{}, err
+	if strings.TrimSpace(opts.SystemPromptText) != "" {
+		systemParts = append(systemParts, strings.TrimSpace(opts.SystemPromptText))
 	}
-	promptSpecs = append(promptSpecs, conditionalSpecs...)
-	resolved, err := wsprompt.Resolve(promptSpecs, opts.SystemPromptText, opts.Tier, opts.Model)
-	if err != nil {
-		return Agent{}, Layout{}, err
-	}
-	if strings.TrimSpace(opts.Tier) == "" {
-		opts.Tier = resolved.Tier
-	}
-	if strings.TrimSpace(opts.Model) == "" {
-		opts.Model = resolved.Model
-	}
+	systemText := strings.Join(systemParts, "\n\n---\n\n")
 	if alias := wsconfig.ModelAlias(opts.Model); alias != "" {
 		opts.Tier = alias
 	}
@@ -570,7 +563,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		CreatedAt:        now,
 		LastSeenAt:       now,
 		LastOutputPath:   "output.md",
-		PromptRefs:       append([]string(nil), promptSpecs...),
+		PromptRefs:       promptRefs,
 		SystemPromptPath: "",
 		Ephemeral:        opts.Ephemeral,
 		Capabilities: map[string]bool{
@@ -579,8 +572,8 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 			"compression": false,
 		},
 	}
-	if strings.TrimSpace(resolved.Text) != "" {
-		if err := os.WriteFile(layout.SystemFile, []byte(resolved.Text), 0o644); err != nil {
+	if strings.TrimSpace(systemText) != "" {
+		if err := os.WriteFile(layout.SystemFile, []byte(systemText), 0o644); err != nil {
 			return Agent{}, Layout{}, fmt.Errorf("write system prompt: %w", err)
 		}
 		agent.SystemPromptPath = "system.md"
@@ -610,26 +603,19 @@ func (m Manager) Agent(root, name string) (Agent, error) {
 	return m.readAgentMetadata(layout, name)
 }
 
-func (m Manager) resolveConditionalPromptRefs(refs []ConditionalPromptRef) ([]string, error) {
-	var specs []string
-	for _, ref := range refs {
-		binary := strings.TrimSpace(ref.Binary)
-		if binary == "" {
-			return nil, errors.New("conditional prompt binary is required")
-		}
-		if _, err := exec.LookPath(binary); err != nil {
-			if errors.Is(err, exec.ErrNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("resolve conditional prompt binary %q: %w", binary, err)
-		}
-		promptRef := strings.TrimSpace(ref.PromptRef)
-		if promptRef == "" {
-			promptRef = binary
-		}
-		specs = append(specs, promptRef)
+// loadDelegateOrientation returns the delegate-orientation body from the rsrc
+// tree, auto-prepended to every non-suppressed agent's system prompt (260611
+// Phase 6b moved it off the wsprompt go:embed bundle).
+func loadDelegateOrientation(harness string) (string, error) {
+	root, err := wsrsrc.ResolveRoot()
+	if err != nil {
+		return "", fmt.Errorf("resolve rsrc root for delegate orientation: %w", err)
 	}
-	return specs, nil
+	pb, err := wsrsrc.Load(root, "delegate-orientation", harness, nil)
+	if err != nil {
+		return "", fmt.Errorf("load delegate-orientation: %w", err)
+	}
+	return pb.Body, nil
 }
 
 func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
@@ -967,7 +953,7 @@ func (m Manager) Recall(opts RecallOptions) (string, error) {
 		"cancelled_active_call": cancelled,
 		"pid":                   result.PID,
 	})
-	return fmt.Sprintf("recall_recovery_only: true\nrecall_cancelled_active_call: %t\n%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.tail | agents.status | agents.cancel\n", cancelled, result.AgentName, result.Status, result.PID), nil
+	return fmt.Sprintf("recall_recovery_only: true\nrecall_cancelled_active_call: %t\n%s\t%s\tpid=%d\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.tail | ws.mercenary.status | ws.mercenary.cancel\n", cancelled, result.AgentName, result.Status, result.PID), nil
 }
 
 func (m Manager) Interrupt(opts InterruptOptions) (InterruptResult, error) {
@@ -1077,13 +1063,6 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	return nil
 }
 
-func promptSpecs(prompts, promptRefs []string) []string {
-	if len(prompts) > 0 {
-		return append([]string(nil), prompts...)
-	}
-	return append([]string(nil), promptRefs...)
-}
-
 func (m Manager) Print(root, name string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -1190,7 +1169,7 @@ func (m Manager) resultStatusText(layout Layout, name, prefix string) (string, e
 	}
 	return prefix +
 		"result_available: false\n" +
-		"follow_up: agents.result --timeout 10m | agents.status | agents.tail | agents.cancel\n" +
+		"follow_up: ws.mercenary.result --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n" +
 		status, nil
 }
 
@@ -1295,7 +1274,7 @@ func (m Manager) readinessBlock(name string, layout Layout) (string, error) {
 	}
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Sprintf("agent: %s\ncall_status: none\nready: false\nterminal: false\nresult_available: false\nactive: false\nfollow_up: agents.status | agents.tail | agents.cancel\n", agent.Name), nil
+		return fmt.Sprintf("agent: %s\ncall_status: none\nready: false\nterminal: false\nresult_available: false\nactive: false\nfollow_up: ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", agent.Name), nil
 	}
 	if err != nil {
 		return "", err
@@ -1567,7 +1546,7 @@ func backendInvocationError(agent Agent, err error) error {
 			fmt.Fprintf(&b, "- %s: not found\n", backend)
 		}
 	}
-	b.WriteString("Existing agents keep stored backend/model; re-run agents.register with backend/model to switch an existing agent.\n")
+	b.WriteString("Existing agents keep stored backend/model; re-run ws.mercenary.register with backend/model to switch an existing agent.\n")
 	b.WriteString("Future registrations can change tier defaults with config.agents_tier.\n")
 	return errors.New(b.String())
 }
@@ -2218,18 +2197,18 @@ func (m Manager) processAliveAfterCancel(pid int) (bool, error) {
 func followUpForCall(call CurrentCall) string {
 	switch call.Status {
 	case CallStatusQueued, CallStatusRunning:
-		return "agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel"
+		return "ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel"
 	case CallStatusCompleted:
-		return "agents.result | agents.tail"
+		return "ws.mercenary.result | ws.mercenary.tail"
 	case CallStatusFailed:
-		return "agents.tail | agents.erase"
+		return "ws.mercenary.tail | ws.mercenary.erase"
 	case CallStatusCancelled:
 		if call.CleanupNeeded {
-			return "inspect runtime log | manual cleanup | agents.erase"
+			return "inspect runtime log | manual cleanup | ws.mercenary.erase"
 		}
-		return "agents.call | agents.tail | agents.erase"
+		return "ws.mercenary.call | ws.mercenary.tail | ws.mercenary.erase"
 	default:
-		return "agents.status"
+		return "ws.mercenary.status"
 	}
 }
 
@@ -2238,7 +2217,7 @@ func interruptHookCommand(root, name string) string {
 	if err != nil || exe == "" {
 		exe = "ws-mcp"
 	}
-	cmd := shellQuote(exe) + " agents check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
+	cmd := shellQuote(exe) + " mercenary check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
 	return cmd
 }
 
