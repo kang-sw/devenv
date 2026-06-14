@@ -3,6 +3,8 @@ title: subagent-rules infra doc still recommends retired ws/subquery
 related:
   260609-refactor-ws-skill-text-playbook-conversion: shifted subquery delegation to native Explore playbooks
   260605-epic-ws-playbook-factory-pivot: owns subquery retirement and native-subagent convergence
+spec:
+  - 260610-subquery-explore-delegation-shift
 related-mental-model:
   - workflow-skills
   - prompt-bundle
