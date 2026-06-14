@@ -1,5 +1,6 @@
 ---
 title: subagent-rules infra doc still recommends retired ws/subquery
+completed: 2026-06-15
 related:
   260609-refactor-ws-skill-text-playbook-conversion: shifted subquery delegation to native Explore playbooks
   260605-epic-ws-playbook-factory-pivot: owns subquery retirement and native-subagent convergence
@@ -56,3 +57,24 @@ Verification boundary:
 - Regenerate and verify the rsrc manifest, and update the wsflow mirror if this
   rsrc file is mirrored there.
 - Run the relevant `agents-plugin-tool` Go tests for rsrc/infra loading.
+
+### Result (d9928c4f) - 2026-06-15
+
+Replaced the retired `ws/subquery` invocation examples in
+`agents-plugin/rsrc/subagent-rules.md` with caller-owned Explore playbook
+guidance: render `explore`, pass the rendered brief path plus scoped question to
+a host-native Explore-capable worker, and collect a concise evidence report.
+Regenerated `agents-plugin/rsrc/manifest.json` and the byte-identical
+`agents-plugin-wsflow/rsrc/` mirror.
+
+Verification:
+
+- `rg "ws/subquery|subquery\\(" agents-plugin/rsrc/subagent-rules.md
+  agents-plugin-wsflow/rsrc/subagent-rules.md` found no matches.
+- Source `ws-mcp serve --stdio` with `WS_RSRC_ROOT=agents-plugin/rsrc` returned
+  updated `infra.read(name: "subagent-rules")` text containing
+  `ws/playbook.render(name: "explore")` and no `ws/subquery` or `subquery(`.
+- `go test -count=1 ./internal/wsrsrc ./internal/wsdoc ./internal/mcp` passed.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` still fails on the
+  pre-existing `lead-workflow-manual/SKILL.md: full ws dotted namespace` issue,
+  unrelated to this rsrc mirror change.
