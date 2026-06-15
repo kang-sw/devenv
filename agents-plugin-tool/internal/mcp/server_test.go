@@ -1057,6 +1057,24 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 			t.Fatalf("non-login tool %s publicly advertises root in schema: %s", name, byID["2"])
 		}
 	}
+	rootAwareTools := []string{
+		"api.list", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel",
+		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
+		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
+		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
+		"tickets.list", "tickets.find", "tickets.status", "path.generate", "playbook.render",
+		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
+		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
+		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
+		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase",
+	}
+	for _, name := range rootAwareTools {
+		properties := toolPropertiesByName(t, byID["2"], name)
+		if _, ok := properties["session_key"]; !ok {
+			t.Fatalf("root-aware tool %s schema missing session_key: %s", name, byID["2"])
+		}
+	}
 	if !strings.Contains(byID["2"], "path.generate") {
 		t.Fatalf("tools/list missing path.generate: %s", byID["2"])
 	}
