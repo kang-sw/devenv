@@ -158,7 +158,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
-| `260615-refactor-native-explore-dispatch-skill-guidance` | todo | Move scoped exploration guidance from the generic `explore` render brief to direct host-native Explore/search dispatch |
+| `260615-refactor-native-explore-dispatch-skill-guidance` | ready | Move scoped exploration guidance from the generic `explore` render brief to direct host-native Explore/search dispatch |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
@@ -188,6 +188,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260615-refactor-native-explore-dispatch-skill-guidance` - ready implementation
+  target; move shipped scoped-exploration guidance to direct host-native
+  Explore/search dispatch and reconcile `workflow-skills`/mental models.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
