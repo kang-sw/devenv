@@ -2,6 +2,8 @@
 title: project_tree should suppress vendored/generated directory noise
 related:
   260524-bug-project-tree-stale-ticket-status-map: adjacent project_tree projection issue; different failure mode
+spec:
+  - 260505-project-context-convention-tools
 ---
 
 # project_tree should suppress vendored/generated directory noise
@@ -23,7 +25,11 @@ ticket, and mental-model inventory that workflow sessions need.
 ### Phase 1: Compact noisy generated directories in project_tree
 
 Update the project tree renderer so generated or vendored directories under
-document-adjacent paths are omitted or summarized. Preserve the current spec,
-ticket, and mental-model inventory sections. Add coverage that would fail if a
-fixture tree expands `node_modules/` or similar dependency directories into the
-returned project map.
+document-adjacent paths are omitted. Use Git ignore awareness for the hotfix:
+before printing an entry or recursing into a directory, check whether Git would
+ignore that path. If the root is not a Git worktree or the ignore check fails,
+fall back to the current include behavior rather than failing `project_tree`.
+
+Preserve the current spec, ticket, and mental-model inventory sections. Add
+coverage that would fail if a fixture tree with `.gitignore` expands
+`node_modules/` or similar dependency directories into the returned project map.
