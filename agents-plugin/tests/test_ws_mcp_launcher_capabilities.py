@@ -241,6 +241,35 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             self.assertTrue(got.endswith(".exe"))
             self.assertIn(hashlib.sha256(contract_path.read_bytes()).hexdigest()[:12], got)
 
+    def test_runtime_contract_waits_for_package_materialization(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+            sleeps = []
+
+            def materialize_contract(_interval):
+                sleeps.append(_interval)
+                contract_path.write_text('{"plugin_version":"0.18.1"}\n', encoding="utf-8")
+
+            launcher.time.sleep = materialize_contract
+
+            got = launcher.read_runtime_contract(contract_path)
+
+            self.assertEqual(got["plugin_version"], "0.18.1")
+            self.assertEqual(sleeps, [0.05])
+
+    def test_runtime_contract_missing_after_wait_names_package_materialization(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+
+            with self.assertRaises(SystemExit), mock.patch("sys.stderr") as stderr:
+                launcher.wait_for_runtime_contract(contract_path, timeout_seconds=0.0)
+
+            self.assertIn("plugin package not fully materialized", "".join(call.args[0] for call in stderr.write.call_args_list))
+
     def test_install_replace_failure_reuses_existing_compatible_runtime(self):
         launcher = load_launcher()
 

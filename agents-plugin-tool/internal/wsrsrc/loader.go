@@ -73,6 +73,9 @@ func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, e
 	if err != nil {
 		return LoadedPlaybook{}, err
 	}
+	if err := checkPlaybookExists(root, name, filePath, manifest); err != nil {
+		return LoadedPlaybook{}, err
+	}
 
 	// Load and verify file integrity.
 	data, err := loadAndVerify(root, filePath, manifest)
@@ -145,6 +148,23 @@ func resolvePlaybookPath(root, name, harness string) (string, bool, error) {
 		}
 	}
 	return basePath, false, nil
+}
+
+func checkPlaybookExists(root, name, filePath string, manifest Manifest) error {
+	relPath, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return fmt.Errorf("resolve relpath for %q: %w", filePath, err)
+	}
+	relPath = filepath.ToSlash(relPath)
+	if _, ok := manifest.Files[relPath]; ok {
+		return nil
+	}
+	if _, err := os.Stat(filePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat %q: %w", relPath, err)
+	}
+	return ErrPlaybookNotFound{Name: name}
 }
 
 // loadAndVerify reads filePath, computes its hash, and verifies it matches the

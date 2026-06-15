@@ -151,7 +151,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260612-bug-subagent-rules-stale-subquery-guidance` | ready | Replace stale infra guidance that still teaches retired `ws/subquery` |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -183,15 +182,10 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-lead-implement-delegation-pre-edit-guard` | idea | Require an explicit direct-edit verdict or implementer spawn before lead-implement mutates source |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
-| `260524-bug-codex-plugin-cache-refresh-mcp-startup-race` | idea | Investigate Codex plugin cache refresh and MCP startup race behavior |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
 
-- `260612-bug-subagent-rules-stale-subquery-guidance` - ready dogfood fix for
-  stale `infra.read("subagent-rules")` guidance; updates rsrc text plus the
-  wsflow mirror/manifest and verifies the infra loader no longer teaches
-  retired `ws/subquery`.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

@@ -3,6 +3,9 @@ title: rsrc Load reports an unknown playbook name as "manifest-listed file missi
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: surfaced while dogfooding the unmerged 2c build via playbook.print on the Claude plugin install
   260611-bug-rsrc-manifest-regen-missed-after-shipped-edit: sibling rsrc-tree/manifest integrity concern (different failure)
+spec:
+  - 260609-rsrc-playbook-distribution
+completed: 2026-06-15
 ---
 
 # rsrc Load reports an unknown playbook name as "manifest-listed file missing"
@@ -55,3 +58,34 @@ exist." It also masks genuine torn-install cases, since both now read the same.
 - Distinct from `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`
   (that one is about manifest regeneration drift after a shipped edit). This
   ticket is purely the unknown-name vs. torn-install message conflation.
+
+## Phases
+
+### Phase 1: Split unknown playbook from torn-install file missing
+
+When a requested playbook stem resolves to neither a manifest entry nor a file on
+disk, return a not-found diagnostic that names the unknown playbook rather than
+the manifest-listed-file-missing integrity error. Preserve `ErrFileMissing` for
+the true integrity cases where a manifest-listed file is absent on disk or a
+disk file exists without a matching manifest entry.
+
+Verification boundary:
+
+- Loading an unknown playbook stem returns a distinct not-found error whose text
+  says no such playbook.
+- Existing missing-file and hash-mismatch integrity tests still pass.
+- `go test -count=1 ./internal/wsrsrc ./internal/mcp` remains green.
+
+### Result (2da50a22) - 2026-06-15
+
+Implemented `ErrPlaybookNotFound` for top-level `wsrsrc.Load` playbook stems
+that resolve to neither a manifest entry nor a file on disk. Existing
+integrity paths remain distinct: a disk file missing from the manifest and a
+manifest-listed file missing from disk still surface as `ErrFileMissing`, while
+hash drift remains `ErrHashMismatch`.
+
+Verification:
+
+- `go test -count=1 ./internal/wsrsrc -run 'TestLoader(PlaybookNotFound|FileMissingFromManifest|ManifestListedFileMissing|HashMismatch)$' -v`
+- `go test -count=1 ./internal/wsrsrc ./internal/mcp`
+- `go test -count=1 ./...`

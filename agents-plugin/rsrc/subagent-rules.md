@@ -9,12 +9,15 @@ file directly.
 For scoped exploration beyond direct file search:
 
 ```text
-ws/subquery(question: "<question>")
-ws/subquery(deep_research: true, question: "<question>")
+Caller: spawn a host-native exploration worker with an English scoped task prompt.
+Caller: collect a concise report with the answer, cited evidence, gaps, and follow-up needs.
 ```
 
-Prefer direct file reads and search when the target is known. Use `ws/subquery`
-when sequential searches would flood context, or for broad cross-module tracing.
+Prefer direct file reads and search when the target is known. Use a
+host-native exploration worker when the investigation requires broad or
+multi-step search that would consume too much main-session context, or for broad
+cross-module tracing. The worker prompt must include the scoped question,
+read-only boundary, expected evidence citations, gaps, and follow-up needs.
 
 ## Branches
 

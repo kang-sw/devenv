@@ -46,13 +46,13 @@ and expected output.
 
 `wsflow/runtime.info`
 `wsflow/runtime.debug_events`
-`wsflow/ws.lead.login`
+`wsflow/lead.login`
 `wsflow/config.show`
 
 Use `wsflow/runtime.info` for runtime compatibility checks and feature
 detection; when a package declares a required runtime version, compare the
 returned metadata against that requirement. Before calling any root-aware
-wsflow tool, call `wsflow/ws.lead.login(root: "<absolute-working-directory>")`
+wsflow tool, call the lead login tool with `root: "<absolute-working-directory>"`
 with the repository's absolute filesystem path and thread the returned
 `session_key` into subsequent root-aware tool calls. The MCP server cannot infer
 the agent's current directory from placeholders or relative paths. Verify the

@@ -65,8 +65,10 @@ Root-aware MCP tools resolve their repository root exclusively from a mandatory
 (`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
 call without a `session_key` is rejected with mandatory-login guidance naming
 `ws.lead.login(root)`; a call whose key is absent from the in-memory registry is
-rejected with the `unknown_session` recovery contract. `ws.lead.login(root)` is
-the sole bootstrap verb and the only tool that accepts a `root` argument.
+rejected with the `unknown_session` recovery contract. Public schemas for
+root-aware tools advertise `session_key` and do not advertise `root`;
+`ws.lead.login(root)` is the sole bootstrap verb and the only tool that accepts
+a `root` argument.
 
 The former resolution sources are removed: the explicit per-tool `root` argument,
 the volatile session default root, host-workspace metadata, the explicit server
@@ -166,7 +168,9 @@ keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active
-ticket inventory for the current repository.
+ticket inventory for the current repository. The document map omits entries
+ignored by the repository's Git ignore rules so generated or vendored
+directories do not dominate the readable project context.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc
@@ -433,6 +437,12 @@ surface: the playbook tools report the failure and do not serve playbook content
 and there is no embedded fallback copy. A session whose playbook surface has
 failed still serves the discovery, Git, and other tools that do not depend on the
 resource tree.
+
+When a caller requests a playbook stem that is absent from both the resource
+manifest and the resource tree, the playbook surface reports a no-such-playbook
+diagnostic. Manifest integrity diagnostics are reserved for corrupted or stale
+resource trees, such as a manifest-listed file missing from disk or a listed
+file whose hash no longer matches.
 
 `WS_RSRC_ROOT` overrides the resource-tree load root. When set, the runtime loads
 the tree from that path instead of the distributed plugin copy, so a development

@@ -1808,7 +1808,7 @@ func errorResponse(id json.RawMessage, code int, message string) response {
 }
 
 func tools() []map[string]any {
-	return []map[string]any{
+	toolList := []map[string]any{
 		{
 			"name":        "runtime.info",
 			"description": "Return ws-mcp runtime metadata for compatibility checks.",
@@ -2420,6 +2420,59 @@ func tools() []map[string]any {
 			},
 		},
 	}
+	return withRootAwareToolSchemas(toolList)
+}
+
+func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
+	for _, tool := range toolList {
+		name, _ := tool["name"].(string)
+		if !rootAwareToolSchemaRequiresSessionKey(name) {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		if schema == nil {
+			schema = map[string]any{"type": "object"}
+			tool["inputSchema"] = schema
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		if properties == nil {
+			properties = map[string]any{}
+			schema["properties"] = properties
+		}
+		properties["session_key"] = stringProperty("Caller's ws session key from ws.lead.login(root).")
+		if name != "playbook.render" {
+			schema["required"] = appendRequiredString(schema["required"], "session_key")
+		}
+	}
+	return toolList
+}
+
+func rootAwareToolSchemaRequiresSessionKey(name string) bool {
+	switch name {
+	case "api.list", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel",
+		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
+		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
+		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
+		"tickets.list", "tickets.find", "tickets.status", "path.generate", "prompt.render", "playbook.render",
+		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
+		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
+		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
+		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase":
+		return true
+	default:
+		return false
+	}
+}
+
+func appendRequiredString(raw any, value string) []string {
+	required, _ := raw.([]string)
+	for _, existing := range required {
+		if existing == value {
+			return required
+		}
+	}
+	return append(required, value)
 }
 
 func LeadToolNames() []string {

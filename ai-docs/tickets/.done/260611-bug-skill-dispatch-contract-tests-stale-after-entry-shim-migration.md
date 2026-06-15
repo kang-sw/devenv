@@ -4,6 +4,10 @@ related:
   260609-refactor-ws-skill-text-playbook-conversion: M2 moved procedure text into playbook.print rsrc content and reduced entry skills to thin shims; the Python contract tests were not updated to match
   260609-refactor-ws-spawn-runtime-deletion-session-auth: surfaced during Phase 3 verification (the failures are disjoint from the Go/Rust Phase 3 surface and predate the whole M3 stack)
   260610-bug-wsflow-runtime-contract-playbook-tools-drift: sibling migration-drift concern (runtime contract, different surface)
+spec:
+  - 260610-entry-skill-surface-reduction
+  - 260513-wsflow-agentless-skill-surface
+completed: 2026-06-15
 ---
 
 # Python skill-dispatch contract tests are stale after the M2 entry-skill-shim migration
@@ -68,3 +72,38 @@ pre-migration skill shape.
 - Distinct from `260610-bug-wsflow-runtime-contract-playbook-tools-drift`
   (runtime capability contract drift). This ticket is purely the Python
   skill-text/dispatch contract tests lagging the entry-shim migration.
+
+## Phases
+
+### Phase 1: Realign skill-dispatch tests with playbook-backed entry shims
+
+Update the shipped Python skill-dispatch contract tests so they assert the
+post-M2 source of truth: thin entry skills route through `playbook.print`, while
+procedure contracts live under `agents-plugin/rsrc/` playbooks. Do not recreate
+removed full skill files under `agents-plugin/skills/`.
+
+Also fix the wsflow workflow-manual namespace offense that the existing
+wsflow package test reports, using the canonical wsflow-facing or
+namespace-neutral form rather than relaxing the forbidden-reference check.
+
+Verification boundary:
+
+- `python3 -m unittest discover agents-plugin/tests` exits 0.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` no longer fails on
+  `skills/lead-workflow-manual/SKILL.md: full ws dotted namespace`.
+- The tests continue to verify that proceed remains route-only and implement
+  owns implementation execution.
+
+### Result (7fd40ce8) - 2026-06-15
+
+`agents-plugin/tests/test_skill_dispatch_contracts.py` now reads the post-M2
+source of truth: thin entry skill shims under `agents-plugin/skills/` for
+trigger routing, and procedure bodies under `agents-plugin/rsrc/` for routing
+and implementation-spine contracts. It no longer expects removed full skill
+files under `agents-plugin/skills/`.
+
+The same implementation fixed the wsflow workflow-manual dotted namespace
+offense by replacing `wsflow/ws.lead.login` prose with a namespace-neutral lead
+login reference while preserving the forbidden-reference test. Verification ran
+`python3 -m unittest discover agents-plugin/tests` and
+`python3 -m unittest discover agents-plugin-wsflow/tests`; both passed.

@@ -2,6 +2,7 @@
 title: wsflow lead-workflow-manual skill references forbidden `ws.` dotted namespace (wsflow/ws.lead.login)
 related:
   260611-refactor-ws-tier-taxonomy-delegate-tier-routing: surfaced while running the wsflow package tests during Phase 6
+completed: 2026-06-15
 ---
 
 # wsflow lead-workflow-manual skill references forbidden `ws.` dotted namespace
@@ -49,3 +50,15 @@ Offending lines (`agents-plugin-wsflow/skills/lead-workflow-manual/SKILL.md`):
 
 Small skill-text + possibly test-pattern fix once the canonical form is decided.
 Out of scope for `260611` Phase 6 (rsrc/loader convergence). Track here.
+
+## Result (7fd40ce8) - 2026-06-15
+
+Resolved by choosing option (a): wsflow skill prose drops the literal `ws.`
+prefix for this login reference, and the forbidden `\bws\.` test remains
+strict. `agents-plugin-wsflow/skills/lead-workflow-manual/SKILL.md` now lists
+`wsflow/lead.login` in the runtime primitive block and describes calling the
+lead login tool with a `root` argument instead of spelling the full dotted tool
+identifier.
+
+Verification ran `python3 -m unittest discover agents-plugin-wsflow/tests`; it
+passed.

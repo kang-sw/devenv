@@ -5,6 +5,7 @@ related:
 related-mental-model:
   - plugin-runtime
   - mcp-runtime
+completed: 2026-06-15
 ---
 
 # Codex plugin cache refresh can race ws MCP startup
@@ -35,6 +36,21 @@ materialized plugin tree, but it cannot read `runtime.json` before the host has
 finished materializing the plugin package. The likely boundary is Codex plugin
 cache install/refresh atomicity or startup ordering.
 
+## Spec Impact
+
+Target spec area: `ai-docs/spec/plugin-runtime.md` launcher startup and runtime
+compatibility contracts.
+
+Expected caller-visible change: plugin-managed MCP startup during local Codex
+plugin refresh should either wait briefly for the installed package tree to
+contain the required contract files, or fail with diagnostics that make the
+package-materialization boundary clear rather than looking like an ordinary
+runtime repair failure.
+
+Contract-first spec: no. The exact mitigation should be chosen after the
+reproduction/classification pass distinguishes a host cache materialization race
+from ws launcher runtime repair.
+
 ## Phases
 
 ### Phase 1: Reproduce and classify the cache materialization race
@@ -49,6 +65,18 @@ Verification boundary: logs or a small probe must distinguish this host cache
 race from ws launcher runtime repair, missing release assets, Windows Python
 availability, and ordinary MCP startup timeout.
 
+### Result (3c1518d9) - 2026-06-15
+
+The race was classified as a package-materialization window: the Python
+launcher can be invoked from a versioned plugin cache after `bin/` is visible
+but before `runtime.json` is present. That is distinct from runtime repair,
+release asset lookup, Python availability, and ordinary MCP startup timeout
+because runtime compatibility has not started yet.
+
+The implementation added a focused launcher unit test that simulates
+`runtime.json` appearing after the first wait interval, plus a failure-path test
+that verifies the expired wait names plugin package materialization directly.
+
 ### Phase 2: Choose a mitigation boundary
 
 Evaluate whether ws can mitigate this from the launcher side by briefly waiting
@@ -59,3 +87,16 @@ stdio MCP and keep diagnostics on stderr.
 Verification boundary: a session started during plugin refresh either delays
 until the package tree is complete or produces a retryable/actionable failure,
 without regressing normal hot-path startup.
+
+### Result (3c1518d9) - 2026-06-15
+
+ws can mitigate the launcher-visible part of the cache race by waiting briefly
+for `runtime.json` before reading the runtime contract. If the file appears,
+startup continues into the existing compatibility path. If the wait expires,
+the launcher fails on stderr with a package-materialization diagnostic instead
+of the previous generic missing-contract repair shape.
+
+This does not claim to fix host skill-bundle reads that happen before the MCP
+launcher runs; those remain a Codex plugin-cache atomicity or refresh-order
+boundary. The implemented mitigation keeps stdout silent for stdio MCP and does
+not change the normal hot-path once `runtime.json` is already present.

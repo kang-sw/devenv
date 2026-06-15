@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
+RSRC_DIR = Path(__file__).resolve().parents[1] / "rsrc"
 
 
 def fenced_template(text: str, heading: str) -> str:
@@ -18,19 +19,21 @@ def verdict_fields(template: str) -> list[str]:
 
 class SkillDispatchContractsTest(unittest.TestCase):
     def test_proceed_keeps_implementation_route_only(self):
-        text = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
+        shim = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
+        text = (RSRC_DIR / "lead-proceed" / "lead-proceed.md").read_text(encoding="utf-8")
 
-        self.assertIn("Always route code-editing work through `ws:lead-implement`", text)
+        self.assertIn('ws/playbook.print(name: "lead-proceed")', shim)
+        self.assertIn("Always route code-editing work through the lead-implement procedure", text)
         self.assertIn("## Routing Verdict", text)
-        self.assertIn("NEXT: <ws:lead-discuss | ws:lead-write-ticket | ws:lead-implement | stop>", text)
-        self.assertIn("If `NEXT: ws:lead-implement`, invoke `ws:lead-implement`", text)
+        self.assertIn("NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
+        self.assertIn('If `NEXT: lead-implement`, call `ws/playbook.print(name: "lead-implement")`', text)
         self.assertNotIn("**Implementation Route**", text)
         self.assertNotIn("**Implementation Verdict**", text)
         self.assertNotIn("**Verdict Basis**", text)
         self.assertNotIn("### judge: implementation-dispatch", text)
 
     def test_implement_keeps_execution_owner(self):
-        text = (SKILLS_DIR / "lead-implement" / "SKILL.md").read_text(encoding="utf-8")
+        text = (RSRC_DIR / "lead-implement" / "lead-implement.md").read_text(encoding="utf-8")
         verdict = fenced_template(text, "### Implementation Verdict")
 
         self.assertIn("## Implementation Verdict", text)
@@ -57,9 +60,9 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertNotIn("Confirm dispatch boundary", text)
 
     def test_workflow_manual_requires_english_agent_prompts(self):
-        text = (SKILLS_DIR / "lead-workflow-manual" / "SKILL.md").read_text(encoding="utf-8")
+        text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
-        self.assertIn("Write prompts sent to `ws/subquery` and `ws/agents.call` in English.", text)
+        self.assertIn("Write prompts sent to native Explore-style subagents and `ws.mercenary.call` in English.", text)
 
 
 if __name__ == "__main__":

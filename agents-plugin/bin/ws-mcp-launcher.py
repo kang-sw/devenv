@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 import urllib.request
 from pathlib import Path
@@ -22,9 +23,20 @@ def note(message: str) -> None:
         print(f"ws-mcp-launcher: {message}", file=sys.stderr)
 
 
+def wait_for_runtime_contract(path: Path, *, timeout_seconds: float = 2.0, interval_seconds: float = 0.05) -> None:
+    if path.is_file():
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        if path.is_file():
+            note(f"runtime contract appeared after package materialization wait: {path}")
+            return
+    fail(f"plugin package not fully materialized: missing runtime contract after {timeout_seconds:.1f}s: {path}")
+
+
 def read_runtime_contract(path: Path) -> dict:
-    if not path.is_file():
-        fail(f"missing runtime contract: {path}")
+    wait_for_runtime_contract(path)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:

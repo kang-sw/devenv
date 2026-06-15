@@ -10,13 +10,13 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
-- All survey queries spawn a native broad-scope Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook); ticket-association checks spawn a scoped Explore-style subagent.
+- All survey queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; ticket-association checks spawn a scoped exploration worker with a ticket-association prompt and cited evidence.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `ws/spec_index.verify()` after every spec file write or update.
 - Domain task labels use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
-- All survey Explore-style subagents for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
+- All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 
 ## On: invoke
 
@@ -40,7 +40,7 @@ Target: user request
 
 ### 2. Parallel codebase survey
 
-Spawn all four Explore-style subagents with broad-tracing scope in a single response turn via the `explore` playbook (see the `lead-workflow-manual` playbook). Collect all results before synthesizing.
+Spawn all four host-native exploration workers with broad-tracing scope in a single response turn, using the query blocks below as task prompts. Require cited evidence, gaps, and follow-up needs. Collect all results before synthesizing.
 
 Query 1 — directory and module structure:
 
@@ -117,7 +117,7 @@ Update the visible task list entry for this domain to in-progress.
 
 ### 2. Parallel domain survey
 
-Spawn all four Explore-style subagents with broad-tracing scope in a single response turn via the `explore` playbook (see the `lead-workflow-manual` playbook). Collect all results before synthesizing.
+Spawn all four host-native exploration workers with broad-tracing scope in a single response turn, using the query blocks below as task prompts. Require cited evidence, gaps, and follow-up needs. Collect all results before synthesizing.
 
 Query 1 — domain source code:
 
@@ -196,7 +196,7 @@ confirmed list before writing anything.
 ### 6. Associate stems with tickets
 
 1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
-2. Spawn a scoped Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook) for the ticket-association check:
+2. Spawn a scoped exploration worker for the ticket-association check, using this block as the task prompt:
 
 ```text
 Associate spec stems with tickets and check convention compliance.
@@ -248,7 +248,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Spawn a scoped Explore-style subagent via the `explore` playbook (see the `lead-workflow-manual` playbook) with a spec-updater brief to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
+- Spawn a scoped exploration worker with a spec-updater task prompt to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.
 - Run the lead-write-spec procedure via `ws/playbook.print(name: "lead-write-spec")` for any domain surfaces discovered after wrap-up.
 

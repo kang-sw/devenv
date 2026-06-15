@@ -3,6 +3,7 @@ package wsdoc
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -24,7 +25,8 @@ func ProjectTree(root string) (string, error) {
 	}
 
 	var b strings.Builder
-	renderAIDocs(&b, aiDocs)
+	ignored := gitIgnoreMatcher(root)
+	renderAIDocs(&b, aiDocs, ignored)
 	b.WriteString("\n\n")
 	if isDir(filepath.Join(aiDocs, "spec")) {
 		renderSpecs(&b, filepath.Join(aiDocs, "spec"))
@@ -60,7 +62,7 @@ func ReadInfra(name string) (string, error) {
 	return pb.Body, nil
 }
 
-func renderAIDocs(b *strings.Builder, aiDocs string) {
+func renderAIDocs(b *strings.Builder, aiDocs string, ignored func(string) bool) {
 	b.WriteString("ai-docs/\n")
 	entries := sortedEntries(aiDocs)
 	for _, entry := range entries {
@@ -69,25 +71,52 @@ func renderAIDocs(b *strings.Builder, aiDocs string) {
 			continue
 		}
 		path := filepath.Join(aiDocs, name)
+		if ignored(path) {
+			continue
+		}
 		if entry.IsDir() {
 			fmt.Fprintf(b, "  %s/\n", name)
-			renderDirTree(b, path, 2)
+			renderDirTree(b, path, 2, ignored)
 		} else {
 			fmt.Fprintf(b, "  %s\n", name)
 		}
 	}
 }
 
-func renderDirTree(b *strings.Builder, root string, indent int) {
+func renderDirTree(b *strings.Builder, root string, indent int, ignored func(string) bool) {
 	prefix := strings.Repeat("  ", indent)
 	for _, entry := range sortedEntries(root) {
 		path := filepath.Join(root, entry.Name())
+		if ignored(path) {
+			continue
+		}
 		if entry.IsDir() {
 			fmt.Fprintf(b, "%s%s/\n", prefix, entry.Name())
-			renderDirTree(b, path, indent+1)
+			renderDirTree(b, path, indent+1, ignored)
 		} else {
 			fmt.Fprintf(b, "%s%s\n", prefix, entry.Name())
 		}
+	}
+}
+
+func gitIgnoreMatcher(repoRoot string) func(string) bool {
+	if err := exec.Command("git", "-C", repoRoot, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+		return func(string) bool { return false }
+	}
+	cache := map[string]bool{}
+	return func(path string) bool {
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			return false
+		}
+		rel = filepath.ToSlash(rel)
+		if ignored, ok := cache[rel]; ok {
+			return ignored
+		}
+		err = exec.Command("git", "-C", repoRoot, "check-ignore", "-q", "--", rel).Run()
+		ignored := err == nil
+		cache[rel] = ignored
+		return ignored
 	}
 }
 

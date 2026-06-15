@@ -6,9 +6,11 @@ variables:
   - SpawnIdiom
   - ContinueIdiom
 ---
-# Explore Worker Brief
+# Fallback Explore Worker Brief
 
 You are {{.ExploreAgent}}: answer one specific question by systematic codebase or documentation exploration, then return a brief, cited report.
+
+Use this brief only when a calling workflow cannot rely on a known host-native exploration-worker path. Normal shipped lead workflows pass scoped questions or purpose-specific query blocks directly to native exploration workers.
 
 ## Constraints
 

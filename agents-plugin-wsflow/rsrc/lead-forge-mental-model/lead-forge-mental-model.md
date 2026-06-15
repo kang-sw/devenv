@@ -10,11 +10,11 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "mental-model-conventions")` before any document write - conventions are canonical there.
-- All survey and verifier queries spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`).
+- All survey and verifier queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; require cited evidence, gaps, and follow-up needs.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain task labels use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Keep labels stable for resume scanning.
-- All survey Explore-style subagents for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
+- All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
@@ -42,7 +42,7 @@ Record whether spec is available (drives step 4 per domain).
 
 ### 2. Parallel codebase survey
 
-Spawn all three Explore-style subagents with broad-tracing scope in a single response turn via the `explore` playbook (see `lead-workflow-manual`). Collect all results before synthesizing.
+Spawn all three host-native exploration workers with broad-tracing scope in a single response turn, using the query blocks below as task prompts. Require cited evidence, gaps, and follow-up needs. Collect all results before synthesizing.
 
 Query 1 — directory and module structure:
 
@@ -108,7 +108,7 @@ Update the visible task list entry for this domain to in-progress.
 
 ### 2. Domain survey
 
-Spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`); collect the result before drafting:
+Spawn a host-native broad-scope exploration worker with the task prompt below; collect the result before drafting:
 
 ```text
 Analyze domain: <domain>
@@ -143,7 +143,7 @@ Skip if no spec exists.
 
 ### 5. Verify
 
-Spawn a native broad-scope Explore-style subagent via the `explore` playbook (see `lead-workflow-manual`); collect the result before applying corrections:
+Spawn a host-native broad-scope exploration worker with the task prompt below; collect the result before applying corrections:
 
 ```text
 Verify the following mental-model domain document against the codebase.

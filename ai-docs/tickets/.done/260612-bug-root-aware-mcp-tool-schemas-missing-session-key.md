@@ -3,9 +3,12 @@ title: Root-aware MCP tool schemas omit required session_key
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: introduced mandatory session-key root resolution
   260611-refactor-ws-tier-taxonomy-delegate-tier-routing: current dogfood branch exposing the issue after plugin cache refresh
+spec:
+  - 260610-ephemeral-session-auth-model
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
+completed: 2026-06-15
 ---
 
 # Root-aware MCP tool schemas omit required session_key
@@ -71,3 +74,16 @@ Verification boundary:
 - Existing mandatory-key tests still verify that keyless root-aware calls fail
   with `mandatory_session_key`.
 - `go test ./...` under `agents-plugin-tool/` remains green.
+
+### Result (601c4e25) - 2026-06-15
+
+`tools()` now runs the public tool list through a centralized root-aware schema
+augmentation pass. Every advertised root-aware MCP tool schema includes
+`session_key` while continuing to omit `root`; ordinary root-aware schemas mark
+`session_key` required, while `playbook.render` keeps it optional because
+`root_override` remains a supported render binding path.
+
+The tools/list contract test now asserts the root-aware schema inventory
+includes `session_key`, preserving the existing checks that non-login tools do
+not advertise `root`. Verification ran `go test -count=1 ./internal/mcp` and
+`go test -count=1 ./...` from `agents-plugin-tool/`; both passed.
