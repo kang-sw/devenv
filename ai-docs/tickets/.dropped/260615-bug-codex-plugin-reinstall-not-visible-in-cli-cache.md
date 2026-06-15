@@ -67,3 +67,9 @@ This ticket is intentionally separate from
 `260525-bug-codex-local-marketplace-worktree-cache-regression`, which concerns
 wrong-source or sibling-worktree cache selection. This observation is about the
 plugin being absent from installed state after an expected reinstall.
+
+## Dropped - 2026-06-15
+
+User clarified that the plugin had not actually been installed before the check.
+The observed absent CLI/cache/MCP state was therefore expected, not a Codex
+reinstall or cache failure.
