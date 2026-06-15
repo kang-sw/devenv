@@ -48,15 +48,16 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 11 entry skills the user invokes as
+The directly invocable surface is narrowed to 12 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
-`lead-add-rule`, `lead-forge-mental-model`, and `lead-forge-spec`. The remaining
+`lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`, and
+`lead-verify-discussion`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
-`lead-verify-discussion`, and `lead-update-spec` — are internal procedures served
-as `ws/playbook.print` content invoked by caller skills, not directly user-invoked
-entry points; `lead-write-ticket` and `lead-write-spec` are orchestration-only. The
+and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
+content invoked by caller skills, not directly user-invoked entry points;
+`lead-write-ticket` and `lead-write-spec` are orchestration-only. The
 classification axis is whether the user is meant to type `/ws:<name>` directly, not
 cross-skill invocation count. Each entry skill's own procedure body is likewise
 served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md

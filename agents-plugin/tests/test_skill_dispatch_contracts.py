@@ -64,6 +64,14 @@ class SkillDispatchContractsTest(unittest.TestCase):
 
         self.assertIn("Write prompts sent to native Explore-style subagents and `ws.mercenary.call` in English.", text)
 
+    def test_verify_discussion_is_entry_shim(self):
+        shim = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
+        text = (RSRC_DIR / "lead-verify-discussion" / "lead-verify-discussion.md").read_text(encoding="utf-8")
+
+        self.assertIn('ws/playbook.print(name: "lead-verify-discussion")', shim)
+        self.assertIn("Treat user preference as input, not evidence.", text)
+        self.assertIn("Build the strongest concise countercase", text)
+
 
 if __name__ == "__main__":
     unittest.main()

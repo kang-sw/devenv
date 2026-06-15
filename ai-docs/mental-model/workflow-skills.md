@@ -14,8 +14,8 @@ related:
 
 ## Entry Points
 
-- `agents-plugin/skills/lead-*` holds the 11 directly user-invocable `ws:` entry skills; uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
-- `agents-plugin/rsrc/lead-*/` holds procedure bodies for all lead-* workflows — entry-skill bodies (e.g., `lead-proceed`, `lead-discuss`, `lead-bootstrap`) and internal-only procedures (e.g., `lead-implement`, `lead-write-ticket`, `lead-workflow-manual`); all are invoked via `ws/playbook.print(name: "<name>")` and executed inline. Entry-skill playbooks have a corresponding thin-shim `SKILL.md` (frontmatter + H1 + single print-and-execute line); internal-only playbooks have no user-invocable shim. {#260609-rsrc-playbook-distribution}
+- `agents-plugin/skills/lead-*` holds the 12 directly user-invocable `ws:` entry skills; uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
+- `agents-plugin/rsrc/lead-*/` holds procedure bodies for all lead-* workflows — entry-skill bodies (e.g., `lead-proceed`, `lead-discuss`, `lead-bootstrap`, `lead-verify-discussion`) and internal-only procedures (e.g., `lead-implement`, `lead-write-ticket`, `lead-workflow-manual`); all are invoked via `ws/playbook.print(name: "<name>")` and executed inline. Entry-skill playbooks have a corresponding thin-shim `SKILL.md` (frontmatter + H1 + single print-and-execute line); internal-only playbooks have no user-invocable shim. {#260609-rsrc-playbook-distribution}
 - `agents-plugin-wsflow/skills/lead-*` is the curated derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
 - The `lead-workflow-manual` playbook is the notation and primitive boundary reference for shared skill text; load it via `ws/playbook.print(name: "lead-workflow-manual")`. {#260505-workflow-primitive-reference}
 

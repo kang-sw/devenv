@@ -4,8 +4,13 @@ spec:
   - 260505-planning-workflow-skills
   - 260510-discuss-intent-frame-interview
   - 260513-proceed-ticket-freshness-gate
+  - 260512-discussion-verification-skill
+  - 260609-playbook-harness-rendering
+  - 260609-rsrc-playbook-distribution
+  - 260610-entry-skill-surface-reduction
 related-mental-model:
   - workflow-skills
+  - prompt-bundle
 ---
 
 # Lead discussion discipline — readable discussion replies + explore-before-gap-fill
@@ -26,20 +31,33 @@ directions surfaced.
 
 ## Discussion Points Before Implementation
 
-- **Phase 1 response shape:** decide whether the implementation should add a
-  rigid response template or a compact rubric/invariant. Conservative default:
-  avoid a hard template; add a short discussion-response rubric that keeps the
-  load-bearing point, evidence, and user-actionable decision adjacent.
-- **Phase 2 enforcement surface:** decide whether migration-anchor loading for
-  plugin architecture, spawn-removal, and adapter-boundary work belongs in
-  `lead-discuss`, `lead-proceed`, `lead-implement` Prep, or only root
-  `AGENTS.md`. Conservative default: make the rule explicit in discussion and
-  routing contexts without making `lead-proceed` inspect source code.
-- **Phase 3 consent threshold:** decide how strict the confirmed-only capture
-  gate should be. Conservative default: require explicit user confirmation for
+- **Phase 1 response shape:** avoid a rigid response template; add a compact
+  discussion-response rubric that keeps the load-bearing point, evidence, and
+  user-actionable decision adjacent.
+- **Phase 2 enforcement surface:** make migration-anchor and cascade lookup
+  explicit in discussion and routing contexts without making `lead-proceed`
+  inspect source code.
+- **Phase 3 consent threshold:** require explicit user confirmation for
   future-scope assertions, `## Decisions`, Result Forward notes, focus "Next"
   lines, and code comments, while still allowing normal ticket edits to capture
   already-settled constraints.
+
+## Decisions
+
+- Before ticket cleanup, discussion flows ask whether to persist the discussion.
+  If yes, the lead creates an Open Decision Queue before editing tickets, resolves
+  one queued item at a time with the user, updates the visible queue after each
+  answer, and writes only confirmed decisions.
+- The Open Decision Queue uses a visible task-list primitive when the harness
+  exposes one. Codex uses its plan/task-list surface; Claude-specific text is
+  supplied later from the Claude-side work.
+- Harness-specific task-list guidance should be authored as playbook-local
+  include fragments such as `<playbook>/task-list.<harness>.md`, with
+  `<playbook>/task-list.md` as fallback. Inline conditional DSL such as
+  `{{IF CLAUDE}}` is explicitly deferred.
+- `lead-verify-discussion` should be exposed as a directly invocable full-ws
+  entry skill, backed by the existing `lead-verify-discussion` playbook shim,
+  because users need the checkpoint during ordinary discussion turns.
 
 ## Phases
 
@@ -78,7 +96,10 @@ persist only decisions the user has confirmed, and before a ticket-cleanup pass,
 surface the full set of open items and get agreement on ALL of them at once rather
 than committing a draft decision that then needs correction/revert. Likely
 surface: `lead-write-ticket` Apply-Ticket-Content / Intent-Review guidance + a
-"confirmed-only" capture rule. Verification: a rule the lead follows + a
+"confirmed-only" capture rule. Add an Open Decision Queue immediately before
+ticket cleanup: ask whether to persist the discussion, list unresolved decisions
+in a visible task list, resolve one decision at a time, update the list after each
+answer, and persist only confirmed decisions. Verification: a rule the lead follows + a
 representative discussion where unconfirmed decisions are held back until
 agreement.
 
