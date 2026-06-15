@@ -12,6 +12,7 @@ related-mental-model:
   - workflow-skills
   - prompt-bundle
   - mcp-runtime
+completed: 2026-06-15
 ---
 
 # native Explore dispatch should bypass the generic explore render brief
@@ -141,3 +142,21 @@ This phase must check:
 - specs and mental models that mention `explore` as an rsrc delegate playbook;
 - whether purpose-specific survey playbooks should replace any remaining
   generic exploration use.
+
+### Result (ab9ba822) - 2026-06-15
+
+Phase 2 keeps `explore.md` as a compatibility/fallback playbook for unknown or
+unsupported harness contexts. It is not the normal scoped fact-finding path:
+shipped lead workflow guidance continues to dispatch scoped questions and
+purpose-specific query blocks directly to host-native exploration workers.
+
+Codex dogfood found the native exploration-worker direction usable, but the
+fallback terminology table still described the Codex worker as "a search agent".
+The fallback render terminology now says "an explorer subagent", matching the
+visible Codex native subagent role and reducing ambiguity if the fallback brief
+is rendered in a Codex harness.
+
+Verification: `explore` golden-render tests remain as fallback coverage for
+Claude, Codex, unknown, and unrecognized harnesses; `workflow-skills` spec and
+the `workflow-skills` / `prompt-bundle` mental models now scope `explore` to
+unknown or unsupported harness fallback.
