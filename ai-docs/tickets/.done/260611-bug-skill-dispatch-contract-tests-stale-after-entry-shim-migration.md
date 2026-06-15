@@ -7,6 +7,7 @@ related:
 spec:
   - 260610-entry-skill-surface-reduction
   - 260513-wsflow-agentless-skill-surface
+completed: 2026-06-15
 ---
 
 # Python skill-dispatch contract tests are stale after the M2 entry-skill-shim migration
@@ -92,3 +93,17 @@ Verification boundary:
   `skills/lead-workflow-manual/SKILL.md: full ws dotted namespace`.
 - The tests continue to verify that proceed remains route-only and implement
   owns implementation execution.
+
+### Result (7fd40ce8) - 2026-06-15
+
+`agents-plugin/tests/test_skill_dispatch_contracts.py` now reads the post-M2
+source of truth: thin entry skill shims under `agents-plugin/skills/` for
+trigger routing, and procedure bodies under `agents-plugin/rsrc/` for routing
+and implementation-spine contracts. It no longer expects removed full skill
+files under `agents-plugin/skills/`.
+
+The same implementation fixed the wsflow workflow-manual dotted namespace
+offense by replacing `wsflow/ws.lead.login` prose with a namespace-neutral lead
+login reference while preserving the forbidden-reference test. Verification ran
+`python3 -m unittest discover agents-plugin/tests` and
+`python3 -m unittest discover agents-plugin-wsflow/tests`; both passed.

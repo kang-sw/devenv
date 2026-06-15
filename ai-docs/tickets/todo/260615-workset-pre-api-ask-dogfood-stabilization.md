@@ -46,16 +46,17 @@ itself an implementation target.
 - `ai-docs/tickets/idea/260610-bug-wsflow-runtime-contract-playbook-tools-drift.md`
   - idea; wsflow runtime contract drift around playbook tools. Relevant because
     wsflow parity tests are part of the release-confidence gate.
-- `ai-docs/tickets/idea/260612-bug-wsflow-skill-ws-dotted-namespace-ref.md`
-  - idea; currently reproduced by `python3 -m unittest discover
-    agents-plugin-wsflow/tests` as the lone known wsflow skill-bundle failure.
+- `ai-docs/tickets/.done/260612-bug-wsflow-skill-ws-dotted-namespace-ref.md`
+  - done; closed by `7fd40ce8` through the skill-dispatch test realignment
+    slice. The wsflow workflow manual no longer carries the forbidden dotted
+    `ws.` reference.
 - `ai-docs/tickets/idea/260612-bug-ws-mcp-smoke-script-stale-mercenary-surface.md`
   - idea; smoke verification still points at retired mercenary/agent names and
     should not remain stale when dogfood confidence depends on smoke output.
-- `ai-docs/tickets/idea/260611-bug-skill-dispatch-contract-tests-stale-after-entry-shim-migration.md`
-  - idea; `python3 -m unittest discover agents-plugin/tests` currently fails
-    because skill-dispatch contract tests still expect pre-M2 full skill bodies.
-    This is now part of the pre-api.ask verification drift set.
+- `ai-docs/tickets/.done/260611-bug-skill-dispatch-contract-tests-stale-after-entry-shim-migration.md`
+  - done; closed by `7fd40ce8`. `agents-plugin/tests` now checks playbook-backed
+    procedure bodies and `agents-plugin-wsflow/tests` passes its skill-bundle
+    forbidden-reference check.
 - `ai-docs/tickets/idea/260611-bug-rsrc-load-unknown-playbook-misleading-error.md`
   - idea; rsrc load diagnostics can mislead callers during prompt/playbook
     iteration.
