@@ -1,5 +1,11 @@
 ---
 title: Lead discussion discipline — readable discussion replies + explore-before-gap-fill
+spec:
+  - 260505-planning-workflow-skills
+  - 260510-discuss-intent-frame-interview
+  - 260513-proceed-ticket-freshness-gate
+related-mental-model:
+  - workflow-skills
 ---
 
 # Lead discussion discipline — readable discussion replies + explore-before-gap-fill
@@ -17,6 +23,23 @@ were already documented (the agent simply had not read the sources), while a thi
 (wsprompt being parallel-maintained, not retired) the agent HAD mentioned but
 buried inside a verbose option-dump, so the user missed it. Two workflow-improvement
 directions surfaced.
+
+## Discussion Points Before Implementation
+
+- **Phase 1 response shape:** decide whether the implementation should add a
+  rigid response template or a compact rubric/invariant. Conservative default:
+  avoid a hard template; add a short discussion-response rubric that keeps the
+  load-bearing point, evidence, and user-actionable decision adjacent.
+- **Phase 2 enforcement surface:** decide whether migration-anchor loading for
+  plugin architecture, spawn-removal, and adapter-boundary work belongs in
+  `lead-discuss`, `lead-proceed`, `lead-implement` Prep, or only root
+  `AGENTS.md`. Conservative default: make the rule explicit in discussion and
+  routing contexts without making `lead-proceed` inspect source code.
+- **Phase 3 consent threshold:** decide how strict the confirmed-only capture
+  gate should be. Conservative default: require explicit user confirmation for
+  future-scope assertions, `## Decisions`, Result Forward notes, focus "Next"
+  lines, and code comments, while still allowing normal ticket edits to capture
+  already-settled constraints.
 
 ## Phases
 
@@ -72,6 +95,4 @@ not assert future scope that the Decisions log contradicts.
 
 ## Notes
 
-- Captured at `todo` (accepted backlog), not spec-addressed; slicing and spec
-  addressing happen at ready promotion.
 - Standalone workflow-discipline improvement; not part of the playbook-factory epic.

@@ -155,6 +155,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
+| `260611-chore-lead-discussion-gap-discipline` | ready | Tighten lead discussion readability, documented-fact lookup, and confirmed-only ticket capture discipline |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -255,6 +256,10 @@ dropped tickets live in hidden archive dirs and git history.
   unblocked. The session-key word-chain generator generalization to other id
   surfaces remains reserved as `260610-refactor-ws-wordchain-id-generalization`
   (todo, follow-up).
+- `260611-chore-lead-discussion-gap-discipline` (ready, chore) - tighten
+  lead-discuss/proceed/write-ticket discipline before more broad dogfood: readable
+  evidence-adjacent discussion replies, documented-fact lookup before architecture
+  claims, and confirmed-only capture for decisions or future-scope notes.
 
 ## Session Notes
 
