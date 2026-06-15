@@ -2,6 +2,9 @@
 title: ws-mcp smoke script still calls retired agents CLI surface
 related:
   260611-refactor-ws-tier-taxonomy-delegate-tier-routing: Phase 7 renamed agents.* to ws.mercenary.* / mercenary.*
+spec:
+  - 260610-ephemeral-session-auth-model
+  - 260610-mercenary-delegation-surface
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
@@ -43,6 +46,10 @@ This is not the direct cause of Codex MCP startup failure in the same session;
 that failure came from stale installed plugin-cache `runtime.json` versus a
 source-built current runtime. This ticket tracks only the source-tree smoke
 script drift that made Level 1 verification noisy.
+
+Current dogfood note: the script also still sends removed per-tool `root`
+arguments to root-aware MCP calls. The refreshed smoke should use the current
+`ws.lead.login(root) -> session_key` flow before calling root-aware tools.
 
 ## Phases
 
