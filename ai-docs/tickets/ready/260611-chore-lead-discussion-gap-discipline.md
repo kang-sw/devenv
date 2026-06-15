@@ -103,6 +103,32 @@ spawn-removal, or adapter boundaries (the Prep step today calls `mental_models.f
 but does not pull the migration anchor). Verification: a gap-handling rule the lead
 follows + (if enforced) a Prep/route step that loads the anchor for in-scope tasks.
 
+### Result (c0f8b768) - 2026-06-15
+
+`lead-discuss` now performs cascade-first documented-fact lookup: migration topics
+load the native-subagent pivot anchor before answering, missing documented decisions
+search loaded docs plus ticket/spec/mental-model references, and the response must
+say when the cascade has no documented answer before inferring or proposing another
+lookup.
+
+`lead-proceed` now handles the migration anchor as a routing artifact, not source
+inspection. The Routing Verdict includes `Migration Anchor`; missing anchors stop
+routing, binding anchor decisions absent from the ticket refresh ticket freshness,
+and anchor conflicts route back to discussion. The proceed -> implement handoff also
+passes the current target and Routing Verdict fields, especially Slice and Reason, as
+caller-provided implementation scope.
+
+`lead-implement` now loads the native-subagent pivot anchor in migration-sensitive
+Prep. Delegated implementation has minimum brief depth, migration-anchor constraints
+are copied into the brief before plan population, and implementers may read only the
+brief, optional plan, and `[Must]` References listed in the brief.
+
+Verification: fresh-reader audits over `lead-discuss`, `lead-proceed`, and
+`lead-implement` drove accepted fixes; rsrc manifest and wsflow mirror were
+regenerated; `go test -count=1 ./internal/wsrsrc ./internal/mcp`,
+`python3 -m unittest discover agents-plugin/tests`, and
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed.
+
 ### Phase 3: Ticket-write consent gate (persist only confirmed decisions)
 
 Dogfood (2026-06-12, same tier-taxonomy discussion). While parking a follow-up,

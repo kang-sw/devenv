@@ -224,6 +224,14 @@ and the user decision or next action adjacent. The skill favors a concise stance
 with the strongest caveat over exhaustive option dumps, and labels incomplete
 evidence instead of presenting inference as established fact.
 
+When a discussion answer depends on a documented decision, prior rejection,
+architecture fact, or cross-ticket constraint that is not loaded, `lead-discuss`
+searches the ticket/spec/mental-model cascade before answering. Migration topics
+such as plugin architecture, host-neutral migration, spawn-removal, or adapter
+boundaries load the native-subagent pivot anchor before the lead states a
+direction. If the cascade has no documented answer, the reply says that before
+making an inference or proposing the next lookup.
+
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
 premise-aware intent summary before giving advice. The frame uses symbolic
@@ -555,6 +563,10 @@ artifact only; when settled decisions are missing from the ticket, it routes
 through `lead-write-ticket` edit, re-reads the refreshed ticket, and then
 continues scope resolution. When freshness is uncertain, it stops for
 discussion instead of delegating hidden conversation context to a background subagent.
+For migration-sensitive targets, `lead-proceed` reads the native-subagent pivot
+anchor as an artifact-only check, reports `Migration Anchor` in the Routing
+Verdict, stops when the anchor is missing, and treats absent binding anchor
+decisions as missing settled decisions.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected scope as
@@ -564,6 +576,15 @@ primitives before `lead-implement`; it requests phase or ticket slicing only
 when scope resolution blocks safe implementation. Public or cross-module
 contract checkpoints are expressed as `lead-implement` brief contract and
 integration-test instructions.
+
+`lead-implement` also loads the native-subagent pivot anchor before editing when
+the target touches plugin architecture, host-neutral migration, spawn-removal,
+or adapter boundaries. Delegated implementation has minimum brief depth; when
+the migration anchor is read, binding implementation constraints from the anchor
+are copied into the brief and the anchor is listed as a `[Must]` reference before
+plan population or implementer dispatch. Delegated implementers receive only the
+brief and optional plan as task input, may read additional documents listed in
+brief References, and must not read the ticket directly.
 
 Before any handoff, `lead-proceed` emits a Routing Verdict with exactly one
 `NEXT:` skill or `stop`. It does not print a full route chain as the active
