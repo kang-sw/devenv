@@ -183,6 +183,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
+| `260615-bug-codex-plugin-reinstall-not-visible-in-cli-cache` | idea | Investigate Codex reinstall reporting success while CLI/cache show ws absent |
 
 ## Ticket Focus
 
