@@ -26,8 +26,8 @@ lead skill -> ws/playbook.render(name: "explore") -> rendered worker brief -> na
 ```
 
 That shape made sense while replacing the retired `ws/subquery` tool, but it
-duplicates responsibility once the harness already offers a native
-Explore/search subagent. The rendered `explore` body is itself the prompt handed
+duplicates responsibility once the harness already offers a host-native
+exploration worker. The rendered `explore` body is itself the prompt handed
 to the worker; adding a Codex-specific `explore.codex.md` would only specialize
 that worker prompt. It would not change the higher-level skill instruction that
 decides whether to render `explore` first.
@@ -36,7 +36,7 @@ The desired direction is to move the dispatch decision up into the lead
 workflow guidance:
 
 ```text
-lead skill -> host-native Explore/search subagent directly -> scoped question or purpose-specific query block
+lead skill -> host-native exploration worker directly -> scoped question or purpose-specific query block
 ```
 
 This keeps native exploration native, removes the redundant generic brief from
@@ -46,7 +46,7 @@ own task framing.
 ## Decisions
 
 - **Top-level skill guidance owns Explore dispatch.** Shared lead playbooks
-  should instruct the caller to spawn a host-native Explore/search subagent
+  should instruct the caller to spawn a host-native exploration worker
   directly, not to render `explore` first.
 - **Do not add an empty Claude overlay.** An empty `explore.claude.md` would be
   selected over the base playbook and would produce an empty or incomplete
@@ -54,11 +54,11 @@ own task framing.
   author the real Claude-native wording.
 - **Codex work starts from the visible native subagent surface.** Because this
   ticket is authored from Codex, Codex-facing wording can name the native
-  Explore/search worker shape at the shared guidance level. Claude-specific
+  exploration-worker shape at the shared guidance level. Claude-specific
   details are deferred.
 - **Purpose-specific query blocks stay purpose-specific.** Forge/spec/model
   workflows that already provide survey or verifier prompt blocks should pass
-  those blocks directly to the native Explore/search subagent. They should not
+  those blocks directly to the host-native exploration worker. They should not
   rely on the generic `explore` prompt to supply the task semantics.
 - **The generic `explore` playbook is not deleted in this slice.** Keep it as a
   compatibility/fallback artifact until a later cleanup can reconcile specs,
@@ -71,7 +71,7 @@ Target spec area: `ai-docs/spec/workflow-skills.md`
 Expected caller-visible change: shipped workflow skill text no longer presents
 `ws/playbook.render(name: "explore")` or `ws/playbook.print(name: "explore")` as
 the normal scoped exploration path. The normal path becomes direct dispatch to a
-host-native Explore/search subagent with the scoped question or existing
+host-native exploration worker with the scoped question or existing
 purpose-specific query block. The old `explore` render playbook remains present
 only as fallback/compatibility until explicitly retired.
 
@@ -80,9 +80,9 @@ and exact wording should be refined while editing the affected skill guidance.
 
 ## Phases
 
-### Phase 1: Move shipped skill guidance to direct native Explore dispatch
+### Phase 1: Move shipped skill guidance to direct host-native exploration dispatch
 
-Update the shared workflow guidance so native Explore/search subagents are
+Update the shared workflow guidance so host-native exploration workers are
 called directly from the lead skill context.
 
 Required scope:
@@ -91,11 +91,11 @@ Required scope:
   tells callers to render `explore` before spawning a native subagent.
 - Update generic call sites (`lead-discuss`, `lead-sprint`,
   `lead-write-ticket`, `lead-skill-authoring`, `lead-verify-discussion`,
-  `lead-salvage`, and `subagent-rules`) to describe direct native
-  Explore/search dispatch with read-only, cited, gap-reporting output.
+  `lead-salvage`, and `subagent-rules`) to describe direct host-native
+  exploration-worker dispatch with read-only, cited, gap-reporting output.
 - Update purpose-specific call sites (`lead-forge-spec`,
   `lead-forge-mental-model`, and `lead-write-spec`) so their existing query
-  blocks are passed directly as native Explore/search subagent task prompts.
+  blocks are passed directly as host-native exploration-worker task prompts.
 - Update wsflow rsrc mirror if the touched files are mirrored there.
 - Keep `explore.md` present; do not add an empty `explore.claude.md`; do not
   delete `explore` tests in this phase unless they are explicitly reframed as
@@ -114,6 +114,19 @@ Verification boundary:
 - `workflow-skills` spec and related mental models are reconciled so they no
   longer claim the `explore` render brief is the canonical scoped exploration
   path.
+
+### Result (da25b381) - 2026-06-15
+
+Phase 1 moved shipped scoped-exploration guidance to direct host-native
+exploration-worker dispatch. `lead-workflow-manual`, generic call sites,
+purpose-specific survey/check call sites, and `subagent-rules` now instruct
+callers to pass scoped English prompts or existing query blocks directly to
+host-native exploration workers and require cited evidence, gaps, and follow-up
+needs. The canonical rsrc manifest and byte-identical wsflow rsrc mirror were
+regenerated. `workflow-skills` spec and the `workflow-skills` / `prompt-bundle`
+mental models now describe `explore` as fallback/compatibility rather than the
+normal scoped fact-finding path. The `explore` playbook and golden rendering
+tests remain in place for Phase 2.
 
 ### Phase 2: Decide the long-term status of the generic explore playbook
 
