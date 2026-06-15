@@ -166,7 +166,9 @@ keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active
-ticket inventory for the current repository.
+ticket inventory for the current repository. The document map omits entries
+ignored by the repository's Git ignore rules so generated or vendored
+directories do not dominate the readable project context.
 
 `infra.read` reads ws infra documents shipped in the rsrc tree by bare stem or
 filename (path-escaping names are rejected). The backing source is the rsrc

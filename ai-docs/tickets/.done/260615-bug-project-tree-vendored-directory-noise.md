@@ -4,6 +4,7 @@ related:
   260524-bug-project-tree-stale-ticket-status-map: adjacent project_tree projection issue; different failure mode
 spec:
   - 260505-project-context-convention-tools
+completed: 2026-06-15
 ---
 
 # project_tree should suppress vendored/generated directory noise
@@ -33,3 +34,13 @@ fall back to the current include behavior rather than failing `project_tree`.
 Preserve the current spec, ticket, and mental-model inventory sections. Add
 coverage that would fail if a fixture tree with `.gitignore` expands
 `node_modules/` or similar dependency directories into the returned project map.
+
+### Result (eb4a2806) - 2026-06-15
+
+`project_tree` now builds a Git-ignore matcher for the target root and skips
+ignored `ai-docs/` entries before printing or recursing. Non-Git roots fall back
+to the prior include behavior. Coverage now initializes a Git fixture with
+`.gitignore` rules and fails if ignored files or `node_modules/` entries appear
+in the rendered project tree. The `260505-project-context-convention-tools`
+spec entry was updated in `f78bcc73` to record the caller-visible ignore
+filtering behavior.
