@@ -26,10 +26,11 @@ itself an implementation target.
 
 ## Tickets
 
-- `ai-docs/tickets/idea/260524-bug-codex-plugin-cache-refresh-mcp-startup-race.md`
-  - idea; primary cache/materialization dogfood blocker. Covers plugin reload
-    states where the MCP process and installed plugin cache can temporarily
-    disagree.
+- `ai-docs/tickets/.done/260524-bug-codex-plugin-cache-refresh-mcp-startup-race.md`
+  - done; primary cache/materialization dogfood blocker. Closed by
+    `3c1518d9`: the launcher now waits briefly for `runtime.json` when the
+    plugin cache is partially materialized and reports an explicit
+    package-materialization diagnostic if the wait expires.
 - `ai-docs/tickets/idea/260525-bug-codex-local-marketplace-worktree-cache-regression.md`
   - idea; adjacent cache fidelity risk. Keep separate from the startup race
     because it concerns local marketplace refresh selecting or regressing to the
@@ -51,6 +52,10 @@ itself an implementation target.
 - `ai-docs/tickets/idea/260612-bug-ws-mcp-smoke-script-stale-mercenary-surface.md`
   - idea; smoke verification still points at retired mercenary/agent names and
     should not remain stale when dogfood confidence depends on smoke output.
+- `ai-docs/tickets/idea/260611-bug-skill-dispatch-contract-tests-stale-after-entry-shim-migration.md`
+  - idea; `python3 -m unittest discover agents-plugin/tests` currently fails
+    because skill-dispatch contract tests still expect pre-M2 full skill bodies.
+    This is now part of the pre-api.ask verification drift set.
 - `ai-docs/tickets/idea/260611-bug-rsrc-load-unknown-playbook-misleading-error.md`
   - idea; rsrc load diagnostics can mislead callers during prompt/playbook
     iteration.

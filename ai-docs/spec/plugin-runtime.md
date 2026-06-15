@@ -122,6 +122,12 @@ selects a cache-local runtime binary path derived from `plugin_version` plus the
 `runtime.json` content hash, and ensures an executable compatible runtime is
 present before delegating to it.
 
+When launched from a plugin cache while the host is still materializing the
+package tree, the launcher waits briefly for `runtime.json` to appear before it
+reads the runtime contract. If the wait expires, startup fails on stderr with a
+package-materialization diagnostic rather than treating the condition as an
+ordinary stale-runtime repair failure.
+
 When the binary is missing or incompatible, the launcher can install a runtime
 from an explicit bootstrap binary, a bootstrap URL, a local devenv runtime, or
 the release asset URL declared in the runtime contract. Explicit bootstrap
