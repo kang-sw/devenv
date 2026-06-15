@@ -2,6 +2,7 @@ package wsdoc
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,40 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
+		}
+	}
+}
+
+func TestProjectTreeSkipsGitIgnoredEntries(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+	mustWrite(t, root, ".gitignore", "ai-docs/presentation/node_modules/\nai-docs/presentation/generated.log\n")
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	mustWrite(t, root, "ai-docs/presentation/deck.md", "# Deck\n")
+	mustWrite(t, root, "ai-docs/presentation/generated.log", "generated\n")
+	mustWrite(t, root, "ai-docs/presentation/node_modules/pkg/index.js", "module.exports = {}\n")
+
+	got, err := ProjectTree(root)
+	if err != nil {
+		t.Fatalf("ProjectTree returned error: %v", err)
+	}
+
+	for _, want := range []string{
+		"ai-docs/",
+		"  presentation/",
+		"    deck.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ProjectTree output missing %q\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{
+		"node_modules",
+		"generated.log",
+		"index.js",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("ProjectTree output included ignored %q\n%s", forbidden, got)
 		}
 	}
 }
@@ -140,5 +175,15 @@ func mustWrite(t *testing.T, root, rel, text string) {
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
