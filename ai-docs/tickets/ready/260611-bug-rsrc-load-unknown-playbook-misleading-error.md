@@ -3,6 +3,8 @@ title: rsrc Load reports an unknown playbook name as "manifest-listed file missi
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: surfaced while dogfooding the unmerged 2c build via playbook.print on the Claude plugin install
   260611-bug-rsrc-manifest-regen-missed-after-shipped-edit: sibling rsrc-tree/manifest integrity concern (different failure)
+spec:
+  - 260609-rsrc-playbook-distribution
 ---
 
 # rsrc Load reports an unknown playbook name as "manifest-listed file missing"
@@ -55,3 +57,20 @@ exist." It also masks genuine torn-install cases, since both now read the same.
 - Distinct from `260611-bug-rsrc-manifest-regen-missed-after-shipped-edit`
   (that one is about manifest regeneration drift after a shipped edit). This
   ticket is purely the unknown-name vs. torn-install message conflation.
+
+## Phases
+
+### Phase 1: Split unknown playbook from torn-install file missing
+
+When a requested playbook stem resolves to neither a manifest entry nor a file on
+disk, return a not-found diagnostic that names the unknown playbook rather than
+the manifest-listed-file-missing integrity error. Preserve `ErrFileMissing` for
+the true integrity cases where a manifest-listed file is absent on disk or a
+disk file exists without a matching manifest entry.
+
+Verification boundary:
+
+- Loading an unknown playbook stem returns a distinct not-found error whose text
+  says no such playbook.
+- Existing missing-file and hash-mismatch integrity tests still pass.
+- `go test -count=1 ./internal/wsrsrc ./internal/mcp` remains green.
