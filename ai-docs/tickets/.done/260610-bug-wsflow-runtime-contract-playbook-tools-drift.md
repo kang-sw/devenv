@@ -3,6 +3,7 @@ title: wsflow runtime contract omits playbook.print/playbook.render exposed by a
 related:
   260609-feat-ws-playbook-surface-mvp: source — M1 added the playbook tools to the agentless capabilities payload
   260605-epic-ws-playbook-factory-pivot: parent direction — playbook surface rollout
+completed: 2026-06-15
 ---
 
 # wsflow runtime contract omits playbook.print/playbook.render
@@ -46,3 +47,15 @@ Two candidate resolutions; pick one before fixing:
   `runtime.json`, or tool registration.
 - Coordinate with M3 (spawn-runtime reshape) and the wsflow convergence deferral,
   since playbook-surface exposure semantics in wsflow may shift then.
+
+## Result (3a03e599 audit) - 2026-06-15
+
+Current HEAD no longer reproduces the runtime-contract drift. The wsflow package
+test `test_runtime_contract_matches_agentless_capabilities` passes, and the
+full `python3 -m unittest discover agents-plugin-wsflow/tests` suite passes.
+
+The resolved state matches the intended boundary from this ticket: wsflow uses
+its `prompt.render` surface, while full-ws-only playbook tools are not exposed
+as unexpected agentless capabilities. No new code change was needed in this
+closeout; this workset audit closed the stale ticket based on current
+verification evidence.

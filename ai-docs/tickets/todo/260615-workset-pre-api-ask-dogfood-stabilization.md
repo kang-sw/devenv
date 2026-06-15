@@ -43,16 +43,17 @@ itself an implementation target.
   - idea; rsrc dev-server staleness concern. Recheck against recent reload
     observations before deciding whether it is the same failure class as plugin
     cache materialization or a separate dev-override bug.
-- `ai-docs/tickets/idea/260610-bug-wsflow-runtime-contract-playbook-tools-drift.md`
-  - idea; wsflow runtime contract drift around playbook tools. Relevant because
-    wsflow parity tests are part of the release-confidence gate.
+- `ai-docs/tickets/.done/260610-bug-wsflow-runtime-contract-playbook-tools-drift.md`
+  - done; current audit verified `agents-plugin-wsflow/tests` passes and the
+    runtime-contract drift no longer reproduces.
 - `ai-docs/tickets/.done/260612-bug-wsflow-skill-ws-dotted-namespace-ref.md`
   - done; closed by `7fd40ce8` through the skill-dispatch test realignment
     slice. The wsflow workflow manual no longer carries the forbidden dotted
     `ws.` reference.
-- `ai-docs/tickets/idea/260612-bug-ws-mcp-smoke-script-stale-mercenary-surface.md`
-  - idea; smoke verification still points at retired mercenary/agent names and
-    should not remain stale when dogfood confidence depends on smoke output.
+- `ai-docs/tickets/.done/260612-bug-ws-mcp-smoke-script-stale-mercenary-surface.md`
+  - done; closed by `3a03e599`. The smoke script now logs in for a
+    `session_key`, calls root-aware tools with that key, and uses the current
+    `mercenary register` CLI surface.
 - `ai-docs/tickets/.done/260611-bug-skill-dispatch-contract-tests-stale-after-entry-shim-migration.md`
   - done; closed by `7fd40ce8`. `agents-plugin/tests` now checks playbook-backed
     procedure bodies and `agents-plugin-wsflow/tests` passes its skill-bundle

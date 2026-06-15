@@ -9,6 +9,7 @@ related-mental-model:
   - mcp-runtime
   - plugin-runtime
   - named-agent-runtime
+completed: 2026-06-15
 ---
 
 # ws-mcp smoke script still calls retired agents CLI surface
@@ -71,3 +72,18 @@ Verification boundary:
 - `agents-plugin-tool/scripts/smoke-ws-mcp.sh ..` exits 0 from this repository.
 - `go test ./...` under `agents-plugin-tool/` remains green.
 - The script no longer contains `ws-mcp agents` or `--prompt` register syntax.
+
+### Result (3a03e599) - 2026-06-15
+
+The smoke script now drives stdio MCP through a small inline JSON-RPC client:
+it initializes the server, lists tools, logs in with `ws.lead.login(root)`,
+threads the returned `session_key` through `project_tree` and `path.generate`,
+and checks `runtime.info`. This replaces the removed per-tool `root` arguments.
+
+The CLI portion now uses `mercenary register` instead of retired
+`agents register --prompt` syntax, and the script sets `WS_RSRC_ROOT` for
+source-tree `go run` so the mercenary CLI can resolve the packaged rsrc tree.
+
+Verification ran `agents-plugin-tool/scripts/smoke-ws-mcp.sh ..` and
+`go test -count=1 ./...` from `agents-plugin-tool/`; both passed. The script no
+longer contains `ws-mcp agents`, `agents register`, or `--prompt`.
