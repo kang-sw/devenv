@@ -6,6 +6,8 @@ related:
   260612-bug-subagent-rules-stale-subquery-guidance: removed stale ws/subquery guidance but left the render-brief pattern intact
 spec:
   - 260610-subquery-explore-delegation-shift
+plans:
+  phase-1: 2026-06/15-260615-refactor-native-explore-dispatch-skill-guidance.brief
 related-mental-model:
   - workflow-skills
   - prompt-bundle
