@@ -5,6 +5,7 @@ related:
   260611-bug-rsrc-manifest-regen-missed-after-shipped-edit: sibling rsrc-tree/manifest integrity concern (different failure)
 spec:
   - 260609-rsrc-playbook-distribution
+completed: 2026-06-15
 ---
 
 # rsrc Load reports an unknown playbook name as "manifest-listed file missing"
@@ -74,3 +75,17 @@ Verification boundary:
   says no such playbook.
 - Existing missing-file and hash-mismatch integrity tests still pass.
 - `go test -count=1 ./internal/wsrsrc ./internal/mcp` remains green.
+
+### Result (2da50a22) - 2026-06-15
+
+Implemented `ErrPlaybookNotFound` for top-level `wsrsrc.Load` playbook stems
+that resolve to neither a manifest entry nor a file on disk. Existing
+integrity paths remain distinct: a disk file missing from the manifest and a
+manifest-listed file missing from disk still surface as `ErrFileMissing`, while
+hash drift remains `ErrHashMismatch`.
+
+Verification:
+
+- `go test -count=1 ./internal/wsrsrc -run 'TestLoader(PlaybookNotFound|FileMissingFromManifest|ManifestListedFileMissing|HashMismatch)$' -v`
+- `go test -count=1 ./internal/wsrsrc ./internal/mcp`
+- `go test -count=1 ./...`

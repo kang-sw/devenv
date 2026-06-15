@@ -158,7 +158,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
-| `260615-workset-pre-api-ask-dogfood-stabilization` | todo | Coordinate dogfood stabilization before entering M4 api.ask corpus routing |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
@@ -184,17 +183,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
-| `260611-bug-rsrc-load-unknown-playbook-misleading-error` | ready | Split unknown playbook diagnostics from torn-install file missing |
 
 ## Ticket Focus
 
-- `260615-workset-pre-api-ask-dogfood-stabilization` (`todo`, workset) - pre-M4
-  dogfood stabilization board; not implementation-ready. Use it to sequence
-  plugin cache/reload, root-aware schema, wsflow drift, and smoke/diagnostic
-  tickets before entering `260609-refactor-ws-api-ask-corpus-routing`.
-- `260611-bug-rsrc-load-unknown-playbook-misleading-error` - ready workset
-  slice; make wrong playbook names report not-found instead of torn-install
-  file-missing diagnostics.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

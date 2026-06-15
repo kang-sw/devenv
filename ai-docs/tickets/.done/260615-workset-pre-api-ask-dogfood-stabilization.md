@@ -8,6 +8,7 @@ related-mental-model:
   - plugin-runtime
   - prompt-bundle
   - workflow-skills
+completed: 2026-06-15
 ---
 
 # pre-api.ask dogfood stabilization workset
@@ -32,17 +33,18 @@ itself an implementation target.
     plugin cache is partially materialized and reports an explicit
     package-materialization diagnostic if the wait expires.
 - `ai-docs/tickets/idea/260525-bug-codex-local-marketplace-worktree-cache-regression.md`
-  - idea; adjacent cache fidelity risk. Keep separate from the startup race
-    because it concerns local marketplace refresh selecting or regressing to the
-    wrong worktree source.
+  - deferred idea; adjacent cache fidelity risk. It remains separate from the
+    startup race because it concerns local marketplace refresh selecting or
+    regressing to the wrong worktree source. Current installed-cache probes did
+    not reproduce a sibling downgrade in this pass, so it is not an M4 blocker.
 - `ai-docs/tickets/.done/260612-bug-root-aware-mcp-tool-schemas-missing-session-key.md`
   - done; closed by `601c4e25`. Root-aware MCP schemas now advertise
     `session_key` and continue omitting `root`, matching the mandatory
     session-auth runtime behavior.
 - `ai-docs/tickets/idea/260612-bug-ws-rsrc-dev-server-new-file-staleness.md`
-  - idea; rsrc dev-server staleness concern. Recheck against recent reload
-    observations before deciding whether it is the same failure class as plugin
-    cache materialization or a separate dev-override bug.
+  - deferred idea; rsrc dev-server new-file staleness remains a dev-override
+    investigation. The M4 path can rely on source tests and server/plugin
+    reloads after adding new rsrc files.
 - `ai-docs/tickets/.done/260610-bug-wsflow-runtime-contract-playbook-tools-drift.md`
   - done; current audit verified `agents-plugin-wsflow/tests` passes and the
     runtime-contract drift no longer reproduces.
@@ -58,22 +60,22 @@ itself an implementation target.
   - done; closed by `7fd40ce8`. `agents-plugin/tests` now checks playbook-backed
     procedure bodies and `agents-plugin-wsflow/tests` passes its skill-bundle
     forbidden-reference check.
-- `ai-docs/tickets/idea/260611-bug-rsrc-load-unknown-playbook-misleading-error.md`
-  - idea; rsrc load diagnostics can mislead callers during prompt/playbook
-    iteration.
+- `ai-docs/tickets/.done/260611-bug-rsrc-load-unknown-playbook-misleading-error.md`
+  - done; closed by `2da50a22`. Unknown playbook stems now return a distinct
+    no-such-playbook diagnostic while manifest integrity failures keep
+    `ErrFileMissing`.
 - `ai-docs/tickets/idea/260611-bug-launcher-repair-failure-opaque-mcp-error.md`
-  - idea; launcher repair failures surface opaquely, which raises the cost of
-    diagnosing plugin reload and installed-runtime failures.
+  - deferred idea; launcher repair failures can still surface opaquely through
+    host MCP `-32000`, but the package-materialization wait and refreshed smoke
+    script cover the current pre-M4 dogfood failure modes.
 
 ## Planned References
 
 - `installed plugin reload acceptance checklist`
-  - intended role: small checklist or ticket if repeated reload verification
-    keeps relying on manual probes; create only if the existing cache and smoke
-    tickets do not give enough acceptance coverage.
+  - not created; the package-materialization fix, root-aware schema fix, and
+    refreshed smoke script give enough acceptance coverage for this workset.
 - `api.ask entry readiness note`
-  - intended role: handoff note for `260609-refactor-ws-api-ask-corpus-routing`
-    once the dogfood blockers are fixed, dropped, or explicitly deferred.
+  - satisfied by the Result section below instead of a separate ticket.
 
 ## Focus
 
@@ -98,3 +100,29 @@ Current focus is a pre-M4 dogfood pass:
 - Deferred: dashboard-specific polish, named-agent retained-path bugs unrelated
   to the M4 api-doc path, and broader release-process improvements remain in
   their existing tickets unless they block the pre-M4 probes.
+
+## Result - 2026-06-15
+
+This workset is closed for M4 entry. The active dogfood blockers were fixed or
+reclassified:
+
+- Plugin cache/materialization race fixed by `3c1518d9`.
+- Root-aware `session_key` schema discoverability fixed by `601c4e25`.
+- Skill-dispatch and wsflow verification drift fixed by `7fd40ce8`.
+- Source-tree ws-mcp smoke drift fixed by `3a03e599`.
+- wsflow runtime-contract drift closed by current passing verification.
+- Unknown playbook diagnostics fixed by `2da50a22`.
+
+Remaining idea tickets stay open but are not M4 blockers:
+
+- `260525-bug-codex-local-marketplace-worktree-cache-regression`
+- `260612-bug-ws-rsrc-dev-server-new-file-staleness`
+- `260611-bug-launcher-repair-failure-opaque-mcp-error`
+
+Verification used for the closeout:
+
+- `python3 -m unittest discover agents-plugin/tests`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `agents-plugin-tool/scripts/smoke-ws-mcp.sh ..`
+- `go test -count=1 ./internal/wsrsrc ./internal/mcp`
+- `go test -count=1 ./...` from `agents-plugin-tool`

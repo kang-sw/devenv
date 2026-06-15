@@ -438,6 +438,12 @@ and there is no embedded fallback copy. A session whose playbook surface has
 failed still serves the discovery, Git, and other tools that do not depend on the
 resource tree.
 
+When a caller requests a playbook stem that is absent from both the resource
+manifest and the resource tree, the playbook surface reports a no-such-playbook
+diagnostic. Manifest integrity diagnostics are reserved for corrupted or stale
+resource trees, such as a manifest-listed file missing from disk or a listed
+file whose hash no longer matches.
+
 `WS_RSRC_ROOT` overrides the resource-tree load root. When set, the runtime loads
 the tree from that path instead of the distributed plugin copy, so a development
 checkout can edit playbook text and see it live without waiting on plugin cache
