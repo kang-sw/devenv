@@ -54,15 +54,12 @@ current directory from placeholders or relative paths. Thread the returned
 
 ### Scoped Exploration (native Explore)
 
-`ws/playbook.print`
-`ws/playbook.render`
-
-Use for scoped fact-finding, surveys, and one-turn answers. Pattern: render the
-`explore` playbook (`ws/playbook.render(name: "explore", context: {...})` to hand a
-worker a brief file, or `ws/playbook.print(name: "explore")` for inline); spawn a
-native Explore-style subagent with the rendered brief; collect the deferred result.
-For parallel dispatch, spawn multiple concurrent subagents in a single turn and
-collect all before synthesizing. Use a broad-tracing scope for wide structural surveys.
+Use for scoped fact-finding, surveys, and one-turn answers. Pattern: spawn a
+host-native exploration worker directly with an English prompt that includes
+the scoped question or purpose-specific query block; require cited evidence,
+gaps, and follow-up needs; collect the deferred result. For parallel dispatch, spawn
+multiple concurrent subagents in a single turn and collect all before
+synthesizing. Use a broad-tracing scope for wide structural surveys.
 
 ### Persistent agents
 
@@ -194,8 +191,7 @@ assuming richer interrupt behavior.
 
 ```text
 Scoped exploration:
-render the explore playbook: `ws/playbook.render(name: "explore", context: {...})`.
-spawn a native Explore-style subagent with the rendered brief path.
+spawn a host-native exploration worker directly with an English scoped task prompt that requests cited evidence, gaps, and follow-up needs.
 collect the result when the subagent returns.
 for parallel dispatch, spawn multiple concurrent subagents in a single turn; collect all before synthesizing.
 

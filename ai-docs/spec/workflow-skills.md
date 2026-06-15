@@ -88,16 +88,18 @@ removed `prompts: ["<prompt-stem>"]`/`prompt_refs`/`model` register fields no lo
 appear in shipped skill text. CLI adapter syntax belongs only in compatibility or
 testing references. {#260507-mcp-centric-workflow-language}
 
-Scoped fact-finding delegation uses a per-harness Explore playbook rather than
-`ws/subquery`: shipped skill text delegates scoped exploration to a native
-Explore-style subagent and takes the worker brief from the `explore` render
-playbook, whose harness-aware terminology and `delegates: true` delegation tip
-render through the playbook surface; the async fire-and-forget plus
-deferred-result shape maps to native background subagents. Native delegation is
-the default, not the exclusive path — the lead-invokable mercenary surface
-remains available and the `delegates: true` render tip is its always-on seam. The
-`ws/subquery` runtime tool has been removed; scoped exploration now uses the
-native Explore subagent exclusively. {#260610-subquery-explore-delegation-shift}
+Scoped fact-finding delegation uses host-native exploration workers rather
+than `ws/subquery`: shipped skill text delegates scoped exploration directly to
+a native worker with an English prompt that includes the scoped question or
+purpose-specific query block, and requires cited evidence, gaps, and follow-up
+needs in the returned report. The async fire-and-forget plus deferred-result
+shape maps to native background subagents. Native delegation is the default, not
+the exclusive path — the lead-invokable mercenary surface remains available for
+stateful named work and bundled delegate prompts. The generic `explore` render
+playbook remains a compatibility/fallback artifact, but it is not the normal
+scoped-exploration path. The `ws/subquery` runtime tool has been removed;
+scoped exploration now uses host-native exploration workers exclusively.
+{#260610-subquery-explore-delegation-shift}
 
 Workflow guidance prefers `model` for both portable aliases and concrete
 overrides. Examples use `model: "core"` or `model: "deep"` for portable

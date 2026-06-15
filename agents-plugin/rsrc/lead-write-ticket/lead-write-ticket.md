@@ -8,7 +8,7 @@ Target: user request
 ## Invariants
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
-- Aside from required conventions and `ai-docs/_index.md` when focus changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or the native Explore pattern (see lead-workflow-manual playbook) for graph discovery.
+- Aside from required conventions and `ai-docs/_index.md` when focus changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or direct host-native exploration-worker dispatch (see lead-workflow-manual playbook) for graph discovery.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Workset tickets stay non-hierarchical operating-context collections; never add, remove, or change `parent:` based on workset inclusion.

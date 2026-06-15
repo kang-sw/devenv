@@ -729,7 +729,7 @@ func TestPlaybookPrintGoldenSamplePlaybookNoDelegation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Golden render: explore playbook (real rsrc tree)
+// Golden render: fallback explore playbook (real rsrc tree)
 // ---------------------------------------------------------------------------
 
 func TestPlaybookPrintGoldenExploreClaudeHarness(t *testing.T) {
@@ -1134,7 +1134,7 @@ func TestPlaybookPrintGoldenLeadSprint(t *testing.T) {
 	if !strings.Contains(body, "session continuity across exploratory workflow turns") {
 		t.Errorf("body %q: expected doctrine text 'session continuity across exploratory workflow turns'", body)
 	}
-	// delegates:true (ws.mercenary.register + explore playbook delegation) — tip must appear.
+	// delegates:true (native exploration-worker dispatch + ws.mercenary.register) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
@@ -1179,7 +1179,7 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadSalvage verifies lead-salvage resolves from the
-// real rsrc tree and is delegates:true (explore playbook + ws.mercenary.register — tip must appear).
+// real rsrc tree and is delegates:true (native exploration-worker dispatch + ws.mercenary.register — tip must appear).
 func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -1191,7 +1191,7 @@ func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
 	if !strings.Contains(body, "evidence-preserving loss containment") {
 		t.Errorf("body %q: expected doctrine text 'evidence-preserving loss containment'", body)
 	}
-	// delegates:true (explore playbook + named agent registration) — tip must appear.
+	// delegates:true (native exploration-worker dispatch + named agent registration) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
@@ -1217,7 +1217,7 @@ func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadForgeSpec verifies lead-forge-spec resolves from the
-// real rsrc tree and is delegates:true (explore playbook spawns — tip must appear).
+// real rsrc tree and is delegates:true (native exploration-worker spawns — tip must appear).
 func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -1229,14 +1229,14 @@ func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
 	if !strings.Contains(body, "confirmed spec entries per domain") {
 		t.Errorf("body %q: expected doctrine text 'confirmed spec entries per domain'", body)
 	}
-	// delegates:true (explore playbook spawns) — tip must appear.
+	// delegates:true (native exploration-worker spawns) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
 }
 
 // TestPlaybookPrintGoldenLeadForgeMentalModel verifies lead-forge-mental-model resolves
-// from the real rsrc tree and is delegates:true (explore playbook spawns — tip must appear).
+// from the real rsrc tree and is delegates:true (native exploration-worker spawns — tip must appear).
 func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -1248,7 +1248,7 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 	if !strings.Contains(body, "confirmed operational knowledge per domain") {
 		t.Errorf("body %q: expected doctrine text 'confirmed operational knowledge per domain'", body)
 	}
-	// delegates:true (explore playbook spawns) — tip must appear.
+	// delegates:true (native exploration-worker spawns) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}

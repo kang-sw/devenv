@@ -9,17 +9,15 @@ file directly.
 For scoped exploration beyond direct file search:
 
 ```text
-Caller: run ws/playbook.render(name: "explore").
-Caller: pass the rendered brief path and the scoped question to a host-native Explore-capable worker.
+Caller: spawn a host-native exploration worker with an English scoped task prompt.
 Caller: collect a concise report with the answer, cited evidence, gaps, and follow-up needs.
 ```
 
-Prefer direct file reads and search when the target is known. Use the rendered
-`explore` playbook with a host-native Explore-capable worker when sequential
-searches would flood context, or for broad cross-module tracing. If passing a
-brief file is not practical, call `ws/playbook.print(name: "explore")` and paste
-the rendered guidance directly into the delegated worker prompt with the scoped
-question.
+Prefer direct file reads and search when the target is known. Use a
+host-native exploration worker when the investigation requires broad or
+multi-step search that would consume too much main-session context, or for broad
+cross-module tracing. The worker prompt must include the scoped question,
+read-only boundary, expected evidence citations, gaps, and follow-up needs.
 
 ## Branches
 
