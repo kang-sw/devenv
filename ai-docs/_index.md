@@ -183,7 +183,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-lead-implement-delegation-pre-edit-guard` | idea | Require an explicit direct-edit verdict or implementer spawn before lead-implement mutates source |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
-| `260524-bug-codex-plugin-cache-refresh-mcp-startup-race` | idea | Investigate Codex plugin cache refresh and MCP startup race behavior |
+| `260524-bug-codex-plugin-cache-refresh-mcp-startup-race` | ready | Investigate Codex plugin cache refresh and MCP startup race behavior |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
@@ -192,6 +192,9 @@ dropped tickets live in hidden archive dirs and git history.
   dogfood stabilization board; not implementation-ready. Use it to sequence
   plugin cache/reload, root-aware schema, wsflow drift, and smoke/diagnostic
   tickets before entering `260609-refactor-ws-api-ask-corpus-routing`.
+- `260524-bug-codex-plugin-cache-refresh-mcp-startup-race` - ready first
+  workset slice; classify the Codex plugin cache materialization race and choose
+  whether ws can mitigate startup during refresh before api.ask M4 resumes.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

@@ -35,6 +35,21 @@ materialized plugin tree, but it cannot read `runtime.json` before the host has
 finished materializing the plugin package. The likely boundary is Codex plugin
 cache install/refresh atomicity or startup ordering.
 
+## Spec Impact
+
+Target spec area: `ai-docs/spec/plugin-runtime.md` launcher startup and runtime
+compatibility contracts.
+
+Expected caller-visible change: plugin-managed MCP startup during local Codex
+plugin refresh should either wait briefly for the installed package tree to
+contain the required contract files, or fail with diagnostics that make the
+package-materialization boundary clear rather than looking like an ordinary
+runtime repair failure.
+
+Contract-first spec: no. The exact mitigation should be chosen after the
+reproduction/classification pass distinguishes a host cache materialization race
+from ws launcher runtime repair.
+
 ## Phases
 
 ### Phase 1: Reproduce and classify the cache materialization race
