@@ -72,6 +72,25 @@ playbook text + the AGENTS.md / skill "Response Discipline" guidance, possibly a
 brevity/structure rule for discussion turns. Verification: review of
 representative discussion replies against a readability/coherence rubric.
 
+### Result (440a71ff) - 2026-06-15
+
+`lead-discuss` now carries an explicit Response invariant group: lead with the
+load-bearing point, keep actionable claims adjacent to evidence/gaps/assumptions,
+place user decisions next to their motivating facts, prefer concise stance over
+option dumps, and label missing evidence instead of inferring. The Respond handler
+now shapes each turn as load-bearing point -> evidence/gap -> user decision/next
+action.
+
+The fresh-reader audit also found pre-existing local coherence issues in the same
+surface, so this phase tightened them: discussion has no source edits; documentation
+writes are confined to Capture, Ticket Status Transition, or explicit persistence
+handlers; implementation handoff to `lead-proceed` stops the discuss handler; and
+ticket-update persistence routes through the lead-write-ticket Edit path.
+
+Verification: fresh-reader audit over `lead-discuss` completed with accepted fixes
+applied; rsrc manifest and wsflow mirror were regenerated; focused wsrsrc/playbook
+and package skill tests passed.
+
 ### Phase 2: Gap → explore-the-cascade-first (no imagination)
 
 When the lead detects it lacks a documented decision or architecture fact, it must

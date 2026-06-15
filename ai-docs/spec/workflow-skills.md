@@ -212,12 +212,17 @@ convergence; the change is wsflow-local.
 Planning skills prepare caller-visible work before implementation.
 
 `lead-discuss` explores a topic without editing source code. It loads project
-context, uses scoped subqueries when search is needed, can promote or move
-tickets when the discussion reaches an actionable state, and recommends an
+context, uses scoped exploration workers when search is needed, can promote or
+move tickets when the discussion reaches an actionable state, and recommends an
 appropriate next workflow step. Discussion responses use the user's active
 conversation language. When the user explicitly wants implementation to start,
 `lead-discuss` invokes `lead-proceed` instead of routing directly to
 `lead-implement`.
+
+Discussion replies keep the load-bearing point, the evidence or gap behind it,
+and the user decision or next action adjacent. The skill favors a concise stance
+with the strongest caveat over exhaustive option dumps, and labels incomplete
+evidence instead of presenting inference as established fact.
 
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
