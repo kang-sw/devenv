@@ -10,8 +10,9 @@ Topic: user request
 ## Invariants
 
 Scope
-- No source edits. Only documentation writes, only in the capture step.
-- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
+- No source edits during discussion.
+- Documentation writes are allowed only in Capture, Ticket Status Transition, or user-approved persistence handlers.
+- With user agreement, unimplemented ticket phases may be edited during Capture to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
 
 Evidence
 - Read mental-model docs on-demand as topics emerge.
@@ -26,6 +27,13 @@ Conversation
 - Use the user's active conversation language for discussion responses.
 - Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
+
+Response
+- Lead with the load-bearing point before options, caveats, or history.
+- Keep each actionable claim adjacent to its evidence, gap, or assumption label.
+- Put user decisions and next actions immediately after the fact that motivates them.
+- Prefer a concise stance plus the strongest caveat over exhaustive option dumps.
+- If evidence is incomplete, label the gap and next lookup instead of filling it with inference.
 
 ## On: invoke
 
@@ -46,14 +54,15 @@ Conversation
 
 ### 2. Route Intent
 
-1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`.
+1. If the user explicitly wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
 2. Apply `judge: needs-intent-frame`; if it fires, emit an Intent Frame before advice.
 3. Apply `judge: needs-interview`; if it fires, enter Interview Workflow before proposing a settled direction.
 
 ### 3. Respond
 
-1. Brainstorm iteratively: suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-2. Continue until the user signals done.
+1. Shape the reply as load-bearing point -> evidence or gap -> user decision or next action.
+2. Brainstorm iteratively: suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+3. Answer bounded requests directly; continue discussion only while the user keeps asking follow-up questions.
 
 ### 4. Capture
 
@@ -88,13 +97,15 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 
 ## On: user signals done
 
-1. If the user wants implementation to start, continue through `ws:lead-proceed`.
-2. For persistence without implementation, suggest invoking the lead-write-spec procedure as the next action; it owns whether spec changes are needed.
-3. Then offer ticket persistence:
+1. If the user wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
+2. If the user explicitly asks to persist the discussion, route by requested artifact:
+   - **Spec update** - call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline.
    - **New ticket** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline.
-   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline, then append design notes to an existing ticket phase.
-4. Apply **judge: needs-integration-tests** to ticket writes.
-5. Write only what the user approves. No artifact needed for exploratory discussions.
+   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline, using its Edit path to append approved design notes to the existing ticket phase.
+3. If persistence artifact is unclear, ask one clarifying question and stop.
+4. When ticket persistence creates or edits an implementation phase, apply **judge: needs-integration-tests** and include criteria only when the judged change has end-to-end observable behavior.
+5. Write only what the user approves.
+6. If no artifact is written, respond with the current conclusion, any unresolved decision, and that no files were changed.
 
 ## Judgments
 
