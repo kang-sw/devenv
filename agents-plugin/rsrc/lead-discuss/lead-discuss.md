@@ -17,6 +17,8 @@ Scope
 Evidence
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge; the project map lists available specs.
+- For missing documented decisions or architecture facts, search the ticket/spec/mental-model cascade before answering.
+- For plugin architecture, host-neutral migration, spawn-removal, or adapter-boundary topics, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` before answering.
 - Use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation-detail questions beyond mental-model docs; read the result before responding.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
@@ -47,10 +49,20 @@ Response
 
 ### 1. Gather Context
 
-1. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
+1. If the topic touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` once before answering.
+2. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
    For each unloaded doc, run `reference-discovery` and incorporate its returned reference list before responding.
-2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation details.
+3. Apply `judge: needs-cascade-lookup`; if it fires, run **Cascade Lookup** before answering.
+4. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
+
+### 1a. Cascade Lookup
+
+1. Search loaded tickets and docs first.
+2. For each loaded ticket or spec stem, call `ws/references.trace`.
+3. Query `ws/tickets.find`, `ws/specs.find`, and `ws/mental_models.find` with concrete terms from the user's claim or missing fact.
+4. Stop when a documented answer is found.
+5. If the cascade has no documented answer, say that before inferring or proposing a next lookup.
 
 ### 2. Route Intent
 
@@ -115,6 +127,13 @@ Spawn `reference-discovery` when any of the following hold:
 - The discussion direction shifts to a domain no doc for which has been loaded this session.
 
 Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or `ws/git.log`.
+
+### judge: needs-cascade-lookup
+Search the ticket/spec/mental-model cascade before answering when any of the following hold:
+- The answer depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint that is not already loaded.
+- The answer would otherwise require inferring project direction from memory or local implementation shape.
+
+Does NOT fire when the user asks for status from already-loaded context, or when the remaining question is purely local implementation detail.
 
 ### judge: needs-intent-frame
 Emit an Intent Frame when the user message contains a proposal, evaluation, design direction, causal claim, scope assumption, or trade-off-heavy request.

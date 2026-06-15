@@ -19,7 +19,7 @@ Branch
 Execution
 - Emit a user-facing Implementation Verdict after Route and before Prep as a non-blocking route summary.
 - Create the task list during Prep; every task is mandatory and ordered.
-- Delegated: implementer reads only the brief and optional plan; never the ticket directly.
+- Delegated: implementer receives only the brief and optional plan as task input; extra docs must be listed in brief References; never read the ticket directly.
 - Brief preserves every selected-scope binding decision; audit before commit.
 
 Review
@@ -56,13 +56,15 @@ Review
 5. Record `<implementation-start>` with `git rev-parse HEAD`.
 6. If `branch-mode` = create: create `implement/<scope>` before any source edit.
 7. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
-8. Call `ws/infra.read(name: "impl-playbook")`.
-9. Identify integration test paths and their run command.
-10. If `plan-depth` ≥ survey: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in step 12 via `plan-populator-survey`.
-11. If `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; audit against target; commit.
-12. If `plan-depth` ≥ survey: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
-13. If delegated: render the implementer prompt via `ws/playbook.render(name: "implementer")` per **Delegate dispatch** (captures the child-key-spliced self-contained prompt + `recommended-tier`); spawn it in the Edit stage.
-14. Create and maintain task list:
+8. If the target or ticket touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md`.
+9. Call `ws/infra.read(name: "impl-playbook")`.
+10. If an implementation choice depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint absent from the target or loaded docs, search the ticket/spec/mental-model cascade before editing and report a blocker instead of inferring.
+11. Identify integration test paths and their run command.
+12. If `plan-depth` ≥ survey: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in step 14 via `plan-populator-survey`.
+13. If delegated or `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; if the migration anchor was read, copy every binding implementation constraint into the brief and add the anchor as a `[Must]` reference; audit against target before committing or running plan population; commit.
+14. If `plan-depth` ≥ survey: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
+15. If delegated: render the implementer prompt via `ws/playbook.render(name: "implementer")` per **Delegate dispatch**; save the rendered prompt path and `recommended-tier` for the Edit stage.
+16. Create and maintain task list:
 
 ```text
 [ ] Route - delegation, plan depth, branch mode, review allocation
@@ -173,6 +175,7 @@ Pick the first matching decision.
 ### judge: plan-depth
 
 Default: `none` for direct-edit; `survey` for delegated when uncertain.
+Delegated implementation has minimum plan-depth `brief`; direct-edit may use `none`.
 
 | Decision | When |
 |----------|------|
@@ -314,7 +317,8 @@ Read it, then replace the file with a research plan.
 Brief path: <brief-path>
 <if plan exists:> Plan path: <plan-path>
 
-Read only the brief (and plan if provided). Do not read the ticket directly.
+Read the brief, any provided plan, and all `[Must]` References listed in the brief.
+Do not read the ticket directly or unlisted docs unless the brief or plan explicitly authorizes escalation.
 Implement only the brief's scope boundary; leave later ticket phases untouched.
 
 Acceptance criteria:
