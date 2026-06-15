@@ -184,7 +184,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
-| `260612-bug-root-aware-mcp-tool-schemas-missing-session-key` | ready | Advertise session_key on root-aware MCP tool schemas |
 
 ## Ticket Focus
 
@@ -192,9 +191,6 @@ dropped tickets live in hidden archive dirs and git history.
   dogfood stabilization board; not implementation-ready. Use it to sequence
   plugin cache/reload, root-aware schema, wsflow drift, and smoke/diagnostic
   tickets before entering `260609-refactor-ws-api-ask-corpus-routing`.
-- `260612-bug-root-aware-mcp-tool-schemas-missing-session-key` - ready workset
-  slice; advertise `session_key` on root-aware tool schemas so routine MCP calls
-  no longer depend on hidden argument knowledge.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

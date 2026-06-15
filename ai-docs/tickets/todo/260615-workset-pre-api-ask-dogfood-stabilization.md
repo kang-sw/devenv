@@ -35,10 +35,10 @@ itself an implementation target.
   - idea; adjacent cache fidelity risk. Keep separate from the startup race
     because it concerns local marketplace refresh selecting or regressing to the
     wrong worktree source.
-- `ai-docs/tickets/idea/260612-bug-root-aware-mcp-tool-schemas-missing-session-key.md`
-  - idea; root-aware MCP schemas omit the mandatory `session_key`, which makes
-    dogfood calls fail unless the caller already knows to pass an unadvertised
-    field.
+- `ai-docs/tickets/.done/260612-bug-root-aware-mcp-tool-schemas-missing-session-key.md`
+  - done; closed by `601c4e25`. Root-aware MCP schemas now advertise
+    `session_key` and continue omitting `root`, matching the mandatory
+    session-auth runtime behavior.
 - `ai-docs/tickets/idea/260612-bug-ws-rsrc-dev-server-new-file-staleness.md`
   - idea; rsrc dev-server staleness concern. Recheck against recent reload
     observations before deciding whether it is the same failure class as plugin

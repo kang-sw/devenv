@@ -65,8 +65,10 @@ Root-aware MCP tools resolve their repository root exclusively from a mandatory
 (`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
 call without a `session_key` is rejected with mandatory-login guidance naming
 `ws.lead.login(root)`; a call whose key is absent from the in-memory registry is
-rejected with the `unknown_session` recovery contract. `ws.lead.login(root)` is
-the sole bootstrap verb and the only tool that accepts a `root` argument.
+rejected with the `unknown_session` recovery contract. Public schemas for
+root-aware tools advertise `session_key` and do not advertise `root`;
+`ws.lead.login(root)` is the sole bootstrap verb and the only tool that accepts
+a `root` argument.
 
 The former resolution sources are removed: the explicit per-tool `root` argument,
 the volatile session default root, host-workspace metadata, the explicit server
