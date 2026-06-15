@@ -50,6 +50,7 @@ related:
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and phase-specific decisions into child tickets; child-ticket phases are complete fresh-session implementation units, not internal task lists. {#260508-write-ticket-epic-child-boundary}
 - `lead-write-ticket` keeps worksets non-hierarchical: inclusion never changes `parent:`, planned entries go under `## Planned References` until real tickets exist, and implementation detail or settled constraints move to the relevant included actionable ticket or phase. {#260524-workset-workflow-skill-routing}
 - `lead-write-ticket` preserves settled decisions before brevity: actionable child tickets record enough contract, agreed strategy, rejected-alternative, verification, and binding cross-ticket detail that a fresh implementation session cannot produce a materially different caller-visible, workflow, API, or verification result without contradicting the ticket. {#260516-write-ticket-related-ticket-propagation}
+- `lead-write-ticket` writes only user-confirmed discussion decisions; discussion-derived cleanup runs an Open Decision Queue, uses the harness task-list guidance from playbook-local `task-list[.<harness>].md` fragments, and omits open/rejected/deferred items unless the user approves recording their status. {#260505-planning-workflow-skills}
 - `lead-write-ticket` reviews related-ticket decisions by default; explicit cascade wording broadens the pass to board and multi-ticket edits, with epics board-level, worksets operating-context-only, and no implicit ready promotion. {#260516-write-ticket-related-ticket-propagation} {#260524-workset-workflow-skill-routing}
 - `lead-discuss` uses the user's active conversation language for discussion responses. {#260505-planning-workflow-skills}
 - `lead-discuss` response shape keeps the load-bearing point, evidence/gap, and user decision adjacent; do not bury the actionable point inside exhaustive option lists. {#260505-planning-workflow-skills}
@@ -83,6 +84,7 @@ related:
 ## Coupling
 
 - Skill text that names a delegate playbook must match an rsrc playbook name under `agents-plugin/rsrc/` (manifest-checked), not an embedded prompt stem.
+- Playbook-local include fragments live beside their owning playbook and resolve before root-level include fallbacks; they are not standalone playbook variants. Use this for harness-local guidance, not shared reviewer bases.
 - Legacy skeleton prompts may remain bundled for compatibility; normal implementation routing does not register skeleton-populator or skeleton-reviewer.
 - Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec-address gate and focus checks.
 - Moving updater dispatch into the Edit stage can double-run documentation updates; implementation doc pre-pass and sprint-edit episode closure own their separate doc pipeline calls.

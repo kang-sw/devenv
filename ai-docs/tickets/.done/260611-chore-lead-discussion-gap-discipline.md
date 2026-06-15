@@ -11,6 +11,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - prompt-bundle
+completed: 2026-06-15
 ---
 
 # Lead discussion discipline — readable discussion replies + explore-before-gap-fill
@@ -158,6 +159,32 @@ contradiction. Reinforces the rule and extends its scope beyond `## Decisions`:
 assistant-authored forward/next-phase hints (in Result Forward notes, focus "Next"
 lines, or code comments) are not confirmed decisions — a Result Forward note must
 not assert future scope that the Decisions log contradicts.
+
+### Result (9de975b) - 2026-06-15
+
+`lead-write-ticket` now gates discussion-derived ticket cleanup through an Open
+Decision Queue. The procedure asks for persistence approval when needed, lists
+unresolved decisions in a visible task list, resolves one item at a time, updates
+the queue after each answer, and writes only user-confirmed items. Its intent
+review now rejects unconfirmed mechanism choices, future-scope hints, Result
+Forward notes, and focus "Next" lines.
+
+`lead-discuss` now routes ticket cleanup through `lead-write-ticket` unless the
+user requested a narrow in-place wording edit, and `lead-proceed` treats
+unconfirmed mechanisms or future-scope hints as uncertain freshness rather than
+missing settled decisions to write.
+
+`wsrsrc.Load` now resolves playbook-local include fragments before root-level
+flat includes: `<playbook>/<include>.<harness>.md`, then
+`<playbook>/<include>.md`, then `<include>.md`. `lead-write-ticket` uses this for
+Codex task-list guidance with a neutral fallback. The validator skips local
+include fragments as standalone playbook variants and tests cover harness-local
+selection, fallback order, and validate/load consistency.
+
+Verification: fresh-reader and correctness audits drove accepted fixes; rsrc
+manifest and wsflow mirror were regenerated; `go test -count=1 ./internal/wsrsrc
+./internal/mcp`, `python3 -m unittest discover agents-plugin/tests`, and
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed.
 
 ## Notes
 

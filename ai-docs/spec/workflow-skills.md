@@ -264,6 +264,15 @@ behavior is too underspecified to spec. `Ticket Focus` entries are maintained
 for selected active attention items; only `ready/` entries are direct
 implementation targets.
 
+Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
+writes mechanism decisions, rejected alternatives, future-scope hints, Result
+Forward notes, focus "Next" lines, or note/comment proposals, `lead-write-ticket`
+builds a visible Open Decision Queue, asks whether to persist the discussion
+when persistence was not already approved, resolves one queue item at a time,
+updates the visible queue after each answer, and writes only user-confirmed
+items. Rejected, deferred, unanswered, or otherwise unconfirmed items are omitted
+unless the user explicitly approves recording their status.
+
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or phase-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
@@ -563,6 +572,8 @@ artifact only; when settled decisions are missing from the ticket, it routes
 through `lead-write-ticket` edit, re-reads the refreshed ticket, and then
 continues scope resolution. When freshness is uncertain, it stops for
 discussion instead of delegating hidden conversation context to a background subagent.
+Unconfirmed mechanisms or future-scope hints are not settled decisions; they
+make freshness uncertain rather than authorizing a ticket write.
 For migration-sensitive targets, `lead-proceed` reads the native-subagent pivot
 anchor as an artifact-only check, reports `Migration Anchor` in the Routing
 Verdict, stops when the anchor is missing, and treats absent binding anchor
@@ -715,6 +726,12 @@ workers, documentation updaters) from rendered rsrc delegate playbooks via
 `ws/playbook.render`, not from register-time prompt stems. Public named-agent
 registrations receive delegate-orientation instructions before role-specific
 prompt material.
+
+Rsrc playbooks may declare include fragments by bare stem. Include resolution
+checks `<playbook>/<include>.<harness>.md` first, then
+`<playbook>/<include>.md`, then the root-level `<include>.md` fallback. This
+supports harness-local guidance such as `lead-write-ticket/task-list.codex.md`
+without replacing existing root-level shared includes such as `code-reviewer.md`.
 
 Delegate orientation reserves lifecycle orchestration, reviewer fanout,
 workflow-stage routing, and final documentation ownership for the lead unless a
