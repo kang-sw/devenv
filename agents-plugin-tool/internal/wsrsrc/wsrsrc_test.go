@@ -580,11 +580,41 @@ func TestLoaderSchemaMismatch(t *testing.T) {
 	}
 }
 
+func TestLoaderPlaybookNotFound(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteManifest(root, Manifest{SchemaVersion: SupportedSchemaVersion, Files: map[string]string{}}); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	_, err := Load(root, "missing", "", nil)
+	var target ErrPlaybookNotFound
+	if !asError(err, &target) {
+		t.Fatalf("expected ErrPlaybookNotFound, got %T: %v", err, err)
+	}
+	if target.Name != "missing" {
+		t.Errorf("ErrPlaybookNotFound.Name = %q, want missing", target.Name)
+	}
+	if !strings.Contains(err.Error(), "no such rsrc playbook") {
+		t.Errorf("error = %q, want no such rsrc playbook diagnostic", err)
+	}
+}
+
 func TestLoaderFileMissingFromManifest(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pb/pb.md", "---\nkind: print\n---\nbody\n")
 	// Write manifest that doesn't list pb/pb.md.
 	writeFile(t, root, "manifest.json", `{"schema_version":1,"files":{}}`)
+
+	_, err := Load(root, "pb", "", nil)
+	var target ErrFileMissing
+	if !asError(err, &target) {
+		t.Errorf("expected ErrFileMissing, got %T: %v", err, err)
+	}
+}
+
+func TestLoaderManifestListedFileMissing(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "manifest.json", `{"schema_version":1,"files":{"pb/pb.md":"deadbeef"}}`)
 
 	_, err := Load(root, "pb", "", nil)
 	var target ErrFileMissing

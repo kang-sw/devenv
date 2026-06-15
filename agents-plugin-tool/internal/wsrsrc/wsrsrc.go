@@ -85,6 +85,14 @@ func (e ErrFileMissing) Error() string {
 	return fmt.Sprintf("rsrc manifest-listed file missing: %q", e.RelPath)
 }
 
+// ErrPlaybookNotFound is returned when a requested playbook stem does not
+// resolve to a file in the rsrc tree or manifest.
+type ErrPlaybookNotFound struct{ Name string }
+
+func (e ErrPlaybookNotFound) Error() string {
+	return fmt.Sprintf("no such rsrc playbook: %q", e.Name)
+}
+
 // ErrUndeclaredVar is returned by substituteVars when a variable is referenced
 // (either supplied in vars or found as {{.Name}} in the body) but is absent
 // from the playbook's declared variables list.
