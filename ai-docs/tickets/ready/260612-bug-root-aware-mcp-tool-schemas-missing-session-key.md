@@ -3,6 +3,8 @@ title: Root-aware MCP tool schemas omit required session_key
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: introduced mandatory session-key root resolution
   260611-refactor-ws-tier-taxonomy-delegate-tier-routing: current dogfood branch exposing the issue after plugin cache refresh
+spec:
+  - 260610-ephemeral-session-auth-model
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
