@@ -10,6 +10,7 @@ Target: user request
 
 Scope
 - Route only; do not implement or plan here.
+- Proceed may invoke `lead-implement`, but source inspection, planning, and editing belong only to `lead-implement`.
 - Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Do not rejudge general ticket quality or mutate ticket structure.
@@ -28,10 +29,12 @@ Execution
 
 Route Context
 - `has-ticket` is artifact state; do not treat it as a judgment.
+- Normalize ticket status to `idea`, `todo`, `ready`, `done`, `dropped`, or `unknown`.
 - `discussion-needed` blocks every implementation route.
 - `needs-ticket` applies only to actionable inline targets without a ticket.
 - Freshness is lead-owned: compare active conversation decisions against the ticket, not source.
 - `freshness=missing-settled-decisions` means the ticket needs a lead-write-ticket procedure run.
+- Unconfirmed mechanisms or future-scope hints are not settled decisions; set `freshness=uncertain` and return to discussion instead of writing them.
 - `migration-anchor=loaded|n/a|missing|conflict`; checks are artifact-only and never permit source inspection.
 - If the migration anchor has binding decisions absent from the ticket, set `freshness=missing-settled-decisions`.
 - If the migration anchor conflicts with the requested route, set `discussion-needed=yes`.
@@ -65,11 +68,12 @@ Routing
 14. Apply `judge: discussion-needed`.
 15. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
 16. If `has-ticket=yes` and freshness is not already `missing-settled-decisions`: set `freshness=missing-settled-decisions` when active conversation has settled decisions, constraints, rejected alternatives, or scope boundaries absent from the ticket; otherwise set `freshness=current`.
-17. If freshness is uncertain because a decision may still be unsettled or missing, set `freshness=uncertain` and `discussion-needed=yes`.
-18. Set `category=workset` only when the ticket itself is declared as a workset by filename/stem category, frontmatter `category`/`type`, title/heading, or a top-level workset membership section.
-19. Set `category=epic` when the filename/stem category, frontmatter `category`/`type`, title, heading, or explicit epic section labels it as an epic.
-20. If `category=epic` or `category=workset`, skip implementation-scope resolution; set `slice=blocked` and `scope-blocked=container-ticket`.
-21. Resolve implementation scope for ready tickets:
+17. If freshness is uncertain because a decision may still be unsettled, unconfirmed, future-scoped, or missing, set `freshness=uncertain` and `discussion-needed=yes`.
+18. For actionable inline targets with `has-ticket=no` and `needs-ticket=no`, set `slice=whole target`.
+19. Set `category=workset` only when the ticket itself is declared as a workset by filename/stem category, frontmatter `category`/`type`, title/heading, or a top-level workset membership section.
+20. Set `category=epic` when the filename/stem category, frontmatter `category`/`type`, title, heading, or explicit epic section labels it as an epic.
+21. If `category=epic` or `category=workset`, skip implementation-scope resolution; set `slice=blocked` and `scope-blocked=container-ticket`.
+22. Resolve implementation scope for ready tickets:
    - No phase sections -> whole target.
    - Multiple explicit phases -> set `scope-blocked=multiple-explicit-phases`.
    - One explicit phase with a `Result` section -> set `scope-blocked=phase-already-complete` unless the user explicitly asked to revise or redo that phase.
@@ -84,21 +88,21 @@ Routing
 |------|-------|
 | `target-kind=inline` and `actionable=no` | Continue through `ws:lead-discuss`; stop. |
 | `ticket-missing=yes` | Stop; report that the ticket path does not exist and ask for a valid ticket path or inline implementation target. |
-| `has-ticket=yes` and status is `.done/` | Stop; report that the ticket is already done. |
-| `has-ticket=yes` and status is `.dropped/` | Stop; report that the ticket was dropped and needs explicit revival or replacement. |
+| `has-ticket=yes` and status is `done` | Stop; report that the ticket is already done. |
+| `has-ticket=yes` and status is `dropped` | Stop; report that the ticket was dropped and needs explicit revival or replacement. |
 | `has-ticket=yes` and status is `unknown` | Stop; report that ticket status could not be determined from its path. |
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
 | `has-ticket=yes` and category is `workset` | Stop; report that worksets are containers, list included actionable ticket paths grouped as `ready`, `not-ready`, and `unknown` from explicit path/status labels or already-loaded artifacts, and suggest one safe next request. |
 | `migration-anchor=missing` | Stop; report that the required migration anchor could not be read and do not continue to ticket writing or implementation. |
 | `discussion-needed=yes` | Continue through `ws:lead-discuss`; stop. |
-| `has-ticket=yes` and status is `idea/` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `idea` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
 | `scope-blocked=multiple-explicit-phases` | Stop; ask the user to choose one phase or create/slice tickets. |
 | `scope-blocked=too-broad` | Stop; ask for phase or ticket slicing before implementation. |
 | `scope-blocked=no-unfinished-phase` | Stop; report that all ticket phases appear complete and ask whether to close, reopen, or name a follow-up target. |
 | `scope-blocked=phase-already-complete` | Stop; report that the named phase already has a result and ask for explicit redo/revision confirmation or a different phase. |
-| `has-ticket=yes` and status is `todo/` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `todo` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and `freshness=missing-settled-decisions` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
+| `has-ticket=yes` and status is `ready` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
 | `has-ticket=no` and `needs-ticket=yes` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
 | `has-ticket=no` and `needs-ticket=no` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
 

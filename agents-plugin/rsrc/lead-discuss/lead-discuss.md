@@ -29,6 +29,7 @@ Conversation
 - Use the user's active conversation language for discussion responses.
 - Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
+- Discussion persistence writes only confirmed decisions; ticket cleanup goes through `lead-write-ticket`'s Open Decision Queue.
 
 Response
 - Lead with the load-bearing point before options, caveats, or history.
@@ -51,7 +52,7 @@ Response
 
 1. If the topic touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` once before answering.
 2. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
-   For each unloaded doc, run `reference-discovery` and incorporate its returned reference list before responding.
+   For each unloaded doc, run the `reference-discovery` procedure from `lead-workflow-manual` and incorporate its returned ticket/spec/mental-model paths before responding.
 3. Apply `judge: needs-cascade-lookup`; if it fires, run **Cascade Lookup** before answering.
 4. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
@@ -78,7 +79,8 @@ Response
 
 ### 4. Capture
 
-1. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+1. When discussion changes unimplemented ticket phases, route ticket cleanup through `lead-write-ticket` unless the user requested a narrow in-place wording edit.
+2. For narrow in-place wording edits, commit the exact edited paths and report them before returning.
 
 ## On: Interview Workflow
 
@@ -102,7 +104,7 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    c. Stop this handler after the lead-write-ticket procedure returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
-   b. No other ticket references this stem -> call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove the `🚧` entry.
+   b. No other ticket references this stem -> call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove or close the linked in-progress spec entry for that stem.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
    d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
 5. Commit through `ws/git.commit`.
@@ -110,14 +112,15 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 ## On: user signals done
 
 1. If the user wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
-2. If the user explicitly asks to persist the discussion, route by requested artifact:
+2. If the user explicitly asks for durable capture, ticket cleanup, or ticket/spec persistence and has not approved the artifact, ask whether to persist the discussion; stop until the user answers.
+3. If the user approves persistence, route by requested artifact:
    - **Spec update** - call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline.
    - **New ticket** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline.
-   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline, using its Edit path to append approved design notes to the existing ticket phase.
-3. If persistence artifact is unclear, ask one clarifying question and stop.
-4. When ticket persistence creates or edits an implementation phase, apply **judge: needs-integration-tests** and include criteria only when the judged change has end-to-end observable behavior.
-5. Write only what the user approves.
-6. If no artifact is written, respond with the current conclusion, any unresolved decision, and that no files were changed.
+   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; its Open Decision Queue resolves unconfirmed design notes before any ticket cleanup.
+4. If persistence artifact is unclear, ask one clarifying question and stop.
+5. When ticket persistence creates or edits an implementation phase, apply **judge: needs-integration-tests** and include criteria only when the judged change has end-to-end observable behavior.
+6. Write only what the user approves.
+7. If no artifact is written, respond with the current conclusion, any unresolved decision, and that no files were changed.
 
 ## Judgments
 

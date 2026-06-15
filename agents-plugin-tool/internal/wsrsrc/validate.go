@@ -16,7 +16,8 @@ import (
 //  4. Each subdirectory is treated as a playbook: its required base file
 //     (<name>/<name>.md) must exist.
 //  5. For each playbook file (base and overlays):
-//     a. All declared includes exist in both the manifest and on disk.
+//     a. All declared includes resolve to a playbook-local or root-level file
+//     that exists in both the manifest and on disk.
 //     b. No undeclared variables ({{.Name}} patterns not in the variables list).
 //
 // Validate is used both by the CI tree check (TestValidateRealTree) and by
@@ -108,6 +109,9 @@ func validatePlaybookDir(root, name string, manifest Manifest) error {
 		if sub.IsDir() || !strings.HasSuffix(sub.Name(), ".md") {
 			continue
 		}
+		if !isPlaybookVariantFilename(name, sub.Name()) {
+			continue
+		}
 		filePath := filepath.Join(dir, sub.Name())
 		if err := validatePlaybookFile(root, name, filePath, manifest); err != nil {
 			return err
@@ -126,16 +130,16 @@ func validatePlaybookFile(root, playbookName, filePath string, manifest Manifest
 	fm, body := parseFrontmatter(string(data))
 	meta := metaFromFrontmatter(fm)
 
-	// 5a. All declared includes must be in the manifest and on disk.
+	// 5a. All declared includes must resolve to a manifest-listed file on disk.
+	harness := harnessFromPlaybookFilename(playbookName, filepath.Base(filePath))
 	for _, inc := range meta.Includes {
 		if !isBareStem(inc) {
 			return fmt.Errorf("playbook %q: include name %q must be a bare stem", playbookName, inc)
 		}
-		incRelPath := inc + ".md"
+		incPath, incRelPath := resolveIncludePath(root, playbookName, inc, harness)
 		if _, ok := manifest.Files[incRelPath]; !ok {
 			return fmt.Errorf("playbook %q: include %q (%q) is not listed in manifest", playbookName, inc, incRelPath)
 		}
-		incPath := filepath.Join(root, incRelPath)
 		if _, err := os.Stat(incPath); os.IsNotExist(err) {
 			return fmt.Errorf("playbook %q: dangling include %q: file not found at %s", playbookName, inc, incPath)
 		}
@@ -150,6 +154,33 @@ func validatePlaybookFile(root, playbookName, filePath string, manifest Manifest
 		return err
 	}
 	return nil
+}
+
+func isPlaybookVariantFilename(playbookName, filename string) bool {
+	if filename == playbookName+".md" {
+		return true
+	}
+	prefix := playbookName + "."
+	if !strings.HasPrefix(filename, prefix) || !strings.HasSuffix(filename, ".md") {
+		return false
+	}
+	harness := strings.TrimSuffix(strings.TrimPrefix(filename, prefix), ".md")
+	return isBareStem(harness)
+}
+
+func harnessFromPlaybookFilename(playbookName, filename string) string {
+	if filename == playbookName+".md" {
+		return ""
+	}
+	prefix := playbookName + "."
+	if !strings.HasPrefix(filename, prefix) || !strings.HasSuffix(filename, ".md") {
+		return ""
+	}
+	harness := strings.TrimSuffix(strings.TrimPrefix(filename, prefix), ".md")
+	if !isBareStem(harness) {
+		return ""
+	}
+	return harness
 }
 
 // scanUndeclaredVars scans text for {{.Name}} patterns and errors on any Name
