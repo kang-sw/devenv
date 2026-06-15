@@ -96,9 +96,10 @@ needs in the returned report. The async fire-and-forget plus deferred-result
 shape maps to native background subagents. Native delegation is the default, not
 the exclusive path — the lead-invokable mercenary surface remains available for
 stateful named work and bundled delegate prompts. The generic `explore` render
-playbook remains a compatibility/fallback artifact, but it is not the normal
-scoped-exploration path. The `ws/subquery` runtime tool has been removed;
-scoped exploration now uses host-native exploration workers exclusively.
+playbook remains a compatibility/fallback artifact for unknown or unsupported
+harness contexts, but it is not the normal scoped-exploration path. The
+`ws/subquery` runtime tool has been removed; ordinary scoped exploration now
+uses host-native exploration workers directly.
 {#260610-subquery-explore-delegation-shift}
 
 Workflow guidance prefers `model` for both portable aliases and concrete

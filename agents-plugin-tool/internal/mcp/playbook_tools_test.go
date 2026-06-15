@@ -682,8 +682,8 @@ func TestPlaybookPrintGoldenDelegateSampleCodexHarness(t *testing.T) {
 		}
 	}
 	// Hardcoded expected strings for the same anti-tautology reason.
-	if !strings.Contains(body, "a search agent") {
-		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'a search agent'", body)
+	if !strings.Contains(body, "an explorer subagent") {
+		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'an explorer subagent'", body)
 	}
 	if !strings.Contains(body, "resuming the agent using its task id") {
 		t.Errorf("golden body %q: expected hardcoded codex ContinueIdiom", body)
@@ -777,8 +777,8 @@ func TestPlaybookPrintGoldenExploreCodexHarness(t *testing.T) {
 		}
 	}
 	// Hardcoded expected strings for the same anti-tautology reason.
-	if !strings.Contains(body, "a search agent") {
-		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'a search agent'", body)
+	if !strings.Contains(body, "an explorer subagent") {
+		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'an explorer subagent'", body)
 	}
 	if !strings.Contains(body, "resuming the agent using its task id") {
 		t.Errorf("golden body %q: expected hardcoded codex ContinueIdiom", body)

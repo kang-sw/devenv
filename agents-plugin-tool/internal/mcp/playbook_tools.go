@@ -26,7 +26,7 @@ var playbookTerminologyTable = map[string]map[string]string{
 		"ContinueIdiom": "SendMessage(to: <agentId>)",
 	},
 	"codex": {
-		"ExploreAgent":  "a search agent",
+		"ExploreAgent":  "an explorer subagent",
 		"SpawnIdiom":    "creating a new Codex task",
 		"ContinueIdiom": "resuming the agent using its task id",
 	},
