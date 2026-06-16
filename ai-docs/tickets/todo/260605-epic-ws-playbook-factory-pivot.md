@@ -23,7 +23,8 @@ subagents. Direction, decisions, and evidence live in
 ## Non-Scope
 
 - memory.* / ticket-mutation MCP tool contracts (deferred follow-up).
-- wsflow naming/convergence mechanics (company compat; follow-up).
+- wsflow naming/convergence mechanics before M4; final convergence is a
+  post-M4 follow-up owned by `260616-refactor-wsflow-product-mode-convergence`.
 - Dashboard feature changes beyond keeping it compiling against the reshaped
   surface (the dashboard is retained as a web-tmux surface). Under option B the
   agent-activity feed is NOT stripped — its mercenary lifecycle source survives,
@@ -93,7 +94,16 @@ subagents. Direction, decisions, and evidence live in
   (`88e646c5`). Depends on M3; P6 coordinates `api.ask` prompt source with M4.
 - `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
   corpus-routed api-doc playbook, cache index/staleness conventions, async job
-  surface removal. Depends on M1; coordinated with M3.
+  surface removal. Treat api.ask as a dependency-documentation exploration
+  methodology expressed through a playbook for a general-purpose native subagent,
+  not as a bespoke api runtime agent. Depends on M1; coordinated with M3.
+- `260616-refactor-wsflow-product-mode-convergence` (todo, post-M4 — wsflow
+  convergence): after M4, remove the curated wsflow skill-body surface and
+  collapse wsflow onto product-mode playbook rendering. Long-term ws/wsflow
+  differences are namespace plus capability gates: mercenary/external-agent and
+  exec surfaces remain full-ws only; wsflow gets no separately maintained
+  workflow procedure corpus. Until this lands, wsflow is considered temporarily
+  not usable for serious dogfood.
 
 ## Cross-Child Decisions
 
@@ -182,6 +192,15 @@ subagents. Direction, decisions, and evidence live in
   (absorbed there per 2026-06-12; the user chose absorption over a new milestone);
   M4 coordinates the `api.ask` prompt-source move.
 
+- **wsflow final convergence (confirmed 2026-06-16):** the previous capture
+  stopped too early by preserving curated wsflow skill bodies as if they were a
+  final contract. The intended endpoint is one shared playbook/resource corpus:
+  wsflow differs from full ws by product-mode namespace and by hiding/rejecting
+  mercenary/external-agent plus exec capabilities, not by maintaining separate
+  workflow procedure text. The cleanup is intentionally delayed until after M4
+  api.ask so the dependency-documentation exploration method lands first; until
+  then, wsflow is not a reliable dogfood target.
+
 ## Completion Criteria
 
 - Done: native subagents are the default delegation path via playbooks; the spawn
@@ -189,5 +208,7 @@ subagents. Direction, decisions, and evidence live in
   implementer/reviewer only) rather than deleted; the actor model is replaced by
   session-auth; M0–M4 children closed.
 - Dropped: direction reversal recorded in the research ticket.
-- Deferred: memory./mutation contracts, wsflow convergence mechanics, TUI
-  implementation — each leaves through its own follow-up ticket.
+- Deferred: memory./mutation contracts and TUI implementation leave through
+  their own follow-up tickets. wsflow convergence is no longer an open-ended
+  non-scope item; it is deferred specifically to the post-M4 child
+  `260616-refactor-wsflow-product-mode-convergence`.

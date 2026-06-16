@@ -161,6 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
+| `260616-refactor-wsflow-product-mode-convergence` | todo | After M4, collapse wsflow onto product-mode playbook rendering and remove curated skill bodies |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
@@ -183,7 +184,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
-| `260616-bug-wsflow-playbook-tools-expose-full-ws-guidance` | idea | Decide whether wsflow should hide or namespace-filter playbook.print/render output |
 
 ## Ticket Focus
 
@@ -229,12 +229,13 @@ dropped tickets live in hidden archive dirs and git history.
   reviewer-tier default) re-homed to
   `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (done, was promoted
   2026-06-11). **M4**
-  (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask corpus-routing
-  redesign; depends M1, coordinated M3. Open: Codex non-skill `rsrc/` cache
-  materialization (prereqs `260523`, `260524-codex-cache`). Follow-ups:
-  `260610-chore-wsflow-explore-playbook-mirroring` (wsflow parity),
-  `260610-bug-wsflow-runtime-contract-playbook-tools-drift` (pre-existing M1
-  capability-contract drift).
+  (`260609-refactor-ws-api-ask-corpus-routing`, todo) — api.ask becomes a
+  dependency-documentation exploration playbook/methodology for general-purpose
+  native agents; depends M1, coordinated M3. **Post-M4:**
+  `260616-refactor-wsflow-product-mode-convergence` collapses wsflow onto
+  product-mode playbook rendering and removes curated skill bodies; until then
+  wsflow is treated as not reliable for serious dogfood. Open: Codex non-skill
+  `rsrc/` cache materialization (prereqs `260523`, `260524-codex-cache`).
 - `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,
   refactor; ready→.done 2026-06-12) - first-class `small/medium/large/xlarge` tier
   vocab + `light/core/deep` alias demotion, mercenary per-spawn tier routing, full

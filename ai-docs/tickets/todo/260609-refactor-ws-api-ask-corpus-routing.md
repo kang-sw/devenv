@@ -5,6 +5,7 @@ related:
   260605-research-ws-native-subagent-pivot: api.ask redesign direction and rejected alternatives
   260609-feat-ws-playbook-surface-mvp: prerequisite — the api-doc playbook ships on the playbook surface
   260609-refactor-ws-spawn-runtime-deletion-session-auth: coordinated — api.ask spawn/async machinery dies with spawn removal
+  260616-refactor-wsflow-product-mode-convergence: follow-up — after M4, collapse wsflow onto product-mode playbook rendering
 related-mental-model:
   - api-documentation-cache
   - mcp-runtime
@@ -31,6 +32,12 @@ Binding decisions from the research ticket:
 
 - **One autonomous native subagent explores the cache corpus directly.** The
   two-stage routing (pre-router + per-domain manager) is deleted.
+- **api.ask becomes a dependency-documentation exploration method, not a special
+  agent runtime.** The behavior should be expressed as a playbook and corpus
+  convention that a general-purpose native subagent can follow. Any shell
+  processing technique, documentation/modularization policy, cache traversal
+  rule, and staleness rule belongs in the playbook/corpus contract rather than
+  in an api-namespace model orchestration layer.
 - **Routing → index file.** `api.list`'s role degrades into a cache-root
   `index.md` (domain list + one-line descriptions). The api-doc playbook
   instructs "read the index first, then descend into the domain doc". Routing
@@ -50,6 +57,10 @@ Binding decisions from the research ticket:
 - Net: the whole `api.*` surface reduces to one api-doc playbook plus a cache
   directory convention — small enough that the research judged it first-epic
   scope.
+- **Do not solve wsflow convergence inside M4.** Finish the api-doc playbook
+  methodology first. wsflow is treated as temporarily not usable until the
+  follow-up product-mode convergence ticket removes the curated skill body /
+  `prompt.render` split.
 
 ## Constraints
 
@@ -68,11 +79,15 @@ Binding decisions from the research ticket:
 Add the api-doc playbook (read `index.md` first, descend into the domain doc,
 apply the staleness rule). Define the cache-root `index.md` convention and the
 `fetched_at` / `source_url` frontmatter, plus the one-file-per-domain
-whole-file-replacement write discipline. Reduce `api.list` to index discovery.
-Remove the two-stage routing, per-domain manager sessions, and the async job
-surface (coordinated with M3 spawn removal). Verification: a native subagent
-answers an API question by reading the index then the domain doc; staleness is
-decided from corpus metadata; no spawn/async machinery remains in `api.*`.
+whole-file-replacement write discipline. Move api-specific shell processing
+techniques and documentation/modularization policy into the playbook so a
+general-purpose native subagent can perform dependency/API documentation
+exploration without a bespoke api runtime agent. Reduce `api.list` to index
+discovery. Remove the two-stage routing, per-domain manager sessions, and the
+async job surface (coordinated with M3 spawn removal). Verification: a native
+subagent answers an API question by reading the index then the domain doc;
+staleness is decided from corpus metadata; shell/documentation policy is
+recoverable from the playbook; no spawn/async machinery remains in `api.*`.
 
 ## Spec Impact
 
@@ -81,6 +96,6 @@ decided from corpus metadata; no spawn/async machinery remains in `api.*`.
   `#260508-api-documentation-async-mcp-tools`. Update the `api-documentation-cache`
   mental model for the index/staleness/write conventions.
 - Expected caller-visible change: `api.ask` answered by a corpus-routed native
-  subagent via a playbook; the async `api.*` surface removed; cache routing
-  becomes an `index.md` convention.
+  subagent via a general dependency-documentation exploration playbook; the
+  async `api.*` surface removed; cache routing becomes an `index.md` convention.
 - Contract-first spec: yes. Resolve at ready promotion via `lead-write-spec`.
