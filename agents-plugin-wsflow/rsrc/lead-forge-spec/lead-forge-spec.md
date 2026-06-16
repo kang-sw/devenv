@@ -9,12 +9,12 @@ Target: user request
 
 ## Invariants
 
-- Call `ws/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
+- Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
 - All survey queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; ticket-association checks spawn a scoped exploration worker with a ticket-association prompt and cited evidence.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
-- Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
-- Call `ws/spec_index.verify()` after every spec file write or update.
+- Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
+- Call `{{.McpNamespace}}/spec_index.verify()` after every spec file write or update.
 - Domain task labels use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
 - All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 
@@ -55,7 +55,7 @@ Format: markdown bullets grouped by module/area.
 Query 2 — ticket domain survey:
 
 ```text
-Survey all tickets through `ws/tickets.list(include_done: true, include_dropped: true)`.
+Survey all tickets through `{{.McpNamespace}}/tickets.list(include_done: true, include_dropped: true)`.
 
 Extract title, status directory, and public-facing or user-visible behavior.
 Group by inferred behavioral domain.
@@ -77,7 +77,7 @@ Query 4 — commit history behavioral signals:
 ```text
 Survey recent commit history for behavioral signals.
 
-Use `ws/git.log`. Identify user-visible features, API changes, CLI
+Use `{{.McpNamespace}}/git.log`. Identify user-visible features, API changes, CLI
 changes, or spec updates (`feat:`, `fix:`, `spec:`, spec-stems in bodies).
 Return behavioral areas -> representative commits. Omit chore/docs/refactor
 unless they reference spec-stems.
@@ -136,7 +136,7 @@ Query 2 — domain tickets:
 Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
-Use `ws/tickets.find(query: "<domain>")`; filter by module paths when needed.
+Use `{{.McpNamespace}}/tickets.find(query: "<domain>")`; filter by module paths when needed.
 Return features -> ticket status. Only contract-first ready implementation items, plus epic/research/workset planned decomposition, investigation text, or operating context, are `🚧` candidates; todo items are ticket-intent evidence.
 ```
 
@@ -184,25 +184,25 @@ confirmed list before writing anything.
 ### 5. Write spec entries
 
 1. Determine the target spec file path. Apply `judge: directory-vs-flat`.
-2. Call `ws/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
+2. Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
 3. For each confirmed behavior:
-   a. Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
+   a. Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
    c. Place `🚧` after the heading marker if planned; omit if implemented.
 4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
-5. Call `ws/spec_index.verify()`.
+5. Call `{{.McpNamespace}}/spec_index.verify()`.
 6. Apply `judge: directory-vs-flat` - if the written file warrants a directory split, note it as a split candidate for a follow-up lead-write-spec procedure invocation. Do not perform the split inline.
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
+1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `{{.McpNamespace}}/git.commit` and skip to step 7.
 2. Spawn a scoped exploration worker for the ticket-association check, using this block as the task prompt:
 
 ```text
 Associate spec stems with tickets and check convention compliance.
 
 Run first:
-  Call `ws/convention.read(name: "ticket-conventions")`
+  Call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")`
 
 Spec stems generated for this domain:
 <list: {#YYMMDD-slug} - feature name, one per line>
@@ -230,7 +230,7 @@ For each ticket:
 
 ### 1. Final index pass
 
-Call `ws/spec_index.verify()` as an idempotent safety pass over all spec files.
+Call `{{.McpNamespace}}/spec_index.verify()` as an idempotent safety pass over all spec files.
 
 ### 2. Summary report
 
@@ -250,7 +250,7 @@ Total stems generated: <count>
 
 - Spawn a scoped exploration worker with a spec-updater task prompt to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.
-- Run the lead-write-spec procedure via `ws/playbook.print(name: "lead-write-spec")` for any domain surfaces discovered after wrap-up.
+- Run the lead-write-spec procedure via `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` for any domain surfaces discovered after wrap-up.
 
 ## Judgments
 
@@ -265,10 +265,10 @@ When uncertain, start flat. Re-evaluate after writing - if a split condition fir
 
 ## Templates
 
-### ws/spec_index.verify call
+### {{.McpNamespace}}/spec_index.verify call
 
 ```text
-ws/spec_index.verify()
+{{.McpNamespace}}/spec_index.verify()
 ```
 
 No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once after any spec write or update in this session.

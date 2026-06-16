@@ -12,7 +12,7 @@ completed implementation phase has a reviewable result commit.
 
 ## Ancestor Loading
 
-1. Callers using `ws/mental_models.find` should read returned parent docs before child docs.
+1. Callers using `{{.McpNamespace}}/mental_models.find` should read returned parent docs before child docs.
 2. Callers using manual paths must read the parent before the child.
 3. Delegation prompts must include the ancestor-loading rule when subagents read mental models.
 

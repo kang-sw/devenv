@@ -4,7 +4,7 @@ kind: print
 # Workflow Manual
 
 > **Session invariant:** Keep this reference active while writing or executing ws
-> workflow skills. After compaction, call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when primitive
+> workflow skills. After compaction, call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when primitive
 > names or orchestration boundaries matter.
 
 ## On: invoke
@@ -15,11 +15,11 @@ Reading this file is the invocation; it loads the primitive reference.
 
 # WS Workflow Primitives
 
-Host-neutral notation reference for ws plugin skill text.
+Host-neutral notation reference for {{.McpNamespace}} plugin skill text.
 
-Use `ws/<tool-name>` for MCP server `ws`, tool `<tool-name>`.
-Use `ws:` only for plugin skills such as `ws:lead-discuss`.
-Write MCP calls as `ws/tool.name(arg: value)`.
+Use `{{.McpNamespace}}/<tool-name>` for the current MCP namespace and tool `<tool-name>`.
+Use `{{.SkillNamespace}}:` only for plugin skills such as `{{.SkillNamespace}}:lead-discuss`.
+Write MCP calls as `{{.McpNamespace}}/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
@@ -28,7 +28,7 @@ Write prompts sent to native Explore-style subagents in English.
 Write prompts sent to `ws.mercenary.call` in English.
 <!-- ws:full-only:end -->
 
-When writing shared skill text, name only primitives that exist in the ws runtime.
+When writing shared skill text, name only primitives that exist in the {{.McpNamespace}} runtime.
 If a workflow needs a surface that is still planned, state the required MCP
 contract instead of naming a Claude helper command or another host-specific
 fallback.
@@ -53,7 +53,7 @@ At the start of any lead workflow session, call
 `ws.lead.login(root: "<absolute-working-directory>")`. Pass the repository's
 absolute filesystem path as `root`; the MCP server cannot infer the agent's
 current directory from placeholders or relative paths. Thread the returned
-`session_key` through every subsequent root-aware ws tool call.
+`session_key` through every subsequent root-aware {{.McpNamespace}} tool call.
 
 ### Scoped Exploration (native Explore)
 
@@ -83,7 +83,7 @@ takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
 general-purpose named agent; registration applies delegate orientation and the
 default model alias. Call the agent for each continuity turn.
 Bundled delegate prompts are not registered by stem — render them. Obtain a
-delegate's self-contained prompt with `ws/playbook.render(name: "<delegate>")`
+delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
 (model-alias vars auto-inject; a lead key splices a child-key credential block and
 the call returns a `recommended-tier`). Hand the rendered prompt to a native
 subagent (default), or pass it as `system_prompt_text` with `tier:
@@ -101,80 +101,80 @@ with a recovery prompt when cancellation followed a no-result timeout, and
 
 ### Artifact paths
 
-`ws/path.generate`
+`{{.McpNamespace}}/path.generate`
 
 Use for generated workflow artifact paths. Capture returned paths. Relay paths,
 not large findings, between lead, implementer, and reviewers.
 
 ### Runtime metadata
 
-`ws/runtime.info`
+`{{.McpNamespace}}/runtime.info`
 
 Use for runtime compatibility checks and feature detection.
 
 ### Reference discovery
 
-`ws/tickets.list`
-`ws/tickets.find`
-`ws/tickets.status`
-`ws/specs.list`
-`ws/specs.find`
-`ws/specs.status`
-`ws/mental_models.list`
-`ws/mental_models.find`
-`ws/mental_models.status`
-`ws/references.trace`
+`{{.McpNamespace}}/tickets.list`
+`{{.McpNamespace}}/tickets.find`
+`{{.McpNamespace}}/tickets.status`
+`{{.McpNamespace}}/specs.list`
+`{{.McpNamespace}}/specs.find`
+`{{.McpNamespace}}/specs.status`
+`{{.McpNamespace}}/mental_models.list`
+`{{.McpNamespace}}/mental_models.find`
+`{{.McpNamespace}}/mental_models.status`
+`{{.McpNamespace}}/references.trace`
 
-Use these for ws-owned ticket, spec, and mental-model path/status/reference
+Use these for {{.McpNamespace}}-owned ticket, spec, and mental-model path/status/reference
 lookup before shell search. Use native file reads after a discovery tool returns
 the path to inspect or edit.
 
 Prefer:
-- `ws/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
-- `ws/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
-- `ws/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
-- `ws/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
-- `ws/specs.find(spec_stem: "<stem>")` for anchor lookup.
-- `ws/specs.find(ticket_stem: "<stem>")` for ticket-linked specs.
-- `ws/specs.status(spec_stem: "<stem>")` for duplicate-safe anchor location.
-- `ws/mental_models.find(query: "<topic>")` for domain discovery.
-- `ws/mental_models.status(domain: "<domain>")` for known-domain docs.
-- `ws/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
-- `ws/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
+- `{{.McpNamespace}}/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
+- `{{.McpNamespace}}/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
+- `{{.McpNamespace}}/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
+- `{{.McpNamespace}}/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
+- `{{.McpNamespace}}/specs.find(spec_stem: "<stem>")` for anchor lookup.
+- `{{.McpNamespace}}/specs.find(ticket_stem: "<stem>")` for ticket-linked specs.
+- `{{.McpNamespace}}/specs.status(spec_stem: "<stem>")` for duplicate-safe anchor location.
+- `{{.McpNamespace}}/mental_models.find(query: "<topic>")` for domain discovery.
+- `{{.McpNamespace}}/mental_models.status(domain: "<domain>")` for known-domain docs.
+- `{{.McpNamespace}}/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
+- `{{.McpNamespace}}/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
 
 ### Git
 
-`ws/git.status`
-`ws/git.diff`
-`ws/git.log`
-`ws/git.merge_base`
-`ws/git.commit`
+`{{.McpNamespace}}/git.status`
+`{{.McpNamespace}}/git.diff`
+`{{.McpNamespace}}/git.log`
+`{{.McpNamespace}}/git.merge_base`
+`{{.McpNamespace}}/git.commit`
 
-Use `ws/git.commit` for workflow commits when available. It stages explicit
+Use `{{.McpNamespace}}/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves plus
 `### Result` and `#### Edition` headings, and avoids shell quoting drift.
-For ticket status moves, use native `git mv` between status directories and commit through `ws/git.commit`; `ready/` is implementation-ready and `todo/` is accepted backlog.
+For ticket status moves, use native `git mv` between status directories and commit through `{{.McpNamespace}}/git.commit`; `ready/` is implementation-ready and `todo/` is accepted backlog.
 
 Prefer:
-- `ws/git.status()` for branch, staged state, and changed-file discovery.
-- `ws/git.diff(mode: "stat")` before detailed review.
-- `ws/git.diff(mode: "full", paths: ["<path>"])` for scoped inspection.
-- `ws/git.log(range: "<base>..HEAD", include_body: true)` for commit audit.
-- `ws/git.merge_base(base: "main", head: "HEAD")` for branch ranges.
-- `ws/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])` for workflow commits.
+- `{{.McpNamespace}}/git.status()` for branch, staged state, and changed-file discovery.
+- `{{.McpNamespace}}/git.diff(mode: "stat")` before detailed review.
+- `{{.McpNamespace}}/git.diff(mode: "full", paths: ["<path>"])` for scoped inspection.
+- `{{.McpNamespace}}/git.log(range: "<base>..HEAD", include_body: true)` for commit audit.
+- `{{.McpNamespace}}/git.merge_base(base: "main", head: "HEAD")` for branch ranges.
+- `{{.McpNamespace}}/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])` for workflow commits.
 
 Use native Git only for operations without an exposed ws primitive, such as
 branch creation, tag push, merge execution, or path-filtered file history.
 
 ### API documentation
 
-`ws/api.list`
+`{{.McpNamespace}}/api.list`
 
-Use `ws/api.list` only to inspect local API documentation cache domains.
+Use `{{.McpNamespace}}/api.list` only to inspect local API documentation cache domains.
 For third-party API documentation questions, run scoped host-native exploration
 or official documentation lookup directly. Give the worker the exact library,
 version or package manager context when known, and require cited evidence plus
-any staleness caveats. Do not route API documentation questions through ws MCP
+any staleness caveats. Do not route API documentation questions through {{.McpNamespace}} MCP
 agent-backed tools.
 
 <!-- ws:full-only:start -->
@@ -198,30 +198,30 @@ for parallel dispatch, spawn multiple concurrent subagents in a single turn; col
 <!-- ws:full-only:start -->
 Persistent task:
 call `ws.mercenary.register(name: "<agent-name>")` for a general-purpose delegate.
-for a bundled delegate, render its prompt: `ws/playbook.render(name: "<delegate>")`, then spawn a native subagent or register a mercenary with `system_prompt_text: <rendered>` and `tier: <recommended-tier>`.
+for a bundled delegate, render its prompt: `{{.McpNamespace}}/playbook.render(name: "<delegate>")`, then spawn a native subagent or register a mercenary with `system_prompt_text: <rendered>` and `tier: <recommended-tier>`.
 call `ws.mercenary.call(name: "<agent-name>", prompt: <block below>)` for the mercenary path.
 wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.
 erase the task-scoped agent when cleanup matters.
 <!-- ws:full-only:end -->
 
 Review artifacts:
-call `ws/path.generate(kind: "review", stems: ["<stem>"])`.
+call `{{.McpNamespace}}/path.generate(kind: "review", stems: ["<stem>"])`.
 tell reviewers to write full findings to those paths.
 relay file paths, not full findings, to the implementer.
 
 API docs:
-call `ws/api.list()` when choosing among cached domains matters.
+call `{{.McpNamespace}}/api.list()` when choosing among cached domains matters.
 for external API lookup, spawn a scoped host-native exploration worker or use
 official documentation lookup directly; include exact package, version, and
 question context, and require cited evidence.
 
 References:
-call `ws/references.trace(ticket_stem: "<ticket-stem>")` for ticket/spec/model links.
-call `ws/references.trace(spec_stem: "<spec-stem>")` for spec/ticket/model links.
+call `{{.McpNamespace}}/references.trace(ticket_stem: "<ticket-stem>")` for ticket/spec/model links.
+call `{{.McpNamespace}}/references.trace(spec_stem: "<spec-stem>")` for spec/ticket/model links.
 call domain discovery tools first when only paths or status metadata are needed.
 
 Commit:
-call `ws/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])`.
+call `{{.McpNamespace}}/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])`.
 ```
 
 ## Doctrine

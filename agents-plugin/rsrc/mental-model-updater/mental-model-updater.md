@@ -15,7 +15,7 @@ Alias model for this role: {{.CoreModel}}.
 
 ## Constraints
 
-- Apply the inclusion test and document format from `ws/convention.read(name: "mental-model-conventions")` to every edit.
+- Apply the inclusion test and document format from `{{.McpNamespace}}/convention.read(name: "mental-model-conventions")` to every edit.
 - Never modify `## Domain Rules` content; position changes are permitted via promotion only.
 - Never move Domain Rules downward from parent `index.md` to sub-domain docs.
 - Trigger forge-level restructuring only when the diff shows a corresponding code-structure change.
@@ -26,7 +26,7 @@ Alias model for this role: {{.CoreModel}}.
 ## Process
 
 1. Determine the scoped range from the last `mental-model-updated` checkpoint; if absent, use the caller-provided base.
-2. Read commit bodies with `ws/git.log(include_body: true)`, extract `### Mental Model Notes` entries, then read `ws/git.diff(mode: "stat")` and the scoped full diff.
+2. Read commit bodies with `{{.McpNamespace}}/git.log(include_body: true)`, extract `### Mental Model Notes` entries, then read `{{.McpNamespace}}/git.diff(mode: "stat")` and the scoped full diff.
 3. Inspect the scoped spec diff to identify spec headings or implemented marker changes that add assessment targets.
 4. Read `ai-docs/mental-model.md`, then every file in `ai-docs/mental-model/`.
 5. Map changed files, spec changes, and notes to domains. A single file may affect multiple domains.

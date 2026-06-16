@@ -18,7 +18,8 @@ import (
 //  5. For each playbook file (base and overlays):
 //     a. All declared includes resolve to a playbook-local or root-level file
 //     that exists in both the manifest and on disk.
-//     b. No undeclared variables ({{.Name}} patterns not in the variables list).
+//     b. No undeclared variables ({{.Name}} patterns not in the variables list
+//     or ImplicitVariableNames).
 //
 // Validate is used both by the CI tree check (TestValidateRealTree) and by
 // callers that want pre-flight validation before loading.
@@ -146,8 +147,11 @@ func validatePlaybookFile(root, playbookName, filePath string, manifest Manifest
 	}
 
 	// 5b. No undeclared variables in body.
-	declaredSet := make(map[string]bool, len(meta.Variables))
+	declaredSet := make(map[string]bool, len(meta.Variables)+len(ImplicitVariableNames))
 	for _, v := range meta.Variables {
+		declaredSet[v] = true
+	}
+	for _, v := range ImplicitVariableNames {
 		declaredSet[v] = true
 	}
 	if err := scanUndeclaredVars(playbookName, body, declaredSet); err != nil {

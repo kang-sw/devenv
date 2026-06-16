@@ -43,7 +43,7 @@ Mode: user request
 7. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
 8. Write `CLAUDE.md` with body `@AGENTS.md`.
 9. Commit scaffolding.
-10. Suggest `ws:lead-forge-spec` and `ws:lead-forge-mental-model` if baselines are absent.
+10. Suggest `{{.SkillNamespace}}:lead-forge-spec` and `{{.SkillNamespace}}:lead-forge-mental-model` if baselines are absent.
 
 ## On: upgrade
 
@@ -85,15 +85,15 @@ Mode: user request
 
 | Finding | Route |
 |---------|-------|
-| Source-derived detail | Compact to source pointers; use `ws:lead-discuss` if meaning is unclear |
-| Behavior coverage | `ws:lead-forge-spec` or the lead-write-spec procedure |
-| Modification knowledge | `ws:lead-forge-mental-model` |
+| Source-derived detail | Compact to source pointers; use `{{.SkillNamespace}}:lead-discuss` if meaning is unclear |
+| Behavior coverage | `{{.SkillNamespace}}:lead-forge-spec` or the lead-write-spec procedure |
+| Modification knowledge | `{{.SkillNamespace}}:lead-forge-mental-model` |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
-| Project reading map | `ws:lead-forge-mental-model` or `ws:lead-discuss` when mixed with status claims |
+| Project reading map | `{{.SkillNamespace}}:lead-forge-mental-model` or `{{.SkillNamespace}}:lead-discuss` when mixed with status claims |
 | Focus or ticket ordering | the lead-write-ticket procedure |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |
 | Duplicated doc map | Compact to start-here pointers |
-| Ambiguous project direction | `ws:lead-discuss` |
+| Ambiguous project direction | `{{.SkillNamespace}}:lead-discuss` |
 
 ## On: user approves index cleanup
 

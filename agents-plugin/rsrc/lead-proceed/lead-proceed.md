@@ -11,14 +11,14 @@ Target: user request
 Scope
 - Route only; do not implement or plan here.
 - Proceed may invoke `lead-implement`, but source inspection, planning, and editing belong only to `lead-implement`.
-- Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when workflow primitives are not already in context.
+- Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Do not rejudge general ticket quality or mutate ticket structure.
 - Request phase or ticket slicing only when scope resolution blocks safe implementation.
 
 Pipeline
 - Handoff stage order is fixed when stages fire: ticket readiness -> implementation.
-- Always route code-editing work through the lead-implement procedure (via `ws/playbook.print`).
+- Always route code-editing work through the lead-implement procedure (via `{{.McpNamespace}}/playbook.print`).
 - Proceed assumes implementation intent; stop when routing cannot safely reach implementation.
 
 Execution
@@ -86,7 +86,7 @@ Routing
 
 | When | Route |
 |------|-------|
-| `target-kind=inline` and `actionable=no` | Continue through `ws:lead-discuss`; stop. |
+| `target-kind=inline` and `actionable=no` | Continue through `{{.SkillNamespace}}:lead-discuss`; stop. |
 | `ticket-missing=yes` | Stop; report that the ticket path does not exist and ask for a valid ticket path or inline implementation target. |
 | `has-ticket=yes` and status is `done` | Stop; report that the ticket is already done. |
 | `has-ticket=yes` and status is `dropped` | Stop; report that the ticket was dropped and needs explicit revival or replacement. |
@@ -94,24 +94,24 @@ Routing
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
 | `has-ticket=yes` and category is `workset` | Stop; report that worksets are containers, list included actionable ticket paths grouped as `ready`, `not-ready`, and `unknown` from explicit path/status labels or already-loaded artifacts, and suggest one safe next request. |
 | `migration-anchor=missing` | Stop; report that the required migration anchor could not be read and do not continue to ticket writing or implementation. |
-| `discussion-needed=yes` | Continue through `ws:lead-discuss`; stop. |
-| `has-ticket=yes` and status is `idea` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `discussion-needed=yes` | Continue through `{{.SkillNamespace}}:lead-discuss`; stop. |
+| `has-ticket=yes` and status is `idea` | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
 | `scope-blocked=multiple-explicit-phases` | Stop; ask the user to choose one phase or create/slice tickets. |
 | `scope-blocked=too-broad` | Stop; ask for phase or ticket slicing before implementation. |
 | `scope-blocked=no-unfinished-phase` | Stop; report that all ticket phases appear complete and ask whether to close, reopen, or name a follow-up target. |
 | `scope-blocked=phase-already-complete` | Stop; report that the named phase already has a result and ask for explicit redo/revision confirmation or a different phase. |
-| `has-ticket=yes` and status is `todo` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and `freshness=missing-settled-decisions` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
-| `has-ticket=no` and `needs-ticket=yes` | Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Call `ws/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
+| `has-ticket=yes` and status is `todo` | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and `freshness=missing-settled-decisions` | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `ready` | Call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
+| `has-ticket=no` and `needs-ticket=yes` | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
+| `has-ticket=no` and `needs-ticket=no` | Call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
 
 ### 3. Emit Routing Verdict
 
 ```text
 ## Routing Verdict
 
-NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>
+NEXT: <{{.SkillNamespace}}:lead-discuss | lead-write-ticket | lead-implement | stop>
 
 - **Target**: <ticket path or brief summary>
 - **Route**: <first matching route row>
@@ -139,7 +139,7 @@ Do not ask for confirmation; the user can interrupt.
 ### 4. Execute Verdict
 
 1. Read the emitted `NEXT:` line.
-2. If `NEXT:` names an entry skill (`ws:lead-discuss`), invoke that skill. If `NEXT:` names `lead-implement`, call `ws/playbook.print(name: "lead-implement")` and execute it inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, or editing. If `NEXT:` names another procedure, call `ws/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
+2. If `NEXT:` names an entry skill (`{{.SkillNamespace}}:lead-discuss`), invoke that skill. If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute it inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, or editing. If `NEXT:` names another procedure, call `{{.McpNamespace}}/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
 3. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
 4. Do not call implementation tools from `lead-proceed`.
 5. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.

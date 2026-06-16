@@ -35,7 +35,7 @@ Alias model for this role: {{.DeepModel}}.
 1. Read the brief at the path given in the spawn prompt.
 2. If the plan path already contains survey output, read it before replacing it.
 3. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
-4. Use `ws/mental_models.find` for missing mental-model areas.
+4. Use `{{.McpNamespace}}/mental_models.find` for missing mental-model areas.
 5. Read files named in `## Contract Instructions`, `## Integration Test
    Instructions`, and `## Details`.
 6. Treat legacy skeleton artifacts as locked inputs only when an older brief

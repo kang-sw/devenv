@@ -30,7 +30,7 @@ Scope
 
 ### 1. Premise Gate
 
-1. Run discussion verification first by calling `ws/playbook.print(name: "lead-verify-discussion")` and executing the returned procedure inline; if unavailable, locally identify corrected premises, evidence, constraints, reuse opportunities, over-alignment risks, countercases, and unresolved unknowns.
+1. Run discussion verification first by calling `{{.McpNamespace}}/playbook.print(name: "lead-verify-discussion")` and executing the returned procedure inline; if unavailable, locally identify corrected premises, evidence, constraints, reuse opportunities, over-alignment risks, countercases, and unresolved unknowns.
 2. If a material premise fails, return premise status, corrected premises, blocking reason, and next action; stop before design review.
 3. If multiple plausible premises depend on an unmade user decision, ask one focused question, include the competing premise options, and stop before creating artifacts.
 4. Treat a premise as blocking when the design review would rely on it and it is contradicted or unsupported.
@@ -38,7 +38,7 @@ Scope
 
 ### 2. Neutral Brief
 
-1. Call `ws/path.generate(kind: "review", stems: ["verify-design-brief", "verify-design-review"])`; capture `<brief-path>` and `<review-path>`; if path generation fails, report failure and stop.
+1. Call `{{.McpNamespace}}/path.generate(kind: "review", stems: ["verify-design-brief", "verify-design-review"])`; capture `<brief-path>` and `<review-path>`; if path generation fails, report failure and stop.
 2. Write `<brief-path>` using **Design Brief template**.
 3. Audit the brief against corrected premises; remove persuasion, lead preference, and unsupported claims.
 4. Keep user preferences only under `Preferences To Treat As Preferences`.

@@ -585,20 +585,25 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
 		t.Fatalf("wsflow playbook output contains bare ws namespace notation:\n%s", body)
 	}
+	if strings.Contains(body, "{{.") {
+		t.Fatalf("wsflow playbook output contains unsubstituted placeholder:\n%s", body)
+	}
 	for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("wsflow playbook output missing %q:\n%s", want, body)
 		}
 	}
+	if !strings.Contains(body, "ws.lead.login") {
+		t.Fatalf("wsflow playbook output rewrote literal ws.lead.login tool name:\n%s", body)
+	}
 }
 
-func TestProductModeBlockSelectionAndNamespaceSafety(t *testing.T) {
+func TestProductModeBlockSelection(t *testing.T) {
 	t.Setenv(envNamespace, "wsflow")
 	input := strings.Join([]string{
-		"shows knows follows workflows rows: news/feed",
-		"ws/tool ws:skill ws MCP ws plugin ws project ws runtime ws workflow ws user ws agent ws agents ws-managed ws-owned",
+		"shared text",
 		fullOnlyStart,
-		"full ws only ws.mercenary.call exec.shell",
+		"full-only text",
 		fullOnlyEnd,
 		wsflowOnlyStart,
 		"wsflow-only text",
@@ -607,12 +612,12 @@ func TestProductModeBlockSelectionAndNamespaceSafety(t *testing.T) {
 
 	t.Setenv(envNoAgent, "1")
 	wsflow := renderProductModePlaybookBody(input)
-	for _, forbidden := range []string{"showsflow", "knowsflow", "followsflow", "workflowsflow", "rowsflow:", "newsflow/", "ws.mercenary.", "exec.shell", fullOnlyStart, wsflowOnlyStart} {
+	for _, forbidden := range []string{"full-only text", fullOnlyStart, wsflowOnlyStart} {
 		if strings.Contains(wsflow, forbidden) {
 			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
 		}
 	}
-	for _, want := range []string{"shows knows follows workflows rows: news/feed", "wsflow/tool", "wsflow:skill", "wsflow MCP", "wsflow plugin", "wsflow project", "wsflow runtime", "wsflow workflow", "wsflow user", "wsflow agent", "wsflow agents", "wsflow-managed", "wsflow-owned", "wsflow-only text"} {
+	for _, want := range []string{"shared text", "wsflow-only text"} {
 		if !strings.Contains(wsflow, want) {
 			t.Fatalf("wsflow render missing %q:\n%s", want, wsflow)
 		}
@@ -623,8 +628,62 @@ func TestProductModeBlockSelectionAndNamespaceSafety(t *testing.T) {
 	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
 		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
 	}
-	if !strings.Contains(full, "full ws only ws.mercenary.call exec.shell") {
+	if !strings.Contains(full, "full-only text") {
 		t.Fatalf("full render omitted full-only content:\n%s", full)
+	}
+}
+
+func TestReservedNamespaceVarsDoNotRequireFrontmatter(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"namespace-pb/namespace-pb.md": `---
+kind: print
+delegates: false
+---
+Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+Actual tool: ws.lead.login.
+`,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", map[string]string{
+		"McpNamespace":   "spoof",
+		"SkillNamespace": "spoof",
+	}, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.lead.login"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "spoof") {
+		t.Fatalf("caller context overrode reserved namespace vars:\n%s", body)
+	}
+}
+
+func TestPlaybookReservedNamespaceVarsFullWs(t *testing.T) {
+	t.Setenv(envNamespace, "")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"namespace-pb/namespace-pb.md": `---
+kind: print
+delegates: false
+---
+Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+`,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, want := range []string{"ws/tickets.find", "ws:lead-discuss"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, body)
+		}
 	}
 }
 
@@ -978,7 +1037,7 @@ func TestTermsDifferThreeWay(t *testing.T) {
 }
 
 func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
-	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "LightModel", "CoreModel", "DeepModel"} {
+	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "LightModel", "CoreModel", "DeepModel", "McpNamespace", "SkillNamespace"} {
 		if !reservedToolVarNames[name] {
 			t.Errorf("reservedToolVarNames missing %q", name)
 		}
@@ -1070,6 +1129,9 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	// Verify the dead-path fix: self-reinvoke uses playbook.print, not ws:lead-workflow-manual.
 	if !strings.Contains(body, `ws/playbook.print(name: "lead-workflow-manual")`) {
 		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.print", body)
+	}
+	if strings.Contains(body, "{{.") {
+		t.Errorf("body %q: unsubstituted placeholder remains", body)
 	}
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {

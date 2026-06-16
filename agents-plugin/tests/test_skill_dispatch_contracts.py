@@ -25,8 +25,11 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn('ws/playbook.print(name: "lead-proceed")', shim)
         self.assertIn("Always route code-editing work through the lead-implement procedure", text)
         self.assertIn("## Routing Verdict", text)
-        self.assertIn("NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
-        self.assertIn('If `NEXT:` names `lead-implement`, call `ws/playbook.print(name: "lead-implement")`', text)
+        self.assertIn("NEXT: <{{.SkillNamespace}}:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
+        self.assertIn(
+            'If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")`',
+            text,
+        )
         self.assertIn("- **Migration Anchor**: <loaded | n/a | missing | conflict>", text)
         self.assertIn("especially Slice and Reason, as caller-provided scope", text)
         self.assertIn("before any source inspection, planning, or editing", text)
