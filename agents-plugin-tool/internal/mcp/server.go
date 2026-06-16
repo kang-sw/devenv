@@ -2146,7 +2146,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.print",
-			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Full ws; not wsflow-only."),
+			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2158,7 +2158,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Full ws; not wsflow-only."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

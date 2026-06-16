@@ -1189,13 +1189,16 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list"} {
+	for _, visible := range []string{"api.list", "config.show", "tickets.list", "playbook.print", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
 	}
 	if !strings.Contains(list, "wsflow") {
 		t.Fatalf("tools/list did not use namespace override in descriptions: %s", list)
+	}
+	if strings.Contains(list, "Full ws") || strings.Contains(list, "full ws") {
+		t.Fatalf("tools/list retained full-ws-only playbook wording in wsflow mode: %s", list)
 	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])

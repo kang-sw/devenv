@@ -149,8 +149,9 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 }
 
 // delegationTip returns the harness-aware continuity tip fragment appended to the
-// rendered body of delegates:true playbooks. It includes the always-on mercenary tip
-// noting the ws.mercenary.call path is always reachable on request.
+// rendered body of delegates:true playbooks. Full ws output includes the
+// always-on mercenary tip; wsflow no-agent output omits it because the mercenary
+// surface is hidden there.
 func delegationTip(harness string) string {
 	term := terminologyForHarness(harness)
 	continueIdiom := term["ContinueIdiom"]
@@ -162,12 +163,14 @@ func delegationTip(harness string) string {
 	sb.WriteString("` to send follow-up messages to the same agent rather than spawning a new one. ")
 	sb.WriteString("The playbook surface keeps no agent registry; ")
 	sb.WriteString("record the agent id in your workflow state if you need it across turns.")
-	// Unit 3: always-on mercenary tip — present in every delegates:true rendering.
-	sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
-	sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
-	sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
-	sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
-	sb.WriteString(" agent id you can resume with the same continuation idiom.")
+	if !NoAgentMode() {
+		// Unit 3: always-on mercenary tip — present in every full-ws delegates:true rendering.
+		sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
+		sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
+		sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
+		sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
+		sb.WriteString(" agent id you can resume with the same continuation idiom.")
+	}
 	return sb.String()
 }
 
@@ -240,6 +243,61 @@ func mercenaryGuidanceBlock() string {
 	return "\n\n**Delegation mode (prefer_mercenary active):** Default guidance for this session is" +
 		" to use the mercenary path (`ws.mercenary.call`) rather than a host-native subagent." +
 		" The native subagent path remains available if you prefer it."
+}
+
+func renderProductModePlaybookBody(body string) string {
+	namespace := RuntimeNamespace()
+	if namespace != "ws" {
+		body = namespaceText(body)
+	}
+	if NoAgentMode() {
+		body = removeNoAgentPlaybookGuidance(body)
+	}
+	return body
+}
+
+func removeNoAgentPlaybookGuidance(body string) string {
+	lines := strings.Split(body, "\n")
+	filtered := make([]string, 0, len(lines))
+	skipPersistentAgents := false
+	skipPlannedOrSpecialized := false
+	skipPersistentTask := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			skipPlannedOrSpecialized = trimmed == "## Planned Or Specialized"
+		}
+		if strings.HasPrefix(trimmed, "### ") {
+			skipPersistentAgents = trimmed == "### Persistent agents"
+		}
+		if strings.HasPrefix(trimmed, "Persistent task:") {
+			skipPersistentTask = true
+			continue
+		}
+		if skipPersistentTask && strings.HasPrefix(trimmed, "Review artifacts:") {
+			skipPersistentTask = false
+		}
+		if skipPersistentAgents || skipPlannedOrSpecialized || skipPersistentTask {
+			continue
+		}
+		if noAgentPlaybookLine(line) {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
+}
+
+func noAgentPlaybookLine(line string) bool {
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "ws.mercenary.") ||
+		strings.Contains(lower, "prefer_mercenary") ||
+		strings.Contains(lower, "mercenary") ||
+		strings.Contains(lower, "exec.") ||
+		strings.Contains(lower, "full ws") {
+		return true
+	}
+	return false
 }
 
 // resolveRsrcRoot resolves the rsrc tree root for a playbook tool call.
@@ -346,7 +404,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		}
 	}
 
-	return body, recommendedTier, nil
+	return renderProductModePlaybookBody(body), recommendedTier, nil
 }
 
 // printPlaybook loads a playbook and returns its rendered body text inline.

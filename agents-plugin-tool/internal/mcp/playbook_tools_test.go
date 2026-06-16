@@ -566,6 +566,48 @@ func TestPlaybookToolsVisibleInToolsList(t *testing.T) {
 	}
 }
 
+func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, forbidden := range []string{"ws/", "ws:", "ws.mercenary.", "exec.", "Full ws", "full ws"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow playbook output contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow playbook output missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestDelegateTipOmitsMercenaryInNoAgentMode(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Fatalf("delegate output missing continuity tip:\n%s", body)
+	}
+	if strings.Contains(body, "Mercenary path") || strings.Contains(body, "ws.mercenary.") {
+		t.Fatalf("no-agent delegate output contains mercenary guidance:\n%s", body)
+	}
+}
+
 func TestPlaybookToolsSchemaNameRequired(t *testing.T) {
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
