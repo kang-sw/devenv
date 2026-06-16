@@ -20,6 +20,12 @@ prompt and may provide a `domain_hint`. The tool owns domain resolution,
 manager dispatch, and aggregation, then returns a synchronous answer to the
 caller.
 
+> [!note] Planned 🚧
+> The agent-backed ask behavior is being removed from ws. `ws/api.ask` and its
+> manager-dispatch semantics will no longer be a supported API documentation
+> lookup path. If `ws/api.list` remains, it is only deterministic read-only
+> cache discovery.
+
 ## API Docs Cache Layout {#260505-api-docs-cache-layout}
 
 API documentation cache entries live under:
@@ -52,6 +58,10 @@ returns malformed prose, the runtime can recover explicit mentions of existing
 domains from the router output; otherwise malformed routing is reported as an
 error.
 
+> [!note] Planned 🚧
+> Runtime-owned domain routing and pre-router agent behavior will be removed
+> with `ws/api.ask`.
+
 ## API Docs Synchronous Aggregation {#260505-api-docs-synchronous-aggregation}
 
 `ws/api.ask` is synchronous from the caller's perspective. Internally, it fans
@@ -62,6 +72,10 @@ Same-domain work is serialized within the MCP process. Different domains can
 run concurrently. Partial success is preserved: if at least one domain returns
 an answer, failed domains are reported alongside successful sections. The tool
 returns an error only when all resolved domains fail.
+
+> [!note] Planned 🚧
+> API-doc manager fan-out and answer aggregation will be removed with
+> `ws/api.ask`.
 
 ## API Docs Async Jobs {#260508-api-docs-async-jobs}
 
@@ -79,6 +93,11 @@ progress, errors, final answer availability, timestamps, and cancellation state.
 If the caller times out after starting a job, the job key remains the recovery
 handle. A later caller can inspect status or collect the result without
 restarting cache bootstrap or manager fetch work.
+
+> [!note] Planned 🚧
+> The recoverable API documentation job surface is being removed:
+> `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, and `ws/api.cancel` will
+> leave the ws MCP surface.
 
 ## API Docs Manager Sessions {#260505-api-docs-manager-sessions}
 
@@ -101,6 +120,9 @@ Inactive manager sessions are reused while warm. If an idle inactive manager is
 older than the API-doc hot-cache TTL, the runtime erases and re-registers it
 before answering the next request. Active managers are preserved.
 
+> [!note] Planned 🚧
+> API-doc manager sessions will be removed with the agent-backed ask surface.
+
 ## API Docs Staleness, Fetch, And Bootstrap {#260505-api-docs-staleness-fetch-bootstrap}
 
 Staleness, fetching, and cache bootstrapping are prompt-owned manager behavior.
@@ -110,6 +132,11 @@ The `api-doc-manager` prompt instructs managers to bootstrap missing domain
 cache files, run staleness checks, fetch official documentation when the cache
 is absent or stale, update cached summaries, and answer using cached paths or
 official source URLs as citations.
+
+> [!note] Planned 🚧
+> Runtime-dispatched manager prompts will no longer own API documentation
+> fetching, staleness checks, or answer synthesis after the ask surface is
+> removed.
 
 ## API Docs Conditional Prompts {#260505-api-docs-conditional-prompts}
 
@@ -121,6 +148,10 @@ When `cargo-brief` is available on `PATH`, the runtime appends the
 That prompt guides Rust API
 lookups toward the local cargo-brief workflow before falling back to ordinary
 cache behavior.
+
+> [!note] Planned 🚧
+> Conditional API-doc manager prompt append behavior will be removed with the
+> manager-session path.
 
 ## API Docs Worker Guidance {#260505-api-docs-worker-guidance}
 
@@ -134,3 +165,9 @@ Workers should not browse or fetch third-party API docs directly when
 `ws/api.ask` or `ws/api.ask_async` can answer the question. They should pass a
 domain hint only when the intended cache domain is known; otherwise the
 pre-router owns domain selection.
+
+> [!note] Planned 🚧
+> Worker guidance will stop routing ordinary external API documentation
+> questions through `ws/api.ask` or `ws/api.ask_async`. Until a future
+> pure-tooling `api.*` namespace exists, agents should use scoped native
+> exploration with official-source citation and explicit staleness caveats.

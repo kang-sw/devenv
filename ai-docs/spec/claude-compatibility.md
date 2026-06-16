@@ -111,6 +111,12 @@ The Codex-first API documentation surface is `ws/api.list`, `ws/api.ask`, and
 the async API job tools `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, and
 `ws/api.cancel`.
 
+> [!note] Planned 🚧
+> The agent-backed API documentation ask and async job tools are being removed
+> from the Codex-first surface. Claude compatibility guidance should no longer
+> advertise `ws/api.ask`, `ws/api.ask_async`, `ws/api.status`, `ws/api.result`,
+> or `ws/api.cancel` after that removal.
+
 ## Claude Plugin Manifest And Marketplace {#260505-claude-plugin-manifest-marketplace}
 
 The active plugin package declares a Claude compatibility manifest under

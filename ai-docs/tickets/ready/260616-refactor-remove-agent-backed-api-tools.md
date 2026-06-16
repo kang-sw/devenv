@@ -6,6 +6,21 @@ related:
   260609-refactor-ws-api-ask-corpus-routing: dropped predecessor; replaced by deletion-only M4 scope
   260616-epic-api-namespace-documentation-memory-tooling: deferred follow-up for a pure-tooling api namespace
   260616-refactor-wsflow-product-mode-convergence: follow-up; wsflow convergence waits until the agent-backed api surface is removed
+spec:
+  - 260505-api-documentation-mcp-tools
+  - 260505-api-docs-mcp-surface
+  - 260505-api-docs-worker-guidance
+  - 260505-claude-api-docs-cli-fallback
+  - 260505-workflow-primitive-reference
+spec-remove:
+  - 260508-api-documentation-async-mcp-tools
+  - 260508-api-docs-async-jobs
+  - 260505-api-docs-domain-routing
+  - 260505-api-docs-synchronous-aggregation
+  - 260505-api-docs-manager-sessions
+  - 260512-api-doc-agent-backend-selection
+  - 260505-api-docs-staleness-fetch-bootstrap
+  - 260505-api-docs-conditional-prompts
 related-mental-model:
   - api-documentation-cache
   - mcp-runtime
@@ -84,13 +99,3 @@ Verification: full ws and wsflow package tests pass; runtime capabilities and
 orientation, spec, or mental model instructs agents to call `ws/api.ask` or its
 async job tools; any retained `api.list` test proves it performs only
 deterministic read-only discovery.
-
-## Spec Impact
-
-- Target spec areas: `mcp-tools.md`, `api-documentation-cache.md`,
-  `claude-compatibility.md`, and `workflow-skills.md`.
-- Expected caller-visible change: `api.ask`, `api.ask_async`, `api.status`,
-  `api.result`, and `api.cancel` are removed from the ws MCP surface; workflow
-  guidance no longer routes external API documentation lookup through an
-  agent-backed MCP tool.
-- Contract-first spec: yes. Resolve at ready promotion via `lead-write-spec`.

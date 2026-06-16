@@ -80,6 +80,13 @@ Prompts sent to `ws.mercenary.call` and wsflow subagents are
 written in English so delegated work products stay consistent with English
 AI-authored repository artifacts.
 
+> [!note] Planned 🚧
+> Workflow primitive guidance will stop naming `ws/api.ask` and its async job
+> tools for external API documentation lookup. Until a future pure-tooling
+> `api.*` namespace is designed, skills should route dependency/API
+> documentation questions through scoped native exploration with official-source
+> citation and staleness caveats.
+
 Codex-facing workflow skill guidance presents MCP primitives as the primary ws
 runtime surface. Promptless `ws.mercenary.register(name: "<agent-name>")` is the
 general-purpose named-agent form; role-specific delegates obtain a self-contained

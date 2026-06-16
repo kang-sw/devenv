@@ -161,7 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
-| `260616-refactor-remove-agent-backed-api-tools` | todo | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
+| `260616-refactor-remove-agent-backed-api-tools` | ready | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | todo | After M4, collapse wsflow onto product-mode playbook rendering and remove curated skill bodies |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
@@ -231,9 +231,11 @@ dropped tickets live in hidden archive dirs and git history.
   reviewer-tier default) re-homed to
   `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (done, was promoted
   2026-06-11). **M4**
-  (`260616-refactor-remove-agent-backed-api-tools`, todo) — remove the
-  agent-backed `api.ask` family and stale guidance from the playbook pivot. The
-  dropped corpus-routing predecessor is replaced by a future outside-epic board:
+  (`260616-refactor-remove-agent-backed-api-tools`, ready) — remove the
+  agent-backed `api.ask` family and stale guidance from the playbook pivot;
+  contract-first spec markers are in place for MCP/API-doc/compat/workflow
+  guidance removal. The dropped corpus-routing predecessor is replaced by a
+  future outside-epic board:
   `260616-epic-api-namespace-documentation-memory-tooling`, where `api.*` becomes
   pure documentation, corpus, hierarchical memory, and playbook-manual tooling
   with no MCP-owned agent delegation. **Post-M4:**

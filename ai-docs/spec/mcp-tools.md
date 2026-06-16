@@ -590,6 +590,14 @@ returns an `api_job_key`; `api.status` reports routing and per-domain progress;
 `api.result` returns the final answer when available; and `api.cancel` stops
 active work on a best-effort basis. {#260508-api-documentation-async-mcp-tools}
 
+> [!note] Planned 🚧
+> The agent-backed API documentation question tools are being retired:
+> `api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel` will
+> leave the ws MCP surface. Any remaining `api.list` behavior is limited to
+> deterministic read-only local cache discovery. Workflow guidance routes
+> external dependency/API documentation questions through scoped native
+> exploration until a future pure-tooling `api.*` namespace is designed.
+
 ## Exec Job MCP Tools {#260524-exec-job-mcp-tools}
 
 The `exec.*` tool family exposes durable command execution jobs for trusted lead
