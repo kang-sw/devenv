@@ -1,5 +1,7 @@
 ---
 kind: print
+includes:
+  - task-list
 ---
 # Write Ticket
 
@@ -8,13 +10,15 @@ Target: user request
 ## Invariants
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
-- Aside from required conventions and `ai-docs/_index.md` when focus changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or direct host-native exploration-worker dispatch (see lead-workflow-manual playbook) for graph discovery.
+- Aside from required conventions, focus updates, and explicitly routed spec or mental-model checks, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Workset tickets stay non-hierarchical operating-context collections; never add, remove, or change `parent:` based on workset inclusion.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
 - Ready tickets require spec addressing, not mandatory planned spec text.
 - Ordinary `todo/` edits leave the ticket in `todo/`; proceed-routed actionable `todo/` tickets move to `ready/` only after intent review and spec-address check pass.
+- Persist only user-confirmed decisions; keep unconfirmed mechanisms, future-scope hints, and draft forward notes out of tickets and focus text.
+- Before discussion-derived ticket cleanup, resolve the Open Decision Queue with the user and write only confirmed queue items.
 
 ## On: invoke
 
@@ -34,22 +38,26 @@ Target: user request
 2. For actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
 3. For workset creation or edits, verify each existing included ticket's path, current status directory, and stated role; convert missing tickets to planned references or stop on a blocker.
 
-### 4. Write
+### 4. Consent Gate
+
+1. Apply `judge: needs-open-decision-queue`; if it fires, run **Open Decision Queue** before editing ticket text.
+
+### 5. Write
 
 1. For a new ticket, run **Create Ticket**.
 2. For an existing ticket, run **Edit Ticket**.
 
-### 5. Verify
+### 6. Verify
 
 1. Run **Intent Review**.
 2. Run **Spec-address Check**.
 
-### 6. Commit
+### 7. Commit
 
 1. If no file changed because the requested move was refused, skip commit.
 2. Commit edited paths with `ws/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
-### 7. Handoff
+### 8. Handoff
 
 1. Run **Output Handoff**.
 
@@ -63,19 +71,20 @@ Target: user request
 ### 2. Draft
 
 1. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
-2. Populate `related-mental-model` with consulted or newly relevant mental-model stems, without `.md`; omit when none applied.
+2. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure, without `.md`; omit when none applied.
 
 ### 3. Shape
 
 1. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
-2. For `epic`: reference existing/planned children; call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline for child creation or child edit.
-3. For `workset`: write context, focus, existing included tickets listed by stem/path with current status and role, and exit criteria.
-4. For `workset`: list planned-but-not-created work in `## Planned References` with a provisional label, intended role, and creation condition; do not assign status/path or `parent:`.
-5. For `workset`: if the user also requested included actionable ticket creation or edits, record planned references unless explicit cascade owns those ticket edits.
-6. For `workset` cascade: create or edit actionable tickets in separate commits, then update the workset to reference final paths/statuses; never add `parent:` because of workset inclusion.
-7. For actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
-8. For each actionable phase, run **Apply Ticket Content**.
-9. For actionable tickets, note inter-phase dependencies explicitly.
+2. For `epic`: reference existing/planned children.
+3. For `epic`: if child creation or edit is needed, finish the epic edit first, then start a separate `lead-write-ticket` invocation scoped to the child.
+4. For `workset`: write context, focus, existing included tickets listed by stem/path with current status and role, and exit criteria.
+5. For `workset`: list planned-but-not-created work in `## Planned References` with a provisional label, intended role, and creation condition; do not assign status/path or `parent:`.
+6. For `workset`: if the user also requested included actionable ticket creation or edits, record planned references unless explicit cascade owns those ticket edits.
+7. For `workset` cascade: create or edit actionable tickets in separate commits, then update the workset to reference final paths/statuses; never add `parent:` because of workset inclusion.
+8. For actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
+9. For each actionable phase, run **Apply Ticket Content**.
+10. For actionable tickets, note inter-phase dependencies explicitly.
 
 ### 4. Ready Guard
 
@@ -92,7 +101,7 @@ Target: user request
 
 1. Apply the requested change: phase update, content update, or status move.
 2. For `epic`, keep edits board-level.
-3. For `epic` implementation detail, stop after the epic edit and call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline for the child ticket.
+3. For `epic` implementation detail, finish the epic edit first, then start a separate `lead-write-ticket` invocation scoped to the child ticket.
 4. For `workset`, keep edits to non-hierarchical operating context and included-ticket notes.
 
 ### 3. Move
@@ -110,15 +119,25 @@ Target: user request
 
 ## On: Apply Ticket Content
 
-1. Capture goals, contracts, and agreed API/type/event/UI sketches.
+1. Capture confirmed goals, contracts, and agreed API/type/event/UI sketches.
 2. Capture completion boundary and deferred scope.
-3. Capture constraints and rationale.
+3. Capture confirmed constraints and rationale.
 4. Capture settled implementation strategy decisions; include suggested strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
 5. Capture rejected alternatives.
-6. Capture forward-compatibility guardrails.
+6. Capture confirmed forward-compatibility guardrails.
 7. Capture verification expectations.
 8. Capture enough detail that a fresh implementer can build the intended result without filling settled gaps.
 9. Exclude source-local edit notes unless settled constraints.
+
+## On: Open Decision Queue
+
+1. If the user has not already approved persistence, ask whether to persist the discussion into tickets or specs; stop with no edits when they decline or do not answer.
+2. List every unresolved or unconfirmed item that could affect ticket text: mechanism decisions, rejected alternatives, future-scope hints, Result Forward notes, focus "Next" lines, and comment/note proposals.
+3. Create or refresh the visible Open Decision Queue using the task-list guidance appended to this playbook.
+4. Ask about one queue item at a time; after each answer, update the visible queue status before asking the next item.
+5. Continue only when every queue item is confirmed, rejected, or explicitly deferred.
+6. Write confirmed items only; omit rejected, deferred, or unanswered items unless the user explicitly approves recording their status.
+7. Never write draft decisions for later correction.
 
 ## On: Intent Review
 
@@ -130,8 +149,9 @@ Target: user request
 6. Check whether related-ticket decisions that constrain this implementation slice were captured.
 7. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
 8. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases.
-9. Fix gaps in-place.
-10. Present a brief correction summary, or confirm nothing was missed.
+9. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus "Next" line was written.
+10. Fix confirmed gaps in-place; return unconfirmed gaps to the Open Decision Queue instead of writing them.
+11. Present a brief correction summary, or confirm nothing was missed.
 
 ## On: Spec-address Check
 
@@ -140,7 +160,7 @@ Target: user request
 1. Skip `epic`, `research`, and `workset`.
 2. Treat requested `todo/` -> `ready/` promotion as `ready/` for this check.
 3. Apply `judge: spec-address-gate` before committing a new `ready/` ticket, a `ready/` promotion, or a `ready/` focus entry.
-4. If Spec-address Check fails, do not move the ticket to `ready/`, do not add a `Ticket Focus` entry, do not commit, and report the blocker.
+4. If Spec-address Check fails, do not move the ticket to `ready/` or add a `Ticket Focus` entry; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
 
 ### 2. Todo Handling
 
@@ -170,7 +190,7 @@ Target: user request
 1. For `epic`, do not suggest proceeding on the epic path.
 2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
 3. For `workset`, suggest one concrete next action: proceed/promote an existing included actionable ticket, or create a planned reference as a new actionable ticket; never suggest proceeding or promoting the workset itself.
-4. For actionable tickets, suggest `ws:lead-proceed` unless `judge: missing-spec-address` fired.
+4. For actionable tickets with valid spec addressing, suggest `ws:lead-proceed`; when spec addressing blocks readiness, report the blocker and omit a proceed suggestion.
 5. State that proceed routes to implementation readiness; the lead-implement procedure resolves plan depth and execution mode.
 6. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
 7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
@@ -244,6 +264,12 @@ No: ticket only needs a spec area for post-implementation closeout, final behavi
 
 Trigger: user asks to cascade broadly, reorganize a board and children, or update parent and child tickets beyond target-constraining decisions.
 Do not trigger: a ticket merely has `related:` links or default cross-ticket decision review applies.
+
+### judge: needs-open-decision-queue
+
+Trigger: discussion-derived persistence or ticket cleanup would write any mechanism decision, rejected alternative, future-scope hint, Result Forward note, focus "Next" line, or note/comment proposal not already explicitly confirmed by the user.
+Trigger: the user asks to persist a discussion whose open items are mixed with confirmed decisions.
+Do not trigger: mechanical status moves, already-confirmed ticket edits, or creation from a fully specified user request with no unresolved discussion residue.
 
 ### judge: ticket-shape
 

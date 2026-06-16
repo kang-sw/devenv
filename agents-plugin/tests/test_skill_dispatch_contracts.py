@@ -26,7 +26,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Always route code-editing work through the lead-implement procedure", text)
         self.assertIn("## Routing Verdict", text)
         self.assertIn("NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
-        self.assertIn('If `NEXT: lead-implement`, call `ws/playbook.print(name: "lead-implement")`', text)
+        self.assertIn('If `NEXT:` names `lead-implement`, call `ws/playbook.print(name: "lead-implement")`', text)
+        self.assertIn("- **Migration Anchor**: <loaded | n/a | missing | conflict>", text)
+        self.assertIn("especially Slice and Reason, as caller-provided scope", text)
+        self.assertIn("before any source inspection, planning, or editing", text)
         self.assertNotIn("**Implementation Route**", text)
         self.assertNotIn("**Implementation Verdict**", text)
         self.assertNotIn("**Verdict Basis**", text)
@@ -40,6 +43,8 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Do not use `NEXT:`", text)
         self.assertIn("Record `<current-branch>`.", text)
         self.assertIn("Apply `judge: branch-mode` to `<current-branch>`.", text)
+        self.assertIn("Delegated implementation has minimum plan-depth `brief`", text)
+        self.assertIn("extra docs must be listed in brief References", text)
         self.assertEqual(
             verdict_fields(verdict),
             [

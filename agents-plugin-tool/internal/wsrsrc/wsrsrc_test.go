@@ -487,6 +487,59 @@ func TestAutoIncludeConcatenated(t *testing.T) {
 	}
 }
 
+func TestAutoIncludePrefersPlaybookLocalHarness(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - task-list\n---\nBody text.\n")
+	writeFile(t, root, "pb/task-list.codex.md", "Codex task-list guidance.\n")
+	writeFile(t, root, "pb/task-list.md", "Neutral task-list guidance.\n")
+	writeFile(t, root, "task-list.md", "Root task-list guidance.\n")
+
+	m, err := GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	pb, err := Load(root, "pb", "codex", nil)
+	if err != nil {
+		t.Fatalf("Load codex: %v", err)
+	}
+	if !strings.Contains(pb.Body, "Codex task-list guidance.") {
+		t.Errorf("Body = %q: missing local codex include", pb.Body)
+	}
+	if strings.Contains(pb.Body, "Neutral task-list guidance.") || strings.Contains(pb.Body, "Root task-list guidance.") {
+		t.Errorf("Body = %q: codex include should override local neutral and root fallback", pb.Body)
+	}
+}
+
+func TestAutoIncludeFallsBackToPlaybookLocalBaseBeforeRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - task-list\n---\nBody text.\n")
+	writeFile(t, root, "pb/task-list.md", "Neutral task-list guidance.\n")
+	writeFile(t, root, "task-list.md", "Root task-list guidance.\n")
+
+	m, err := GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	pb, err := Load(root, "pb", "claude", nil)
+	if err != nil {
+		t.Fatalf("Load claude: %v", err)
+	}
+	if !strings.Contains(pb.Body, "Neutral task-list guidance.") {
+		t.Errorf("Body = %q: missing local base include", pb.Body)
+	}
+	if strings.Contains(pb.Body, "Root task-list guidance.") {
+		t.Errorf("Body = %q: local base include should override root fallback", pb.Body)
+	}
+}
+
 func TestAutoIncludeDangling(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - missing\n---\nbody\n")
@@ -710,6 +763,59 @@ func TestValidateDanglingInclude(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error = %q, want mention of 'ghost'", err)
+	}
+}
+
+func TestValidatePlaybookLocalInclude(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - task-list\n---\nbody\n")
+	writeFile(t, root, "pb/task-list.md", "local include\n")
+	m, _ := GenerateManifest(root)
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	if err := Validate(root); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateBasePlaybookDoesNotUsePseudoHarness(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - task-list\n---\nbody\n")
+	writeFile(t, root, "pb/task-list.md.md", "wrong pseudo-harness include\n")
+	m, _ := GenerateManifest(root)
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	err := Validate(root)
+	if err == nil {
+		t.Fatal("expected dangling include error, got nil")
+	}
+	if strings.Contains(err.Error(), "task-list.md.md") {
+		t.Errorf("Validate used pseudo-harness include path: %v", err)
+	}
+}
+
+func TestValidateSkipsPlaybookLocalIncludeFragments(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\nincludes:\n  - task-list\nvariables:\n  - Name\n---\nbody\n")
+	writeFile(t, root, "pb/task-list.md", "local include can use parent vars: {{.Name}}\n")
+	m, _ := GenerateManifest(root)
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	if err := Validate(root); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	pb, err := Load(root, "pb", "", map[string]string{"Name": "World"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(pb.Body, "World") {
+		t.Errorf("Body = %q: expected parent variable substitution in local include", pb.Body)
 	}
 }
 

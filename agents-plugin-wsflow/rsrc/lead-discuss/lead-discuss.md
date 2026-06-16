@@ -10,12 +10,15 @@ Topic: user request
 ## Invariants
 
 Scope
-- No source edits. Only documentation writes, only in the capture step.
-- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
+- No source edits during discussion.
+- Documentation writes are allowed only in Capture, Ticket Status Transition, or user-approved persistence handlers.
+- With user agreement, unimplemented ticket phases may be edited during Capture to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
 
 Evidence
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge; the project map lists available specs.
+- For missing documented decisions or architecture facts, search the ticket/spec/mental-model cascade before answering.
+- For plugin architecture, host-neutral migration, spawn-removal, or adapter-boundary topics, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` before answering.
 - Use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation-detail questions beyond mental-model docs; read the result before responding.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
@@ -26,6 +29,14 @@ Conversation
 - Use the user's active conversation language for discussion responses.
 - Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
+- Discussion persistence writes only confirmed decisions; ticket cleanup goes through `lead-write-ticket`'s Open Decision Queue.
+
+Response
+- Lead with the load-bearing point before options, caveats, or history.
+- Keep each actionable claim adjacent to its evidence, gap, or assumption label.
+- Put user decisions and next actions immediately after the fact that motivates them.
+- Prefer a concise stance plus the strongest caveat over exhaustive option dumps.
+- If evidence is incomplete, label the gap and next lookup instead of filling it with inference.
 
 ## On: invoke
 
@@ -39,25 +50,37 @@ Conversation
 
 ### 1. Gather Context
 
-1. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
-   For each unloaded doc, run `reference-discovery` and incorporate its returned reference list before responding.
-2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation details.
+1. If the topic touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` once before answering.
+2. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
+   For each unloaded doc, run the `reference-discovery` procedure from `lead-workflow-manual` and incorporate its returned ticket/spec/mental-model paths before responding.
+3. Apply `judge: needs-cascade-lookup`; if it fires, run **Cascade Lookup** before answering.
+4. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
+
+### 1a. Cascade Lookup
+
+1. Search loaded tickets and docs first.
+2. For each loaded ticket or spec stem, call `ws/references.trace`.
+3. Query `ws/tickets.find`, `ws/specs.find`, and `ws/mental_models.find` with concrete terms from the user's claim or missing fact.
+4. Stop when a documented answer is found.
+5. If the cascade has no documented answer, say that before inferring or proposing a next lookup.
 
 ### 2. Route Intent
 
-1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`.
+1. If the user explicitly wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
 2. Apply `judge: needs-intent-frame`; if it fires, emit an Intent Frame before advice.
 3. Apply `judge: needs-interview`; if it fires, enter Interview Workflow before proposing a settled direction.
 
 ### 3. Respond
 
-1. Brainstorm iteratively: suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-2. Continue until the user signals done.
+1. Shape the reply as load-bearing point -> evidence or gap -> user decision or next action.
+2. Brainstorm iteratively: suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+3. Answer bounded requests directly; continue discussion only while the user keeps asking follow-up questions.
 
 ### 4. Capture
 
-1. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+1. When discussion changes unimplemented ticket phases, route ticket cleanup through `lead-write-ticket` unless the user requested a narrow in-place wording edit.
+2. For narrow in-place wording edits, commit the exact edited paths and report them before returning.
 
 ## On: Interview Workflow
 
@@ -81,20 +104,23 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    c. Stop this handler after the lead-write-ticket procedure returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
-   b. No other ticket references this stem -> call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove the `🚧` entry.
+   b. No other ticket references this stem -> call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove or close the linked in-progress spec entry for that stem.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
    d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
 5. Commit through `ws/git.commit`.
 
 ## On: user signals done
 
-1. If the user wants implementation to start, continue through `ws:lead-proceed`.
-2. For persistence without implementation, suggest invoking the lead-write-spec procedure as the next action; it owns whether spec changes are needed.
-3. Then offer ticket persistence:
+1. If the user wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
+2. If the user explicitly asks for durable capture, ticket cleanup, or ticket/spec persistence and has not approved the artifact, ask whether to persist the discussion; stop until the user answers.
+3. If the user approves persistence, route by requested artifact:
+   - **Spec update** - call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline.
    - **New ticket** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline.
-   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline, then append design notes to an existing ticket phase.
-4. Apply **judge: needs-integration-tests** to ticket writes.
-5. Write only what the user approves. No artifact needed for exploratory discussions.
+   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; its Open Decision Queue resolves unconfirmed design notes before any ticket cleanup.
+4. If persistence artifact is unclear, ask one clarifying question and stop.
+5. When ticket persistence creates or edits an implementation phase, apply **judge: needs-integration-tests** and include criteria only when the judged change has end-to-end observable behavior.
+6. Write only what the user approves.
+7. If no artifact is written, respond with the current conclusion, any unresolved decision, and that no files were changed.
 
 ## Judgments
 
@@ -104,6 +130,13 @@ Spawn `reference-discovery` when any of the following hold:
 - The discussion direction shifts to a domain no doc for which has been loaded this session.
 
 Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or `ws/git.log`.
+
+### judge: needs-cascade-lookup
+Search the ticket/spec/mental-model cascade before answering when any of the following hold:
+- The answer depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint that is not already loaded.
+- The answer would otherwise require inferring project direction from memory or local implementation shape.
+
+Does NOT fire when the user asks for status from already-loaded context, or when the remaining question is purely local implementation detail.
 
 ### judge: needs-intent-frame
 Emit an Intent Frame when the user message contains a proposal, evaluation, design direction, causal claim, scope assumption, or trade-off-heavy request.

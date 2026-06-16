@@ -88,7 +88,7 @@ func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, e
 	meta := metaFromFrontmatter(fm)
 
 	// Resolve includes.
-	includeText, err := resolveIncludes(root, meta.Includes, manifest)
+	includeText, err := resolveIncludes(root, name, harness, meta.Includes, manifest)
 	if err != nil {
 		return LoadedPlaybook{}, err
 	}
@@ -235,14 +235,16 @@ func metaFromFrontmatter(fm map[string]any) PlaybookMeta {
 	return meta
 }
 
-// resolveIncludes reads each named include from <root>/<name>.md, verifies its
-// manifest hash, strips its own frontmatter, and returns the bodies joined by a
-// blank line.
+// resolveIncludes reads each named include, verifies its manifest hash, strips
+// its own frontmatter, and returns the bodies joined by a blank line.
 //
-// Includes are flat: they live at the rsrc root as <name>.md and are NOT
-// recursively resolved (no nested includes). This avoids include cycles by
-// design.
-func resolveIncludes(root string, names []string, manifest Manifest) (string, error) {
+// Include resolution is playbook-local first:
+//   - <root>/<playbook>/<include>.<harness>.md
+//   - <root>/<playbook>/<include>.md
+//   - <root>/<include>.md
+//
+// Includes are NOT recursively resolved. This avoids include cycles by design.
+func resolveIncludes(root, playbookName, harness string, names []string, manifest Manifest) (string, error) {
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -251,18 +253,36 @@ func resolveIncludes(root string, names []string, manifest Manifest) (string, er
 		if !isBareStem(name) {
 			return "", fmt.Errorf("include name %q must be a bare stem", name)
 		}
-		relPath := name + ".md"
-		includePath := filepath.Join(root, relPath)
+		includePath, relPath := resolveIncludePath(root, playbookName, name, harness)
 
 		data, err := loadAndVerify(root, includePath, manifest)
 		if err != nil {
-			return "", fmt.Errorf("include %q: %w", name, err)
+			return "", fmt.Errorf("include %q (%s): %w", name, relPath, err)
 		}
 
 		_, body := parseFrontmatter(string(data))
 		parts = append(parts, strings.TrimSpace(body))
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+func resolveIncludePath(root, playbookName, includeName, harness string) (string, string) {
+	if harness != "" {
+		localOverlayRel := filepath.ToSlash(filepath.Join(playbookName, includeName+"."+harness+".md"))
+		localOverlayPath := filepath.Join(root, filepath.FromSlash(localOverlayRel))
+		if _, err := os.Stat(localOverlayPath); err == nil {
+			return localOverlayPath, localOverlayRel
+		}
+	}
+
+	localRel := filepath.ToSlash(filepath.Join(playbookName, includeName+".md"))
+	localPath := filepath.Join(root, filepath.FromSlash(localRel))
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath, localRel
+	}
+
+	rootRel := includeName + ".md"
+	return filepath.Join(root, rootRel), rootRel
 }
 
 // substituteVars replaces {{.Name}} placeholders in body.

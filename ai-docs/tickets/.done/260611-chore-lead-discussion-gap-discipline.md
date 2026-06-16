@@ -11,6 +11,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - prompt-bundle
+completed: 2026-06-15
 ---
 
 # Lead discussion discipline — readable discussion replies + explore-before-gap-fill
@@ -72,6 +73,25 @@ playbook text + the AGENTS.md / skill "Response Discipline" guidance, possibly a
 brevity/structure rule for discussion turns. Verification: review of
 representative discussion replies against a readability/coherence rubric.
 
+### Result (440a71ff) - 2026-06-15
+
+`lead-discuss` now carries an explicit Response invariant group: lead with the
+load-bearing point, keep actionable claims adjacent to evidence/gaps/assumptions,
+place user decisions next to their motivating facts, prefer concise stance over
+option dumps, and label missing evidence instead of inferring. The Respond handler
+now shapes each turn as load-bearing point -> evidence/gap -> user decision/next
+action.
+
+The fresh-reader audit also found pre-existing local coherence issues in the same
+surface, so this phase tightened them: discussion has no source edits; documentation
+writes are confined to Capture, Ticket Status Transition, or explicit persistence
+handlers; implementation handoff to `lead-proceed` stops the discuss handler; and
+ticket-update persistence routes through the lead-write-ticket Edit path.
+
+Verification: fresh-reader audit over `lead-discuss` completed with accepted fixes
+applied; rsrc manifest and wsflow mirror were regenerated; focused wsrsrc/playbook
+and package skill tests passed.
+
 ### Phase 2: Gap → explore-the-cascade-first (no imagination)
 
 When the lead detects it lacks a documented decision or architecture fact, it must
@@ -83,6 +103,32 @@ Consider enforcing the migration-anchor read in `lead-implement` Prep and/or
 spawn-removal, or adapter boundaries (the Prep step today calls `mental_models.find`
 but does not pull the migration anchor). Verification: a gap-handling rule the lead
 follows + (if enforced) a Prep/route step that loads the anchor for in-scope tasks.
+
+### Result (c0f8b768) - 2026-06-15
+
+`lead-discuss` now performs cascade-first documented-fact lookup: migration topics
+load the native-subagent pivot anchor before answering, missing documented decisions
+search loaded docs plus ticket/spec/mental-model references, and the response must
+say when the cascade has no documented answer before inferring or proposing another
+lookup.
+
+`lead-proceed` now handles the migration anchor as a routing artifact, not source
+inspection. The Routing Verdict includes `Migration Anchor`; missing anchors stop
+routing, binding anchor decisions absent from the ticket refresh ticket freshness,
+and anchor conflicts route back to discussion. The proceed -> implement handoff also
+passes the current target and Routing Verdict fields, especially Slice and Reason, as
+caller-provided implementation scope.
+
+`lead-implement` now loads the native-subagent pivot anchor in migration-sensitive
+Prep. Delegated implementation has minimum brief depth, migration-anchor constraints
+are copied into the brief before plan population, and implementers may read only the
+brief, optional plan, and `[Must]` References listed in the brief.
+
+Verification: fresh-reader audits over `lead-discuss`, `lead-proceed`, and
+`lead-implement` drove accepted fixes; rsrc manifest and wsflow mirror were
+regenerated; `go test -count=1 ./internal/wsrsrc ./internal/mcp`,
+`python3 -m unittest discover agents-plugin/tests`, and
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed.
 
 ### Phase 3: Ticket-write consent gate (persist only confirmed decisions)
 
@@ -113,6 +159,32 @@ contradiction. Reinforces the rule and extends its scope beyond `## Decisions`:
 assistant-authored forward/next-phase hints (in Result Forward notes, focus "Next"
 lines, or code comments) are not confirmed decisions — a Result Forward note must
 not assert future scope that the Decisions log contradicts.
+
+### Result (9de975b) - 2026-06-15
+
+`lead-write-ticket` now gates discussion-derived ticket cleanup through an Open
+Decision Queue. The procedure asks for persistence approval when needed, lists
+unresolved decisions in a visible task list, resolves one item at a time, updates
+the queue after each answer, and writes only user-confirmed items. Its intent
+review now rejects unconfirmed mechanism choices, future-scope hints, Result
+Forward notes, and focus "Next" lines.
+
+`lead-discuss` now routes ticket cleanup through `lead-write-ticket` unless the
+user requested a narrow in-place wording edit, and `lead-proceed` treats
+unconfirmed mechanisms or future-scope hints as uncertain freshness rather than
+missing settled decisions to write.
+
+`wsrsrc.Load` now resolves playbook-local include fragments before root-level
+flat includes: `<playbook>/<include>.<harness>.md`, then
+`<playbook>/<include>.md`, then `<include>.md`. `lead-write-ticket` uses this for
+Codex task-list guidance with a neutral fallback. The validator skips local
+include fragments as standalone playbook variants and tests cover harness-local
+selection, fallback order, and validate/load consistency.
+
+Verification: fresh-reader and correctness audits drove accepted fixes; rsrc
+manifest and wsflow mirror were regenerated; `go test -count=1 ./internal/wsrsrc
+./internal/mcp`, `python3 -m unittest discover agents-plugin/tests`, and
+`python3 -m unittest discover agents-plugin-wsflow/tests` passed.
 
 ## Notes
 

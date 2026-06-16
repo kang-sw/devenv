@@ -212,12 +212,25 @@ convergence; the change is wsflow-local.
 Planning skills prepare caller-visible work before implementation.
 
 `lead-discuss` explores a topic without editing source code. It loads project
-context, uses scoped subqueries when search is needed, can promote or move
-tickets when the discussion reaches an actionable state, and recommends an
+context, uses scoped exploration workers when search is needed, can promote or
+move tickets when the discussion reaches an actionable state, and recommends an
 appropriate next workflow step. Discussion responses use the user's active
 conversation language. When the user explicitly wants implementation to start,
 `lead-discuss` invokes `lead-proceed` instead of routing directly to
 `lead-implement`.
+
+Discussion replies keep the load-bearing point, the evidence or gap behind it,
+and the user decision or next action adjacent. The skill favors a concise stance
+with the strongest caveat over exhaustive option dumps, and labels incomplete
+evidence instead of presenting inference as established fact.
+
+When a discussion answer depends on a documented decision, prior rejection,
+architecture fact, or cross-ticket constraint that is not loaded, `lead-discuss`
+searches the ticket/spec/mental-model cascade before answering. Migration topics
+such as plugin architecture, host-neutral migration, spawn-removal, or adapter
+boundaries load the native-subagent pivot anchor before the lead states a
+direction. If the cascade has no documented answer, the reply says that before
+making an inference or proposing the next lookup.
 
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
@@ -250,6 +263,15 @@ stem or `## Spec Impact` can address the work, spec writing fails, or the
 behavior is too underspecified to spec. `Ticket Focus` entries are maintained
 for selected active attention items; only `ready/` entries are direct
 implementation targets.
+
+Discussion-derived ticket persistence is consent-gated. Before ticket cleanup
+writes mechanism decisions, rejected alternatives, future-scope hints, Result
+Forward notes, focus "Next" lines, or note/comment proposals, `lead-write-ticket`
+builds a visible Open Decision Queue, asks whether to persist the discussion
+when persistence was not already approved, resolves one queue item at a time,
+updates the visible queue after each answer, and writes only user-confirmed
+items. Rejected, deferred, unanswered, or otherwise unconfirmed items are omitted
+unless the user explicitly approves recording their status.
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or phase-specific decisions arise
@@ -550,6 +572,12 @@ artifact only; when settled decisions are missing from the ticket, it routes
 through `lead-write-ticket` edit, re-reads the refreshed ticket, and then
 continues scope resolution. When freshness is uncertain, it stops for
 discussion instead of delegating hidden conversation context to a background subagent.
+Unconfirmed mechanisms or future-scope hints are not settled decisions; they
+make freshness uncertain rather than authorizing a ticket write.
+For migration-sensitive targets, `lead-proceed` reads the native-subagent pivot
+anchor as an artifact-only check, reports `Migration Anchor` in the Routing
+Verdict, stops when the anchor is missing, and treats absent binding anchor
+decisions as missing settled decisions.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected scope as
@@ -559,6 +587,15 @@ primitives before `lead-implement`; it requests phase or ticket slicing only
 when scope resolution blocks safe implementation. Public or cross-module
 contract checkpoints are expressed as `lead-implement` brief contract and
 integration-test instructions.
+
+`lead-implement` also loads the native-subagent pivot anchor before editing when
+the target touches plugin architecture, host-neutral migration, spawn-removal,
+or adapter boundaries. Delegated implementation has minimum brief depth; when
+the migration anchor is read, binding implementation constraints from the anchor
+are copied into the brief and the anchor is listed as a `[Must]` reference before
+plan population or implementer dispatch. Delegated implementers receive only the
+brief and optional plan as task input, may read additional documents listed in
+brief References, and must not read the ticket directly.
 
 Before any handoff, `lead-proceed` emits a Routing Verdict with exactly one
 `NEXT:` skill or `stop`. It does not print a full route chain as the active
@@ -689,6 +726,12 @@ workers, documentation updaters) from rendered rsrc delegate playbooks via
 `ws/playbook.render`, not from register-time prompt stems. Public named-agent
 registrations receive delegate-orientation instructions before role-specific
 prompt material.
+
+Rsrc playbooks may declare include fragments by bare stem. Include resolution
+checks `<playbook>/<include>.<harness>.md` first, then
+`<playbook>/<include>.md`, then the root-level `<include>.md` fallback. This
+supports harness-local guidance such as `lead-write-ticket/task-list.codex.md`
+without replacing existing root-level shared includes such as `code-reviewer.md`.
 
 Delegate orientation reserves lifecycle orchestration, reviewer fanout,
 workflow-stage routing, and final documentation ownership for the lead unless a
