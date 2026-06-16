@@ -117,6 +117,16 @@ notation from reserved vars, caller context cannot override the reserved vars,
 and tests fail if shared rsrc playbooks depend on broad `ws` string substitution
 for namespace output.
 
+### Result (ae0c6959) - 2026-06-16
+
+Completed the Phase 1.5 hardening through
+`260616-refactor-explicit-namespace-render-vars`. Playbook product-mode
+namespace output now comes from explicit implicit rsrc variables
+(`McpNamespace`, `SkillNamespace`) rather than broad playbook string
+substitution. Actual MCP tool identifiers remain literal, product markers remain
+the section-selection mechanism, and the canonical rsrc manifest plus wsflow
+mirror were regenerated.
+
 ### Phase 2: absorb prompt.render behavior into playbook.render
 
 Move the current `prompt.render` stem allowlist, context injection, and

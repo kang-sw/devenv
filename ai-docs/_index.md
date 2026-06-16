@@ -164,7 +164,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | ready | After M4, collapse wsflow onto product-mode playbook rendering and remove curated skill bodies |
-| `260616-refactor-explicit-namespace-render-vars` | ready | Replace implicit ws->wsflow playbook string substitution with explicit reserved namespace render vars |
+| `260616-refactor-explicit-namespace-render-vars` | done | Replaced implicit ws->wsflow playbook string substitution with explicit reserved namespace render vars |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
@@ -244,9 +244,10 @@ dropped tickets live in hidden archive dirs and git history.
   with no MCP-owned agent delegation. **Post-M4:**
   `260616-refactor-wsflow-product-mode-convergence` (ready) collapses wsflow
   onto product-mode playbook rendering and removes curated skill bodies. Phase 1
-  landed product-marker rendering; before prompt.render absorption, proceed on
-  `260616-refactor-explicit-namespace-render-vars` (ready) to replace implicit
-  namespace string substitution with explicit reserved render vars. Until the
+  landed product-marker rendering, and Phase 1.5
+  `260616-refactor-explicit-namespace-render-vars` (`.done/`, `ae0c6959`) replaced
+  broad playbook namespace rewriting with explicit reserved render vars. Next:
+  Phase 2 absorbs `prompt.render` behavior into `playbook.render`. Until the
   wsflow convergence phases complete, wsflow is treated as not reliable for serious dogfood. Open: Codex non-skill
   `rsrc/` cache materialization (prereqs `260523`, `260524-codex-cache`).
 - `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,

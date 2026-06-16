@@ -93,7 +93,7 @@ related:
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
 - Passing `"."` or `"<cwd>"` to `ws.lead.login(root)` is ambiguous in plugin-managed sessions; pass the repository's absolute filesystem path.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must reject without a valid `session_key` and direct the caller to `ws.lead.login(root)`.
-- Treating namespace override as a tool rename; wsflow changes user-facing namespace text, while generic MCP tool identifiers stay stable.
+- Treating namespace override as a tool rename; wsflow changes user-facing namespace text, while generic MCP tool identifiers stay stable. In playbook text, use explicit `McpNamespace` / `SkillNamespace` render vars for display notation instead of relying on broad string rewriting.
 - Updating `specs.find` or `mental_models.find` MCP output without the CLI mirror; users dogfood the CLI fallback when MCP host behavior is unclear.
 - Treating `ai-docs/ref/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
 - Migrating agent or exec state into SQLite while also moving large stream payloads into the database; that defeats raw tail/read/grep and increases lock pressure.

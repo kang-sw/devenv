@@ -12,6 +12,7 @@ related-mental-model:
   - prompt-bundle
   - workflow-skills
   - mcp-runtime
+completed: 2026-06-16
 ---
 
 # explicit namespace render vars for wsflow playbooks
@@ -74,3 +75,28 @@ Verification:
 - caller `context` cannot override reserved namespace vars.
 - tests fail if new shared rsrc text relies on broad `ws` string substitution
   for namespace output.
+
+### Result (ae0c6959) - 2026-06-16
+
+Implemented explicit namespace render variables for the playbook surface.
+`McpNamespace` and `SkillNamespace` are implicit rsrc variables that validation
+allows without frontmatter declarations, while the MCP playbook renderer injects
+their runtime values after caller context so product namespace output cannot be
+spoofed.
+
+Shared `agents-plugin/rsrc/` playbook text now uses the explicit variables for
+user-facing `ws/` and `ws:` notation. Literal actual MCP tool identifiers such
+as `ws.lead.login` and `ws.mercenary.*` remain literal. The canonical rsrc
+manifest and byte-identical `agents-plugin-wsflow/rsrc/` mirror were regenerated.
+
+Verification added or updated:
+
+- wsflow `playbook.print` output for `lead-workflow-manual` renders `wsflow/`
+  and `wsflow:` notation from explicit vars, contains no raw `ws/` or `ws:`
+  namespace notation, and leaves literal `ws.lead.login` unchanged.
+- wsflow `playbook.render` output for the shipped `implementer` delegate contains
+  no hidden full-ws guidance, broad-substitution artifacts, or marker comments.
+- full ws output still renders `ws/` and `ws:` notation.
+- caller `context` values cannot override `McpNamespace` or `SkillNamespace`.
+- shipped rsrc validation accepts implicit namespace variables while ordinary
+  undeclared placeholders still fail.

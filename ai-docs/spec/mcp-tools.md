@@ -327,8 +327,10 @@ The playbook surface also follows product mode. In no-agent mode,
 through product-aware selection: `<!-- ws:full-only:start/end -->` regions are
 omitted, `<!-- ws:wsflow-only:start/end -->` regions are included, marker
 comments are never emitted, and the remaining user-facing namespace notation is
-rendered as `wsflow`. Full ws keeps full-only regions, omits wsflow-only
-regions, strips the marker comments, and keeps the `ws` namespace.
+rendered through reserved namespace variables such as `McpNamespace` and
+`SkillNamespace`. In wsflow these variables render as `wsflow`; in full ws they
+render as `ws`. The variables do not rename literal generic MCP tool
+identifiers such as `ws.lead.login`.
 
 ## wsflow Prompt Render Tool {#260529-prompt-render-tool}
 
@@ -415,11 +417,12 @@ Product-mode content selection is separate from harness selection. Shared rsrc
 playbooks may mark full-ws-only or wsflow-only sections with the product markers
 documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.print` and
 `playbook.render` select those sections after harness rendering and before
-returning text or writing a prompt file. Namespace substitution is token-safe:
-it rewrites `ws/` and `ws:` notation plus known product terms such as `ws
-runtime`, `ws workflow`, `ws agent`, `ws-owned`, and `ws-managed`, but does not
-rewrite unrelated words containing `ws` such as `shows`, `knows`, `follows`,
-`rows:`, `news/`, or `workflows`.
+returning text or writing a prompt file. User-facing namespace notation in
+shared playbooks is authored with reserved implicit variables (`McpNamespace`
+for `ws/<tool>` notation and `SkillNamespace` for `ws:<skill>` notation). These
+vars are injected by the playbook tool layer, are available without frontmatter
+declarations, and override caller-supplied `context` keys. Literal MCP tool
+identifiers remain literal unless a dedicated semantic variable is introduced.
 
 A playbook may declare text dependencies in its frontmatter; the renderer
 auto-includes that text at print/render time, so a single `playbook.print(name)`
