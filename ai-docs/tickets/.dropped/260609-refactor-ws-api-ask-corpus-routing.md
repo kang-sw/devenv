@@ -13,6 +13,15 @@ related-mental-model:
 
 # ws api.ask redesign — corpus-routed api-doc playbook
 
+## Dropped
+
+Dropped 2026-06-16. The accepted M4 scope changed from redesigning `api.ask`
+into a corpus-routed playbook methodology to removing the agent-backed
+`api.ask` tool family from the playbook pivot entirely. The deletion work is
+tracked by `260616-refactor-remove-agent-backed-api-tools`. The broader future
+api namespace direction is tracked outside this epic by
+`260616-epic-api-namespace-documentation-memory-tooling`.
+
 ## Background
 
 Milestone M4 of the playbook-factory pivot (epic

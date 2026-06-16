@@ -2,7 +2,7 @@
 title: wsflow product-mode convergence — remove curated skill bodies after M4
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
-  260609-refactor-ws-api-ask-corpus-routing: prerequisite — finish M4 api.ask playbook-methodology redesign before removing the wsflow curated-skill surface
+  260616-refactor-remove-agent-backed-api-tools: prerequisite — remove the agent-backed api.ask surface before product-mode rendering cleanup
   260616-bug-wsflow-playbook-tools-expose-full-ws-guidance: absorbed narrow dogfood symptom; the real issue is missing wsflow product-mode convergence
 related-mental-model:
   - prompt-bundle
@@ -30,16 +30,16 @@ Final target:
 - `prompt.render` is removed after its allowlist/context behavior is absorbed
   into product-mode-aware `playbook.render`.
 
-Timing: do this after M4 api.ask redesign. Until then, treat wsflow as not
-usable for serious dogfood because the current surface can expose full ws
-guidance through `playbook.print` / `playbook.render` while wsflow skills still
-carry a parallel curated procedure corpus.
+Timing: do this after M4 removes the agent-backed `api.ask` surface. Until then,
+treat wsflow as not usable for serious dogfood because the current surface can
+expose full ws guidance through `playbook.print` / `playbook.render` while
+wsflow skills still carry a parallel curated procedure corpus.
 
 ## Decisions
 
-- **Order:** M4 api.ask first; wsflow convergence last. Do not spend effort
-  preserving the current wsflow curated-skill surface during M4 except to avoid
-  breaking source-tree tests unintentionally.
+- **Order:** M4 api tool deletion first; wsflow convergence last. Do not spend
+  effort preserving the current wsflow curated-skill surface during M4 except to
+  avoid breaking source-tree tests unintentionally.
 - **Distinction rule:** ws and wsflow differ only by namespace and capability
   gates: mercenary/external-agent calls and exec permissions exist in full ws
   only; wsflow hides or rejects them.
@@ -87,4 +87,3 @@ old doctrine that wsflow skills are curated semantic rewrites, replacing it with
 the product-mode rendering contract. Verification: full ws and wsflow package
 tests pass, wsflow runtime capabilities omit `prompt.render`, and no maintained
 wsflow skill body duplicates shared playbook text.
-

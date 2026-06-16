@@ -92,11 +92,13 @@ subagents. Direction, decisions, and evidence live in
   (P5), retire the `wsprompt` loader incl. `api.ask`/wsflow `RenderSource` rewire
   (P6). Re-homes the 260609 Phase 2c Editions. Promoted to `ready/` 2026-06-11
   (`88e646c5`). Depends on M3; P6 coordinates `api.ask` prompt source with M4.
-- `260609-refactor-ws-api-ask-corpus-routing` (todo, M4 — api.ask redesign):
-  corpus-routed api-doc playbook, cache index/staleness conventions, async job
-  surface removal. Treat api.ask as a dependency-documentation exploration
-  methodology expressed through a playbook for a general-purpose native subagent,
-  not as a bespoke api runtime agent. Depends on M1; coordinated with M3.
+- `260616-refactor-remove-agent-backed-api-tools` (todo, M4 — api tool
+  deletion): remove the agent-backed `api.ask` family and stale workflow
+  guidance from the playbook pivot. Do not redesign dependency-documentation or
+  hierarchical memory in this epic. The dropped predecessor
+  `260609-refactor-ws-api-ask-corpus-routing` is replaced by this deletion-only
+  scope; the future pure-tooling api namespace leaves through
+  `260616-epic-api-namespace-documentation-memory-tooling`.
 - `260616-refactor-wsflow-product-mode-convergence` (todo, post-M4 — wsflow
   convergence): after M4, remove the curated wsflow skill-body surface and
   collapse wsflow onto product-mode playbook rendering. Long-term ws/wsflow
@@ -198,17 +200,27 @@ subagents. Direction, decisions, and evidence live in
   wsflow differs from full ws by product-mode namespace and by hiding/rejecting
   mercenary/external-agent plus exec capabilities, not by maintaining separate
   workflow procedure text. The cleanup is intentionally delayed until after M4
-  api.ask so the dependency-documentation exploration method lands first; until
-  then, wsflow is not a reliable dogfood target.
+  removes the agent-backed api tool family; until then, wsflow is not a reliable
+  dogfood target.
+
+- **api namespace boundary (confirmed 2026-06-16):** M4 removes the
+  agent-backed `api.ask` family instead of redesigning it inside this epic.
+  Future `api.*` work is outside the playbook-factory pivot and should treat the
+  namespace as deterministic documentation, corpus, hierarchical memory, and
+  agent manual tooling. It must not reintroduce MCP-owned agent delegation or
+  model routing.
 
 ## Completion Criteria
 
 - Done: native subagents are the default delegation path via playbooks; the spawn
   engine is reshaped into a scoped mercenary surface (codex retained,
   implementer/reviewer only) rather than deleted; the actor model is replaced by
-  session-auth; M0–M4 children closed.
+  session-auth; the agent-backed api tool family is removed; M0–M4 children
+  closed.
 - Dropped: direction reversal recorded in the research ticket.
 - Deferred: memory./mutation contracts and TUI implementation leave through
-  their own follow-up tickets. wsflow convergence is no longer an open-ended
-  non-scope item; it is deferred specifically to the post-M4 child
+  their own follow-up tickets. Future pure-tooling api namespace work leaves
+  through `260616-epic-api-namespace-documentation-memory-tooling`. wsflow
+  convergence is no longer an open-ended non-scope item; it is deferred
+  specifically to the post-M4 child
   `260616-refactor-wsflow-product-mode-convergence`.

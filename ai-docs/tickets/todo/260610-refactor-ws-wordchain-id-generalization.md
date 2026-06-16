@@ -3,7 +3,7 @@ title: generalize the word-chain key generator across id-issuing MCP tools
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: prerequisite — introduces the reusable word-chain key generator, wired to session keys only
   260605-epic-ws-playbook-factory-pivot: pivot epic that lands the generator
-  260609-refactor-ws-api-ask-corpus-routing: coordinate — may reshape api_job_key first
+  260616-refactor-remove-agent-backed-api-tools: removes api_job_key from the candidate surface before this follow-up
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
@@ -28,9 +28,9 @@ focus.
 ## Candidate Surfaces
 
 - `exec_key` — `exec.spawn` / `exec.shell` capability tokens.
-- `api_job_key` — `api.ask_async` jobs. Coordinate with M4
-  (`260609-refactor-ws-api-ask-corpus-routing`), which may reshape or remove this
-  surface first; do not double-churn.
+- `api_job_key` — removed from the candidate set once M4
+  (`260616-refactor-remove-agent-backed-api-tools`) deletes `api.ask_async`; do
+  not recreate it for this follow-up.
 - `path.generate` artifact stems.
 - Mercenary continuation handles — under M3 these are already native-agentId
   shaped; evaluate whether a word-chain handle adds value or is needless churn.
@@ -47,8 +47,8 @@ focus.
 
 ## Constraints
 
-- Coordinate `api_job_key` changes with M4 to avoid reshaping the same surface
-  twice.
+- Do not include `api_job_key` unless M4 explicitly leaves an async api job
+  surface in place.
 - Each surface migration must remain independently reviewable and revertible.
 
 ## Phases
@@ -58,6 +58,6 @@ focus.
 ### Phase 1: per-surface migration
 
 Migrate the candidate surfaces onto the shared generator, one tool family per
-reviewable slice, honoring the M4 coordination on `api_job_key`. Verification:
-each migrated surface mints word-chain ids through the shared generator with no
-regression in id uniqueness or opacity, and no caller parses id structure.
+reviewable slice. Verification: each migrated surface mints word-chain ids
+through the shared generator with no regression in id uniqueness or opacity, and
+no caller parses id structure.
