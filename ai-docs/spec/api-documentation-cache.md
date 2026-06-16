@@ -1,30 +1,26 @@
 ---
 title: API Documentation Cache
-summary: Host-neutral API documentation lookup through cached domain docs, routing, manager sessions, and worker guidance.
+summary: Local API documentation cache discovery after removal of agent-backed ask tools.
 ---
 
 # API Documentation Cache
 
-The API documentation cache lets workflow agents answer third-party API
-questions through project-local cached documentation instead of ad hoc direct
-web lookup. The Codex-first surface is the `ws/api.*` MCP tool family, with
-domain routing and cache maintenance delegated to API-doc manager agents.
+The API documentation cache is local project data under `ai-docs/.deps/`.
+The ws runtime currently exposes only deterministic cache-domain discovery for
+this area. It does not own third-party API question answering, domain routing,
+documentation fetching, staleness analysis, or manager-agent orchestration.
 
 ## API Docs MCP Surface {#260505-api-docs-mcp-surface}
 
 `ws/api.list` returns sorted domain names from the project cache under
-`ai-docs/.deps/`. Hidden entries and non-directories are excluded.
+`ai-docs/.deps/`. Hidden entries and non-directories are excluded. The default
+response is one domain per line; callers can request structured JSON through the
+standard `format: "json"` compatibility path.
 
-`ws/api.ask` answers an API documentation question. The caller provides a
-prompt and may provide a `domain_hint`. The tool owns domain resolution,
-manager dispatch, and aggregation, then returns a synchronous answer to the
-caller.
-
-> [!note] Planned 🚧
-> The agent-backed ask behavior is being removed from ws. `ws/api.ask` and its
-> manager-dispatch semantics will no longer be a supported API documentation
-> lookup path. If `ws/api.list` remains, it is only deterministic read-only
-> cache discovery.
+The retired agent-backed API documentation tools are not part of the ws MCP
+surface: `ws/api.ask`, `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, and
+`ws/api.cancel` are unknown tools in full ws and are absent from runtime
+capability metadata.
 
 ## API Docs Cache Layout {#260505-api-docs-cache-layout}
 
@@ -34,140 +30,56 @@ API documentation cache entries live under:
 ai-docs/.deps/<domain>/
 ```
 
-The runtime creates domain directories as needed and lists existing domain
-directories. The manager prompt owns the detailed cache contents. Expected
-manager-owned files include domain overview material, version metadata,
-layered documentation summaries, subdomain Markdown files, and helper scripts
-for version detection, fetching, and staleness checks.
-
-Workflow guidance treats `.deps` contents as a managed cache. Ordinary workers
-ask through `ws/api.ask` rather than reading or editing cached files directly.
-Bootstrap guidance treats `ai-docs/.deps/` as Git-ignored local cache data, not
-durable project memory.
+The runtime lists existing domain directories but does not inspect domain
+metadata, mutate cache contents, fetch upstream documentation, or decide whether
+cache data is stale. Bootstrap guidance treats `ai-docs/.deps/` as Git-ignored
+local cache data, not durable project memory.
 
 ## API Docs Domain Routing {#260505-api-docs-domain-routing}
 
-`ws/api.ask` resolves one or more cache domains before dispatching manager
-queries. An exact `domain_hint` matching an existing cache domain bypasses the
-pre-router. Unknown, fuzzy, or absent hints route through a transient
-`pre-router` agent.
+Runtime-owned API documentation domain routing is retired. Agents that need
+third-party API documentation should use scoped host-native exploration or
+direct official documentation lookup, with exact package/version context when
+known and cited evidence in the result.
 
-The pre-router receives the caller prompt, optional domain hint, and existing
-domain list. Its output is parsed as one domain slug per line. If the router
-returns malformed prose, the runtime can recover explicit mentions of existing
-domains from the router output; otherwise malformed routing is reported as an
-error.
-
-> [!note] Planned 🚧
-> Runtime-owned domain routing and pre-router agent behavior will be removed
-> with `ws/api.ask`.
+There is no MCP-owned pre-router, fuzzy domain selector, or automatic manager
+session creation path after the removal of `ws/api.ask`.
 
 ## API Docs Synchronous Aggregation {#260505-api-docs-synchronous-aggregation}
 
-`ws/api.ask` is synchronous from the caller's perspective. Internally, it fans
-out resolved domains in parallel, runs one manager query per domain, and
-combines successful answers into sections headed `## Domain: <domain>`.
-
-Same-domain work is serialized within the MCP process. Different domains can
-run concurrently. Partial success is preserved: if at least one domain returns
-an answer, failed domains are reported alongside successful sections. The tool
-returns an error only when all resolved domains fail.
-
-> [!note] Planned 🚧
-> API-doc manager fan-out and answer aggregation will be removed with
-> `ws/api.ask`.
+Runtime-owned synchronous answer aggregation is retired. The ws runtime no
+longer fans out API documentation prompts across cache domains or combines
+answers under `## Domain: <domain>` headings.
 
 ## API Docs Async Jobs {#260508-api-docs-async-jobs}
 
-Long-running API documentation lookups have a separate asynchronous job
-surface while `ws/api.ask` remains the synchronous quick path. Starting an async
-job returns a stable `api_job_key` immediately. Callers can use that key to poll
-status, read the final answer, inspect partial failures, and cancel active work
-on a best-effort basis.
-
-Async jobs preserve the current API-doc behavior for domain routing, manager
-reuse, cache ownership, and partial-success aggregation. Job state records the
-original prompt, optional domain hint, resolved domains when known, per-domain
-progress, errors, final answer availability, timestamps, and cancellation state.
-
-If the caller times out after starting a job, the job key remains the recovery
-handle. A later caller can inspect status or collect the result without
-restarting cache bootstrap or manager fetch work.
-
-> [!note] Planned 🚧
-> The recoverable API documentation job surface is being removed:
-> `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, and `ws/api.cancel` will
-> leave the ws MCP surface.
+The recoverable API documentation job surface is retired. `ws/api.ask_async`,
+`ws/api.status`, `ws/api.result`, and `ws/api.cancel` are not advertised and do
+not create or recover API documentation work.
 
 ## API Docs Manager Sessions {#260505-api-docs-manager-sessions}
 
-Each cache domain uses a named manager session:
-
-```text
-api-doc-<domain>
-```
-
-The pre-router registers with the `light` model alias and each per-domain
-manager registers with the `core` model alias. Both helper types resolve their
-effective backend/model selection through the current MCP harness and configured
-alias mappings rather than pinning Codex explicitly.
-{#260512-api-doc-agent-backend-selection}
-
-Public delegate orientation is suppressed because the manager prompt is a
-complete domain-specific system prompt.
-
-Inactive manager sessions are reused while warm. If an idle inactive manager is
-older than the API-doc hot-cache TTL, the runtime erases and re-registers it
-before answering the next request. Active managers are preserved.
-
-> [!note] Planned 🚧
-> API-doc manager sessions will be removed with the agent-backed ask surface.
+API documentation manager sessions are retired. The runtime no longer registers
+`api-doc-<domain>` agents, a pre-router agent, or domain-specific API-doc
+workers.
 
 ## API Docs Staleness, Fetch, And Bootstrap {#260505-api-docs-staleness-fetch-bootstrap}
 
-Staleness, fetching, and cache bootstrapping are prompt-owned manager behavior.
-The Go runtime does not inspect cache metadata or run fetch scripts itself.
-
-The `api-doc-manager` prompt instructs managers to bootstrap missing domain
-cache files, run staleness checks, fetch official documentation when the cache
-is absent or stale, update cached summaries, and answer using cached paths or
-official source URLs as citations.
-
-> [!note] Planned 🚧
-> Runtime-dispatched manager prompts will no longer own API documentation
-> fetching, staleness checks, or answer synthesis after the ask surface is
-> removed.
+The Go runtime does not own API documentation staleness checks, upstream
+fetching, or cache bootstrap. Future API documentation tooling may add
+deterministic helpers for these concerns, but it must not reintroduce
+MCP-owned model delegation or agent-backed routing.
 
 ## API Docs Conditional Prompts {#260505-api-docs-conditional-prompts}
 
-API-doc manager registration can include conditional prompt material based on
-available local tooling.
-
-When `cargo-brief` is available on `PATH`, the runtime appends the
-`api-doc-cargo-brief` prompt (rendered from the rsrc tree) to API-doc managers.
-That prompt guides Rust API
-lookups toward the local cargo-brief workflow before falling back to ordinary
-cache behavior.
-
-> [!note] Planned 🚧
-> Conditional API-doc manager prompt append behavior will be removed with the
-> manager-session path.
+Conditional API-doc manager prompts are retired with the manager-session path.
+The shipped rsrc tree no longer contains `api-doc-manager`, `pre-router`, or
+`api-doc-cargo-brief` playbooks.
 
 ## API Docs Worker Guidance {#260505-api-docs-worker-guidance}
 
-Workflow and delegate guidance direct agents to use `ws/api.ask` for ordinary
-external API documentation questions. `ws/api.ask_async` is used when cache
-bootstrap, slow upstream fetches, or broad multi-domain routing can outlive the
-host tool-call timeout. `ws/api.list` is used when the caller needs to inspect
-available cache domains or choose a precise `domain_hint`.
-
-Workers should not browse or fetch third-party API docs directly when
-`ws/api.ask` or `ws/api.ask_async` can answer the question. They should pass a
-domain hint only when the intended cache domain is known; otherwise the
-pre-router owns domain selection.
-
-> [!note] Planned 🚧
-> Worker guidance will stop routing ordinary external API documentation
-> questions through `ws/api.ask` or `ws/api.ask_async`. Until a future
-> pure-tooling `api.*` namespace exists, agents should use scoped native
-> exploration with official-source citation and explicit staleness caveats.
+Workflow and delegate guidance must not route ordinary external API
+documentation questions through ws API ask tools. Use `ws/api.list` only when
+local cache domain discovery matters. For actual dependency/API documentation
+questions, use scoped native exploration or official documentation lookup and
+return cited evidence plus version or staleness caveats.

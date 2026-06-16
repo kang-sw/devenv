@@ -4,6 +4,16 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260616-refactor-remove-agent-backed-api-tools: prerequisite — remove the agent-backed api.ask surface before product-mode rendering cleanup
   260616-bug-wsflow-playbook-tools-expose-full-ws-guidance: absorbed narrow dogfood symptom; the real issue is missing wsflow product-mode convergence
+spec:
+  - 260513-wsflow-agentless-runtime-mode
+  - 260609-playbook-tools
+  - 260609-playbook-harness-rendering
+  - 260609-rsrc-playbook-distribution
+  - 260513-wsflow-agentless-skill-surface
+  - 260529-wsflow-converged-implement-spine
+spec-remove:
+  - 260529-prompt-render-tool
+  - 260529-wsflow-only-tool-surface
 related-mental-model:
   - prompt-bundle
   - workflow-skills

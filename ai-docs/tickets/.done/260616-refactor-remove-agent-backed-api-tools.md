@@ -99,3 +99,29 @@ Verification: full ws and wsflow package tests pass; runtime capabilities and
 orientation, spec, or mental model instructs agents to call `ws/api.ask` or its
 async job tools; any retained `api.list` test proves it performs only
 deterministic read-only discovery.
+
+### Result
+
+Implemented Phase 1.
+
+- Removed `api.ask`, `api.ask_async`, `api.status`, `api.result`, and
+  `api.cancel` from MCP dispatch, tool schemas, runtime metadata, and API-doc
+  async/manager code paths.
+- Retained `api.list` as deterministic read-only cache-domain discovery under
+  `ai-docs/.deps/`.
+- Deleted the retired API-doc prompt assets (`api-doc-manager`, `pre-router`,
+  and `api-doc-cargo-brief`) from canonical rsrc and regenerated the wsflow
+  rsrc mirror plus manifests.
+- Updated workflow manual and delegate orientation guidance to use scoped
+  native exploration or direct official documentation lookup for third-party
+  API documentation questions.
+- Updated specs, mental models, and runtime reference text so the agent-backed
+  API ask family is described as retired, not planned or implemented.
+
+Verification:
+
+- `cd agents-plugin-tool && go test -count=1 ./...` passes.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` passes.
+- `python3 -m unittest discover agents-plugin/tests` currently fails on an
+  unrelated launcher test drift (`runtime_install_forced` missing); captured as
+  `260616-bug-launcher-runtime-install-forced-test-drift`.

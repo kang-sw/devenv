@@ -164,20 +164,13 @@ branch creation, tag push, merge execution, or path-filtered file history.
 ### API documentation
 
 `ws/api.list`
-`ws/api.ask`
-`ws/api.ask_async`
-`ws/api.status`
-`ws/api.result`
-`ws/api.cancel`
 
-Use `ws/api.ask(prompt: "<prose question>")` for external API documentation.
-Pass the natural-language question directly. Use `ws/api.list` to inspect cached domains.
-Use `domain_hint` only when the intended domain is known.
-The runtime owns pre-routing, per-domain sessions, stale checks, and cache access.
-Use `ws/api.ask_async` for broad or bootstrap-prone lookups that may outlive the
-host tool-call timeout. Store the returned `api_job_key`, then use
-`ws/api.status`, `ws/api.result`, and `ws/api.cancel` to inspect, collect, or
-stop the job.
+Use `ws/api.list` only to inspect local API documentation cache domains.
+For third-party API documentation questions, run scoped host-native exploration
+or official documentation lookup directly. Give the worker the exact library,
+version or package manager context when known, and require cited evidence plus
+any staleness caveats. Do not route API documentation questions through ws MCP
+agent-backed tools.
 
 ## Planned Or Specialized
 
@@ -209,12 +202,9 @@ relay file paths, not full findings, to the implementer.
 
 API docs:
 call `ws/api.list()` when choosing among cached domains matters.
-call `ws/api.ask(prompt: "<prose API documentation question>")` for external API lookup.
-add `domain_hint: "<optional-domain>"` only when the intended domain is known.
-call `ws/api.ask_async(prompt: "<long-running question>")` when cache bootstrap,
-slow upstream fetch, or broad multi-domain routing can exceed the host timeout.
-store `<api_job_key>`; call `ws/api.status(api_job_key: "<key>")`, then
-`ws/api.result(api_job_key: "<key>")`, or `ws/api.cancel(api_job_key: "<key>")`.
+for external API lookup, spawn a scoped host-native exploration worker or use
+official documentation lookup directly; include exact package, version, and
+question context, and require cited evidence.
 
 References:
 call `ws/references.trace(ticket_stem: "<ticket-stem>")` for ticket/spec/model links.
