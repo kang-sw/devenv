@@ -171,7 +171,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
-| `260616-bug-launcher-runtime-install-forced-test-drift` | idea | Restore or retire launcher runtime_install_forced test contract |
+| `260616-bug-launcher-runtime-install-forced-test-drift` | ready | Restore launcher runtime_install_forced test contract |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
