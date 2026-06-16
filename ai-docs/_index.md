@@ -241,12 +241,12 @@ dropped tickets live in hidden archive dirs and git history.
   `agents.*`→`ws.mercenary.*` delegation-surface rename. All 7 phases complete
   (P1 `3019ade9`, P2 `54e53d70`, P3 `fc1cdc5f`+`45f32b80`, P4 `5a26b1d6`,
   P5 `5023562c`, P6 `6be3bb64`, P6b `6873b480`, P7 `d18883a0` — agents.*→
-  ws.mercenary.* MCP/CLI/runtime/rsrc/spec rename, hard rename no alias). **Live
-  follow-ups:** the P4-7 epic-merge (21-commit convergence stack; P1-3 already merged at `016c1425`) is a
-  pending user decision; deferred config-surface slice (`config.agents_tier`→
-  `config.model_alias`, `config.role_tier`), the `(skill,role)→tier` override
-  surface, the `lead-verify-design` inline-reviewer model/tier path, and
-  `ref/ws-agent-runtime.md` pre-M3 staleness cleanup.
+  ws.mercenary.* MCP/CLI/runtime/rsrc/spec rename, hard rename no alias). P4-7
+  merged to the epic at `04452233`; P1-3 had already merged at `016c1425`.
+  **Live follow-ups:** deferred config-surface slice
+  (`config.agents_tier`→`config.model_alias`, `config.role_tier`), the
+  `(skill,role)→tier` override surface, the `lead-verify-design` inline-reviewer
+  model/tier path, and `ref/ws-agent-runtime.md` pre-M3 staleness cleanup.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =
