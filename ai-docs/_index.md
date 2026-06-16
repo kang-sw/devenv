@@ -183,6 +183,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
+| `260616-bug-wsflow-playbook-tools-expose-full-ws-guidance` | idea | Decide whether wsflow should hide or namespace-filter playbook.print/render output |
 
 ## Ticket Focus
 
