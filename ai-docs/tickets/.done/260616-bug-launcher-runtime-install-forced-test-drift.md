@@ -2,6 +2,7 @@
 title: restore or retire launcher runtime_install_forced test contract
 related:
   260616-refactor-remove-agent-backed-api-tools: discovered while running package tests during API tool removal
+completed: 2026-06-16
 ---
 
 # Restore or retire launcher runtime_install_forced test contract
@@ -55,3 +56,18 @@ Verification:
 - `python3 -m unittest discover agents-plugin/tests` passes.
 - Targeted launcher tests covering bootstrap, local-devenv marker, invalid
   marker fallback, and release download paths pass.
+
+### Result (5af3e503) - 2026-06-16
+
+Restored `runtime_install_forced(plugin_dir, os_name)` in the launcher and added
+a small `bootstrap_runtime_forced()` helper for the bootstrap override predicate.
+`main()` now uses the restored helper while passing the already-computed
+`local_enabled` value, preserving current install behavior without re-reading
+the local marker or duplicating marker diagnostics.
+
+Verification:
+
+- `python3 -m unittest agents-plugin/tests/test_ws_mcp_launcher_capabilities.py`
+  passes.
+- `python3 -m unittest discover agents-plugin/tests` passes.
+- `python3 -m py_compile agents-plugin/bin/ws-mcp-launcher.py` passes.
