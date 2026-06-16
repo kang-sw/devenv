@@ -322,6 +322,14 @@ plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
 `ws.setup` may remain available only as hidden compatibility dispatch when a
 different setup name is advertised.
 
+The playbook surface also follows product mode. In no-agent mode,
+`playbook.print` and `playbook.render` serve the shared rsrc playbook bodies
+through product-aware selection: `<!-- ws:full-only:start/end -->` regions are
+omitted, `<!-- ws:wsflow-only:start/end -->` regions are included, marker
+comments are never emitted, and the remaining user-facing namespace notation is
+rendered as `wsflow`. Full ws keeps full-only regions, omits wsflow-only
+regions, strips the marker comments, and keeps the `ws` namespace.
+
 ## wsflow Prompt Render Tool {#260529-prompt-render-tool}
 
 `prompt.render(stem, context) -> { prompt_path }` is a read-only tool for the
@@ -402,6 +410,16 @@ per-provider model names are resolved from configuration
 (`#260513-harness-local-agent-tier-config`), never baked into the resource tree
 or the binary, so model-name churn is a config update rather than a
 redistribution. {#260609-playbook-harness-rendering}
+
+Product-mode content selection is separate from harness selection. Shared rsrc
+playbooks may mark full-ws-only or wsflow-only sections with the product markers
+documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.print` and
+`playbook.render` select those sections after harness rendering and before
+returning text or writing a prompt file. Namespace substitution is token-safe:
+it rewrites `ws/` and `ws:` notation plus known product terms such as `ws
+runtime`, `ws workflow`, `ws agent`, `ws-owned`, and `ws-managed`, but does not
+rewrite unrelated words containing `ws` such as `shows`, `knows`, `follows`,
+`rows:`, `news/`, or `workflows`.
 
 A playbook may declare text dependencies in its frontmatter; the renderer
 auto-includes that text at print/render time, so a single `playbook.print(name)`

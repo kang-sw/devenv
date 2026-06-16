@@ -73,6 +73,31 @@ mercenary/exec/full-ws-only guidance, and enforce the wsflow render allowlist
 where needed. Verification: wsflow-mode playbook output for representative lead
 and delegate playbooks contains wsflow notation and no hidden full-ws tools.
 
+### Result (f6e2dc20) - 2026-06-16
+
+Implemented product-mode-aware rendering for `playbook.print` and
+`playbook.render`. Shared rsrc playbooks now use explicit full-only and
+wsflow-only marker blocks; the renderer strips markers, selects the appropriate
+blocks for full ws vs wsflow/no-agent mode, and applies token-safe namespace
+substitution without corrupting words that merely contain `ws`.
+
+Representative shipped playbooks were updated to hide mercenary/exec/full-ws-only
+guidance from wsflow output while keeping native subagent alternatives where a
+workflow still needs delegation. The canonical rsrc manifest and byte-identical
+wsflow rsrc mirror were regenerated.
+
+Verification added or extended:
+
+- wsflow `playbook.print` output for `lead-workflow-manual` contains `wsflow`
+  notation and no marker comments, `ws.mercenary.*`, `exec.*`, or full-ws-only
+  wording.
+- wsflow `playbook.render` output for a real shipped delegate (`implementer`)
+  writes a prompt file without hidden full-ws guidance or marker comments.
+- namespace substitution preserves words such as `shows`, `knows`, `follows`,
+  `rows:`, `news/`, and `workflows`.
+- package tests cover the new raw rsrc marker structure and the regenerated
+  wsflow mirror.
+
 ### Phase 2: absorb prompt.render behavior into playbook.render
 
 Move the current `prompt.render` stem allowlist, context injection, and
