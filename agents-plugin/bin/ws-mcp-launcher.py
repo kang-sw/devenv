@@ -243,7 +243,7 @@ def unique_runtime_temp_path(runtime_dir: Path, label: str) -> Path:
     return runtime_dir / f".{label}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
 
 
-def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path) -> dict | None:
+def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path, source_fingerprint: str | None = None) -> dict | None:
     try:
         stat = binary.stat()
     except OSError:
@@ -257,11 +257,12 @@ def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Pat
         "binary_path": str(binary.resolve()),
         "binary_size": stat.st_size,
         "binary_mtime_ns": stat.st_mtime_ns,
+        "local_devenv_source_fingerprint": source_fingerprint,
     }
 
 
-def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path) -> bool:
-    expected = compatibility_stamp_payload(binary, contract, contract_path)
+def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path, source_fingerprint: str | None = None) -> bool:
+    expected = compatibility_stamp_payload(binary, contract, contract_path, source_fingerprint)
     if expected is None:
         return False
     try:
@@ -274,8 +275,8 @@ def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Pat
     return False
 
 
-def write_compatibility_stamp(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path) -> None:
-    payload = compatibility_stamp_payload(binary, contract, contract_path)
+def write_compatibility_stamp(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path, source_fingerprint: str | None = None) -> None:
+    payload = compatibility_stamp_payload(binary, contract, contract_path, source_fingerprint)
     if payload is None:
         return
     try:
@@ -414,6 +415,44 @@ def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     return read_local_devenv_contract(plugin_dir, os_name) is not None
 
 
+def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | None:
+    # Fingerprint the local ws-mcp source tree so an unchanged tree can reuse the
+    # cached runtime binary instead of forcing a `go build` on every launch (the
+    # forced rebuild blew past the MCP startup timeout on cold caches). Uses stat
+    # metadata only (no file reads) to stay cheap on the startup path.
+    contract = read_local_devenv_contract(plugin_dir, os_name)
+    if contract is None:
+        return None
+    tool_dir = contract["tool_dir"]
+    entries = []
+    try:
+        for path in tool_dir.rglob("*.go"):
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            entries.append((str(path.relative_to(tool_dir)), st.st_size, st.st_mtime_ns))
+    except OSError as exc:
+        note(f"local devenv source fingerprint walk failed: {exc}")
+        return None
+    for name in ("go.mod", "go.sum"):
+        candidate = tool_dir / name
+        try:
+            st = candidate.stat()
+        except OSError:
+            continue
+        entries.append((name, st.st_size, st.st_mtime_ns))
+    try:
+        go_st = contract["go"].stat()
+        entries.append(("::go-toolchain::", go_st.st_size, go_st.st_mtime_ns))
+    except OSError:
+        pass
+    digest = hashlib.sha256()
+    for rel, size, mtime in sorted(entries):
+        digest.update(f"{rel}\x00{size}\x00{mtime}\x00".encode("utf-8"))
+    return digest.hexdigest()
+
+
 def local_devenv_build_env() -> dict:
     # The MCP host may launch the launcher with a sanitized environment that
     # lacks HOME (observed on Claude Code launches). `go build` then cannot
@@ -472,10 +511,6 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
             note(f"local devenv runtime candidate is incompatible: {candidate}")
 
     return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
-
-
-def runtime_install_forced(plugin_dir: Path, os_name: str) -> bool:
-    return bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL")) or local_devenv_runtime_enabled(plugin_dir, os_name)
 
 
 def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, force_local: bool = False) -> None:
@@ -654,25 +689,35 @@ def main() -> int:
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
-    forced_install = runtime_install_forced(plugin_dir, os_name)
-    compatible = False
-    if forced_install:
-        note("forcing runtime install from bootstrap or local devenv source")
-        clear_compatibility_stamp(runtime_dir)
-    else:
-        compatible = compatibility_stamp_current(binary, contract, contract_path, runtime_dir)
-    if not forced_install and not compatible:
-        compatible = runtime_fully_compatible(binary, contract, runtime_dir)
-        if compatible:
-            write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
+    bootstrap_forced = bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL"))
+    local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    # The stamp encodes the local source fingerprint, so a stamp hit under local
+    # devenv proves the cached binary already matches the current source: skip the
+    # rebuild. A miss means the source changed (or no runtime exists) -> rebuild.
+    source_fingerprint = local_devenv_source_fingerprint(plugin_dir, os_name) if local_enabled else None
 
-    if forced_install or not compatible:
+    need_install = False
+    if bootstrap_forced:
+        note("forcing runtime install from bootstrap binary or url")
+        clear_compatibility_stamp(runtime_dir)
+        need_install = True
+    elif compatibility_stamp_current(binary, contract, contract_path, runtime_dir, source_fingerprint):
+        pass
+    elif local_enabled:
+        note("local devenv source changed or runtime missing; rebuilding from source")
+        need_install = True
+    elif runtime_fully_compatible(binary, contract, runtime_dir):
+        write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
+    else:
+        need_install = True
+
+    if need_install:
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
-        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_devenv_runtime_enabled(plugin_dir, os_name))
+        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_enabled)
         if not runtime_fully_compatible(binary, contract, runtime_dir):
             fail("incompatible ws-mcp runtime after repair")
-        write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
+        write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
 
     detect_project_root(plugin_dir)
     note(f"plugin_dir={plugin_dir}")
