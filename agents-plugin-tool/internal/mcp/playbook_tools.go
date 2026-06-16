@@ -246,41 +246,43 @@ func mercenaryGuidanceBlock() string {
 }
 
 func renderProductModePlaybookBody(body string) string {
-	namespace := RuntimeNamespace()
-	if namespace != "ws" {
-		body = namespaceText(body)
-	}
-	if NoAgentMode() {
-		body = removeNoAgentPlaybookGuidance(body)
-	}
-	return body
+	body = selectProductModeBlocks(body)
+	return namespacePlaybookText(body)
 }
 
-func removeNoAgentPlaybookGuidance(body string) string {
+const (
+	fullOnlyStart   = "<!-- ws:full-only:start -->"
+	fullOnlyEnd     = "<!-- ws:full-only:end -->"
+	wsflowOnlyStart = "<!-- ws:wsflow-only:start -->"
+	wsflowOnlyEnd   = "<!-- ws:wsflow-only:end -->"
+)
+
+// selectProductModeBlocks removes marker comments and keeps only the sections
+// that apply to the current product mode. The source rsrc remains shared; the
+// rendered playbook is the product-specific contract.
+func selectProductModeBlocks(body string) string {
 	lines := strings.Split(body, "\n")
 	filtered := make([]string, 0, len(lines))
-	skipPersistentAgents := false
-	skipPlannedOrSpecialized := false
-	skipPersistentTask := false
+	fullOnly := false
+	wsflowOnly := false
+	noAgent := NoAgentMode()
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## ") {
-			skipPlannedOrSpecialized = trimmed == "## Planned Or Specialized"
-		}
-		if strings.HasPrefix(trimmed, "### ") {
-			skipPersistentAgents = trimmed == "### Persistent agents"
-		}
-		if strings.HasPrefix(trimmed, "Persistent task:") {
-			skipPersistentTask = true
+		switch trimmed {
+		case fullOnlyStart:
+			fullOnly = true
+			continue
+		case fullOnlyEnd:
+			fullOnly = false
+			continue
+		case wsflowOnlyStart:
+			wsflowOnly = true
+			continue
+		case wsflowOnlyEnd:
+			wsflowOnly = false
 			continue
 		}
-		if skipPersistentTask && strings.HasPrefix(trimmed, "Review artifacts:") {
-			skipPersistentTask = false
-		}
-		if skipPersistentAgents || skipPlannedOrSpecialized || skipPersistentTask {
-			continue
-		}
-		if noAgentPlaybookLine(line) {
+		if (fullOnly && noAgent) || (wsflowOnly && !noAgent) {
 			continue
 		}
 		filtered = append(filtered, line)
@@ -288,16 +290,12 @@ func removeNoAgentPlaybookGuidance(body string) string {
 	return strings.Join(filtered, "\n")
 }
 
-func noAgentPlaybookLine(line string) bool {
-	lower := strings.ToLower(line)
-	if strings.Contains(lower, "ws.mercenary.") ||
-		strings.Contains(lower, "prefer_mercenary") ||
-		strings.Contains(lower, "mercenary") ||
-		strings.Contains(lower, "exec.") ||
-		strings.Contains(lower, "full ws") {
-		return true
+func namespacePlaybookText(body string) string {
+	namespace := RuntimeNamespace()
+	if namespace == "ws" {
+		return body
 	}
-	return false
+	return namespaceTerms(body, namespace)
 }
 
 // resolveRsrcRoot resolves the rsrc tree root for a playbook tool call.

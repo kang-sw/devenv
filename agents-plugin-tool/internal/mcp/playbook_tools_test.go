@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -576,10 +577,13 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, forbidden := range []string{"ws/", "ws:", "ws.mercenary.", "exec.", "Full ws", "full ws"} {
+	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("wsflow playbook output contains forbidden %q:\n%s", forbidden, body)
 		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("wsflow playbook output contains bare ws namespace notation:\n%s", body)
 	}
 	for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
 		if !strings.Contains(body, want) {
@@ -588,23 +592,70 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	}
 }
 
-func TestDelegateTipOmitsMercenaryInNoAgentMode(t *testing.T) {
+func TestProductModeBlockSelectionAndNamespaceSafety(t *testing.T) {
+	t.Setenv(envNamespace, "wsflow")
+	input := strings.Join([]string{
+		"shows knows follows workflows rows: news/feed",
+		"ws/tool ws:skill ws MCP ws plugin ws project ws runtime ws workflow ws user ws agent ws agents ws-managed ws-owned",
+		fullOnlyStart,
+		"full ws only ws.mercenary.call exec.shell",
+		fullOnlyEnd,
+		wsflowOnlyStart,
+		"wsflow-only text",
+		wsflowOnlyEnd,
+	}, "\n")
+
+	t.Setenv(envNoAgent, "1")
+	wsflow := renderProductModePlaybookBody(input)
+	for _, forbidden := range []string{"showsflow", "knowsflow", "followsflow", "workflowsflow", "rowsflow:", "newsflow/", "ws.mercenary.", "exec.shell", fullOnlyStart, wsflowOnlyStart} {
+		if strings.Contains(wsflow, forbidden) {
+			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
+		}
+	}
+	for _, want := range []string{"shows knows follows workflows rows: news/feed", "wsflow/tool", "wsflow:skill", "wsflow MCP", "wsflow plugin", "wsflow project", "wsflow runtime", "wsflow workflow", "wsflow user", "wsflow agent", "wsflow agents", "wsflow-managed", "wsflow-owned", "wsflow-only text"} {
+		if !strings.Contains(wsflow, want) {
+			t.Fatalf("wsflow render missing %q:\n%s", want, wsflow)
+		}
+	}
+
+	t.Setenv(envNoAgent, "")
+	full := renderProductModePlaybookBody(input)
+	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
+		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
+	}
+	if !strings.Contains(full, "full ws only ws.mercenary.call exec.shell") {
+		t.Fatalf("full render omitted full-only content:\n%s", full)
+	}
+}
+
+func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envNamespace, "wsflow")
-	rsrcRoot := buildTestRsrcTree(t, map[string]string{
-		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
-	})
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{})
+	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", nil, wsconfig.Options{CacheHome: cacheHome}, "", false)
 	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
+		t.Fatalf("renderPlaybook: %v", err)
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
 	if !strings.Contains(body, "Continuity tip") {
-		t.Fatalf("delegate output missing continuity tip:\n%s", body)
+		t.Fatalf("rendered delegate output missing continuity tip:\n%s", body)
 	}
-	if strings.Contains(body, "Mercenary path") || strings.Contains(body, "ws.mercenary.") {
-		t.Fatalf("no-agent delegate output contains mercenary guidance:\n%s", body)
+	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rendered wsflow delegate contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("rendered wsflow delegate contains bare ws namespace notation:\n%s", body)
 	}
 }
 

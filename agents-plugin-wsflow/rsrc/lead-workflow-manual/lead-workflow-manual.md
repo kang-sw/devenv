@@ -23,7 +23,10 @@ Write MCP calls as `ws/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
-Write prompts sent to native Explore-style subagents and `ws.mercenary.call` in English.
+Write prompts sent to native Explore-style subagents in English.
+<!-- ws:full-only:start -->
+Write prompts sent to `ws.mercenary.call` in English.
+<!-- ws:full-only:end -->
 
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
@@ -61,6 +64,7 @@ gaps, and follow-up needs; collect the deferred result. For parallel dispatch, s
 multiple concurrent subagents in a single turn and collect all before
 synthesizing. Use a broad-tracing scope for wide structural surveys.
 
+<!-- ws:full-only:start -->
 ### Persistent agents
 
 `ws.mercenary.register`
@@ -93,6 +97,7 @@ playbook, not a workflow skill.
 alias, `cancel` to stop active work, retry `call` on the same registered agent
 with a recovery prompt when cancellation followed a no-result timeout, and
 `erase` when task-scoped state should be removed.
+<!-- ws:full-only:end -->
 
 ### Artifact paths
 
@@ -172,6 +177,7 @@ version or package manager context when known, and require cited evidence plus
 any staleness caveats. Do not route API documentation questions through ws MCP
 agent-backed tools.
 
+<!-- ws:full-only:start -->
 ## Planned Or Specialized
 
 Treat active-agent listing and broad message-queue semantics as planned contract
@@ -179,6 +185,7 @@ surfaces unless the runtime exposes the exact tool. Basic async cancellation
 exists through `ws.mercenary.cancel`; retry the same registered agent with
 `ws.mercenary.call` for no-result cancellation recovery. Check runtime before
 assuming richer interrupt behavior.
+<!-- ws:full-only:end -->
 
 ## Usage Pattern
 
@@ -188,12 +195,14 @@ spawn a host-native exploration worker directly with an English scoped task prom
 collect the result when the subagent returns.
 for parallel dispatch, spawn multiple concurrent subagents in a single turn; collect all before synthesizing.
 
+<!-- ws:full-only:start -->
 Persistent task:
 call `ws.mercenary.register(name: "<agent-name>")` for a general-purpose delegate.
 for a bundled delegate, render its prompt: `ws/playbook.render(name: "<delegate>")`, then spawn a native subagent or register a mercenary with `system_prompt_text: <rendered>` and `tier: <recommended-tier>`.
 call `ws.mercenary.call(name: "<agent-name>", prompt: <block below>)` for the mercenary path.
 wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.
 erase the task-scoped agent when cleanup matters.
+<!-- ws:full-only:end -->
 
 Review artifacts:
 call `ws/path.generate(kind: "review", stems: ["<stem>"])`.

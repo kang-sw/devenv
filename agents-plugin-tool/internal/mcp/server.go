@@ -2476,19 +2476,20 @@ func namespaceText(text string) string {
 	if namespace == "ws" {
 		return text
 	}
-	replacer := strings.NewReplacer(
-		"ws MCP", namespace+" MCP",
-		"ws/", namespace+"/",
-		"ws:", namespace+":",
-		"ws project", namespace+" project",
-		"ws runtime", namespace+" runtime",
-		"ws workflow", namespace+" workflow",
-		"ws user", namespace+" user",
-		"ws agent", namespace+" agent",
-		"ws agents", namespace+" agents",
-		"ws ", namespace+" ",
-	)
-	return replacer.Replace(text)
+	return namespaceTerms(text, namespace)
+}
+
+func namespaceTerms(text, namespace string) string {
+	text = wsNamespaceRef.ReplaceAllString(text, namespace+"$1")
+	for _, term := range []string{"MCP", "plugin", "project", "runtime", "tool", "tools", "workflow", "user", "agent", "agents"} {
+		pattern := regexp.MustCompile(`\bws ` + regexp.QuoteMeta(term) + `\b`)
+		text = pattern.ReplaceAllString(text, namespace+" "+term)
+	}
+	for _, term := range []string{"managed", "owned"} {
+		pattern := regexp.MustCompile(`\bws-` + regexp.QuoteMeta(term) + `\b`)
+		text = pattern.ReplaceAllString(text, namespace+"-"+term)
+	}
+	return text
 }
 
 func namespaceValue(value any) any {

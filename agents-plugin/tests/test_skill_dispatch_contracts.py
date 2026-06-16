@@ -67,7 +67,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
-        self.assertIn("Write prompts sent to native Explore-style subagents and `ws.mercenary.call` in English.", text)
+        self.assertIn("Write prompts sent to native Explore-style subagents in English.", text)
+        self.assertIn("<!-- ws:full-only:start -->", text)
+        self.assertIn("Write prompts sent to `ws.mercenary.call` in English.", text)
+        self.assertIn("<!-- ws:full-only:end -->", text)
 
     def test_verify_discussion_is_entry_shim(self):
         shim = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
