@@ -303,10 +303,10 @@ locations.
 
 The MCP server supports an environment-selected agentless product mode for the
 internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
-omit named-agent, model-alias configuration, and agent-backed API
-documentation surfaces: `ws.mercenary.*`, `config.agents_tier`,
-`api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel`.
-`api.list` remains available as read-only cache discovery.
+omit named-agent and model-alias configuration surfaces:
+`ws.mercenary.*` and `config.agents_tier`. `api.list` remains available as
+read-only cache discovery; the agent-backed API documentation ask tools are
+removed from the full ws surface rather than hidden only in wsflow mode.
 
 Explicit calls to hidden agent-backed tools fail with a clear disabled error and
 do not start named-agent workers. Runtime capability output and CLI command
@@ -579,24 +579,15 @@ reduction only — they are not the enforcement boundary.
 `ai-docs/.deps`. The default response is one domain per line, with structured
 JSON available on request.
 
-`api.ask` asks cached or fetchable third-party API documentation through
-per-domain manager sessions. Callers provide a prompt and may provide a domain
-hint. The tool owns the API-doc routing and aggregation behavior internally and
-returns a synchronous answer to the caller.
+The retired agent-backed API documentation tools are not exposed by full ws:
+`api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel` are
+unknown tools and absent from runtime capability metadata.
+{#260508-api-documentation-async-mcp-tools}
 
-The API documentation tool family also exposes an async job surface for lookups
-that can outlive the host tool-call timeout. `api.ask_async` starts a job and
-returns an `api_job_key`; `api.status` reports routing and per-domain progress;
-`api.result` returns the final answer when available; and `api.cancel` stops
-active work on a best-effort basis. {#260508-api-documentation-async-mcp-tools}
-
-> [!note] Planned 🚧
-> The agent-backed API documentation question tools are being retired:
-> `api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel` will
-> leave the ws MCP surface. Any remaining `api.list` behavior is limited to
-> deterministic read-only local cache discovery. Workflow guidance routes
-> external dependency/API documentation questions through scoped native
-> exploration until a future pure-tooling `api.*` namespace is designed.
+The remaining `api.list` behavior is limited to deterministic read-only local
+cache discovery. Workflow guidance routes external dependency/API documentation
+questions through scoped native exploration or direct official documentation
+lookup until a future pure-tooling `api.*` namespace is designed.
 
 ## Exec Job MCP Tools {#260524-exec-job-mcp-tools}
 
@@ -696,9 +687,12 @@ Tool-permission enforcement is the server-side capability check in the keyed
 `lead`, `delegate`, or `leaf` — minted by `ws.lead.login(capability)` or as a
 render-minted child key. When a call presents a known non-lead key, the handler
 rejects any tool that scope disallows (`delegate` cannot call `ws.mercenary.*`,
-`config.*`, or `session.*`; `leaf` additionally cannot call `api.*` or
-`git.commit`) and rejects any `ws.lead.*` call from any non-lead key (self-login
-escalation block). Keyless callers and lead keys are not restricted by this gate,
+`config.*`, or `session.*`; `leaf` additionally cannot call `git.commit`) and
+rejects any `ws.lead.*` call from any non-lead key (self-login escalation
+block). The retained `api.list` cache-domain discovery tool is read-only and
+leaf-callable; the retired agent-backed API ask tools are absent from the
+surface rather than blocked by scope. Keyless callers and lead keys are not
+restricted by this gate,
 so the keyless `ws.lead.login` bootstrap stays open; a delegate can therefore
 keyless-re-`login` to re-escalate. The scope is a soft defense-in-depth guard
 layered on the host's own subagent tool restriction, not a hard sandbox.

@@ -161,7 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
-| `260616-refactor-remove-agent-backed-api-tools` | ready | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
+| `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | todo | After M4, collapse wsflow onto product-mode playbook rendering and remove curated skill bodies |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
@@ -171,6 +171,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
+| `260616-bug-launcher-runtime-install-forced-test-drift` | idea | Restore or retire launcher runtime_install_forced test contract |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -231,10 +232,10 @@ dropped tickets live in hidden archive dirs and git history.
   reviewer-tier default) re-homed to
   `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (done, was promoted
   2026-06-11). **M4**
-  (`260616-refactor-remove-agent-backed-api-tools`, ready) — remove the
-  agent-backed `api.ask` family and stale guidance from the playbook pivot;
-  contract-first spec markers are in place for MCP/API-doc/compat/workflow
-  guidance removal. The dropped corpus-routing predecessor is replaced by a
+  (`260616-refactor-remove-agent-backed-api-tools`, done) — removed the
+  agent-backed `api.ask` family and stale guidance from the playbook pivot while
+  retaining `api.list` only as deterministic cache-domain discovery. The dropped
+  corpus-routing predecessor is replaced by a
   future outside-epic board:
   `260616-epic-api-namespace-documentation-memory-tooling`, where `api.*` becomes
   pure documentation, corpus, hierarchical memory, and playbook-manual tooling

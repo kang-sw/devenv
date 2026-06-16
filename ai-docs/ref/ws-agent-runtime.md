@@ -288,9 +288,9 @@ MCP tools use server `ws` and the following tool names:
 - `config.show` — inspect the current user-local configuration and resolved config path without modifying it. Implemented.
 - `config.agents_tier` — compatibility surface for configuring the user-local backend/model mapping for a model alias. Implemented.
 - `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
-- `runtime.info` — return runtime metadata, including embedded prompt bundle hash. Implemented.
+- `runtime.info` — return runtime metadata. Implemented.
 - `api.list` — list existing API documentation cache domains. Implemented.
-- `api.ask` — route an API documentation question to persistent `api-doc-<domain>` manager sessions. Implemented.
+- `api.ask` — retired with the agent-backed API documentation manager surface.
 
 ## CLI Prototype
 
@@ -330,7 +330,7 @@ tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
 `ws/agents.result`, `ws/agents.status`, `ws/agents.interrupt`,
 `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`,
 `ws/config.show`, `ws/config.agents_tier`,
-`ws/path.generate`, `ws/api.list`, `ws/api.ask`, and `ws/runtime.info`.
+`ws/path.generate`, `ws/api.list`, and `ws/runtime.info`.
 
 `agents.call` acquires a short-lived `current/setup.lock`, writes the prompt
 snapshot to `current/prompt.md`, starts an internal `agents run-current` worker
@@ -341,9 +341,8 @@ pid is no longer alive may be recovered. The worker owns the actual backend
 call, captures backend stdout and stderr to `current/stdout` and
 `current/stderr`, persists streamed Codex `session_id` updates, writes the final
 `output.md`, and transitions the current call to `completed` or `failed`. Only
-one active call is allowed per named agent. `api.ask` composes over the same
-agent runtime by registering or reusing `api-doc-<domain>` sessions and by
-serializing same-domain calls before invoking `agents.call`/`agents.result`.
+one active call is allowed per named agent. The retired `api.ask` manager path
+must not be treated as a current named-agent runtime consumer.
 
 `agents.interrupt` appends a durable pending message to `inbox/<id>.json`.
 Messages use a two-state contract: `pending` means the runtime has not injected

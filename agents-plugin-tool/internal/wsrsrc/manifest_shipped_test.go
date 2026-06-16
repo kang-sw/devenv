@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,50 @@ func TestShippedManifestUpToDate(t *testing.T) {
 		t.Fatalf("shipped manifest.json is stale: generated tree hashes differ from committed manifest.\n"+
 			"Regenerate with: WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -run TestRegenerateShippedManifest\n"+
 			"generated %d files, committed %d files", len(got.Files), len(want.Files))
+	}
+}
+
+func TestRetiredAPIGuidanceNotShipped(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	roots := []string{
+		filepath.Join(repoRoot, "agents-plugin", "rsrc"),
+		filepath.Join(repoRoot, "agents-plugin-wsflow", "rsrc"),
+		filepath.Join(repoRoot, "agents-plugin", "skills"),
+		filepath.Join(repoRoot, "ai-docs", "spec"),
+		filepath.Join(repoRoot, "ai-docs", "mental-model"),
+	}
+	forbidden := []string{
+		"ws/api.ask(prompt",
+		"ws/api.ask_async(prompt",
+		"api.ask_async(prompt",
+		"api_job_key",
+		"Use `ws/api.ask",
+		"call `ws/api.ask",
+		"route external dependency/API documentation questions through `ws/api.ask`",
+		"ask through `ws/api.ask`",
+	}
+	for _, root := range roots {
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			text := string(data)
+			for _, needle := range forbidden {
+				if strings.Contains(text, needle) {
+					t.Fatalf("retired API ask guidance %q found in %s", needle, path)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

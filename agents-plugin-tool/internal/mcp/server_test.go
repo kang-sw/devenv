@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -217,18 +217,6 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 		t.Fatalf("config response missing tier mapping: %s", byID["1"])
 	}
 
-}
-
-func TestAPIRuntimeUsesObservedHarness(t *testing.T) {
-	server := NewServer(t.TempDir(), "test")
-	server.observeHarness("test", "claude")
-	runtime, ok := server.apiRuntime().(wsagentAPIRuntime)
-	if !ok {
-		t.Fatalf("apiRuntime returned %T", server.apiRuntime())
-	}
-	if runtime.harness != "claude" {
-		t.Fatalf("api runtime harness = %q", runtime.harness)
-	}
 }
 
 func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T) {
@@ -529,12 +517,18 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 		t.Fatalf("leaf key not rejected for config.show: %s", deniedShow)
 	}
 
-	// runtime.info is permitted for a leaf scope (not a restricted prefix).
+	// Read-only runtime/cache discovery is permitted for a leaf scope.
 	allowedInfo := callToolOnce(t, server, 5, "runtime.info", map[string]any{
 		"session_key": leafKey,
 	})
 	if !strings.Contains(allowedInfo, "version:") {
 		t.Fatalf("leaf key wrongly rejected runtime.info: %s", allowedInfo)
+	}
+	allowedAPIList := callToolOnce(t, server, 6, "api.list", map[string]any{
+		"session_key": leafKey,
+	})
+	if strings.Contains(allowedAPIList, "tool not available") {
+		t.Fatalf("leaf key wrongly rejected api.list: %s", allowedAPIList)
 	}
 }
 
@@ -643,6 +637,39 @@ func assertStringAbsentFromTree(t *testing.T, root, needle string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func snapshotTreeForTest(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snapshot := map[string]string{}
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return snapshot
+	}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if entry.IsDir() {
+			snapshot[rel] = "<dir>"
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		snapshot[rel] = string(data)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }
 
 func initGit(t *testing.T, root string) {
@@ -810,175 +837,6 @@ func runGitOutput(t *testing.T, root string, args ...string) []byte {
 	return out
 }
 
-type fakeAPIRuntime struct {
-	mu          sync.Mutex
-	routeCalls  []string
-	routeOutput string
-	routeErr    error
-	managerHits []string
-	answers     map[string]string
-	errs        map[string]error
-	active      map[string]int
-	maxActive   map[string]int
-	delay       time.Duration
-}
-
-func (f *fakeAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
-	f.mu.Lock()
-	f.routeCalls = append(f.routeCalls, prompt)
-	output := f.routeOutput
-	err := f.routeErr
-	f.mu.Unlock()
-	if output == "" {
-		output = "go\npython\n"
-	}
-	return output, err
-}
-
-func (f *fakeAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
-	f.mu.Lock()
-	if f.active == nil {
-		f.active = map[string]int{}
-	}
-	if f.maxActive == nil {
-		f.maxActive = map[string]int{}
-	}
-	f.managerHits = append(f.managerHits, domain+":"+prompt)
-	f.active[domain]++
-	if f.active[domain] > f.maxActive[domain] {
-		f.maxActive[domain] = f.active[domain]
-	}
-	f.mu.Unlock()
-	if f.delay > 0 {
-		time.Sleep(f.delay)
-	}
-	f.mu.Lock()
-	f.active[domain]--
-	answer := "answer for " + domain
-	if f.answers != nil && f.answers[domain] != "" {
-		answer = f.answers[domain]
-	}
-	err := error(nil)
-	if f.errs != nil {
-		err = f.errs[domain]
-	}
-	f.mu.Unlock()
-	return answer, err
-}
-
-func TestAPIAskExistingDomainMentionStillUsesRouter(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/.deps/ratatui/README.md", "ratatui")
-	fake := &fakeAPIRuntime{
-		routeOutput: "ratatui\n",
-		answers:     map[string]string{"ratatui": "ratatui answer"},
-	}
-	server := NewServer(root, "test")
-	server.api = fake
-	text, err := server.askAPI(context.Background(), root, "For ratatui, how do I render a widget?", "")
-	if err != nil {
-		t.Fatalf("askAPI returned error: %v\n%s", err, text)
-	}
-	if len(fake.routeCalls) != 1 {
-		t.Fatalf("existing domain mention did not invoke pre-router: %v", fake.routeCalls)
-	}
-	if !strings.Contains(text, "## Domain: ratatui\nratatui answer") {
-		t.Fatalf("api.ask response missing existing domain answer:\n%s", text)
-	}
-}
-
-func TestAPIAskRecoversExistingDomainFromRouterProse(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/.deps/ratatui/README.md", "ratatui")
-	fake := &fakeAPIRuntime{
-		routeOutput: "Use frame.render_widget for ratatui widgets.\n",
-		answers:     map[string]string{"ratatui": "ratatui answer"},
-	}
-	server := NewServer(root, "test")
-	server.api = fake
-	text, err := server.askAPI(context.Background(), root, "For ratatui, how do I render a widget?", "")
-	if err != nil {
-		t.Fatalf("askAPI returned error: %v\n%s", err, text)
-	}
-	if !strings.Contains(text, "## Domain: ratatui\nratatui answer") {
-		t.Fatalf("api.ask response missing recovered existing domain answer:\n%s", text)
-	}
-}
-
-func TestAPIAskPreRouterPartialFailureBoundaries(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
-	mustWrite(t, root, "ai-docs/.deps/python/README.md", "python")
-	fake := &fakeAPIRuntime{answers: map[string]string{"go": "go ok"}, errs: map[string]error{"python": fmt.Errorf("python unavailable")}}
-	server := NewServer(root, "test")
-	server.api = fake
-	text, err := server.askAPI(context.Background(), root, "Compare clients", "")
-	if err != nil {
-		t.Fatalf("partial success should not error: %v\n%s", err, text)
-	}
-	if len(fake.routeCalls) != 1 || !strings.Contains(fake.routeCalls[0], "Existing domains:\ngo\npython\nPrompt: Compare clients") {
-		t.Fatalf("pre-router input mismatch: %#v", fake.routeCalls)
-	}
-	if !strings.Contains(text, "## Domain: go\ngo ok") || !strings.Contains(text, "## Domain: python\nERROR: python unavailable") {
-		t.Fatalf("partial response missing boundaries:\n%s", text)
-	}
-}
-
-func TestAPIAskRejectsMalformedRouterDomainSlug(t *testing.T) {
-	root := t.TempDir()
-	fake := &fakeAPIRuntime{routeOutput: "1. go\ngo docs\ngo:latest\n"}
-	server := NewServer(root, "test")
-	server.api = fake
-	_, err := server.askAPI(context.Background(), root, "question", "")
-	if err == nil || !strings.Contains(err.Error(), "invalid domain") {
-		t.Fatalf("expected invalid domain error, got %v", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(root, "ai-docs", ".deps", "1. go")); !os.IsNotExist(statErr) {
-		t.Fatalf("malformed router output created cache directory, stat err=%v", statErr)
-	}
-}
-
-func TestAPIManagerExpiredUsesRecentUseTimestamp(t *testing.T) {
-	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-	recent := now.Add(-apiManagerTTL + time.Second).Format(time.RFC3339)
-	old := now.Add(-apiManagerTTL - time.Second).Format(time.RFC3339)
-	if apiManagerExpired(wsagent.Agent{LastCallAt: recent, CreatedAt: old}, now) {
-		t.Fatal("recent last call expired")
-	}
-	if !apiManagerExpired(wsagent.Agent{LastCallAt: old}, now) {
-		t.Fatal("old last call did not expire")
-	}
-	if !apiManagerExpired(wsagent.Agent{LastSeenAt: old}, now) {
-		t.Fatal("old last seen did not expire")
-	}
-}
-
-func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
-	fake := &fakeAPIRuntime{delay: 50 * time.Millisecond}
-	server := NewServer(root, "test")
-	server.api = fake
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, err := server.askAPI(context.Background(), root, "question", "go")
-			if err != nil {
-				t.Errorf("askAPI returned error: %v", err)
-			}
-		}()
-	}
-	wg.Wait()
-	fake.mu.Lock()
-	max := fake.maxActive["go"]
-	fake.mu.Unlock()
-	if max != 1 {
-		t.Fatalf("same-domain calls were not serialized; max active = %d", max)
-	}
-}
-
 func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -1058,7 +916,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		}
 	}
 	rootAwareTools := []string{
-		"api.list", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel",
+		"api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
@@ -1326,7 +1184,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
-	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel"} {
+	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "config.agents_tier"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
@@ -1765,6 +1623,7 @@ func TestAPIListDomains(t *testing.T) {
 	mustWrite(t, root, "ai-docs/.deps/.hidden/README.md", "hidden")
 	mustWrite(t, root, "ai-docs/.deps/python/README.md", "python")
 	mustWrite(t, root, "ai-docs/.deps/file.txt", "not dir")
+	before := snapshotTreeForTest(t, filepath.Join(root, "ai-docs", ".deps"))
 
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api.list","arguments":{}}}` + "\n"
 	var out bytes.Buffer
@@ -1775,59 +1634,42 @@ func TestAPIListDomains(t *testing.T) {
 	if got != "go\npython\n" {
 		t.Fatalf("api.list = %q", got)
 	}
+	if after := snapshotTreeForTest(t, filepath.Join(root, "ai-docs", ".deps")); !reflect.DeepEqual(after, before) {
+		t.Fatalf("api.list mutated ai-docs/.deps: before=%v after=%v", before, after)
+	}
 }
 
-func TestAPIAskMCPExactHintSkipsRouter(t *testing.T) {
+func TestAgentBackedAPIToolsRemovedFromMCP(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
-	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
-	fake := &fakeAPIRuntime{answers: map[string]string{"go": "go answer"}}
 	server := NewServer(root, "test")
-	server.api = fake
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" +
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"How do modules work?","domain_hint":"go"}}}` + "\n"
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"How do modules work?"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"api.ask_async","arguments":{"prompt":"How do modules work?"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"api.status","arguments":{"api_job_key":"job"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"api.result","arguments":{"api_job_key":"job"}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"api.cancel","arguments":{"api_job_key":"job"}}}`,
+	}, "\n") + "\n"
 	var out bytes.Buffer
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(byID["1"], "api.ask") || !strings.Contains(byID["1"], "api.list") {
-		t.Fatalf("tools/list missing api tools: %s", byID["1"])
+	if !strings.Contains(byID["1"], "api.list") {
+		t.Fatalf("tools/list missing retained api.list: %s", byID["1"])
 	}
-	if toolIsError(t, byID["2"]) {
-		t.Fatalf("api.ask returned tool error: %s", byID["2"])
+	for _, removed := range []string{"api.ask", "api.ask_async", "api.status", "api.result", "api.cancel"} {
+		if strings.Contains(byID["1"], removed) {
+			t.Fatalf("tools/list still advertises removed tool %s: %s", removed, byID["1"])
+		}
 	}
-	text := toolText(t, byID["2"])
-	if len(fake.routeCalls) != 0 {
-		t.Fatalf("exact hint invoked pre-router: %v", fake.routeCalls)
-	}
-	if !strings.Contains(text, "## Domain: go") || !strings.Contains(text, "go answer") {
-		t.Fatalf("api.ask response missing boundary/answer:\n%s", text)
-	}
-}
-
-func TestAPIAskMCPAllDomainFailureReturnsToolErrorWithMetadata(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	fake := &fakeAPIRuntime{errs: map[string]error{"go": fmt.Errorf("go failed"), "python": fmt.Errorf("python failed")}}
-	server := NewServer(root, "test")
-	server.api = fake
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"question"}}}` + "\n"
-	var out bytes.Buffer
-	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !toolIsError(t, byID["1"]) {
-		t.Fatalf("expected api.ask tool error: %s", byID["1"])
-	}
-	text := toolText(t, byID["1"])
-	if !strings.Contains(text, "## Domain: go\nERROR: go failed") ||
-		!strings.Contains(text, "## Domain: python\nERROR: python failed") ||
-		!strings.Contains(text, "api.ask failed for all resolved domains") {
-		t.Fatalf("all failure text missing metadata:\n%s", text)
+	for id := 2; id <= 6; id++ {
+		line := byID[strconv.Itoa(id)]
+		if !strings.Contains(line, `"code":-32602`) || !strings.Contains(line, "unknown tool") {
+			t.Fatalf("removed api tool call did not fail as unknown tool: %s", line)
+		}
 	}
 }
 

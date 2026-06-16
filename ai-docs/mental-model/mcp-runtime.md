@@ -8,7 +8,7 @@ sources:
   - agents-plugin-tool/internal/wskey/
 related:
   plugin-runtime: "runtime.capabilities is the launcher fast path; runtime.info, tools/list, and CLI probes remain fallback compatibility checks."
-  named-agent-runtime: "ws.mercenary.* and api.ask route through wsagent lifecycle APIs."
+  named-agent-runtime: "ws.mercenary.* route through wsagent lifecycle APIs; retired api.ask tools no longer do."
   git-workflow-tools: "git.* MCP tools and CLI mirrors delegate to internal/wsgit."
 ---
 
@@ -25,7 +25,7 @@ related:
 - `cmd/ws-mcp/main.go` is the binary entry point for `serve --stdio`, `runtime info`, CLI mirrors, and local diagnostics. {#260505-runtime-cli-entrypoints}
 - `ws-mcp smoke --root <repo>` is the single-process executable smoke entrypoint; keep it aligned with release workflow checks. {#260505-runtime-cli-entrypoints}
 - `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, optional profile filtering, and cancellation. {#260505-mcp-server-protocol-surface}
-- `internal/mcp/api_async.go` owns recoverable API documentation job state behind the `api.ask_async` tool family. {#260508-api-documentation-async-mcp-tools}
+- `internal/mcp/api_docs.go` owns the remaining deterministic `api.list` cache-domain discovery path; the former `api.ask_async` job state file is removed. {#260508-api-documentation-async-mcp-tools}
 - `internal/wsstore` owns root/worktree SQLite metadata for named-agent registry metadata, exec job lifecycle metadata, future async metadata, retention, pruning, tombstone cleanup, and the runtime metadata migration gate inventory. Actor tables/columns are migration-cleanup only after the Phase 2a session-auth cutover; Phase 3 drops the residual `exec_jobs.owner_actor_id` so exec job metadata is fully actor-free. Exec stream payload bytes remain job-owned files. {#260525-runtime-metadata-migration-gate}
 - `runtime.info` and `runtime.capabilities` are launcher-facing compatibility data; capabilities adds MCP protocol, lead tool names, and CLI commands. {#260505-runtime-debug-metadata-tools} {#260506-runtime-capabilities-single-probe}
 
@@ -63,7 +63,7 @@ related:
 
 - Tool additions, removals, or intentionally hidden compatibility paths require both `callTool` and `tools()` review; role/profile filtering and runtime metadata must also be reviewed. `runtime.capabilities` derives MCP tool names from `tools()`, but `runtime.json` still must be updated. {#260505-tool-profile-gating}
 - CLI mirrors are separate adapters. MCP behavior changes do not update `cmd/ws-mcp` handlers automatically, and public launcher-required CLI commands must also be kept in `runtimeCapabilityCommandNames` plus `runtime.json.commands`. {#260505-cli-mirror-coverage}
-- `api.ask` and async API jobs use named-agent runtime semantics; changes to agent result/wait/print/cancel/erase behavior must keep MCP tool descriptions, async job reconciliation, session-key dispatch tests, and follow-up text coherent. {#260505-workflow-state-delegation-tools}
+- `api.ask` and async API jobs are retired; named-agent runtime changes should not preserve or recreate API documentation manager/pre-router behavior. `api.list` remains filesystem-only cache discovery. {#260505-workflow-state-delegation-tools}
 - Config tools read/write user-local config through `wsconfig`; compatibility tier names, model aliases, optional effort metadata, and harness-aware defaults must match agent registration behavior and readable `config.show` output. `config.agents_tier` is the public effort-selection surface; exposing effort directly on `ws.mercenary.register` or prompt metadata would bypass the alias contract and backend no-override default. {#260505-config-tools} {#260508-model-alias-config-tools}
 - MCP and CLI mirrors share readable formatter contracts through exported `internal/mcp` formatting helpers for workflow discovery and Git summaries. Keep explicit JSON output paths beside text defaults so tests cover both caller types. {#260519-workflow-command-readable-output-defaults}
 - Broad documentation find output has a stricter formatter contract than ordinary list summaries: default text groups by document with `score`/`hits`, bounds document and hit counts, and prints selected line snippets; explicit JSON must keep the wsdoc `matches` evidence for structured consumers. {#260519-tolerant-documentation-lookup-query-evidence}
@@ -88,8 +88,8 @@ related:
 - Adding dispatch without schema makes the tool callable only by guessing the name.
 - Treating schema-level (`tools/list`) filtering as an authority boundary creates false safety; it is advisory — a caller that knows a tool name can still issue `tools/call`. The authority is the keyed capability gate in `callTool`. `WS_MCP_TOOL_PROFILE` no longer gates anything (retired in Phase 3); do not reintroduce an env-profile role layer. Mandatory `session_key` closes keyless root-aware dispatch; render-minted child keys carry delegate scope in-band.
 - Assuming delegate or leaf agents can call `ws.mercenary.*` tools when `WS_MCP_TOOL_PROFILE` is applied; neither delegate nor leaf profile may call `ws.mercenary.*` — the delegate-profile exception that allowed lifecycle calls for `subquery-*`-named agents was removed with the subquery runtime in Phase 2b.
-- Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
-- Adding API-doc async tools without updating `agents-plugin/runtime.json`; launcher compatibility checks compare the required MCP tool surface against runtime metadata.
+- Reintroducing `api.ask` or API-doc async tools without a new spec; the current surface deliberately keeps only deterministic `api.list` cache discovery. {#260505-api-documentation-mcp-tools}
+- Adding MCP tools without updating `agents-plugin/runtime.json`; launcher compatibility checks compare the required MCP tool surface against runtime metadata.
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
 - Passing `"."` or `"<cwd>"` to `ws.lead.login(root)` is ambiguous in plugin-managed sessions; pass the repository's absolute filesystem path.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must reject without a valid `session_key` and direct the caller to `ws.lead.login(root)`.

@@ -28,7 +28,6 @@ type Server struct {
 	root           string
 	version        string
 	sourceCommit   string
-	api            apiRuntime
 	rootMu         sync.RWMutex
 	sessionHarness string
 	sessions       *sessionRegistry
@@ -353,54 +352,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, domains, err)
 		}
 		return toolTextResponse(req.ID, formatStringLines(domains), err)
-	case "api.ask":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		prompt, _ := params.Arguments["prompt"].(string)
-		hint, _ := params.Arguments["domain_hint"].(string)
-		text, err := s.askAPI(ctx, root, prompt, hint)
-		if err != nil && text != "" {
-			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
-		}
-		return toolTextResponse(req.ID, text, err)
-	case "api.ask_async":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		prompt, _ := params.Arguments["prompt"].(string)
-		hint, _ := params.Arguments["domain_hint"].(string)
-		result, err := s.startAPIJob(ctx, root, prompt, hint)
-		return toolJSONResponse(req.ID, result, err)
-	case "api.status":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		key, _ := params.Arguments["api_job_key"].(string)
-		result, err := s.statusAPIJob(ctx, root, key)
-		return toolJSONResponse(req.ID, result, err)
-	case "api.result":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		key, _ := params.Arguments["api_job_key"].(string)
-		text, err := s.resultAPIJob(ctx, root, key)
-		if err != nil && text != "" {
-			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
-		}
-		return toolTextResponse(req.ID, text, err)
-	case "api.cancel":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		key, _ := params.Arguments["api_job_key"].(string)
-		result, err := s.cancelAPIJob(ctx, root, key)
-		return toolJSONResponse(req.ID, result, err)
 
 	case "exec.spawn":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1855,69 +1806,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "api.list",
-			"description": "Return sorted API documentation cache domain names under ai-docs/.deps.",
+			"description": "Return sorted local API documentation cache domain names under ai-docs/.deps.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-			},
-		},
-		{
-			"name":        "api.ask",
-			"description": "Ask cached or fetchable third-party API documentation through per-domain manager sessions.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"prompt":      stringProperty("API documentation question to answer."),
-					"domain_hint": stringProperty("Optional API documentation domain hint."),
-				},
-				"required": []string{"prompt"},
-			},
-		},
-		{
-			"name":        "api.ask_async",
-			"description": "Start a recoverable asynchronous API documentation lookup job and return an api_job_key immediately.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"prompt":      stringProperty("API documentation question to answer asynchronously."),
-					"domain_hint": stringProperty("Optional API documentation domain hint."),
-				},
-				"required": []string{"prompt"},
-			},
-		},
-		{
-			"name":        "api.status",
-			"description": "Inspect a recoverable asynchronous API documentation job by api_job_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"api_job_key": stringProperty("Recoverable async API documentation job key."),
-				},
-				"required": []string{"api_job_key"},
-			},
-		},
-		{
-			"name":        "api.result",
-			"description": "Return the final answer for a recoverable asynchronous API documentation job by api_job_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"api_job_key": stringProperty("Recoverable async API documentation job key."),
-				},
-				"required": []string{"api_job_key"},
-			},
-		},
-		{
-			"name":        "api.cancel",
-			"description": "Best-effort cancel a recoverable asynchronous API documentation job by api_job_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"api_job_key": stringProperty("Recoverable async API documentation job key."),
-				},
-				"required": []string{"api_job_key"},
 			},
 		},
 		{
@@ -2449,7 +2343,7 @@ func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
 
 func rootAwareToolSchemaRequiresSessionKey(name string) bool {
 	switch name {
-	case "api.list", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel",
+	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
@@ -2567,7 +2461,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 		}
 		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "git.commit"
+		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -2645,7 +2539,7 @@ func noAgentHiddenTool(name string) bool {
 		return true
 	}
 	switch name {
-	case "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel":
+	case "config.agents_tier":
 		return true
 	case "ws.lead.prefer_mercenary":
 		// Mercenary render-mode control is ws-only; the agentless wsflow surface
