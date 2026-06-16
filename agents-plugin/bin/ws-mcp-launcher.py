@@ -415,6 +415,18 @@ def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     return read_local_devenv_contract(plugin_dir, os_name) is not None
 
 
+def bootstrap_runtime_forced() -> bool:
+    return bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL"))
+
+
+def runtime_install_forced(plugin_dir: Path, os_name: str, *, local_enabled: bool | None = None) -> bool:
+    if bootstrap_runtime_forced():
+        return True
+    if local_enabled is None:
+        local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    return local_enabled
+
+
 def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | None:
     # Fingerprint the local ws-mcp source tree so an unchanged tree can reuse the
     # cached runtime binary instead of forcing a `go build` on every launch (the
@@ -689,8 +701,9 @@ def main() -> int:
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
-    bootstrap_forced = bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL"))
+    bootstrap_forced = bootstrap_runtime_forced()
     local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    install_forced = runtime_install_forced(plugin_dir, os_name, local_enabled=local_enabled)
     # The stamp encodes the local source fingerprint, so a stamp hit under local
     # devenv proves the cached binary already matches the current source: skip the
     # rebuild. A miss means the source changed (or no runtime exists) -> rebuild.
@@ -703,7 +716,7 @@ def main() -> int:
         need_install = True
     elif compatibility_stamp_current(binary, contract, contract_path, runtime_dir, source_fingerprint):
         pass
-    elif local_enabled:
+    elif install_forced and local_enabled:
         note("local devenv source changed or runtime missing; rebuilding from source")
         need_install = True
     elif runtime_fully_compatible(binary, contract, runtime_dir):
