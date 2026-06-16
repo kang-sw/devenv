@@ -4,6 +4,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260616-refactor-remove-agent-backed-api-tools: prerequisite — remove the agent-backed api.ask surface before product-mode rendering cleanup
   260616-bug-wsflow-playbook-tools-expose-full-ws-guidance: absorbed narrow dogfood symptom; the real issue is missing wsflow product-mode convergence
+  260616-refactor-explicit-namespace-render-vars: Phase 1.5 stabilization — replace broad namespace substitution with explicit render vars
 spec:
   - 260513-wsflow-agentless-runtime-mode
   - 260609-playbook-tools
@@ -62,6 +63,11 @@ wsflow skills still carry a parallel curated procedure corpus.
   branch before the tool is removed.
 - **Current wsflow status:** wsflow is considered temporarily not usable until
   this convergence lands.
+- **Namespace rendering hardening:** Phase 1's token-safe namespace substitution
+  is a stabilization bridge, not the desired long-term authoring contract.
+  Before absorbing `prompt.render`, shared rsrc text should move display
+  namespace output to explicit reserved render vars so literal MCP tool names
+  and prose are not vulnerable to broad string substitution.
 
 ## Phases
 
@@ -97,6 +103,19 @@ Verification added or extended:
   `rows:`, `news/`, and `workflows`.
 - package tests cover the new raw rsrc marker structure and the regenerated
   wsflow mirror.
+
+### Phase 1.5: explicit namespace template variables
+
+Implement `260616-refactor-explicit-namespace-render-vars` before Phase 2. Move
+user-facing namespace output in shared rsrc playbooks from implicit render-time
+string substitution to explicit reserved render vars such as `McpNamespace` and
+`SkillNamespace`. Keep actual MCP tool identifiers, such as `ws.lead.login`,
+distinct from display namespace notation.
+
+Verification: wsflow and full-ws playbook outputs use the correct namespace
+notation from reserved vars, caller context cannot override the reserved vars,
+and tests fail if shared rsrc playbooks depend on broad `ws` string substitution
+for namespace output.
 
 ### Phase 2: absorb prompt.render behavior into playbook.render
 
