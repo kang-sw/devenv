@@ -163,3 +163,4 @@ Acceptance requires:
 - [Must] `ai-docs/mental-model/mcp-runtime.md` - MCP registry, product-mode gates, and runtime.capabilities rules.
 - [Must] `ai-docs/mental-model/plugin-runtime.md` - runtime.json and wsflow package contract coupling.
 - [Must] `ai-docs/mental-model/workflow-skills.md` - wsflow skill and delegate dispatch contracts.
+- [Must] Spec anchors `260529-prompt-render-tool`, `260609-playbook-tools`, `260513-wsflow-agentless-runtime-mode`, `260513-wsflow-runtime-contract-mode`, `260513-wsflow-agentless-plugin-package`, `260513-wsflow-agentless-skill-surface`, and `260529-wsflow-converged-implement-spine` - active contract anchors to update or remove.
