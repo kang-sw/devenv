@@ -94,10 +94,10 @@ of canonical `agents-plugin/rsrc/`, so wsflow prompt/playbook tools resolve
 their text from rsrc rather than an embedded bundle. Product differences are
 render-time transforms: the shared playbook renderer selects full-only or
 wsflow-only marker blocks and resolves explicit namespace variables to the
-active product namespace. The older wsflow-only `prompt.render` tool remains
-callable until its removal phase, but `playbook.render` now covers its five
-legacy render-eligible stems and appends the same free-text Render Context block
-in wsflow mode. The stored rsrc copy does not diverge from canonical; a byte-equality drift guard
+active product namespace. The retired wsflow-only `prompt.render` tool is no
+longer part of the runtime contract; `playbook.render` covers its five legacy
+render-eligible stems and appends the same free-text Render Context block in
+wsflow mode. The stored rsrc copy does not diverge from canonical; a byte-equality drift guard
 (regenerated with `WS_REGEN_WSFLOW_RSRC=1`, mirroring `WS_REGEN_MANIFEST`) keeps
 the copy in sync, and the launcher sets `WS_RSRC_ROOT` to the sibling tree when
 present. The rsrc subtree is the one generated-sameness exception to the

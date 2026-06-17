@@ -71,23 +71,20 @@ Excluded:
   review when useful.
 - Keep workflow integration lead-owned: docs, ticket/spec changes, mental-model
   updates, commits, and final judgment stay with the lead.
-- Feed playbook delegate prompts to native subagents only through
-  `wsflow/prompt.render` or the wsflow-mode `playbook.render` bridge for legacy
-  render-eligible stems; never hand-paste full playbook prompt text.
+- Feed playbook delegate prompts to native subagents only through wsflow-mode
+  `playbook.render`; never hand-paste full playbook prompt text.
 
-## Prompt Render Dispatch
+## Playbook Render Dispatch
 
-`wsflow/prompt.render(stem, context)` is the retained wsflow-only mechanism for
-handing a bundled delegate prompt to a native subagent. It loads the prompt by
-stem from the wsflow rsrc tree (see **Rsrc Tree Provisioning**), applies
-render-time `ws/` -> `wsflow/` namespace substitution, appends `context` as a
-free-text Render Context block, writes the result to a tmp file, and returns
-`prompt_path`. The lead hands `prompt_path` to a native subagent.
+`wsflow/playbook.render(name, context)` is the retained wsflow mechanism for
+handing bundled delegate prompts to native subagents. It loads the playbook by
+name from the wsflow rsrc tree (see **Rsrc Tree Provisioning**), applies
+product-mode playbook rendering, writes the result to a tmp file, and returns
+the path. The lead hands that path to a native subagent.
 
-During product-mode convergence, wsflow-mode `playbook.render(name, context)`
-also supports these same five stems and appends `context` as the same free-text
-Render Context block. That bridge is limited to the legacy render-eligible stem
-set; other playbooks still treat `context` as declared template variables.
+For the legacy render-eligible stem set, wsflow-mode `playbook.render` appends
+caller `context` as a free-text Render Context block. Other playbooks still
+treat `context` as declared template variables.
 
 - Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
@@ -95,20 +92,18 @@ set; other playbooks still treat `context` as declared template variables.
   text.
 - File-writing prompts (`plan-populator-*`, `mental-model-updater`) receive a
   caller-created output path in `context`; free-response prompts
-  (`reference-discovery`, `code-reviewer`) return text. `prompt.render` does not
-  mint an `expected_output_path`.
+  (`reference-discovery`, `code-reviewer`) return text. `playbook.render` does
+  not mint an `expected_output_path`.
 - The `implementer` prompt is not render-eligible in wsflow.
 
-`prompt.render` is a wsflow-only tool: it is advertised and callable only in the
-wsflow product mode and is hidden from the full ws surface. This is the mirror of
-the agentless hidden-tool gate (full ws hides `agents.*`, `subquery`, and other
-agent-backed tools in wsflow). The two gates are symmetric and must stay so.
+The retired `prompt.render` tool is no longer advertised or callable in wsflow
+or full ws. Explicit calls are unknown tools; do not restore it as a hidden
+compatibility alias.
 
 ## Rsrc Tree Provisioning
 
-`wsflow/prompt.render` and wsflow-mode `playbook.render` load from an rsrc tree,
-so the wsflow package ships one:
-`agents-plugin-wsflow/rsrc/`. It is a **generated, byte-identical copy** of
+wsflow-mode `playbook.render` loads from an rsrc tree, so the wsflow package
+ships one: `agents-plugin-wsflow/rsrc/`. It is a **generated, byte-identical copy** of
 canonical `agents-plugin/rsrc/`, committed as a real on-disk tree (not a symlink,
 not a release-only artifact). Product-specific rendering is applied at render
 time in the tool layer, not in the stored files, so the copy is byte-for-byte
@@ -152,10 +147,8 @@ skill files contain forbidden full-ws references, excluded skills, non-shim
 bodies, missing shared playbook stems, or inventory drift.
 
 wsflow ships no wsflow-only skills: `lead-implement` is the converged unified
-spine and absorbs the former `lead-edit` primitive. The only wsflow-only runtime
-surface is the `prompt.render` MCP tool (see **Prompt Render Dispatch**). Any new
-wsflow-only skill or tool must be documented here and in the package test before
-release.
+spine and absorbs the former `lead-edit` primitive. Any new wsflow-only skill or
+tool must be documented here and in the package test before release.
 
 Run:
 

@@ -19,6 +19,7 @@ related-mental-model:
   - prompt-bundle
   - workflow-skills
   - mcp-runtime
+completed: 2026-06-17
 ---
 
 # wsflow product-mode convergence — remove curated skill bodies after M4
@@ -195,3 +196,29 @@ remaining migration doctrine that treats legacy prompt rendering as the normal
 wsflow delegate path. Verification: full ws and wsflow package tests pass,
 wsflow runtime capabilities omit `prompt.render`, and wsflow skills remain thin
 playbook shims.
+
+### Result (6fec9107) - 2026-06-17
+
+Removed the wsflow-only `prompt.render` MCP/runtime surface. The tool schema,
+dispatch path, root-aware metadata, wsflow-only product gate, helper renderer,
+and wsflow package `runtime.json` requirement were deleted; explicit
+`prompt.render` calls now return unknown-tool JSON-RPC errors in both full ws
+and wsflow. The retained compatibility path is wsflow-mode `playbook.render`,
+which still appends caller context as a free-text Render Context block for the
+five legacy render-eligible stems.
+
+Verification added or updated:
+
+- full ws and wsflow `tools/list` omit `prompt.render`;
+- explicit `prompt.render` calls fail in both product modes;
+- wsflow `playbook.render` still preserves context injection for all five
+  legacy stems;
+- wsflow runtime capabilities and package `runtime.json` omit `prompt.render`;
+- wsflow skill shims remain unchanged.
+
+Dogfood note: native subagent survey work surfaced that render-minted session
+keys can become `unknown_session` when a subagent starts with a fresh MCP server
+instance. The follow-up todo ticket
+`260617-refactor-mcp-stateless-subagent-context` captures the need to redesign
+delegate context around stateless/filesystem-backed material rather than
+in-memory MCP server continuity.
