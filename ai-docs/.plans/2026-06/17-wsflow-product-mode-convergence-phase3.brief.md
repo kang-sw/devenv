@@ -33,8 +33,9 @@ Out of scope:
 
 ## Caller-Visible Contract
 
-Every shipped wsflow skill remains invocable under the same `wsflow:lead-*`
-skill name, but its `SKILL.md` body is only a shim that calls
+Every shipped wsflow skill remains invocable under the same package-qualified
+`wsflow:lead-*` skill name, while its `SKILL.md` frontmatter keeps the existing
+bare `name: lead-*` package-local convention. The `SKILL.md` body is only a shim that calls
 `wsflow/playbook.print(name: "<lead-name>")` and executes the returned procedure
 inline. Workflow behavior comes from shared rsrc playbooks rendered in wsflow
 product mode.
@@ -116,7 +117,7 @@ The expected wsflow shim shape is:
 
 ```markdown
 ---
-name: wsflow:lead-<name>
+name: lead-<name>
 description: <existing description>
 ---
 
