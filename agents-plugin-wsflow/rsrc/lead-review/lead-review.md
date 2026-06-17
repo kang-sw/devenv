@@ -11,7 +11,7 @@ Target: user request
 - Load `ai-docs/_review.local.md` before any review step; run setup if absent.
 - Never push, force-push, or modify remote branches without user confirmation.
 - Record the current branch before checkout; offer to restore it after review.
-- Workflow mutations (fixes, commits) are lead-owned; route through `ws:lead-discuss` and the lead-implement procedure.
+- Workflow mutations (fixes, commits) are lead-owned; route through `{{.SkillNamespace}}:lead-discuss` and the lead-implement procedure.
 - All written artifacts (review config, findings) must be in English regardless of conversation language.
 
 ## On: invoke [branch?]
@@ -36,7 +36,7 @@ Target: user request
 
 ### 4. Review
 
-1. Run `ws/git.diff(mode: "stat")` → present scope summary.
+1. Run `{{.McpNamespace}}/git.diff(mode: "stat")` → present scope summary.
 2. Apply `judge: follows-ws-workflow` → determine intention analysis path.
 3. Apply `judge: is-large-diff` → determine phase execution depth.
 4. Run review phases in order: intent, alignment, risk, then any custom phases from config.
@@ -138,12 +138,12 @@ One or more phases flagged issues.
 1. Present findings summary.
 2. Ask: fix locally or post to contributor?
 3. **Fix locally**:
-   a. Route to `ws:lead-discuss` with review findings as context.
+   a. Route to `{{.SkillNamespace}}:lead-discuss` with review findings as context.
    b. User proceeds through normal development route (lead-proceed → lead-implement).
-   c. Re-invoke `ws:lead-review` at user's discretion after fixes.
+   c. Re-invoke `{{.SkillNamespace}}:lead-review` at user's discretion after fixes.
 4. **Post to contributor**:
    a. Apply `judge: has-comment-method` → post findings per configured method.
-   b. If no comment method: write findings to `ws/path.generate(kind: "review")` artifact.
+   b. If no comment method: write findings to `{{.McpNamespace}}/path.generate(kind: "review")` artifact.
    c. Exit.
 
 ### OPEN

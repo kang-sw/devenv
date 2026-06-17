@@ -9,7 +9,7 @@ Target: user request
 
 ## Project Map
 
-Call `ws/project_tree()`.
+Call `{{.McpNamespace}}/project_tree()`.
 
 ## Invariants
 
@@ -26,8 +26,8 @@ Call `ws/project_tree()`.
 
 ## On: invoke
 
-1. Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
-2. Call `ws/git.status()`.
+1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
+2. Call `{{.McpNamespace}}/git.status()`.
 3. Identify target kind: branch, sprint, commit range, ticket graph, worktree diff, agent run, or user-described failure.
 4. Enter **Containment**.
 
@@ -37,7 +37,7 @@ Call `ws/project_tree()`.
 2. If the worktree or branch may be lost, ask before creating a rescue branch or tag.
 3. Ask the user for the **Failure Claim**: what is wrong, what must not be trusted, and what must not be lost.
 4. Restate the failure claim and ask the user to confirm or amend it.
-5. Stop if the user cannot confirm a failure claim; suggest `ws:lead-discuss` for exploratory diagnosis.
+5. Stop if the user cannot confirm a failure claim; suggest `{{.SkillNamespace}}:lead-discuss` for exploratory diagnosis.
 6. Enter **Survey Fanout**.
 
 ## On: Survey Fanout
@@ -49,10 +49,15 @@ Call `ws/project_tree()`.
    - **Evidence inventory** - logs, reviewer reports, plans, skeletons, screenshots, or external notes worth preserving.
 2. Dispatch all independent survey calls first; store agent ids or names before collecting results.
 3. Spawn a host-native exploration worker directly with a one-turn bounded survey prompt; collect the result when it returns.
+<!-- ws:full-only:start -->
 4. Use named agents for broad or stateful surveys:
    a. Register one agent per independent survey, such as `salvage-blast-radius`, `salvage-ticket-graph`, `salvage-doc-impact`, or `salvage-evidence`.
    b. Call each agent with the **Survey Prompt** for its assigned question.
    c. Collect each result through `ws.mercenary.result(name: "<agent-name>", timeout_seconds: 600)`.
+<!-- ws:full-only:end -->
+<!-- ws:wsflow-only:start -->
+4. For broad surveys, spawn additional native exploration workers with one bounded survey prompt per independent question; collect each result when it returns.
+<!-- ws:wsflow-only:end -->
 5. Summarize survey outputs into the **Salvage Report** before treating them as durable evidence.
 6. Do not convert survey outputs into decisions without user confirmation.
 7. Enter **Premise Interview**.
@@ -80,11 +85,11 @@ Call `ws/project_tree()`.
 
 Trigger: user approves the salvage report and ticket plan.
 
-1. Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline to create or update one research ticket containing the salvage report.
-2. Apply **judge: needs-recovery-epic**; if it fires, call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline to create or update one recovery epic.
-3. For concrete execution slices, call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline separately for each child ticket.
+1. Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline to create or update one research ticket containing the salvage report.
+2. Apply **judge: needs-recovery-epic**; if it fires, call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline to create or update one recovery epic.
+3. For concrete execution slices, call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline separately for each child ticket.
 4. Apply **judge: destructive-action** immediately before any destructive ticket, spec, or source cleanup.
-5. For affected existing tickets, call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline separately for each approved rewrite, drop, absorb, or status move.
+5. For affected existing tickets, call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline separately for each approved rewrite, drop, absorb, or status move.
 6. If destructive source cleanup is still needed, route to the approved manual git action or implementation skill.
 7. Report created or updated ticket paths, remaining unknowns, and the next user decision point.
 

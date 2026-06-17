@@ -30,7 +30,7 @@ Scope
 
 ### 1. Premise Gate
 
-1. Run discussion verification first by calling `ws/playbook.print(name: "lead-verify-discussion")` and executing the returned procedure inline; if unavailable, locally identify corrected premises, evidence, constraints, reuse opportunities, over-alignment risks, countercases, and unresolved unknowns.
+1. Run discussion verification first by calling `{{.McpNamespace}}/playbook.print(name: "lead-verify-discussion")` and executing the returned procedure inline; if unavailable, locally identify corrected premises, evidence, constraints, reuse opportunities, over-alignment risks, countercases, and unresolved unknowns.
 2. If a material premise fails, return premise status, corrected premises, blocking reason, and next action; stop before design review.
 3. If multiple plausible premises depend on an unmade user decision, ask one focused question, include the competing premise options, and stop before creating artifacts.
 4. Treat a premise as blocking when the design review would rely on it and it is contradicted or unsupported.
@@ -38,19 +38,25 @@ Scope
 
 ### 2. Neutral Brief
 
-1. Call `ws/path.generate(kind: "review", stems: ["verify-design-brief", "verify-design-review"])`; capture `<brief-path>` and `<review-path>`; if path generation fails, report failure and stop.
+1. Call `{{.McpNamespace}}/path.generate(kind: "review", stems: ["verify-design-brief", "verify-design-review"])`; capture `<brief-path>` and `<review-path>`; if path generation fails, report failure and stop.
 2. Write `<brief-path>` using **Design Brief template**.
 3. Audit the brief against corrected premises; remove persuasion, lead preference, and unsupported claims.
 4. Keep user preferences only under `Preferences To Treat As Preferences`.
 
 ### 3. Fresh Review
 
+<!-- ws:full-only:start -->
 1. Register a fresh unique reviewer through `ws.mercenary.register(name: "design-reviewer-<unique-suffix>", model: "deep")`; do not reuse an existing reviewer session.
 2. Call `ws.mercenary.call(name: "design-reviewer-<unique-suffix>", prompt: <Design Reviewer prompt>)`.
 3. Read `ws.mercenary.result(name: "design-reviewer-<unique-suffix>", timeout_seconds: 600)`; if the call fails or times out, delete artifacts and return review failure with premise status, failure reason, and next action.
-4. If the reviewer wrote `<review-path>`, read it; otherwise use the final result text.
-5. If neither `<review-path>` nor usable final text exists, delete artifacts and return review failure with premise status, failure reason, and next action.
-6. Classify findings as fatal issue, important risk, minor polish, acceptable trade-off, reviewer-overreach, or out of scope; list simpler alternatives only under the separate Simpler Alternatives section.
+<!-- ws:full-only:end -->
+<!-- ws:wsflow-only:start -->
+1. Spawn a fresh native reviewer with the **Design Reviewer prompt**; do not reuse an existing reviewer session.
+2. Collect the native reviewer result; if the call fails or times out, delete artifacts and return review failure with premise status, failure reason, and next action.
+<!-- ws:wsflow-only:end -->
+1. If the reviewer wrote `<review-path>`, read it; otherwise use the final result text.
+2. If neither `<review-path>` nor usable final text exists, delete artifacts and return review failure with premise status, failure reason, and next action.
+3. Classify findings as fatal issue, important risk, minor polish, acceptable trade-off, reviewer-overreach, or out of scope; list simpler alternatives only under the separate Simpler Alternatives section.
 
 ### 4. Return
 

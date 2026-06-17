@@ -25,8 +25,11 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn('ws/playbook.print(name: "lead-proceed")', shim)
         self.assertIn("Always route code-editing work through the lead-implement procedure", text)
         self.assertIn("## Routing Verdict", text)
-        self.assertIn("NEXT: <ws:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
-        self.assertIn('If `NEXT:` names `lead-implement`, call `ws/playbook.print(name: "lead-implement")`', text)
+        self.assertIn("NEXT: <{{.SkillNamespace}}:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
+        self.assertIn(
+            'If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")`',
+            text,
+        )
         self.assertIn("- **Migration Anchor**: <loaded | n/a | missing | conflict>", text)
         self.assertIn("especially Slice and Reason, as caller-provided scope", text)
         self.assertIn("before any source inspection, planning, or editing", text)
@@ -67,7 +70,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
-        self.assertIn("Write prompts sent to native Explore-style subagents and `ws.mercenary.call` in English.", text)
+        self.assertIn("Write prompts sent to native Explore-style subagents in English.", text)
+        self.assertIn("<!-- ws:full-only:start -->", text)
+        self.assertIn("Write prompts sent to `ws.mercenary.call` in English.", text)
+        self.assertIn("<!-- ws:full-only:end -->", text)
 
     def test_verify_discussion_is_entry_shim(self):
         shim = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")

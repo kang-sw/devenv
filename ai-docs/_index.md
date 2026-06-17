@@ -42,8 +42,8 @@ history.
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
 - `agents-plugin-wsflow/` is an agentless derivative package with
   Codex/Claude manifests, package-local no-agent MCP env, shared launcher
-  copies, a reduced `runtime.json`, a curated wsflow skill bundle, and package
-  tests for runtime-contract plus skill-inventory drift.
+  copies, a reduced `runtime.json`, thin wsflow skill shims over shared
+  playbooks, and package tests for runtime-contract plus skill-shim drift.
 - `.agents/plugins/marketplace.json` exposes both `ws` and `wsflow` as local
   Codex plugin entries; `.claude-plugin/marketplace.json` exposes both packages
   for manual Claude marketplace installation while `install.sh` still installs
@@ -163,7 +163,10 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
 | `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
-| `260616-refactor-wsflow-product-mode-convergence` | ready | After M4, collapse wsflow onto product-mode playbook rendering and remove curated skill bodies |
+| `260616-refactor-wsflow-product-mode-convergence` | done | Collapsed wsflow onto product-mode playbook rendering and removed curated skill bodies |
+| `260616-refactor-explicit-namespace-render-vars` | done | Replaced implicit ws->wsflow playbook string substitution with explicit reserved namespace render vars |
+| `260617-feat-fresh-reader-audit-playbook` | idea | Add a reusable fresh-reader audit playbook for skill and prompt authoring |
+| `260617-refactor-mcp-stateless-subagent-context` | todo | Make MCP subagent context stateless and filesystem-backed |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
@@ -172,6 +175,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
+| `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | idea | Investigate exec MCP running/abort timing flakiness under full agents-plugin-tool test suite load |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -239,11 +243,23 @@ dropped tickets live in hidden archive dirs and git history.
   future outside-epic board:
   `260616-epic-api-namespace-documentation-memory-tooling`, where `api.*` becomes
   pure documentation, corpus, hierarchical memory, and playbook-manual tooling
-  with no MCP-owned agent delegation. **Post-M4:**
-  `260616-refactor-wsflow-product-mode-convergence` (ready) collapses wsflow
-  onto product-mode playbook rendering and removes curated skill bodies; until
-  then wsflow is treated as not reliable for serious dogfood. Open: Codex non-skill
-  `rsrc/` cache materialization (prereqs `260523`, `260524-codex-cache`).
+  with no MCP-owned agent delegation. **Post-M4 complete**
+  (`260616-refactor-wsflow-product-mode-convergence`, `.done/`): wsflow is
+  converged onto product-mode playbook rendering. Phase 1
+  landed product-marker rendering, Phase 1.5
+  `260616-refactor-explicit-namespace-render-vars` (`.done/`, `ae0c6959`) replaced
+  broad playbook namespace rewriting with explicit reserved render vars. Phase 2
+  (`6ca530ab`) absorbed legacy `prompt.render` context materialization into
+  wsflow-mode `playbook.render`.
+  Phase 3 (`87aec145`) collapsed shipped wsflow skill bodies to thin
+  `wsflow/playbook.print` shims over shared rsrc playbooks. Phase 4
+  (`6fec9107`) removed the wsflow-only `prompt.render` MCP/runtime surface and
+  stale migration doctrine; wsflow delegate prompts now render through
+  `playbook.render`. Open dogfood follow-up:
+  `260617-refactor-mcp-stateless-subagent-context` captures that native
+  subagents may start fresh MCP instances and need stateless/filesystem-backed
+  workflow context. Open: Codex non-skill `rsrc/` cache materialization
+  (prereqs `260523`, `260524-codex-cache`).
 - `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,
   refactor; ready→.done 2026-06-12) - first-class `small/medium/large/xlarge` tier
   vocab + `light/core/deep` alias demotion, mercenary per-spawn tier routing, full

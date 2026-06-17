@@ -8,7 +8,7 @@ Target: user request
 
 ## Project Map
 
-Call `ws/mental_models.list()` to load the current mental-model catalog.
+Call `{{.McpNamespace}}/mental_models.list()` to load the current mental-model catalog.
 
 ## Invariants
 
@@ -25,7 +25,7 @@ Call `ws/mental_models.list()` to load the current mental-model catalog.
 
 1. Parse the rule from `user request`. If `user request` is empty, ask the user for the rule description and wait.
 2. Read `CLAUDE.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
-3. Use the `ws/mental_models.list()` result for the current domain catalog and hierarchy.
+3. Use the `{{.McpNamespace}}/mental_models.list()` result for the current domain catalog and hierarchy.
 4. For direct-child sub-domain candidates (`mental-model/<domain>/<sub>.md`), read `mental-model/<domain>/index.md` first; inherited `## Domain Rules` may already cover the rule.
 
 ### 2. Classify
@@ -155,12 +155,12 @@ sources:
 ```
 
 Add sibling sections (Entry Points, Module Contracts, etc.) only if the
-user asks - `ws:lead-add-rule` is a rule authoring skill, not a mental-model
-scaffolding skill. `ws:lead-forge-mental-model` owns full-doc authorship.
+user asks - `{{.SkillNamespace}}:lead-add-rule` is a rule authoring skill, not a mental-model
+scaffolding skill. `{{.SkillNamespace}}:lead-forge-mental-model` owns full-doc authorship.
 
 ## Doctrine
 
-`ws:lead-add-rule` optimizes for **classification accuracy at capture time**.
+`{{.SkillNamespace}}:lead-add-rule` optimizes for **classification accuracy at capture time**.
 A mis-routed rule either dilutes `## Architecture Rules` or hides a cross-cutting
 invariant in a domain doc. The skill writes autonomously only when classification
 is unambiguous, asks on ambiguity, never edits existing rule content, and

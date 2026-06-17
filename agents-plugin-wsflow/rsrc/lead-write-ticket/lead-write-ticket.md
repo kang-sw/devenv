@@ -9,7 +9,7 @@ Target: user request
 
 ## Invariants
 
-- Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
+- Ticket conventions: call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
 - Aside from required conventions, focus updates, and explicitly routed spec or mental-model checks, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
@@ -24,7 +24,7 @@ Target: user request
 
 ### 1. Resolve
 
-1. Call `ws/convention.read(name: "ticket-conventions")`.
+1. Call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")`.
 
 ### 2. Route
 
@@ -55,7 +55,7 @@ Target: user request
 ### 7. Commit
 
 1. If no file changed because the requested move was refused, skip commit.
-2. Commit edited paths with `ws/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
+2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
 ### 8. Handoff
 
@@ -169,11 +169,11 @@ Target: user request
 
 ### 3. Ready Addressing
 
-1. For `ready/`, use `ws/specs.find` or `ws/specs.status` to confirm existing `spec:` and `spec-remove:` stems.
+1. For `ready/`, use `{{.McpNamespace}}/specs.find` or `{{.McpNamespace}}/specs.status` to confirm existing `spec:` and `spec-remove:` stems.
 2. For `ready/`, keep confirmed existing stems in frontmatter.
 3. For `ready/`, when neither confirmed `spec:` nor `spec-remove:` stems address the phase, write or update `## Spec Impact`.
 4. `## Spec Impact` must name the target spec area, expected caller-visible change, and `Contract-first spec: yes|no`.
-5. If `Contract-first spec: yes`, call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline, re-check the created or updated stem, and list it in `spec:`.
+5. If `Contract-first spec: yes`, call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline, re-check the created or updated stem, and list it in `spec:`.
 6. After a contract-first spec is listed in `spec:`, remove redundant `## Spec Impact` text or keep only closeout notes not covered by the spec.
 7. If neither confirmed stems nor `## Spec Impact` addresses a phase, apply `judge: missing-spec-address`.
 
@@ -190,11 +190,11 @@ Target: user request
 1. For `epic`, do not suggest proceeding on the epic path.
 2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
 3. For `workset`, suggest one concrete next action: proceed/promote an existing included actionable ticket, or create a planned reference as a new actionable ticket; never suggest proceeding or promoting the workset itself.
-4. For actionable tickets with valid spec addressing, suggest `ws:lead-proceed`; when spec addressing blocks readiness, report the blocker and omit a proceed suggestion.
+4. For actionable tickets with valid spec addressing, suggest `{{.SkillNamespace}}:lead-proceed`; when spec addressing blocks readiness, report the blocker and omit a proceed suggestion.
 5. State that proceed routes to implementation readiness; the lead-implement procedure resolves plan depth and execution mode.
 6. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
 7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
-8. Preserve the final `Ticket:` line; callers such as `ws:lead-proceed` capture this path from prefix-stage output.
+8. Preserve the final `Ticket:` line; callers such as `{{.SkillNamespace}}:lead-proceed` capture this path from prefix-stage output.
 
 ## On: Cross-ticket decision review
 
@@ -219,7 +219,7 @@ Target: user request
 1. Keep epics to scope, non-scope, child ticket board, cross-child decisions, and completion criteria.
 2. Keep worksets to context, included tickets, focus, and exit criteria; never add child relationships from workset inclusion.
 3. Put implementation decisions, constraints, rejected alternatives, and phases into actionable tickets.
-4. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `ws:lead-proceed`.
+4. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `{{.SkillNamespace}}:lead-proceed`.
 5. For any selected target entering `ready/`, run Spec-address check before commit.
 
 ### 3. Verify and Report
@@ -243,7 +243,7 @@ Default: if the user asks for a board without decomposition ownership, choose `w
 Trigger: non-`epic`, non-`research`, non-`workset` ticket creation or move into `ready/`.
 Ungated: `idea/` creation and `idea/` -> `todo/` triage.
 Find addressing: identify existing `spec:` or `spec-remove:` stems, or write a ticket-local `## Spec Impact` section.
-Contract-first: call `ws/playbook.print(name: "lead-write-spec")` and execute inline only when `judge: contract-first-spec` is yes.
+Contract-first: call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute inline only when `judge: contract-first-spec` is yes.
 Stop: no stem or `## Spec Impact` can address the behavior, the lead-write-spec procedure failed, or the behavior is too underspecified; name the blocker.
 
 ### judge: initial-status

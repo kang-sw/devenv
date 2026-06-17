@@ -55,15 +55,15 @@ Review
 4. If continuing on `implement/*` and branch name no longer matches selected scope, rename with `git branch -m implement/<scope>`; stop if target branch exists or upstream tracking is ambiguous.
 5. Record `<implementation-start>` with `git rev-parse HEAD`.
 6. If `branch-mode` = create: create `implement/<scope>` before any source edit.
-7. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
+7. Call `{{.McpNamespace}}/mental_models.find(query: <target or domain>)` or `{{.McpNamespace}}/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 8. If the target or ticket touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md`.
-9. Call `ws/infra.read(name: "impl-playbook")`.
+9. Call `{{.McpNamespace}}/infra.read(name: "impl-playbook")`.
 10. If an implementation choice depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint absent from the target or loaded docs, search the ticket/spec/mental-model cascade before editing and report a blocker instead of inferring.
 11. Identify integration test paths and their run command.
 12. If `plan-depth` ≥ survey: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in step 14 via `plan-populator-survey`.
 13. If delegated or `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; if the migration anchor was read, copy every binding implementation constraint into the brief and add the anchor as a `[Must]` reference; audit against target before committing or running plan population; commit.
 14. If `plan-depth` ≥ survey: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
-15. If delegated: render the implementer prompt via `ws/playbook.render(name: "implementer")` per **Delegate dispatch**; save the rendered prompt path and `recommended-tier` for the Edit stage.
+15. If delegated: render the implementer prompt via `{{.McpNamespace}}/playbook.render(name: "implementer")` per **Delegate dispatch**; save the rendered prompt path and `recommended-tier` for the Edit stage.
 16. Create and maintain task list:
 
 ```text
@@ -71,7 +71,7 @@ Review
 [ ] Prep - branch, context, brief/plan (per plan-depth)
 [ ] Edit - direct-edit or spawn implementer; capture commit range
 [ ] Review - run reviewer relay according to `judge: review-allocation`
-[ ] Doc pre-pass - call `ws/playbook.print(name: "lead-update-spec")` and execute inline, then `mental-model-updater`; commit each
+[ ] Doc pre-pass - call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute inline, then `mental-model-updater`; commit each
 [ ] Doc commit gate - refresh _index.md, ticket status, then commit docs
 [ ] Doc closeout compaction - compact safe documentation-only branch-tip suffix
 [ ] Final action gate - wait for merge, continue, or stop
@@ -83,15 +83,15 @@ Review
 1. If direct-edit: edit directly per target and impl-playbook; commit logical checkpoints.
 2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
 3. If delegated and referenced tests exist: run baseline verification.
-4. If delegated: spawn the implementer per **Delegate dispatch** (native default; mercenary on request) with the **Implementer spawn prompt** as the task-specific input.
-5. If delegated: read the implementer result (native subagent return, or `ws.mercenary.result(name: "implementer", timeout_seconds: 600)` for a mercenary) only if the async result lacks a usable summary; capture `<first-commit>..<last-commit>`.
+4. If delegated: spawn the implementer per **Delegate dispatch** with the **Implementer spawn prompt** as the task-specific input.
+5. If delegated: read the implementer result only if the async result lacks a usable summary; capture `<first-commit>..<last-commit>`.
 6. Capture `<commit-range>` and `<result-commit>`.
 
 ### 5. Review
 
 1. If lead-only: record rationale; skip to step 8.
-2. If single: dispatch the `reviewer` playbook per **Delegate dispatch** (the general reviewer; its shared base covers correctness, standards, contract, and security); generate path via `ws/path.generate(kind: "review", stems: ["direct"])`.
-3. If partitioned: choose partition subset from Tier 2; for each, dispatch its partition playbook from the **Reviewer partition table** per **Delegate dispatch**; generate paths via `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
+2. If single: dispatch the `reviewer` playbook per **Delegate dispatch** (the general reviewer; its shared base covers correctness, standards, contract, and security); generate path via `{{.McpNamespace}}/path.generate(kind: "review", stems: ["direct"])`.
+3. If partitioned: choose partition subset from Tier 2; for each, dispatch its partition playbook from the **Reviewer partition table** per **Delegate dispatch**; generate paths via `{{.McpNamespace}}/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
 4. Call reviewer(s) with **Reviewer prompt frame**.
 5. If all reviewers return `[clean]`, proceed to Review cleanup.
 6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call reviewer with rejected list. Repeat until `[clean]` or 2 cycles.
@@ -100,7 +100,7 @@ Review
 
 ### 6. Doc Pre-Pass
 
-1. Call `ws/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<commit-range>`.
+1. Call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<commit-range>`.
 2. Dispatch `mental-model-updater` per **Delegate dispatch** (task input: `Commit range: <commit-range>` plus the target output path).
 3. Wait for completion; commit file changes.
 
@@ -108,7 +108,7 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 
 ### 7. Doc Commit Gate
 
-1. Call `ws/infra.read(name: "executor-wrapup")`.
+1. Call `{{.McpNamespace}}/infra.read(name: "executor-wrapup")`.
 2. Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
 3. If ticket-driven, follow Ticket Update using `<result-commit>`.
 4. Commit doc changes per executor-wrapup. Do not re-run Doc Pipeline.
@@ -137,7 +137,7 @@ Report:
 
 Stop after reporting and wait for the user to choose merge, continue with a new
 slice, or stop. If the user wants more changes, route to a new
-implementation slice or `ws:lead-sprint`; completed phases capture follow-up
+implementation slice or `{{.SkillNamespace}}:lead-sprint`; completed phases capture follow-up
 through append-only ticket Result editions. If the user chooses stop, leave the
 implementation branch unmerged and report the branch name plus merge target.
 
@@ -206,8 +206,11 @@ Tier 2 — partitions (only when Tier 1 = Partitioned):
 
 Choose the smallest partition set that covers material risk.
 Full review (all three): reserve for cross-cutting behavior plus runtime/tooling plus test surface.
-Default reviewer tier per partition in first-class vocabulary (`small`/`medium`/`large`/`xlarge`); raise a partition's tier for unusually subtle risk. When a delegate playbook declares its own `tier:`, the `recommended-tier` returned by `ws/playbook.render` is the source of truth for that delegate.
-Native delegation treats the tier as a model-selection guide; mercenary delegation maps it through the `light↦small`/`core↦medium`/`deep↦large` alias layer to a concrete model.
+Default reviewer tier per partition in first-class vocabulary (`small`/`medium`/`large`/`xlarge`); raise a partition's tier for unusually subtle risk. When a delegate playbook declares its own `tier:`, the `recommended-tier` returned by `{{.McpNamespace}}/playbook.render` is the source of truth for that delegate.
+Native delegation treats the tier as a model-selection guide.
+<!-- ws:full-only:start -->
+Mercenary delegation maps it through the `light↦small`/`core↦medium`/`deep↦large` alias layer to a concrete model.
+<!-- ws:full-only:end -->
 
 ## Templates
 
@@ -231,13 +234,17 @@ Proceeding with implementation.
 
 Canonical render+spawn idiom for every bundled delegate (`reference-discovery`,
 `implementer`, `reviewer` / review partitions, `mental-model-updater`,
-`plan-populator-survey`/`plan-populator-research`). Native is the default;
-mercenary is available on user request or under `ws.lead.prefer_mercenary`.
+`plan-populator-survey`/`plan-populator-research`). Native is the default.
+<!-- ws:full-only:start -->
+Mercenary is available on user request or under `ws.lead.prefer_mercenary`.
+<!-- ws:full-only:end -->
 
-1. Render the delegate playbook: `ws/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
-2. Native (default): spawn a native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide.
-3. Mercenary (on request): `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`.
-4. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus the target output path. File-writing delegates write to their caller-created output path or return content; free-response delegates return text the lead integrates.
+1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
+1. Native (default): spawn a native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide.
+<!-- ws:full-only:start -->
+1. Mercenary (on request): `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`.
+<!-- ws:full-only:end -->
+1. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus the target output path. File-writing delegates write to their caller-created output path or return content; free-response delegates return text the lead integrates.
 
 ### Brief template
 

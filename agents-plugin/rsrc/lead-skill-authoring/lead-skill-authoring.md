@@ -30,7 +30,7 @@ These apply to both skill and agent documents.
 
 ### Content rules
 
-- Skills stand alone. Refer to other skills only as explicit invocation targets, such as `ws:<skill>` or host-specific slash commands.
+- Skills stand alone. Refer to other skills only as explicit invocation targets, such as `{{.SkillNamespace}}:<skill>` or host-specific slash commands.
 - Agents stand alone. Do not reference session state or conversation history.
 - Use examples only when they prevent repeated wrong execution.
 - For user shorthand, name the general intent first and list shorthand only as trigger examples.

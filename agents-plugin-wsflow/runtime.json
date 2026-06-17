@@ -36,8 +36,7 @@
     "git.log": ">=0.30.0-dev <0.31.0",
     "git.merge_base": ">=0.30.0-dev <0.31.0",
     "git.commit": ">=0.30.0-dev <0.31.0",
-    "api.list": ">=0.30.0-dev <0.31.0",
-    "prompt.render": ">=0.30.0-dev <0.31.0"
+    "api.list": ">=0.30.0-dev <0.31.0"
   },
   "commands": {
     "runtime.info": ">=0.30.0-dev <0.31.0",

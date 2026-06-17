@@ -307,7 +307,7 @@ func TestLoaderParsesRoleAndTier(t *testing.T) {
 // TestLoaderFlatPlaybook verifies a flat root-level file <root>/<name>.md is
 // loadable as a playbook when no subdir playbook exists. This is how the
 // var-free code-reviewer flat dep (also a flat include target) is rendered as a
-// playbook in its own right (wsflow prompt.render "code-reviewer" stem).
+// playbook in its own right (wsflow playbook.render "code-reviewer" stem).
 func TestLoaderFlatPlaybook(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "code-reviewer.md", "Shared reviewer base text.\n")
@@ -746,6 +746,19 @@ func TestValidateUndeclaredVariable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Secret") {
 		t.Errorf("error = %q, want mention of 'Secret'", err)
+	}
+}
+
+func TestValidateImplicitVariables(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pb/pb.md", "---\nkind: print\n---\nUse {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.\n")
+	m, _ := GenerateManifest(root)
+	if err := WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+
+	if err := Validate(root); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 

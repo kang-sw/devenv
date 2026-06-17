@@ -39,11 +39,12 @@ var playbookTerminologyTable = map[string]map[string]string{
 }
 
 // reservedToolVarNames documents the complete set of variable names that the
-// tool layer may inject (from the terminology table or model alias resolution).
+// tool layer may inject (from the terminology table, namespace table, or model
+// alias resolution).
 // This variable is a documentation artifact: the "tool-injected wins on
 // collision" invariant is achieved by layer ordering in buildPlaybookVars
-// (terminology and model alias layers overwrite the caller context layer),
-// not by a guard that references this set. Tests use it to assert that the
+// (terminology, namespace, and model alias layers overwrite the caller context
+// layer), not by a guard that references this set. Tests use it to assert that the
 // documented reserved set is complete.
 var reservedToolVarNames = func() map[string]bool {
 	set := map[string]bool{}
@@ -56,6 +57,9 @@ var reservedToolVarNames = func() map[string]bool {
 	set["LightModel"] = true
 	set["CoreModel"] = true
 	set["DeepModel"] = true
+	for _, name := range wsrsrc.ImplicitVariableNames {
+		set[name] = true
+	}
 	return set
 }()
 
@@ -97,17 +101,36 @@ func resolveModelVars(harness string, configOpts wsconfig.Options) map[string]st
 	return result
 }
 
+func resolveNamespaceVars() map[string]string {
+	namespace := RuntimeNamespace()
+	return map[string]string{
+		"McpNamespace":   namespace,
+		"SkillNamespace": namespace,
+	}
+}
+
+func isReservedNamespaceVar(name string) bool {
+	for _, reserved := range wsrsrc.ImplicitVariableNames {
+		if name == reserved {
+			return true
+		}
+	}
+	return false
+}
+
 // buildPlaybookVars assembles the final vars map for wsrsrc.Load.
 //
 // Merge rules:
 //  1. Caller-supplied context vars are accepted as-is.
 //  2. Tool-injected terminology vars overwrite caller context for reserved names.
 //  3. Tool-injected model alias vars overwrite caller context for reserved names.
-//  4. Only keys present in declared are included in the result (so wsrsrc.Load
-//     never sees undeclared keys from the tool-injected tables).
+//  4. Tool-injected namespace vars overwrite caller context for reserved names.
+//  5. Only keys present in declared, plus namespace reserved vars, are included
+//     in the result.
 //
-// Caller context keys that are not in declared return an ErrUndeclaredVar so the
-// contract "undeclared caller context → loud error" is preserved.
+// Caller context keys that are neither declared nor namespace reserved return an
+// ErrUndeclaredVar so the contract "undeclared caller context → loud error" is
+// preserved while common namespace vars do not require frontmatter declarations.
 //
 // configOpts is forwarded to resolveModelVars unchanged.
 func buildPlaybookVars(declared []string, callerContext map[string]string, harness string, configOpts wsconfig.Options) (map[string]string, error) {
@@ -118,12 +141,12 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 
 	// Check caller context keys against declared — fail loudly on undeclared.
 	for k := range callerContext {
-		if !declaredSet[k] {
+		if !declaredSet[k] && !isReservedNamespaceVar(k) {
 			return nil, wsrsrc.ErrUndeclaredVar{Name: k}
 		}
 	}
 
-	merged := make(map[string]string, len(declared))
+	merged := make(map[string]string, len(declared)+len(wsrsrc.ImplicitVariableNames))
 
 	// Layer 1: caller context (validated above).
 	for k, v := range callerContext {
@@ -145,12 +168,19 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 		}
 	}
 
+	// Layer 4: namespace vars are available to all playbooks and override caller
+	// context so display namespace cannot be spoofed through render context.
+	for k, v := range resolveNamespaceVars() {
+		merged[k] = v
+	}
+
 	return merged, nil
 }
 
 // delegationTip returns the harness-aware continuity tip fragment appended to the
-// rendered body of delegates:true playbooks. It includes the always-on mercenary tip
-// noting the ws.mercenary.call path is always reachable on request.
+// rendered body of delegates:true playbooks. Full ws output includes the
+// always-on mercenary tip; wsflow no-agent output omits it because the mercenary
+// surface is hidden there.
 func delegationTip(harness string) string {
 	term := terminologyForHarness(harness)
 	continueIdiom := term["ContinueIdiom"]
@@ -162,12 +192,14 @@ func delegationTip(harness string) string {
 	sb.WriteString("` to send follow-up messages to the same agent rather than spawning a new one. ")
 	sb.WriteString("The playbook surface keeps no agent registry; ")
 	sb.WriteString("record the agent id in your workflow state if you need it across turns.")
-	// Unit 3: always-on mercenary tip — present in every delegates:true rendering.
-	sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
-	sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
-	sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
-	sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
-	sb.WriteString(" agent id you can resume with the same continuation idiom.")
+	if !NoAgentMode() {
+		// Unit 3: always-on mercenary tip — present in every full-ws delegates:true rendering.
+		sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
+		sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
+		sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
+		sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
+		sb.WriteString(" agent id you can resume with the same continuation idiom.")
+	}
 	return sb.String()
 }
 
@@ -242,6 +274,50 @@ func mercenaryGuidanceBlock() string {
 		" The native subagent path remains available if you prefer it."
 }
 
+func renderProductModePlaybookBody(body string) string {
+	return selectProductModeBlocks(body)
+}
+
+const (
+	fullOnlyStart   = "<!-- ws:full-only:start -->"
+	fullOnlyEnd     = "<!-- ws:full-only:end -->"
+	wsflowOnlyStart = "<!-- ws:wsflow-only:start -->"
+	wsflowOnlyEnd   = "<!-- ws:wsflow-only:end -->"
+)
+
+// selectProductModeBlocks removes marker comments and keeps only the sections
+// that apply to the current product mode. The source rsrc remains shared; the
+// rendered playbook is the product-specific contract.
+func selectProductModeBlocks(body string) string {
+	lines := strings.Split(body, "\n")
+	filtered := make([]string, 0, len(lines))
+	fullOnly := false
+	wsflowOnly := false
+	noAgent := NoAgentMode()
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case fullOnlyStart:
+			fullOnly = true
+			continue
+		case fullOnlyEnd:
+			fullOnly = false
+			continue
+		case wsflowOnlyStart:
+			wsflowOnly = true
+			continue
+		case wsflowOnlyEnd:
+			wsflowOnly = false
+			continue
+		}
+		if (fullOnly && noAgent) || (wsflowOnly && !noAgent) {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
+}
+
 // resolveRsrcRoot resolves the rsrc tree root for a playbook tool call.
 // rsrcRootOverride carries playbook.render's root_override (Phase 2c, active): a
 // non-empty value rebinds the auto-include resolution root; pass "" to fall back
@@ -257,9 +333,10 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 }
 
 // renderPlaybookBody is the shared core for printPlaybook and renderPlaybook.
-// It loads the playbook via two wsrsrc.Load passes:
-//  1. nil-vars pass to obtain the declared variables list (no substitution errors).
-//  2. filtered-vars pass with terminology + model aliases + caller context merged.
+// It loads the playbook once without substitution so include and overlay
+// semantics stay in wsrsrc, then applies MCP-layer substitution. The MCP layer
+// owns implicit namespace variables because their values come from runtime
+// product mode rather than playbook frontmatter.
 //
 // The delegation tip is appended after substitution when meta.Delegates is true.
 //
@@ -282,8 +359,9 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
 	harness := s.currentHarness()
 
-	// Pass 1: nil vars → load metadata without triggering substitution errors.
-	metaOnly, err := wsrsrc.Load(rsrcRoot, name, harness, nil)
+	// Load once with nil vars so the MCP playbook layer can add reserved
+	// namespace variables without teaching product-mode semantics to wsrsrc.
+	pb, err := wsrsrc.Load(rsrcRoot, name, harness, nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -291,38 +369,23 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
 	// the caller so it can route both delegation paths from one render call: native
 	// uses it as a host model-selection guide, mercenary passes it to ws.mercenary.register.
-	recommendedTier := metaOnly.Meta.Tier
+	recommendedTier := pb.Meta.Tier
 
-	var body string
-
-	// Fast path: no declared variables and no caller context.
-	if len(metaOnly.Meta.Variables) == 0 && len(callerContext) == 0 {
-		body = metaOnly.Body
-		if metaOnly.Meta.Delegates {
-			body += delegationTip(harness)
-		}
-	} else {
-		// Build filtered vars: check caller context, inject terminology + model aliases.
-		vars, err := buildPlaybookVars(metaOnly.Meta.Variables, callerContext, harness, configOpts)
-		if err != nil {
-			return "", "", err
-		}
-
-		// Pass 2: load with full vars for actual substitution.
-		pb, err := wsrsrc.Load(rsrcRoot, name, harness, vars)
-		if err != nil {
-			return "", "", err
-		}
-
-		body = pb.Body
-		if pb.Meta.Delegates {
-			body += delegationTip(harness)
-		}
+	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, configOpts)
+	if err != nil {
+		return "", "", err
+	}
+	body, err := substitutePlaybookVars(pb.Body, pb.Meta.Variables, vars)
+	if err != nil {
+		return "", "", err
+	}
+	if pb.Meta.Delegates {
+		body += delegationTip(harness)
 	}
 
 	// Unit 2: prefer_mercenary guidance — implementer/reviewer only.
 	if preferMercenary {
-		switch strings.ToLower(strings.TrimSpace(metaOnly.Meta.Role)) {
+		switch strings.ToLower(strings.TrimSpace(pb.Meta.Role)) {
 		case "implementer", "reviewer":
 			body += mercenaryGuidanceBlock()
 		}
@@ -330,7 +393,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 
 	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
 	if strings.TrimSpace(mintRoot) != "" {
-		if childScope, ok := childRoleForPlaybookRole(metaOnly.Meta.Role); ok {
+		if childScope, ok := childRoleForPlaybookRole(pb.Meta.Role); ok {
 			childKey, err := s.sessions.mint(mintRoot, childScope)
 			if err != nil {
 				return "", "", fmt.Errorf("mint child session key: %w", err)
@@ -346,7 +409,70 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		}
 	}
 
-	return body, recommendedTier, nil
+	return renderProductModePlaybookBody(body), recommendedTier, nil
+}
+
+func substitutePlaybookVars(body string, declared []string, vars map[string]string) (string, error) {
+	declaredSet := make(map[string]bool, len(declared)+len(wsrsrc.ImplicitVariableNames))
+	names := make([]string, 0, len(declared)+len(wsrsrc.ImplicitVariableNames))
+	for _, name := range declared {
+		if declaredSet[name] {
+			continue
+		}
+		declaredSet[name] = true
+		names = append(names, name)
+	}
+	for _, name := range wsrsrc.ImplicitVariableNames {
+		if declaredSet[name] {
+			continue
+		}
+		declaredSet[name] = true
+		names = append(names, name)
+	}
+
+	for k := range vars {
+		if !declaredSet[k] {
+			return "", wsrsrc.ErrUndeclaredVar{Name: k}
+		}
+	}
+
+	var pairs []string
+	for _, name := range names {
+		placeholder := "{{." + name + "}}"
+		if !strings.Contains(body, placeholder) {
+			continue
+		}
+		value, provided := vars[name]
+		if !provided {
+			return "", wsrsrc.ErrUnprovidedVar{Name: name}
+		}
+		pairs = append(pairs, placeholder, value)
+	}
+
+	result := body
+	if len(pairs) > 0 {
+		result = strings.NewReplacer(pairs...).Replace(body)
+	}
+
+	remaining := result
+	for {
+		idx := strings.Index(remaining, "{{.")
+		if idx < 0 {
+			break
+		}
+		end := strings.Index(remaining[idx:], "}}")
+		if end < 0 {
+			break
+		}
+		end += idx
+		varName := remaining[idx+3 : end]
+		if !declaredSet[varName] {
+			return "", wsrsrc.ErrUndeclaredVar{Name: varName}
+		}
+		remaining = remaining[end+2:]
+	}
+
+	return result, nil
 }
 
 // printPlaybook loads a playbook and returns its rendered body text inline.
@@ -371,10 +497,21 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
 func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, mintRoot, preferMercenary)
+	templateContext := callerContext
+	var renderContext map[string]string
+	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
+		// Phase 2 of wsflow convergence: legacy wsflow delegate callers pass
+		// arbitrary context as prompt data, not template variables. Preserve that
+		// behavior only for the legacy wsflow stem set so ordinary playbook.render
+		// still fails loudly on undeclared template variables.
+		templateContext = nil
+		renderContext = callerContext
+	}
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, preferMercenary)
 	if err != nil {
 		return "", "", err
 	}
+	body = appendRenderContext(body, renderContext)
 	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(worktreeRoot, "prompt", []string{name})
 	if err != nil {
 		return "", "", fmt.Errorf("allocate playbook path: %w", err)

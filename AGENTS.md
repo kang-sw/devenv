@@ -142,10 +142,6 @@ not stage it unless explicitly requested.
    values needed later must be captured from output and passed explicitly.
 5. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
    historical Claude material under `ai-docs/ref/` when needed.
-6. **Named-agent delegation first.** Prefer ws named agents over host-native
-   subagents for repo workflow delegation so dogfooding preserves platform
-   independence.
-
 ## Documentation System
 
 - Project memory and focus: `ai-docs/_index.md`

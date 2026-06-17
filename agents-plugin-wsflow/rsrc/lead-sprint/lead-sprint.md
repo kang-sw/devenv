@@ -9,14 +9,14 @@ Target: user request
 
 ## Project Map
 
-Call `ws/project_tree()`.
+Call `{{.McpNamespace}}/project_tree()`.
 
 ## Invariants
 
 Scope
 - Stay on the current branch; never create or require `sprint/` branches.
 - Keep `lead-sprint` responsible for routing, session continuity, and episode closure.
-- Route general implementation through `ws:lead-proceed` or the lead-implement procedure; do not weaken their gates.
+- Route general implementation through `{{.SkillNamespace}}:lead-proceed` or the lead-implement procedure; do not weaken their gates.
 - Allow `sprint-edit` only for one-context, lead-owned, small interactive edits.
 
 Episodes
@@ -31,9 +31,9 @@ Language
 
 ## On: invoke
 
-1. Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
-2. Call `ws/git.status()`.
-3. Call `ws/project_tree()`.
+1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
+2. Call `{{.McpNamespace}}/git.status()`.
+3. Call `{{.McpNamespace}}/project_tree()`.
 4. Recover episode state from active conversation or recent `Sprint-Edit:` commit markers.
 5. If recovery finds one open episode, set `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` from it.
 6. If recovery is empty or ambiguous, initialize `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` as empty.
@@ -85,11 +85,11 @@ Trigger: post-edit reply means wrap it up, done, or good.
 2. Find commits in `<episode-start>..HEAD` whose commit body contains `Sprint-Edit: <episode-slug>`.
 3. Stop if no marked commits are found.
 4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
-5. Call `ws/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<episode-range>` and the marked commit list.
-6. Render `mental-model-updater` via `ws/playbook.render(name: "mental-model-updater")` (self-contained prompt + `recommended-tier`).
-7. Spawn it (native default; mercenary on request) with task input `Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>`; collect its result.
+5. Call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<episode-range>` and the marked commit list.
+6. Render `mental-model-updater` via `{{.McpNamespace}}/playbook.render(name: "mental-model-updater")` (self-contained prompt + `recommended-tier`).
+7. Spawn it with task input `Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>`; collect its result.
 8. Wait for completion and apply any needed episode-scoped documentation updates.
-9. Call `ws/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
+9. Call `{{.McpNamespace}}/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
 10. Commit documentation changes only after the Doc Commit Gate passes.
 11. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
 12. Report marked episode commits, documentation updates, and verification.
@@ -115,9 +115,9 @@ Pick first match, execute, return to loop.
 | Behavior, concept, or status question | Answer inline; spawn a host-native exploration worker directly with a scoped task prompt if codebase search is needed |
 | Codebase exploration | Spawn a host-native exploration worker directly with a scoped task prompt |
 | Design discussion | Discuss inline; do not auto-chain to the lead-write-spec procedure |
-| Ticket, spec, or protocol change | Route through normal workflow; usually `ws:lead-proceed` when implementation is requested |
+| Ticket, spec, or protocol change | Route through normal workflow; usually `{{.SkillNamespace}}:lead-proceed` when implementation is requested |
 | One-context small interactive edit | Start or continue sprint-edit |
-| Larger implementation, public contract work, cross-module change, new pattern, or review-worthy work | Continue through `ws:lead-proceed` or the lead-implement procedure |
+| Larger implementation, public contract work, cross-module change, new pattern, or review-worthy work | Continue through `{{.SkillNamespace}}:lead-proceed` or the lead-implement procedure |
 | Ambiguous request | Ask the smallest routing question, then re-apply judge |
 
 ### judge: sprint-edit

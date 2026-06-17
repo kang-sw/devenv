@@ -90,6 +90,24 @@ func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]an
 	return nil
 }
 
+func toolNameListed(t *testing.T, listLine, toolName string) bool {
+	t.Helper()
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := listResp["result"].(map[string]any)
+	listedTools, _ := result["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if name == toolName {
+			return true
+		}
+	}
+	return false
+}
+
 func TestServeStdioConfigShow(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -236,62 +254,59 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 	}
 }
 
-func TestWsflowOnlyToolHiddenInFullWsMode(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	// Full ws mode: WS_MCP_NO_AGENT is NOT set.
-	t.Setenv("WS_MCP_NO_AGENT", "")
-	t.Setenv("WS_MCP_NAMESPACE", "")
+func TestPromptRenderToolRemoved(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		noAgent   string
+		namespace string
+	}{
+		{name: "full ws", noAgent: "", namespace: ""},
+		{name: "wsflow", noAgent: "1", namespace: "wsflow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+			initGit(t, root)
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			t.Setenv("WS_MCP_NO_AGENT", tc.noAgent)
+			t.Setenv("WS_MCP_NAMESPACE", tc.namespace)
 
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"stem":"code-reviewer"}}}`,
-	}, "\n") + "\n"
+			input := strings.Join([]string{
+				`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+				`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"stem":"code-reviewer"}}}`,
+			}, "\n") + "\n"
 
-	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+			var out bytes.Buffer
+			if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+				t.Fatalf("ServeStdio returned error: %v", err)
+			}
+			byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 
-	// tools/list must NOT include prompt.render in full ws mode.
-	list := byID["1"]
-	if strings.Contains(list, "prompt.render") {
-		t.Fatalf("tools/list exposed wsflow-only tool prompt.render in full ws mode: %s", list)
-	}
+			if toolNameListed(t, byID["1"], "prompt.render") {
+				t.Fatalf("tools/list exposed removed prompt.render tool in %s mode: %s", tc.name, byID["1"])
+			}
 
-	// Explicit call must return a JSON-RPC error (not isError content).
-	var callResp struct {
-		Error *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(byID["2"]), &callResp); err != nil {
-		t.Fatalf("unmarshal call response: %v", err)
-	}
-	if callResp.Error == nil {
-		t.Fatalf("prompt.render in full ws mode did not return JSON-RPC error: %s", byID["2"])
-	}
-	if !strings.Contains(callResp.Error.Message, "prompt.render") {
-		t.Fatalf("prompt.render full ws error missing tool name: %s", callResp.Error.Message)
+			var callResp struct {
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(byID["2"]), &callResp); err != nil {
+				t.Fatalf("unmarshal call response: %v", err)
+			}
+			if callResp.Error == nil {
+				t.Fatalf("prompt.render in %s mode did not return JSON-RPC error: %s", tc.name, byID["2"])
+			}
+			if !strings.Contains(callResp.Error.Message, "prompt.render") {
+				t.Fatalf("prompt.render error missing tool name: %s", callResp.Error.Message)
+			}
+		})
 	}
 }
 
-func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
-	root := t.TempDir()
-	initGit(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
-	// Phase 6: prompt.render now sources from rsrc; point at the shipped tree.
-	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
-	s := NewServer(root, "test")
-
-	// (a) Namespace substitution replaces ws/ and ws: at word boundaries only.
-	//     Tokens like "workflows/", "news/", "rows:" must NOT be mangled.
+func TestNamespaceTermsSubstitution(t *testing.T) {
 	nonManglingCases := []struct {
 		input string
 		want  string
@@ -311,72 +326,20 @@ func TestRenderPromptSubstitutionAndAllowlist(t *testing.T) {
 		}
 	}
 
-	// (b) Render code-reviewer; the rendered file must contain wsflow/ (ws/ substituted)
-	//     and must not contain bare ws/ tokens.
-	path1, err := s.renderPrompt(root, "code-reviewer", nil)
-	if err != nil {
-		t.Fatalf("renderPrompt code-reviewer: %v", err)
-	}
-	data, err := os.ReadFile(path1)
-	if err != nil {
-		t.Fatalf("read rendered prompt: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "ws/") {
-		t.Errorf("rendered code-reviewer still contains 'ws/' after substitution")
-	}
-	if !strings.Contains(text, "wsflow/") {
-		t.Errorf("rendered code-reviewer missing 'wsflow/' after substitution")
-	}
-
-	// (b-cont) ws: -> wsflow: substitution: verified via regex unit cases above.
-	//         Also confirm a synthetic text with ws: is substituted correctly.
 	synth := wsNamespaceRef.ReplaceAllString("invoke ws:some-skill here", "wsflow"+"$1")
 	if synth != "invoke wsflow:some-skill here" {
 		t.Errorf("ws: substitution failed: %q", synth)
 	}
-
-	// (c) Ineligible stem and unknown stem both return errors.
-	if _, err := s.renderPrompt(root, "implementer", nil); err == nil {
-		t.Error("renderPrompt with ineligible stem 'implementer' returned nil error")
-	} else if !strings.Contains(err.Error(), "not render-eligible") {
-		t.Errorf("ineligible stem error message unexpected: %v", err)
-	}
-	if _, err := s.renderPrompt(root, "no-such-prompt", nil); err == nil {
-		t.Error("renderPrompt with unknown stem 'no-such-prompt' returned nil error")
-	} else if !strings.Contains(err.Error(), "not render-eligible") {
-		t.Errorf("unknown stem error message unexpected: %v", err)
-	}
-
-	// (d) Context values containing ws/ are NOT substituted (context is appended
-	//     after the substitution pass).
-	path2, err := s.renderPrompt(root, "code-reviewer", map[string]string{
-		"note": "see ws/specs.find for details",
-	})
-	if err != nil {
-		t.Fatalf("renderPrompt with context: %v", err)
-	}
-	data2, err := os.ReadFile(path2)
-	if err != nil {
-		t.Fatalf("read context-rendered prompt: %v", err)
-	}
-	text2 := string(data2)
-	if !strings.Contains(text2, "## Render Context") {
-		t.Error("context-rendered prompt missing ## Render Context block")
-	}
-	if !strings.Contains(text2, "ws/specs.find") {
-		t.Error("context value containing 'ws/specs.find' was unexpectedly substituted in the context block")
-	}
 }
 
-// TestRenderPromptAllEligibleStemsFromRsrc verifies every wsflow-eligible stem
-// renders from the shipped rsrc tree (Phase 6 source move) with model-alias vars
-// fully substituted — covering the subdir playbooks (reference-discovery,
-// plan-populator-*, mental-model-updater) alongside the flat code-reviewer dep.
-func TestRenderPromptAllEligibleStemsFromRsrc(t *testing.T) {
+// TestWsflowPlaybookRenderAllLegacyStemsFromRsrc verifies every legacy
+// render-eligible stem still renders through wsflow playbook.render after the
+// prompt.render MCP tool is removed.
+func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
 	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
 	s := NewServer(root, "test")
@@ -386,9 +349,11 @@ func TestRenderPromptAllEligibleStemsFromRsrc(t *testing.T) {
 		"plan-populator-research", "code-reviewer", "mental-model-updater",
 	} {
 		t.Run(stem, func(t *testing.T) {
-			path, err := s.renderPrompt(root, stem, nil)
+			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, map[string]string{
+				"bridge_probe": "context for " + stem,
+			}, wsconfig.Options{}, "", false)
 			if err != nil {
-				t.Fatalf("renderPrompt(%s): %v", stem, err)
+				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -400,6 +365,12 @@ func TestRenderPromptAllEligibleStemsFromRsrc(t *testing.T) {
 			}
 			if strings.Contains(text, "{{.") {
 				t.Errorf("rendered %s has an unsubstituted placeholder:\n%s", stem, text)
+			}
+			if !strings.Contains(text, "## Render Context") || !strings.Contains(text, "- bridge_probe: context for "+stem) {
+				t.Errorf("rendered %s did not append legacy context block:\n%s", stem, text)
+			}
+			if strings.Contains(text, "ws.mercenary.") || strings.Contains(text, "exec.") {
+				t.Errorf("rendered %s exposed hidden full-ws guidance:\n%s", stem, text)
 			}
 		})
 	}
@@ -1189,13 +1160,16 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list"} {
+	for _, visible := range []string{"api.list", "config.show", "tickets.list", "playbook.print", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
 	}
 	if !strings.Contains(list, "wsflow") {
 		t.Fatalf("tools/list did not use namespace override in descriptions: %s", list)
+	}
+	if strings.Contains(list, "Full ws") || strings.Contains(list, "full ws") {
+		t.Fatalf("tools/list retained full-ws-only playbook wording in wsflow mode: %s", list)
 	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
@@ -1205,7 +1179,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 }
 
-func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
+func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -1213,15 +1187,12 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
-	// Phase 6: prompt.render sources from rsrc; point at the shipped tree (in
-	// production the wsflow launcher sets this to the packaged rsrc copy).
 	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer"}}}`, root),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"code-reviewer","context":{"reviewer_scope":"correctness only"}}}}`, root),
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"prompt.render","arguments":{"root":%q,"stem":"implementer"}}}`, root),
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"brief_path":"ai-docs/.plans/brief.md","plan_path":"ai-docs/.plans/plan.md"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1229,56 +1200,50 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-
-	// tools/list must include prompt.render in wsflow mode.
-	list := byID["1"]
-	if !strings.Contains(list, "prompt.render") {
-		t.Fatalf("tools/list missing prompt.render in wsflow mode: %s", list)
+	if !toolNameListed(t, byID["1"], "playbook.render") {
+		t.Fatalf("wsflow tools/list missing playbook.render: %s", byID["1"])
+	}
+	if toolNameListed(t, byID["1"], "prompt.render") {
+		t.Fatalf("wsflow tools/list exposed removed prompt.render: %s", byID["1"])
 	}
 
-	// Render without context: file must exist, contain wsflow/, not contain ws/.
 	if toolIsError(t, byID["2"]) {
-		t.Fatalf("prompt.render returned error in wsflow mode: %s", byID["2"])
+		t.Fatalf("playbook.render code-reviewer returned error: %s", byID["2"])
 	}
-	promptPath := strings.TrimSpace(toolText(t, byID["2"]))
-	if _, err := os.Stat(promptPath); err != nil {
-		t.Fatalf("rendered prompt file does not exist at %q: %v", promptPath, err)
-	}
-	rendered, err := os.ReadFile(promptPath)
+	codeReviewerPath := strings.SplitN(strings.TrimSpace(toolText(t, byID["2"])), "\n", 2)[0]
+	codeReviewerData, err := os.ReadFile(codeReviewerPath)
 	if err != nil {
-		t.Fatalf("read rendered prompt: %v", err)
+		t.Fatalf("read code-reviewer render: %v", err)
 	}
-	renderedText := string(rendered)
-	if strings.Contains(renderedText, "ws/") {
-		t.Fatalf("rendered prompt still contains 'ws/' after substitution:\n%s", renderedText)
+	codeReviewerText := string(codeReviewerData)
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details", "- reviewer_scope: correctness only"} {
+		if !strings.Contains(codeReviewerText, want) {
+			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
+		}
 	}
-	if !strings.Contains(renderedText, "wsflow/") {
-		t.Fatalf("rendered prompt missing 'wsflow/' after substitution:\n%s", renderedText)
+	if strings.Contains(codeReviewerText, "ws.mercenary.") || strings.Contains(codeReviewerText, "exec.") {
+		t.Fatalf("code-reviewer playbook render exposed hidden full-ws guidance:\n%s", codeReviewerText)
 	}
 
-	// Render with context: file must contain ## Render Context with injected key/value.
 	if toolIsError(t, byID["3"]) {
-		t.Fatalf("prompt.render with context returned error: %s", byID["3"])
+		t.Fatalf("playbook.render plan-populator-survey returned error: %s", byID["3"])
 	}
-	contextPath := strings.TrimSpace(toolText(t, byID["3"]))
-	contextRendered, err := os.ReadFile(contextPath)
+	planPath := strings.SplitN(strings.TrimSpace(toolText(t, byID["3"])), "\n", 2)[0]
+	planData, err := os.ReadFile(planPath)
 	if err != nil {
-		t.Fatalf("read context-rendered prompt: %v", err)
+		t.Fatalf("read plan-populator-survey render: %v", err)
 	}
-	contextText := string(contextRendered)
-	if !strings.Contains(contextText, "## Render Context") {
-		t.Fatalf("rendered prompt missing ## Render Context block:\n%s", contextText)
-	}
-	if !strings.Contains(contextText, "- reviewer_scope: correctness only") {
-		t.Fatalf("rendered prompt missing injected context key/value:\n%s", contextText)
-	}
-
-	// Ineligible stem returns MCP isError (not a JSON-RPC error).
-	if !toolIsError(t, byID["4"]) {
-		t.Fatalf("prompt.render with ineligible stem 'implementer' should return isError: %s", byID["4"])
-	}
-	if !strings.Contains(toolText(t, byID["4"]), "not render-eligible") {
-		t.Fatalf("ineligible stem error message missing 'not render-eligible': %s", toolText(t, byID["4"]))
+	planText := string(planData)
+	for _, want := range []string{"recommended-tier: medium", "## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+		if want == "recommended-tier: medium" {
+			if !strings.Contains(toolText(t, byID["3"]), want) {
+				t.Fatalf("playbook.render response missing %q: %s", want, toolText(t, byID["3"]))
+			}
+			continue
+		}
+		if !strings.Contains(planText, want) {
+			t.Fatalf("plan-populator-survey playbook render missing %q:\n%s", want, planText)
+		}
 	}
 }
 

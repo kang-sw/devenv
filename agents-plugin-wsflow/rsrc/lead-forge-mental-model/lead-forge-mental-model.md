@@ -9,7 +9,7 @@ Target: user request
 
 ## Invariants
 
-- Call `ws/convention.read(name: "mental-model-conventions")` before any document write - conventions are canonical there.
+- Call `{{.McpNamespace}}/convention.read(name: "mental-model-conventions")` before any document write - conventions are canonical there.
 - All survey and verifier queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; require cited evidence, gaps, and follow-up needs.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
@@ -36,7 +36,7 @@ ls ai-docs/spec/ 2>/dev/null | head -1
 If absent or empty: surface the warning below and proceed - do not block.
 
 > No spec found - mental-model will be built without spec stem cross-references.
-> Run `ws:lead-forge-spec` first for full cross-reference support.
+> Run `{{.SkillNamespace}}:lead-forge-spec` first for full cross-reference support.
 
 Record whether spec is available (drives step 4 per domain).
 
@@ -128,7 +128,7 @@ Be concrete: cite paths, functions, and types. Do not list fields or paraphrase 
 
 ### 3. Draft domain file
 
-1. Call `ws/convention.read(name: "mental-model-conventions")`. Read the output; apply the inclusion test to every claim before writing it.
+1. Call `{{.McpNamespace}}/convention.read(name: "mental-model-conventions")`. Read the output; apply the inclusion test to every claim before writing it.
 2. Draft the domain file content for `ai-docs/mental-model/<domain>.md` following the document format in `mental-model-conventions.md`.
 3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from task description), `related` (other domains with coupling to this one).
 
@@ -202,7 +202,7 @@ Items for user review: <LOW findings list, or 'none'>
 
 ### 3. Suggested next steps
 
-- Run `ws:lead-forge-spec` if spec was absent - mental-model was built without stem cross-references.
+- Run `{{.SkillNamespace}}:lead-forge-spec` if spec was absent - mental-model was built without stem cross-references.
 - Run `mental-model-updater` agent after future code changes to keep domain files current.
 
 ## Judgments

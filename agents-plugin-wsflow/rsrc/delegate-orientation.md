@@ -21,7 +21,7 @@ continue with the useful part of the task you can complete.
 
 For third-party API documentation lookup, use the host's direct documentation
 lookup or a scoped native exploration worker when the caller assigned that work.
-Use `ws/api.list` only when choosing among known local cache domains matters.
+Use `{{.McpNamespace}}/api.list` only when choosing among known local cache domains matters.
 Return cited evidence and call out version or staleness uncertainty.
 
 ## Process

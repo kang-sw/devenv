@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -535,15 +536,6 @@ func TestPlaybookToolsInLeadToolNames(t *testing.T) {
 	}
 }
 
-func TestPlaybookToolsNotWsflowOnly(t *testing.T) {
-	if wsflowOnlyTool("playbook.print") {
-		t.Error("playbook.print is incorrectly marked as wsflow-only")
-	}
-	if wsflowOnlyTool("playbook.render") {
-		t.Error("playbook.render is incorrectly marked as wsflow-only")
-	}
-}
-
 func TestPlaybookToolsNotNoAgentHidden(t *testing.T) {
 	if noAgentHiddenTool("playbook.print") {
 		t.Error("playbook.print is incorrectly hidden in no-agent mode")
@@ -562,6 +554,249 @@ func TestPlaybookToolsVisibleInToolsList(t *testing.T) {
 	for _, want := range []string{"playbook.print", "playbook.render"} {
 		if !listed[want] {
 			t.Errorf("tool %q missing from tools() list", want)
+		}
+	}
+}
+
+func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow playbook output contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("wsflow playbook output contains bare ws namespace notation:\n%s", body)
+	}
+	if strings.Contains(body, "{{.") {
+		t.Fatalf("wsflow playbook output contains unsubstituted placeholder:\n%s", body)
+	}
+	for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow playbook output missing %q:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "ws.lead.login") {
+		t.Fatalf("wsflow playbook output rewrote literal ws.lead.login tool name:\n%s", body)
+	}
+}
+
+func TestProductModeBlockSelection(t *testing.T) {
+	t.Setenv(envNamespace, "wsflow")
+	input := strings.Join([]string{
+		"shared text",
+		fullOnlyStart,
+		"full-only text",
+		fullOnlyEnd,
+		wsflowOnlyStart,
+		"wsflow-only text",
+		wsflowOnlyEnd,
+	}, "\n")
+
+	t.Setenv(envNoAgent, "1")
+	wsflow := renderProductModePlaybookBody(input)
+	for _, forbidden := range []string{"full-only text", fullOnlyStart, wsflowOnlyStart} {
+		if strings.Contains(wsflow, forbidden) {
+			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
+		}
+	}
+	for _, want := range []string{"shared text", "wsflow-only text"} {
+		if !strings.Contains(wsflow, want) {
+			t.Fatalf("wsflow render missing %q:\n%s", want, wsflow)
+		}
+	}
+
+	t.Setenv(envNoAgent, "")
+	full := renderProductModePlaybookBody(input)
+	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
+		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
+	}
+	if !strings.Contains(full, "full-only text") {
+		t.Fatalf("full render omitted full-only content:\n%s", full)
+	}
+}
+
+func TestReservedNamespaceVarsDoNotRequireFrontmatter(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"namespace-pb/namespace-pb.md": `---
+kind: print
+delegates: false
+---
+Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+Actual tool: ws.lead.login.
+`,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", map[string]string{
+		"McpNamespace":   "spoof",
+		"SkillNamespace": "spoof",
+	}, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.lead.login"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "spoof") {
+		t.Fatalf("caller context overrode reserved namespace vars:\n%s", body)
+	}
+}
+
+func TestPlaybookReservedNamespaceVarsFullWs(t *testing.T) {
+	t.Setenv(envNamespace, "")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"namespace-pb/namespace-pb.md": `---
+kind: print
+delegates: false
+---
+Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+`,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", nil, wsconfig.Options{})
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, want := range []string{"ws/tickets.find", "ws:lead-discuss"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", nil, wsconfig.Options{CacheHome: cacheHome}, "", false)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "Continuity tip") {
+		t.Fatalf("rendered delegate output missing continuity tip:\n%s", body)
+	}
+	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rendered wsflow delegate contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("rendered wsflow delegate contains bare ws namespace notation:\n%s", body)
+	}
+}
+
+func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+		"note": "see ws/specs.find for details",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false)
+	if err != nil {
+		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
+	}
+	codeReviewerData, err := os.ReadFile(codeReviewerPath)
+	if err != nil {
+		t.Fatalf("read code-reviewer render: %v", err)
+	}
+	codeReviewerBody := string(codeReviewerData)
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details"} {
+		if !strings.Contains(codeReviewerBody, want) {
+			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
+		}
+	}
+
+	planPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", map[string]string{
+		"brief_path": "ai-docs/.plans/brief.md",
+		"plan_path":  "ai-docs/.plans/plan.md",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false)
+	if err != nil {
+		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
+	}
+	planData, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("read plan-populator-survey render: %v", err)
+	}
+	planBody := string(planData)
+	for _, want := range []string{"## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+		if !strings.Contains(planBody, want) {
+			t.Fatalf("plan-populator-survey render missing %q:\n%s", want, planBody)
+		}
+	}
+	for _, forbidden := range []string{"Mercenary path", "ws.mercenary.", "exec."} {
+		if strings.Contains(planBody, forbidden) {
+			t.Fatalf("plan-populator-survey wsflow render contains forbidden %q:\n%s", forbidden, planBody)
+		}
+	}
+}
+
+func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+		"note": "ordinary full ws context remains template vars",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for code-reviewer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+}
+
+func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", map[string]string{
+		"note": "wsflow non-legacy stems still require declared template vars",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false); err == nil {
+		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared context")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("wsflow non-legacy renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -885,7 +1120,7 @@ func TestTermsDifferThreeWay(t *testing.T) {
 }
 
 func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
-	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "LightModel", "CoreModel", "DeepModel"} {
+	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "LightModel", "CoreModel", "DeepModel", "McpNamespace", "SkillNamespace"} {
 		if !reservedToolVarNames[name] {
 			t.Errorf("reservedToolVarNames missing %q", name)
 		}
@@ -977,6 +1212,9 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	// Verify the dead-path fix: self-reinvoke uses playbook.print, not ws:lead-workflow-manual.
 	if !strings.Contains(body, `ws/playbook.print(name: "lead-workflow-manual")`) {
 		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.print", body)
+	}
+	if strings.Contains(body, "{{.") {
+		t.Errorf("body %q: unsubstituted placeholder remains", body)
 	}
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {

@@ -40,9 +40,9 @@ Response
 
 ## On: invoke
 
-1. Call `ws/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline (loads orchestration primitives reference).
-2. Call `ws/project_tree()` to load the current project map.
-3. Call `ws/git.status()`.
+1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline (loads orchestration primitives reference).
+2. Call `{{.McpNamespace}}/project_tree()` to load the current project map.
+3. Call `{{.McpNamespace}}/git.status()`.
 4. If `user request` references a ticket, read it.
 5. Enter user-message handling.
 
@@ -60,14 +60,14 @@ Response
 ### 1a. Cascade Lookup
 
 1. Search loaded tickets and docs first.
-2. For each loaded ticket or spec stem, call `ws/references.trace`.
-3. Query `ws/tickets.find`, `ws/specs.find`, and `ws/mental_models.find` with concrete terms from the user's claim or missing fact.
+2. For each loaded ticket or spec stem, call `{{.McpNamespace}}/references.trace`.
+3. Query `{{.McpNamespace}}/tickets.find`, `{{.McpNamespace}}/specs.find`, and `{{.McpNamespace}}/mental_models.find` with concrete terms from the user's claim or missing fact.
 4. Stop when a documented answer is found.
 5. If the cascade has no documented answer, say that before inferring or proposing a next lookup.
 
 ### 2. Route Intent
 
-1. If the user explicitly wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
+1. If the user explicitly wants implementation to start, hand off to `{{.SkillNamespace}}:lead-proceed` and stop the discuss handler after that procedure takes over.
 2. Apply `judge: needs-intent-frame`; if it fires, emit an Intent Frame before advice.
 3. Apply `judge: needs-interview`; if it fires, enter Interview Workflow before proposing a settled direction.
 
@@ -99,24 +99,24 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    a. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
    b. Do not require spec creation; `todo/` is accepted backlog, not implementation-ready status.
 3. **Ready promotion (todo/ -> ready/)**:
-   a. Call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline (Edit path) for the `todo/` -> `ready/` promotion.
+   a. Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline (Edit path) for the `todo/` -> `ready/` promotion.
    b. The lead-write-ticket procedure owns spec addressing, frontmatter population, the `git mv`, focus update, and commit.
    c. Stop this handler after the lead-write-ticket procedure returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
-   b. No other ticket references this stem -> call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove or close the linked in-progress spec entry for that stem.
+   b. No other ticket references this stem -> call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove or close the linked in-progress spec entry for that stem.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
    d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
-5. Commit through `ws/git.commit`.
+5. Commit through `{{.McpNamespace}}/git.commit`.
 
 ## On: user signals done
 
-1. If the user wants implementation to start, hand off to `ws:lead-proceed` and stop the discuss handler after that procedure takes over.
+1. If the user wants implementation to start, hand off to `{{.SkillNamespace}}:lead-proceed` and stop the discuss handler after that procedure takes over.
 2. If the user explicitly asks for durable capture, ticket cleanup, or ticket/spec persistence and has not approved the artifact, ask whether to persist the discussion; stop until the user answers.
 3. If the user approves persistence, route by requested artifact:
-   - **Spec update** - call `ws/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline.
-   - **New ticket** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline.
-   - **Ticket update** - call `ws/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; its Open Decision Queue resolves unconfirmed design notes before any ticket cleanup.
+   - **Spec update** - call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline.
+   - **New ticket** - call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline.
+   - **Ticket update** - call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; its Open Decision Queue resolves unconfirmed design notes before any ticket cleanup.
 4. If persistence artifact is unclear, ask one clarifying question and stop.
 5. When ticket persistence creates or edits an implementation phase, apply **judge: needs-integration-tests** and include criteria only when the judged change has end-to-end observable behavior.
 6. Write only what the user approves.
@@ -129,7 +129,7 @@ Spawn `reference-discovery` when any of the following hold:
 - The current question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded in this session - regardless of whether the model feels confident it knows the answer.
 - The discussion direction shifts to a domain no doc for which has been loaded this session.
 
-Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or `ws/git.log`.
+Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or `{{.McpNamespace}}/git.log`.
 
 ### judge: needs-cascade-lookup
 Search the ticket/spec/mental-model cascade before answering when any of the following hold:

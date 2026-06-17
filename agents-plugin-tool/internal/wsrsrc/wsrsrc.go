@@ -49,6 +49,11 @@ type LoadedPlaybook struct {
 	Body string
 }
 
+// ImplicitVariableNames are resource-format variables that may appear in
+// playbook bodies and includes without being declared in frontmatter. The MCP
+// playbook layer owns their runtime values.
+var ImplicitVariableNames = []string{"McpNamespace", "SkillNamespace"}
+
 // Manifest is the on-disk manifest.json structure.
 type Manifest struct {
 	SchemaVersion int               `json:"schema_version"`

@@ -36,7 +36,7 @@ implementation. If safe execution needs planner judgment, exit to research.
 
 1. Read the brief at the path given in the spawn prompt.
 2. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
-3. Use `ws/mental_models.find` for missing mental-model areas.
+3. Use `{{.McpNamespace}}/mental_models.find` for missing mental-model areas.
 4. Read files named in `## Contract Instructions`, `## Integration Test
    Instructions`, and `## Details`.
 5. Treat legacy skeleton artifacts as inputs only when an older brief explicitly
@@ -58,7 +58,7 @@ Search the codebase for:
   mechanism reuse, duplicated glue, mock-data wiring, fallback behavior, or
   temporary implementation paths that need lead or planner inspection.
 
-Use focused search for project code and `ws/mental_models.find` for doc gaps.
+Use focused search for project code and `{{.McpNamespace}}/mental_models.find` for doc gaps.
 Read candidates to confirm relevance.
 Discard entries requiring more than two sentences.
 For risk signals, report evidence and why it may matter; do not decide the

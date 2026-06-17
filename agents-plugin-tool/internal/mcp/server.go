@@ -282,6 +282,11 @@ func RuntimeNamespace() string {
 	return value
 }
 
+// wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
+// a word boundary so that words containing "ws" as an interior substring (e.g.
+// "news/", "rows:", "workflows/") are never mangled.
+var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
+
 func (s *Server) callTool(ctx context.Context, req request) response {
 	var params struct {
 		Name      string         `json:"name"`
@@ -297,9 +302,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
-	}
-	if !NoAgentMode() && wsflowOnlyTool(params.Name) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("%s: tool not available in full ws mode: %s", RuntimeNamespace(), params.Name))
 	}
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
@@ -722,15 +724,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
-	case "prompt.render":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		stem, _ := params.Arguments["stem"].(string)
-		promptPath, err := s.renderPrompt(root, stem, stringMapArgument(params.Arguments["context"]))
-		return toolTextResponse(req.ID, promptPath+"\n", err)
-
 	case "playbook.print":
 		// Phase 2: name + context; rsrc root is call-site-overridable seam for M3.
 		// Argument parsing is named/extensible (not positional) for forward-compat
@@ -2133,20 +2126,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "prompt.render",
-			"description": namespaceText("Render a bundled delegate prompt by stem with namespace substitution and injected context; returns a tmp prompt file path (wsflow only)."),
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"stem":    stringProperty("Bundled prompt stem to render (e.g. code-reviewer, reference-discovery)."),
-					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional string key-value pairs injected as a ## Render Context block at the end of the rendered prompt."},
-				},
-				"required": []string{"stem"},
-			},
-		},
-		{
 			"name":        "playbook.print",
-			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Full ws; not wsflow-only."),
+			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2158,13 +2139,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Full ws; not wsflow-only."),
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
-					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead."},
 					"root_override": stringProperty("Optional path to override both the auto-include resolution root and the child-key binding root. Use when the delegate runs in a different worktree."),
 				},
 				"required": []string{"name"},
@@ -2348,7 +2329,7 @@ func rootAwareToolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "path.generate", "prompt.render", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "path.generate", "playbook.render",
 		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
 		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
 		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
@@ -2375,9 +2356,6 @@ func LeadToolNames() []string {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
 		if NoAgentMode() && noAgentHiddenTool(name) {
-			continue
-		}
-		if !NoAgentMode() && wsflowOnlyTool(name) {
 			continue
 		}
 		if name != "" {
@@ -2442,9 +2420,6 @@ func (s *Server) toolAllowed(name string) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}
-	if !NoAgentMode() && wsflowOnlyTool(name) {
-		return false
-	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
 		return allowed[name]
 	}
@@ -2476,19 +2451,20 @@ func namespaceText(text string) string {
 	if namespace == "ws" {
 		return text
 	}
-	replacer := strings.NewReplacer(
-		"ws MCP", namespace+" MCP",
-		"ws/", namespace+"/",
-		"ws:", namespace+":",
-		"ws project", namespace+" project",
-		"ws runtime", namespace+" runtime",
-		"ws workflow", namespace+" workflow",
-		"ws user", namespace+" user",
-		"ws agent", namespace+" agent",
-		"ws agents", namespace+" agents",
-		"ws ", namespace+" ",
-	)
-	return replacer.Replace(text)
+	return namespaceTerms(text, namespace)
+}
+
+func namespaceTerms(text, namespace string) string {
+	text = wsNamespaceRef.ReplaceAllString(text, namespace+"$1")
+	for _, term := range []string{"MCP", "plugin", "project", "runtime", "tool", "tools", "workflow", "user", "agent", "agents"} {
+		pattern := regexp.MustCompile(`\bws ` + regexp.QuoteMeta(term) + `\b`)
+		text = pattern.ReplaceAllString(text, namespace+" "+term)
+	}
+	for _, term := range []string{"managed", "owned"} {
+		pattern := regexp.MustCompile(`\bws-` + regexp.QuoteMeta(term) + `\b`)
+		text = pattern.ReplaceAllString(text, namespace+"-"+term)
+	}
+	return text
 }
 
 func namespaceValue(value any) any {
@@ -2551,22 +2527,8 @@ func noAgentHiddenTool(name string) bool {
 	}
 }
 
-func wsflowOnlyTool(name string) bool {
-	switch name {
-	case "prompt.render":
-		return true
-	default:
-		return false
-	}
-}
-
-// wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
-// a word boundary so that words containing "ws" as an interior substring (e.g.
-// "news/", "rows:", "workflows/") are never mangled.
-var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
-
 // wsflowRenderEligibleStems is the exact set of prompt stems that are
-// render-eligible from wsflow per spec #260529-prompt-render-tool.
+// eligible for the wsflow playbook.render legacy context bridge.
 // Add entries here as the spec expands the set.
 var wsflowRenderEligibleStems = map[string]bool{
 	"reference-discovery":     true,
@@ -2576,56 +2538,25 @@ var wsflowRenderEligibleStems = map[string]bool{
 	"mental-model-updater":    true,
 }
 
-// renderPrompt loads a render-eligible delegate prompt by stem from the rsrc
-// tree, applies wsflow namespace substitution, appends an optional injected
-// context block, writes the result to a worktree-scoped tmp file, and returns
-// the path. Phase 6 (260611) moved the source from the embedded wsprompt bundle
-// to rsrc; the five-stem allowlist and render-time namespace substitution are
-// preserved per spec #260529-prompt-render-tool.
-func (s *Server) renderPrompt(root, stem string, context map[string]string) (string, error) {
-	if !wsflowRenderEligibleStems[stem] {
-		return "", fmt.Errorf("prompt stem %q is not render-eligible in wsflow", stem)
+func appendRenderContext(body string, context map[string]string) string {
+	if len(context) == 0 {
+		return body
 	}
-	rsrcRoot, err := resolveRsrcRoot("")
-	if err != nil {
-		return "", err
+	keys := make([]string, 0, len(context))
+	for k := range context {
+		keys = append(keys, k)
 	}
-	// wsflow is agentless: no child-key mint (mintRoot="") and no mercenary
-	// guidance. These delegate playbooks declare only model-alias vars, which
-	// renderPlaybookBody auto-injects (nil caller context); the caller `context`
-	// is appended as a free-text block below, preserving the prompt.render
-	// contract from before the rsrc move (context is data, not substitution vars).
-	body, _, err := renderPlaybookBody(s, rsrcRoot, stem, nil, wsconfig.Options{}, "", false)
-	if err != nil {
-		return "", fmt.Errorf("load prompt %q: %w", stem, err)
+	sort.Strings(keys)
+	var sb strings.Builder
+	sb.WriteString("\n\n## Render Context\n")
+	for _, k := range keys {
+		sb.WriteString("- ")
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		sb.WriteString(context[k])
+		sb.WriteString("\n")
 	}
-	ns := RuntimeNamespace()
-	body = wsNamespaceRef.ReplaceAllString(body, ns+"$1")
-	if len(context) > 0 {
-		keys := make([]string, 0, len(context))
-		for k := range context {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		var sb strings.Builder
-		sb.WriteString("\n\n## Render Context\n")
-		for _, k := range keys {
-			sb.WriteString("- ")
-			sb.WriteString(k)
-			sb.WriteString(": ")
-			sb.WriteString(context[k])
-			sb.WriteString("\n")
-		}
-		body += sb.String()
-	}
-	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, "prompt", []string{stem})
-	if err != nil {
-		return "", fmt.Errorf("allocate prompt path: %w", err)
-	}
-	if err := os.WriteFile(generated[0].Path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("write prompt %s: %w", generated[0].Path, err)
-	}
-	return generated[0].Path, nil
+	return body + sb.String()
 }
 
 func explicitAllowedTools() map[string]bool {
