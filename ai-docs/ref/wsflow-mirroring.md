@@ -66,16 +66,22 @@ Excluded:
 - Keep workflow integration lead-owned: docs, ticket/spec changes, mental-model
   updates, commits, and final judgment stay with the lead.
 - Feed playbook delegate prompts to native subagents only through
-  `wsflow/prompt.render`; never hand-paste full playbook prompt text.
+  `wsflow/prompt.render` or the wsflow-mode `playbook.render` bridge for legacy
+  render-eligible stems; never hand-paste full playbook prompt text.
 
 ## Prompt Render Dispatch
 
-`wsflow/prompt.render(stem, context)` is the wsflow-only mechanism for handing a
-bundled delegate prompt to a native subagent. It loads the prompt by stem from
-the wsflow rsrc tree (see **Rsrc Tree Provisioning**), applies render-time
-`ws/` -> `wsflow/` namespace substitution, appends `context` as a free-text
-Render Context block, writes the result to a tmp file, and returns `prompt_path`.
-The lead hands `prompt_path` to a native subagent.
+`wsflow/prompt.render(stem, context)` is the retained wsflow-only mechanism for
+handing a bundled delegate prompt to a native subagent. It loads the prompt by
+stem from the wsflow rsrc tree (see **Rsrc Tree Provisioning**), applies
+render-time `ws/` -> `wsflow/` namespace substitution, appends `context` as a
+free-text Render Context block, writes the result to a tmp file, and returns
+`prompt_path`. The lead hands `prompt_path` to a native subagent.
+
+During product-mode convergence, wsflow-mode `playbook.render(name, context)`
+also supports these same five stems and appends `context` as the same free-text
+Render Context block. That bridge is limited to the legacy render-eligible stem
+set; other playbooks still treat `context` as declared template variables.
 
 - Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
@@ -94,12 +100,13 @@ agent-backed tools in wsflow). The two gates are symmetric and must stay so.
 
 ## Rsrc Tree Provisioning
 
-`wsflow/prompt.render` loads from an rsrc tree, so the wsflow package ships one:
+`wsflow/prompt.render` and wsflow-mode `playbook.render` load from an rsrc tree,
+so the wsflow package ships one:
 `agents-plugin-wsflow/rsrc/`. It is a **generated, byte-identical copy** of
 canonical `agents-plugin/rsrc/`, committed as a real on-disk tree (not a symlink,
-not a release-only artifact). The `ws/` -> `wsflow/` substitution is applied at
-render time in the `prompt.render` tool layer, not in the stored files, so the
-copy is byte-for-byte identical to canonical — including `manifest.json`.
+not a release-only artifact). Product-specific rendering is applied at render
+time in the tool layer, not in the stored files, so the copy is byte-for-byte
+identical to canonical — including `manifest.json`.
 
 - **Generation / drift guard:** `TestWsflowRsrcMirrorUpToDate` (in
   `internal/wsrsrc`) asserts byte-equality between the two trees; regenerate the

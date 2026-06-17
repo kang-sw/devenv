@@ -246,8 +246,10 @@ dropped tickets live in hidden archive dirs and git history.
   onto product-mode playbook rendering and removes curated skill bodies. Phase 1
   landed product-marker rendering, and Phase 1.5
   `260616-refactor-explicit-namespace-render-vars` (`.done/`, `ae0c6959`) replaced
-  broad playbook namespace rewriting with explicit reserved render vars. Next:
-  Phase 2 absorbs `prompt.render` behavior into `playbook.render`. Until the
+  broad playbook namespace rewriting with explicit reserved render vars. Phase 2
+  (`6ca530ab`) absorbed legacy `prompt.render` context materialization into
+  wsflow-mode `playbook.render` while retaining `prompt.render` until removal.
+  Next: Phase 3 collapses curated wsflow skill bodies to thin shims. Until the
   wsflow convergence phases complete, wsflow is treated as not reliable for serious dogfood. Open: Codex non-skill
   `rsrc/` cache materialization (prereqs `260523`, `260524-codex-cache`).
 - `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,

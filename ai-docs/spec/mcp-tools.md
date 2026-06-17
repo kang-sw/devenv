@@ -354,6 +354,13 @@ prompts return their result as the subagent's text; file-writing prompts such as
 path through `context`, and the rendered prompt body directs the write to that
 path.
 
+During the product-mode convergence migration, wsflow callers can express the
+same five stem use cases through `playbook.render`. In no-agent/wsflow mode,
+`playbook.render` treats `context` for the legacy render-eligible stems as
+free-text prompt data and appends it as the same sorted `## Render Context`
+block. For every other playbook, and in full ws mode, `context` remains declared
+template-variable input and undeclared keys fail loudly.
+
 wsflow exposes exactly five render-eligible prompts: `reference-discovery`,
 `plan-populator-survey`, `plan-populator-research`, `code-reviewer`, and
 `mental-model-updater`. The `implementer` prompt is not render-eligible in
@@ -372,8 +379,9 @@ directions. {#260529-wsflow-only-tool-surface}
 The playbook tools are the ws-distribution surface for serving workflow procedure
 text and subagent-injection prompts from a plain-text resource tree, with content
 selected for the detected host harness. They are the full-ws generalization of the
-wsflow-only `prompt.render` (`#260529-prompt-render-tool`): `prompt.render` stays
-the wsflow surface during migration and is not removed by this surface.
+wsflow-only `prompt.render` (`#260529-prompt-render-tool`). During migration,
+`prompt.render` stays callable in wsflow, while `playbook.render` also supports
+the legacy wsflow prompt-render stem set and its free-text context block.
 
 `playbook.print(name, context?)` returns the named playbook's procedure text
 inline in the tool result, with `context` values substituted and declared
@@ -396,6 +404,13 @@ and the playbook frontmatter declares a delegate-eligible role, the render mints
 a fresh child session key and splices it into the rendered prompt, so both native
 and mercenary delegates receive a prompt with their key already embedded
 (`#260610-mercenary-delegation-surface`).
+
+In no-agent/wsflow mode only, `playbook.render` has a compatibility bridge for
+the five legacy `prompt.render` stems. When `name` is one of those stems,
+caller-supplied `context` is appended as prompt data in a `## Render Context`
+block after normal playbook rendering rather than being interpreted as template
+variables. The bridge does not apply to `implementer`, to arbitrary playbooks, or
+to full ws mode.
 
 A playbook is selected by `name`; the tool does not decide which playbook to use.
 A load or render failure for a requested `name` is a loud error, not a silent

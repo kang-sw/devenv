@@ -135,6 +135,29 @@ Preserve the existing five renderable delegate stems unless M4 changes the
 delegate set. Verification: existing prompt.render use cases can be expressed
 through playbook.render and produce equivalent prompt files.
 
+### Result (6ca530ab) - 2026-06-17
+
+Implemented the Phase 2 compatibility bridge. In wsflow/no-agent mode,
+`playbook.render` now accepts the existing five legacy `prompt.render` stems
+(`reference-discovery`, `plan-populator-survey`, `plan-populator-research`,
+`code-reviewer`, and `mental-model-updater`) and appends caller `context` as the
+same sorted free-text `## Render Context` block used by `prompt.render`.
+
+The bridge is intentionally narrow: full ws `playbook.render` and wsflow
+non-legacy playbooks still treat `context` as declared template variables and
+reject undeclared keys. `prompt.render` remains callable and wsflow-only for the
+later removal phase; no wsflow skill bodies or rsrc files were changed.
+
+Verification added or extended:
+
+- wsflow `playbook.render` materializes context for a free-response legacy stem
+  (`code-reviewer`) and a file-writing legacy stem (`plan-populator-survey`).
+- full ws `playbook.render` still rejects undeclared context for a legacy stem.
+- wsflow `playbook.render` still rejects undeclared context for a non-legacy
+  stem (`implementer`).
+- existing `prompt.render` tests continue to cover advertisement, allowlist, and
+  retained context behavior.
+
 ### Phase 3: collapse wsflow skills to thin shims
 
 Replace curated `agents-plugin-wsflow/skills/lead-*` procedure bodies with thin

@@ -44,6 +44,10 @@ related:
 - `runtime.capabilities` must report the full lead launcher contract surface even when `WS_MCP_TOOL_PROFILE` or `WS_MCP_ALLOWED_TOOLS` is inherited; use `LeadToolNames`, not filtered server tools. {#260506-runtime-capabilities-single-probe}
 - `WS_MCP_NO_AGENT=1` is a product-mode surface, not a profile filter: tools/list, tools/call, CLI command gates, and `runtime.capabilities` all hide agent-backed surfaces together while environment-unset full ws behavior stays unchanged. {#260513-wsflow-agentless-runtime-mode}
 - Product-mode gates are bidirectional and symmetric: `NoAgentMode() && noAgentHiddenTool(name)` hides agent-backed tools in wsflow, and `!NoAgentMode() && wsflowOnlyTool(name)` hides wsflow-only tools (currently `prompt.render`) from full ws. Each gate is applied at the same three points — `callTool` (explicit-call error), `toolAllowed` (tools/list), and `LeadToolNames` (runtime.capabilities). {#260529-wsflow-only-tool-surface} {#260529-prompt-render-tool}
+- Product-mode rendering is separate from product-mode tool visibility:
+  `prompt.render` is still wsflow-only, but wsflow `playbook.render` also
+  supports the legacy prompt-render context bridge for the five allowlisted
+  stems while ordinary playbook context stays declared-var-only.
 - Empty `WS_MCP_NAMESPACE` values are treated as unset, preserving `ws` namespace text.
 - MCP starts with the lead tool surface; worktree locks are not an authority signal for tool visibility. {#260505-tool-profile-gating}
 - The session-key keyed capability gate (`roleAllowsTool(entry.scope, name)` plus the `ws.lead.*` block for non-lead keys, in `callTool`) is the sole server-side tool-permission authority. `WS_MCP_TOOL_PROFILE` is retired (Phase 3): it no longer filters the served surface, `Server.role`/`requestedToolRole` are gone, and it is not propagated to spawned subprocesses. Delegate scope travels in-band via the render-minted child key. The gate is still a soft guard (a delegate can keyless-`ws.lead.login` to re-escalate), not a hard sandbox.
