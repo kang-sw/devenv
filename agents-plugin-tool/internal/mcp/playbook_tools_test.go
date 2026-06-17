@@ -789,6 +789,27 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 	}
 }
 
+func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", map[string]string{
+		"note": "wsflow non-legacy stems still require declared template vars",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false); err == nil {
+		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared context")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("wsflow non-legacy renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+}
+
 func TestPlaybookToolsSchemaNameRequired(t *testing.T) {
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
