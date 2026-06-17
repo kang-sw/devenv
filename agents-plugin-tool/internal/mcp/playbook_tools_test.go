@@ -718,6 +718,77 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	}
 }
 
+func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+		"note": "see ws/specs.find for details",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false)
+	if err != nil {
+		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
+	}
+	codeReviewerData, err := os.ReadFile(codeReviewerPath)
+	if err != nil {
+		t.Fatalf("read code-reviewer render: %v", err)
+	}
+	codeReviewerBody := string(codeReviewerData)
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details"} {
+		if !strings.Contains(codeReviewerBody, want) {
+			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
+		}
+	}
+
+	planPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", map[string]string{
+		"brief_path": "ai-docs/.plans/brief.md",
+		"plan_path":  "ai-docs/.plans/plan.md",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false)
+	if err != nil {
+		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
+	}
+	planData, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("read plan-populator-survey render: %v", err)
+	}
+	planBody := string(planData)
+	for _, want := range []string{"## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+		if !strings.Contains(planBody, want) {
+			t.Fatalf("plan-populator-survey render missing %q:\n%s", want, planBody)
+		}
+	}
+	for _, forbidden := range []string{"Mercenary path", "ws.mercenary.", "exec."} {
+		if strings.Contains(planBody, forbidden) {
+			t.Fatalf("plan-populator-survey wsflow render contains forbidden %q:\n%s", forbidden, planBody)
+		}
+	}
+}
+
+func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+		"note": "ordinary full ws context remains template vars",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", false); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for code-reviewer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+}
+
 func TestPlaybookToolsSchemaNameRequired(t *testing.T) {
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)

@@ -90,6 +90,24 @@ func toolPropertiesByName(t *testing.T, listLine, toolName string) map[string]an
 	return nil
 }
 
+func toolNameListed(t *testing.T, listLine, toolName string) bool {
+	t.Helper()
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(listLine), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := listResp["result"].(map[string]any)
+	listedTools, _ := result["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if name == toolName {
+			return true
+		}
+	}
+	return false
+}
+
 func TestServeStdioConfigShow(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -259,7 +277,7 @@ func TestWsflowOnlyToolHiddenInFullWsMode(t *testing.T) {
 
 	// tools/list must NOT include prompt.render in full ws mode.
 	list := byID["1"]
-	if strings.Contains(list, "prompt.render") {
+	if toolNameListed(t, list, "prompt.render") {
 		t.Fatalf("tools/list exposed wsflow-only tool prompt.render in full ws mode: %s", list)
 	}
 
@@ -1235,7 +1253,7 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 
 	// tools/list must include prompt.render in wsflow mode.
 	list := byID["1"]
-	if !strings.Contains(list, "prompt.render") {
+	if !toolNameListed(t, list, "prompt.render") {
 		t.Fatalf("tools/list missing prompt.render in wsflow mode: %s", list)
 	}
 
@@ -1282,6 +1300,71 @@ func TestWsflowModeAdvertisesAndServesPromptRender(t *testing.T) {
 	}
 	if !strings.Contains(toolText(t, byID["4"]), "not render-eligible") {
 		t.Fatalf("ineligible stem error message missing 'not render-eligible': %s", toolText(t, byID["4"]))
+	}
+}
+
+func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"brief_path":"ai-docs/.plans/brief.md","plan_path":"ai-docs/.plans/plan.md"}}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolNameListed(t, byID["1"], "playbook.render") || !toolNameListed(t, byID["1"], "prompt.render") {
+		t.Fatalf("wsflow tools/list missing render surfaces: %s", byID["1"])
+	}
+
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("playbook.render code-reviewer returned error: %s", byID["2"])
+	}
+	codeReviewerPath := strings.SplitN(strings.TrimSpace(toolText(t, byID["2"])), "\n", 2)[0]
+	codeReviewerData, err := os.ReadFile(codeReviewerPath)
+	if err != nil {
+		t.Fatalf("read code-reviewer render: %v", err)
+	}
+	codeReviewerText := string(codeReviewerData)
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details", "- reviewer_scope: correctness only"} {
+		if !strings.Contains(codeReviewerText, want) {
+			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
+		}
+	}
+	if strings.Contains(codeReviewerText, "ws.mercenary.") || strings.Contains(codeReviewerText, "exec.") {
+		t.Fatalf("code-reviewer playbook render exposed hidden full-ws guidance:\n%s", codeReviewerText)
+	}
+
+	if toolIsError(t, byID["3"]) {
+		t.Fatalf("playbook.render plan-populator-survey returned error: %s", byID["3"])
+	}
+	planPath := strings.SplitN(strings.TrimSpace(toolText(t, byID["3"])), "\n", 2)[0]
+	planData, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("read plan-populator-survey render: %v", err)
+	}
+	planText := string(planData)
+	for _, want := range []string{"recommended-tier: medium", "## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+		if want == "recommended-tier: medium" {
+			if !strings.Contains(toolText(t, byID["3"]), want) {
+				t.Fatalf("playbook.render response missing %q: %s", want, toolText(t, byID["3"]))
+			}
+			continue
+		}
+		if !strings.Contains(planText, want) {
+			t.Fatalf("plan-populator-survey playbook render missing %q:\n%s", want, planText)
+		}
 	}
 }
 

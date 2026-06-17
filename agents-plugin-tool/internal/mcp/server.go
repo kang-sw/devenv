@@ -2164,7 +2164,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
-					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy prompt.render stems append context as a ## Render Context block instead."},
 					"root_override": stringProperty("Optional path to override both the auto-include resolution root and the child-key binding root. Use when the delegate runs in a different worktree."),
 				},
 				"required": []string{"name"},
@@ -2602,23 +2602,7 @@ func (s *Server) renderPrompt(root, stem string, context map[string]string) (str
 	}
 	ns := RuntimeNamespace()
 	body = wsNamespaceRef.ReplaceAllString(body, ns+"$1")
-	if len(context) > 0 {
-		keys := make([]string, 0, len(context))
-		for k := range context {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		var sb strings.Builder
-		sb.WriteString("\n\n## Render Context\n")
-		for _, k := range keys {
-			sb.WriteString("- ")
-			sb.WriteString(k)
-			sb.WriteString(": ")
-			sb.WriteString(context[k])
-			sb.WriteString("\n")
-		}
-		body += sb.String()
-	}
+	body = appendRenderContext(body, context)
 	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, "prompt", []string{stem})
 	if err != nil {
 		return "", fmt.Errorf("allocate prompt path: %w", err)
@@ -2627,6 +2611,27 @@ func (s *Server) renderPrompt(root, stem string, context map[string]string) (str
 		return "", fmt.Errorf("write prompt %s: %w", generated[0].Path, err)
 	}
 	return generated[0].Path, nil
+}
+
+func appendRenderContext(body string, context map[string]string) string {
+	if len(context) == 0 {
+		return body
+	}
+	keys := make([]string, 0, len(context))
+	for k := range context {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	sb.WriteString("\n\n## Render Context\n")
+	for _, k := range keys {
+		sb.WriteString("- ")
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		sb.WriteString(context[k])
+		sb.WriteString("\n")
+	}
+	return body + sb.String()
 }
 
 func explicitAllowedTools() map[string]bool {

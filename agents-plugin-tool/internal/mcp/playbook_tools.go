@@ -497,10 +497,21 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
 func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, mintRoot, preferMercenary)
+	templateContext := callerContext
+	var renderContext map[string]string
+	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
+		// Phase 2 of wsflow convergence: legacy prompt.render callers pass
+		// arbitrary context as prompt data, not template variables. Preserve that
+		// behavior only for the legacy wsflow stem set so ordinary playbook.render
+		// still fails loudly on undeclared template variables.
+		templateContext = nil
+		renderContext = callerContext
+	}
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, preferMercenary)
 	if err != nil {
 		return "", "", err
 	}
+	body = appendRenderContext(body, renderContext)
 	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(worktreeRoot, "prompt", []string{name})
 	if err != nil {
 		return "", "", fmt.Errorf("allocate playbook path: %w", err)
