@@ -166,11 +166,32 @@ tests from curated-body assertions to shim and rendered-output assertions.
 Verification: wsflow skill inventory remains correct, but procedure behavior is
 loaded from shared rsrc playbooks.
 
-### Phase 4: remove prompt.render and stale curated-skill doctrine
+### Result (87aec145) - 2026-06-17
+
+Collapsed all shipped `agents-plugin-wsflow/skills/lead-*` `SKILL.md` files to
+thin entry shims. The shims preserve package-local bare `name: lead-*`
+frontmatter, call `wsflow/playbook.print(name: "<lead-name>")`, execute the
+returned procedure against the current request, and report a blocker if the
+playbook cannot be loaded.
+
+Updated wsflow package tests so curated-body assertions are replaced by thin
+shim shape and shared-playbook coverage checks. Inventory, forbidden full-ws
+reference, runtime-contract, and bootstrap-template lineage checks remain
+active. The wsflow rsrc mirror, runtime metadata, skill inventory, and
+`prompt.render` surface were not changed; `prompt.render` removal remains Phase
+4.
+
+Dogfood notes: the root `AGENTS.md` named-agent-first delegation rule was removed
+in a separate user-requested commit (`c430c1ee`) after it caused optional audits
+to route through mercenary instead of native subagents. A follow-up idea ticket
+(`260617-feat-fresh-reader-audit-playbook`) captures the missing reusable
+fresh-reader audit playbook surfaced during the skill-authoring audit.
+
+### Phase 4: remove prompt.render and stale migration doctrine
 
 Remove the wsflow-only `prompt.render` MCP/runtime surface and update specs,
 mental models, package runtime contracts, and wsflow mirroring docs. Drop the
-old doctrine that wsflow skills are curated semantic rewrites, replacing it with
-the product-mode rendering contract. Verification: full ws and wsflow package
-tests pass, wsflow runtime capabilities omit `prompt.render`, and no maintained
-wsflow skill body duplicates shared playbook text.
+remaining migration doctrine that treats legacy prompt rendering as the normal
+wsflow delegate path. Verification: full ws and wsflow package tests pass,
+wsflow runtime capabilities omit `prompt.render`, and wsflow skills remain thin
+playbook shims.

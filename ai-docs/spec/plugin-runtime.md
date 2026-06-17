@@ -77,7 +77,7 @@ does not fall back to weaker required-surface probes after a capability mismatch
 
 ## wsflow Agentless Plugin Package {#260513-wsflow-agentless-plugin-package}
 
-The repository ships `agents-plugin-wsflow/` as a curated internal derivative
+The repository ships `agents-plugin-wsflow/` as an agentless internal derivative
 plugin package named `wsflow`. Its Codex and Claude manifests expose the
 wsflow name, its MCP configuration registers the server under the `wsflow` key,
 and its package-local runtime contract requires the wsflow agentless surface.
@@ -102,15 +102,21 @@ in wsflow mode. The stored rsrc copy does not diverge from canonical; a byte-equ
 the copy in sync, and the launcher sets `WS_RSRC_ROOT` to the sibling tree when
 present. The rsrc subtree is the one generated-sameness exception to the
 otherwise-curated derivative (see `ai-docs/ref/wsflow-mirroring.md`).
+Distributed `agents-plugin-wsflow/skills/lead-*` files are also converged entry
+shims over that rsrc surface: each shim calls
+`wsflow/playbook.print(name: "<lead-name>")` and leaves procedure behavior to the
+shared playbook renderer.
 
-Apart from that generated rsrc subtree, the wsflow package is not a generated
-mirror of `agents-plugin/`: skills and manifests are curated. Future full
-plugin packaging or runtime-contract changes that affect copied or
-caller-visible surfaces must evaluate wsflow drift, update the derivative in
-the same logical change when applicable, or record an explicit follow-up ticket.
+Apart from that generated rsrc subtree and the uniform entry-shim skill bodies,
+the wsflow package is not a generated mirror of `agents-plugin/`: manifests,
+runtime metadata, templates, and inventory are curated. Future full plugin
+packaging or runtime-contract changes that affect copied or caller-visible
+surfaces must evaluate wsflow drift, update the derivative in the same logical
+change when applicable, or record an explicit follow-up ticket.
 The local verification path includes `python3 -m unittest discover
 agents-plugin-wsflow/tests`, which checks the agentless runtime contract and
-the curated skill inventory without requiring text-identical skills.
+the skill inventory, shim shape, and shared-playbook coverage without requiring
+text-identical full ws skill files.
 
 The repository local Codex marketplace exposes wsflow as a separate installable
 plugin entry alongside the full ws plugin. The repository Claude marketplace

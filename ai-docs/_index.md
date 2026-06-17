@@ -42,8 +42,8 @@ history.
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
 - `agents-plugin-wsflow/` is an agentless derivative package with
   Codex/Claude manifests, package-local no-agent MCP env, shared launcher
-  copies, a reduced `runtime.json`, a curated wsflow skill bundle, and package
-  tests for runtime-contract plus skill-inventory drift.
+  copies, a reduced `runtime.json`, thin wsflow skill shims over shared
+  playbooks, and package tests for runtime-contract plus skill-shim drift.
 - `.agents/plugins/marketplace.json` exposes both `ws` and `wsflow` as local
   Codex plugin entries; `.claude-plugin/marketplace.json` exposes both packages
   for manual Claude marketplace installation while `install.sh` still installs
@@ -165,6 +165,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | ready | After M4, collapse wsflow onto product-mode playbook rendering and remove curated skill bodies |
 | `260616-refactor-explicit-namespace-render-vars` | done | Replaced implicit ws->wsflow playbook string substitution with explicit reserved namespace render vars |
+| `260617-feat-fresh-reader-audit-playbook` | idea | Add a reusable fresh-reader audit playbook for skill and prompt authoring |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
@@ -249,8 +250,10 @@ dropped tickets live in hidden archive dirs and git history.
   broad playbook namespace rewriting with explicit reserved render vars. Phase 2
   (`6ca530ab`) absorbed legacy `prompt.render` context materialization into
   wsflow-mode `playbook.render` while retaining `prompt.render` until removal.
-  Next: Phase 3 collapses curated wsflow skill bodies to thin shims. Until the
-  wsflow convergence phases complete, wsflow is treated as not reliable for serious dogfood. Open: Codex non-skill
+  Phase 3 (`87aec145`) collapsed shipped wsflow skill bodies to thin
+  `wsflow/playbook.print` shims over shared rsrc playbooks. Next: Phase 4 removes
+  `prompt.render` and remaining stale migration doctrine. Until the wsflow
+  convergence phases complete, wsflow is treated as not reliable for serious dogfood. Open: Codex non-skill
   `rsrc/` cache materialization (prereqs `260523`, `260524-codex-cache`).
 - `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,
   refactor; ready→.done 2026-06-12) - first-class `small/medium/large/xlarge` tier

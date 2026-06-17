@@ -16,7 +16,7 @@ related:
 
 - `agents-plugin/skills/lead-*` holds the 12 directly user-invocable `ws:` entry skills; uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
 - `agents-plugin/rsrc/lead-*/` holds procedure bodies for all lead-* workflows — entry-skill bodies (e.g., `lead-proceed`, `lead-discuss`, `lead-bootstrap`, `lead-verify-discussion`) and internal-only procedures (e.g., `lead-implement`, `lead-write-ticket`, `lead-workflow-manual`); all are invoked via `ws/playbook.print(name: "<name>")` and executed inline. Entry-skill playbooks have a corresponding thin-shim `SKILL.md` (frontmatter + H1 + single print-and-execute line); internal-only playbooks have no user-invocable shim. {#260609-rsrc-playbook-distribution}
-- `agents-plugin-wsflow/skills/lead-*` is the curated derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
+- `agents-plugin-wsflow/skills/lead-*` is the wsflow entry-skill surface: package-local bare `name: lead-*` frontmatter plus a thin `wsflow/playbook.print(name: "<lead-name>")` shim, with behavior owned by shared rsrc playbooks rendered in wsflow product mode. {#260513-wsflow-agentless-skill-surface}
 - The `lead-workflow-manual` playbook is the notation and primitive boundary reference for shared skill text; load it via `ws/playbook.print(name: "lead-workflow-manual")`. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
@@ -96,7 +96,7 @@ related:
 
 - **Add a Codex workflow skill**: for a user-invocable entry skill, create both (a) a thin-shim `agents-plugin/skills/lead-<name>/SKILL.md` (frontmatter + H1 + single `ws/playbook.print(name: "<name>")` execute line) and (b) the full procedure body at `agents-plugin/rsrc/lead-<name>/lead-<name>.md` as a `kind:print` playbook (set `delegates:true` if it spawns subagents). For an internal-only procedure (no user shim), create only the rsrc playbook. Follow skill-authoring invariants for both surfaces; add OpenAI UI metadata only for entry skills; update workflow specs and mental models.
 - **Add a config-first review skill variant**: follow `lead-review` pattern — machine-local `ai-docs/_review.local.md` captures environment judgment, setup interview fires only when config is absent, judges gate subagent depth rather than hard-coding it.
-- **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
+- **Change a shared lead playbook visible in wsflow**: verify wsflow product-mode output and the `agents-plugin-wsflow` shim/package tests in the same logical change, or record a follow-up ticket when the wsflow surface cannot be checked.
 - **Change a full workflow skill excluded from wsflow**: check `ai-docs/ref/wsflow-mirroring.md` and update wsflow docs, workflow manual text, or exclusion rationale if the excluded skill's meaning changed.
 - **Change bootstrap baseline behavior**: update both `lead-bootstrap` packages when applicable, but bump each package's `AGENTS.template.md` version only inside that package's own lineage.
 - **Add a delegate prompt to a workflow**: author it as an rsrc playbook under `agents-plugin/rsrc/` (regenerate `manifest.json`), then have the skill render it via `ws/playbook.render` and spawn native/mercenary — the `register(prompts:[stems])` path and its runtime prompt bundle metadata were retired (260611 Phase 6b). Keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
@@ -107,6 +107,6 @@ related:
 - Skipping the `lead-workflow-manual` playbook (load via `ws/playbook.print(name: "lead-workflow-manual")`) before executing or editing orchestration-heavy skills, which causes notation drift back to Claude shell helpers.
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
-- Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve workflow intent while using wsflow notation, scoped subagent guidance, and the curated skill inventory.
+- Reintroducing curated procedure bodies into wsflow skills; wsflow `SKILL.md` files are entry shims and shared rsrc playbooks own workflow intent.
 - Relaying reviewer file contents instead of file paths, which breaks implementation review relay and inflates lead context.
 - Treating brief compression as permission to drop settled caller-visible contracts, implementation strategy decisions, rejected alternatives, or verification expectations.

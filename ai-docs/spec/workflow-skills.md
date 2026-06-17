@@ -148,7 +148,7 @@ short lists when output and end state are obvious.
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
 
-The wsflow distribution ships a curated subset of lead workflow skills
+The wsflow distribution ships a curated subset of lead workflow entry skills
 under `wsflow:lead-*` invocation names and `wsflow/<tool>` MCP notation.
 Shipped wsflow skills include planning, documentation, direct implementation,
 bootstrap, release, verification, and reconstruction workflows:
@@ -170,18 +170,18 @@ skill was absorbed into that spine and removed from the wsflow skill set.
 
 The wsflow package excludes skeleton flows, recovery orchestration, and
 upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
-`lead-skill-authoring`. wsflow skill text uses scoped subagent guidance for
-exploration, implementation, verification, audit, or review and keeps lead
-responsibility focused on integration, verification, final judgment, and commits.
+`lead-skill-authoring`. Shipped wsflow `SKILL.md` files are thin entry shims:
+they keep package-local bare `name: lead-*` frontmatter, call
+`wsflow/playbook.print(name: "<lead-name>")`, execute the returned procedure
+against the current user request, and report a blocker if the playbook cannot
+load. Procedure behavior lives in shared rsrc playbooks rendered in wsflow
+product mode, not in separately curated wsflow skill bodies.
 
-wsflow skills are curated semantic rewrites, not generated copies. A change to
-a full `agents-plugin/skills/lead-*` skill that is shipped in wsflow must either
-update the corresponding wsflow skill in the same logical change or leave an
-explicit follow-up ticket. A change to a full skill excluded from wsflow must
-still check whether the wsflow workflow manual, exclusion rationale, or static
-verification rules drifted. The wsflow skill-bundle verification path checks
-inventory and forbidden full ws agent references, but it does not require text
-identity with the full ws skill.
+A change to a shared rsrc lead playbook that affects wsflow-visible behavior
+must still evaluate wsflow product-mode output, static verification, and the
+wsflow exclusion rationale. The wsflow skill-bundle verification path checks
+inventory, forbidden full ws agent references, thin-shim shape, and shared
+playbook coverage; it does not require text identity with full ws skill shims.
 
 wsflow bootstrap uses package-local template version history. Its downstream
 `AGENTS.template.md` starts at `v0001` for the wsflow baseline and does not
