@@ -536,15 +536,6 @@ func TestPlaybookToolsInLeadToolNames(t *testing.T) {
 	}
 }
 
-func TestPlaybookToolsNotWsflowOnly(t *testing.T) {
-	if wsflowOnlyTool("playbook.print") {
-		t.Error("playbook.print is incorrectly marked as wsflow-only")
-	}
-	if wsflowOnlyTool("playbook.render") {
-		t.Error("playbook.render is incorrectly marked as wsflow-only")
-	}
-}
-
 func TestPlaybookToolsNotNoAgentHidden(t *testing.T) {
 	if noAgentHiddenTool("playbook.print") {
 		t.Error("playbook.print is incorrectly hidden in no-agent mode")

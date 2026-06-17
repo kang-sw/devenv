@@ -111,25 +111,7 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
         self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
         self.assertIn("api.list", contract["tools"])
-        self.assertIn("prompt.render", contract["tools"])
-
-    def test_prompt_render_absent_from_full_ws_capabilities(self):
-        env = os.environ.copy()
-        env.pop("WS_MCP_NO_AGENT", None)
-        env.pop("WS_MCP_NAMESPACE", None)
-        env.pop("WS_MCP_SETUP_TOOL", None)
-
-        proc = subprocess.run(
-            ["go", "run", "./cmd/ws-mcp", "runtime", "capabilities"],
-            cwd=TOOL_DIR,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=60,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        payload = json.loads(proc.stdout)
+        self.assertNotIn("prompt.render", contract["tools"])
         self.assertNotIn("prompt.render", payload["tools"])
 
 

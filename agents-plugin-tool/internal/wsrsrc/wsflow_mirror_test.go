@@ -46,8 +46,8 @@ func collectTreeBytes(t *testing.T, root string) map[string][]byte {
 
 // TestWsflowRsrcMirrorUpToDate is the drift guard for the generated wsflow rsrc
 // copy. The wsflow package ships an rsrc tree that must be a BYTE-IDENTICAL copy
-// of canonical agents-plugin/rsrc/ (the ws/→wsflow/ namespace substitution is
-// applied at render time in the prompt.render tool layer, not in stored files,
+// of canonical agents-plugin/rsrc/ (the ws/ to wsflow/ namespace difference is
+// applied at render time in the playbook rendering layer, not in stored files,
 // so the stored copies are identical). A drift here is exactly the failure class
 // — silent divergence — that let the old embedded prompt copies rot; this guard
 // makes it loud.

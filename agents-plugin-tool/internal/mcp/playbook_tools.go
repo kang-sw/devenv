@@ -500,7 +500,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
-		// Phase 2 of wsflow convergence: legacy prompt.render callers pass
+		// Phase 2 of wsflow convergence: legacy wsflow delegate callers pass
 		// arbitrary context as prompt data, not template variables. Preserve that
 		// behavior only for the legacy wsflow stem set so ordinary playbook.render
 		// still fails loudly on undeclared template variables.

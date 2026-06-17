@@ -307,7 +307,7 @@ func TestLoaderParsesRoleAndTier(t *testing.T) {
 // TestLoaderFlatPlaybook verifies a flat root-level file <root>/<name>.md is
 // loadable as a playbook when no subdir playbook exists. This is how the
 // var-free code-reviewer flat dep (also a flat include target) is rendered as a
-// playbook in its own right (wsflow prompt.render "code-reviewer" stem).
+// playbook in its own right (wsflow playbook.render "code-reviewer" stem).
 func TestLoaderFlatPlaybook(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "code-reviewer.md", "Shared reviewer base text.\n")
