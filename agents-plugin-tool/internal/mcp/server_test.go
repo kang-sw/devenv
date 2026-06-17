@@ -349,7 +349,9 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 		"plan-populator-research", "code-reviewer", "mental-model-updater",
 	} {
 		t.Run(stem, func(t *testing.T) {
-			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, nil, wsconfig.Options{}, "", false)
+			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, map[string]string{
+				"bridge_probe": "context for " + stem,
+			}, wsconfig.Options{}, "", false)
 			if err != nil {
 				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}
@@ -363,6 +365,9 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 			}
 			if strings.Contains(text, "{{.") {
 				t.Errorf("rendered %s has an unsubstituted placeholder:\n%s", stem, text)
+			}
+			if !strings.Contains(text, "## Render Context") || !strings.Contains(text, "- bridge_probe: context for "+stem) {
+				t.Errorf("rendered %s did not append legacy context block:\n%s", stem, text)
 			}
 			if strings.Contains(text, "ws.mercenary.") || strings.Contains(text, "exec.") {
 				t.Errorf("rendered %s exposed hidden full-ws guidance:\n%s", stem, text)
