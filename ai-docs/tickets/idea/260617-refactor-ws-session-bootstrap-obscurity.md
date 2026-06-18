@@ -45,11 +45,14 @@ factor at low cost, not a new security guarantee.
   process restart). Removing the callable mint surface entirely (delivering the
   lead key only through the manual render channel) was considered and left out of
   scope here.
-- **Rename to an arbitrary, semantically-disconnected name** (illustrative:
-  `ws.james.bond`), not a function-descriptive one. Function-style names
-  (`attach`/`bind`/`hello`/`preflight`) are rejected — they re-create the
-  session-start pull for every agent. The literal token is an open decision; the
-  principle (arbitrary, unpredictable, no semantic hook) is settled.
+- **Rename to `ws.ferrule`** — an arbitrary, semantically-disconnected name, not
+  a function-descriptive one. Function-style names (`attach`/`bind`/`hello`/
+  `preflight`) are rejected: they re-create the session-start pull for every
+  agent. Among arbitrary names, a bland/obscure noun is preferred over a famous
+  one (e.g. `james.bond`): both carry zero session-semantic hook, but a famous
+  name attracts curiosity ("what is this?") — exactly the accidental invocation
+  this ticket aims to reduce. The lead learns the name from `workflow-manual`, so
+  memorability is not a requirement.
 - **Inert tool description too.** A `tools/list` entry is name + description, so
   an arbitrary name with a function-revealing description still leaks. The
   description must be inert (e.g., "Reserved workflow primitive; see
