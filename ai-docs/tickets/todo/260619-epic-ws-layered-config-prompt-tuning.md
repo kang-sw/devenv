@@ -47,19 +47,26 @@ rather than a delegation-specific feature.
 
 ## Child Tickets
 
-- `260619-feat-ws-layered-config-scope-substrate` (todo) — 4-layer resolver
+- `260619-feat-ws-layered-config-scope-substrate` (**done**) — 4-layer resolver
   (`session > project > global > builtin`), per-item declared default scope,
   explicit `scope:` arg, scope-reporting get/show, new global config location,
   file-lock read-modify-write, reusable scope primitive + shared schema. P2
-  migrates `prefer_mercenary` into it (closes
-  `260618-bug-ws-prefer-mercenary-one-way-flip`). Prerequisite for the other two.
-- `260619-feat-ws-prompt-override-marker-engine` (todo) — A1 block-marker
-  override pass (sibling to the product-mode pass); seed `DelegationSection` in
-  the workflow manual and consolidate scattered/hardcoded delegation-posture
-  text. Depends on the substrate child.
-- `260619-feat-ws-config-prompt-tool-self-doc` (todo) — `config.prompt.set`
-  setter (own namespace) + no-arg `config.prompt()` self-doc listing that
-  tree-scans override markers. Depends on the substrate and the marker engine.
+  migrated `prefer_mercenary` into it (closed
+  `260618-bug-ws-prefer-mercenary-one-way-flip`).
+- `260619-feat-ws-prompt-override-marker-engine` (**done**) — A1 block-marker
+  override pass (sibling to the product-mode pass); seeded `DelegationSection` in
+  the workflow manual (first shipped override-point). Both phases shipped.
+- `260619-feat-ws-config-prompt-tool-self-doc` (todo) — **data plane only**:
+  `config.prompt.set` setter (own namespace) + no-arg `config.prompt()` listing
+  that tree-scans override markers and returns the point list / current values /
+  scopes **plus a one-line pointer to `ws:lead-tune`**. The tuning *manual* moved
+  out to the new skill child (3b). Depends on the substrate and the marker engine.
+- `260619-feat-ws-lead-tune-skill` (todo) — **new**: `ws:lead-tune`, a dedicated
+  user-invocable entry skill that is the **umbrella tuning surface** (prompt
+  overrides primary; introduces/links `prefer_mercenary` and `config.agents_tier`;
+  leaves a slot for future `config.model_alias`/`config.role_tier`). Owns the
+  tuning manual and the proactive-proposal trigger. Depends on 3a (data plane) and
+  the marker engine (points it documents).
 
 ## Cross-Child Decisions
 
@@ -128,15 +135,37 @@ rather than a delegation-specific feature.
   negligible) and raw-file readability is recovered by the self-doc render.
   Split-to-resource-files rejected: reintroduces multi-file
   lock/atomicity/orphan complexity.
+- **Tuning discovery = dedicated entry skill, not workflow-manual prose
+  (confirmed).** The proactive-proposal surface (so an agent offers tuning when a
+  user signals "let's tune the prompts/workflow") is a new `ws:lead-tune` entry
+  skill whose *description* is the runtime trigger (mental model
+  `workflow-skills` #260508 — skill descriptions are the trigger surface). The
+  always-on `lead-workflow-manual` gets at most a one-line pointer (or none), so
+  the tuning surface does not tax general-task routing attention. Rejected:
+  putting the tuning manual inline in `lead-workflow-manual` (always-on bloat) or
+  inline in `config.prompt()` output (bloats the data surface, weak trigger).
+- **Three planes, kept separate (confirmed).** (1) Data plane = `config.prompt.*`
+  MCP tools (3a). (2) Procedure/manual plane = the `ws:lead-tune` skill playbook
+  (3b) — owns the tuning manual and when/how to propose. (3) Discovery plane =
+  the skill description + minimal manual pointer. `config.prompt()` returns data +
+  a pointer; the manual lives in 3b.
+- **`ws:lead-tune` is an umbrella, implemented to what exists (confirmed).** It
+  conceptually covers all workflow tuning; the first build covers prompt overrides
+  (primary), `prefer_mercenary`, and `config.agents_tier` (introduce/link their
+  existing set paths — do not reimplement), and leaves a slot for the future
+  `config.model_alias`/`config.role_tier` axis (`260611` research). 3a (MCP data
+  plane) is NOT blocked on 3b. Naming follows the `lead-*` entry-skill convention
+  (`ws:lead-tune`); the user-facing framing is "workflow tuning."
 
 ## Completion Criteria
 
-- Done: all three children landed — layered config resolves across the four
-  scopes with per-item defaults and scope-reporting get/show; `prefer_mercenary`
-  is a session-scope item with working revert (260618 closed); the block-marker
-  override engine renders `{.DelegationSection}` with user overrides honored
-  per `(pointId, harness)` and scope; `config.prompt()` self-documents the
-  override surface.
+- Done: all children landed — layered config resolves across the four
+  scopes with per-item defaults and scope-reporting get/show (done);
+  `prefer_mercenary` is a session-scope item with working revert (260618 closed,
+  done); the block-marker override engine renders `DelegationSection` with user
+  overrides honored per `(pointId, harness)` and scope (done); `config.prompt()`
+  returns the override surface data; and `ws:lead-tune` surfaces the umbrella
+  tuning manual plus the proactive-proposal trigger.
 - Dropped: the pivot abandons user-tunable playbook config, or a simpler
   single-scope override surface is judged sufficient and the layered substrate
   is cut.

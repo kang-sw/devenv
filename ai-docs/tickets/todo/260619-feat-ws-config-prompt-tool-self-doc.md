@@ -4,6 +4,7 @@ parent: 260619-epic-ws-layered-config-prompt-tuning
 related:
   260619-feat-ws-layered-config-scope-substrate: prerequisite — setter writes through the layered scope primitive
   260619-feat-ws-prompt-override-marker-engine: prerequisite — listing tree-scans the override markers this defines
+  260619-feat-ws-lead-tune-skill: consumer — the ws:lead-tune skill owns the tuning manual and calls this data plane; config.prompt() points users there
 related-mental-model:
   - prompt-bundle
 ---
@@ -25,12 +26,17 @@ see every overridable point and set one without external docs.
   stored at the chosen scope via the layered primitive
   (`260619-feat-ws-layered-config-scope-substrate`); overrides live inline in the
   single config file (no split resource-files).
-- **No-arg `config.prompt()` = self-doc listing.** Tree-scan the rsrc playbooks
-  for declared override markers (the A1 grammar from
-  `260619-feat-ws-prompt-override-marker-engine`), and render: the list of
-  override-points with their short `desc`, current overrides (per harness/scope),
-  and a short tuning manual sourced from an rsrc infra doc. The marker scan is
-  the listing mechanism.
+- **No-arg `config.prompt()` = data listing + pointer (scope trimmed).** Tree-scan
+  the rsrc playbooks for declared override markers (the A1 grammar from
+  `260619-feat-ws-prompt-override-marker-engine`) and return the **data**: the list
+  of override-points with their short `desc`, plus current overrides per
+  harness/scope. End with a **one-line pointer to `ws:lead-tune`** for the tuning
+  manual / how-to. The marker scan is the listing mechanism.
+  - **The tuning manual is NOT rendered here.** It moved to the `ws:lead-tune`
+    entry skill (`260619-feat-ws-lead-tune-skill`); keeping the manual out of the
+    MCP output keeps `config.prompt()` a lean data surface. (Originally this
+    ticket inlined a manual from an rsrc infra doc — superseded by the
+    discuss-confirmed three-plane split: data here, manual + discovery in the skill.)
 
 ## Phases
 
@@ -46,14 +52,16 @@ Verification: an override set via the tool is honored at render time by the
 override engine for the matching `(pointId, harness)` and resolves at the
 expected scope.
 
-### Phase 2: Self-documenting config.prompt() listing
+### Phase 2: config.prompt() data listing
 
 Implement no-arg `config.prompt()`: tree-scan override markers, render the point
-list with `desc`, current overrides (harness/scope), and the tuning manual.
+list with `desc` and current overrides (harness/scope), and end with a one-line
+pointer to `ws:lead-tune`. No tuning manual is rendered here (it lives in the
+skill child).
 
 Depends on Phase 1 and `260619-feat-ws-prompt-override-marker-engine` (marker
 grammar to scan).
 
 Verification: listing enumerates all declared override-points with descriptions,
-reflects an override set in Phase 1 with its scope, and renders the tuning
-guidance.
+reflects an override set in Phase 1 with its scope, and emits the `ws:lead-tune`
+pointer.

@@ -294,16 +294,20 @@ dropped tickets live in hidden archive dirs and git history.
   Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
   item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
   slice must adopt (not fork) the shared scope primitive.
-  Dependent children: marker-engine **shipped** (done, both phases — `705795b8`
-  engine + `b2929411` `DelegationSection` seed). `260619-feat-ws-config-prompt-tool-self-doc`
-  (todo, dep both substrate + engine) is now **unblocked** and is the remaining
-  child.
-- `260619-feat-ws-config-prompt-tool-self-doc` (todo) - the remaining epic child:
-  a `config.prompt.set(pointId, harness, prompt, scope?)` setter plus a no-arg
-  `config.prompt()` self-doc that tree-scans override markers and lists the
-  tunable points with their stored/seed values. Both deps shipped (layered-config
-  substrate + marker engine with the live `DelegationSection` point keyed
-  `prompt.DelegationSection.<harness>`), so it is ready to promote.
+  Substrate + marker-engine **both shipped** (done). Remaining work is the
+  tuning surface, split into two children (discuss 2026-06-19): a data plane +
+  a dedicated entry skill.
+- `260619-feat-ws-config-prompt-tool-self-doc` (todo) - **data plane**:
+  `config.prompt.set(pointId, harness, prompt, scope?)` + no-arg `config.prompt()`
+  that tree-scans override markers and returns the point list / current values /
+  scopes **plus a one-line pointer to `ws:lead-tune`** (tuning manual moved out).
+  Both deps shipped (substrate + marker engine; live point `DelegationSection`
+  keyed `prompt.DelegationSection.<harness>`), so ready to promote.
+- `260619-feat-ws-lead-tune-skill` (todo) - **new entry skill** `ws:lead-tune`:
+  the umbrella workflow-tuning surface (prompt overrides primary; introduces/links
+  `prefer_mercenary` + `config.agents_tier`; slot for future `model_alias`/`role_tier`).
+  Owns the tuning manual + the proactive-proposal trigger (description = trigger
+  surface). Depends on the data-plane child. Sequence: data plane (3a) → skill (3b).
 - `260619-refactor-stateless-implement-review-continuity` (ready) - makes the
   `lead-implement` review fix-loop correct under the default native-subagent path
   by treating delegates as stateless and moving continuity to the lead, anchored
