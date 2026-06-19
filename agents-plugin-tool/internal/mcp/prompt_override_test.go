@@ -100,9 +100,13 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 		t.Errorf("close marker must not appear in rendered output:\n%s", body)
 	}
 
-	// Static structural content must remain intact.
+	// Static structural content must remain intact, including the content between
+	// the two marker blocks.
 	if !strings.Contains(body, "Before section.") {
 		t.Errorf("content before marker block must be preserved:\n%s", body)
+	}
+	if !strings.Contains(body, "Between sections.") {
+		t.Errorf("content between marker blocks must be preserved:\n%s", body)
 	}
 	if !strings.Contains(body, "After sections.") {
 		t.Errorf("content after marker block must be preserved:\n%s", body)
@@ -240,6 +244,128 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Marker-stripping robustness — no override marker syntax may ever survive
+// ---------------------------------------------------------------------------
+
+// assertNoMarkerSyntax fails the test if any override marker syntax survives in s.
+func assertNoMarkerSyntax(t *testing.T, label, s string) {
+	t.Helper()
+	if strings.Contains(s, overrideOpenPrefix) || strings.Contains(s, overrideClosePrefix) {
+		t.Errorf("%s: override marker syntax survived in output:\n%s", label, s)
+	}
+}
+
+// TestApplyOverrideMarkersCloseSpacingLeniency verifies the close marker is
+// recognized with the same spacing leniency as the open marker: a close marker
+// with no space before `-->` must still close the block and be stripped, not
+// swept into the seed and re-emitted.
+func TestApplyOverrideMarkersCloseSpacingLeniency(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"close no space", "<!-- ws:override:A -->\nseed\n<!-- ws:/override:A-->"},
+		{"open no space", "<!-- ws:override:A-->\nseed\n<!-- ws:/override:A -->"},
+		{"both no space", "<!-- ws:override:A-->\nseed\n<!-- ws:/override:A-->"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// nil lookup → seed renders, both markers stripped.
+			got := applyOverrideMarkers(tc.body, "claude", nil)
+			if !strings.Contains(got, "seed") {
+				t.Errorf("seed must survive:\n%s", got)
+			}
+			assertNoMarkerSyntax(t, tc.name, got)
+
+			// With an override → seed replaced, markers stripped.
+			lookup := staticLookup(map[string]string{"A/claude": "override"})
+			got2 := applyOverrideMarkers(tc.body, "claude", lookup)
+			if !strings.Contains(got2, "override") || strings.Contains(got2, "seed") {
+				t.Errorf("override must replace seed:\n%s", got2)
+			}
+			assertNoMarkerSyntax(t, tc.name+" override", got2)
+		})
+	}
+}
+
+// TestApplyOverrideMarkersNesting verifies a nested override block inside a seed
+// is processed recursively so no inner marker line survives in the output.
+func TestApplyOverrideMarkersNesting(t *testing.T) {
+	body := strings.Join([]string{
+		"<!-- ws:override:Outer -->",
+		"outer-pre",
+		"<!-- ws:override:Inner -->",
+		"inner-seed",
+		"<!-- ws:/override:Inner -->",
+		"outer-post",
+		"<!-- ws:/override:Outer -->",
+	}, "\n")
+
+	// nil lookup → both seeds render, all four marker lines stripped.
+	got := applyOverrideMarkers(body, "claude", nil)
+	assertNoMarkerSyntax(t, "nested nil", got)
+	for _, want := range []string{"outer-pre", "inner-seed", "outer-post"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("nested nil: %q must survive:\n%s", want, got)
+		}
+	}
+
+	// Inner override set → inner seed replaced, no markers survive.
+	lookup := staticLookup(map[string]string{"Inner/claude": "inner-override"})
+	got2 := applyOverrideMarkers(body, "claude", lookup)
+	assertNoMarkerSyntax(t, "nested inner override", got2)
+	if !strings.Contains(got2, "inner-override") || strings.Contains(got2, "inner-seed") {
+		t.Errorf("inner override must replace inner seed:\n%s", got2)
+	}
+	if !strings.Contains(got2, "outer-pre") || !strings.Contains(got2, "outer-post") {
+		t.Errorf("outer seed content must survive:\n%s", got2)
+	}
+
+	// Outer override set → whole outer block (including inner markers) replaced.
+	lookupOuter := staticLookup(map[string]string{"Outer/claude": "outer-override"})
+	got3 := applyOverrideMarkers(body, "claude", lookupOuter)
+	assertNoMarkerSyntax(t, "nested outer override", got3)
+	if !strings.Contains(got3, "outer-override") {
+		t.Errorf("outer override must appear:\n%s", got3)
+	}
+	for _, gone := range []string{"outer-pre", "inner-seed", "outer-post"} {
+		if strings.Contains(got3, gone) {
+			t.Errorf("outer override must replace entire block; %q leaked:\n%s", gone, got3)
+		}
+	}
+}
+
+// TestApplyOverrideMarkersUnclosedMarkerPreservesContent verifies an unclosed
+// open marker (EOF with no matching close) is NOT treated as a block: its line
+// and all following content are emitted unchanged, even when an override is
+// stored for that pointId (no silent consumption or truncation).
+func TestApplyOverrideMarkersUnclosedMarkerPreservesContent(t *testing.T) {
+	body := strings.Join([]string{
+		"before",
+		"<!-- ws:override:Dangling -->",
+		"content after open marker",
+		"more content",
+	}, "\n")
+
+	// Even with an override stored, the unclosed block must not consume content.
+	lookup := staticLookup(map[string]string{"Dangling/claude": "should-not-apply"})
+	got := applyOverrideMarkers(body, "claude", lookup)
+
+	for _, want := range []string{"before", "content after open marker", "more content"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("unclosed marker must preserve %q:\n%s", want, got)
+		}
+	}
+	// The override must NOT be applied for an unclosed block.
+	if strings.Contains(got, "should-not-apply") {
+		t.Errorf("override must not apply to an unclosed (malformed) block:\n%s", got)
+	}
+	// The dangling open line is emitted verbatim here (it is not a valid block),
+	// which is acceptable: the content-preservation guarantee is the contract.
+	// What matters for fix #2 is that nothing was consumed/truncated.
+}
+
+// ---------------------------------------------------------------------------
 // Case 5: production-path — override stored via resolver is honored at render
 // ---------------------------------------------------------------------------
 
@@ -272,10 +398,14 @@ func TestOverrideProductionPath(t *testing.T) {
 
 	// Seed an override directly through the resolver (Phase 1 — no setter tool yet).
 	// The key is "prompt.SeedSection.claude" as per the storage convention.
+	// ExplicitScope: ScopeSession forces the write into the per-key session store;
+	// without it, the unregistered prompt.* key would default to project scope and
+	// the test would never exercise the session→resolver→render path.
 	adapter := sessionConfigAdapter{s: s.sessions}
 	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
 	if err := resolver.Set("prompt.SeedSection.claude", "production-path override", wsconfig.SetOptions{
-		SessionKey: key,
+		ExplicitScope: wsconfig.ScopeSession,
+		SessionKey:    key,
 	}); err != nil {
 		t.Fatalf("seed override via resolver: %v", err)
 	}
@@ -307,5 +437,56 @@ func TestOverrideProductionPath(t *testing.T) {
 	// Marker syntax must never appear in the rendered file.
 	if strings.Contains(body, "ws:override:") || strings.Contains(body, "ws:/override:") {
 		t.Errorf("marker syntax must not appear in rendered output file:\n%s", body)
+	}
+}
+
+// TestOverridePrintProductionPath mirrors TestOverrideProductionPath for the
+// playbook.print dispatch path: it stores an override via the session-scope
+// resolver and then calls playbook.print with the same session_key, proving the
+// print-path override-lookup wiring (and the print inputSchema's session_key
+// advertisement) resolves overrides end-to-end. Marker syntax must never appear.
+func TestOverridePrintProductionPath(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+
+	// Bootstrap a lead session key.
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900200, root, nil))
+
+	// Seed a session-scoped override through the resolver.
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	if err := resolver.Set("prompt.SeedSection.claude", "print-path override", wsconfig.SetOptions{
+		ExplicitScope: wsconfig.ScopeSession,
+		SessionKey:    key,
+	}); err != nil {
+		t.Fatalf("seed override via resolver: %v", err)
+	}
+
+	// Call playbook.print through the production dispatch path, passing session_key.
+	printResp := callToolOnce(t, s, 1, "playbook.print", map[string]any{
+		"name":        "override-pb",
+		"session_key": key,
+	})
+	body := toolText(t, printResp)
+
+	// The override must appear; the original seed must not; markers must be gone.
+	if !strings.Contains(body, "print-path override") {
+		t.Errorf("print-path override must appear in inline output:\n%s", body)
+	}
+	if strings.Contains(body, "original seed text") {
+		t.Errorf("original seed must not appear when override is set:\n%s", body)
+	}
+	if strings.Contains(body, "ws:override:") || strings.Contains(body, "ws:/override:") {
+		t.Errorf("marker syntax must not appear in print output:\n%s", body)
 	}
 }

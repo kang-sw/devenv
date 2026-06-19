@@ -770,16 +770,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		// Build an override lookup from the session-keyed resolver when a session_key
 		// is present (same pattern as the prefer_mercenary read path in playbook.render).
-		var printOverrideLookup overrideLookupFn
-		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
-			capturedKey := strings.TrimSpace(keyStr)
-			adapter := sessionConfigAdapter{s: s.sessions}
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-			printOverrideLookup = func(pointId, harness string) (string, bool) {
-				rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
-				return rv.Value, rv.Value != ""
-			}
-		}
+		keyStr, _ := params.Arguments["session_key"].(string)
+		printOverrideLookup := buildOverrideLookup(s, keyStr)
 		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
@@ -812,16 +804,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		var mintRoot string
 		var parentKey string
 		var preferMercenary bool
-		var renderOverrideLookup overrideLookupFn
+		// Override lookup is built for any present session_key (shared helper with
+		// the playbook.print path); it is independent of the lead-gate.
+		renderSessionKey, _ := params.Arguments["session_key"].(string)
+		renderOverrideLookup := buildOverrideLookup(s, renderSessionKey)
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)
-			// Build the override lookup using the same resolver pattern as prefer_mercenary.
-			adapter := sessionConfigAdapter{s: s.sessions}
-			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-			renderOverrideLookup = func(pointId, harness string) (string, bool) {
-				rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
-				return rv.Value, rv.Value != ""
-			}
 			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
 				// Child key binding root: root_override when set, else caller's bound root.
 				if rootOverride != "" {
@@ -833,6 +821,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				// Resolve prefer_mercenary through the layered config resolver
 				// (session > project > global > builtin) so both enable and disable
 				// transitions are visible (260618 closer). Builtin default is false.
+				adapter := sessionConfigAdapter{s: s.sessions}
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
 				preferMercenary, _, _ = resolver.GetBool(capturedKey, wsconfig.ItemPreferMercenary)
 			}
 		}
@@ -2334,8 +2324,9 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name":    stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
-					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"name":        stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
+					"context":     map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"session_key": stringProperty("Optional caller's ws session key. When provided, prompt override-points resolve against the session's layered config; omit to render seed defaults."),
 				},
 				"required": []string{"name"},
 			},
