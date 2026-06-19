@@ -369,7 +369,7 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 		t.Run(stem, func(t *testing.T) {
 			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, map[string]string{
 				"bridge_probe": "context for " + stem,
-			}, wsconfig.Options{}, "", "", false)
+			}, wsconfig.Options{}, "", "", false, nil)
 			if err != nil {
 				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}

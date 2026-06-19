@@ -768,7 +768,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{})
+		// Build an override lookup from the session-keyed resolver when a session_key
+		// is present (same pattern as the prefer_mercenary read path in playbook.render).
+		var printOverrideLookup overrideLookupFn
+		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+			capturedKey := strings.TrimSpace(keyStr)
+			adapter := sessionConfigAdapter{s: s.sessions}
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			printOverrideLookup = func(pointId, harness string) (string, bool) {
+				rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
+				return rv.Value, rv.Value != ""
+			}
+		}
+		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
 	case "playbook.render":
@@ -800,25 +812,32 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		var mintRoot string
 		var parentKey string
 		var preferMercenary bool
+		var renderOverrideLookup overrideLookupFn
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
-			if entry, found := s.sessions.lookup(keyStr); found && entry.scope == roleLead {
+			capturedKey := strings.TrimSpace(keyStr)
+			// Build the override lookup using the same resolver pattern as prefer_mercenary.
+			adapter := sessionConfigAdapter{s: s.sessions}
+			resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			renderOverrideLookup = func(pointId, harness string) (string, bool) {
+				rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
+				return rv.Value, rv.Value != ""
+			}
+			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
 				// Child key binding root: root_override when set, else caller's bound root.
 				if rootOverride != "" {
 					mintRoot = rootOverride
 				} else {
 					mintRoot = entry.root
 				}
-				parentKey = keyStr
+				parentKey = capturedKey
 				// Resolve prefer_mercenary through the layered config resolver
 				// (session > project > global > builtin) so both enable and disable
 				// transitions are visible (260618 closer). Builtin default is false.
-				adapter := sessionConfigAdapter{s: s.sessions}
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-				preferMercenary, _, _ = resolver.GetBool(keyStr, wsconfig.ItemPreferMercenary)
+				preferMercenary, _, _ = resolver.GetBool(capturedKey, wsconfig.ItemPreferMercenary)
 			}
 		}
 
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
