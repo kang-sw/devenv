@@ -450,7 +450,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return execRawGrepResponse(req.ID, result, err)
 	case "config.show":
-		view, err := wsconfig.Show(wsconfig.Options{})
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		var view wsconfig.View
+		var err error
+		if sessionKey != "" {
+			// When a session key is supplied, use ScopedShow so that
+			// ResolvedOverrides is populated with per-key scope labels.
+			adapter := sessionConfigAdapter{s: s.sessions}
+			r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			view, err = wsconfig.ScopedShow(&r, wsconfig.Options{}, sessionKey)
+		} else {
+			view, err = wsconfig.Show(wsconfig.Options{})
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, view, err)
 		}
@@ -794,7 +805,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				} else {
 					mintRoot = entry.root
 				}
-				preferMercenary = entry.preferMercenary
+				// Resolve prefer_mercenary through the layered config resolver
+				// (session > project > global > builtin) so both enable and disable
+				// transitions are visible (260618 closer). Builtin default is false.
+				adapter := sessionConfigAdapter{s: s.sessions}
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+				preferMercenary, _, _ = resolver.GetBool(keyStr, wsconfig.ItemPreferMercenary)
 			}
 		}
 
@@ -802,18 +818,37 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
-		// Lead-only tool to flip the render mode for this session key.
-		// The ws.lead.* prefix gate in callTool (lines 311-328) already blocks
-		// non-lead keys — do not add a second role check here.
+		// Lead-only desired-state setter for the default delegation guidance toggle.
+		// The ws.lead.* prefix gate in callTool already blocks non-lead keys —
+		// do not add a second role check here (sole keyed-gate-is-authority rule).
 		keyStr, _ := params.Arguments["session_key"].(string)
 		keyStr = strings.TrimSpace(keyStr)
 		if keyStr == "" {
 			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
 		}
-		if !s.sessions.setPreferMercenary(keyStr) {
+		// enabled defaults to true when absent (backward-compatible call shape).
+		enabled := true
+		if v, ok := params.Arguments["enabled"]; ok {
+			if b, isBool := v.(bool); isBool {
+				enabled = b
+			}
+		}
+		// Write through the layered config resolver (declared default scope: session).
+		value := "false"
+		if enabled {
+			value = "true"
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemPreferMercenary, value, wsconfig.SetOptions{
+			SessionKey: keyStr,
+		}); err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual and retry"))
 		}
-		return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
+		if enabled {
+			return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
+		}
+		return toolTextResponse(req.ID, "prefer_mercenary: disabled\n", nil)
 
 	case "ws.mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1095,6 +1130,14 @@ func formatConfigView(view wsconfig.View) string {
 				fmt.Fprintf(&b, " effort=%s", tier.Effort)
 			}
 			b.WriteString("\n")
+		}
+	}
+	// Scope-resolved overrides are present when config.show is invoked with a
+	// session key (ScopedShow path). Print each resolved item with its source scope.
+	if len(view.ResolvedOverrides) > 0 {
+		b.WriteString("overrides:\n")
+		for _, item := range view.ResolvedOverrides {
+			fmt.Fprintf(&b, "  %s: %s  [scope:%s]\n", item.Key, item.Value, item.Scope)
 		}
 	}
 	return b.String()
@@ -1808,11 +1851,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.lead.prefer_mercenary",
-			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"description": "Set or clear the default delegation guidance for this session key. When enabled (default), playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default; when disabled, it reverts to host-native subagent guidance. Does not affect tool availability — mercenary is always reachable on request regardless of this setting. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's lead ws session key."),
+					"enabled":     boolProperty("Whether to enable (true, default) or disable (false) the mercenary-primary delegation guidance. Omit to enable (backward-compatible call shape)."),
 				},
 				"required": []string{"session_key"},
 			},
@@ -1869,11 +1913,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.show",
-			"description": "Return the current ws user-local configuration and resolved config path without modifying it.",
+			"description": "Return the current ws user-local configuration and resolved config path without modifying it. When session_key is supplied, each config override is annotated with the scope it resolved from (session, project, global, or builtin).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"session_key": stringProperty("Optional session key. When supplied, resolved override scopes are included in the output."),
 				},
 			},
 		},
@@ -2767,6 +2812,19 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"description": description,
 		"enum":        values,
 	}
+}
+
+// scopeSchemaProperty returns the shared MCP inputSchema fragment for the
+// scope argument consumed by every scope-aware config tool. Callers embed this
+// into their tool's properties map under the "scope" key. The fragment uses the
+// canonical scope enum from wsconfig so the definition stays in one place.
+func scopeSchemaProperty() map[string]any {
+	return enumStringProperty(
+		`Optional config scope to target. Omit to use the item's declared default scope (usually "project"). `+
+			`"session" stores in the current session only; "project" stores in the per-project config; `+
+			`"global" stores in the cross-project ~/.ws/config.json.`,
+		wsconfig.ScopeSchemaEnum(),
+	)
 }
 
 func numberProperty(description string) map[string]string {

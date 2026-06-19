@@ -217,24 +217,52 @@ func TestPreferMercenaryGuidanceAbsentForNonImplementerRole(t *testing.T) {
 	}
 }
 
-func TestSetPreferMercenaryRegistry(t *testing.T) {
+// TestSetPreferMercenaryViaResolver verifies that setting prefer_mercenary through
+// the layered config resolver writes to the session Overrides overlay and can be
+// read back via GetBool, replacing the former one-way setPreferMercenary path.
+func TestSetPreferMercenaryViaResolver(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	key, err := s.sessions.mint("/work/root", roleLead)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if ok := s.sessions.setPreferMercenary(key); !ok {
-		t.Fatalf("setPreferMercenary returned false for known key")
+
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+
+	// Enable.
+	if err := resolver.Set(wsconfig.ItemPreferMercenary, "true", wsconfig.SetOptions{SessionKey: key}); err != nil {
+		t.Fatalf("set prefer_mercenary=true: %v", err)
 	}
+	got, scope, err := resolver.GetBool(key, wsconfig.ItemPreferMercenary)
+	if err != nil {
+		t.Fatalf("GetBool: %v", err)
+	}
+	if !got || scope != wsconfig.ScopeSession {
+		t.Errorf("after enable: got=%v scope=%s, want true/session", got, scope)
+	}
+
+	// Verify the session entry root/scope were not corrupted.
 	entry, _ := s.sessions.lookup(key)
-	if !entry.preferMercenary {
-		t.Errorf("preferMercenary flag not set after setPreferMercenary")
-	}
 	if entry.root != "/work/root" || entry.scope != roleLead {
-		t.Errorf("setPreferMercenary corrupted entry: %+v", entry)
+		t.Errorf("set corrupted entry: %+v", entry)
 	}
-	if ok := s.sessions.setPreferMercenary("no-such-key"); ok {
-		t.Errorf("setPreferMercenary returned true for unknown key")
+
+	// Disable.
+	if err := resolver.Set(wsconfig.ItemPreferMercenary, "false", wsconfig.SetOptions{SessionKey: key}); err != nil {
+		t.Fatalf("set prefer_mercenary=false: %v", err)
+	}
+	got2, scope2, err := resolver.GetBool(key, wsconfig.ItemPreferMercenary)
+	if err != nil {
+		t.Fatalf("GetBool after disable: %v", err)
+	}
+	if got2 || scope2 != wsconfig.ScopeSession {
+		t.Errorf("after disable: got=%v scope=%s, want false/session", got2, scope2)
+	}
+
+	// Unknown key must return an error.
+	if err := resolver.Set(wsconfig.ItemPreferMercenary, "true", wsconfig.SetOptions{SessionKey: "no-such-key"}); err == nil {
+		t.Errorf("set for unknown session key must return an error")
 	}
 }
 
@@ -344,9 +372,12 @@ func TestPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
 	if !strings.Contains(line, "ws.lead.prefer_mercenary") || !strings.Contains(line, `"error"`) {
 		t.Fatalf("expected a keyed-gate error rejecting ws.lead.prefer_mercenary: %s", line)
 	}
-	// The delegate key's preferMercenary flag must remain unset.
-	if entry, _ := server.sessions.lookup(delegateKey); entry.preferMercenary {
-		t.Fatalf("rejected call must not have flipped the delegate key's flag")
+	// The delegate key's prefer_mercenary override must remain completely unset in
+	// the session Overrides map — the keyed-gate rejection fires before any resolver
+	// write, so no value (not even "false") should appear for this key.
+	_, ok := server.sessions.getOverride(delegateKey, wsconfig.ItemPreferMercenary)
+	if ok {
+		t.Fatalf("rejected call must not have written ANY prefer_mercenary value for the delegate key")
 	}
 }
 

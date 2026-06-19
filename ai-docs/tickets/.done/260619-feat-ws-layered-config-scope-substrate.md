@@ -79,6 +79,48 @@ store from `260617`.
 Verification: a value set at each scope resolves with correct precedence; `show`
 reports the resolved scope; concurrent writers do not corrupt the file (lock).
 
+### Result (acf1be70) - 2026-06-19
+
+Substrate landed (impl `6b3ea800`, fix-cycle `acf1be70`). All Phase 1 decisions
+honored:
+
+- `wsconfig.Resolver` resolves `session > project > global > builtin`, returning
+  the source scope (`resolver.go`). Per-item default-scope registry with
+  `project` fallback (`scope.go`); explicit `SetOptions.ExplicitScope` wins.
+- New global store `~/.ws/config.json` / `$WS_CONFIG_HOME` (`global.go`); missing
+  file → empty layer, not an error.
+- File-scope RMW serialized with `gofrs/flock` (temp-write + atomic-rename) for
+  both project and global; the session store is unchanged (mutex + `O_EXCL`/
+  rename, NOT flocked).
+- Session scope routes through the existing per-key store via additive
+  `getOverride`/`setOverride`/`listOverrideKeys` accessors (`session_auth.go`) —
+  no new session backend.
+- `config.show` reports each value's resolved scope when `session_key` is supplied
+  (`ScopedShow` → `View.ResolvedOverrides`); plain `Show` otherwise.
+  `config.agents_tier` byte-for-byte unchanged. Shared `scope` schema fragment
+  (`ScopeSchemaEnum` / `scopeSchemaProperty`) exposed for later adopters.
+
+Verification: `go test ./internal/wsconfig/...` passes (incl. precedence,
+scope-reporting, explicit-scope override, default fallback, global location via
+`$WS_CONFIG_HOME` and `ConfigHome`, zero-migration project-over-global, capability
+hook, and two concurrency tests — distinct-key and contended shared-key
+increment, final == N). `go test ./internal/mcp/...` shows only two pre-existing
+golden-hash failures (`lead-workflow-manual.md`), confirmed unrelated to this
+slice. `go build ./...` clean.
+
+Spec `260619-layered-config-scope-model` 🚧 stripped (`a3969d4b`); mental model
+`mcp-runtime` updated with the locking invariant (`a0b5571c`).
+
+Forward (Phase 2): `prefer_mercenary` can now ride the `Overrides` overlay as a
+session-default desired-state item with the role/capability gating hook already
+present in `Resolver.Set` (`CapabilityCheck`).
+
+#### Minor follow-up (deferred, non-blocking)
+
+`setOverrideInFileRMW` and `setOverrideInFile` share ~40 lines of flock+temp+
+rename boilerplate; the latter could delegate to the former. Correct and tested;
+unify opportunistically.
+
 ### Phase 2: Migrate prefer_mercenary onto the layered config
 
 Replace the bespoke one-way `setPreferMercenary` with a `prefer_mercenary`
@@ -92,3 +134,49 @@ Depends on Phase 1.
 Verification: flip prefer_mercenary on, then off, on the same session key (the
 260618 repro) and confirm the render guidance follows both transitions; non-lead
 keys are rejected.
+
+### Result (c65326bd) - 2026-06-19
+
+Migration landed (impl `090e69f3`, fix-cycle `c65326bd`). The bespoke one-way
+flip is gone; `prefer_mercenary` is now a desired-state layered-config item.
+Closes `260618-bug-ws-prefer-mercenary-one-way-flip`.
+
+- `prefer_mercenary` registered with declared default scope `ScopeSession` and
+  builtin default `false` (`wsconfig/scope.go`, `ItemPreferMercenary` constant +
+  `init()` registration). `Resolver.GetBool` added as an additive bool read
+  (`"true"`→true; empty/builtin→false) returning the resolved scope
+  (`resolver.go`).
+- `ws.lead.prefer_mercenary` is now desired-state: optional `enabled` boolean
+  (default `true` for backward-compatible legacy call shape), written at session
+  scope via `Resolver.Set` into the per-key session `Overrides` overlay
+  (`server.go` write path + tool schema). Response: `prefer_mercenary: enabled` /
+  `prefer_mercenary: disabled`. Lead-only stays at the `ws.lead.*` prefix gate —
+  no redundant role check (sole keyed authority).
+- `playbook.render` read path resolves `prefer_mercenary` through the resolver
+  inside the lead-only block (`server.go` L811-813), so render guidance follows
+  BOTH transitions (on and off), not a latched flag. Non-lead keys never resolve
+  it.
+- Retired the one-way path with a clean cut (safe under the ephemeral
+  session-auth model — no cross-version persistence contract): removed
+  `sessionStore.setPreferMercenary`, `sessionRecord.PreferMercenary`, and
+  `sessionEntry.preferMercenary`. Legacy on-disk records carrying a top-level
+  `prefer_mercenary` JSON field are silently dropped → resolve to builtin=false
+  (safe default).
+- `ScopedShow` now enumerates registered default-scope keys so `prefer_mercenary`
+  always appears in `config.show` (reports `builtin` when unset)
+  (`wsconfig/scoped_show.go`).
+
+Verification: `go test ./internal/wsconfig/... ./internal/mcp/...` passes except
+the two pre-existing `lead-workflow-manual.md` golden-hash failures (confirmed
+identical at base `2ce2327b`, unrelated to this slice). 260618 repro exercised
+both at the resolver level (`TestPreferMercenaryOnOffRenderGuidance`) and through
+the full production dispatch (`TestPreferMercenaryOnOffRenderGuidanceProductionPath`:
+enable→render→disable→render via `callToolOnce`, asserting the guidance block is
+present after enable and absent after disable). Legacy enable shape, explicit
+`enabled:false` disable, non-lead rejection (no value written at all), and
+`config.show` scope reporting all covered. `go build ./...` clean.
+
+Spec `260619-prefer-mercenary-session-scope-item` 🚧 stripped (`090e69f3`);
+mental model `mcp-runtime` updated to desired-state semantics (`090e69f3`).
+
+Both phases complete → ticket moves to `.done/`.
