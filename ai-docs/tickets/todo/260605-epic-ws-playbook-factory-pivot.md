@@ -106,6 +106,17 @@ subagents. Direction, decisions, and evidence live in
   exec surfaces remain full-ws only; wsflow gets no separately maintained
   workflow procedure corpus. Until this lands, wsflow is considered temporarily
   not usable for serious dogfood.
+- `260619-feat-ws-session-lineage-children` (todo, ready-candidate — session-key
+  parent lineage + enumeration): forward feature on the M3 ephemeral session-key
+  model. Records an optional `parent` edge at both mint paths (`ferrule` control
+  keys + render-minted delegate leaves) and adds a read-only
+  `ws.session.children` enumeration tool so a lead can re-discover its worktree
+  control keys and delegate leaves from one anchor after context loss. Elevates a
+  working root / git worktree to a re-discoverable first-class work surface
+  without a heavier workset primitive; worktree creation and merge-back stay out
+  of scope (native git tooling + the merge/cleanup idea tickets). Captured from
+  the 2026-06-19 lead-discuss dogfood that added the per-workroot `ferrule`
+  manual clarification (`13eeccd9`).
 
 ## Cross-Child Decisions
 
