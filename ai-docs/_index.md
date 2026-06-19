@@ -288,13 +288,19 @@ dropped tickets live in hidden archive dirs and git history.
   engine toward user-tunable config: a 4-layer `session>project>global>builtin`
   config substrate (per-item default scope, file lock, `prefer_mercenary`
   migrated in → closes `260618`) + a block-marker prompt-override engine
-  (`DelegationSection` seed) + a self-doc `config.prompt()` listing. Three
-  children created: `260619-feat-ws-layered-config-scope-substrate` (substrate,
-  the proceed entry point), `260619-feat-ws-prompt-override-marker-engine`,
-  `260619-feat-ws-config-prompt-tool-self-doc` (deps: engine→substrate,
-  tool→both). Substrate must coordinate with the deferred
-  `config.model_alias`/`config.role_tier` rename slice. Runs in main worktree;
-  additive changes to keep merge-clean against live pivot work.
+  (`DelegationSection` seed) + a self-doc `config.prompt()` listing.
+- `260619-feat-ws-layered-config-scope-substrate` (ready) - direct
+  implementation target; prerequisite for the other two children. Phase 1 builds
+  the 4-layer scope resolver + global `~/.ws/config.json` + file lock + shared
+  `scope` schema; Phase 2 migrates `prefer_mercenary` to a session-scope
+  desired-state item (closes `260618`). Spec-addressed by
+  `260619-layered-config-scope-model` + `260619-prefer-mercenary-session-scope-item`.
+  Must coordinate with (not fork) the deferred
+  `config.model_alias`/`config.role_tier` rename slice. Additive changes only —
+  runs in main worktree alongside live pivot work.
+  Remaining children: `260619-feat-ws-prompt-override-marker-engine` (todo,
+  dep: substrate), `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep:
+  engine→substrate, tool→both) — not implementation-ready until substrate lands.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

@@ -1,6 +1,9 @@
 ---
 title: Layered config scope substrate (session>project>global>builtin) + prefer_mercenary migration
 parent: 260619-epic-ws-layered-config-prompt-tuning
+spec:
+  - 260619-layered-config-scope-model
+  - 260619-prefer-mercenary-session-scope-item
 related:
   260618-bug-ws-prefer-mercenary-one-way-flip: closed by Phase 2 (prefer_mercenary becomes a session-scope layered-config item with desired-state get/set)
   260617-refactor-mcp-stateless-subagent-context: owns the per-key session store (keys/<key>.json) that backs the session scope layer
