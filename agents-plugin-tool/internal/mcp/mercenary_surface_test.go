@@ -372,11 +372,12 @@ func TestPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
 	if !strings.Contains(line, "ws.lead.prefer_mercenary") || !strings.Contains(line, `"error"`) {
 		t.Fatalf("expected a keyed-gate error rejecting ws.lead.prefer_mercenary: %s", line)
 	}
-	// The delegate key's prefer_mercenary override must remain unset in the
-	// session Overrides map (the resolver write was rejected before it could land).
-	v, ok := server.sessions.getOverride(delegateKey, wsconfig.ItemPreferMercenary)
-	if ok && v == "true" {
-		t.Fatalf("rejected call must not have written prefer_mercenary=true for the delegate key")
+	// The delegate key's prefer_mercenary override must remain completely unset in
+	// the session Overrides map — the keyed-gate rejection fires before any resolver
+	// write, so no value (not even "false") should appear for this key.
+	_, ok := server.sessions.getOverride(delegateKey, wsconfig.ItemPreferMercenary)
+	if ok {
+		t.Fatalf("rejected call must not have written ANY prefer_mercenary value for the delegate key")
 	}
 }
 

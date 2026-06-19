@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,6 +97,85 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 	}
 }
 
+// TestPreferMercenaryOnOffRenderGuidanceProductionPath closes the 260618 revert
+// invariant through the full production dispatch (server.go L811-813). Unlike
+// TestPreferMercenaryOnOffRenderGuidance (which calls renderPlaybookBody directly),
+// this test drives ws.lead.prefer_mercenary and playbook.render as sequential MCP
+// tool calls on the same session key, so the prefer_mercenary resolver look-up at
+// render time (server.go L813) is exercised end-to-end.
+//
+// Pattern mirrors TestPreferMercenaryConfigShowReportsIt: sequential callToolOnce
+// calls on the same *Server guarantee session-write visibility across calls
+// (session store is filesystem-backed with mutex serialization).
+func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
+	useLeadProfile(t)
+	// Build a minimal rsrc tree containing the test implementer playbook.
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"impl-pb/impl-pb.md": implementerPlaybookContent,
+	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	// Separate git repo for the session-bound worktree root (renderPlaybook needs
+	// git identity to allocate the prompt path).
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+
+	// Bootstrap a lead session key bound to root.
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900002, root, nil))
+
+	// --- Enable prefer_mercenary ---
+	enableResp := callToolOnce(t, s, 1, "ws.lead.prefer_mercenary", map[string]any{"session_key": key})
+	if !strings.Contains(toolText(t, enableResp), "prefer_mercenary: enabled") {
+		t.Fatalf("enable call must succeed: %s", enableResp)
+	}
+
+	// --- playbook.render with prefer_mercenary active ---
+	// The production path in server.go resolves preferMercenary from the resolver
+	// at render time using the session_key; guidance block must appear.
+	renderResp1 := callToolOnce(t, s, 2, "playbook.render", map[string]any{
+		"name":        "impl-pb",
+		"session_key": key,
+	})
+	renderText1 := toolText(t, renderResp1)
+	renderedPath1 := strings.SplitN(strings.TrimSpace(renderText1), "\n", 2)[0]
+	renderedBody1, err := os.ReadFile(renderedPath1)
+	if err != nil {
+		t.Fatalf("read rendered playbook (enabled): %v", err)
+	}
+	if !strings.Contains(string(renderedBody1), "prefer_mercenary active") {
+		t.Errorf("guidance block must be present after enable via production path:\n%s", string(renderedBody1))
+	}
+
+	// --- Disable prefer_mercenary ---
+	disableResp := callToolOnce(t, s, 3, "ws.lead.prefer_mercenary", map[string]any{
+		"session_key": key,
+		"enabled":     false,
+	})
+	if !strings.Contains(toolText(t, disableResp), "prefer_mercenary: disabled") {
+		t.Fatalf("disable call must succeed: %s", disableResp)
+	}
+
+	// --- playbook.render with prefer_mercenary inactive ---
+	// The resolver resolves the updated session override (false); guidance block must be absent.
+	renderResp2 := callToolOnce(t, s, 4, "playbook.render", map[string]any{
+		"name":        "impl-pb",
+		"session_key": key,
+	})
+	renderText2 := toolText(t, renderResp2)
+	renderedPath2 := strings.SplitN(strings.TrimSpace(renderText2), "\n", 2)[0]
+	renderedBody2, err := os.ReadFile(renderedPath2)
+	if err != nil {
+		t.Fatalf("read rendered playbook (disabled): %v", err)
+	}
+	if strings.Contains(string(renderedBody2), "prefer_mercenary active") {
+		t.Errorf("guidance block must be absent after disable via production path:\n%s", string(renderedBody2))
+	}
+}
+
 // TestPreferMercenaryLegacyEnableShape verifies backward-compatible call shape:
 // ws.lead.prefer_mercenary called without "enabled" argument still enables.
 func TestPreferMercenaryLegacyEnableShape(t *testing.T) {
@@ -134,6 +214,12 @@ func TestPreferMercenaryDisableViaEnabledFalse(t *testing.T) {
 	input := inputEnable + inputDisable
 	var out bytes.Buffer
 	s := NewServer(root, "test")
+	// Both calls are dispatched concurrently inside ServeStdio, but the assertions
+	// are race-safe: each call is identified by its own JSON-RPC id (1 and 2), and
+	// each writes its desired-state result into that id's response string
+	// independently of the other goroutine. There is no ordering dependency between
+	// the two calls — enable(id=1) does not need to complete before disable(id=2)
+	// is read — so no sequencing or synchronization beyond responseLinesByID is needed.
 	if err := serveStdioWithSession(t, s, root, input, &out); err != nil {
 		t.Fatalf("ServeStdio: %v", err)
 	}
@@ -177,7 +263,7 @@ func TestPreferMercenaryConfigShowReportsIt(t *testing.T) {
 	if !strings.Contains(showText, "prefer_mercenary") {
 		t.Fatalf("config.show must report prefer_mercenary: %s", showText)
 	}
-	if !strings.Contains(showText, "session") {
-		t.Fatalf("config.show must report session scope for prefer_mercenary: %s", showText)
+	if !strings.Contains(showText, "[scope:session]") {
+		t.Fatalf("config.show must report [scope:session] for prefer_mercenary: %s", showText)
 	}
 }
