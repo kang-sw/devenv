@@ -597,6 +597,14 @@ self-documenting `config.prompt()` listing are planned alongside this engine to
 make the override surface tunable and discoverable from inside the MCP without
 external docs.
 
+The first shipped override-point is `DelegationSection`, seeded in the lead
+workflow manual. Its seed states the lead's default delegation posture — how
+eagerly to delegate work to subagents to preserve execution context — and a user
+tunes that posture by storing an override under `prompt.DelegationSection.<harness>`
+without editing the shipped resource tree. The override replaces only the
+posture section of the rendered manual; the surrounding primitive reference is
+untouched. {#260619-delegation-section-override-point}
+
 > [!note] Constraints
 > - The marker grammar is a ws-private schema (ws is the sole reader); it is not
 >   an external comment-processing standard and carries no meaning outside the

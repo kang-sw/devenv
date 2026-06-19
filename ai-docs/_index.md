@@ -294,19 +294,16 @@ dropped tickets live in hidden archive dirs and git history.
   Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
   item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
   slice must adopt (not fork) the shared scope primitive.
-  Dependent children (substrate shipped): marker-engine promoted to `ready/`
-  (see below); `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep:
-  engine→substrate, tool→both) stays backlog until the engine lands.
-- `260619-feat-ws-prompt-override-marker-engine` (**ready**, Phase 1 landed) -
-  block-marker prompt-override engine. **Phase 1 shipped** (`705795b8`): A1
-  marker grammar + a sibling render pass (`applyOverrideMarkers`) beside
-  product-mode selection that resolves `(pointId, harness)` → scope → inline seed,
-  strips markers (recursive nesting, spacing-tolerant, unclosed-safe), reads
-  overrides via `buildOverrideLookup` under `prompt.<pointId>.<harness>`; spec
-  `260619-prompt-override-marker-engine` 🚧 stripped. **Phase 2 remaining**: seed
-  `DelegationSection` in `lead-workflow-manual` + consolidate delegation-posture
-  prose (critical-path mechanics stay fixed). Sibling `config.prompt.*` self-doc
-  tool (todo) tree-scans the markers this defines.
+  Dependent children: marker-engine **shipped** (done, both phases — `705795b8`
+  engine + `b2929411` `DelegationSection` seed). `260619-feat-ws-config-prompt-tool-self-doc`
+  (todo, dep both substrate + engine) is now **unblocked** and is the remaining
+  child.
+- `260619-feat-ws-config-prompt-tool-self-doc` (todo) - the remaining epic child:
+  a `config.prompt.set(pointId, harness, prompt, scope?)` setter plus a no-arg
+  `config.prompt()` self-doc that tree-scans override markers and lists the
+  tunable points with their stored/seed values. Both deps shipped (layered-config
+  substrate + marker engine with the live `DelegationSection` point keyed
+  `prompt.DelegationSection.<harness>`), so it is ready to promote.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

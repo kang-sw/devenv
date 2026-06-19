@@ -129,3 +129,42 @@ Depends on Phase 1.
 Verification: with no override the manual renders the current delegation posture;
 a user override changes only the posture section, leaving the continuity tip and
 credential splice intact.
+
+### Result (b2929411) - 2026-06-19
+
+DelegationSection seeded (impl `b2929411`). The first shipped override marker
+lives in `lead-workflow-manual` as a `### Delegation posture` subsection placed
+before the delegation mechanics:
+
+```
+<!-- ws:override:DelegationSection desc="lead delegation eagerness and context-saving stance" -->
+<default delegation posture seed>
+<!-- ws:/override:DelegationSection -->
+```
+
+- **Scope note (honest):** the manual carried no pre-existing delegation-*posture*
+  prose — only delegation *mechanics* (Scoped Exploration / Persistent agents) —
+  so this establishes `DelegationSection` as the canonical posture home rather
+  than migrating scattered text. The override boundary held: the continuity tip,
+  child-key credential splice, and `prefer_mercenary` guidance block stay
+  hardcoded in `playbook_tools.go` (unchanged by this phase).
+- The seed is mode-neutral (renders in full ws + wsflow) and tool-name-free, so
+  the wsflow product-mode filter and bare-`ws[/:]` assertions stay green; markers
+  strip before product-mode selection regardless.
+- First shipped marker → regenerated the canonical rsrc manifest and the wsflow
+  rsrc mirror (`WS_REGEN_MANIFEST` / `WS_REGEN_WSFLOW_RSRC`).
+- Integration test `TestShippedDelegationSectionSeedAndOverride`
+  (`internal/mcp/prompt_override_test.go`) drives the real shipped tree: seed
+  render (markers stripped), override replacement, and tightly-bounded structure
+  preservation (`### Delegation posture` heading + following section survive).
+
+Verification: `go build ./...` clean; full `go test ./...` green (12 packages).
+Single-reviewer (large) review `[clean]`; one optional Minor (tighten
+structure-preservation assertions) adopted into the result commit.
+
+Spec `260619-prompt-override-marker-engine` gained sub-concept
+`{#260619-delegation-section-override-point}` (`c2359467`); mental model
+`prompt-bundle` noted the shipped point plus a shipped-marker change-recipe
+(`050ff21e`).
+
+Ticket complete: both phases shipped.
