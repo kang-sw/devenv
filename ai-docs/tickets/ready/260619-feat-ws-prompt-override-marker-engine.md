@@ -1,6 +1,8 @@
 ---
 title: Block-marker prompt-override engine + DelegationSection seed
 parent: 260619-epic-ws-layered-config-prompt-tuning
+spec:
+  - 260619-prompt-override-marker-engine
 related:
   260619-feat-ws-layered-config-scope-substrate: prerequisite — override values resolve through the layered config storage/scope primitive
 related-mental-model:

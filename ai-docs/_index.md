@@ -294,10 +294,16 @@ dropped tickets live in hidden archive dirs and git history.
   Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
   item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
   slice must adopt (not fork) the shared scope primitive.
-  Dependent children now UNBLOCKED (substrate shipped, next actionable):
-  `260619-feat-ws-prompt-override-marker-engine` (todo, dep: substrate),
-  `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep: engine→substrate,
-  tool→both).
+  Dependent children (substrate shipped): marker-engine promoted to `ready/`
+  (see below); `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep:
+  engine→substrate, tool→both) stays backlog until the engine lands.
+- `260619-feat-ws-prompt-override-marker-engine` (**ready**) - block-marker
+  prompt-override engine: A1 marker grammar + a sibling render pass beside
+  product-mode selection that resolves `(pointId, harness)` → scope → inline seed
+  and strips markers; Phase 2 seeds `DelegationSection` in the workflow manual.
+  Contract-first spec `260619-prompt-override-marker-engine` authored (🚧).
+  Substrate prerequisite already shipped. Next implementation target; sibling
+  `config.prompt.*` self-doc tool tree-scans the markers this defines.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
