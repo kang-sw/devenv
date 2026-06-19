@@ -180,3 +180,42 @@ Deferred:
 - Correcting the `260619-research-ws-delegate-continuity-host-neutral-fallback`
   finding and cross-referencing the teammate-mode ticket — done when those
   research tickets are next touched, not part of this implementation slice.
+
+### Result (1d6cd7d3) - 2026-06-19
+
+Landed D1-D6 as one coherent slice on `implement/stateless-implement-review-continuity`.
+
+- `implementer.md` (D3): commit `## AI Context` depth guidance + fix-cycle
+  dispositions recorded inline in the fix commit (and returned to the caller),
+  non-redundant with `impl-playbook.md` `### Mental Model Notes`.
+- `reviewer.md` (D4/D5): re-review input carries prior findings + dispositions +
+  diff (no memory), no regression-vs-preexisting classification; Output emits a
+  severity-explicit verdict, the lead acts on it and owns the merge decision; the
+  Verdict/Findings/Final-report sequencing is now explicit.
+- `lead-implement.md` (D1/D5/D6): stateless-dispatch invariant; lead-owned clean
+  decision + dedup-against-disposition-record convergence invariants (with the
+  per-path cycle cap as backstop); self-contained Re-review and Review relay
+  prompts (fresh-spawn fallback); severity verdict in the Reviewer prompt frame.
+- `workflow-skills.md`: new contract anchor
+  `#260619-stateless-implement-review-continuity` (spec authored within the slice,
+  contract-first: no, as planned).
+- Regenerated the canonical rsrc manifest and the byte-identical wsflow mirror.
+
+Verification: `wsrsrc` (manifest-up-to-date, wsflow-mirror, retired-API guards) +
+`mcp` (playbook render) suites green uncached; spec index ok. The
+`lead-skill-authoring` fresh-reader audit ran on all three changed playbooks; the
+audit findings were classified and the in-scope coherence fixes landed in
+`8d55bd4a`. That audit-fix cycle **dogfooded the verification boundary**: the
+per-finding dispositions (including `won't fix` items for pre-existing wording)
+were recorded inline in the fix commit's `## AI Context`, exercising D3.
+Doc pre-pass: `lead-update-spec` = no changes (behavior already owned by the new
+spec anchor); `mental-model-updater` = no changes (the contract lives in the spec
+anchor; duplicating it in the mental model would violate the no-spec-duplication
+inclusion test).
+
+Tooling footgun observed (captured as a follow-up idea ticket): the rsrc
+manifest/mirror regen test entrypoints silently no-op when `go test` returns a
+cached result — they must be run with `-count=1` to force the `WriteManifest`
+side effect.
+
+Branch unmerged pending Final Action Gate approval.

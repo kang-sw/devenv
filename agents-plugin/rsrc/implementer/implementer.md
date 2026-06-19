@@ -42,7 +42,7 @@ Alias model for this role: {{.CoreModel}}.
 5. **Explore when needed**: Use focused search and reads for local queries. For a broad codebase question that exceeds your scope, escalate to the caller or request a scoped exploration rather than widening your own task.
 6. **Test and verify**: Follow playbook test strategy and verify sections. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.
 7. **Mechanical edits**: When repetitive edits span 3+ locations, follow playbook mechanical-edit criteria. Use native regex replacement for regex-expressible changes.
-8. **Commit**: Commit at logical checkpoints on the current branch.
+8. **Commit**: Commit at logical checkpoints on the current branch. In each commit `## AI Context`, capture what the diff cannot show — intent, rejected alternatives, cross-module implications, and related mental-model/spec references — not mechanical "what changed" narration. On a fix cycle, record each finding's disposition (`fixed`, `won't fix`, or `deferred`, with a reason for the latter two) in the fix commit's `## AI Context` — the same per-finding list you return to the caller (see Output) — so the judgment survives to the commit log.
 
 ## Output
 

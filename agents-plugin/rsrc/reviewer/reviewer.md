@@ -40,10 +40,29 @@ Alias model for this role: {{.DeepModel}}.
 
 ### Re-review Scope
 
-On re-review after fixes, focus only on whether reported issues were addressed.
-Do not re-review unchanged code.
+On re-review after fixes, the input carries the prior findings, their
+dispositions (fixed / won't-fix / deferred), and the updated diff — do not rely
+on memory of an earlier pass.
+Check whether each reported issue was addressed, and report any new issue the
+fixes introduced, with severity. Do not re-scan unchanged code, and do not
+classify findings as regression-vs-preexisting; report what the updated diff
+shows.
 
 ## Output
+
+Always return the **verdict** — the one-line value the caller reads:
+- `clean` — no issues.
+- `clean with N minor remaining` — only Minor issues remain.
+- `non-clean: M critical/important` — M is the count of Critical/Important issues.
+
+The verdict reports your severity assessment; the lead acts on it — deciding
+whether to run another fix cycle (a `clean with N minor remaining` need not
+trigger one) and owning the merge decision.
+
+Alongside the verdict, write one report body:
+- while Critical/Important issues remain — the Findings report;
+- once they are resolved — the Final report;
+- if clean on the first pass — `No issues found.` (no Final report needed).
 
 Findings report:
 
@@ -57,17 +76,15 @@ Findings report:
 - <file>:<line> - <description>
 ```
 
-Final report after all issues resolved:
+Final report:
 
 ```markdown
 ## Review: <brief scope>
-Rounds: <number of review-fix iterations>
+Rounds: <cycle number from the re-review input; 1 on a clean first pass>
 ### Summary
 <1-2 sentence overall assessment>
 Remaining: <unresolved minor items, or "none">
 ```
-
-If clean on first pass: `No issues found.`
 
 ## Doctrine
 
