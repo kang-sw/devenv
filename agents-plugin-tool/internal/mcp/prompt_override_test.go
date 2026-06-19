@@ -1,7 +1,7 @@
 package mcp
 
 // prompt_override_test.go — integration tests for the override-marker engine
-// (Phase 1 of 260619-feat-ws-prompt-override-marker-engine).
+// (260619-feat-ws-prompt-override-marker-engine; Phase 1 engine, Phase 2 seed).
 //
 // Coverage:
 //   1. No-override: seed renders, markers stripped.
@@ -12,6 +12,9 @@ package mcp
 //   5. Production-path case: override stored via the real resolver/session store
 //      is honored at playbook.render time (mirrors
 //      TestPreferMercenaryOnOffRenderGuidanceProductionPath).
+//   6. Phase 2 shipped seed: the DelegationSection marker in the real
+//      lead-workflow-manual renders its seed posture (markers stripped) and an
+//      override replaces only that posture, leaving manual structure intact.
 //
 // Unit-level cases (1–4) drive renderPlaybookBody with an injected fake
 // overrideLookupFn.  Case 5 uses the production dispatch (callToolOnce on
@@ -488,5 +491,64 @@ func TestOverridePrintProductionPath(t *testing.T) {
 	}
 	if strings.Contains(body, "ws:override:") || strings.Contains(body, "ws:/override:") {
 		t.Errorf("marker syntax must not appear in print output:\n%s", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Case 6: Phase 2 — shipped DelegationSection seed in lead-workflow-manual
+// ---------------------------------------------------------------------------
+
+// TestShippedDelegationSectionSeedAndOverride verifies the first shipped override
+// marker. With no override the seed posture renders (markers stripped); an
+// override on DelegationSection replaces only the posture body and leaves the
+// rest of the manual intact. It runs against the real shipped rsrc tree, so it
+// also guards the manifest regen for the edited manual.
+func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	const seedPhrase = "Delegate to preserve lead execution context"
+
+	// No override → seed posture renders, markers stripped, structure intact.
+	seedBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (seed): %v", err)
+	}
+	if !strings.Contains(seedBody, seedPhrase) {
+		t.Errorf("seed posture must render with no override:\n%s", seedBody)
+	}
+	assertNoMarkerSyntax(t, "shipped seed", seedBody)
+	assertManualStructureIntact(t, "shipped seed", seedBody)
+
+	// Override DelegationSection (all bucket) → posture replaced, seed gone,
+	// structure intact, markers stripped.
+	lookup := staticLookup(map[string]string{
+		"DelegationSection/all": "ALWAYS delegate aggressively to conserve context.",
+	})
+	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, lookup)
+	if err != nil {
+		t.Fatalf("printPlaybook (override): %v", err)
+	}
+	if !strings.Contains(ovBody, "ALWAYS delegate aggressively to conserve context.") {
+		t.Errorf("override posture must replace the seed:\n%s", ovBody)
+	}
+	if strings.Contains(ovBody, seedPhrase) {
+		t.Errorf("seed posture must not appear when overridden:\n%s", ovBody)
+	}
+	assertNoMarkerSyntax(t, "shipped override", ovBody)
+	assertManualStructureIntact(t, "shipped override", ovBody)
+}
+
+// assertManualStructureIntact bounds the override replacement region: the
+// far-above heading, the `### Delegation posture` heading (immediately above the
+// override block, outside it), and the following `Scoped Exploration` section
+// must all survive both seed and override renders. A mis-scoped marker that
+// swallowed the heading or the next section would fail here.
+func assertManualStructureIntact(t *testing.T, label, body string) {
+	t.Helper()
+	for _, want := range []string{"WS Workflow Primitives", "### Delegation posture", "Scoped Exploration"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s: manual structure must remain intact, missing %q:\n%s", label, want, body)
+		}
 	}
 }
