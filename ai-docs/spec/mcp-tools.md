@@ -549,6 +549,63 @@ refresh.
 >   incompatible, the playbook surface fails loudly rather than degrading to a
 >   stale built-in copy.
 
+### 🚧 Prompt Override Marker Engine {#260619-prompt-override-marker-engine}
+
+A playbook body may declare named **override-points** with block markers so a
+user can replace or extend a named section of the rendered text without editing
+the shipped resource tree. An override-point is a pair of single-line markers,
+each on its own line, wrapping inline seed text:
+
+```
+<!-- ws:override:DelegationSection desc="how eagerly the lead delegates" -->
+<seed default text — the shipped wording for this point>
+<!-- ws:/override:DelegationSection -->
+```
+
+The identifier after `ws:override:` is the **point id**. The text between the
+open and close markers is the **inline seed default** — there is no separate
+default field, so the shipped wording stays in the `.md` body and is readable in
+review. `desc` is a short human-readable summary of the point.
+
+The override pass runs during both `playbook.print` and `playbook.render`,
+alongside product-mode marker selection (`#260513-wsflow-agentless-runtime-mode`)
+and after harness rendering. For each override-point it resolves a value along
+two orthogonal axes:
+
+- **What** is selected by `(point id, harness)`: a stored override whose harness
+  matches the rendered harness wins; otherwise an override stored for `*` (all
+  harnesses) applies; otherwise the inline seed default is used. The harness axis
+  values are `claude`, `codex`, and `*`.
+- **Where** the override is stored is selected by scope through the layered
+  config scope model (`#260619-layered-config-scope-model`); resolution reads the
+  highest-precedence scope that holds a value.
+
+The resolved text replaces the block body and the marker lines themselves are
+stripped, so the rendered output contains only resolved content and never the
+marker syntax. An **empty seed body** is a pure extension slot: it renders the
+stored override if one exists, or nothing when none is set — so overriding
+existing text and appending new text are the same primitive (for example a
+`DelegationSection` override-point versus a `WorkflowManualExt` extension slot).
+
+Overrides are written through the prompt-override setter (`config.prompt.set`,
+planned alongside this engine); the addressing API is
+`config.prompt.set(point id, harness, prompt)` with an optional scope, so the
+point id is the user-facing handle even though the body carries it as a marker
+rather than a template variable.
+
+> [!note] Constraints
+> - The marker grammar is a ws-private schema (ws is the sole reader); it is not
+>   an external comment-processing standard and carries no meaning outside the
+>   playbook surface.
+> - Override-points do not use the `{{.Var}}` template-variable mechanism. The
+>   point id lives only as the marker id and the `config.prompt.set` key; the seed
+>   default is the inline block body, not a frontmatter default.
+> - Critical-path render mechanics are intentionally NOT exposed as
+>   override-points: the harness-aware continuation tip, the delegate child-key
+>   credential splice, and the `prefer_mercenary` guidance block
+>   (`#260619-prefer-mercenary-session-scope-item`) stay fixed because they are
+>   correctness, security, and continuity machinery, not user-tunable style.
+
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 
 The `ws.mercenary.*` tool family exposes durable named-agent orchestration.
