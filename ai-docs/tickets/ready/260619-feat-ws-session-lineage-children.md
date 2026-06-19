@@ -72,7 +72,7 @@ strict depth-1 containment (see Decisions).
   dispatched children are non-recursive leaves. The lead ferruling N roots is
   already allowed (the lead key is `roleLead`, so the gate's non-lead branch is
   skipped) and already documented.
-- `ws.session.children` returns child **key strings** (credentials): keys are
+- `session.children` returns child **key strings** (credentials): keys are
   lead-private, the caller already holds the parent key that minted them, and
   re-threading after compaction is the feature's purpose.
 - Worktree creation/removal stays out of scope (native git tooling). Merge-back
@@ -191,14 +191,16 @@ added.
 Spec `260619-session-key-lineage-children` stays 🚧 until Phase 3 lands the
 `ws.session.children` enumeration tool (the caller-facing read surface).
 
-### Phase 3: ws.session.children enumeration tool
+### Phase 3: session.children enumeration tool
 
-Add a read-only `ws.session.children(session_key, depth?, format?, include_dead?)`
+Add a read-only `session.children(session_key, depth?, format?, include_dead?)`
 tool that scans the flat `keys/` store, returns the subtree whose `parent` chain
 roots at the presented key, and labels each child by stored `scope` (control
 coordination keys vs delegate/leaf). Default output is compact labeled text (the
 tree, including the child key strings for re-threading); `format:"json"` is the
-structured escape hatch.
+structured escape hatch. The tool is registered in the `session.*` family so the
+pre-existing keyed-gate `session.` prefix block (`roleAllowsTool`) already
+restricts it to lead-scoped keys with no gate change.
 
 Settled contract decisions:
 

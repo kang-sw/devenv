@@ -168,11 +168,14 @@ minted after they fall out of its own (compacted or restarted) context.
 - A render-minted delegate child key (`playbook.render`, including a
   worktree-bound leaf produced via `root_override`) records the dispatching lead
   key as its `parent`.
-- `ws.session.children(session_key, depth?, format?, include_dead?)` returns,
+- `session.children(session_key, depth?, format?, include_dead?)` returns,
   read-only, the subtree of keys whose `parent` chain roots at the presented
   key. Each entry is labeled by its capability scope (control coordination key
   vs delegate leaf) and includes the child key string so the lead can re-thread
-  it. A caller only ever sees the subtree under a key it presents.
+  it. A caller only ever sees the subtree under a key it presents. It lives in
+  the `session.*` tool family, so the existing keyed-gate `session.` prefix block
+  already restricts it to lead-scoped keys (a delegate/leaf key is rejected;
+  those scopes mint no children anyway).
   - `depth`: integer, default `1` (immediate children); a higher value returns
     that many levels; `0` returns the full subtree.
   - Liveness is whether the child's bound `root` path still exists. Dead keys
