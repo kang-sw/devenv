@@ -289,18 +289,19 @@ dropped tickets live in hidden archive dirs and git history.
   config substrate (per-item default scope, file lock, `prefer_mercenary`
   migrated in → closes `260618`) + a block-marker prompt-override engine
   (`DelegationSection` seed) + a self-doc `config.prompt()` listing.
-- `260619-feat-ws-layered-config-scope-substrate` (ready) - direct
-  implementation target; prerequisite for the other two children. Phase 1 builds
-  the 4-layer scope resolver + global `~/.ws/config.json` + file lock + shared
-  `scope` schema; Phase 2 migrates `prefer_mercenary` to a session-scope
-  desired-state item (closes `260618`). Spec-addressed by
-  `260619-layered-config-scope-model` + `260619-prefer-mercenary-session-scope-item`.
+- `260619-feat-ws-layered-config-scope-substrate` (ready) - **Phase 1 landed**
+  (`acf1be70`): the 4-layer scope resolver + per-item default-scope registry +
+  global `~/.ws/config.json`/`WS_CONFIG_HOME` + file-lock RMW (file scopes only;
+  session store unchanged) + `config.show` scope reporting + shared `scope`
+  schema fragment. Spec `260619-layered-config-scope-model` 🚧 stripped. **Phase 2
+  remaining**: migrate `prefer_mercenary` to a session-scope desired-state item
+  (closes `260618`) — the `CapabilityCheck` gating hook is already in place.
   Must coordinate with (not fork) the deferred
-  `config.model_alias`/`config.role_tier` rename slice. Additive changes only —
-  runs in main worktree alongside live pivot work.
-  Remaining children: `260619-feat-ws-prompt-override-marker-engine` (todo,
-  dep: substrate), `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep:
-  engine→substrate, tool→both) — not implementation-ready until substrate lands.
+  `config.model_alias`/`config.role_tier` rename slice.
+  Dependent children now UNBLOCKED (substrate shipped):
+  `260619-feat-ws-prompt-override-marker-engine` (todo, dep: substrate),
+  `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep: engine→substrate,
+  tool→both).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

@@ -79,6 +79,48 @@ store from `260617`.
 Verification: a value set at each scope resolves with correct precedence; `show`
 reports the resolved scope; concurrent writers do not corrupt the file (lock).
 
+### Result (acf1be70) - 2026-06-19
+
+Substrate landed (impl `6b3ea800`, fix-cycle `acf1be70`). All Phase 1 decisions
+honored:
+
+- `wsconfig.Resolver` resolves `session > project > global > builtin`, returning
+  the source scope (`resolver.go`). Per-item default-scope registry with
+  `project` fallback (`scope.go`); explicit `SetOptions.ExplicitScope` wins.
+- New global store `~/.ws/config.json` / `$WS_CONFIG_HOME` (`global.go`); missing
+  file → empty layer, not an error.
+- File-scope RMW serialized with `gofrs/flock` (temp-write + atomic-rename) for
+  both project and global; the session store is unchanged (mutex + `O_EXCL`/
+  rename, NOT flocked).
+- Session scope routes through the existing per-key store via additive
+  `getOverride`/`setOverride`/`listOverrideKeys` accessors (`session_auth.go`) —
+  no new session backend.
+- `config.show` reports each value's resolved scope when `session_key` is supplied
+  (`ScopedShow` → `View.ResolvedOverrides`); plain `Show` otherwise.
+  `config.agents_tier` byte-for-byte unchanged. Shared `scope` schema fragment
+  (`ScopeSchemaEnum` / `scopeSchemaProperty`) exposed for later adopters.
+
+Verification: `go test ./internal/wsconfig/...` passes (incl. precedence,
+scope-reporting, explicit-scope override, default fallback, global location via
+`$WS_CONFIG_HOME` and `ConfigHome`, zero-migration project-over-global, capability
+hook, and two concurrency tests — distinct-key and contended shared-key
+increment, final == N). `go test ./internal/mcp/...` shows only two pre-existing
+golden-hash failures (`lead-workflow-manual.md`), confirmed unrelated to this
+slice. `go build ./...` clean.
+
+Spec `260619-layered-config-scope-model` 🚧 stripped (`a3969d4b`); mental model
+`mcp-runtime` updated with the locking invariant (`a0b5571c`).
+
+Forward (Phase 2): `prefer_mercenary` can now ride the `Overrides` overlay as a
+session-default desired-state item with the role/capability gating hook already
+present in `Resolver.Set` (`CapabilityCheck`).
+
+#### Minor follow-up (deferred, non-blocking)
+
+`setOverrideInFileRMW` and `setOverrideInFile` share ~40 lines of flock+temp+
+rename boilerplate; the latter could delegate to the former. Correct and tested;
+unify opportunistically.
+
 ### Phase 2: Migrate prefer_mercenary onto the layered config
 
 Replace the bespoke one-way `setPreferMercenary` with a `prefer_mercenary`
