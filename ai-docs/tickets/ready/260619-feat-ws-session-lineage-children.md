@@ -117,6 +117,39 @@ Verification: store round-trips `parent`; a render-minted leaf carries the lead
 key as parent; a `root_override` worktree leaf likewise; omitempty keeps legacy
 records readable; concurrent mints do not clobber parent.
 
+### Result (95d56b26) - 2026-06-19
+
+Landed (impl `1f72fa3c`, manifest-drift fix `95d56b26`). All Phase 1 decisions
+honored:
+
+- `sessionRecord` gains `Parent string \`json:"parent,omitempty"\`` and
+  `sessionEntry` gains `parent string`; `schema_version` stays `1`. The
+  concurrently-added `Overrides` field is preserved across the json round-trip
+  (`session_auth.go`).
+- `sessionStore.mint(root, scope, parent)` writes `Parent`; `lookup` populates
+  `entry.parent`. `setPreferMercenary`'s read-modify-write preserves `parent`
+  (unmarshal/marshal round-trip; test-confirmed).
+- Render path threads the lead key: `server.go` callTool sets `parentKey = keyStr`
+  inside the `entry.scope == roleLead` branch (so only lead callers record a
+  parent, and it is the lead's own key), passed through
+  `renderPlaybook → renderPlaybookBody → mint`. `root_override` worktree leaves
+  record the same lead parent (parentKey is independent of mintRoot).
+- Bootstrap/print stay parentless: `handleLeadLogin` and `printPlaybook` pass `""`.
+  No `parent_session_key` arg and no `ws.session.children` tool added (Phases 2/3).
+
+Verification: `go test ./internal/mcp/... ./internal/wsrsrc/...` green; full
+`go test ./...` green (one transient subprocess-timing flake, not reproduced on
+re-run). Four required tests present and passing:
+`TestSessionMintRoundTripsParent`, `TestRenderPathMintedChildRecordsLeadParent`,
+`TestLegacySessionRecordWithoutParentResolves`,
+`TestSetPreferMercenaryPreservesParent`. `go build ./...` clean.
+
+Incidental fix: the two `lead-workflow-manual.md` golden-hash failures that prior
+slices logged as "pre-existing" were stale `manifest.json` + wsflow mirror drift
+left by the per-workroot manual edit (`13eeccd9`). Regenerated via the canonical
+seams (`WS_REGEN_MANIFEST=1`, `WS_REGEN_WSFLOW_RSRC=1`) in `95d56b26`; those
+golden tests now pass.
+
 ### Phase 2: Optional parent on ws.ferrule (scenario-2 coordination lineage)
 
 Add an optional `parent_session_key` argument to `ws.ferrule`. When present, the

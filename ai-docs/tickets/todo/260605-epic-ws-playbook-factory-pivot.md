@@ -106,8 +106,9 @@ subagents. Direction, decisions, and evidence live in
   exec surfaces remain full-ws only; wsflow gets no separately maintained
   workflow procedure corpus. Until this lands, wsflow is considered temporarily
   not usable for serious dogfood.
-- `260619-feat-ws-session-lineage-children` (todo, ready-candidate — session-key
-  parent lineage + enumeration): forward feature on the M3 ephemeral session-key
+- `260619-feat-ws-session-lineage-children` (ready, **Phase 1 landed** `1f72fa3c`
+  / drift-fix `95d56b26`; Phases 2-3 remaining — session-key parent lineage +
+  enumeration): forward feature on the M3 ephemeral session-key
   model. Records an optional `parent` edge at both mint paths and adds a read-only
   `ws.session.children` enumeration tool so a lead can re-discover its keys from
   one anchor after context loss. Two worktree scenarios kept distinct:
