@@ -21,10 +21,13 @@ Execution
 - Create the task list during Prep; every task is mandatory and ordered.
 - Delegated: implementer receives only the brief and optional plan as task input; extra docs must be listed in brief References; never read the ticket directly.
 - Brief preserves every selected-scope binding decision; audit before commit.
+- Treat every delegate dispatch as stateless; loop continuity is lead-owned via commit `## AI Context`, and same-agent resume is only a latency optimization, never a correctness dependency.
 
 Review
 - Single Review stage for all paths; reviewer count from `judge: review-allocation`.
 - Lead fixes correctness, security, contract, and regression findings; may reject style-only or scope-expanding findings with reasons.
+- The lead owns the clean decision from each reviewer's severity verdict; `clean with N minor remaining` is clean unless the lead elects another cycle for a minor item.
+- Do not re-relay a finding already settled (won't-fix/accepted) in a prior cycle — recognize it from the disposition record; relay only genuinely new Critical/Important findings, let minors flow to the final report, with the cycle cap as backstop.
 - After capturing review result and disputes, delete review path files before Final Action Gate.
 
 ## On: invoke
@@ -93,9 +96,9 @@ Review
 2. If single: dispatch the `reviewer` playbook per **Delegate dispatch** (the general reviewer; its shared base covers correctness, standards, contract, and security); generate path via `{{.McpNamespace}}/path.generate(kind: "review", stems: ["direct"])`.
 3. If partitioned: choose partition subset from Tier 2; for each, dispatch its partition playbook from the **Reviewer partition table** per **Delegate dispatch**; generate paths via `{{.McpNamespace}}/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
 4. Call reviewer(s) with **Reviewer prompt frame**.
-5. If all reviewers return `[clean]`, proceed to Review cleanup.
-6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call reviewer with rejected list. Repeat until `[clean]` or 2 cycles.
-7. If non-clean and partitioned: relay to implementer with **Review relay prompt**; extract won't-fix list; re-review non-clean partitions with **Re-review prompt**; keep clean partitions accepted unless fix touched their surface. Repeat until all `[clean]` or 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
+5. The lead decides clean from each reviewer's severity verdict (see Review invariants); when the run is clean, proceed to Review cleanup.
+6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call the reviewer with the **Re-review prompt**. Repeat until clean or 2 cycles.
+7. If non-clean and partitioned: relay to implementer with **Review relay prompt**; extract the disposition list; re-review non-clean partitions with the **Re-review prompt**; keep clean partitions accepted unless a fix touched their surface. Repeat until clean or 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
 8. Summarize review outcomes and disputes for the final report, then delete all review path files.
 
 ### 6. Doc Pre-Pass
@@ -375,13 +378,15 @@ Required checks:
 Instructions:
 - Ignore outside this partition unless directly broken by the diff.
 - Write full findings to the findings path.
-- Return only: [clean|non-clean]: <one-line summary>
+- Return only the severity verdict: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`; the lead decides clean.
 ```
 
 ### Review relay prompt
 
 ```text
-Review cycle <N>: <non-clean review paths only>. Read each file directly.
+Review cycle <N> (self-contained — a fresh implementer can act on this alone).
+Brief path: <brief-path>; implemented range: <commit-range>.
+Non-clean review paths: <paths>. Read each file directly.
 For each finding: [fixed], [won't fix: <reason>], or [deferred: <reason>].
 Won't-fix allowed: style suggestions conflicting with codebase patterns; scope expansion beyond brief.
 Won't-fix not allowed: correctness, security, or contract violations.
@@ -390,9 +395,11 @@ Won't-fix not allowed: correctness, security, or contract violations.
 ### Re-review prompt
 
 ```text
-Re-review. Updated diff: <diff>
-Won't-fix items: <list with reasons>
-For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+Re-review (self-contained — act on this prompt alone, assume no prior context).
+Updated diff: <diff>
+Prior findings and dispositions: <each finding with [fixed] / [won't fix: <reason>] / [deferred: <reason>]>
+Verify whether each addressed item was actually fixed, and report any new issue the updated diff introduced, with severity. Do not classify findings as regression-vs-preexisting.
+For each [won't fix] item: respond [accepted] or [maintained: <brief reason>].
 ```
 
 ## Doctrine

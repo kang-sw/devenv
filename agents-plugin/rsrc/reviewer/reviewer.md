@@ -40,10 +40,22 @@ Alias model for this role: {{.DeepModel}}.
 
 ### Re-review Scope
 
-On re-review after fixes, focus only on whether reported issues were addressed.
-Do not re-review unchanged code.
+On re-review after fixes, the input carries the prior findings, their
+dispositions, and the updated diff — do not rely on memory of an earlier pass.
+Check whether each reported issue was addressed, and report any new issue the
+fixes introduced, with severity. Do not re-scan unchanged code, and do not
+classify findings as regression-vs-preexisting; report what the updated diff
+shows.
 
 ## Output
+
+Verdict — the one-line value returned to the caller:
+- `clean` — no issues.
+- `clean with N minor remaining` — only Minor issues remain.
+- `non-clean: M critical/important` — one or more Critical/Important issues.
+
+Report the severity breakdown only; the caller (the lead) decides whether the
+run is clean. The verdict is not a merge gate.
 
 Findings report:
 
