@@ -184,6 +184,45 @@ resolved to a concrete backend/model by mapping through the alias layer into
 `config.agents_tier` (`#260513-harness-local-agent-tier-config`), which remains
 keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
 
+### 🚧 Layered Config Scope Model {#260619-layered-config-scope-model}
+
+Config items resolve across four ordered scopes, highest precedence first:
+`session > project > global > builtin`. `builtin` is the code default (for
+example the `wsconfig` tier/alias defaults and `prefer_mercenary=false`). A read
+returns the value from the highest-precedence scope that holds one.
+
+Each config item declares a natural **default write scope** in code; items that
+declare nothing fall back to `project`. A write without an explicit scope lands
+in the item's declared default scope. An explicit `scope:` argument on a set
+always wins over the declared default. `get`/`show` report *which scope* a value
+resolved from, so a caller can see whether a value is session-, project-,
+global-, or builtin-sourced.
+
+Scope storage map:
+
+- `session` — the per-key session store (`keys/<key>.json`,
+  `#260617-stateless-subagent-context`); tied to the session key's lifetime.
+- `project` — the existing project-scoped `config.json` under `${WS_CACHE_HOME}`
+  (`~/.ws@<project-id>/`).
+- `global` — a project-agnostic `~/.ws/config.json`, with a `WS_CONFIG_HOME`
+  environment override mirroring the `WS_CACHE_HOME → ~/.ws@<id>/` convention.
+
+Adding the `global` layer is non-breaking: because `project` outranks `global`,
+existing project-stored values keep winning, so no data migration is required;
+only the *write default* for future sets follows each item's declared scope.
+Read-modify-write on the project and global files is serialized so concurrent
+writers cannot corrupt the file (atomic replace under a file lock). The scope
+resolution rule and the `scope` argument shape are a single shared contract that
+every scope-aware config tool consumes, rather than per-tool re-implementations.
+
+> [!note] Constraints
+> - Scope-awareness is opt-in per config item; this contract does not retrofit
+>   the existing `config.agents_tier` surface, which is re-homed under the same
+>   model by the separate model-alias/role-tier rename rather than here.
+> - Item-level write gating still applies: a scope-aware setter honors an item's
+>   existing role/capability restrictions (not every item is freely settable at
+>   every scope).
+
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active
@@ -540,6 +579,14 @@ implementer/reviewer playbooks — never availability. Independently, every
 delegation-capable rendering carries a small always-on tip fragment noting the
 mercenary path is reachable on request, so the on-request path works without the
 toggle.
+
+> [!note] Planned 🚧
+> `prefer_mercenary` becomes a `session`-default item in the layered config scope
+> model (`#260619-layered-config-scope-model`) with desired-state get/set: the
+> lead can both enable and disable it on the same session key, replacing the
+> current one-way flip. It stays lead-only — the scope-aware setter honors the
+> existing lead-only gating. Mercenary *availability* is unchanged; only the
+> default-guidance toggle gains a revert path. {#260619-prefer-mercenary-session-scope-item}
 
 **Scope: implementer and reviewer roles only.** Mercenaries cover implementer and
 reviewer delegation. Exploration, survey (reference-discovery, plan-populator),
