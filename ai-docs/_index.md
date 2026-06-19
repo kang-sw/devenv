@@ -288,8 +288,11 @@ dropped tickets live in hidden archive dirs and git history.
   engine toward user-tunable config: a 4-layer `session>project>global>builtin`
   config substrate (per-item default scope, file lock, `prefer_mercenary`
   migrated in → closes `260618`) + a block-marker prompt-override engine
-  (`{.DelegationSection}` seed) + a self-doc `config.prompt()` listing. Three
-  planned children; child-1 (substrate) must coordinate with the deferred
+  (`DelegationSection` seed) + a self-doc `config.prompt()` listing. Three
+  children created: `260619-feat-ws-layered-config-scope-substrate` (substrate,
+  the proceed entry point), `260619-feat-ws-prompt-override-marker-engine`,
+  `260619-feat-ws-config-prompt-tool-self-doc` (deps: engine→substrate,
+  tool→both). Substrate must coordinate with the deferred
   `config.model_alias`/`config.role_tier` rename slice. Runs in main worktree;
   additive changes to keep merge-clean against live pivot work.
 ## Session Notes

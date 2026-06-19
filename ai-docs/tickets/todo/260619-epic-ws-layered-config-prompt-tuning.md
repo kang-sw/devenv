@@ -40,29 +40,26 @@ rather than a delegation-specific feature.
   granular role-addressing is a possible later consumer, not in scope.
 - Config file *format* migration (JSON -> TOML/YAML for multiline friendliness).
   Deferred; revisit only if raw-file readability becomes a real pain.
-- A persistent session backend for session-scope config — owned by the pivot
-  session-auth work; session-scope items remain in-memory and are lost on
-  process restart (consistent with the `unknown_session -> re-login` model).
+- Session-scope config storage backend redesign — session-scope items live in
+  the existing per-key session store (`keys/<key>.json`, owned by
+  `260617-refactor-mcp-stateless-subagent-context`); this epic reuses it, not
+  redesigns it.
 
 ## Child Tickets
 
-- Planned: **layered config substrate** — 4-layer resolver
+- `260619-feat-ws-layered-config-scope-substrate` (todo) — 4-layer resolver
   (`session > project > global > builtin`), per-item declared default scope,
-  explicit `scope:` arg on set, scope-reporting get/show, new global config
-  location, file-lock for read-modify-write. Migrate `prefer_mercenary` into it
-  as a session-default item (closes `260618-bug-ws-prefer-mercenary-one-way-flip`).
-  Re-home `config.agents_tier`/model aliases under the model (precedence makes
-  this zero-migration — see Cross-Child Decisions).
-- Planned: **block-marker override engine + DelegationSection seed** — extend
-  the product-mode marker pass with an override-block pass; seed
-  `{.DelegationSection}` in the workflow manual and consolidate the currently
-  scattered/hardcoded delegation guidance text into that named section.
-  Depends on the substrate child (override values resolve through layered config).
-- Planned: **`config.prompt.*` setter + self-doc listing** — setter that writes
-  prompt overrides keyed by `(pointId, harness)` at a chosen scope; a
-  no-arg/self-doc `config.prompt()` that tree-scans declared override-points and
-  renders the list + current overrides + a short tuning manual so an agent can
-  tune in-place. Depends on both prior children.
+  explicit `scope:` arg, scope-reporting get/show, new global config location,
+  file-lock read-modify-write, reusable scope primitive + shared schema. P2
+  migrates `prefer_mercenary` into it (closes
+  `260618-bug-ws-prefer-mercenary-one-way-flip`). Prerequisite for the other two.
+- `260619-feat-ws-prompt-override-marker-engine` (todo) — A1 block-marker
+  override pass (sibling to the product-mode pass); seed `DelegationSection` in
+  the workflow manual and consolidate scattered/hardcoded delegation-posture
+  text. Depends on the substrate child.
+- `260619-feat-ws-config-prompt-tool-self-doc` (todo) — `config.prompt.set`
+  setter (own namespace) + no-arg `config.prompt()` self-doc listing that
+  tree-scans override markers. Depends on the substrate and the marker engine.
 
 ## Cross-Child Decisions
 
