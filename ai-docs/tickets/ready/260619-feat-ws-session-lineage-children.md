@@ -8,7 +8,7 @@ related:
   260503-feat-ws-mcp-worktree-orchestrator-lock: existing worktree concurrency primitive; lineage does not create worktrees
   260512-feat-llm-readable-mcp-output-defaults: output principle children() must follow
 spec:
-  - mcp-tools
+  - 260619-session-key-lineage-children
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
@@ -133,39 +133,29 @@ lead-only gate is unaffected (a non-lead key still cannot call ferrule).
 
 ### Phase 3: ws.session.children enumeration tool
 
-Add a read-only `ws.session.children(session_key, depth?, format?)` tool that
-scans the flat `keys/` store, returns the subtree whose `parent` chain roots at
-the presented key, and labels each child by stored `scope` (control coordination
-keys vs delegate/leaf). Default output is compact labeled text (the tree,
-including the child key strings for re-threading); `format:"json"` is the
-structured escape hatch. `depth` defaults to immediate children (1) with an
-opt-in for deeper or full-subtree traversal.
+Add a read-only `ws.session.children(session_key, depth?, format?, include_dead?)`
+tool that scans the flat `keys/` store, returns the subtree whose `parent` chain
+roots at the presented key, and labels each child by stored `scope` (control
+coordination keys vs delegate/leaf). Default output is compact labeled text (the
+tree, including the child key strings for re-threading); `format:"json"` is the
+structured escape hatch.
 
-Open questions to resolve in this phase:
+Settled contract decisions:
 
-- `depth` maximum / full-tree sentinel shape.
-- Whether to filter or flag stale/dead child keys (the store has no eviction),
-  or return all and let the lead prune.
+- **`depth`**: integer, default `1` (immediate children); higher = that many
+  levels; `depth: 0` = full subtree. The tree is shallow in practice, so the
+  bounded default is the safe choice.
+- **Stale/dead keys**: the store has no eviction, so a removed worktree leaves a
+  key whose `root` path no longer exists. Liveness = the key's `root` path still
+  exists. Dead keys are **filtered by default**; `include_dead: true` returns
+  them flagged (`live: no`) so the lead retains a prune/debug path.
 
-Spec/docs: add the tool contract to `mcp-tools.md`, note the `ferrule`
-`parent_session_key` argument and the `sessionRecord.parent` field, and update
-the `mcp-runtime` / `named-agent-runtime` mental models.
+Spec/docs: the caller contract is specified in
+`mcp-tools.md` `{#260619-session-key-lineage-children}`. Phase 3 also updates the
+`mcp-runtime` / `named-agent-runtime` mental models.
 
 Verification: a control key returns its delegate leaves and its coordination
-control keys; depth bounding works; text default carries re-threadable keys;
+control keys; depth bounding works (`depth: 0` = full subtree); dead keys are
+filtered unless `include_dead: true`; text default carries re-threadable keys;
 json escape hatch returns stable fields; a leaf key returns an empty/flat result;
 enumeration never crosses into unrelated sessions.
-
-## Spec Impact
-
-- Target spec area: `ai-docs/spec/mcp-tools.md` — new `ws.session.children`
-  read-only tool contract; `ws.ferrule` gains optional `parent_session_key`;
-  `playbook.render`'s minted child key and the filesystem session record gain an
-  optional `parent` field.
-- Expected caller-visible change: the lead can enumerate its minted subtree
-  (coordination control keys + delegate leaves) from one anchor key and re-thread
-  keys after context loss; existing single-root flows are unchanged because
-  `parent` is optional and omitempty.
-- Contract-first spec: yes (the `children()` output contract — fields, labeling
-  by scope, text-vs-json defaults, depth semantics — should be specified before
-  or alongside Phase 3 implementation).

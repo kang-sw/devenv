@@ -151,6 +151,38 @@ Gating).
 >   automatic eviction, though deleting a key file is now a physically possible
 >   removal path (deferred).
 
+### 🚧 Session-Key Lineage And Child Enumeration {#260619-session-key-lineage-children}
+
+Session keys form a parent→child lineage so a lead can re-discover the keys it
+minted after they fall out of its own (compacted or restarted) context.
+
+- Each session record carries an optional `parent` — the session key that minted
+  it. It is absent for a lead's first bootstrap key. Recording a parent is
+  metadata only and never widens the child's capability scope.
+- `ws.ferrule` accepts an optional `parent_session_key`. A lead coordinating
+  several repository roots in one conversation (for example multiple git
+  worktrees, each a distinct root) records each additional control key's parent
+  as its primary control key. Because `ws.ferrule` is lead-only, control-key
+  lineage stays within one lead — it does not create a tree of independent
+  control agents.
+- A render-minted delegate child key (`playbook.render`, including a
+  worktree-bound leaf produced via `root_override`) records the dispatching lead
+  key as its `parent`.
+- `ws.session.children(session_key, depth?, format?, include_dead?)` returns,
+  read-only, the subtree of keys whose `parent` chain roots at the presented
+  key. Each entry is labeled by its capability scope (control coordination key
+  vs delegate leaf) and includes the child key string so the lead can re-thread
+  it. A caller only ever sees the subtree under a key it presents.
+  - `depth`: integer, default `1` (immediate children); a higher value returns
+    that many levels; `0` returns the full subtree.
+  - Liveness is whether the child's bound `root` path still exists. Dead keys
+    (such as a removed worktree's key) are filtered by default;
+    `include_dead: true` returns them flagged `live: no`, preserving a
+    prune/debug path.
+  - Output defaults to compact labeled text per
+    `#260512-mcp-llm-readable-output-defaults`; `format: "json"` is the
+    structured escape hatch.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
