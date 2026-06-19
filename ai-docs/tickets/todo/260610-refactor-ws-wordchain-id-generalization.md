@@ -16,7 +16,7 @@ related-mental-model:
 M3 (`260609-refactor-ws-spawn-runtime-deletion-session-auth`) introduces a
 reusable, generic word-chain key generator — EFF large 7776-word pool vendored
 and `go:embed`-ed, 4 words + a 2-digit suffix, mint-time uniqueness check — but
-wires it only to `ws.lead.login` session keys to keep that milestone scoped. This
+wires it only to `ws.ferrule` session keys to keep that milestone scoped. This
 ticket extends the same generator to the remaining id-issuing MCP surfaces so the
 fleet has one consistent, LLM-friendly id idiom (an LLM reliably echoes a
 word-chain back; opaque hex/UUID handles are more error-prone in prompts).

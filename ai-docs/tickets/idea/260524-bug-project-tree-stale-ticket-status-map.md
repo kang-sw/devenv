@@ -19,3 +19,13 @@ project-index-derived or otherwise stale. Future work should clarify whether
 state, or both. If it intentionally includes project-memory inventory, it should
 surface staleness clearly enough that callers do not route implementation from
 completed tickets.
+
+## Staleness audit (2026-06-19)
+
+The original symptom is no longer reproducible. `renderTickets()` reads the
+filesystem directly and scans only `ready/todo/idea`, never `.done/`
+(`agents-plugin-tool/internal/wsdoc/project_tree.go:188`); all dashboard child
+tickets are correctly archived under `.done/`. The Go MCP `project_tree` never
+carried the projected-stale-status bug. Retained only for the softer open design
+question above (raw project memory vs live ticket filesystem rendering); this is
+not a live bug.

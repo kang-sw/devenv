@@ -123,9 +123,12 @@ Active or planned product tracks:
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
-  `260525-feat-ws-dashboard-sqlite-agent-activity-source` is ready for
-  aligning the backend Activity projection with ws-mcp's SQLite role/instance
-  registry while keeping frontend routes and rendering stable.
+  `260525-feat-ws-dashboard-sqlite-agent-activity-source` is now in `.done/`; its
+  original basis — aligning the backend Activity projection with ws-mcp's SQLite
+  role/instance registry — no longer exists after the epic 260605 session-auth
+  reshape removed the SQLite actor registry. Re-ground this track's activity source
+  on the mercenary lifecycle before any further agent-panel work (see
+  `260523-feat-ws-dashboard-main-session-activity-source`). [staleness audit 2026-06-19]
 - Multi-server management - active child track.
   `260525-feat-ws-dashboard-multi-server-gateway` is done for
   linked-server registry, selected-server resource forwarding, passphrase

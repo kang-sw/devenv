@@ -51,3 +51,13 @@ exists, do not discard the work by default. Treat the changes as a lead draft,
 not authoritative implementation output, and hand them to the implementer for
 review, correction, verification, and source/test/dependency commits. The lead
 then owns review orchestration, documentation, ticket closeout, and final gate.
+
+## Staleness audit (2026-06-19)
+
+Still live, but the skill baseline has moved since capture. `lead-implement` now
+carries a judge:needs-delegation table with direct-edit predicates and an
+Implementation Verdict step
+(`agents-plugin/rsrc/lead-implement/lead-implement.md:158-164`). The specific ask
+here — a short explicit per-predicate proof gated *before any source mutation* — is
+still absent, so the ticket remains valid. Read the Background's "current skill"
+description against this updated baseline when implementing.

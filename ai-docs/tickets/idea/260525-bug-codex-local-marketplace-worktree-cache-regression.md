@@ -62,3 +62,15 @@ plugin cache despite a global marketplace source pointing at the main checkout.
 - Should ws dogfood use a unique marketplace id per worktree, an absolute source
   path in marketplace metadata, or a post-refresh guard that verifies cache
   source/version before trusting the installed MCP server?
+
+## Staleness audit (2026-06-19)
+
+Reproduction conditions are no longer present. The Windows Codex config now uses a
+git remote source (`source = "https://github.com/kang-sw/devenv.git"`), not
+`source_type = "local"`, and the global cache holds a single version (`0.30.0`)
+with no regression; the original macOS `/Users/kang-sw/` paths are gone. The
+root-cause structure — relative `./agents-plugin` path plus the shared marketplace
+name `kang-sw-devenv` across sibling worktrees — still exists in
+`.agents/plugins/marketplace.json`. Retained as a **latent risk** that would
+resurface only if a local marketplace source is re-enabled across sibling
+worktrees; not currently reproducible.
