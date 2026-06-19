@@ -796,6 +796,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Lead-gate: check caller entry to determine whether to mint a child key.
 		// mintRoot is empty when caller is not a lead (no mint).
 		var mintRoot string
+		var parentKey string
 		var preferMercenary bool
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			if entry, found := s.sessions.lookup(keyStr); found && entry.scope == roleLead {
@@ -805,11 +806,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				} else {
 					mintRoot = entry.root
 				}
+				parentKey = keyStr
 				preferMercenary = entry.preferMercenary
 			}
 		}
 
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, preferMercenary)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
@@ -1052,7 +1054,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		return toolTextResponse(id, "", err)
 	}
 	scope := parseCapabilityScope(arguments["capability"])
-	key, err := s.sessions.mint(canonical, scope)
+	key, err := s.sessions.mint(canonical, scope, "")
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}

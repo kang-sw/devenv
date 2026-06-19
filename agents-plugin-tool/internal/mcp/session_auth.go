@@ -19,20 +19,22 @@ type sessionEntry struct {
 	root            string
 	scope           toolRole
 	preferMercenary bool
+	parent          string
 }
 
 // sessionRecord is the on-disk JSON shape of a session entry. It is versioned so
 // the format can grow (render lineage, permission/capability metadata) without a
 // migration; unknown future fields are simply ignored by older readers.
 type sessionRecord struct {
-	SchemaVersion   int               `json:"schema_version"`
-	Root            string            `json:"root"`
-	Scope           string            `json:"scope"`
-	PreferMercenary bool              `json:"prefer_mercenary"`
+	SchemaVersion   int    `json:"schema_version"`
+	Root            string `json:"root"`
+	Scope           string `json:"scope"`
+	PreferMercenary bool   `json:"prefer_mercenary"`
+	Parent          string `json:"parent,omitempty"`
 	// Overrides is the session-scope generic config overlay. Keys are item
 	// identifiers; values are string-encoded config values. Added as an additive
 	// field; existing records without it parse with a nil map.
-	Overrides       map[string]string `json:"overrides,omitempty"`
+	Overrides map[string]string `json:"overrides,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
@@ -91,7 +93,7 @@ func (s *sessionStore) keyPath(dir, key string) string {
 // candidate cannot both succeed — the loser sees os.IsExist and retries with a
 // fresh candidate. This is the cross-process analogue of the previous in-memory
 // check-and-insert and has no TOCTOU window.
-func (s *sessionStore) mint(root string, scope toolRole) (string, error) {
+func (s *sessionStore) mint(root string, scope toolRole, parent string) (string, error) {
 	dir, err := s.keysDir()
 	if err != nil {
 		return "", err
@@ -100,6 +102,7 @@ func (s *sessionStore) mint(root string, scope toolRole) (string, error) {
 		SchemaVersion: sessionRecordSchemaVersion,
 		Root:          root,
 		Scope:         string(scope),
+		Parent:        parent,
 	}
 	payload, err := json.Marshal(record)
 	if err != nil {
@@ -151,6 +154,7 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 		root:            record.Root,
 		scope:           toolRole(record.Scope),
 		preferMercenary: record.PreferMercenary,
+		parent:          record.Parent,
 	}, true
 }
 

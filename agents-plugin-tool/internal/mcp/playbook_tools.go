@@ -356,7 +356,7 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // declared in the playbook frontmatter, surfaced so one render call routes both
 // delegation paths — native uses it as a host model-selection guide, mercenary
 // passes it to ws.mercenary.register's pass-through tier arg.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool) (string, string, error) {
 	harness := s.currentHarness()
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
@@ -394,7 +394,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
 	if strings.TrimSpace(mintRoot) != "" {
 		if childScope, ok := childRoleForPlaybookRole(pb.Meta.Role); ok {
-			childKey, err := s.sessions.mint(mintRoot, childScope)
+			childKey, err := s.sessions.mint(mintRoot, childScope, parentKey)
 			if err != nil {
 				return "", "", fmt.Errorf("mint child session key: %w", err)
 			}
@@ -485,7 +485,7 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 // rsrcRoot is a call-site-overridable seam for root_override support.
 // configOpts controls config-backed model alias resolution.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, string, error) {
-	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", false)
+	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false)
 }
 
 // renderPlaybook loads a playbook, renders it (with optional child-key mint and
@@ -496,7 +496,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // mintRoot: when non-empty, caller is a lead and a child key is minted for the delegate.
 // preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, preferMercenary bool) (string, string, error) {
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool) (string, string, error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -507,7 +507,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		templateContext = nil
 		renderContext = callerContext
 	}
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, preferMercenary)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary)
 	if err != nil {
 		return "", "", err
 	}

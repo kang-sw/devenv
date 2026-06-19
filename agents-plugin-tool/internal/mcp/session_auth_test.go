@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -171,11 +172,11 @@ func TestSessionKeyResolvesRoot(t *testing.T) {
 	server := NewServer(root1, "test")
 
 	// Mint keys for both roots directly to avoid round-trip parsing.
-	key1, err := server.sessions.mint(canonical1, roleLead)
+	key1, err := server.sessions.mint(canonical1, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint root1: %v", err)
 	}
-	key2, err := server.sessions.mint(canonical2, roleLead)
+	key2, err := server.sessions.mint(canonical2, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint root2: %v", err)
 	}
@@ -335,16 +336,16 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	server := NewServer(root, "test")
 
 	// git.commit is blocked for roleLeaf.
-	leafKey, err := server.sessions.mint(root, roleLeaf)
+	leafKey, err := server.sessions.mint(root, roleLeaf, "")
 	if err != nil {
 		t.Fatalf("mint leaf key: %v", err)
 	}
 	// ws.mercenary.register is blocked for roleDelegate.
-	delegateKey, err := server.sessions.mint(root, roleDelegate)
+	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatalf("mint delegate key: %v", err)
 	}
-	leadKey, err := server.sessions.mint(root, roleLead)
+	leadKey, err := server.sessions.mint(root, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint lead key: %v", err)
 	}
@@ -484,7 +485,7 @@ func TestSessionKeySurvivesFreshServerInstance(t *testing.T) {
 
 	// Mint on the "lead" server, then discard it entirely.
 	leadServer := NewServer(root, "test")
-	key, err := leadServer.sessions.mint(canonical, roleLead)
+	key, err := leadServer.sessions.mint(canonical, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -507,6 +508,131 @@ func TestSessionKeySurvivesFreshServerInstance(t *testing.T) {
 	}
 	if text := toolText(t, bad); !strings.Contains(text, "unknown_session") {
 		t.Fatalf("path-unsafe key should yield unknown_session, got: %q", text)
+	}
+}
+
+func TestSessionMintRoundTripsParent(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer("", "test")
+
+	parentKey := "parent-key-00"
+	childKey, err := server.sessions.mint("/work/child", roleDelegate, parentKey)
+	if err != nil {
+		t.Fatalf("mint child: %v", err)
+	}
+	childEntry, ok := server.sessions.lookup(childKey)
+	if !ok {
+		t.Fatalf("lookup child key %q failed", childKey)
+	}
+	if childEntry.parent != parentKey {
+		t.Fatalf("child parent = %q, want %q", childEntry.parent, parentKey)
+	}
+	if childEntry.scope != roleDelegate {
+		t.Fatalf("child scope = %q, want %q", childEntry.scope, roleDelegate)
+	}
+
+	rootKey, err := server.sessions.mint("/work/root", roleLead, "")
+	if err != nil {
+		t.Fatalf("mint root: %v", err)
+	}
+	rootEntry, ok := server.sessions.lookup(rootKey)
+	if !ok {
+		t.Fatalf("lookup root key %q failed", rootKey)
+	}
+	if rootEntry.parent != "" {
+		t.Fatalf("root parent = %q, want empty", rootEntry.parent)
+	}
+	if rootEntry.scope != roleLead {
+		t.Fatalf("root scope = %q, want %q", rootEntry.scope, roleLead)
+	}
+}
+
+func TestRenderPathMintedChildRecordsLeadParent(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"leaf-pb/leaf-pb.md": leafPlaybookContent,
+	})
+	initGit(t, rsrcRoot)
+	server := NewServer(rsrcRoot, "test")
+	leadKey, err := server.sessions.mint(rsrcRoot, roleLead, "")
+	if err != nil {
+		t.Fatalf("mint lead: %v", err)
+	}
+
+	resp := callToolOnce(t, server, 1, "playbook.render", map[string]any{
+		"session_key":   leadKey,
+		"name":          "leaf-pb",
+		"root_override": rsrcRoot,
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("playbook.render returned isError: %s", resp)
+	}
+	renderedPath := strings.TrimSpace(toolText(t, resp))
+	bodyBytes, err := os.ReadFile(renderedPath)
+	if err != nil {
+		t.Fatalf("read rendered playbook %q: %v", renderedPath, err)
+	}
+	childKey := extractSplicedKey(t, string(bodyBytes))
+	childEntry, ok := server.sessions.lookup(childKey)
+	if !ok {
+		t.Fatalf("lookup rendered child key %q failed", childKey)
+	}
+	if childEntry.parent != leadKey {
+		t.Fatalf("rendered child parent = %q, want lead key %q", childEntry.parent, leadKey)
+	}
+	if childEntry.scope != roleLeaf {
+		t.Fatalf("rendered child scope = %q, want %q", childEntry.scope, roleLeaf)
+	}
+	if childEntry.root != rsrcRoot {
+		t.Fatalf("rendered child root = %q, want root_override %q", childEntry.root, rsrcRoot)
+	}
+}
+
+func TestLegacySessionRecordWithoutParentResolves(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	dir, err := store.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	const key = "legacy-key-00"
+	legacyJSON := `{"schema_version":1,"root":"/legacy/root","scope":"delegate","prefer_mercenary":true}`
+	if err := os.WriteFile(store.keyPath(dir, key), []byte(legacyJSON), 0o644); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+	entry, ok := store.lookup(key)
+	if !ok {
+		t.Fatalf("legacy key %q did not resolve", key)
+	}
+	if entry.parent != "" {
+		t.Fatalf("legacy parent = %q, want empty", entry.parent)
+	}
+	if entry.root != "/legacy/root" || entry.scope != roleDelegate || !entry.preferMercenary {
+		t.Fatalf("legacy entry = %#v, want root/scope/prefer preserved", entry)
+	}
+}
+
+func TestSetPreferMercenaryPreservesParent(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	parentKey := "parent-key-00"
+	key, err := store.mint("/work/child", roleDelegate, parentKey)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if !store.setPreferMercenary(key) {
+		t.Fatalf("setPreferMercenary(%q) returned false", key)
+	}
+	entry, ok := store.lookup(key)
+	if !ok {
+		t.Fatalf("lookup after setPreferMercenary failed")
+	}
+	if !entry.preferMercenary {
+		t.Fatalf("preferMercenary was not set")
+	}
+	if entry.parent != parentKey {
+		t.Fatalf("parent after setPreferMercenary = %q, want %q", entry.parent, parentKey)
 	}
 }
 
