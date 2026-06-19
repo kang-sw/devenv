@@ -108,15 +108,17 @@ subagents. Direction, decisions, and evidence live in
   not usable for serious dogfood.
 - `260619-feat-ws-session-lineage-children` (todo, ready-candidate — session-key
   parent lineage + enumeration): forward feature on the M3 ephemeral session-key
-  model. Records an optional `parent` edge at both mint paths (`ferrule` control
-  keys + render-minted delegate leaves) and adds a read-only
-  `ws.session.children` enumeration tool so a lead can re-discover its worktree
-  control keys and delegate leaves from one anchor after context loss. Elevates a
-  working root / git worktree to a re-discoverable first-class work surface
-  without a heavier workset primitive; worktree creation and merge-back stay out
-  of scope (native git tooling + the merge/cleanup idea tickets). Captured from
-  the 2026-06-19 lead-discuss dogfood that added the per-workroot `ferrule`
-  manual clarification (`13eeccd9`).
+  model. Records an optional `parent` edge at both mint paths and adds a read-only
+  `ws.session.children` enumeration tool so a lead can re-discover its keys from
+  one anchor after context loss. Two worktree scenarios kept distinct:
+  dispatch-into (delegate leaf via the anchor-settled `render` + `root_override`
+  path, leaf, non-recursive) and work-in (lead drives a worktree directly via
+  `ferrule` control key, coordination lineage). Grounds on — does not change —
+  the existing lead-only `ferrule` guard (`isLeadOnlyTool`) + obscurity
+  soft-guard, so the anchor's strict depth-1 containment is preserved. Worktree
+  creation and merge-back stay out of scope (native git tooling + the
+  merge/cleanup idea tickets). Captured from the 2026-06-19 lead-discuss dogfood
+  that added the per-workroot `ferrule` manual clarification (`13eeccd9`).
 
 ## Cross-Child Decisions
 
