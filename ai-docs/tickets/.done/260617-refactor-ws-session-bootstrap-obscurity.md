@@ -87,6 +87,21 @@ Close the confirmed gap: `lead-bootstrap` does not currently expose
 `workflow-manual`. Verification: each lead entry skill surfaces the manual; a
 lead starting from any entry skill can learn the bootstrap call.
 
+### Result (6762aaf5) - 2026-06-19
+
+Resolved without editing `lead-bootstrap`. On closer reading the earlier
+characterization was imprecise: `lead-bootstrap` does not "route to
+`WORKFLOW.md`" as a manual — it reads `WORKFLOW.md` as a *template source* to
+copy into a downstream project. It is a one-time project-scaffolding skill, not
+a work-session entry like `lead-discuss`/`lead-proceed`, and it loads no
+orchestration primitives by design, so the absence of manual routing is correct
+for its purpose. The discoverability goal is instead met by the Phase 2 scrub:
+the `mandatory_session_key` / `unknown_session` error guidance now routes any
+lead that attempts a root-aware call without a key to `ws:workflow-manual`. The
+other four lead entry skills already route to the manual. A skill behavior
+change of questionable necessity ("Ask first" surface) was therefore avoided;
+the precondition's intent (a lead can learn the obscure bootstrap name) holds.
+
 ### Phase 2: rename the bootstrap tool to an arbitrary name and scrub surfaces
 
 Depends on Phase 1. Rename `ws.lead.login` to the chosen arbitrary,
@@ -97,3 +112,32 @@ to end under the new name; the old name and meaning no longer appear in
 `tools/list` (name or description), error-guidance strings, or rendered delegate
 prompts; a delegate that hits `unknown_session` receives a name-free recovery
 hint.
+
+### Result (6762aaf5) - 2026-06-19
+
+Renamed `ws.lead.login` -> `ws.ferrule` and applied the 3-surface scrub.
+
+- **Gate:** `bootstrapToolName` const + `isLeadOnlyTool()`. The tool left the
+  `ws.lead.*` prefix, so the non-lead escalation block now matches it by
+  explicit name (the prefix still covers `ws.lead.prefer_mercenary`). This was
+  the load-bearing landmine — a prefix-only check would have silently stopped
+  blocking the bootstrap verb.
+- **Surface 1 (tools/list):** inert description — "Reserved workflow primitive.
+  See ws:workflow-manual." Also scrubbed the broadly-visible `session_key`
+  property description shared by every root-aware tool.
+- **Surface 2 (error guidance):** `mandatory_session_key`, `unknown_session`,
+  and the legacy `session.*` errors now name no tool and route the lead to
+  `ws:workflow-manual`.
+- **Surface 3 (delegate cred block):** capability-level instruction with no tool
+  name ("already authenticated; do not attempt to mint, log in, or escalate").
+- **Teaching:** `workflow-manual` (both copies) teaches `ws.ferrule` and why the
+  name is obscure. `runtime.json` (both), rsrc manifests (both), and the wsflow
+  rsrc mirror regenerated. spec `mcp-tools.md` + mental-model `mcp-runtime.md`
+  renamed for consistency and given the obscurity/scrub invariant (renamed, not
+  made name-free: lower-priority non-runtime surface per `## Decisions`).
+- **Verification:** `go build ./...`, `go vet`, and the full repo test suite are
+  green. The old name no longer appears in `tools/list`, error strings, or
+  rendered delegate prompts; tests assert the recovery text does not leak the
+  name and routes to the manual. Ticket-body references to the old name in
+  decision-history records (`.done/`, `.plans/`, epic/research tickets) were
+  intentionally left.
