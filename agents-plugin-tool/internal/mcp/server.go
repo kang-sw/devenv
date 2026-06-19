@@ -1054,7 +1054,14 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		return toolTextResponse(id, "", err)
 	}
 	scope := parseCapabilityScope(arguments["capability"])
-	key, err := s.sessions.mint(canonical, scope, "")
+	parentKey, _ := arguments["parent_session_key"].(string)
+	parentKey = strings.TrimSpace(parentKey)
+	if parentKey != "" {
+		if _, ok := s.sessions.lookup(parentKey); !ok {
+			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", parentKey))
+		}
+	}
+	key, err := s.sessions.mint(canonical, scope, parentKey)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -1820,9 +1827,10 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":       stringProperty("Absolute Git worktree root to bind to the session key."),
-					"capability": enumStringProperty(`Optional capability scope. Omit or pass "lead" for unrestricted access. Pass "delegate" or "leaf" to restrict the key to that role's allowed tools.`, []string{"lead", "delegate", "leaf"}),
-					"format":     stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root":               stringProperty("Absolute Git worktree root to bind to the session key."),
+					"capability":         enumStringProperty(`Optional capability scope. Omit or pass "lead" for unrestricted access. Pass "delegate" or "leaf" to restrict the key to that role's allowed tools.`, []string{"lead", "delegate", "leaf"}),
+					"parent_session_key": stringProperty("Optional parent session key to record coordination lineage. See ws:workflow-manual."),
+					"format":             stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"root"},
 			},

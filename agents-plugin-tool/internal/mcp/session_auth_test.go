@@ -88,6 +88,7 @@ func canonicalRootForTest(t *testing.T, root string) string {
 
 func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root1 := t.TempDir()
 	root2 := t.TempDir()
 	initGit(t, root1)
@@ -150,6 +151,120 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	if parsed.Root != canonical1 {
 		t.Fatalf("json root = %q, want canonical %q", parsed.Root, canonical1)
 	}
+}
+
+func TestFerruleWithParentSessionKeyRecordsParent(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+	initGit(t, root1)
+	initGit(t, root2)
+	server := NewServer(root1, "test")
+
+	parentResp := callLogin(t, server, 1, root1, nil)
+	if toolIsError(t, parentResp) {
+		t.Fatalf("primary ws.ferrule returned isError: %s", parentResp)
+	}
+	parentKey, _ := parseLoginResponse(t, parentResp)
+
+	childResp := callLogin(t, server, 2, root2, map[string]any{"parent_session_key": parentKey})
+	if toolIsError(t, childResp) {
+		t.Fatalf("child ws.ferrule returned isError: %s", childResp)
+	}
+	childKey, _ := parseLoginResponse(t, childResp)
+	childEntry, ok := server.sessions.lookup(childKey)
+	if !ok {
+		t.Fatalf("lookup child key %q failed", childKey)
+	}
+	if childEntry.parent != parentKey {
+		t.Fatalf("child parent = %q, want %q", childEntry.parent, parentKey)
+	}
+	if childEntry.scope != roleLead {
+		t.Fatalf("child scope = %q, want %q", childEntry.scope, roleLead)
+	}
+}
+
+func TestFerruleWithoutParentSessionKeyMintsParentlessKey(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callLogin(t, server, 1, root, nil)
+	if toolIsError(t, resp) {
+		t.Fatalf("ws.ferrule returned isError: %s", resp)
+	}
+	key, _ := parseLoginResponse(t, resp)
+	entry, ok := server.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("lookup key %q failed", key)
+	}
+	if entry.parent != "" {
+		t.Fatalf("parent = %q, want empty", entry.parent)
+	}
+}
+
+func TestFerruleUnknownParentSessionKeyErrorsWithoutMint(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+	before := sessionKeyFileCount(t, server)
+
+	resp := callLogin(t, server, 1, root, map[string]any{"parent_session_key": "missing-parent-00"})
+	if !toolIsError(t, resp) {
+		t.Fatalf("unknown parent_session_key should return tool error: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, `parent_session_key "missing-parent-00" is not a known session key`) {
+		t.Fatalf("unknown parent error text = %q", text)
+	}
+	after := sessionKeyFileCount(t, server)
+	if after != before {
+		t.Fatalf("session key count grew after unknown parent: before=%d after=%d", before, after)
+	}
+}
+
+func TestFerruleEmptyParentSessionKeyBehavesAsAbsent(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callLogin(t, server, 1, root, map[string]any{"parent_session_key": "   "})
+	if toolIsError(t, resp) {
+		t.Fatalf("empty parent_session_key should behave as absent, got isError: %s", resp)
+	}
+	key, _ := parseLoginResponse(t, resp)
+	entry, ok := server.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("lookup key %q failed", key)
+	}
+	if entry.parent != "" {
+		t.Fatalf("parent = %q, want empty", entry.parent)
+	}
+}
+
+func sessionKeyFileCount(t *testing.T, server *Server) int {
+	t.Helper()
+	dir, err := server.sessions.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", dir, err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			count++
+		}
+	}
+	return count
 }
 
 // --- Test 2: valid session_key resolves the bound root; concurrent calls do not clobber ---
