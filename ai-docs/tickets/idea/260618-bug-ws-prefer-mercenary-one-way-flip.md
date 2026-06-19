@@ -2,6 +2,7 @@
 title: prefer_mercenary has no revert path within a session
 related:
   260605-research-ws-native-subagent-pivot: mercenary surface and delegation-default guidance originate here
+  260619-epic-ws-layered-config-prompt-tuning: superseded — prefer_mercenary becomes a session-scope item in this epic's layered config (child-1), gaining desired-state get/set that resolves this one-way-flip bug; close when that child lands
 related-mental-model:
   - mcp-runtime
 ---

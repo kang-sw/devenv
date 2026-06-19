@@ -283,6 +283,15 @@ dropped tickets live in hidden archive dirs and git history.
   unblocked. The session-key word-chain generator generalization to other id
   surfaces remains reserved as `260610-refactor-ws-wordchain-id-generalization`
   (todo, follow-up).
+- `260619-epic-ws-layered-config-prompt-tuning` (todo, epic) - board artifact,
+  not implementation-ready. New epic under `260605` pushing the playbook prompt
+  engine toward user-tunable config: a 4-layer `session>project>global>builtin`
+  config substrate (per-item default scope, file lock, `prefer_mercenary`
+  migrated in → closes `260618`) + a block-marker prompt-override engine
+  (`{.DelegationSection}` seed) + a self-doc `config.prompt()` listing. Three
+  planned children; child-1 (substrate) must coordinate with the deferred
+  `config.model_alias`/`config.role_tier` rename slice. Runs in main worktree;
+  additive changes to keep merge-clean against live pivot work.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
