@@ -288,17 +288,13 @@ dropped tickets live in hidden archive dirs and git history.
   engine toward user-tunable config: a 4-layer `session>project>global>builtin`
   config substrate (per-item default scope, file lock, `prefer_mercenary`
   migrated in → closes `260618`) + a block-marker prompt-override engine
-  (`DelegationSection` seed) + a self-doc `config.prompt()` listing.
-- `260619-feat-ws-layered-config-scope-substrate` (ready) - **Phase 1 landed**
-  (`acf1be70`): the 4-layer scope resolver + per-item default-scope registry +
-  global `~/.ws/config.json`/`WS_CONFIG_HOME` + file-lock RMW (file scopes only;
-  session store unchanged) + `config.show` scope reporting + shared `scope`
-  schema fragment. Spec `260619-layered-config-scope-model` 🚧 stripped. **Phase 2
-  remaining**: migrate `prefer_mercenary` to a session-scope desired-state item
-  (closes `260618`) — the `CapabilityCheck` gating hook is already in place.
-  Must coordinate with (not fork) the deferred
-  `config.model_alias`/`config.role_tier` rename slice.
-  Dependent children now UNBLOCKED (substrate shipped):
+  (`DelegationSection` seed) + a self-doc `config.prompt()` listing. **Substrate
+  child shipped** (`260619-feat-ws-layered-config-scope-substrate`, done: Phase 1
+  `acf1be70` resolver + scopes + file-lock RMW + `config.show` scope reporting;
+  Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
+  item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
+  slice must adopt (not fork) the shared scope primitive.
+  Dependent children now UNBLOCKED (substrate shipped, next actionable):
   `260619-feat-ws-prompt-override-marker-engine` (todo, dep: substrate),
   `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep: engine→substrate,
   tool→both).
