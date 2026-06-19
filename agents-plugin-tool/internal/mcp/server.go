@@ -450,7 +450,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return execRawGrepResponse(req.ID, result, err)
 	case "config.show":
-		view, err := wsconfig.Show(wsconfig.Options{})
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		var view wsconfig.View
+		var err error
+		if sessionKey != "" {
+			// When a session key is supplied, use ScopedShow so that
+			// ResolvedOverrides is populated with per-key scope labels.
+			adapter := sessionConfigAdapter{s: s.sessions}
+			r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+			view, err = wsconfig.ScopedShow(&r, wsconfig.Options{}, sessionKey)
+		} else {
+			view, err = wsconfig.Show(wsconfig.Options{})
+		}
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, view, err)
 		}
@@ -1877,11 +1888,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.show",
-			"description": "Return the current ws user-local configuration and resolved config path without modifying it.",
+			"description": "Return the current ws user-local configuration and resolved config path without modifying it. When session_key is supplied, each config override is annotated with the scope it resolved from (session, project, global, or builtin).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"session_key": stringProperty("Optional session key. When supplied, resolved override scopes are included in the output."),
 				},
 			},
 		},

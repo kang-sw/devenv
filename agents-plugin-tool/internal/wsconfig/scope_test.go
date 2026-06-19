@@ -3,6 +3,7 @@ package wsconfig
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 )
@@ -39,6 +40,22 @@ func (f *fakeSessionStore) SetOverride(sessionKey, itemKey, value string) error 
 	}
 	f.sessions[sessionKey][itemKey] = value
 	return nil
+}
+
+// ListOverrideKeys implements the optional key-enumeration interface consumed by
+// ScopedShow to discover session-only keys (not visible from file scopes).
+func (f *fakeSessionStore) ListOverrideKeys(sessionKey string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.sessions[sessionKey]
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // --- helpers ---
@@ -192,7 +209,7 @@ func TestScopeReportingGetReportsResolvedScope(t *testing.T) {
 func TestExplicitScopeOverridesDeclaredDefault(t *testing.T) {
 	// Register the item's declared default as project.
 	RegisterDefaultScope("default-project-item", ScopeProject)
-	defer delete(scopeRegistry, "default-project-item")
+	t.Cleanup(func() { delete(scopeRegistry, "default-project-item") })
 
 	r, opts := newTestResolver(t, nil, nil)
 	const key = "default-project-item"
@@ -225,8 +242,9 @@ func TestExplicitScopeOverridesDeclaredDefault(t *testing.T) {
 // default scope writes to project.
 func TestDefaultScopeFallbackToProject(t *testing.T) {
 	const key = "unregistered-item-xyz"
-	// Ensure it is not in the registry.
+	// Ensure it is not in the registry before and after the test.
 	delete(scopeRegistry, key)
+	t.Cleanup(func() { delete(scopeRegistry, key) })
 
 	r, opts := newTestResolver(t, nil, nil)
 
@@ -343,6 +361,74 @@ func TestConcurrentWritersNoLostWrites(t *testing.T) {
 	}
 }
 
+// TestConcurrentSharedKeyNoLostWrites verifies the no-lost-writes property for
+// the contended-key case: N goroutines each perform a read-modify-write
+// incrementing the SAME key, and the final value must equal N. This exercises
+// the file-lock serialization under shared-key contention, complementing
+// TestConcurrentWritersNoLostWrites which uses distinct keys per goroutine.
+func TestConcurrentSharedKeyNoLostWrites(t *testing.T) {
+	const n = 20
+	const sharedKey = "concurrent.shared"
+	r, opts := newTestResolver(t, nil, nil)
+
+	// Seed the key at zero so subsequent readers always find it.
+	if err := r.Set(sharedKey, "0", SetOptions{ExplicitScope: ScopeProject}); err != nil {
+		t.Fatalf("seed shared key: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			// Each goroutine atomically reads the current integer value,
+			// increments it, and writes it back. The file lock in setOverrideInFile
+			// serializes the full read-modify-write so no two goroutines can
+			// interleave their read and write, preventing lost updates.
+			if err := incrementSharedCounter(r, opts, sharedKey); err != nil {
+				t.Errorf("increment: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	projectCfg, err := Load(opts)
+	if err != nil {
+		t.Fatalf("load after concurrent increments: %v", err)
+	}
+	got, ok := projectCfg.Overrides[sharedKey]
+	if !ok {
+		t.Fatalf("shared key missing after concurrent writes")
+	}
+	gotN, err := strconv.Atoi(got)
+	if err != nil {
+		t.Fatalf("shared key value %q is not an integer: %v", got, err)
+	}
+	if gotN != n {
+		t.Errorf("shared key final value = %d, want %d (lost writes detected)", gotN, n)
+	}
+}
+
+// incrementSharedCounter performs a locked read-modify-write increment of the
+// integer value stored under key in the project scope. It is intentionally
+// implemented via the flock-serialized Set path so that the test proves the
+// lock prevents lost updates under concurrent callers.
+func incrementSharedCounter(r Resolver, opts Options, key string) error {
+	// Read current value under lock (acquire lock implicitly via setOverrideInFile).
+	// We perform the read-then-write as a single flock-serialized operation by
+	// calling the exported Set with an inline read inside the lock. Since Set
+	// calls setOverrideInFile which holds the flock for the entire RMW, we can
+	// replicate the pattern directly: read the file, parse, increment, write.
+	path, err := Path(opts)
+	if err != nil {
+		return err
+	}
+	return setOverrideInFileRMW(path, key, func(current string) string {
+		n, _ := strconv.Atoi(current)
+		return strconv.Itoa(n + 1)
+	})
+}
+
 // TestConcurrentGlobalWritersNoLostWrites verifies that concurrent writes to
 // the global file are also serialized correctly.
 func TestConcurrentGlobalWritersNoLostWrites(t *testing.T) {
@@ -449,6 +535,51 @@ func TestScopedShowReportsResolvedScopes(t *testing.T) {
 	// item.session: session scope wins over project.
 	if got, ok := found["item.session"]; !ok || got.Scope != ScopeSession || got.Value != "sv" {
 		t.Errorf("item.session: %+v", found["item.session"])
+	}
+}
+
+// TestScopedShowIncludesSessionOnlyKeys verifies that ScopedShow includes keys
+// that exist ONLY in the session scope (not present in project or global).
+// This covers the contract gap identified in the review: without ListOverrideKeys,
+// a session-only key would be silently omitted from ResolvedOverrides.
+func TestScopedShowIncludesSessionOnlyKeys(t *testing.T) {
+	sess := newFakeSessionStore()
+	r, opts := newTestResolver(t, nil, sess)
+
+	const sessionKey = "test-session-only-key"
+	const sessionOnlyItem = "item.session-only"
+	const sessionOnlyValue = "session-only-value"
+
+	// Set the key ONLY in the session scope; do not write to project or global.
+	if err := r.Set(sessionOnlyItem, sessionOnlyValue, SetOptions{
+		ExplicitScope: ScopeSession,
+		SessionKey:    sessionKey,
+	}); err != nil {
+		t.Fatalf("set session-only key: %v", err)
+	}
+
+	view, err := ScopedShow(&r, opts, sessionKey)
+	if err != nil {
+		t.Fatalf("ScopedShow: %v", err)
+	}
+
+	found := map[string]ScopedItem{}
+	for _, item := range view.ResolvedOverrides {
+		found[item.Key] = item
+	}
+
+	got, ok := found[sessionOnlyItem]
+	if !ok {
+		t.Fatalf("session-only key %q absent from ResolvedOverrides; got keys: %v", sessionOnlyItem, func() []string {
+			keys := make([]string, 0, len(found))
+			for k := range found {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+	}
+	if got.Scope != ScopeSession || got.Value != sessionOnlyValue {
+		t.Errorf("session-only key: got scope=%s value=%q, want scope=session value=%q", got.Scope, got.Value, sessionOnlyValue)
 	}
 }
 

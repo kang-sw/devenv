@@ -1,6 +1,9 @@
 package wsconfig
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // ScopedShow returns a View that includes ResolvedOverrides: one ScopedItem per
 // key that exists in any scope (session, project, global). Keys are deduplicated
@@ -20,36 +23,37 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 
 	view := View{Path: path, Config: cfg}
 
-	// Gather all known item keys across all file scopes so we can report each one.
+	// Gather all known item keys across all scopes so we can report each one.
 	allKeys := map[string]struct{}{}
 
-	// Session scope overrides (if available).
-	var sessionOverrides map[string]string
-	if r != nil && r.sessionR != nil && sessionKey != "" {
-		// We need to read all session overrides. Do this by iterating known keys
-		// from lower scopes and checking session as well. For the general case we
-		// walk all keys discovered in the project and global layers, then also
-		// check for any session-only keys via the sessionR interface.
-		// Since SessionReader only exposes per-key lookup, we iterate discovered
-		// keys; session-only keys are not separately discoverable here (none exist
-		// in Phase 1 — session-scope items are set programmatically with known keys).
-		_ = sessionOverrides // populated below after key collection
-	}
-
-	projectCfg, err := Load(opts)
-	if err != nil {
-		return View{}, fmt.Errorf("scoped show: load project overrides: %w", err)
-	}
-	for k := range projectCfg.Overrides {
+	// Project scope keys.
+	for k := range cfg.Overrides {
 		allKeys[k] = struct{}{}
 	}
 
+	// Global scope keys.
 	globalCfg, err := loadGlobalConfig(opts)
 	if err != nil {
 		return View{}, fmt.Errorf("scoped show: load global overrides: %w", err)
 	}
 	for k := range globalCfg.Overrides {
 		allKeys[k] = struct{}{}
+	}
+
+	// Session scope keys: when a sessionR is available, enumerate all session
+	// overrides by asking the reader for the full key set. This ensures that
+	// session-only keys (not present in project or global) are included.
+	// SessionReader exposes ListOverrideKeys for this purpose; if the reader does
+	// not implement the optional KeyLister, we fall back to the keys already
+	// discovered from the file scopes.
+	if r != nil && r.sessionR != nil && sessionKey != "" {
+		if lister, ok := r.sessionR.(interface {
+			ListOverrideKeys(sessionKey string) []string
+		}); ok {
+			for _, k := range lister.ListOverrideKeys(sessionKey) {
+				allKeys[k] = struct{}{}
+			}
+		}
 	}
 
 	// Resolve each key through the full precedence chain.
@@ -67,17 +71,10 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 			})
 		}
 		// Sort for deterministic output.
-		sortScopedItems(view.ResolvedOverrides)
+		sort.Slice(view.ResolvedOverrides, func(i, j int) bool {
+			return view.ResolvedOverrides[i].Key < view.ResolvedOverrides[j].Key
+		})
 	}
 
 	return view, nil
-}
-
-// sortScopedItems sorts ScopedItem slices by key for deterministic output.
-func sortScopedItems(items []ScopedItem) {
-	for i := 1; i < len(items); i++ {
-		for j := i; j > 0 && items[j].Key < items[j-1].Key; j-- {
-			items[j], items[j-1] = items[j-1], items[j]
-		}
-	}
 }

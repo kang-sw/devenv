@@ -151,6 +151,75 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	}
 }
 
+// setOverrideInFileRMW performs an flock-serialized read-modify-write on the
+// config file at path. The transform function receives the current string value
+// for itemKey (empty string when absent) and returns the new value to store.
+// This generalizes setOverrideInFile for use-cases such as integer increment
+// where the new value depends on the current value.
+func setOverrideInFileRMW(path, itemKey string, transform func(current string) string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	lockPath := path + ".lock"
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("acquire config lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
+	}
+	defer fl.Unlock() //nolint:errcheck
+
+	var cfg Config
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read config for update: %w", err)
+	}
+	if err == nil {
+		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
+			return fmt.Errorf("parse config for update: %w", jerr)
+		}
+	}
+
+	if cfg.Overrides == nil {
+		cfg.Overrides = map[string]string{}
+	}
+	cfg.Overrides[itemKey] = transform(cfg.Overrides[itemKey])
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("encode config: %w", err)
+	}
+	payload = append(payload, '\n')
+	if _, werr := tmp.Write(payload); werr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write temp config: %w", werr)
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close temp config: %w", cerr)
+	}
+	if rerr := os.Rename(tmpName, path); rerr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("atomic rename config: %w", rerr)
+	}
+	return nil
+}
+
 // setOverrideInFile performs an flock-serialized read-modify-write on the
 // config file at path, setting overrides[key] = value. The file is written via
 // a temp file + atomic rename to prevent partial reads by concurrent processes.

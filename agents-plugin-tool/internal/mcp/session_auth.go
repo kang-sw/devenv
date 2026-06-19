@@ -174,11 +174,17 @@ func (s *sessionStore) setPreferMercenary(key string) bool {
 // getOverride returns the Overrides entry for the given item key in the session
 // record identified by sessionKey. Returns ("", false) when the session is not
 // found, the key is path-unsafe, or the item is absent.
+//
+// s.mu is held for the duration of the read to match the mutex discipline of
+// setOverride, preventing a data race when another goroutine is concurrently
+// writing to the same session record.
 func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
 	dir, err := s.keysDir()
 	if err != nil {
 		return "", false
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	record, ok := s.readRecord(dir, sessionKey)
 	if !ok {
 		return "", false
@@ -188,6 +194,27 @@ func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
 	}
 	v, ok := record.Overrides[itemKey]
 	return v, ok
+}
+
+// listOverrideKeys returns all item keys present in the Overrides map of the
+// session record identified by sessionKey. Returns nil when the session is not
+// found or the Overrides map is empty.
+func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
+	dir, err := s.keysDir()
+	if err != nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok || len(record.Overrides) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(record.Overrides))
+	for k := range record.Overrides {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // setOverride writes an Overrides entry for the given item key/value into the
