@@ -1097,6 +1097,14 @@ func formatConfigView(view wsconfig.View) string {
 			b.WriteString("\n")
 		}
 	}
+	// Scope-resolved overrides are present when config.show is invoked with a
+	// session key (ScopedShow path). Print each resolved item with its source scope.
+	if len(view.ResolvedOverrides) > 0 {
+		b.WriteString("overrides:\n")
+		for _, item := range view.ResolvedOverrides {
+			fmt.Fprintf(&b, "  %s: %s  [scope:%s]\n", item.Key, item.Value, item.Scope)
+		}
+	}
 	return b.String()
 }
 
@@ -2767,6 +2775,19 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"description": description,
 		"enum":        values,
 	}
+}
+
+// scopeSchemaProperty returns the shared MCP inputSchema fragment for the
+// scope argument consumed by every scope-aware config tool. Callers embed this
+// into their tool's properties map under the "scope" key. The fragment uses the
+// canonical scope enum from wsconfig so the definition stays in one place.
+func scopeSchemaProperty() map[string]any {
+	return enumStringProperty(
+		`Optional config scope to target. Omit to use the item's declared default scope (usually "project"). `+
+			`"session" stores in the current session only; "project" stores in the per-project config; `+
+			`"global" stores in the cross-project ~/.ws/config.json.`,
+		wsconfig.ScopeSchemaEnum(),
+	)
 }
 
 func numberProperty(description string) map[string]string {

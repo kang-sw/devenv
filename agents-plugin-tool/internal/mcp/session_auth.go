@@ -25,10 +25,14 @@ type sessionEntry struct {
 // the format can grow (render lineage, permission/capability metadata) without a
 // migration; unknown future fields are simply ignored by older readers.
 type sessionRecord struct {
-	SchemaVersion   int    `json:"schema_version"`
-	Root            string `json:"root"`
-	Scope           string `json:"scope"`
-	PreferMercenary bool   `json:"prefer_mercenary"`
+	SchemaVersion   int               `json:"schema_version"`
+	Root            string            `json:"root"`
+	Scope           string            `json:"scope"`
+	PreferMercenary bool              `json:"prefer_mercenary"`
+	// Overrides is the session-scope generic config overlay. Keys are item
+	// identifiers; values are string-encoded config values. Added as an additive
+	// field; existing records without it parse with a nil map.
+	Overrides       map[string]string `json:"overrides,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
@@ -165,6 +169,46 @@ func (s *sessionStore) setPreferMercenary(key string) bool {
 	}
 	record.PreferMercenary = true
 	return s.writeRecordAtomic(dir, key, record) == nil
+}
+
+// getOverride returns the Overrides entry for the given item key in the session
+// record identified by sessionKey. Returns ("", false) when the session is not
+// found, the key is path-unsafe, or the item is absent.
+func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return "", false
+	}
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return "", false
+	}
+	if record.Overrides == nil {
+		return "", false
+	}
+	v, ok := record.Overrides[itemKey]
+	return v, ok
+}
+
+// setOverride writes an Overrides entry for the given item key/value into the
+// session record identified by sessionKey via atomic read-modify-write.
+// Returns an error if the session key is not found or the write fails.
+func (s *sessionStore) setOverride(sessionKey, itemKey, value string) error {
+	dir, err := s.keysDir()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return fmt.Errorf("session key not found: %s", sessionKey)
+	}
+	if record.Overrides == nil {
+		record.Overrides = map[string]string{}
+	}
+	record.Overrides[itemKey] = value
+	return s.writeRecordAtomic(dir, sessionKey, record)
 }
 
 func (s *sessionStore) readRecord(dir, key string) (sessionRecord, bool) {

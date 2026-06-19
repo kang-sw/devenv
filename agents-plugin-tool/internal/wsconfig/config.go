@@ -13,12 +13,20 @@ import (
 const schemaVersion = 1
 
 type Options struct {
-	CacheHome string
+	CacheHome  string
+	// ConfigHome overrides the global config directory. Resolution order:
+	// ConfigHome → $WS_CONFIG_HOME → ~/.ws/config.json (note: ~/.ws, not ~/.cache).
+	// Mirrors the CacheHome test-seam shape so tests can use Options{ConfigHome: t.TempDir()}.
+	ConfigHome string
 }
 
 type Config struct {
-	SchemaVersion int          `json:"schema_version"`
-	Agents        AgentsConfig `json:"agents"`
+	SchemaVersion int               `json:"schema_version"`
+	Agents        AgentsConfig      `json:"agents"`
+	// Overrides is a generic key→value overlay for scope-aware config items.
+	// Keys are item identifiers; values are string-encoded config values.
+	// The field is additive: existing configs without it parse with a nil map.
+	Overrides     map[string]string `json:"overrides,omitempty"`
 }
 
 type AgentsConfig struct {
@@ -29,6 +37,17 @@ type AgentsConfig struct {
 type View struct {
 	Path   string `json:"path"`
 	Config Config `json:"config"`
+	// ResolvedOverrides carries each scoped config item's value and the scope it
+	// resolved from. Populated by ScopedShow; nil when populated by plain Show.
+	ResolvedOverrides []ScopedItem `json:"resolved_overrides,omitempty"`
+}
+
+// ScopedItem pairs an item key with its resolved value and source scope for
+// human-readable and JSON show output.
+type ScopedItem struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Scope Scope  `json:"scope"`
 }
 
 type AgentTier struct {
