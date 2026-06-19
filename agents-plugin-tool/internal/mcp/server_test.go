@@ -214,7 +214,7 @@ func withSessionKeyInToolCalls(t *testing.T, input, key string) string {
 		if payload["method"] == "tools/call" {
 			params, _ := payload["params"].(map[string]any)
 			name, _ := params["name"].(string)
-			if name != "ws.lead.login" {
+			if name != "ws.ferrule" {
 				args, _ := params["arguments"].(map[string]any)
 				if args == nil {
 					args = map[string]any{}
@@ -888,14 +888,14 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	toolsResult, _ := listResp["result"].(map[string]any)
 	listedTools, _ := toolsResult["tools"].([]any)
-	loginProperties := toolPropertiesByName(t, byID["2"], "ws.lead.login")
+	loginProperties := toolPropertiesByName(t, byID["2"], "ws.ferrule")
 	if _, ok := loginProperties["root"]; !ok {
-		t.Fatalf("ws.lead.login schema missing root bootstrap parameter: %s", byID["2"])
+		t.Fatalf("ws.ferrule schema missing root bootstrap parameter: %s", byID["2"])
 	}
 	for _, rawTool := range listedTools {
 		tool, _ := rawTool.(map[string]any)
 		name, _ := tool["name"].(string)
-		if name == "ws.lead.login" {
+		if name == "ws.ferrule" {
 			continue
 		}
 		schema, _ := tool["inputSchema"].(map[string]any)
@@ -928,8 +928,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "runtime.info") {
 		t.Fatalf("tools/list missing runtime.info: %s", byID["2"])
 	}
-	if !strings.Contains(byID["2"], "ws.lead.login") {
-		t.Fatalf("tools/list missing ws.lead.login: %s", byID["2"])
+	if !strings.Contains(byID["2"], "ws.ferrule") {
+		t.Fatalf("tools/list missing ws.ferrule: %s", byID["2"])
 	}
 	if strings.Contains(byID["2"], "session.set_default_root") || strings.Contains(byID["2"], "session.get_default_root") {
 		t.Fatalf("tools/list still advertises session root compatibility tools: %s", byID["2"])

@@ -403,7 +403,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 			// the key before any procedure text.
 			credBlock := "---\n" +
 				"**Your ws session_key: `" + childKey + "`**\n" +
-				"Use this key in all ws tool calls. Do not call `ws.lead.login` or `ws.lead.*` tools.\n" +
+				"Use this key in all ws tool calls. You are already authenticated; do not attempt to mint, log in, or escalate session credentials.\n" +
 				"---\n\n"
 			body = credBlock + body
 		}

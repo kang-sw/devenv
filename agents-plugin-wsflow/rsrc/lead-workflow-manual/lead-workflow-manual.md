@@ -47,13 +47,16 @@ include only local arguments that affect the current step.
 
 ### Session setup
 
-`ws.lead.login`
+`ws.ferrule`
 
 At the start of any lead workflow session, call
-`ws.lead.login(root: "<absolute-working-directory>")`. Pass the repository's
-absolute filesystem path as `root`; the MCP server cannot infer the agent's
-current directory from placeholders or relative paths. Thread the returned
-`session_key` through every subsequent root-aware {{.McpNamespace}} tool call.
+`ws.ferrule(root: "<absolute-working-directory>")` to mint your session key.
+The name is deliberately non-descriptive and is taught only here: it is the lead
+session-bootstrap call, so subagents that share this MCP connection have no
+semantic cue to invoke it. Pass the repository's absolute filesystem path as
+`root`; the MCP server cannot infer the agent's current directory from
+placeholders or relative paths. Thread the returned `session_key` through every
+subsequent root-aware {{.McpNamespace}} tool call.
 
 ### Scoped Exploration (native Explore)
 

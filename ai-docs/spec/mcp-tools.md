@@ -63,11 +63,13 @@ server behavior without reading process-local files directly.
 Root-aware MCP tools resolve their repository root exclusively from a mandatory
 `session_key` argument; root resolution is the ephemeral session-auth model
 (`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
-call without a `session_key` is rejected with mandatory-login guidance naming
-`ws.lead.login(root)`; a call whose key has no record in the session store is
+call without a `session_key` is rejected with `mandatory_session_key` guidance
+that routes the lead to `ws:workflow-manual` (the recovery message names no tool,
+per the bootstrap-name obscurity scrub); a call whose key has no record in the
+session store is
 rejected with the `unknown_session` recovery contract. Public schemas for
 root-aware tools advertise `session_key` and do not advertise `root`;
-`ws.lead.login(root)` is the sole bootstrap verb and the only tool that accepts
+`ws.ferrule(root)` is the sole bootstrap verb and the only tool that accepts
 a `root` argument.
 
 The former resolution sources are removed: the explicit per-tool `root` argument,
@@ -86,7 +88,7 @@ an ephemeral, in-memory session-auth model. This is the caller-visible
 authentication contract for ws tool calls.
 
 A lead-centric bootstrap verb mints a session:
-`ws.lead.login(root) -> session_key`. The returned key is an LLM-friendly
+`ws.ferrule(root) -> session_key`. The returned key is an LLM-friendly
 word-chain string (for example `amber-tide-fox`), not a UUID. Only the lead logs
 in; subagents and mercenaries never call login — they receive a render-minted key
 (`#260610-mercenary-delegation-surface`).
@@ -130,11 +132,20 @@ Gating).
 > - The session key is mandatory on every ws call; there is no keyless lead
 >   default. A delegate that drops its key gets `unknown_session`, not a silent
 >   foreign-root operation.
-> - `login` is lead-only and lives under the `ws.lead.*` namespace. A non-lead
->   key calling `ws.lead.*` is rejected by the keyed-call handler
->   (`#260610-mercenary-delegation-surface`), so a delegate cannot self-login or
->   escalate by logging in again from a contained context. Re-login for recovery
->   uses the caller's own already-known root.
+> - The bootstrap tool (`ws.ferrule`) is lead-only. It lives outside the
+>   `ws.lead.*` namespace, so the keyed-call handler blocks non-lead keys from it
+>   by explicit name in addition to the `ws.lead.*` prefix block
+>   (`#260610-mercenary-delegation-surface`); a delegate cannot self-bootstrap or
+>   escalate from a contained context. Re-bootstrap for recovery uses the caller's
+>   own already-known root.
+> - The bootstrap tool name is deliberately obscure (260617 obscurity, soft
+>   guard): semantically disconnected from "session start" and taught only in
+>   `ws:workflow-manual`. The three subagent-reachable surfaces must not leak it —
+>   the `tools/list` description is inert, error-guidance strings name no tool and
+>   route the lead to the manual, and the rendered delegate prompt carries a
+>   capability-level instruction with no tool name. This lowers accidental/curious
+>   invocation by subagents that share the lead's MCP connection; it is not a hard
+>   barrier (a name-aware caller can still keyless-bootstrap).
 > - The store is filesystem-backed (one record file per key under a flat `keys/`
 >   directory) and survives a server restart. There is still no logout and no
 >   automatic eviction, though deleting a key file is now a physically possible
@@ -338,7 +349,7 @@ comments are never emitted, and the remaining user-facing namespace notation is
 rendered through reserved namespace variables such as `McpNamespace` and
 `SkillNamespace`. In wsflow these variables render as `wsflow`; in full ws they
 render as `ws`. The variables do not rename literal generic MCP tool
-identifiers such as `ws.lead.login`.
+identifiers such as `ws.ferrule`.
 
 ## Playbook Tools {#260609-playbook-tools}
 
@@ -686,16 +697,17 @@ consistently.
 
 Tool-permission enforcement is the server-side capability check in the keyed
 `tools/call` handler. A session key carries `{root + capability scope}` —
-`lead`, `delegate`, or `leaf` — minted by `ws.lead.login(capability)` or as a
+`lead`, `delegate`, or `leaf` — minted by `ws.ferrule(capability)` or as a
 render-minted child key. When a call presents a known non-lead key, the handler
 rejects any tool that scope disallows (`delegate` cannot call `ws.mercenary.*`,
 `config.*`, or `session.*`; `leaf` additionally cannot call `git.commit`) and
-rejects any `ws.lead.*` call from any non-lead key (self-login escalation
-block). The retained `api.list` cache-domain discovery tool is read-only and
+rejects any lead-only tool from any non-lead key — the `ws.lead.*` prefix plus
+the bootstrap tool `ws.ferrule` matched by explicit name (self-bootstrap
+escalation block). The retained `api.list` cache-domain discovery tool is read-only and
 leaf-callable; the retired agent-backed API ask tools are absent from the
 surface rather than blocked by scope. Keyless callers and lead keys are not
 restricted by this gate,
-so the keyless `ws.lead.login` bootstrap stays open; a delegate can therefore
+so the keyless `ws.ferrule` bootstrap stays open; a delegate can therefore
 keyless-re-`login` to re-escalate. The scope is a soft defense-in-depth guard
 layered on the host's own subagent tool restriction, not a hard sandbox.
 

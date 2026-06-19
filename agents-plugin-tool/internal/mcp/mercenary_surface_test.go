@@ -309,9 +309,9 @@ func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 	if strings.Contains(byID["1"], `"name":"ws.lead.prefer_mercenary"`) {
 		t.Fatalf("ws.lead.prefer_mercenary must be hidden in no-agent (wsflow) mode: %s", byID["1"])
 	}
-	// ws.lead.login stays visible (wsflow still needs bootstrap).
-	if !strings.Contains(byID["1"], `"name":"ws.lead.login"`) {
-		t.Fatalf("ws.lead.login must remain visible in no-agent mode: %s", byID["1"])
+	// the bootstrap tool stays visible (wsflow still needs bootstrap).
+	if !strings.Contains(byID["1"], `"name":"ws.ferrule"`) {
+		t.Fatalf("ws.ferrule must remain visible in no-agent mode: %s", byID["1"])
 	}
 }
 

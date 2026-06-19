@@ -41,6 +41,25 @@ const (
 	roleLeaf     toolRole = "leaf"
 )
 
+// bootstrapToolName is the deliberately obscure, function-inert name of the
+// lead session-bootstrap tool (mints a session key). Its name<->purpose mapping
+// is taught ONLY in ws:workflow-manual (260617 obscurity): a semantically
+// meaningless name removes the session-start "pull" that a descriptive name
+// (login/attach/bind) creates for every agent, lowering accidental/curious
+// invocation by subagents that share the lead's MCP connection. Invariants:
+// do not give it a descriptive alias, do not leak its purpose through its
+// tools/list description, and do not name it in error-guidance strings.
+const bootstrapToolName = "ws.ferrule"
+
+// isLeadOnlyTool reports whether a tool is restricted to lead-scoped session
+// keys. It is the authority for the keyed-gate escalation block. The bootstrap
+// tool must be listed explicitly because it no longer lives under the
+// `ws.lead.*` prefix (260617 obscurity rename) — a prefix-only check would
+// silently stop blocking it for non-lead keys.
+func isLeadOnlyTool(name string) bool {
+	return name == bootstrapToolName || strings.HasPrefix(name, "ws.lead.")
+}
+
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -312,14 +331,15 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g.
 	// runtime.info) silently ignore an unrecognised session_key.
 	//
-	// ws.lead.* tools are additionally blocked for any non-lead scoped key to
-	// prevent self-login escalation: a delegate or leaf key must not be able to
-	// call ws.lead.login and receive a lead-scoped key, bypassing all capability
-	// restrictions. A KEYLESS caller (no session_key) is unaffected — the normal
-	// lead bootstrap path remains open.
+	// Lead-only tools (see isLeadOnlyTool) are additionally blocked for any
+	// non-lead scoped key to prevent self-bootstrap escalation: a delegate or
+	// leaf key must not be able to call the bootstrap tool and receive a
+	// lead-scoped key, bypassing all capability restrictions. A KEYLESS caller
+	// (no session_key) is unaffected — the normal lead bootstrap path remains
+	// open.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		if entry, found := s.sessions.lookup(keyStr); found && entry.scope != roleLead {
-			if strings.HasPrefix(params.Name, "ws.lead.") || !roleAllowsTool(entry.scope, params.Name) {
+			if isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name) {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 			}
 		}
@@ -339,10 +359,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
 	case "session.set_default_root":
-		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; call ws.lead.login(root) and pass session_key"))
+		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.get_default_root":
-		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; call ws.lead.login(root) and pass session_key"))
-	case "ws.lead.login":
+		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
+	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -791,7 +811,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
 		}
 		if !s.sessions.setPreferMercenary(keyStr) {
-			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; re-login via ws.lead.login(root) and retry"))
+			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual and retry"))
 		}
 		return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
 
@@ -1008,13 +1028,13 @@ func canonicalSetupRoot(root string) (string, error) {
 	return canonicalGitRoot(root)
 }
 
-// handleLeadLogin implements the ws.lead.login tool: canonicalize root, mint an
+// handleLeadLogin implements the session-bootstrap tool (bootstrapToolName): canonicalize root, mint an
 // ephemeral session key, store the {root, scope} entry in the registry, and
 // return the key to the caller.
 func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) response {
 	rootArg, _ := arguments["root"].(string)
 	if strings.TrimSpace(rootArg) == "" {
-		return toolTextResponse(id, "", fmt.Errorf("ws.lead.login: root is required"))
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: root is required"))
 	}
 	canonical, err := canonicalSetupRoot(rootArg)
 	if err != nil {
@@ -1493,13 +1513,13 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 	if key, ok := arguments["session_key"].(string); ok && strings.TrimSpace(key) != "" {
 		entry, found := s.sessions.lookup(key)
 		if !found {
-			return "", fmt.Errorf("unknown_session: session key not found in registry; " +
-				"re-login via ws.lead.login(root) with your known root and retry the call")
+			return "", fmt.Errorf("unknown_session: session key not found; " +
+				"if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call")
 		}
 		return entry.root, nil
 	}
 
-	return "", fmt.Errorf("mandatory_session_key: root-aware ws tools require session_key; call ws.lead.login(root) first and pass the returned session_key")
+	return "", fmt.Errorf("mandatory_session_key: root-aware ws tools require a session_key; if you are the lead, obtain one per ws:workflow-manual and pass it")
 }
 
 func canonicalGitRoot(root string) (string, error) {
@@ -1774,8 +1794,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.lead.login",
-			"description": "Mint an ephemeral word-chain session key for the given repository root. The returned session_key may be passed to any root-aware ws tool to identify the call root without relying on the server session state. The key is opaque; do not parse it.",
+			"name":        bootstrapToolName,
+			"description": "Reserved workflow primitive. See ws:workflow-manual before use.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2314,7 +2334,7 @@ func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
 			properties = map[string]any{}
 			schema["properties"] = properties
 		}
-		properties["session_key"] = stringProperty("Caller's ws session key from ws.lead.login(root).")
+		properties["session_key"] = stringProperty("Caller's ws session key (see ws:workflow-manual).")
 		if name != "playbook.render" {
 			schema["required"] = appendRequiredString(schema["required"], "session_key")
 		}
@@ -2519,8 +2539,8 @@ func noAgentHiddenTool(name string) bool {
 		return true
 	case "ws.lead.prefer_mercenary":
 		// Mercenary render-mode control is ws-only; the agentless wsflow surface
-		// has no mercenary path, so prefer_mercenary is hidden there. ws.lead.login
-		// stays visible (wsflow still needs session-key bootstrap).
+		// has no mercenary path, so prefer_mercenary is hidden there. The
+		// bootstrap tool stays visible (wsflow still needs session-key bootstrap).
 		return true
 	default:
 		return false

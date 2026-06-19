@@ -584,8 +584,8 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 			t.Fatalf("wsflow playbook output missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "ws.lead.login") {
-		t.Fatalf("wsflow playbook output rewrote literal ws.lead.login tool name:\n%s", body)
+	if !strings.Contains(body, "ws.ferrule") {
+		t.Fatalf("wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", body)
 	}
 }
 
@@ -633,7 +633,7 @@ kind: print
 delegates: false
 ---
 Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
-Actual tool: ws.lead.login.
+Actual tool: ws.ferrule.
 `,
 	})
 	s := newTestServerWithHarness(t, "codex")
@@ -645,7 +645,7 @@ Actual tool: ws.lead.login.
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.lead.login"} {
+	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.ferrule"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered body missing %q:\n%s", want, body)
 		}

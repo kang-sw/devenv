@@ -14,7 +14,7 @@ import (
 )
 
 // sessionEntry associates a canonical repository root and a capability scope
-// with an ephemeral session key minted by ws.lead.login.
+// with an ephemeral session key minted by the session-bootstrap tool.
 type sessionEntry struct {
 	root            string
 	scope           toolRole

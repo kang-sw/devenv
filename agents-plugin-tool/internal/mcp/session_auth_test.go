@@ -15,7 +15,7 @@ import (
 // sessionKeyPattern validates the word-chain session key format: 4 lowercase words + 2-digit suffix.
 var sessionKeyPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+){3}-[0-9]{2}$`)
 
-// callLogin issues a ws.lead.login MCP call and returns the raw response line.
+// callLogin issues a ws.ferrule (session-bootstrap) MCP call and returns the raw response line.
 func callLogin(t *testing.T, server *Server, id int, root string, extra map[string]any) string {
 	t.Helper()
 	args := map[string]any{"root": root}
@@ -26,14 +26,14 @@ func callLogin(t *testing.T, server *Server, id int, root string, extra map[stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"ws.lead.login","arguments":%s}}`, id, raw)
+	line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"ws.ferrule","arguments":%s}}`, id, raw)
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(line), &out); err != nil {
 		t.Fatalf("ServeStdio error: %v", err)
 	}
 	resp := strings.TrimSpace(out.String())
 	if resp == "" {
-		t.Fatalf("got empty response for ws.lead.login id=%d", id)
+		t.Fatalf("got empty response for ws.ferrule id=%d", id)
 	}
 	return resp
 }
@@ -53,7 +53,7 @@ func callToolOnce(t *testing.T, server *Server, id int, name string, args map[st
 	return strings.TrimSpace(out.String())
 }
 
-// parseLoginResponse extracts the session_key and root from a ws.lead.login text response.
+// parseLoginResponse extracts the session_key and root from a ws.ferrule text response.
 func parseLoginResponse(t *testing.T, respLine string) (key, root string) {
 	t.Helper()
 	text := toolText(t, respLine)
@@ -83,7 +83,7 @@ func canonicalRootForTest(t *testing.T, root string) string {
 	return filepath.Clean(strings.TrimSpace(string(out)))
 }
 
-// --- Test 1: ws.lead.login returns a valid key and correct canonical root ---
+// --- Test 1: ws.ferrule returns a valid key and correct canonical root ---
 
 func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	useLeadProfile(t)
@@ -100,7 +100,7 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	// Login for root1
 	resp1 := callLogin(t, server, 1, root1, nil)
 	if toolIsError(t, resp1) {
-		t.Fatalf("ws.lead.login unexpectedly returned isError: %s", resp1)
+		t.Fatalf("ws.ferrule unexpectedly returned isError: %s", resp1)
 	}
 	key1, gotRoot1 := parseLoginResponse(t, resp1)
 	if !sessionKeyPattern.MatchString(key1) {
@@ -114,7 +114,7 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	// Login for root2
 	resp2 := callLogin(t, server, 2, root2, nil)
 	if toolIsError(t, resp2) {
-		t.Fatalf("ws.lead.login for root2 unexpectedly returned isError: %s", resp2)
+		t.Fatalf("ws.ferrule for root2 unexpectedly returned isError: %s", resp2)
 	}
 	key2, gotRoot2 := parseLoginResponse(t, resp2)
 	if !sessionKeyPattern.MatchString(key2) {
@@ -133,7 +133,7 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	// JSON format branch: key and root must be present and correctly formatted.
 	respJSON := callLogin(t, server, 3, root1, map[string]any{"format": "json"})
 	if toolIsError(t, respJSON) {
-		t.Fatalf("ws.lead.login json format returned isError: %s", respJSON)
+		t.Fatalf("ws.ferrule json format returned isError: %s", respJSON)
 	}
 	jsonText := toolText(t, respJSON)
 	var parsed struct {
@@ -315,8 +315,13 @@ func TestUnknownSessionKeyReturnsError(t *testing.T) {
 	if !strings.Contains(text, "unknown_session") {
 		t.Fatalf("error text missing 'unknown_session' token: %q", text)
 	}
-	if !strings.Contains(text, "ws.lead.login") {
-		t.Fatalf("error text must name the re-login recovery verb 'ws.lead.login': %q", text)
+	// 260617 scrub: the recovery hint must NOT leak the bootstrap tool name and
+	// must route the lead to the manual instead.
+	if strings.Contains(text, "ws.lead.login") || strings.Contains(text, "ws.ferrule") {
+		t.Fatalf("error text must not leak the bootstrap tool name: %q", text)
+	}
+	if !strings.Contains(text, "workflow-manual") {
+		t.Fatalf("error text must route recovery to ws:workflow-manual: %q", text)
 	}
 }
 
@@ -378,19 +383,19 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	})
 	assertGateError(t, "delegate/config.agents_tier", deniedDelegateResp, -32601)
 
-	// Non-lead key calling ws.lead.login must be denied (self-login escalation block).
-	deniedLoginResp := callToolOnce(t, server, 3, "ws.lead.login", map[string]any{
+	// Non-lead key calling the bootstrap tool must be denied (self-bootstrap escalation block).
+	deniedLoginResp := callToolOnce(t, server, 3, "ws.ferrule", map[string]any{
 		"session_key": leafKey,
 		"root":        root,
 	})
-	assertGateError(t, "leaf/ws.lead.login escalation", deniedLoginResp, -32601)
+	assertGateError(t, "leaf/bootstrap escalation", deniedLoginResp, -32601)
 
-	// Delegate key calling ws.lead.login must also be denied.
-	deniedDelegateLoginResp := callToolOnce(t, server, 4, "ws.lead.login", map[string]any{
+	// Delegate key calling the bootstrap tool must also be denied.
+	deniedDelegateLoginResp := callToolOnce(t, server, 4, "ws.ferrule", map[string]any{
 		"session_key": delegateKey,
 		"root":        root,
 	})
-	assertGateError(t, "delegate/ws.lead.login escalation", deniedDelegateLoginResp, -32601)
+	assertGateError(t, "delegate/bootstrap escalation", deniedDelegateLoginResp, -32601)
 
 	// Lead key must NOT be rejected by the capability gate for git.commit
 	// (may fail for other reasons such as missing files, but not -32601 from the gate).
@@ -410,10 +415,10 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 		t.Fatalf("lead key must NOT be blocked by capability gate (-32601): %s", allowedResp)
 	}
 
-	// Keyless caller must still be able to call ws.lead.login (normal bootstrap path).
+	// Keyless caller must still be able to call the bootstrap tool (normal bootstrap path).
 	keylessLoginResp := callLogin(t, server, 6, root, nil)
 	if toolIsError(t, keylessLoginResp) {
-		t.Fatalf("keyless ws.lead.login must succeed (additive guarantee): %s", keylessLoginResp)
+		t.Fatalf("keyless ws.ferrule must succeed (additive guarantee): %s", keylessLoginResp)
 	}
 }
 
@@ -432,8 +437,8 @@ func TestKeylessRootAwareCallRequiresSessionKey(t *testing.T) {
 			t.Fatalf("keyless git.status should be a tool error for args %#v: %s", args, resp)
 		}
 		text := toolText(t, resp)
-		if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "ws.lead.login") {
-			t.Fatalf("keyless error missing mandatory login guidance for args %#v: %q", args, text)
+		if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "workflow-manual") {
+			t.Fatalf("keyless error missing mandatory session-key guidance (manual route) for args %#v: %q", args, text)
 		}
 	}
 }
@@ -516,7 +521,7 @@ func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
 		t.Fatalf("keyless ws.mercenary.status should be a tool error: %s", resp)
 	}
 	text := toolText(t, resp)
-	if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "ws.lead.login") {
-		t.Fatalf("agent keyless error missing mandatory login guidance: %q", text)
+	if !strings.Contains(text, "mandatory_session_key") || !strings.Contains(text, "workflow-manual") {
+		t.Fatalf("agent keyless error missing mandatory session-key guidance (manual route): %q", text)
 	}
 }
