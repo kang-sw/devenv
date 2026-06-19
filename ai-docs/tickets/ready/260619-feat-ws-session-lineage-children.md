@@ -164,6 +164,33 @@ key is parent-less; an invalid/unknown parent is handled without minting a
 mislinked key; behavior is identical in wsflow no-agent mode; the existing
 lead-only gate is unaffected (a non-lead key still cannot call ferrule).
 
+### Result (12eb1bbe) - 2026-06-19
+
+Landed (`12eb1bbe`). All Phase 2 decisions honored:
+
+- `ws.ferrule` input schema gains an optional `parent_session_key` (not in
+  `required`); description kept terse and consistent with the deliberately
+  obscure ferrule surface (`server.go` tools list).
+- `handleLeadLogin` reads `parent_session_key`, `TrimSpace`-normalizes it, and
+  when non-empty validates it via `s.sessions.lookup`; an unknown parent returns
+  an error and mints no key (faithful to "without minting a mislinked key"). The
+  validated (or empty) parent threads into the Phase-1-widened
+  `s.sessions.mint(canonical, scope, parentKey)`. Empty string behaves as absent.
+- No parent scope/capability enforcement added: parent is metadata only and never
+  widens scope (scope still comes from `parseCapabilityScope`, untouched). The
+  lead-only ferrule gate is untouched.
+
+Verification: `go test ./internal/mcp/...` green; `go build ./...` clean. Four
+tests present and passing: `TestFerruleWithParentSessionKeyRecordsParent`,
+`TestFerruleWithoutParentSessionKeyMintsParentlessKey`,
+`TestFerruleUnknownParentSessionKeyErrorsWithoutMint`,
+`TestFerruleEmptyParentSessionKeyBehavesAsAbsent`. Wsflow no-agent mode shares
+the same code path (mode-independent plumbing), so no redundant separate test was
+added.
+
+Spec `260619-session-key-lineage-children` stays 🚧 until Phase 3 lands the
+`ws.session.children` enumeration tool (the caller-facing read surface).
+
 ### Phase 3: ws.session.children enumeration tool
 
 Add a read-only `ws.session.children(session_key, depth?, format?, include_dead?)`
