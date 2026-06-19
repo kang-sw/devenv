@@ -98,7 +98,13 @@ rather than a delegation-specific feature.
   (override existing) and `{.WorkflowManualExt}` (append) are the *same*
   primitive. Rejected: variable-with-frontmatter-default (engine fails loud on
   unprovided placeholders today, and multiline YAML defaults are ugly and move
-  seed text out of the body).
+  seed text out of the body). **Consequence: the `{{.DelegationSection}}`-style
+  template-variable placeholder is NOT used for override-points.** The
+  `DelegationSection` identifier survives only as the marker `<id>` and as the
+  `config.prompt.set` `pointId` key — the user-facing addressing API
+  (`config.prompt.set("DelegationSection", harness, prompt)`) is preserved; only
+  the in-body carrier changes from a `{{.Var}}` placeholder to a marker-delimited
+  block whose inline content is the seed default.
 - **Two orthogonal axes for prompt overrides:** `(pointId, harness)` selects
   *what* is overridden (harness in `claude | codex | "*"/all`, mirroring the
   existing per-harness `ModelAliases` map shape); scope selects *where* it is
@@ -118,16 +124,13 @@ rather than a delegation-specific feature.
   sibling field for overrides, a single inserted override-layer in
   `buildPlaybookVars`, and a new marker-pass function beside
   `selectProductModeBlocks` — not rewrites of existing functions.
-
-### Open (child-1 to finalize)
-
-- **Prompt-override storage layout.** Leaning: keep overrides inline in the
-  single config JSON (not split into per-override resource-files), to keep the
-  lock/atomicity story to one file; config size is not a functional problem
-  (config is already loaded per call; tens of KB is negligible) and raw-file
-  readability is recovered by the self-doc render. Split-to-resource-files was
-  argued against (reintroduces multi-file lock/atomicity/orphan complexity) but
-  is not yet user-confirmed; child-1 locks this in.
+- **Prompt-override storage = inline in the single config file (confirmed).**
+  Overrides live inline in the one config JSON, not split into per-override
+  resource-files, so the lock/atomicity story stays single-file. Config size is
+  not a functional problem (config is already loaded per call; tens of KB is
+  negligible) and raw-file readability is recovered by the self-doc render.
+  Split-to-resource-files rejected: reintroduces multi-file
+  lock/atomicity/orphan complexity.
 
 ## Completion Criteria
 
