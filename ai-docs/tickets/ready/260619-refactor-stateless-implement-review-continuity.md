@@ -120,6 +120,36 @@ Critical/Important findings are still relayed; minors flow to the final report.
 - `ai-docs/tickets/.done/260617-refactor-mcp-stateless-subagent-context.md` —
   stateless-delegate intent this builds on.
 
+## Spec Impact
+
+- **Target spec area**: `workflow-skills.md`, the `lead-implement` review-loop
+  contract — anchor `#260612-reviewer-allocation-tier-default` (review allocation
+  + relay cap) and the surrounding implementer/reviewer delegate description. That
+  anchor currently states the cap mechanics (single 2 / partitioned 3, lead
+  adjudication at cycle 2, caller escalation at cycle 3) but says nothing about
+  delegate statelessness, the reviewer verdict shape, the re-review relay payload,
+  or how convergence is enforced.
+- **Expected caller-visible change**:
+  - Delegates are stateless; loop continuity is lead-owned (anchored on commit
+    `## AI Context`), never on same-agent resume (D1/D2).
+  - The reviewer emits a severity-explicit verdict (`clean` /
+    `clean with N minor remaining` / `non-clean: M critical/important`); the lead
+    decides "clean" — it is not a machine gate (D5).
+  - The re-review relay carries the prior findings, their dispositions, and the
+    updated diff; the reviewer is not asked to classify regression-vs-preexisting
+    (D4).
+  - Convergence is enforced at the lead by semantic dedup against the durable
+    disposition record, layered over the existing relay cap as backstop (D6).
+  - The implementer records each fix-cycle disposition inline in the fix commit
+    `## AI Context` (D3).
+- **Contract-first spec: no.** The spec update and the three interlocking playbook
+  edits must land in the same implementation slice — the ticket requires them to
+  land together to avoid an incoherent intermediate, so a spec written ahead of
+  the playbooks would itself be the "spec says new behavior, playbooks say old"
+  intermediate this redesign avoids. `workflow-skills.md` is updated within the
+  implementation slice and the implement commit carries a `## Spec` section
+  naming the stem.
+
 ## Phases
 
 ### Phase 1: Land the stateless continuity contract across implement/review playbooks

@@ -304,6 +304,15 @@ dropped tickets live in hidden archive dirs and git history.
   tunable points with their stored/seed values. Both deps shipped (layered-config
   substrate + marker engine with the live `DelegationSection` point keyed
   `prompt.DelegationSection.<harness>`), so it is ready to promote.
+- `260619-refactor-stateless-implement-review-continuity` (ready) - makes the
+  `lead-implement` review fix-loop correct under the default native-subagent path
+  by treating delegates as stateless and moving continuity to the lead, anchored
+  on commit `## AI Context`. Single interlocking Phase 1 across
+  `implementer.md`/`reviewer.md`/`lead-implement.md` (D1-D6). Spec addressing:
+  `## Spec Impact` on `workflow-skills.md` (`#260612-reviewer-allocation-tier-default`),
+  contract-first: no (spec + playbooks land together in the slice). Implementation
+  is Ask-first + `lead-skill-authoring` review (observable workflow behavior). Epic
+  child of `260605`.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
