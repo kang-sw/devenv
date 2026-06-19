@@ -184,7 +184,7 @@ resolved to a concrete backend/model by mapping through the alias layer into
 `config.agents_tier` (`#260513-harness-local-agent-tier-config`), which remains
 keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
 
-### 🚧 Layered Config Scope Model {#260619-layered-config-scope-model}
+### Layered Config Scope Model {#260619-layered-config-scope-model}
 
 Config items resolve across four ordered scopes, highest precedence first:
 `session > project > global > builtin`. `builtin` is the code default (for
@@ -222,6 +222,12 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 > - Item-level write gating still applies: a scope-aware setter honors an item's
 >   existing role/capability restrictions (not every item is freely settable at
 >   every scope).
+> - The substrate (resolver, default-scope registry, file-lock RMW, global store,
+>   shared `scope` schema fragment) and scope-reporting on `config.show` are the
+>   caller-visible surface today. Per-item scope-aware *set* surfaces arrive as
+>   individual items adopt the model (`prefer_mercenary`
+>   (`#260619-prefer-mercenary-session-scope-item`), prompt overrides); the set
+>   capability otherwise lives at the internal `wsconfig` API.
 
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
