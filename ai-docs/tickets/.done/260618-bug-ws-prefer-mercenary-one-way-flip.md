@@ -33,3 +33,17 @@ a preference can be unset.
   state moves to a per-session file, `preferMercenary` becomes editable metadata,
   which would make a disable path trivial — decide whether to defer the fix to
   that work or add a disable path independently.
+
+## Resolution (c65326bd) - 2026-06-19
+
+Resolved by `260619-feat-ws-layered-config-scope-substrate` Phase 2 (impl
+`090e69f3`, fix-cycle `c65326bd`, landed on the epic via merge `cd0f06b8`). The
+desired-state answer was chosen: `ws.lead.prefer_mercenary` now accepts an
+optional `enabled` boolean (default `true` for backward-compatible legacy call
+shape), and `enabled:false` disables it on the same session key. The value rides
+the per-key session `Overrides` overlay through the layered config resolver, so
+`playbook.render` guidance follows BOTH transitions. The one-way `setPreferMercenary`
+and the in-memory `preferMercenary` field are removed. The fresh-login reset path
+is no longer the only revert. Open questions are answered: desired-state, not
+one-way; the per-session-file interaction (260617) made the disable path the
+clean implementation, exactly as anticipated.
