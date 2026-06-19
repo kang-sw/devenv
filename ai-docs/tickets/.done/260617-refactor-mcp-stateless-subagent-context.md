@@ -87,6 +87,18 @@ which prompt/render flows currently depend on in-memory session continuity.
 Verification: a short matrix with reproducible probes for same-instance,
 fresh-instance, and unknown-session outcomes.
 
+### Result (f757f70f) - 2026-06-19
+
+Resolved by design rather than by an empirical probe matrix. The conservative
+assumption from `## Decisions` — subagent MCP process identity is unstable, a
+subagent may or may not share the lead's instance — was adopted directly. The
+file-as-source-of-truth design is correct whether or not instances are shared,
+so characterizing the exact same-instance/fresh-instance boundary was not on the
+critical path and no matrix was produced. The dogfood symptom recorded in
+Background (a rendered delegate prompt's minted key reported `unknown_session` on
+a fresh instance) is the observed instance of that unstable boundary; the fix
+removes the dependency outright instead of mapping when it triggers.
+
 ### Phase 2: design stateless filesystem-backed delegation context
 
 Adopt the per-session filesystem store from `## Decisions` as the delegation
@@ -96,6 +108,26 @@ a fresh-instance subagent discovers its file, and which existing MCP tools stop
 depending on per-process session registry continuity. Verification: spec or
 mental-model updates identify the new source of truth and rejected alternatives.
 
+### Result (f757f70f) - 2026-06-19
+
+- **Layout (flat, confirmed with user):** `<cache-root>/keys/<key>.json`, one JSON
+  record per key. Not per-worktree `sessions/` — a caller presents only the
+  opaque key, never its root, so the path must derive from key + globally
+  deterministic cache root.
+- **Key→filename:** the opaque word-chain key verbatim, guarded by a path-safety
+  pattern `^[a-z0-9-]{1,128}$` (rejects separators/dots/traversal); deliberately
+  not an exact word-chain format check so the store tolerates future key-format
+  evolution.
+- **Read policy:** read-fresh on every `lookup` (no in-process cache); the file is
+  the source of truth, so every server instance agrees without coordination.
+- **Cache location:** `wsstate.CacheRoot(Options{})`, honoring `WS_CACHE_HOME` —
+  the single seam every ws cache artifact already uses. A per-login cache-path
+  override was rejected: `lookup` receives only the key, never login args, so a
+  per-login path would be unresolvable on a fresh-instance lookup.
+- **Registry-continuity removal:** `mint`/`lookup`/`setPreferMercenary` keep their
+  signatures, so no MCP tool changed shape; every root resolution now reads the
+  file, so no tool depends on per-process session continuity.
+
 ### Phase 3: implement stateless delegate context path
 
 Implement the chosen filesystem-backed or prompt-embedded context path and
@@ -103,3 +135,21 @@ update playbook rendering, MCP root resolution, tests, and docs accordingly.
 Verification: native subagents can use rendered delegate prompts even when they
 start with a fresh MCP server instance; existing lead-session behavior remains
 compatible or has an explicit migration path.
+
+### Result (f757f70f) - 2026-06-19
+
+Implemented `sessionStore` (`internal/mcp/session_auth.go`): `O_EXCL`-create mint
+for cross-process unique claim, atomic temp-write + rename update, read-fresh
+lookup with path-safety validation. The `server.go` and `playbook_tools.go` call
+sites are unchanged. `TestMain` defaults `WS_CACHE_HOME` to a throwaway temp dir
+so the suite never touches the real `~/.cache`; new
+`TestSessionKeySurvivesFreshServerInstance` proves a key minted on one `Server`
+resolves on a brand-new `Server` and that a path-unsafe key yields
+`unknown_session`. spec `mcp-tools.md` and mental-model `mcp-runtime.md` updated
+to describe the filesystem-backed store as the source of truth (the swap the spec
+had already anticipated as contract-invariant). Full `internal/mcp` test suite and
+`go vet` green. No migration shim: in-flight keys from a prior in-memory process
+simply re-login via the existing `unknown_session` contract.
+
+Ready gate (spec-addressing / `ready/` promotion) intentionally skipped per user
+direction for this dogfood implementation pass.

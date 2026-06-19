@@ -166,7 +166,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260616-refactor-wsflow-product-mode-convergence` | done | Collapsed wsflow onto product-mode playbook rendering and removed curated skill bodies |
 | `260616-refactor-explicit-namespace-render-vars` | done | Replaced implicit ws->wsflow playbook string substitution with explicit reserved namespace render vars |
 | `260617-feat-fresh-reader-audit-playbook` | idea | Add a reusable fresh-reader audit playbook for skill and prompt authoring |
-| `260617-refactor-mcp-stateless-subagent-context` | todo | Make MCP subagent context stateless and filesystem-backed |
+| `260617-refactor-mcp-stateless-subagent-context` | done | Make MCP subagent context stateless and filesystem-backed |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
@@ -255,10 +255,12 @@ dropped tickets live in hidden archive dirs and git history.
   `wsflow/playbook.print` shims over shared rsrc playbooks. Phase 4
   (`6fec9107`) removed the wsflow-only `prompt.render` MCP/runtime surface and
   stale migration doctrine; wsflow delegate prompts now render through
-  `playbook.render`. Open dogfood follow-up:
-  `260617-refactor-mcp-stateless-subagent-context` captures that native
-  subagents may start fresh MCP instances and need stateless/filesystem-backed
-  workflow context. Open: Codex non-skill `rsrc/` cache materialization
+  `playbook.render`. Dogfood follow-up
+  `260617-refactor-mcp-stateless-subagent-context` (**done** `f757f70f`,
+  `.done/`) replaced the in-memory session registry with a flat per-key
+  filesystem store (`keys/<key>.json`), so native subagents that start fresh
+  MCP instances resolve session keys from disk instead of shared process state.
+  Open: Codex non-skill `rsrc/` cache materialization
   (prereqs `260523`, `260524-codex-cache`).
 - `260611-refactor-ws-tier-taxonomy-delegate-tier-routing` (**done** `.done/`,
   refactor; ready→.done 2026-06-12) - first-class `small/medium/large/xlarge` tier
