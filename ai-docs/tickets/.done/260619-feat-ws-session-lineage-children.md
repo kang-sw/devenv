@@ -72,7 +72,7 @@ strict depth-1 containment (see Decisions).
   dispatched children are non-recursive leaves. The lead ferruling N roots is
   already allowed (the lead key is `roleLead`, so the gate's non-lead branch is
   skipped) and already documented.
-- `ws.session.children` returns child **key strings** (credentials): keys are
+- `session.children` returns child **key strings** (credentials): keys are
   lead-private, the caller already holds the parent key that minted them, and
   re-threading after compaction is the feature's purpose.
 - Worktree creation/removal stays out of scope (native git tooling). Merge-back
@@ -117,6 +117,39 @@ Verification: store round-trips `parent`; a render-minted leaf carries the lead
 key as parent; a `root_override` worktree leaf likewise; omitempty keeps legacy
 records readable; concurrent mints do not clobber parent.
 
+### Result (95d56b26) - 2026-06-19
+
+Landed (impl `1f72fa3c`, manifest-drift fix `95d56b26`). All Phase 1 decisions
+honored:
+
+- `sessionRecord` gains `Parent string \`json:"parent,omitempty"\`` and
+  `sessionEntry` gains `parent string`; `schema_version` stays `1`. The
+  concurrently-added `Overrides` field is preserved across the json round-trip
+  (`session_auth.go`).
+- `sessionStore.mint(root, scope, parent)` writes `Parent`; `lookup` populates
+  `entry.parent`. `setPreferMercenary`'s read-modify-write preserves `parent`
+  (unmarshal/marshal round-trip; test-confirmed).
+- Render path threads the lead key: `server.go` callTool sets `parentKey = keyStr`
+  inside the `entry.scope == roleLead` branch (so only lead callers record a
+  parent, and it is the lead's own key), passed through
+  `renderPlaybook → renderPlaybookBody → mint`. `root_override` worktree leaves
+  record the same lead parent (parentKey is independent of mintRoot).
+- Bootstrap/print stay parentless: `handleLeadLogin` and `printPlaybook` pass `""`.
+  No `parent_session_key` arg and no `ws.session.children` tool added (Phases 2/3).
+
+Verification: `go test ./internal/mcp/... ./internal/wsrsrc/...` green; full
+`go test ./...` green (one transient subprocess-timing flake, not reproduced on
+re-run). Four required tests present and passing:
+`TestSessionMintRoundTripsParent`, `TestRenderPathMintedChildRecordsLeadParent`,
+`TestLegacySessionRecordWithoutParentResolves`,
+`TestSetPreferMercenaryPreservesParent`. `go build ./...` clean.
+
+Incidental fix: the two `lead-workflow-manual.md` golden-hash failures that prior
+slices logged as "pre-existing" were stale `manifest.json` + wsflow mirror drift
+left by the per-workroot manual edit (`13eeccd9`). Regenerated via the canonical
+seams (`WS_REGEN_MANIFEST=1`, `WS_REGEN_WSFLOW_RSRC=1`) in `95d56b26`; those
+golden tests now pass.
+
 ### Phase 2: Optional parent on ws.ferrule (scenario-2 coordination lineage)
 
 Add an optional `parent_session_key` argument to `ws.ferrule`. When present, the
@@ -131,14 +164,43 @@ key is parent-less; an invalid/unknown parent is handled without minting a
 mislinked key; behavior is identical in wsflow no-agent mode; the existing
 lead-only gate is unaffected (a non-lead key still cannot call ferrule).
 
-### Phase 3: ws.session.children enumeration tool
+### Result (12eb1bbe) - 2026-06-19
 
-Add a read-only `ws.session.children(session_key, depth?, format?, include_dead?)`
+Landed (`12eb1bbe`). All Phase 2 decisions honored:
+
+- `ws.ferrule` input schema gains an optional `parent_session_key` (not in
+  `required`); description kept terse and consistent with the deliberately
+  obscure ferrule surface (`server.go` tools list).
+- `handleLeadLogin` reads `parent_session_key`, `TrimSpace`-normalizes it, and
+  when non-empty validates it via `s.sessions.lookup`; an unknown parent returns
+  an error and mints no key (faithful to "without minting a mislinked key"). The
+  validated (or empty) parent threads into the Phase-1-widened
+  `s.sessions.mint(canonical, scope, parentKey)`. Empty string behaves as absent.
+- No parent scope/capability enforcement added: parent is metadata only and never
+  widens scope (scope still comes from `parseCapabilityScope`, untouched). The
+  lead-only ferrule gate is untouched.
+
+Verification: `go test ./internal/mcp/...` green; `go build ./...` clean. Four
+tests present and passing: `TestFerruleWithParentSessionKeyRecordsParent`,
+`TestFerruleWithoutParentSessionKeyMintsParentlessKey`,
+`TestFerruleUnknownParentSessionKeyErrorsWithoutMint`,
+`TestFerruleEmptyParentSessionKeyBehavesAsAbsent`. Wsflow no-agent mode shares
+the same code path (mode-independent plumbing), so no redundant separate test was
+added.
+
+Spec `260619-session-key-lineage-children` stays 🚧 until Phase 3 lands the
+`ws.session.children` enumeration tool (the caller-facing read surface).
+
+### Phase 3: session.children enumeration tool
+
+Add a read-only `session.children(session_key, depth?, format?, include_dead?)`
 tool that scans the flat `keys/` store, returns the subtree whose `parent` chain
 roots at the presented key, and labels each child by stored `scope` (control
 coordination keys vs delegate/leaf). Default output is compact labeled text (the
 tree, including the child key strings for re-threading); `format:"json"` is the
-structured escape hatch.
+structured escape hatch. The tool is registered in the `session.*` family so the
+pre-existing keyed-gate `session.` prefix block (`roleAllowsTool`) already
+restricts it to lead-scoped keys with no gate change.
 
 Settled contract decisions:
 
@@ -159,3 +221,40 @@ control keys; depth bounding works (`depth: 0` = full subtree); dead keys are
 filtered unless `include_dead: true`; text default carries re-threadable keys;
 json escape hatch returns stable fields; a leaf key returns an empty/flat result;
 enumeration never crosses into unrelated sessions.
+
+### Result (4ac91312) - 2026-06-19
+
+Landed (`4ac91312`). All Phase 3 decisions honored:
+
+- `sessionStore.children(parentKey, maxDepth)` (`session_auth.go`): reads the
+  flat keys dir under `s.mu`, builds a `parent→[]key` adjacency, and BFS-walks
+  the subtree. `maxDepth >= 1` bounds to that many levels; `maxDepth <= 0` is the
+  full subtree. The queried key is excluded; a `visited` set guards cycles;
+  liveness is `os.Stat(record.Root)`; output is deterministically sorted (depth,
+  then key). Reuses the non-locking `readRecord`, so the single `s.mu` hold does
+  not deadlock.
+- `session.children` tool (`server.go`): `tools()` schema entry
+  (`session_key` required, `depth`/`include_dead`/`format` optional) + dispatch
+  case + `handleSessionChildren`. `depth` is parsed directly (not via
+  `intFromArgument`, which coerces `<=0` to its fallback and would have broken
+  `depth: 0 = full`). Dead children filtered unless `include_dead`; text default
+  (indented, carries re-threadable keys, `live:` flag shown when `include_dead`),
+  `format:"json"` returns stable `{key, scope, parent, depth, live, root}` fields.
+  Scope labels: `lead→control`, `delegate`, `leaf`.
+- Tool registered in the `session.*` family, so the pre-existing
+  `roleAllowsTool` `session.` prefix block restricts it to lead-scoped keys with
+  **no gate change** (confirmed: `roleAllowsTool` is untouched).
+
+Verification: `go test ./internal/mcp/...` green; `go build ./...` clean. Seven
+tests present and passing (4 store-level: immediate control/delegate/leaf
+children, depth bounding + full subtree, leaf + sibling isolation, dead-root
+marking; 3 handler-level through the real dispatch path: dead filtering +
+`include_dead`, json stable fields, missing `session_key` error).
+
+Mental-model: `mcp-runtime.md` `sessionStore` bullet gained one sentence on
+parent lineage + `session.children`; `named-agent-runtime` needed no change
+(lineage is store-level, not agent-runtime). Spec
+`260619-session-key-lineage-children` 🚧 marker stripped — the caller-facing read
+surface is now complete.
+
+**Ticket complete: all three phases landed.**

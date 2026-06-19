@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -87,6 +88,7 @@ func canonicalRootForTest(t *testing.T, root string) string {
 
 func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root1 := t.TempDir()
 	root2 := t.TempDir()
 	initGit(t, root1)
@@ -151,6 +153,120 @@ func TestLeadLoginReturnsKeyAndRoot(t *testing.T) {
 	}
 }
 
+func TestFerruleWithParentSessionKeyRecordsParent(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+	initGit(t, root1)
+	initGit(t, root2)
+	server := NewServer(root1, "test")
+
+	parentResp := callLogin(t, server, 1, root1, nil)
+	if toolIsError(t, parentResp) {
+		t.Fatalf("primary ws.ferrule returned isError: %s", parentResp)
+	}
+	parentKey, _ := parseLoginResponse(t, parentResp)
+
+	childResp := callLogin(t, server, 2, root2, map[string]any{"parent_session_key": parentKey})
+	if toolIsError(t, childResp) {
+		t.Fatalf("child ws.ferrule returned isError: %s", childResp)
+	}
+	childKey, _ := parseLoginResponse(t, childResp)
+	childEntry, ok := server.sessions.lookup(childKey)
+	if !ok {
+		t.Fatalf("lookup child key %q failed", childKey)
+	}
+	if childEntry.parent != parentKey {
+		t.Fatalf("child parent = %q, want %q", childEntry.parent, parentKey)
+	}
+	if childEntry.scope != roleLead {
+		t.Fatalf("child scope = %q, want %q", childEntry.scope, roleLead)
+	}
+}
+
+func TestFerruleWithoutParentSessionKeyMintsParentlessKey(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callLogin(t, server, 1, root, nil)
+	if toolIsError(t, resp) {
+		t.Fatalf("ws.ferrule returned isError: %s", resp)
+	}
+	key, _ := parseLoginResponse(t, resp)
+	entry, ok := server.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("lookup key %q failed", key)
+	}
+	if entry.parent != "" {
+		t.Fatalf("parent = %q, want empty", entry.parent)
+	}
+}
+
+func TestFerruleUnknownParentSessionKeyErrorsWithoutMint(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+	before := sessionKeyFileCount(t, server)
+
+	resp := callLogin(t, server, 1, root, map[string]any{"parent_session_key": "missing-parent-00"})
+	if !toolIsError(t, resp) {
+		t.Fatalf("unknown parent_session_key should return tool error: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, `parent_session_key "missing-parent-00" is not a known session key`) {
+		t.Fatalf("unknown parent error text = %q", text)
+	}
+	after := sessionKeyFileCount(t, server)
+	if after != before {
+		t.Fatalf("session key count grew after unknown parent: before=%d after=%d", before, after)
+	}
+}
+
+func TestFerruleEmptyParentSessionKeyBehavesAsAbsent(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callLogin(t, server, 1, root, map[string]any{"parent_session_key": "   "})
+	if toolIsError(t, resp) {
+		t.Fatalf("empty parent_session_key should behave as absent, got isError: %s", resp)
+	}
+	key, _ := parseLoginResponse(t, resp)
+	entry, ok := server.sessions.lookup(key)
+	if !ok {
+		t.Fatalf("lookup key %q failed", key)
+	}
+	if entry.parent != "" {
+		t.Fatalf("parent = %q, want empty", entry.parent)
+	}
+}
+
+func sessionKeyFileCount(t *testing.T, server *Server) int {
+	t.Helper()
+	dir, err := server.sessions.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", dir, err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			count++
+		}
+	}
+	return count
+}
+
 // --- Test 2: valid session_key resolves the bound root; concurrent calls do not clobber ---
 
 func TestSessionKeyResolvesRoot(t *testing.T) {
@@ -171,11 +287,11 @@ func TestSessionKeyResolvesRoot(t *testing.T) {
 	server := NewServer(root1, "test")
 
 	// Mint keys for both roots directly to avoid round-trip parsing.
-	key1, err := server.sessions.mint(canonical1, roleLead)
+	key1, err := server.sessions.mint(canonical1, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint root1: %v", err)
 	}
-	key2, err := server.sessions.mint(canonical2, roleLead)
+	key2, err := server.sessions.mint(canonical2, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint root2: %v", err)
 	}
@@ -335,16 +451,16 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	server := NewServer(root, "test")
 
 	// git.commit is blocked for roleLeaf.
-	leafKey, err := server.sessions.mint(root, roleLeaf)
+	leafKey, err := server.sessions.mint(root, roleLeaf, "")
 	if err != nil {
 		t.Fatalf("mint leaf key: %v", err)
 	}
 	// ws.mercenary.register is blocked for roleDelegate.
-	delegateKey, err := server.sessions.mint(root, roleDelegate)
+	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatalf("mint delegate key: %v", err)
 	}
-	leadKey, err := server.sessions.mint(root, roleLead)
+	leadKey, err := server.sessions.mint(root, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint lead key: %v", err)
 	}
@@ -484,7 +600,7 @@ func TestSessionKeySurvivesFreshServerInstance(t *testing.T) {
 
 	// Mint on the "lead" server, then discard it entirely.
 	leadServer := NewServer(root, "test")
-	key, err := leadServer.sessions.mint(canonical, roleLead)
+	key, err := leadServer.sessions.mint(canonical, roleLead, "")
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -507,6 +623,374 @@ func TestSessionKeySurvivesFreshServerInstance(t *testing.T) {
 	}
 	if text := toolText(t, bad); !strings.Contains(text, "unknown_session") {
 		t.Fatalf("path-unsafe key should yield unknown_session, got: %q", text)
+	}
+}
+
+func TestSessionMintRoundTripsParent(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer("", "test")
+
+	parentKey := "parent-key-00"
+	childKey, err := server.sessions.mint("/work/child", roleDelegate, parentKey)
+	if err != nil {
+		t.Fatalf("mint child: %v", err)
+	}
+	childEntry, ok := server.sessions.lookup(childKey)
+	if !ok {
+		t.Fatalf("lookup child key %q failed", childKey)
+	}
+	if childEntry.parent != parentKey {
+		t.Fatalf("child parent = %q, want %q", childEntry.parent, parentKey)
+	}
+	if childEntry.scope != roleDelegate {
+		t.Fatalf("child scope = %q, want %q", childEntry.scope, roleDelegate)
+	}
+
+	rootKey, err := server.sessions.mint("/work/root", roleLead, "")
+	if err != nil {
+		t.Fatalf("mint root: %v", err)
+	}
+	rootEntry, ok := server.sessions.lookup(rootKey)
+	if !ok {
+		t.Fatalf("lookup root key %q failed", rootKey)
+	}
+	if rootEntry.parent != "" {
+		t.Fatalf("root parent = %q, want empty", rootEntry.parent)
+	}
+	if rootEntry.scope != roleLead {
+		t.Fatalf("root scope = %q, want %q", rootEntry.scope, roleLead)
+	}
+}
+
+func TestRenderPathMintedChildRecordsLeadParent(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"leaf-pb/leaf-pb.md": leafPlaybookContent,
+	})
+	initGit(t, rsrcRoot)
+	server := NewServer(rsrcRoot, "test")
+	leadKey, err := server.sessions.mint(rsrcRoot, roleLead, "")
+	if err != nil {
+		t.Fatalf("mint lead: %v", err)
+	}
+
+	resp := callToolOnce(t, server, 1, "playbook.render", map[string]any{
+		"session_key":   leadKey,
+		"name":          "leaf-pb",
+		"root_override": rsrcRoot,
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("playbook.render returned isError: %s", resp)
+	}
+	renderedPath := strings.TrimSpace(toolText(t, resp))
+	bodyBytes, err := os.ReadFile(renderedPath)
+	if err != nil {
+		t.Fatalf("read rendered playbook %q: %v", renderedPath, err)
+	}
+	childKey := extractSplicedKey(t, string(bodyBytes))
+	childEntry, ok := server.sessions.lookup(childKey)
+	if !ok {
+		t.Fatalf("lookup rendered child key %q failed", childKey)
+	}
+	if childEntry.parent != leadKey {
+		t.Fatalf("rendered child parent = %q, want lead key %q", childEntry.parent, leadKey)
+	}
+	if childEntry.scope != roleLeaf {
+		t.Fatalf("rendered child scope = %q, want %q", childEntry.scope, roleLeaf)
+	}
+	if childEntry.root != rsrcRoot {
+		t.Fatalf("rendered child root = %q, want root_override %q", childEntry.root, rsrcRoot)
+	}
+}
+
+func TestLegacySessionRecordWithoutParentResolves(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	dir, err := store.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	const key = "legacy-key-00"
+	// The legacy record carries the retired typed prefer_mercenary field; it must
+	// be silently ignored on read (the toggle now lives in Overrides), while the
+	// record still resolves with an empty parent edge.
+	legacyJSON := `{"schema_version":1,"root":"/legacy/root","scope":"delegate","prefer_mercenary":true}`
+	if err := os.WriteFile(store.keyPath(dir, key), []byte(legacyJSON), 0o644); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+	entry, ok := store.lookup(key)
+	if !ok {
+		t.Fatalf("legacy key %q did not resolve", key)
+	}
+	if entry.parent != "" {
+		t.Fatalf("legacy parent = %q, want empty", entry.parent)
+	}
+	if entry.root != "/legacy/root" || entry.scope != roleDelegate {
+		t.Fatalf("legacy entry = %#v, want root/scope preserved", entry)
+	}
+}
+
+// TestSetOverridePreservesParent guards the read-modify-write override path
+// (the live successor to the retired setPreferMercenary) against clobbering the
+// parent lineage edge stored on the same record.
+func TestSetOverridePreservesParent(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	parentKey := "parent-key-00"
+	key, err := store.mint("/work/child", roleDelegate, parentKey)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if err := store.setOverride(key, "prefer_mercenary", "true"); err != nil {
+		t.Fatalf("setOverride(%q): %v", key, err)
+	}
+	if v, ok := store.getOverride(key, "prefer_mercenary"); !ok || v != "true" {
+		t.Fatalf("getOverride after set = (%q, %v), want (\"true\", true)", v, ok)
+	}
+	entry, ok := store.lookup(key)
+	if !ok {
+		t.Fatalf("lookup after setOverride failed")
+	}
+	if entry.parent != parentKey {
+		t.Fatalf("parent after setOverride = %q, want %q", entry.parent, parentKey)
+	}
+}
+
+func writeSessionRecordForTest(t *testing.T, store *sessionStore, key, root string, scope toolRole, parent string) {
+	t.Helper()
+	dir, err := store.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	payload, err := json.Marshal(sessionRecord{
+		SchemaVersion: sessionRecordSchemaVersion,
+		Root:          root,
+		Scope:         string(scope),
+		Parent:        parent,
+	})
+	if err != nil {
+		t.Fatalf("marshal session record: %v", err)
+	}
+	if err := os.WriteFile(store.keyPath(dir, key), payload, 0o644); err != nil {
+		t.Fatalf("write session record %q: %v", key, err)
+	}
+}
+
+func childrenByKey(children []sessionChild) map[string]sessionChild {
+	out := make(map[string]sessionChild, len(children))
+	for _, child := range children {
+		out[child.key] = child
+	}
+	return out
+}
+
+func TestSessionStoreChildrenReturnsImmediateControlDelegateAndLeafChildren(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	parentRoot := t.TempDir()
+	childRoot := t.TempDir()
+
+	writeSessionRecordForTest(t, store, "parent-key-00", parentRoot, roleLead, "")
+	writeSessionRecordForTest(t, store, "delegate-one-00", childRoot, roleDelegate, "parent-key-00")
+	writeSessionRecordForTest(t, store, "delegate-two-00", childRoot, roleDelegate, "parent-key-00")
+	writeSessionRecordForTest(t, store, "control-one-00", childRoot, roleLead, "parent-key-00")
+
+	children, err := store.children("parent-key-00", 1)
+	if err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	if len(children) != 3 {
+		t.Fatalf("len(children) = %d, want 3: %#v", len(children), children)
+	}
+	byKey := childrenByKey(children)
+	for key, wantScope := range map[string]toolRole{
+		"control-one-00":  roleLead,
+		"delegate-one-00": roleDelegate,
+		"delegate-two-00": roleDelegate,
+	} {
+		child, ok := byKey[key]
+		if !ok {
+			t.Fatalf("missing child %q in %#v", key, children)
+		}
+		if child.scope != wantScope {
+			t.Fatalf("%s scope = %q, want %q", key, child.scope, wantScope)
+		}
+		if child.depth != 1 || child.parent != "parent-key-00" || !child.live {
+			t.Fatalf("%s child metadata = %#v, want depth=1 parent=parent-key-00 live=true", key, child)
+		}
+	}
+}
+
+func TestSessionStoreChildrenDepthBoundingAndFullSubtree(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	root := t.TempDir()
+
+	writeSessionRecordForTest(t, store, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "delegate-mid-00", root, roleDelegate, "lead-root-00")
+	writeSessionRecordForTest(t, store, "leaf-final-00", root, roleLeaf, "delegate-mid-00")
+
+	depthOne, err := store.children("lead-root-00", 1)
+	if err != nil {
+		t.Fatalf("children depth 1: %v", err)
+	}
+	if len(depthOne) != 1 || depthOne[0].key != "delegate-mid-00" {
+		t.Fatalf("depth 1 children = %#v, want only delegate-mid-00", depthOne)
+	}
+
+	full, err := store.children("lead-root-00", 0)
+	if err != nil {
+		t.Fatalf("children full: %v", err)
+	}
+	if len(full) != 2 {
+		t.Fatalf("full children len = %d, want 2: %#v", len(full), full)
+	}
+	byKey := childrenByKey(full)
+	if byKey["delegate-mid-00"].depth != 1 {
+		t.Fatalf("delegate depth = %d, want 1", byKey["delegate-mid-00"].depth)
+	}
+	if byKey["leaf-final-00"].depth != 2 {
+		t.Fatalf("leaf depth = %d, want 2", byKey["leaf-final-00"].depth)
+	}
+}
+
+func TestSessionStoreChildrenLeafAndSiblingIsolation(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	root := t.TempDir()
+
+	writeSessionRecordForTest(t, store, "lead-one-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "lead-two-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "leaf-one-00", root, roleLeaf, "lead-one-00")
+	writeSessionRecordForTest(t, store, "leaf-two-00", root, roleLeaf, "lead-two-00")
+
+	leafChildren, err := store.children("leaf-one-00", 0)
+	if err != nil {
+		t.Fatalf("leaf children: %v", err)
+	}
+	if len(leafChildren) != 0 {
+		t.Fatalf("leaf children = %#v, want empty", leafChildren)
+	}
+
+	children, err := store.children("lead-one-00", 0)
+	if err != nil {
+		t.Fatalf("lead one children: %v", err)
+	}
+	if len(children) != 1 || children[0].key != "leaf-one-00" {
+		t.Fatalf("lead one children = %#v, want only leaf-one-00", children)
+	}
+}
+
+func TestSessionStoreChildrenMarksDeadRoots(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	root := t.TempDir()
+	deadRoot := filepath.Join(t.TempDir(), "missing")
+
+	writeSessionRecordForTest(t, store, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "dead-child-00", deadRoot, roleDelegate, "lead-root-00")
+
+	children, err := store.children("lead-root-00", 1)
+	if err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	if len(children) != 1 {
+		t.Fatalf("children len = %d, want 1: %#v", len(children), children)
+	}
+	if children[0].live {
+		t.Fatalf("dead child live = true, want false: %#v", children[0])
+	}
+}
+
+func TestSessionChildrenFiltersDeadByDefaultAndIncludesWhenRequested(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+	deadRoot := filepath.Join(t.TempDir(), "missing")
+
+	writeSessionRecordForTest(t, server.sessions, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, server.sessions, "live-child-00", root, roleDelegate, "lead-root-00")
+	writeSessionRecordForTest(t, server.sessions, "dead-child-00", deadRoot, roleDelegate, "lead-root-00")
+
+	resp := callToolOnce(t, server, 1, "session.children", map[string]any{"session_key": "lead-root-00"})
+	if toolIsError(t, resp) {
+		t.Fatalf("session.children returned isError: %s", resp)
+	}
+	text := toolText(t, resp)
+	if !strings.Contains(text, "live-child-00") {
+		t.Fatalf("text output missing live child key: %q", text)
+	}
+	if strings.Contains(text, "dead-child-00") {
+		t.Fatalf("default text output included dead child: %q", text)
+	}
+
+	withDead := callToolOnce(t, server, 2, "session.children", map[string]any{"session_key": "lead-root-00", "include_dead": true})
+	if toolIsError(t, withDead) {
+		t.Fatalf("session.children include_dead returned isError: %s", withDead)
+	}
+	withDeadText := toolText(t, withDead)
+	if !strings.Contains(withDeadText, "dead-child-00") || !strings.Contains(withDeadText, "live: no") {
+		t.Fatalf("include_dead text missing dead child/live flag: %q", withDeadText)
+	}
+}
+
+func TestSessionChildrenJSONOutputStableFields(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	writeSessionRecordForTest(t, server.sessions, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, server.sessions, "delegate-one-00", root, roleDelegate, "lead-root-00")
+	writeSessionRecordForTest(t, server.sessions, "leaf-one-00", root, roleLeaf, "delegate-one-00")
+
+	resp := callToolOnce(t, server, 1, "session.children", map[string]any{"session_key": "lead-root-00", "depth": 0, "format": "json"})
+	if toolIsError(t, resp) {
+		t.Fatalf("session.children json returned isError: %s", resp)
+	}
+	var parsed struct {
+		SessionKey string               `json:"session_key"`
+		Depth      int                  `json:"depth"`
+		Children   []sessionChildOutput `json:"children"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(toolText(t, resp))), &parsed); err != nil {
+		t.Fatalf("parse session.children json: %v\n%s", err, toolText(t, resp))
+	}
+	if parsed.SessionKey != "lead-root-00" || parsed.Depth != 0 {
+		t.Fatalf("json wrapper = %#v, want session_key lead-root-00 depth 0", parsed)
+	}
+	if len(parsed.Children) != 2 {
+		t.Fatalf("json children len = %d, want 2: %#v", len(parsed.Children), parsed.Children)
+	}
+	byKey := map[string]sessionChildOutput{}
+	for _, child := range parsed.Children {
+		byKey[child.Key] = child
+	}
+	if byKey["delegate-one-00"].Scope != "delegate" || byKey["delegate-one-00"].Parent != "lead-root-00" || byKey["delegate-one-00"].Depth != 1 || !byKey["delegate-one-00"].Live || byKey["delegate-one-00"].Root != root {
+		t.Fatalf("delegate json child = %#v", byKey["delegate-one-00"])
+	}
+	if byKey["leaf-one-00"].Scope != "leaf" || byKey["leaf-one-00"].Parent != "delegate-one-00" || byKey["leaf-one-00"].Depth != 2 {
+		t.Fatalf("leaf json child = %#v", byKey["leaf-one-00"])
+	}
+}
+
+func TestSessionChildrenMissingSessionKeyErrors(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callToolOnce(t, server, 1, "session.children", map[string]any{})
+	if !toolIsError(t, resp) {
+		t.Fatalf("missing session_key should return tool error: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "session.children: session_key is required") {
+		t.Fatalf("missing session_key error text = %q", text)
 	}
 }
 

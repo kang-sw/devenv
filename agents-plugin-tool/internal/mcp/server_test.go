@@ -369,7 +369,7 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 		t.Run(stem, func(t *testing.T) {
 			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, map[string]string{
 				"bridge_probe": "context for " + stem,
-			}, wsconfig.Options{}, "", false)
+			}, wsconfig.Options{}, "", "", false)
 			if err != nil {
 				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}
@@ -466,7 +466,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	initGit(t, root)
 
 	server := NewServer(root, "test")
-	leafKey, err := server.sessions.mint(root, roleLeaf)
+	leafKey, err := server.sessions.mint(root, roleLeaf, "")
 	if err != nil {
 		t.Fatalf("mint leaf key: %v", err)
 	}
@@ -532,7 +532,7 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	t.Setenv("WS_MCP_ALLOWED_TOOLS", "runtime.info,ws.mercenary.status,config.show")
 
 	server := NewServer(root, "test")
-	leafKey, err := server.sessions.mint(root, roleLeaf)
+	leafKey, err := server.sessions.mint(root, roleLeaf, "")
 	if err != nil {
 		t.Fatalf("mint leaf key: %v", err)
 	}

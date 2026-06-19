@@ -362,6 +362,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.get_default_root":
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
+	case "session.children":
+		return s.handleSessionChildren(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -796,6 +798,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Lead-gate: check caller entry to determine whether to mint a child key.
 		// mintRoot is empty when caller is not a lead (no mint).
 		var mintRoot string
+		var parentKey string
 		var preferMercenary bool
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			if entry, found := s.sessions.lookup(keyStr); found && entry.scope == roleLead {
@@ -805,6 +808,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				} else {
 					mintRoot = entry.root
 				}
+				parentKey = keyStr
 				// Resolve prefer_mercenary through the layered config resolver
 				// (session > project > global > builtin) so both enable and disable
 				// transitions are visible (260618 closer). Builtin default is false.
@@ -814,7 +818,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 		}
 
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, preferMercenary)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
@@ -1076,7 +1080,14 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		return toolTextResponse(id, "", err)
 	}
 	scope := parseCapabilityScope(arguments["capability"])
-	key, err := s.sessions.mint(canonical, scope)
+	parentKey, _ := arguments["parent_session_key"].(string)
+	parentKey = strings.TrimSpace(parentKey)
+	if parentKey != "" {
+		if _, ok := s.sessions.lookup(parentKey); !ok {
+			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", parentKey))
+		}
+	}
+	key, err := s.sessions.mint(canonical, scope, parentKey)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -1088,6 +1099,99 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		return toolJSONResponse(id, result, nil)
 	}
 	return toolTextResponse(id, fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical), nil)
+}
+
+type sessionChildOutput struct {
+	Key    string `json:"key"`
+	Scope  string `json:"scope"`
+	Parent string `json:"parent"`
+	Depth  int    `json:"depth"`
+	Live   bool   `json:"live"`
+	Root   string `json:"root"`
+}
+
+func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]any) response {
+	sessionKey, _ := arguments["session_key"].(string)
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return toolTextResponse(id, "", fmt.Errorf("session.children: session_key is required"))
+	}
+
+	depth := 1
+	if raw, ok := arguments["depth"]; ok {
+		if f, ok := raw.(float64); ok {
+			depth = int(f)
+		}
+	}
+	includeDead, _ := arguments["include_dead"].(bool)
+
+	children, err := s.sessions.children(sessionKey, depth)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	filtered := make([]sessionChild, 0, len(children))
+	for _, child := range children {
+		if child.live || includeDead {
+			filtered = append(filtered, child)
+		}
+	}
+
+	out := make([]sessionChildOutput, 0, len(filtered))
+	for _, child := range filtered {
+		out = append(out, sessionChildOutput{
+			Key:    child.key,
+			Scope:  sessionChildScopeLabel(child.scope),
+			Parent: child.parent,
+			Depth:  child.depth,
+			Live:   child.live,
+			Root:   child.root,
+		})
+	}
+
+	if wantsJSON(arguments) {
+		return toolJSONResponse(id, map[string]any{
+			"session_key": sessionKey,
+			"depth":       depth,
+			"children":    out,
+		}, nil)
+	}
+	return toolTextResponse(id, formatSessionChildren(sessionKey, out, includeDead), nil)
+}
+
+func sessionChildScopeLabel(scope toolRole) string {
+	switch scope {
+	case roleLead:
+		return "control"
+	case roleDelegate:
+		return "delegate"
+	case roleLeaf:
+		return "leaf"
+	default:
+		return string(scope)
+	}
+}
+
+func formatSessionChildren(sessionKey string, children []sessionChildOutput, includeDead bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "session_key: %s\n", sessionKey)
+	if len(children) == 0 {
+		b.WriteString("children: none\n")
+		return b.String()
+	}
+	b.WriteString("children:\n")
+	for _, child := range children {
+		indent := strings.Repeat("  ", child.Depth-1)
+		fmt.Fprintf(&b, "%s- key: %s scope: %s depth: %d", indent, child.Key, child.Scope, child.Depth)
+		if includeDead {
+			live := "no"
+			if child.Live {
+				live = "yes"
+			}
+			fmt.Fprintf(&b, " live: %s", live)
+		}
+		fmt.Fprintf(&b, " root: %s\n", child.Root)
+	}
+	return b.String()
 }
 
 // parseCapabilityScope maps the optional capability argument to a toolRole.
@@ -1837,14 +1941,29 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "session.children",
+			"description": "Return the descendant session-key subtree under a lead session key. Defaults to immediate live children; use depth 0 for the full subtree.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":  stringProperty("Caller's lead session key whose descendants should be enumerated."),
+					"depth":        integerProperty("Maximum descendant depth to return. Defaults to 1; 0 returns the full subtree."),
+					"include_dead": boolProperty("Include keys whose bound root path no longer exists. Defaults to false."),
+					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
 			"name":        bootstrapToolName,
 			"description": "Reserved workflow primitive. See ws:workflow-manual before use.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":       stringProperty("Absolute Git worktree root to bind to the session key."),
-					"capability": enumStringProperty(`Optional capability scope. Omit or pass "lead" for unrestricted access. Pass "delegate" or "leaf" to restrict the key to that role's allowed tools.`, []string{"lead", "delegate", "leaf"}),
-					"format":     stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root":               stringProperty("Absolute Git worktree root to bind to the session key."),
+					"capability":         enumStringProperty(`Optional capability scope. Omit or pass "lead" for unrestricted access. Pass "delegate" or "leaf" to restrict the key to that role's allowed tools.`, []string{"lead", "delegate", "leaf"}),
+					"parent_session_key": stringProperty("Optional parent session key to record coordination lineage. See ws:workflow-manual."),
+					"format":             stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"root"},
 			},

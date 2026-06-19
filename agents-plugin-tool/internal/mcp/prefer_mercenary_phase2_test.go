@@ -27,7 +27,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Mint a lead key.
-	key, err := s.sessions.mint("/work/root", roleLead)
+	key, err := s.sessions.mint("/work/root", roleLead, "")
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 		t.Fatalf("after enable: got=%v scope=%s, want true/session", enabled, scope)
 	}
 
-	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", enabled)
+	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", enabled)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody on: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 		t.Fatalf("after disable: got=%v scope=%s, want false/session", disabled, scope2)
 	}
 
-	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", disabled)
+	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", disabled)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody off: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 	if !reEnabled {
 		t.Fatalf("re-enable: got false, want true")
 	}
-	bodyOn2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", reEnabled)
+	bodyOn2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", reEnabled)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody re-on: %v", err)
 	}
