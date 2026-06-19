@@ -618,11 +618,11 @@ delegation-capable rendering carries a small always-on tip fragment noting the
 mercenary path is reachable on request, so the on-request path works without the
 toggle.
 
-> [!note] Planned 🚧
-> `prefer_mercenary` becomes a `session`-default item in the layered config scope
+> [!note]
+> `prefer_mercenary` is a `session`-default item in the layered config scope
 > model (`#260619-layered-config-scope-model`) with desired-state get/set: the
 > lead can both enable and disable it on the same session key, replacing the
-> current one-way flip. It stays lead-only — the scope-aware setter honors the
+> former one-way flip. It stays lead-only — the scope-aware setter honors the
 > existing lead-only gating. Mercenary *availability* is unchanged; only the
 > default-guidance toggle gains a revert path. {#260619-prefer-mercenary-session-scope-item}
 

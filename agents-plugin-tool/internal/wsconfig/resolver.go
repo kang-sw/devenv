@@ -151,6 +151,18 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	}
 }
 
+// GetBool resolves the value for itemKey and interprets it as a boolean.
+// "true" (case-sensitive exact match) → true; any other value including empty
+// or absent → false. Also returns the scope the value resolved from.
+// This is a thin convenience wrapper over Get; the signature of Get is unchanged.
+func (r *Resolver) GetBool(sessionKey, itemKey string) (bool, Scope, error) {
+	rv, err := r.Get(sessionKey, itemKey)
+	if err != nil {
+		return false, ScopeBuiltin, err
+	}
+	return rv.Value == "true", rv.Scope, nil
+}
+
 // setOverrideInFileRMW performs an flock-serialized read-modify-write on the
 // config file at path. The transform function receives the current string value
 // for itemKey (empty string when absent) and returns the new value to store.

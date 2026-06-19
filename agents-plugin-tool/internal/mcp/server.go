@@ -805,7 +805,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				} else {
 					mintRoot = entry.root
 				}
-				preferMercenary = entry.preferMercenary
+				// Resolve prefer_mercenary through the layered config resolver
+				// (session > project > global > builtin) so both enable and disable
+				// transitions are visible (260618 closer). Builtin default is false.
+				adapter := sessionConfigAdapter{s: s.sessions}
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+				preferMercenary, _, _ = resolver.GetBool(keyStr, wsconfig.ItemPreferMercenary)
 			}
 		}
 
@@ -813,18 +818,37 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
-		// Lead-only tool to flip the render mode for this session key.
-		// The ws.lead.* prefix gate in callTool (lines 311-328) already blocks
-		// non-lead keys — do not add a second role check here.
+		// Lead-only desired-state setter for the default delegation guidance toggle.
+		// The ws.lead.* prefix gate in callTool already blocks non-lead keys —
+		// do not add a second role check here (sole keyed-gate-is-authority rule).
 		keyStr, _ := params.Arguments["session_key"].(string)
 		keyStr = strings.TrimSpace(keyStr)
 		if keyStr == "" {
 			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
 		}
-		if !s.sessions.setPreferMercenary(keyStr) {
+		// enabled defaults to true when absent (backward-compatible call shape).
+		enabled := true
+		if v, ok := params.Arguments["enabled"]; ok {
+			if b, isBool := v.(bool); isBool {
+				enabled = b
+			}
+		}
+		// Write through the layered config resolver (declared default scope: session).
+		value := "false"
+		if enabled {
+			value = "true"
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemPreferMercenary, value, wsconfig.SetOptions{
+			SessionKey: keyStr,
+		}); err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual and retry"))
 		}
-		return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
+		if enabled {
+			return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
+		}
+		return toolTextResponse(req.ID, "prefer_mercenary: disabled\n", nil)
 
 	case "ws.mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1827,11 +1851,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.lead.prefer_mercenary",
-			"description": "Flip the default delegation guidance for this session key to mercenary-primary. After the flip, playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default. Does not affect tool availability — mercenary is always reachable on request. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"description": "Set or clear the default delegation guidance for this session key. When enabled (default), playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default; when disabled, it reverts to host-native subagent guidance. Does not affect tool availability — mercenary is always reachable on request regardless of this setting. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's lead ws session key."),
+					"enabled":     boolProperty("Whether to enable (true, default) or disable (false) the mercenary-primary delegation guidance. Omit to enable (backward-compatible call shape)."),
 				},
 				"required": []string{"session_key"},
 			},

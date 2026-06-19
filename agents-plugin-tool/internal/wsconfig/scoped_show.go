@@ -56,6 +56,14 @@ func ScopedShow(r *Resolver, opts Options, sessionKey string) (View, error) {
 		}
 	}
 
+	// Registered default-scope items: always enumerate them so callers see their
+	// resolved value (and which scope it came from, including "builtin" when unset).
+	// This ensures items like prefer_mercenary appear in config.show output even
+	// before any value has been written to any scope.
+	for k := range scopeRegistry {
+		allKeys[k] = struct{}{}
+	}
+
 	// Resolve each key through the full precedence chain.
 	if len(allKeys) > 0 {
 		view.ResolvedOverrides = make([]ScopedItem, 0, len(allKeys))

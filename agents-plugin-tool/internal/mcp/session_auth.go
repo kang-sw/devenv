@@ -16,23 +16,28 @@ import (
 // sessionEntry associates a canonical repository root and a capability scope
 // with an ephemeral session key minted by the session-bootstrap tool.
 type sessionEntry struct {
-	root            string
-	scope           toolRole
-	preferMercenary bool
+	root  string
+	scope toolRole
 }
 
 // sessionRecord is the on-disk JSON shape of a session entry. It is versioned so
 // the format can grow (render lineage, permission/capability metadata) without a
 // migration; unknown future fields are simply ignored by older readers.
+//
+// Note: the former typed PreferMercenary bool field has been retired. The
+// prefer_mercenary toggle now lives in the generic Overrides map under the key
+// wsconfig.ItemPreferMercenary ("prefer_mercenary"), routed through the layered
+// config resolver. Old records with a "prefer_mercenary" JSON field are silently
+// ignored on read (Go's json.Unmarshal drops unknown fields); the resolver reads
+// the Overrides map instead.
 type sessionRecord struct {
-	SchemaVersion   int               `json:"schema_version"`
-	Root            string            `json:"root"`
-	Scope           string            `json:"scope"`
-	PreferMercenary bool              `json:"prefer_mercenary"`
+	SchemaVersion int               `json:"schema_version"`
+	Root          string            `json:"root"`
+	Scope         string            `json:"scope"`
 	// Overrides is the session-scope generic config overlay. Keys are item
 	// identifiers; values are string-encoded config values. Added as an additive
 	// field; existing records without it parse with a nil map.
-	Overrides       map[string]string `json:"overrides,omitempty"`
+	Overrides map[string]string `json:"overrides,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
@@ -55,9 +60,9 @@ var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 // presents only the opaque key, never its root, so the file path must be
 // derivable from the key plus the globally-deterministic cache root.
 type sessionStore struct {
-	// mu serializes same-process read-modify-write (setPreferMercenary) and the
-	// mint claim loop. Cross-process safety rests on filesystem primitives:
-	// O_EXCL create for the unique mint claim, atomic temp+rename for updates.
+	// mu serializes same-process read-modify-write and the mint claim loop.
+	// Cross-process safety rests on filesystem primitives: O_EXCL create for the
+	// unique mint claim, atomic temp+rename for updates.
 	mu sync.Mutex
 }
 
@@ -148,27 +153,9 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 		return sessionEntry{}, false
 	}
 	return sessionEntry{
-		root:            record.Root,
-		scope:           toolRole(record.Scope),
-		preferMercenary: record.PreferMercenary,
+		root:  record.Root,
+		scope: toolRole(record.Scope),
 	}, true
-}
-
-// setPreferMercenary flips the preferMercenary flag for the given key via an
-// atomic read-modify-write. Returns true if the key was found and updated.
-func (s *sessionStore) setPreferMercenary(key string) bool {
-	dir, err := s.keysDir()
-	if err != nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, key)
-	if !ok {
-		return false
-	}
-	record.PreferMercenary = true
-	return s.writeRecordAtomic(dir, key, record) == nil
 }
 
 // getOverride returns the Overrides entry for the given item key in the session

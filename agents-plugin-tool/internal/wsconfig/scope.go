@@ -15,6 +15,23 @@ const (
 	ScopeBuiltin Scope = "builtin"
 )
 
+// Well-known item key constants for registered config items. Use these instead of
+// raw string literals to ensure consistent naming across packages.
+const (
+	// ItemPreferMercenary is the layered config key for the default delegation
+	// guidance toggle. Value "true" instructs playbook.render to emit the
+	// mercenary-primary guidance block; absent/empty/"false" leaves it off.
+	// Declared default scope: ScopeSession (rides the per-key session Overrides
+	// overlay). Builtin default: false (absent = disabled).
+	ItemPreferMercenary = "prefer_mercenary"
+)
+
+func init() {
+	// prefer_mercenary defaults to session scope: a lead's flip is session-local
+	// and does not persist to the project or global config files.
+	RegisterDefaultScope(ItemPreferMercenary, ScopeSession)
+}
+
 // ResolvedValue carries a config item value together with the scope it was
 // resolved from, enabling get/show to report which layer provided the value.
 type ResolvedValue struct {
