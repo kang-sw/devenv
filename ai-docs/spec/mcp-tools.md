@@ -151,7 +151,7 @@ Gating).
 >   automatic eviction, though deleting a key file is now a physically possible
 >   removal path (deferred).
 
-### 🚧 Session-Key Lineage And Child Enumeration {#260619-session-key-lineage-children}
+### Session-Key Lineage And Child Enumeration {#260619-session-key-lineage-children}
 
 Session keys form a parent→child lineage so a lead can re-discover the keys it
 minted after they fall out of its own (compacted or restarted) context.

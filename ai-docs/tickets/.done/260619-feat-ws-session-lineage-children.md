@@ -221,3 +221,40 @@ control keys; depth bounding works (`depth: 0` = full subtree); dead keys are
 filtered unless `include_dead: true`; text default carries re-threadable keys;
 json escape hatch returns stable fields; a leaf key returns an empty/flat result;
 enumeration never crosses into unrelated sessions.
+
+### Result (4ac91312) - 2026-06-19
+
+Landed (`4ac91312`). All Phase 3 decisions honored:
+
+- `sessionStore.children(parentKey, maxDepth)` (`session_auth.go`): reads the
+  flat keys dir under `s.mu`, builds a `parent→[]key` adjacency, and BFS-walks
+  the subtree. `maxDepth >= 1` bounds to that many levels; `maxDepth <= 0` is the
+  full subtree. The queried key is excluded; a `visited` set guards cycles;
+  liveness is `os.Stat(record.Root)`; output is deterministically sorted (depth,
+  then key). Reuses the non-locking `readRecord`, so the single `s.mu` hold does
+  not deadlock.
+- `session.children` tool (`server.go`): `tools()` schema entry
+  (`session_key` required, `depth`/`include_dead`/`format` optional) + dispatch
+  case + `handleSessionChildren`. `depth` is parsed directly (not via
+  `intFromArgument`, which coerces `<=0` to its fallback and would have broken
+  `depth: 0 = full`). Dead children filtered unless `include_dead`; text default
+  (indented, carries re-threadable keys, `live:` flag shown when `include_dead`),
+  `format:"json"` returns stable `{key, scope, parent, depth, live, root}` fields.
+  Scope labels: `lead→control`, `delegate`, `leaf`.
+- Tool registered in the `session.*` family, so the pre-existing
+  `roleAllowsTool` `session.` prefix block restricts it to lead-scoped keys with
+  **no gate change** (confirmed: `roleAllowsTool` is untouched).
+
+Verification: `go test ./internal/mcp/...` green; `go build ./...` clean. Seven
+tests present and passing (4 store-level: immediate control/delegate/leaf
+children, depth bounding + full subtree, leaf + sibling isolation, dead-root
+marking; 3 handler-level through the real dispatch path: dead filtering +
+`include_dead`, json stable fields, missing `session_key` error).
+
+Mental-model: `mcp-runtime.md` `sessionStore` bullet gained one sentence on
+parent lineage + `session.children`; `named-agent-runtime` needed no change
+(lineage is store-level, not agent-runtime). Spec
+`260619-session-key-lineage-children` 🚧 marker stripped — the caller-facing read
+surface is now complete.
+
+**Ticket complete: all three phases landed.**
