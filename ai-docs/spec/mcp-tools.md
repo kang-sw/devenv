@@ -549,7 +549,7 @@ refresh.
 >   incompatible, the playbook surface fails loudly rather than degrading to a
 >   stale built-in copy.
 
-### 🚧 Prompt Override Marker Engine {#260619-prompt-override-marker-engine}
+### Prompt Override Marker Engine {#260619-prompt-override-marker-engine}
 
 A playbook body may declare named **override-points** with block markers so a
 user can replace or extend a named section of the rendered text without editing
@@ -573,9 +573,10 @@ and after harness rendering. For each override-point it resolves a value along
 two orthogonal axes:
 
 - **What** is selected by `(point id, harness)`: a stored override whose harness
-  matches the rendered harness wins; otherwise an override stored for `*` (all
-  harnesses) applies; otherwise the inline seed default is used. The harness axis
-  values are `claude`, `codex`, and `*`.
+  matches the rendered harness wins; otherwise an override stored for the
+  cross-harness `all` bucket applies; otherwise the inline seed default is used.
+  The harness axis values are `claude`, `codex`, and `all` (the `all` bucket is
+  the cross-harness / `*` setting).
 - **Where** the override is stored is selected by scope through the layered
   config scope model (`#260619-layered-config-scope-model`); resolution reads the
   highest-precedence scope that holds a value.
@@ -587,11 +588,14 @@ stored override if one exists, or nothing when none is set — so overriding
 existing text and appending new text are the same primitive (for example a
 `DelegationSection` override-point versus a `WorkflowManualExt` extension slot).
 
-Overrides are written through the prompt-override setter (`config.prompt.set`,
-planned alongside this engine); the addressing API is
-`config.prompt.set(point id, harness, prompt)` with an optional scope, so the
-point id is the user-facing handle even though the body carries it as a marker
-rather than a template variable.
+Override values resolve through the layered config scope model under the key
+`prompt.<point id>.<harness>`, so a write at any scope through the config layer
+is honored by the resolver's precedence; the point id is the user-facing handle
+even though the body carries it as a marker rather than a template variable. A
+dedicated `config.prompt.set(point id, harness, prompt)` setter and a
+self-documenting `config.prompt()` listing are planned alongside this engine to
+make the override surface tunable and discoverable from inside the MCP without
+external docs.
 
 > [!note] Constraints
 > - The marker grammar is a ws-private schema (ws is the sole reader); it is not

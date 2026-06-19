@@ -297,13 +297,16 @@ dropped tickets live in hidden archive dirs and git history.
   Dependent children (substrate shipped): marker-engine promoted to `ready/`
   (see below); `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep:
   engine→substrate, tool→both) stays backlog until the engine lands.
-- `260619-feat-ws-prompt-override-marker-engine` (**ready**) - block-marker
-  prompt-override engine: A1 marker grammar + a sibling render pass beside
-  product-mode selection that resolves `(pointId, harness)` → scope → inline seed
-  and strips markers; Phase 2 seeds `DelegationSection` in the workflow manual.
-  Contract-first spec `260619-prompt-override-marker-engine` authored (🚧).
-  Substrate prerequisite already shipped. Next implementation target; sibling
-  `config.prompt.*` self-doc tool tree-scans the markers this defines.
+- `260619-feat-ws-prompt-override-marker-engine` (**ready**, Phase 1 landed) -
+  block-marker prompt-override engine. **Phase 1 shipped** (`705795b8`): A1
+  marker grammar + a sibling render pass (`applyOverrideMarkers`) beside
+  product-mode selection that resolves `(pointId, harness)` → scope → inline seed,
+  strips markers (recursive nesting, spacing-tolerant, unclosed-safe), reads
+  overrides via `buildOverrideLookup` under `prompt.<pointId>.<harness>`; spec
+  `260619-prompt-override-marker-engine` 🚧 stripped. **Phase 2 remaining**: seed
+  `DelegationSection` in `lead-workflow-manual` + consolidate delegation-posture
+  prose (critical-path mechanics stay fixed). Sibling `config.prompt.*` self-doc
+  tool (todo) tree-scans the markers this defines.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

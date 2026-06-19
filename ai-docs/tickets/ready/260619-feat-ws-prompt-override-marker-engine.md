@@ -68,6 +68,49 @@ Verification: a point with no override renders its seed (markers stripped); a
 per-harness override replaces the body for the matching harness only; a `*`
 override applies to all; an empty-seed slot renders override-or-nothing.
 
+### Result (705795b8) - 2026-06-19
+
+Engine landed (impl `6eca3f11`, fix-cycle `705795b8`). The A1 marker grammar and
+the render pass are implemented; no shipped playbook carries markers yet (that is
+Phase 2) and no `config.prompt.*` setter exists yet (sibling ticket).
+
+- `applyOverrideMarkers` (`internal/mcp/playbook_tools.go`) is a line-oriented
+  sibling pass to `selectProductModeBlocks`, run inside `renderPlaybookBody`
+  immediately before product-mode selection (so overrides resolve on the shared
+  body, including full-only sections, before product blocks are stripped).
+  Resolution order: `(pointId, rendered-harness)` → `(pointId, "all")` → inline
+  seed. Marker lines are always stripped.
+- `parseOverrideMarkerPointId` gives symmetric, spacing-tolerant open/close
+  parsing (`<!-- ws:/override:A-->` closes as well as `... -->`). Nested override
+  blocks are processed recursively (depth-tracking scan + recursive seed pass) so
+  no inner marker line survives. An unclosed open marker emits its line unchanged
+  and consumes no following content (no silent truncation).
+- `overrideLookupFn` + `buildOverrideLookup(s, sessionKey)` resolve overrides
+  through the layered config resolver under dynamic keys
+  `prompt.<pointId>.<harness>` (harness `claude`/`codex`/`all`); `nil` when no
+  `session_key` → every point renders its seed. The closure is built once at each
+  dispatch site, reusing the `sessionConfigAdapter` + `wsconfig.NewResolver`
+  pattern of the `prefer_mercenary` read path.
+- `server.go`: `playbook.print` inputSchema gains an optional `session_key`
+  property (the print dispatch now resolves overrides too); both print and render
+  dispatch use `buildOverrideLookup`.
+
+Verification: `go test ./internal/wsconfig/... ./internal/mcp/...` passes (no
+golden-set change — Phase 1 adds no shipped-playbook markers). Coverage:
+no-override/seed, per-harness replacement, `all`-bucket fallback, empty-seed
+slot, close-spacing leniency, nested markers, unclosed-marker preservation, and
+two production-path cases (`playbook.print` and `playbook.render` via
+`callToolOnce` with a session-scoped override). Partitioned review (correctness/
+fit/test) passed after one test-and-robustness fix cycle. `go build ./...` clean.
+
+Spec `260619-prompt-override-marker-engine` 🚧 stripped (`0b23d48a`); mental
+models `prompt-bundle`/`mcp-runtime` updated (`639b81fa`).
+
+Forward (Phase 2): seed `DelegationSection` in `lead-workflow-manual` and
+consolidate delegation-posture prose; the engine's empty-seed extension slots and
+critical-path boundary (continuation tip / child-key splice / prefer_mercenary
+block stay fixed) are already in place.
+
 ### Phase 2: DelegationSection seed + workflow-manual consolidation
 
 Seed `DelegationSection` in `lead-workflow-manual` and consolidate the scattered
