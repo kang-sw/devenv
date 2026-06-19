@@ -362,6 +362,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.get_default_root":
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
+	case "session.children":
+		return s.handleSessionChildren(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -1073,6 +1075,99 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		return toolJSONResponse(id, result, nil)
 	}
 	return toolTextResponse(id, fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical), nil)
+}
+
+type sessionChildOutput struct {
+	Key    string `json:"key"`
+	Scope  string `json:"scope"`
+	Parent string `json:"parent"`
+	Depth  int    `json:"depth"`
+	Live   bool   `json:"live"`
+	Root   string `json:"root"`
+}
+
+func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]any) response {
+	sessionKey, _ := arguments["session_key"].(string)
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return toolTextResponse(id, "", fmt.Errorf("session.children: session_key is required"))
+	}
+
+	depth := 1
+	if raw, ok := arguments["depth"]; ok {
+		if f, ok := raw.(float64); ok {
+			depth = int(f)
+		}
+	}
+	includeDead, _ := arguments["include_dead"].(bool)
+
+	children, err := s.sessions.children(sessionKey, depth)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	filtered := make([]sessionChild, 0, len(children))
+	for _, child := range children {
+		if child.live || includeDead {
+			filtered = append(filtered, child)
+		}
+	}
+
+	out := make([]sessionChildOutput, 0, len(filtered))
+	for _, child := range filtered {
+		out = append(out, sessionChildOutput{
+			Key:    child.key,
+			Scope:  sessionChildScopeLabel(child.scope),
+			Parent: child.parent,
+			Depth:  child.depth,
+			Live:   child.live,
+			Root:   child.root,
+		})
+	}
+
+	if wantsJSON(arguments) {
+		return toolJSONResponse(id, map[string]any{
+			"session_key": sessionKey,
+			"depth":       depth,
+			"children":    out,
+		}, nil)
+	}
+	return toolTextResponse(id, formatSessionChildren(sessionKey, out, includeDead), nil)
+}
+
+func sessionChildScopeLabel(scope toolRole) string {
+	switch scope {
+	case roleLead:
+		return "control"
+	case roleDelegate:
+		return "delegate"
+	case roleLeaf:
+		return "leaf"
+	default:
+		return string(scope)
+	}
+}
+
+func formatSessionChildren(sessionKey string, children []sessionChildOutput, includeDead bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "session_key: %s\n", sessionKey)
+	if len(children) == 0 {
+		b.WriteString("children: none\n")
+		return b.String()
+	}
+	b.WriteString("children:\n")
+	for _, child := range children {
+		indent := strings.Repeat("  ", child.Depth-1)
+		fmt.Fprintf(&b, "%s- key: %s scope: %s depth: %d", indent, child.Key, child.Scope, child.Depth)
+		if includeDead {
+			live := "no"
+			if child.Live {
+				live = "yes"
+			}
+			fmt.Fprintf(&b, " live: %s", live)
+		}
+		fmt.Fprintf(&b, " root: %s\n", child.Root)
+	}
+	return b.String()
 }
 
 // parseCapabilityScope maps the optional capability argument to a toolRole.
@@ -1819,6 +1914,20 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
 				},
+			},
+		},
+		{
+			"name":        "session.children",
+			"description": "Return the descendant session-key subtree under a lead session key. Defaults to immediate live children; use depth 0 for the full subtree.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":  stringProperty("Caller's lead session key whose descendants should be enumerated."),
+					"depth":        integerProperty("Maximum descendant depth to return. Defaults to 1; 0 returns the full subtree."),
+					"include_dead": boolProperty("Include keys whose bound root path no longer exists. Defaults to false."),
+					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"session_key"},
 			},
 		},
 		{

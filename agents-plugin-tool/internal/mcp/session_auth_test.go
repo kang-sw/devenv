@@ -751,6 +751,243 @@ func TestSetPreferMercenaryPreservesParent(t *testing.T) {
 	}
 }
 
+func writeSessionRecordForTest(t *testing.T, store *sessionStore, key, root string, scope toolRole, parent string) {
+	t.Helper()
+	dir, err := store.keysDir()
+	if err != nil {
+		t.Fatalf("keysDir: %v", err)
+	}
+	payload, err := json.Marshal(sessionRecord{
+		SchemaVersion: sessionRecordSchemaVersion,
+		Root:          root,
+		Scope:         string(scope),
+		Parent:        parent,
+	})
+	if err != nil {
+		t.Fatalf("marshal session record: %v", err)
+	}
+	if err := os.WriteFile(store.keyPath(dir, key), payload, 0o644); err != nil {
+		t.Fatalf("write session record %q: %v", key, err)
+	}
+}
+
+func childrenByKey(children []sessionChild) map[string]sessionChild {
+	out := make(map[string]sessionChild, len(children))
+	for _, child := range children {
+		out[child.key] = child
+	}
+	return out
+}
+
+func TestSessionStoreChildrenReturnsImmediateControlDelegateAndLeafChildren(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	parentRoot := t.TempDir()
+	childRoot := t.TempDir()
+
+	writeSessionRecordForTest(t, store, "parent-key-00", parentRoot, roleLead, "")
+	writeSessionRecordForTest(t, store, "delegate-one-00", childRoot, roleDelegate, "parent-key-00")
+	writeSessionRecordForTest(t, store, "delegate-two-00", childRoot, roleDelegate, "parent-key-00")
+	writeSessionRecordForTest(t, store, "control-one-00", childRoot, roleLead, "parent-key-00")
+
+	children, err := store.children("parent-key-00", 1)
+	if err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	if len(children) != 3 {
+		t.Fatalf("len(children) = %d, want 3: %#v", len(children), children)
+	}
+	byKey := childrenByKey(children)
+	for key, wantScope := range map[string]toolRole{
+		"control-one-00":  roleLead,
+		"delegate-one-00": roleDelegate,
+		"delegate-two-00": roleDelegate,
+	} {
+		child, ok := byKey[key]
+		if !ok {
+			t.Fatalf("missing child %q in %#v", key, children)
+		}
+		if child.scope != wantScope {
+			t.Fatalf("%s scope = %q, want %q", key, child.scope, wantScope)
+		}
+		if child.depth != 1 || child.parent != "parent-key-00" || !child.live {
+			t.Fatalf("%s child metadata = %#v, want depth=1 parent=parent-key-00 live=true", key, child)
+		}
+	}
+}
+
+func TestSessionStoreChildrenDepthBoundingAndFullSubtree(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	root := t.TempDir()
+
+	writeSessionRecordForTest(t, store, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "delegate-mid-00", root, roleDelegate, "lead-root-00")
+	writeSessionRecordForTest(t, store, "leaf-final-00", root, roleLeaf, "delegate-mid-00")
+
+	depthOne, err := store.children("lead-root-00", 1)
+	if err != nil {
+		t.Fatalf("children depth 1: %v", err)
+	}
+	if len(depthOne) != 1 || depthOne[0].key != "delegate-mid-00" {
+		t.Fatalf("depth 1 children = %#v, want only delegate-mid-00", depthOne)
+	}
+
+	full, err := store.children("lead-root-00", 0)
+	if err != nil {
+		t.Fatalf("children full: %v", err)
+	}
+	if len(full) != 2 {
+		t.Fatalf("full children len = %d, want 2: %#v", len(full), full)
+	}
+	byKey := childrenByKey(full)
+	if byKey["delegate-mid-00"].depth != 1 {
+		t.Fatalf("delegate depth = %d, want 1", byKey["delegate-mid-00"].depth)
+	}
+	if byKey["leaf-final-00"].depth != 2 {
+		t.Fatalf("leaf depth = %d, want 2", byKey["leaf-final-00"].depth)
+	}
+}
+
+func TestSessionStoreChildrenLeafAndSiblingIsolation(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	root := t.TempDir()
+
+	writeSessionRecordForTest(t, store, "lead-one-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "lead-two-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "leaf-one-00", root, roleLeaf, "lead-one-00")
+	writeSessionRecordForTest(t, store, "leaf-two-00", root, roleLeaf, "lead-two-00")
+
+	leafChildren, err := store.children("leaf-one-00", 0)
+	if err != nil {
+		t.Fatalf("leaf children: %v", err)
+	}
+	if len(leafChildren) != 0 {
+		t.Fatalf("leaf children = %#v, want empty", leafChildren)
+	}
+
+	children, err := store.children("lead-one-00", 0)
+	if err != nil {
+		t.Fatalf("lead one children: %v", err)
+	}
+	if len(children) != 1 || children[0].key != "leaf-one-00" {
+		t.Fatalf("lead one children = %#v, want only leaf-one-00", children)
+	}
+}
+
+func TestSessionStoreChildrenMarksDeadRoots(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	store := newSessionStore()
+	root := t.TempDir()
+	deadRoot := filepath.Join(t.TempDir(), "missing")
+
+	writeSessionRecordForTest(t, store, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, store, "dead-child-00", deadRoot, roleDelegate, "lead-root-00")
+
+	children, err := store.children("lead-root-00", 1)
+	if err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	if len(children) != 1 {
+		t.Fatalf("children len = %d, want 1: %#v", len(children), children)
+	}
+	if children[0].live {
+		t.Fatalf("dead child live = true, want false: %#v", children[0])
+	}
+}
+
+func TestSessionChildrenFiltersDeadByDefaultAndIncludesWhenRequested(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+	deadRoot := filepath.Join(t.TempDir(), "missing")
+
+	writeSessionRecordForTest(t, server.sessions, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, server.sessions, "live-child-00", root, roleDelegate, "lead-root-00")
+	writeSessionRecordForTest(t, server.sessions, "dead-child-00", deadRoot, roleDelegate, "lead-root-00")
+
+	resp := callToolOnce(t, server, 1, "session.children", map[string]any{"session_key": "lead-root-00"})
+	if toolIsError(t, resp) {
+		t.Fatalf("session.children returned isError: %s", resp)
+	}
+	text := toolText(t, resp)
+	if !strings.Contains(text, "live-child-00") {
+		t.Fatalf("text output missing live child key: %q", text)
+	}
+	if strings.Contains(text, "dead-child-00") {
+		t.Fatalf("default text output included dead child: %q", text)
+	}
+
+	withDead := callToolOnce(t, server, 2, "session.children", map[string]any{"session_key": "lead-root-00", "include_dead": true})
+	if toolIsError(t, withDead) {
+		t.Fatalf("session.children include_dead returned isError: %s", withDead)
+	}
+	withDeadText := toolText(t, withDead)
+	if !strings.Contains(withDeadText, "dead-child-00") || !strings.Contains(withDeadText, "live: no") {
+		t.Fatalf("include_dead text missing dead child/live flag: %q", withDeadText)
+	}
+}
+
+func TestSessionChildrenJSONOutputStableFields(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	writeSessionRecordForTest(t, server.sessions, "lead-root-00", root, roleLead, "")
+	writeSessionRecordForTest(t, server.sessions, "delegate-one-00", root, roleDelegate, "lead-root-00")
+	writeSessionRecordForTest(t, server.sessions, "leaf-one-00", root, roleLeaf, "delegate-one-00")
+
+	resp := callToolOnce(t, server, 1, "session.children", map[string]any{"session_key": "lead-root-00", "depth": 0, "format": "json"})
+	if toolIsError(t, resp) {
+		t.Fatalf("session.children json returned isError: %s", resp)
+	}
+	var parsed struct {
+		SessionKey string               `json:"session_key"`
+		Depth      int                  `json:"depth"`
+		Children   []sessionChildOutput `json:"children"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(toolText(t, resp))), &parsed); err != nil {
+		t.Fatalf("parse session.children json: %v\n%s", err, toolText(t, resp))
+	}
+	if parsed.SessionKey != "lead-root-00" || parsed.Depth != 0 {
+		t.Fatalf("json wrapper = %#v, want session_key lead-root-00 depth 0", parsed)
+	}
+	if len(parsed.Children) != 2 {
+		t.Fatalf("json children len = %d, want 2: %#v", len(parsed.Children), parsed.Children)
+	}
+	byKey := map[string]sessionChildOutput{}
+	for _, child := range parsed.Children {
+		byKey[child.Key] = child
+	}
+	if byKey["delegate-one-00"].Scope != "delegate" || byKey["delegate-one-00"].Parent != "lead-root-00" || byKey["delegate-one-00"].Depth != 1 || !byKey["delegate-one-00"].Live || byKey["delegate-one-00"].Root != root {
+		t.Fatalf("delegate json child = %#v", byKey["delegate-one-00"])
+	}
+	if byKey["leaf-one-00"].Scope != "leaf" || byKey["leaf-one-00"].Parent != "delegate-one-00" || byKey["leaf-one-00"].Depth != 2 {
+		t.Fatalf("leaf json child = %#v", byKey["leaf-one-00"])
+	}
+}
+
+func TestSessionChildrenMissingSessionKeyErrors(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	server := NewServer(root, "test")
+
+	resp := callToolOnce(t, server, 1, "session.children", map[string]any{})
+	if !toolIsError(t, resp) {
+		t.Fatalf("missing session_key should return tool error: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "session.children: session_key is required") {
+		t.Fatalf("missing session_key error text = %q", text)
+	}
+}
+
 func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

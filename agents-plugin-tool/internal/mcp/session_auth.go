@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/kang-sw/devenv/internal/wskey"
@@ -20,6 +22,16 @@ type sessionEntry struct {
 	scope           toolRole
 	preferMercenary bool
 	parent          string
+}
+
+// sessionChild is one enumerated descendant of a queried key.
+type sessionChild struct {
+	key    string
+	root   string
+	scope  toolRole
+	parent string
+	depth  int
+	live   bool
 }
 
 // sessionRecord is the on-disk JSON shape of a session entry. It is versioned so
@@ -156,6 +168,91 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 		preferMercenary: record.PreferMercenary,
 		parent:          record.Parent,
 	}, true
+}
+
+// children returns the descendants of parentKey from the flat keys store,
+// ordered deterministically (depth, then key). maxDepth bounds the walk:
+// maxDepth >= 1 returns that many levels; maxDepth <= 0 returns the full
+// subtree. The queried key itself is not included. A cycle guard prevents
+// infinite loops on malformed parent edges.
+func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild, error) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read session keys dir: %w", err)
+	}
+
+	records := map[string]sessionRecord{}
+	adjacency := map[string][]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		key := strings.TrimSuffix(entry.Name(), ".json")
+		record, ok := s.readRecord(dir, key)
+		if !ok {
+			continue
+		}
+		records[key] = record
+		adjacency[record.Parent] = append(adjacency[record.Parent], key)
+	}
+	for parent := range adjacency {
+		sort.Strings(adjacency[parent])
+	}
+	if _, ok := records[parentKey]; !ok {
+		return []sessionChild{}, nil
+	}
+
+	type queued struct {
+		key   string
+		depth int
+	}
+	queue := []queued{{key: parentKey, depth: 0}}
+	visited := map[string]bool{parentKey: true}
+	children := []sessionChild{}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if maxDepth >= 1 && current.depth == maxDepth {
+			continue
+		}
+		for _, childKey := range adjacency[current.key] {
+			if visited[childKey] {
+				continue
+			}
+			visited[childKey] = true
+			record := records[childKey]
+			childDepth := current.depth + 1
+			child := sessionChild{
+				key:    childKey,
+				root:   record.Root,
+				scope:  toolRole(record.Scope),
+				parent: record.Parent,
+				depth:  childDepth,
+				live:   false,
+			}
+			if _, err := os.Stat(record.Root); err == nil {
+				child.live = true
+			}
+			children = append(children, child)
+			queue = append(queue, queued{key: childKey, depth: childDepth})
+		}
+	}
+
+	sort.Slice(children, func(i, j int) bool {
+		if children[i].depth != children[j].depth {
+			return children[i].depth < children[j].depth
+		}
+		return children[i].key < children[j].key
+	})
+	return children, nil
 }
 
 // setPreferMercenary flips the preferMercenary flag for the given key via an
