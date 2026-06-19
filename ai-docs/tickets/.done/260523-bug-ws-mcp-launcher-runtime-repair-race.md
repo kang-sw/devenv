@@ -4,6 +4,14 @@ title: ws MCP launcher runtime repair race
 
 # ws MCP launcher runtime repair race
 
+## Resolution (2026-06-19): fixed, closed to .done/
+
+Fixed in `fb8e156d` ("fix(mcp): harden launcher runtime repair race"): the launcher
+now uses contract-addressed cache binary names, process-unique temporary files, and
+best-effort replacement with compatible-target fallback — exactly the direction the
+`## Notes` section below describes. Verified against the staleness audit
+(2026-06-19): no open sub-items remain. Closed as completed.
+
 ## Background
 
 During MCP startup dogfooding, concurrent first-start or repair attempts against

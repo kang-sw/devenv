@@ -6,6 +6,16 @@ related:
 
 # ws setup cwd literal can bind to plugin cache root
 
+## Disposition (2026-06-19): dropped, the bug surface no longer exists
+
+M3 has landed. The `ws/setup` tool — the exact surface this bug lived on — was
+removed (`24569308`, "remove setup tool dispatch and schema"); a non-test source
+grep for `ws.setup` now returns zero hits. The session-auth contract (`ws.ferrule`
+mints a word-chain key against an explicit `root`, mandatory per-call keys, no
+ambient cwd auto-derivation) replaced it. The closing condition stated below ("Drop
+or close it when M3 lands the session-auth contract") is satisfied. Dropped as
+resolved-by-deletion; retained here only as historical design input to M3.
+
 ## Superseded-by-redesign (2026-06-09): folded into M3 session-auth
 
 Do not fix this in isolation. `260605-epic-ws-playbook-factory-pivot` (M3)
