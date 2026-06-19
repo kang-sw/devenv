@@ -30,7 +30,7 @@ type Server struct {
 	sourceCommit   string
 	rootMu         sync.RWMutex
 	sessionHarness string
-	sessions       *sessionRegistry
+	sessions       *sessionStore
 }
 
 type toolRole string
@@ -87,7 +87,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 		commit = sourceCommit[0]
 	}
 	cleanRoot := filepath.Clean(root)
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionRegistry()}
+	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionStore()}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {

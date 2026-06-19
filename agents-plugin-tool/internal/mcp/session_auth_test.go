@@ -464,6 +464,47 @@ func TestSetupCallsReturnUnknownTool(t *testing.T) {
 	}
 }
 
+// --- Test: a key minted on one Server resolves on a fresh Server instance ---
+//
+// This is the core guarantee of the filesystem-backed store: session continuity
+// no longer depends on a shared in-memory registry, so a subagent that starts
+// with its own MCP server instance can still resolve a lead-minted key.
+func TestSessionKeySurvivesFreshServerInstance(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := t.TempDir()
+	initGit(t, root)
+	canonical := canonicalRootForTest(t, root)
+	mustWrite(t, root, "fresh-instance-marker.txt", "marker\n")
+
+	// Mint on the "lead" server, then discard it entirely.
+	leadServer := NewServer(root, "test")
+	key, err := leadServer.sessions.mint(canonical, roleLead)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+
+	// A brand-new server shares no in-memory state with leadServer; it must
+	// resolve the key purely from the keys/<key>.json file.
+	freshServer := NewServer(root, "test")
+	resp := callToolOnce(t, freshServer, 1, "git.status", map[string]any{"session_key": key})
+	if toolIsError(t, resp) {
+		t.Fatalf("fresh-instance git.status with minted key returned isError: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "fresh-instance-marker.txt") {
+		t.Fatalf("fresh-instance resolution missing root marker; got: %s", text)
+	}
+
+	// A path-unsafe key must be rejected as unknown, never resolved to a file.
+	bad := callToolOnce(t, freshServer, 2, "git.status", map[string]any{"session_key": "../../etc/passwd"})
+	if !toolIsError(t, bad) {
+		t.Fatalf("path-unsafe key must be a tool error: %s", bad)
+	}
+	if text := toolText(t, bad); !strings.Contains(text, "unknown_session") {
+		t.Fatalf("path-unsafe key should yield unknown_session, got: %q", text)
+	}
+}
+
 func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

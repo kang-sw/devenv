@@ -64,7 +64,7 @@ Root-aware MCP tools resolve their repository root exclusively from a mandatory
 `session_key` argument; root resolution is the ephemeral session-auth model
 (`#260610-ephemeral-session-auth-model`). There is no fallback chain. A root-aware
 call without a `session_key` is rejected with mandatory-login guidance naming
-`ws.lead.login(root)`; a call whose key is absent from the in-memory registry is
+`ws.lead.login(root)`; a call whose key has no record in the session store is
 rejected with the `unknown_session` recovery contract. Public schemas for
 root-aware tools advertise `session_key` and do not advertise `root`;
 `ws.lead.login(root)` is the sole bootstrap verb and the only tool that accepts
@@ -97,23 +97,29 @@ on a server-default or lead root. This closes the wrong-tree footgun in which a
 worktree delegate doing root-omitted calls silently mutated the lead's main
 repository.
 
-The server holds a concurrency-safe in-memory `{session_key -> root context}`
-map. It replaces the process-global default-root field and the request-order
-setup fence, so parallel requests each resolve their own root with no
-serialization and no shared-field clobber. The map is in-memory only — no
-SQLite, no persistent store.
+The server resolves `{session_key -> root context}` from a flat, filesystem-backed
+store: one JSON record per key at `<cache-root>/keys/<session_key>.json`. It
+replaces the process-global default-root field and the request-order setup fence,
+so parallel requests each resolve their own root with no serialization and no
+shared-field clobber. The file is the source of truth, not the process: keys are
+minted with an `O_EXCL` create (atomic cross-process uniqueness) and updated with
+temp-write + rename (no partial reads), and per-key sharding removes write
+contention without a single shared file or SQLite. A fresh MCP server instance —
+a subagent that did not inherit the lead's process, or a lead that restarted
+mid-delegation — resolves a key by reading its file, so session continuity does
+not depend on a shared in-memory registry.
 
 `login` is a bootstrap verb only: there is no logout and no eviction (rows are a
 tiny `(word-chain key, root path)` bounded by the number of distinct roots a
 fleet touches).
 
-Every keyed call honors an `unknown_session` recovery contract: when a key is not
-found (for example after the in-memory map is lost to an MCP process restart),
-the call is rejected with an `unknown_session` signal and the caller re-logins
-with its own known root and retries. Because the caller-visible contract
+Every keyed call honors an `unknown_session` recovery contract: when a key has no
+record file (a genuinely unknown or path-unsafe key, or state cleared by deleting
+the cache), the call is rejected with an `unknown_session` signal and the caller
+re-logins with its own known root and retries. Because the caller-visible contract
 (`login(root) -> key`; `<tool>(key, …)`; re-login-on-reject) hides the backend,
-a later persistent session store is a pure implementation swap with no contract
-migration.
+the move from the original in-memory map to this filesystem-backed store was a
+pure implementation swap with no contract migration.
 
 Key issuance accepts an optional capability/role-scope parameter
 (`#260505-tool-profile-gating`), so the lead can mint capability-scoped keys for
@@ -129,8 +135,10 @@ Gating).
 >   (`#260610-mercenary-delegation-surface`), so a delegate cannot self-login or
 >   escalate by logging in again from a contained context. Re-login for recovery
 >   uses the caller's own already-known root.
-> - The model is in-memory with no eviction; a persistent backend is deferred
->   until session state grows heavy and is a contract-invariant swap.
+> - The store is filesystem-backed (one record file per key under a flat `keys/`
+>   directory) and survives a server restart. There is still no logout and no
+>   automatic eviction, though deleting a key file is now a physically possible
+>   removal path (deferred).
 
 ## Config Tools {#260505-config-tools}
 

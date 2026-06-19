@@ -27,11 +27,29 @@ import (
 // can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
 // go:embed bundle). Tests that exercise a custom rsrc tree override it per-test
 // with t.Setenv.
+//
+// It also defaults WS_CACHE_HOME to a throwaway temp dir so the file-backed
+// session store (keys/<key>.json under the cache root) never reads or writes the
+// developer's real ~/.cache during the suite. Tests that assert specific cache
+// paths still override it per-test with t.Setenv (last write wins).
 func TestMain(m *testing.M) {
 	if os.Getenv("WS_RSRC_ROOT") == "" {
 		_ = os.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
 	}
-	os.Exit(m.Run())
+	os.Exit(runTestMain(m))
+}
+
+func runTestMain(m *testing.M) int {
+	if os.Getenv("WS_CACHE_HOME") == "" {
+		dir, err := os.MkdirTemp("", "ws-mcp-test-cache-")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "TestMain: create temp cache home: %v\n", err)
+			return 1
+		}
+		defer os.RemoveAll(dir)
+		_ = os.Setenv("WS_CACHE_HOME", dir)
+	}
+	return m.Run()
 }
 
 func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
