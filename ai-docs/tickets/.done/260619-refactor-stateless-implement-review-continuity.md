@@ -4,6 +4,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260619-research-ws-delegate-continuity-host-neutral-fallback: motivating research; its finding leaned on the mercenary path, which this ticket supersedes (mercenary is default-off/advanced). Finding needs a correction append when next touched.
   260619-research-claude-teammate-mode-subagent-collection-doc-gap: related collection-mode gap; stateless delegates reduce how load-bearing teammate-mode same-agent resume is.
+completed: 2026-06-19
 ---
 
 # Stateless implement-review loop continuity via commit AI Context

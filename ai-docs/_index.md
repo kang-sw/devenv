@@ -308,15 +308,6 @@ dropped tickets live in hidden archive dirs and git history.
   `prefer_mercenary` + `config.agents_tier`; slot for future `model_alias`/`role_tier`).
   Owns the tuning manual + the proactive-proposal trigger (description = trigger
   surface). Depends on the data-plane child. Sequence: data plane (3a) → skill (3b).
-- `260619-refactor-stateless-implement-review-continuity` (ready, Phase 1
-  implemented — branch `implement/stateless-implement-review-continuity`, result
-  `1d6cd7d3` + audit-fix `8d55bd4a`, **unmerged pending Final Action Gate**) -
-  makes the `lead-implement` review fix-loop correct under the default
-  native-subagent path by treating delegates as stateless and moving continuity to
-  the lead, anchored on commit `## AI Context`. D1-D6 landed across
-  `implementer.md`/`reviewer.md`/`lead-implement.md` + spec anchor
-  `#260619-stateless-implement-review-continuity` in `workflow-skills.md`. Epic
-  child of `260605`. Remove from focus on merge to `.done/`.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
