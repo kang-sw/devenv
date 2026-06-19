@@ -61,6 +61,17 @@ its own top-level, so it counts as a distinct root. Call `ws.ferrule` once per
 working root, and thread the matching `session_key` through every subsequent
 root-aware {{.McpNamespace}} tool call that targets that root.
 
+### Delegation posture
+
+<!-- ws:override:DelegationSection desc="lead delegation eagerness and context-saving stance" -->
+Delegate to preserve lead execution context. Hand off parallelizable
+fact-finding, multi-file surveys, and self-contained implementation or review
+slices to subagents, and keep the lead loop on routing, adjudication, and
+synthesis. Keep work that is faster to do than to brief — small, local,
+single-step edits — inline. When context budget runs short, lean harder toward
+delegation.
+<!-- ws:/override:DelegationSection -->
+
 ### Scoped Exploration (native Explore)
 
 Use for scoped fact-finding, surveys, and one-turn answers. Pattern: spawn a

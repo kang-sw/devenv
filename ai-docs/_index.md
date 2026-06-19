@@ -294,10 +294,16 @@ dropped tickets live in hidden archive dirs and git history.
   Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
   item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
   slice must adopt (not fork) the shared scope primitive.
-  Dependent children now UNBLOCKED (substrate shipped, next actionable):
-  `260619-feat-ws-prompt-override-marker-engine` (todo, dep: substrate),
-  `260619-feat-ws-config-prompt-tool-self-doc` (todo, dep: engine→substrate,
-  tool→both).
+  Dependent children: marker-engine **shipped** (done, both phases — `705795b8`
+  engine + `b2929411` `DelegationSection` seed). `260619-feat-ws-config-prompt-tool-self-doc`
+  (todo, dep both substrate + engine) is now **unblocked** and is the remaining
+  child.
+- `260619-feat-ws-config-prompt-tool-self-doc` (todo) - the remaining epic child:
+  a `config.prompt.set(pointId, harness, prompt, scope?)` setter plus a no-arg
+  `config.prompt()` self-doc that tree-scans override markers and lists the
+  tunable points with their stored/seed values. Both deps shipped (layered-config
+  substrate + marker engine with the live `DelegationSection` point keyed
+  `prompt.DelegationSection.<harness>`), so it is ready to promote.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

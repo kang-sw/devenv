@@ -274,6 +274,177 @@ func mercenaryGuidanceBlock() string {
 		" The native subagent path remains available if you prefer it."
 }
 
+// overrideLookupFn is an injectable function for resolving override values for a
+// named override-point and harness. It returns the override text and true when a
+// value is stored for the (pointId, harness) pair, or ("", false) to signal that
+// no override is stored and the inline seed default should be used.
+//
+// A nil overrideLookupFn means "no overrides available" — every override-point
+// renders its inline seed default. This allows printPlaybook and unit tests to
+// pass nil without constructing a resolver.
+type overrideLookupFn func(pointId, harness string) (value string, found bool)
+
+const (
+	// overrideOpenPrefix and overrideClosePrefix are the trimmed-line prefixes used
+	// to detect override-point open and close markers. The open marker has the form:
+	//   <!-- ws:override:<pointId> desc="..." -->
+	// The close marker has the form:
+	//   <!-- ws:/override:<pointId> -->
+	overrideOpenPrefix  = "<!-- ws:override:"
+	overrideClosePrefix = "<!-- ws:/override:"
+)
+
+// parseOverrideMarkerPointId extracts the pointId token from a trimmed marker
+// line whose prefix has already been verified, returning (pointId, true) when the
+// line is a well-formed marker (ends with `-->`). Parsing is symmetric for open
+// and close markers and tolerant of spacing: both `<!-- ws:override:Foo -->` and
+// `<!-- ws:override:Foo-->` (no space before `-->`) yield pointId "Foo". An
+// empty pointId or a missing `-->` terminator returns ("", false).
+func parseOverrideMarkerPointId(trimmed, prefix string) (string, bool) {
+	if !strings.HasPrefix(trimmed, prefix) || !strings.HasSuffix(trimmed, "-->") {
+		return "", false
+	}
+	// Strip the prefix and the trailing `-->`, then take the first whitespace-
+	// delimited token as the pointId. This handles both `Foo -->`, `Foo-->`, and
+	// `Foo desc="..." -->` forms identically.
+	rest := strings.TrimSuffix(trimmed[len(prefix):], "-->")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", false
+	}
+	pointId := rest
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		pointId = rest[:spaceIdx]
+	}
+	pointId = strings.TrimSpace(pointId)
+	if pointId == "" {
+		return "", false
+	}
+	return pointId, true
+}
+
+// buildOverrideLookup returns an overrideLookupFn backed by the session-keyed
+// layered-config resolver, or nil when sessionKey is empty (no session → no
+// overrides → seeds render). It is the single construction site shared by the
+// playbook.print and playbook.render dispatch paths, reusing the same
+// sessionConfigAdapter + resolver shape as the prefer_mercenary read path.
+//
+// Override values are stored under dynamic keys `prompt.<pointId>.<harness>`; the
+// resolver returns empty (not an error) for unset keys, so an absent override
+// yields ("", false) and the override pass falls back to the inline seed.
+func buildOverrideLookup(s *Server, sessionKey string) overrideLookupFn {
+	capturedKey := strings.TrimSpace(sessionKey)
+	if capturedKey == "" {
+		return nil
+	}
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	return func(pointId, harness string) (string, bool) {
+		rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
+		return rv.Value, rv.Value != ""
+	}
+}
+
+// applyOverrideMarkers processes override-point block markers in body, resolving
+// each (pointId, harness) pair through the lookup closure and substituting the
+// inline seed default when no override is stored. Marker lines are always stripped
+// from the rendered output — the result contains only resolved content and never
+// any override marker syntax.
+//
+// Resolution order per point: lookup(pointId, harness) → lookup(pointId, "all") →
+// inline seed body. An empty seed body (open marker immediately followed by close
+// marker) is an extension slot: it renders the stored override or nothing.
+//
+// Robustness guarantees:
+//   - Open/close parsing is symmetric and tolerant of spacing before `-->`.
+//   - Nested override blocks inside a seed body are processed recursively, so no
+//     inner marker line ever survives in the output.
+//   - An unclosed open marker (EOF reached with no matching close) is NOT treated
+//     as an override block: its line is emitted unchanged so no playbook content
+//     is consumed or truncated.
+//
+// A nil lookup is treated as "no overrides": every point falls back to its seed.
+func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string {
+	lines := strings.Split(body, "\n")
+	result := make([]string, 0, len(lines))
+
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Detect open marker: <!-- ws:override:<pointId> ... -->
+		pointId, ok := parseOverrideMarkerPointId(trimmed, overrideOpenPrefix)
+		if !ok {
+			result = append(result, line)
+			i++
+			continue
+		}
+
+		// Scan forward for the matching close marker, tracking nesting depth so an
+		// inner same-or-other override block does not prematurely close the outer
+		// one. The close that matches this open is the first close (for any pointId)
+		// encountered at depth 0.
+		seedLines := make([]string, 0)
+		depth := 1
+		closeIdx := -1
+		for j := i + 1; j < len(lines); j++ {
+			jt := strings.TrimSpace(lines[j])
+			if _, openOK := parseOverrideMarkerPointId(jt, overrideOpenPrefix); openOK {
+				depth++
+				seedLines = append(seedLines, lines[j])
+				continue
+			}
+			if _, closeOK := parseOverrideMarkerPointId(jt, overrideClosePrefix); closeOK {
+				depth--
+				if depth == 0 {
+					closeIdx = j
+					break
+				}
+				seedLines = append(seedLines, lines[j])
+				continue
+			}
+			seedLines = append(seedLines, lines[j])
+		}
+
+		// Unclosed open marker: do NOT treat as a block. Emit the open line
+		// unchanged and continue scanning from the next line so no content is lost.
+		if closeIdx < 0 {
+			result = append(result, line)
+			i++
+			continue
+		}
+
+		// Recursively process the seed so any nested override block inside it is
+		// resolved and its marker lines are stripped (prevents orphaned markers).
+		seed := applyOverrideMarkers(strings.Join(seedLines, "\n"), harness, lookup)
+
+		// Resolve: harness-specific → all → seed.
+		var resolved string
+		if lookup != nil {
+			if v, ok := lookup(pointId, harness); ok {
+				resolved = v
+			} else if v, ok := lookup(pointId, "all"); ok {
+				resolved = v
+			} else {
+				resolved = seed
+			}
+		} else {
+			resolved = seed
+		}
+
+		// Append the resolved text (may be empty for empty-seed extension slots
+		// with no stored override).
+		if resolved != "" {
+			result = append(result, resolved)
+		}
+		// Advance past the close marker.
+		i = closeIdx + 1
+	}
+
+	return strings.Join(result, "\n")
+}
+
 func renderProductModePlaybookBody(body string) string {
 	return selectProductModeBlocks(body)
 }
@@ -352,11 +523,16 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // preferMercenary: when true and the playbook is an implementer/reviewer role,
 // appends a guidance block advising the mercenary spawn idiom as primary.
 //
+// overrideLookup: when non-nil, a session-keyed resolver closure used to resolve
+// override-point marker values before product-mode selection. Pass nil (e.g. from
+// printPlaybook or unit tests that do not seed overrides) to render every
+// override-point with its inline seed default.
+//
 // Returns (body, recommendedTier, error): recommendedTier is the first-class tier
 // declared in the playbook frontmatter, surfaced so one render call routes both
 // delegation paths — native uses it as a host model-selection guide, mercenary
 // passes it to ws.mercenary.register's pass-through tier arg.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool) (string, string, error) {
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, overrideLookup overrideLookupFn) (string, string, error) {
 	harness := s.currentHarness()
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
@@ -408,6 +584,12 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 			body = credBlock + body
 		}
 	}
+
+	// Override-marker pass: runs before product-mode selection so that override
+	// substitution operates on the shared body (including full-only sections)
+	// before product-mode blocks are stripped. A nil lookup skips this pass and
+	// every override-point renders its inline seed default.
+	body = applyOverrideMarkers(body, harness, overrideLookup)
 
 	return renderProductModePlaybookBody(body), recommendedTier, nil
 }
@@ -484,8 +666,10 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 //
 // rsrcRoot is a call-site-overridable seam for root_override support.
 // configOpts controls config-backed model alias resolution.
-func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options) (string, string, error) {
-	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false)
+// overrideLookup: when non-nil, the session-keyed closure for resolving prompt
+// override-point values; pass nil to render every override-point with its seed.
+func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, overrideLookup overrideLookupFn) (string, string, error) {
+	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, overrideLookup)
 }
 
 // renderPlaybook loads a playbook, renders it (with optional child-key mint and
@@ -496,7 +680,9 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // mintRoot: when non-empty, caller is a lead and a child key is minted for the delegate.
 // preferMercenary: when true and playbook is implementer/reviewer, adds mercenary-primary guidance.
 // configOpts controls config-backed model alias resolution.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool) (string, string, error) {
+// overrideLookup: when non-nil, the session-keyed closure for resolving prompt
+// override-point values; pass nil to render every override-point with its seed.
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, overrideLookup overrideLookupFn) (string, string, error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -507,7 +693,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		templateContext = nil
 		renderContext = callerContext
 	}
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary, overrideLookup)
 	if err != nil {
 		return "", "", err
 	}
