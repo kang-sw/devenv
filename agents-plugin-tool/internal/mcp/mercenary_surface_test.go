@@ -476,6 +476,14 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	if !strings.Contains(revClaude, "opus") {
 		t.Errorf("reviewer (claude) body must surface RoleModel 'opus':\n%s", revClaude)
 	}
+
+	// reference-discovery → RoleModel (tier small): claude=haiku. Anchors the small
+	// tier concretely so all three first-class tiers (small/medium/large) have a
+	// resolved-model assertion, not just placeholder-absence.
+	refDiscClaude := render(t, "reference-discovery", "claude")
+	if !strings.Contains(refDiscClaude, "haiku") {
+		t.Errorf("reference-discovery (claude) body must surface RoleModel 'haiku':\n%s", refDiscClaude)
+	}
 }
 
 // TestRenderGoldenShippedPhase4Delegates exercises the remaining shipped delegate
