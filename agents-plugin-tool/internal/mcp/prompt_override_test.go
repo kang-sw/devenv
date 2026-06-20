@@ -552,3 +552,124 @@ func assertManualStructureIntact(t *testing.T, label, body string) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Case 7: config.prompt.set end-to-end — setter drives real override through
+// to render, matching the brief's integration-test contract.
+// ---------------------------------------------------------------------------
+
+// TestConfigPromptSetEndToEnd verifies the config.prompt.set tool dispatch path
+// end-to-end against the shipped lead-workflow-manual:
+//
+//  1. Calling config.prompt.set with a lead session key writes the override
+//     through the real layered config resolver.
+//  2. Rendering lead-workflow-manual via buildOverrideLookup + printPlaybook
+//     (the same path used by playbook.print dispatch) shows the stored override
+//     instead of the DelegationSection seed.
+//  3. Marker syntax is absent; manual structure is intact.
+//  4. Harness-exact match vs all-bucket: a harness-specific override (claude)
+//     wins over a previously stored all-bucket override when both are present.
+func TestConfigPromptSetEndToEnd(t *testing.T) {
+	useLeadProfile(t)
+
+	// Use the real shipped rsrc tree so lead-workflow-manual loads with its
+	// real DelegationSection marker.
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	// Separate git repo as the session-bound worktree root.
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	// Set harness to "claude" so per-harness lookups resolve predictably.
+	s.observeHarness("test", "claude")
+
+	// Bootstrap a lead session key.
+	key, _ := parseLoginResponse(t, callLogin(t, s, 910100, root, nil))
+
+	const seedPhrase = "Delegate to preserve lead execution context"
+
+	// --- Baseline: without any override, seed renders ---
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (baseline): %v", err)
+	}
+	if !strings.Contains(baseBody, seedPhrase) {
+		t.Errorf("baseline: seed phrase must appear before any override is set:\n%s", baseBody)
+	}
+
+	// --- Set override via the real config.prompt.set dispatch ---
+	// Scope: session (explicit) so the test exercises the session-scope write path
+	// and does not touch the project-scope file on disk.
+	const overrideText = "ALWAYS delegate to save context — custom override for test."
+	setResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "DelegationSection",
+		"harness":     "claude",
+		"prompt":      overrideText,
+		"scope":       "session",
+	})
+	setText := toolText(t, setResp)
+	// Confirm the tool returned the expected confirmation line.
+	if !strings.Contains(setText, "prompt override set: DelegationSection/claude") {
+		t.Fatalf("config.prompt.set confirmation missing: %s", setText)
+	}
+	if !strings.Contains(setText, "scope: session") {
+		t.Fatalf("config.prompt.set must report session scope: %s", setText)
+	}
+
+	// --- Render with the override active ---
+	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (after set): %v", err)
+	}
+
+	// Override text must appear; seed must be gone.
+	if !strings.Contains(overrideBody, overrideText) {
+		t.Errorf("config.prompt.set: stored override must appear in render:\n%s", overrideBody)
+	}
+	if strings.Contains(overrideBody, seedPhrase) {
+		t.Errorf("config.prompt.set: seed phrase must not appear when override is set:\n%s", overrideBody)
+	}
+
+	// Marker syntax must be absent; manual structure intact.
+	assertNoMarkerSyntax(t, "config.prompt.set render", overrideBody)
+	assertManualStructureIntact(t, "config.prompt.set render", overrideBody)
+
+	// --- Harness-exact vs all-bucket precedence ---
+	// Store an all-bucket override. Since a claude-specific override already exists,
+	// the per-harness key must win and the all-bucket text must not appear.
+	const allOverrideText = "All-harness override — should lose to claude-specific."
+	allSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "DelegationSection",
+		"harness":     "*",
+		"prompt":      allOverrideText,
+		"scope":       "session",
+	})
+	allSetText := toolText(t, allSetResp)
+	// Confirm the harness normalization: "*" is stored as "all".
+	if !strings.Contains(allSetText, "prompt override set: DelegationSection/all") {
+		t.Fatalf("config.prompt.set (all bucket) confirmation missing: %s", allSetText)
+	}
+
+	// Render again — claude-specific override must still win.
+	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (precedence): %v", err)
+	}
+	if !strings.Contains(precedenceBody, overrideText) {
+		t.Errorf("harness-specific (claude) override must win over all-bucket:\n%s", precedenceBody)
+	}
+	if strings.Contains(precedenceBody, allOverrideText) {
+		t.Errorf("all-bucket text must not appear when harness-specific override is set:\n%s", precedenceBody)
+	}
+	if strings.Contains(precedenceBody, seedPhrase) {
+		t.Errorf("seed phrase must not appear when overrides are set:\n%s", precedenceBody)
+	}
+	assertNoMarkerSyntax(t, "config.prompt.set precedence render", precedenceBody)
+	assertManualStructureIntact(t, "config.prompt.set precedence render", precedenceBody)
+}

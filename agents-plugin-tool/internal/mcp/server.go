@@ -485,6 +485,64 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolJSONResponse(req.ID, cfg, err)
 
+	case "config.prompt.set":
+		// Lead-only setter for prompt override-points. The config.* prefix gate in
+		// roleAllowsTool already blocks delegate and leaf keys, so no extra role
+		// check is needed here (sole keyed-gate-is-authority rule, per mcp-runtime
+		// mental model).
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: session_key is required"))
+		}
+		pointID, _ := params.Arguments["pointId"].(string)
+		pointID = strings.TrimSpace(pointID)
+		if pointID == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: pointId must be non-empty"))
+		}
+		harness, _ := params.Arguments["harness"].(string)
+		// Normalize the harness value and reject unrecognized inputs.
+		// The caller-visible enum is ["claude","codex","*"]; "*" is stored as "all"
+		// to match the buildOverrideLookup reader which reads prompt.<id>.all.
+		switch harness {
+		case "claude", "codex":
+			// accepted as-is
+		case "*":
+			harness = "all"
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: harness must be one of claude, codex, or *; got %q", harness))
+		}
+		promptText, _ := params.Arguments["prompt"].(string)
+		if strings.TrimSpace(promptText) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: prompt must be non-empty"))
+		}
+		// Parse optional scope arg. Empty/absent passes ExplicitScope:"" so the
+		// resolver applies DefaultScope (project for unregistered prompt.* keys).
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(scopeArg)
+		}
+		// Write through the layered config resolver. Use wsconfig.Options{} (ambient
+		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as config.agents_tier and
+		// prefer_mercenary do; do NOT call resolveToolRoot (config.* tools are not
+		// root-aware per mcp-runtime mental model).
+		overrideKey := "prompt." + pointID + "." + harness
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{
+			ExplicitScope: explicitScope,
+			SessionKey:    sessionKey,
+		}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: %w", err))
+		}
+		// Determine the resolved scope for the confirmation message.
+		resolvedScope := explicitScope
+		if resolvedScope == "" {
+			resolvedScope = wsconfig.DefaultScope(overrideKey)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
+
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2063,6 +2121,21 @@ func tools() []map[string]any {
 					"harness": stringProperty("Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known."),
 				},
 				"required": []string{"tier"},
+			},
+		},
+		{
+			"name":        "config.prompt.set",
+			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate and to support session-scope writes."),
+					"pointId":     stringProperty("Override-point id, e.g. DelegationSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket the override applies to. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"prompt":      stringProperty("Override text that replaces the seed block at render time. Must be non-empty."),
+					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
+				},
+				"required": []string{"session_key", "pointId", "harness", "prompt"},
 			},
 		},
 		{
