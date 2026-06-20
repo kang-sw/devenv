@@ -954,12 +954,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		// Phase 2 (260611): `tier` is re-introduced as a PASS-THROUGH of the
-		// first-class recommended tier that playbook.render returns (origin =
-		// playbook frontmatter, not a caller-chosen workload tier). It is mapped
-		// first-class→alias here before wsconfig resolution; empty/unknown tier
-		// leaves RegisterOptions.Tier empty so Register applies its built-in
-		// default instead of pinning to core when a tier WAS declared. The other
+		// Phase 1 (260620): `tier` is a PASS-THROUGH of the recommended tier that
+		// playbook.render returns (origin = playbook frontmatter). The tier flows
+		// directly as a capability word to RegisterOptions.Tier; downstream
+		// ResolveAgentForHarnessConfig normalizes via normalizedTier. Empty/unknown
+		// tier leaves RegisterOptions.Tier empty so Register applies its built-in
+		// default instead of pinning to medium when a tier WAS declared. The other
 		// former fields (prompts/prompt_refs/model) stay removed from the MCP
 		// schema; RegisterOptions struct fields remain for internal callers (api_docs).
 		tier, _ := params.Arguments["tier"].(string)
@@ -969,7 +969,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Backend:          backend,
 			Harness:          s.currentHarness(),
 			SystemPromptText: systemPromptText,
-			Tier:             firstClassTierToAlias(tier),
+			Tier:             tier,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
 	case "ws.mercenary.call":
@@ -1310,7 +1310,7 @@ func formatStringLines(values []string) string {
 func formatConfigView(view wsconfig.View) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "path: %s\n", view.Path)
-	aliases := []string{"light", "core", "deep"}
+	aliases := []string{"small", "medium", "large", "xlarge"}
 	b.WriteString("model_aliases:\n")
 	for _, alias := range aliases {
 		byHarness := view.Config.Agents.ModelAliases[alias]
@@ -2202,11 +2202,11 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.agents_tier",
-			"description": "Compatibility surface for configuring the current or selected harness backend/model mapping for a ws agent model alias.",
+			"description": "Configure the backend/model mapping for a ws agent capability tier.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"tier":    enumStringProperty("Model alias to configure.", []string{"light", "core", "deep"}),
+					"tier":    enumStringProperty("Capability tier to configure.", []string{"small", "medium", "large", "xlarge"}),
 					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
 					"model":   stringProperty("Concrete model for this alias."),
 					"effort":  enumStringProperty("Optional portable reasoning effort for this alias. Empty, omitted, or none leaves backend effort unset.", []string{"", "none", "low", "medium", "high", "xhigh"}),

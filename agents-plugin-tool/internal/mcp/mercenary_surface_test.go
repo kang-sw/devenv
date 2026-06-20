@@ -543,30 +543,7 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 	}
 }
 
-// --- Phase 2 (260611): tier routing — render-returned recommended tier + register pass-through ---
-
-// TestFirstClassTierToAlias pins the first-class→alias bridge the register handler
-// applies to the render-returned recommended tier before wsconfig resolution.
-func TestFirstClassTierToAlias(t *testing.T) {
-	cases := map[string]string{
-		"small":    "light",
-		"medium":   "core",
-		"large":    "deep",
-		"xlarge":   "deep",  // no legacy alias → highest configured tier until Phase 3
-		"light":    "light", // alias passes through
-		"core":     "core",
-		"deep":     "deep",
-		"Large":    "deep", // case-insensitive
-		" medium ": "core", // trimmed
-		"":         "",     // empty → default at Register
-		"bogus":    "",     // unknown → default at Register
-	}
-	for in, want := range cases {
-		if got := firstClassTierToAlias(in); got != want {
-			t.Errorf("firstClassTierToAlias(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
+// --- Phase 1 (260620): capability tier routing — register pass-through to capability vocabulary ---
 
 // TestWithRecommendedTier verifies the render/print return channel: a declared tier
 // appends a `recommended-tier:` line; an empty tier leaves the payload unchanged.
@@ -600,47 +577,46 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	}
 }
 
-// TestMercenaryTierRoutingResolvesCustomModel is the Phase 2 key coverage: with
-// light & deep customized via config.agents_tier, a mercenary registered for a
-// small-tier role resolves the custom light model and a large-tier role resolves
-// the custom deep model — NOT the built-in core default. firstClassTierToAlias is
-// exactly what the ws.mercenary.register handler applies to the render-returned tier
-// before Register; this exercises that mapping + the config resolution end to end.
+// TestMercenaryTierRoutingResolvesCustomModel is the Phase 1 key coverage: with
+// small & large customized via config.agents_tier, a mercenary registered with a
+// capability tier flows straight through to wsconfig resolution — NOT the built-in
+// medium default. The tier passes directly without firstClassTierToAlias translation;
+// downstream ResolveAgentForHarnessConfig normalizes via normalizedTier.
 // (A real subprocess is not spawned; Register resolves the backend/model the call
-// would use.) Closes 260609 Edition 0c7c0f50 gap 3.
+// would use.)
 func TestMercenaryTierRoutingResolvesCustomModel(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	cache := filepath.Join(t.TempDir(), "cache")
-	// Custom light & deep models distinct from the core default (gpt-5.5): a
-	// resolved custom model proves the first-class tier flowed through.
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "light", "", "claude-custom-light"); err != nil {
-		t.Fatalf("set light tier: %v", err)
+	// Custom small & large models distinct from the medium default (gpt-5.5): a
+	// resolved custom model proves the capability tier flowed straight through.
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "small", "", "claude-custom-small"); err != nil {
+		t.Fatalf("set small tier: %v", err)
 	}
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "deep", "", "gpt-custom-deep"); err != nil {
-		t.Fatalf("set deep tier: %v", err)
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "large", "", "gpt-custom-large"); err != nil {
+		t.Fatalf("set large tier: %v", err)
 	}
 	mgr := wsagent.NewManager(wsagent.Options{CacheHome: cache})
 	cases := []struct {
-		name, firstClass, wantBackend, wantModel string
+		name, tier, wantBackend, wantModel string
 	}{
-		{"impl", "small", "claude", "claude-custom-light"},
-		{"rev", "large", "codex", "gpt-custom-deep"},
+		{"impl", "small", "claude", "claude-custom-small"},
+		{"rev", "large", "codex", "gpt-custom-large"},
 	}
 	for _, tc := range cases {
 		agent, _, err := mgr.Register(wsagent.RegisterOptions{
 			Root:             root,
 			Name:             tc.name,
-			Tier:             firstClassTierToAlias(tc.firstClass), // handler's pass-through mapping
+			Tier:             tc.tier, // capability tier flows directly, no alias translation
 			SystemPromptText: "x",
 		})
 		if err != nil {
 			t.Fatalf("Register %s: %v", tc.name, err)
 		}
 		if agent.Backend != tc.wantBackend || agent.Model != tc.wantModel {
-			t.Errorf("%s (first-class %q → alias %q): backend/model = %q/%q, want %q/%q (must not pin to core)",
-				tc.name, tc.firstClass, firstClassTierToAlias(tc.firstClass),
+			t.Errorf("%s (tier %q): backend/model = %q/%q, want %q/%q (must not pin to medium)",
+				tc.name, tc.tier,
 				agent.Backend, agent.Model, tc.wantBackend, tc.wantModel)
 		}
 	}

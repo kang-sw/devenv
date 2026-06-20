@@ -78,12 +78,50 @@ func Load(opts Options) (Config, error) {
 	if cfg.Agents.Tiers == nil {
 		cfg.Agents.Tiers = map[string]AgentTier{}
 	}
+	// Load-time key migration: normalize legacy light/core/deep keys to capability
+	// vocabulary (small/medium/large). This is in-memory only — no file rewrite,
+	// no schemaVersion bump. Precedence: if both a legacy key and its capability
+	// key already exist, the capability key wins; the legacy duplicate is dropped.
+	normalizeLegacyTierKeys(cfg.Agents.Tiers, cfg.Agents.ModelAliases)
 	applyDefaultTiers(cfg.Agents.Tiers)
 	if cfg.Agents.ModelAliases == nil {
 		cfg.Agents.ModelAliases = map[string]map[string]AgentTier{}
 	}
 	applyDefaultModelAliases(cfg.Agents.Tiers, cfg.Agents.ModelAliases)
 	return cfg, nil
+}
+
+// normalizeLegacyTierKeys migrates persisted light/core/deep map keys to their
+// capability equivalents (small/medium/large) in-memory. Capability key wins on
+// collision; legacy key is dropped. Operates on both Tiers and ModelAliases.
+func normalizeLegacyTierKeys(tiers map[string]AgentTier, aliases map[string]map[string]AgentTier) {
+	// Normalize Tiers map.
+	for legacyKey, val := range tiers {
+		capKey := normalizedTier(legacyKey)
+		if capKey == "" || capKey == legacyKey {
+			// Already a capability key or unrecognized — skip.
+			continue
+		}
+		if _, exists := tiers[capKey]; !exists {
+			tiers[capKey] = val
+		}
+		// Capability key wins; drop the legacy duplicate.
+		delete(tiers, legacyKey)
+	}
+	if aliases == nil {
+		return
+	}
+	// Normalize ModelAliases outer (alias) key.
+	for legacyKey, byHarness := range aliases {
+		capKey := normalizedTier(legacyKey)
+		if capKey == "" || capKey == legacyKey {
+			continue
+		}
+		if _, exists := aliases[capKey]; !exists {
+			aliases[capKey] = byHarness
+		}
+		delete(aliases, legacyKey)
+	}
 }
 
 func Show(opts Options) (View, error) {
@@ -105,7 +143,7 @@ func SetAgentsTier(opts Options, tier, backend, model string, effortValues ...st
 func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string, effortValues ...string) (Config, error) {
 	tier = normalizedTier(tier)
 	if tier == "" {
-		return Config{}, fmt.Errorf("tier must be light, core, or deep")
+		return Config{}, fmt.Errorf("tier must be small, medium, large, or xlarge")
 	}
 	backend = strings.TrimSpace(backend)
 	model = strings.TrimSpace(model)
@@ -181,7 +219,7 @@ func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness st
 		model = ""
 	}
 	if tier == "" {
-		tier = "core"
+		tier = "medium"
 	}
 	if model != "" {
 		if backend == "" {
@@ -219,8 +257,14 @@ func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness st
 
 func ModelAlias(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "light", "core", "deep":
-		return strings.ToLower(strings.TrimSpace(value))
+	case "small", "light":
+		return "small"
+	case "medium", "core":
+		return "medium"
+	case "large", "deep":
+		return "large"
+	case "xlarge":
+		return "xlarge"
 	default:
 		return ""
 	}
@@ -263,9 +307,10 @@ func defaultConfig() Config {
 
 func applyDefaultTiers(tiers map[string]AgentTier) {
 	defaults := map[string]AgentTier{
-		"light": {Backend: "codex", Model: "gpt-5.4-mini"},
-		"core":  {Backend: "codex", Model: "gpt-5.5"},
-		"deep":  {Backend: "codex", Model: "gpt-5.5"},
+		"small":  {Backend: "codex", Model: "gpt-5.4-mini"},
+		"medium": {Backend: "codex", Model: "gpt-5.5"},
+		"large":  {Backend: "codex", Model: "gpt-5.5"},
+		"xlarge": {Backend: "codex", Model: "gpt-5.5"},
 	}
 	for tier, mapping := range defaults {
 		if _, ok := tiers[tier]; !ok {
@@ -290,19 +335,24 @@ func applyDefaultModelAliases(tiers map[string]AgentTier, aliases map[string]map
 
 func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]AgentTier {
 	return map[string]map[string]AgentTier{
-		"light": {
-			"default": tierOrDefault(tiers, "light", AgentTier{Backend: "codex", Model: "gpt-5.4-mini"}),
-			"codex":   tierOrDefault(tiers, "light", AgentTier{Backend: "codex", Model: "gpt-5.4-mini"}),
+		"small": {
+			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-5.4-mini"}),
+			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-5.4-mini"}),
 			"claude":  {Backend: "claude", Model: "haiku"},
 		},
-		"core": {
-			"default": tierOrDefault(tiers, "core", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
-			"codex":   tierOrDefault(tiers, "core", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+		"medium": {
+			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
 			"claude":  {Backend: "claude", Model: "sonnet"},
 		},
-		"deep": {
-			"default": tierOrDefault(tiers, "deep", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
-			"codex":   tierOrDefault(tiers, "deep", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+		"large": {
+			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"claude":  {Backend: "claude", Model: "opus"},
+		},
+		"xlarge": {
+			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
 			"claude":  {Backend: "claude", Model: "opus"},
 		},
 	}
@@ -427,12 +477,14 @@ func save(opts Options, cfg Config) error {
 
 func normalizedTier(tier string) string {
 	switch strings.ToLower(strings.TrimSpace(tier)) {
-	case "haiku", "light":
-		return "light"
-	case "sonnet", "core":
-		return "core"
-	case "opus", "deep":
-		return "deep"
+	case "small", "light", "haiku":
+		return "small"
+	case "medium", "core", "sonnet":
+		return "medium"
+	case "large", "deep", "opus":
+		return "large"
+	case "xlarge":
+		return "xlarge"
 	default:
 		return ""
 	}

@@ -205,36 +205,6 @@ func delegationTip(harness string) string {
 	return sb.String()
 }
 
-// firstClassTierToAlias maps a first-class capability tier (small/medium/large/
-// xlarge) declared in playbook frontmatter down to the conventional alias layer
-// (light/core/deep) that config.agents_tier is keyed by. This is the intended
-// translation boundary between the two tier planes — the abstraction layer
-// (first-class tier, spoken by frontmatter/skills/defaults) and the concrete-model
-// layer (aliases alongside vendor model names, where per-harness model config
-// lives) — not a temporary shim: config.agents_tier stays alias-keyed by design,
-// since the taxonomy demotes light/core/deep to the concrete-model layer. Alias
-// values pass through unchanged so a playbook may declare an alias directly.
-// xlarge has no legacy alias and maps to deep (the highest configured tier).
-// Empty/unknown returns "" so the register path falls back to its built-in
-// default rather than routing an unrecognized tier.
-//
-// playbook.render surfaces the first-class frontmatter tier as a recommended
-// tier, and ws.mercenary.register maps it here before setting RegisterOptions.Tier.
-func firstClassTierToAlias(tier string) string {
-	switch strings.ToLower(strings.TrimSpace(tier)) {
-	case "small", "light":
-		return "light"
-	case "medium", "core":
-		return "core"
-	case "large", "deep":
-		return "deep"
-	case "xlarge":
-		return "deep"
-	default:
-		return ""
-	}
-}
-
 // withRecommendedTier appends a `recommended-tier: <first-class>` metadata line to
 // a playbook tool payload when the playbook declares a tier. Empty tier leaves the
 // payload unchanged. This is the render/print return channel the lead reads to

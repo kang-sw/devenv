@@ -295,7 +295,7 @@ func configShow(args []string) {
 
 func configAgentsTier(args []string) {
 	fs := flag.NewFlagSet("config agents-tier", flag.ExitOnError)
-	tier := fs.String("tier", "", "model alias: light, core, or deep")
+	tier := fs.String("tier", "", "capability tier: small, medium, large, or xlarge")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
 	effort := fs.String("effort", "", "portable reasoning effort for this alias: none, low, medium, high, or xhigh")
