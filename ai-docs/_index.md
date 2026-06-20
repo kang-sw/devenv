@@ -283,41 +283,18 @@ dropped tickets live in hidden archive dirs and git history.
   unblocked. The session-key word-chain generator generalization to other id
   surfaces remains reserved as `260610-refactor-ws-wordchain-id-generalization`
   (todo, follow-up).
-- `260619-epic-ws-layered-config-prompt-tuning` (todo, epic) - board artifact,
-  not implementation-ready. New epic under `260605` pushing the playbook prompt
-  engine toward user-tunable config: a 4-layer `session>project>global>builtin`
-  config substrate (per-item default scope, file lock, `prefer_mercenary`
-  migrated in → closes `260618`) + a block-marker prompt-override engine
-  (`DelegationSection` seed) + a self-doc `config.prompt()` listing. **Substrate
-  child shipped** (`260619-feat-ws-layered-config-scope-substrate`, done: Phase 1
-  `acf1be70` resolver + scopes + file-lock RMW + `config.show` scope reporting;
-  Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
-  item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
-  slice must adopt (not fork) the shared scope primitive.
-  Substrate + marker-engine **both shipped** (done). The tuning surface (two
-  children, discuss 2026-06-19) is now **both shipped**: data plane 3a
-  (`config.prompt.*`, merged) + entry skill 3b (`ws:lead-tune`, awaiting merge).
-  All epic children complete — close the epic once 3b merges.
-- `260619-feat-ws-config-prompt-tool-self-doc` (.done) - **data plane, COMPLETE**.
-  Phase 1 `config.prompt.set` (`24e7e0d1` setter, `85b7b63f` test) + Phase 2
-  read-only `config.prompt()` listing (`4e4460a1`: marker tree-scan with `desc`,
-  per-harness/scope current values, `ws:lead-tune` pointer) both on
-  `implement/260619-config-prompt-tool`. Setter: lead-only `config.*`-gated, key
-  `prompt.<pointId>.<harness>` (`*`→`all`), default scope project, session writes
-  need `session_key`, wsflow-visible. Listing mirrors `config.show` (optional
-  `session_key`, declared-marker-keyed, no orphan surfacing). Spec
-  `260620-config-prompt-override-tuning-tools` both tools implemented; mental-model
-  `prompt-bundle` synced. Merged to the epic (`461fef11`, whole-ticket `--no-ff`).
-- `260619-feat-ws-lead-tune-skill` (.done) - **entry skill COMPLETE** (`670e37dd`).
-  `ws:lead-tune`, the 13th user-invocable lead entry skill: thin shim + `kind:print`
-  umbrella tuning manual driving `config.prompt.*` for prompt overrides
-  (`DelegationSection` worked example), introducing/linking `prefer_mercenary` +
-  `config.agents_tier`, with a `proactive-propose` judge (description = trigger
-  surface) and a future `model_alias`/`role_tier` slot. Agent-backed knobs are
-  `ws:full-only`; wsflow renders only the prompt-override knob. Spec
-  `260505-lead-skill-namespace-surface` (`#260619-lead-tune-workflow-tuning-skill`)
-  + `workflow-skills` mental-model updated; Fresh-Reader Audit passed. On
-  `implement/260619-lead-tune-skill`, awaiting merge to the epic branch.
+- `260619-epic-ws-layered-config-prompt-tuning` (**.done**, epic) - user-tunable
+  playbook prompt config, all four children landed on the epic branch:
+  layered `session>project>global>builtin` config substrate
+  (`260619-feat-ws-layered-config-scope-substrate`: `acf1be70` resolver/scopes/
+  file-lock + `c65326bd` `prefer_mercenary` migration, closed `260618`),
+  block-marker override engine (`260619-feat-ws-prompt-override-marker-engine`,
+  `DelegationSection` seed), data plane (`260619-feat-ws-config-prompt-tool-self-doc`:
+  `24e7e0d1` `config.prompt.set` + `4e4460a1` `config.prompt()` listing, merged
+  `461fef11`), and the `ws:lead-tune` umbrella tuning skill
+  (`260619-feat-ws-lead-tune-skill`: `670e37dd`, merged `d3ca7a90`). Future
+  `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
+  fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

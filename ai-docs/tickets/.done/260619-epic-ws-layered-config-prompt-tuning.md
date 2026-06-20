@@ -56,17 +56,18 @@ rather than a delegation-specific feature.
 - `260619-feat-ws-prompt-override-marker-engine` (**done**) — A1 block-marker
   override pass (sibling to the product-mode pass); seeded `DelegationSection` in
   the workflow manual (first shipped override-point). Both phases shipped.
-- `260619-feat-ws-config-prompt-tool-self-doc` (todo) — **data plane only**:
-  `config.prompt.set` setter (own namespace) + no-arg `config.prompt()` listing
-  that tree-scans override markers and returns the point list / current values /
-  scopes **plus a one-line pointer to `ws:lead-tune`**. The tuning *manual* moved
-  out to the new skill child (3b). Depends on the substrate and the marker engine.
-- `260619-feat-ws-lead-tune-skill` (todo) — **new**: `ws:lead-tune`, a dedicated
-  user-invocable entry skill that is the **umbrella tuning surface** (prompt
+- `260619-feat-ws-config-prompt-tool-self-doc` (**done**) — **data plane**:
+  `config.prompt.set` setter (own namespace, Phase 1 `24e7e0d1`) + no-arg
+  `config.prompt()` listing (Phase 2 `4e4460a1`) that tree-scans override markers
+  and returns the point list / current values / scopes **plus a one-line pointer to
+  `ws:lead-tune`**. The tuning *manual* moved out to the skill child (3b). Merged to
+  the epic (`461fef11`).
+- `260619-feat-ws-lead-tune-skill` (**done**) — `ws:lead-tune` (feat `670e37dd`,
+  merged `d3ca7a90`), the user-invocable **umbrella tuning surface** (prompt
   overrides primary; introduces/links `prefer_mercenary` and `config.agents_tier`;
   leaves a slot for future `config.model_alias`/`config.role_tier`). Owns the
-  tuning manual and the proactive-proposal trigger. Depends on 3a (data plane) and
-  the marker engine (points it documents).
+  tuning manual and the proactive-proposal trigger; agent-backed knobs are
+  `ws:full-only` so agentless wsflow renders only the prompt-override knob.
 
 ## Cross-Child Decisions
 
