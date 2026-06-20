@@ -217,6 +217,50 @@ Verification: `playbook.render(reference-discovery)` substitutes the concrete
 model resolved from `tier:`; `recommended-tier` still emitted; `playbook_tools_test`
 and the wsflow mirror drift guard pass. Depends on Phase 1.
 
+### Result (ddc2caf9) - 2026-06-20
+
+Implemented. The fixed three-var model-hint surface
+(`{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}`) is collapsed to a single
+tier-derived `{{.RoleModel}}`. `resolveModelVars` (three fixed aliases) is
+replaced by `resolveRoleModelVar(harness, tier, configOpts)`, which resolves one
+`RoleModel` entry from the playbook's declared `tier:` via
+`ResolveAgentForHarnessConfig` (Phase 1 made that accept capability vocabulary
+directly). `buildPlaybookVars` gains a `tier` parameter; `renderPlaybookBody`
+passes `pb.Meta.Tier` (already read as `recommendedTier`), so the body's
+`RoleModel` is always consistent with the `recommended-tier:` line. The
+`firstClassTierToAlias`-style alias step is gone from the render path.
+`reservedToolVarNames` drops the three alias names and adds `RoleModel`; no
+read-compat shim for the old var names (internal authoring surface — loud failure
+is correct).
+
+All 9 model-var delegate playbooks migrated (`reference-discovery`,
+`implementer`, `mental-model-updater`, `plan-populator-survey`,
+`plan-populator-research`, `reviewer`, `code-review-correctness`,
+`code-review-fit`, `code-review-test`): `variables:` list → `[RoleModel]`, body
+line → `{{.RoleModel}}`. **No `tier:` value changed** — the existing per-playbook
+tier already matched its hand-picked alias (small↔light, medium↔core,
+large↔deep), so resolved model strings are byte-identical to before.
+
+Reviewed partitioned (correctness/fit/test) — clean; one test-coverage minor
+(small-tier concrete-model assertion gap) fixed directly by lead in `11da5258`.
+
+Deviation from the listed bullets:
+- **Manifest regeneration was required beyond the phase bullets.** Editing the
+  playbook sources changed their content hashes, so `manifest.json` in both
+  `agents-plugin/rsrc/` and `agents-plugin-wsflow/rsrc/` was regenerated
+  (`WS_REGEN_MANIFEST=1`) alongside the mirror (`WS_REGEN_WSFLOW_RSRC=1`) so the
+  drift guard passes on a normal run. Correct and necessary; no hand-editing.
+- The unrelated `TestExecMCPRunningLargeAndAbort` is a pre-existing timing-based
+  flake (passed `ok` in lead verification runs); not touched by this diff.
+
+> Forward (Phase 3): the `prompt-bundle` mental model still documents the
+> `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` render-var set — fold its
+> `{{.RoleModel}}` update into the Phase 3 single-vocabulary mental-model sweep
+> alongside the Phase 1 forward note (`named-agent-runtime`, `mcp-runtime`).
+> Deferred from Phase 2 on purpose: updating `prompt-bundle` alone while its
+> neighbors stay `light/core/deep` until Phase 3 would document a transient,
+> internally-inconsistent state.
+
 ### Phase 3: Single-vocabulary docs, skills, and spec finalization
 
 Align caller-facing prose to one vocabulary and mark the spec implemented.
