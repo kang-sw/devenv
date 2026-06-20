@@ -3,6 +3,7 @@ title: ws-mcp launcher repair failure surfaces only as opaque MCP -32000
 related:
   260609-refactor-ws-spawn-runtime-deletion-session-auth: surfaced while dogfooding the unmerged M3 2c build on the Claude plugin install
   260525-bug-local-runtime-contract-marker: the local-devenv repair contract whose failure mode this concerns
+completed: 2026-06-20
 ---
 
 # ws-mcp launcher repair failure surfaces only as opaque MCP -32000
@@ -65,3 +66,28 @@ cause at `fail(...)` time.
   are "the real terminal reason is buried; the lead-facing surface is generic."
   The launcher case is process-startup; the agent case is runner invocation.
   Decide at triage whether a shared diagnostic-surfacing convention covers both.
+
+## Resolution (2026-06-20)
+
+Took the first follow-up: `fail()` now writes a best-effort durable breadcrumb
+to `<runtime_dir>/last-launch-error` (timestamp + the precise `fail(...)`
+reason) in both launchers. main() sets the breadcrumb dir as soon as
+`runtime_dir` is resolved and clears the file on the success path, so
+`last-launch-error` exists only when the most recent launch actually failed. A
+user who sees a bare `-32000` connect failure now has a readable reason on disk
+without re-running the launcher by hand. Early failures (before `runtime_dir` is
+known — bad OS/arch) still go to stderr only, which is acceptable: those are
+environment-obvious.
+
+Verified both launchers: py_compile clean, and a functional check confirms the
+breadcrumb is written with the reason on a post-set fail, skipped on an early
+fail, and removed by the success-path clear.
+
+Not taken here:
+- Surfacing server stderr through the MCP client on `-32000` is outside the
+  launcher's control (client behavior); the on-disk breadcrumb gives the user a
+  path regardless.
+- A shared diagnostic-surfacing convention with
+  `260611-bug-agent-context-exhaustion-opaque-failure` (now promoted to `todo/`,
+  DEEP) belongs to that ticket's runner-invocation work; the breadcrumb here is
+  the process-startup half and does not block it.
