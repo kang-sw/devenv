@@ -131,8 +131,9 @@ Active or planned product tracks:
   `260523-feat-ws-dashboard-main-session-activity-source`). [staleness audit 2026-06-19]
   `260620-feat-ws-dashboard-agent-client-activity-sources` is todo for the
   re-grounding pass: keep Activity rendering source-neutral, treat ws mercenary
-  state, Codex app-server, and OpenCode serve as provider inputs, and avoid
-  restarting direct harness/runtime development under the dashboard.
+  state plus Codex app-server and OpenCode ACP as provider inputs, keep OpenCode
+  serve as optional observation/discovery, and avoid restarting direct
+  harness/runtime development under the dashboard.
   `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is done: WSL/local
   dogfood can start the daemon with explicit loopback-only `--no-auth` and get
   a direct local dashboard URL without weakening normal owner-auth or
@@ -170,8 +171,10 @@ Implementation sequence:
 
 1. Agent view panel: dedicated agent-oriented visibility over Activity Console
    and future main-session/subtask sources. Re-ground source integration through
-   dashboard-owned Activity source adapters for ws mercenary, Codex app-server,
-   and OpenCode serve; avoid direct harness/runtime development.
+   an ACP-shaped dashboard agent-client provider contract and Activity
+   projections for ws mercenary compatibility state, Codex app-server, and
+   OpenCode ACP; keep OpenCode serve as optional observation/discovery and avoid
+   direct harness/runtime development.
 2. Multi-server management: local dashboard as gateway for local, WSL, and
    remote linked daemons, including remote Windows dogfood deployment and
    seamless resource integration under `serverId`.
