@@ -88,6 +88,37 @@ as host-owned agent-client data.
   state must include or derive `serverId` before remote Codex/OpenCode activity
   can be transparent.
 
+## Public Interface Briefing
+
+This track intentionally touches the dashboard's browser-facing Activity
+interface, but the first implementation should keep the route set stable.
+Existing routes remain the public entrypoints:
+
+- `GET /api/dashboard/work-roots/{workRootId}/activity`
+- `GET /api/dashboard/work-roots/{workRootId}/activity/items/{activityId}/transcript`
+- `GET /api/dashboard/work-roots/{workRootId}/activity/events`
+
+The public change is inside the source-neutral payload contract. `ActivityFeed`
+continues to expose `items` as the primary Activity list and `agents` as the
+legacy named-agent compatibility projection. New Codex app-server activity must
+appear through `items`; it must not be forced into `agents`. `activityId` values
+may gain a new dashboard-owned source prefix, but provider thread ids, turn ids,
+session ids, raw event ids, process ids, and cache/transcript paths must remain
+daemon-private. `ActivitySourceDisplay.kind`, item `kind`, and transcript
+`renderKind` may gain new string values, so frontend parsers and tests must keep
+unknown-value tolerance while rendering useful labels for known Codex values.
+
+The watch stream may emit existing `ActivityConsoleEvent` variants for Codex
+rows: item upserts/removals, transcript updates, snapshot invalidation, mode
+changes, and heartbeats. The event vocabulary should not grow until a concrete
+Codex or OpenCode behavior cannot be represented by the current variants.
+
+Transcript payloads continue to use `TranscriptBlock` as the only browser
+backfill format. Codex app-server item and notification records must normalize
+into bounded user, assistant, tool/command, file-change, approval-needed,
+status, and diagnostic blocks. Unknown provider records degrade to bounded
+diagnostic/status blocks rather than leaking raw provider JSON.
+
 ## Phases
 
 ### Phase 1: Activity source contract
@@ -103,19 +134,28 @@ Verification boundary: documentation and type-level tests or fixtures are enough
 for this phase; no provider process needs to run. The result must make it clear
 which fields are dashboard identity, which provider ids stay daemon-private, and
 which stale named-agent/SQLite assumptions remain compatibility-only.
+Route and TypeScript contract tests should assert that mixed source rows keep
+using the existing Activity routes and that browser payloads tolerate unknown
+future source kinds without treating them as named agents.
 
 ### Phase 2: Codex app-server read adapter
 
 Add a Codex app-server source that can connect through a local transport, read or
 subscribe to thread/turn/item state, and project native Codex activity into
 `ActivityItem` rows and `TranscriptBlock` backfill. Prefer generated or captured
-schema fixtures over handwritten assumptions. Unknown event types must degrade
-without breaking the whole Activity feed.
+schema fixtures over handwritten assumptions. For the first dogfood path, prefer
+the default stdio transport and a minimal JSON-RPC subset: initialize, read/list
+stored threads when available, start a thread/turn for smoke verification, and
+consume thread/turn/item notifications into Activity rows and transcript blocks.
+Unknown event types must degrade without breaking the whole Activity feed.
 
 Verification boundary: fixture projection tests for representative Codex
 thread/turn/item sequences, route tests proving browser payloads omit provider
 session ids and raw paths, and a local smoke path that can be run when Codex
-app-server is available.
+app-server is available. The WSL smoke should run against the locally installed
+`codex app-server --stdio` binary and prove that a real turn can appear in the
+dashboard Activity Console without requiring dashboard owner pairing when the
+daemon is explicitly started through the loopback-only no-auth debug profile.
 
 ### Phase 3: OpenCode serve read adapter
 
