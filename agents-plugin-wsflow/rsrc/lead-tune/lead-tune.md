@@ -46,15 +46,15 @@ Worked example — making the lead delegate less: override the `DelegationSectio
 
 ## On: tune model tier
 
-1. `config.agents_tier` maps a model alias (`light`/`core`/`deep`) to a backend, model, and effort for a harness.
+1. `config.agents_tier` maps a capability tier (`small`/`medium`/`large`/`xlarge`) to a backend, model, and effort for a harness; `light`/`core`/`deep` and `haiku`/`sonnet`/`opus` are accepted as read-compat synonyms.
 2. Set it with `{{.McpNamespace}}/config.agents_tier`; do not reimplement its set path here.
-3. Report the alias and its resolved backend/model.
+3. Report the tier and its resolved backend/model.
 <!-- ws:full-only:end -->
 
 ## On: unsupported axis
 
 1. State that the request is not a supported tuning knob today.
-2. If it is per-role `model_alias`/`role_tier` tuning, point to research ticket `260611-research-ws-per-role-delegation-tuning-config`.
+2. If it is per-role tier tuning (a `(role) -> tier` override), point to research ticket `260611-research-ws-per-role-delegation-tuning-config`.
 3. Do not fabricate a tool for an unsupported knob.
 
 ## Judgments

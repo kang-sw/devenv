@@ -212,7 +212,7 @@ Full review (all three): reserve for cross-cutting behavior plus runtime/tooling
 Default reviewer tier per partition in first-class vocabulary (`small`/`medium`/`large`/`xlarge`); raise a partition's tier for unusually subtle risk. When a delegate playbook declares its own `tier:`, the `recommended-tier` returned by `{{.McpNamespace}}/playbook.render` is the source of truth for that delegate.
 Native delegation treats the tier as a model-selection guide.
 <!-- ws:full-only:start -->
-Mercenary delegation maps it through the `light↦small`/`core↦medium`/`deep↦large` alias layer to a concrete model.
+Mercenary delegation passes the recommended capability tier to `ws.mercenary.register`, which resolves it directly to a concrete per-harness model via capability-keyed config.
 <!-- ws:full-only:end -->
 
 ## Templates

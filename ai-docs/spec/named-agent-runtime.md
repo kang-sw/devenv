@@ -55,15 +55,16 @@ retired with the embedded bundle. Public delegate registrations prepend the
 caller explicitly suppresses it for an internal helper.
 
 The runtime joins the orientation document and the system prompt text and
-writes the resolved text to the agent's `system.md`. `light`,
-`core`, and `deep` are portable model aliases. `model` may name one of those
-aliases or a concrete backend model; concrete model names override alias and
-harness defaults. Legacy `tier` inputs remain accepted as compatibility alias
-selectors when `model` is absent. Resolved agent metadata reports the alias in
-the compatibility `tier` field, plus the resolved backend, concrete model, and
-optional resolved effort from the selected harness-aware alias mapping.
-Registration does not accept a separate effort input; model aliases remain the
-single public selection route for named-agent effort.
+writes the resolved text to the agent's `system.md`. The `model` field may name a
+portable alias (`light`/`core`/`deep`, read-compat synonyms for the
+`small`/`medium`/`large` capability tiers) or a concrete backend model; concrete
+model names override alias and harness defaults. The `tier` input takes the
+capability vocabulary (`small`/`medium`/`large`/`xlarge`; `light`/`core`/`deep`
+and `haiku`/`sonnet`/`opus` fold in as read-compat) and selects the mapping when
+`model` is absent. Resolved agent metadata reports the resolved tier, backend,
+concrete model, and optional resolved effort from the selected harness-aware
+mapping. Registration does not accept a separate effort input; the tier mapping
+remains the single public selection route for named-agent effort.
 {#260508-harness-aware-model-aliases}
 
 When registration supplies an explicit backend with only alias-based model
@@ -218,11 +219,11 @@ Claude-backed calls with a resolved non-empty alias effort pass it through the
 Claude `--effort` option. Calls without resolved effort do not pass an effort
 option.
 
-Portable model aliases resolve through the detected MCP harness. A `core`
-registration from a Codex MCP session resolves through Codex alias defaults,
-while the same alias from a Claude MCP session resolves through Claude alias
-defaults. Unknown harnesses use a deterministic configured default.
-{#260508-mcp-harness-detection}
+Capability tiers (and their read-compat aliases) resolve through the detected MCP
+harness. A `medium` (or its `core` read-compat alias) registration from a Codex
+MCP session resolves through Codex defaults, while the same tier from a Claude MCP
+session resolves through Claude defaults. Unknown harnesses use a deterministic
+configured default. {#260508-mcp-harness-detection}
 
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 
