@@ -34,6 +34,7 @@ lead-salvage
 lead-ship
 lead-skill-authoring
 lead-sprint
+lead-tune
 lead-update-spec
 lead-verify-design
 lead-verify-discussion
@@ -48,11 +49,11 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 12 entry skills the user invokes as
+The directly invocable surface is narrowed to 13 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
-`lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`, and
-`lead-verify-discussion`. The remaining
+`lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
+`lead-verify-discussion`, and `lead-tune`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -63,6 +64,21 @@ cross-skill invocation count. Each entry skill's own procedure body is likewise
 served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
 surface carries only the trigger description and delegates execution to its
 playbook. {#260610-entry-skill-surface-reduction}
+
+`lead-tune` is the umbrella workflow-tuning entry skill: its description is the
+runtime trigger surface that fires when the user signals intent to tune how the
+workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
+so the skill can proactively propose a tune. Its playbook is the tuning manual —
+it drives the `config.prompt.*` data plane for prompt overrides
+(`#260620-config-prompt-override-tuning-tools`, the `DelegationSection` override is
+the worked example) and introduces or links `prefer_mercenary` and
+`config.agents_tier` without reimplementing their set paths. The always-on
+`lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
+of general-task routing attention. In agentless wsflow only the prompt-override
+knob exists (`prefer_mercenary` and `config.agents_tier` are agent-backed and
+hidden there), so the delegation-mode and model-tier sections are `ws:full-only`
+and the wsflow shim advertises only prompt-override tuning.
+{#260619-lead-tune-workflow-tuning-skill}
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 

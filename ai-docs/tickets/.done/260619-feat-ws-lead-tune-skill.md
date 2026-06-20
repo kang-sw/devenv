@@ -93,6 +93,41 @@ prompt-override section driving the live `config.prompt.*` tools; the skill
 description fires on tuning intent without capturing general work; wsflow
 product-mode output stays clean; manifest + mirror tests pass.
 
+### Result (670e37dd) - 2026-06-20
+
+Added `ws:lead-tune` as the 13th user-invocable lead entry skill across both
+surfaces: thin-shim `agents-plugin/skills/lead-tune/SKILL.md` (trigger description
++ single `ws/playbook.print` line) and the `kind:print` umbrella manual
+`agents-plugin/rsrc/lead-tune/lead-tune.md`. The playbook drives the
+`config.prompt.*` data plane for prompt overrides (`On: tune prompt override`,
+`DelegationSection` worked example, `(pointId, harness)` + scope +
+seed/override/extension model), introduces/links `prefer_mercenary` and
+`config.agents_tier` without reimplementing them, handles an unsupported-axis
+catch-all (with the `260611` research pointer), and carries a `judge: tune-target`
+router + a `judge: proactive-propose` trigger.
+
+Product-mode: the delegation-mode and model-tier handlers + their `judge`
+branches are wrapped in `ws:full-only` markers, and the wsflow shim description is
+narrowed to prompt-override tuning, because `config.agents_tier` and
+`ws.lead.prefer_mercenary` are hidden in agentless wsflow — so wsflow renders only
+the prompt-override knob. Added the wsflow shim, the `EXPECTED_SKILLS` entry, the
+≤1-line `lead-workflow-manual` pointer, and regenerated both rsrc manifests + the
+byte-identical wsflow rsrc mirror.
+
+Authored inline as lead (trigger surface + manual are high-judgment); applied the
+`lead-skill-authoring` invariant checklist and ran the mandatory Fresh-Reader
+Audit (1 cycle, separate fresh reviewer) — accepted wording fixes applied
+(invariant precision, empty-seed phrasing, unsupported-axis catch-all, free-text
+proposal knob, `DelegationSection`-vs-`prefer_mercenary` disambiguation). Spec
+`260505-lead-skill-namespace-surface` records the entry skill
+(`#260619-lead-tune-workflow-tuning-skill`); mental-model `workflow-skills` count
+and the skill-add change-recipe updated. Verified green: `go build`, wsrsrc
+(manifest + mirror up-to-date), `cmd/ws-mcp` runtime contract, and the 8 python
+wsflow bundle tests.
+
+This completes the epic `260619-epic-ws-layered-config-prompt-tuning` child set
+(data plane 3a + this skill 3b).
+
 ## Spec Impact
 
 Ready promotion (todo -> ready) must address the workflow-skills spec: a new
