@@ -297,16 +297,16 @@ dropped tickets live in hidden archive dirs and git history.
   Substrate + marker-engine **both shipped** (done). Remaining work is the
   tuning surface, split into two children (discuss 2026-06-19): a data plane +
   a dedicated entry skill.
-- `260619-feat-ws-config-prompt-tool-self-doc` (ready) - **data plane**, current
-  implementation target. **Phase 1 `config.prompt.set` SHIPPED** (`24e7e0d1`,
-  setter; `85b7b63f` test coverage; on `implement/260619-config-prompt-tool`,
-  unmerged): lead-only `config.*`-gated setter, key `prompt.<pointId>.<harness>`
-  (`*`→`all`), default scope project, session-scope needs `session_key`,
-  wsflow-visible. **Phase 2 remaining** = no-arg `config.prompt()` listing
-  (tree-scan markers → point list / values / scopes + one-line `ws:lead-tune`
-  pointer; tuning manual stays out). Spec `260620-config-prompt-override-tuning-tools`:
-  setter implemented, `config.prompt()` Planned 🚧. Phase 2 commits carry `## Spec`
-  for that stem.
+- `260619-feat-ws-config-prompt-tool-self-doc` (.done) - **data plane, COMPLETE**.
+  Phase 1 `config.prompt.set` (`24e7e0d1` setter, `85b7b63f` test) + Phase 2
+  read-only `config.prompt()` listing (`4e4460a1`: marker tree-scan with `desc`,
+  per-harness/scope current values, `ws:lead-tune` pointer) both on
+  `implement/260619-config-prompt-tool`. Setter: lead-only `config.*`-gated, key
+  `prompt.<pointId>.<harness>` (`*`→`all`), default scope project, session writes
+  need `session_key`, wsflow-visible. Listing mirrors `config.show` (optional
+  `session_key`, declared-marker-keyed, no orphan surfacing). Spec
+  `260620-config-prompt-override-tuning-tools` both tools implemented; mental-model
+  `prompt-bundle` synced. Awaiting whole-ticket merge to the epic branch.
 - `260619-feat-ws-lead-tune-skill` (todo) - **new entry skill** `ws:lead-tune`:
   the umbrella workflow-tuning surface (prompt overrides primary; introduces/links
   `prefer_mercenary` + `config.agents_tier`; slot for future `model_alias`/`role_tier`).

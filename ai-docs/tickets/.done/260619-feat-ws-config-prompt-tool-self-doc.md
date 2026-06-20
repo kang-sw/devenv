@@ -97,3 +97,37 @@ grammar to scan).
 Verification: listing enumerates all declared override-points with descriptions,
 reflects an override set in Phase 1 with its scope, and emits the `ws:lead-tune`
 pointer.
+
+### Result (4e4460a1) - 2026-06-20
+
+Added the read-only no-arg `config.prompt()` MCP tool (`internal/mcp/server.go`
+dispatch + `tools()` schema + `buildPromptOverrideListing`/
+`formatPromptOverrideListing` helpers; `internal/mcp/playbook_tools.go`
+`parseOverrideOpenMarkerDesc` + `scanOverridePoints`). It tree-scans the rsrc `.md`
+files for declared open markers (deduped by pointId, first non-empty `desc` wins,
+sorted), reports each point's id + `desc` + current override values per harness
+bucket and resolved scope via `resolver.Get`, and ends with a one-line
+`ws:lead-tune` pointer. Default output is text; `format:"json"` returns
+`[{pointId, desc, overrides:[{harness, scope, value}]}]`.
+
+Design facts:
+- Mirrors `config.show`: optional `session_key` (session-scope values listed only
+  when supplied); keyless caller passes the `config.*` gate; delegate/leaf keys
+  blocked — no custom role check.
+- Keyed on declared markers; orphan `prompt.*` values without a marker are not
+  surfaced (per spec `260620`).
+- The render engine's `parseOverrideMarkerPointId` is untouched; `desc` parsing
+  lives in the separate `parseOverrideOpenMarkerDesc`.
+- Registered in both `agents-plugin/runtime.json` and
+  `agents-plugin-wsflow/runtime.json` to satisfy the launcher-contract
+  exact-equality test (`cmd/ws-mcp` `TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`).
+
+Tests: `TestConfigPromptListEnumeratesDeclaredPoints` (enumeration + harness/scope
+annotation + ordering), `TestParseOverrideOpenMarkerDesc` (7 subtests),
+`TestScanOverridePoints` (dedup/`.md`-filter/sort), and a delegate-key gate
+assertion in `TestCapabilityScopedKeyGatesTools`. Build + both packages green;
+reviews fit/correctness/test all clean. Spec `260620` `config.prompt()` callout
+promoted from Planned to implemented; mental-model `prompt-bundle` synced.
+
+Phase 1 and Phase 2 are both shipped — this ticket is complete and ready to move
+to `.done/`.

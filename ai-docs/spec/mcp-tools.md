@@ -283,16 +283,19 @@ and agentless wsflow modes, since prompt overrides are a mode-neutral rendering
 concern. Once stored, the override is honored at render time by the marker engine
 for the matching `(point id, harness)` and resolved scope.
 
-> [!note] Planned 🚧
-> No-argument `config.prompt()` will return a **data listing**, not a manual: a
-> scan of the shipped playbook resource tree for declared override markers (the
-> marker grammar from `#260619-prompt-override-marker-engine`) reporting each
-> override-point's id and short `desc` together with the current override values
-> per harness and the scope each resolved from, ending with a one-line pointer to
-> the `ws:lead-tune` workflow-tuning skill (which owns the how-to manual and the
-> proactive-proposal trigger). The tuning manual itself is deliberately not
-> rendered there, so `config.prompt()` stays a lean data surface. Current behavior
-> is unchanged until implemented.
+No-argument `config.prompt()` returns a **data listing**, not a manual: a scan of
+the shipped playbook resource tree for declared override markers (the marker
+grammar from `#260619-prompt-override-marker-engine`) reporting each
+override-point's id and short `desc` together with any current override values per
+harness bucket and the scope each resolved from, ending with a one-line pointer to
+the `ws:lead-tune` workflow-tuning skill (which owns the how-to manual and the
+proactive-proposal trigger). The tuning manual itself is deliberately not rendered
+there, so `config.prompt()` stays a lean data surface. Like `config.show`, it takes
+an optional `session_key` — session-scope overrides are listed and annotated only
+when it is supplied — and is lead-only via the same `config.*` prefix gate (a
+keyless caller passes; delegate and leaf keys are blocked). The listing is keyed on
+the declared markers (orphan `prompt.*` values without a marker are not surfaced),
+and each value's scope is resolved through the layered config scope model.
 
 > [!note] Constraints
 > - The setter does not introduce its own storage; it writes through the layered
@@ -629,8 +632,8 @@ is honored by the resolver's precedence; the point id is the user-facing handle
 even though the body carries it as a marker rather than a template variable. The
 dedicated `config.prompt.set(point id, harness, prompt, scope?)` setter makes the
 override surface tunable from inside the MCP without external docs; a
-self-documenting `config.prompt()` listing for discoverability is planned
-(`#260620-config-prompt-override-tuning-tools`).
+self-documenting `config.prompt()` listing makes that surface discoverable from
+inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
 
 The first shipped override-point is `DelegationSection`, seeded in the lead
 workflow manual. Its seed states the lead's default delegation posture — how
