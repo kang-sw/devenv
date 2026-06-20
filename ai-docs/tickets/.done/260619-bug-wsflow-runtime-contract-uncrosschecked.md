@@ -1,5 +1,6 @@
 ---
 title: wsflow runtime.json contract is not CI-cross-checked against the live agentless tool surface
+completed: 2026-06-20
 ---
 
 # wsflow runtime.json contract is not CI-cross-checked against the live agentless tool surface
@@ -45,3 +46,20 @@ have failed at runtime for users while CI stayed green.
 - Process learning captured in the fix commit: tool-adding implementation briefs
   should set the verification scope to `go test ./...` (or at least include
   `./cmd/ws-mcp`), not just `./internal/mcp/...`, so contract-surface tests run.
+
+## Resolution (2026-06-20)
+
+Took the first follow-up: added
+`TestRuntimeCapabilitiesCommandReportsWsflowContractSurface` in `cmd/ws-mcp`, the
+agentless analogue of the full-surface contract test. It runs `runtime
+capabilities` under `WS_MCP_NO_AGENT=1 WS_MCP_NAMESPACE=wsflow` and asserts the
+live tool/command set equals `agents-plugin-wsflow/runtime.json` exactly,
+matching the wsflow launcher's `runtime_capabilities.match: "exact"` check.
+Verified the gap is closed both ways: the test passes against the current tree,
+and removing a tool from the wsflow manifest makes it fail (so silent drift now
+breaks CI, not just the launcher at user runtime).
+
+The derive-from-full-minus-`noAgentHiddenTool` alternative was not taken: an
+independent exact-equal assertion is simpler and catches both an over- and
+under-exposed surface without coupling the test to the hiding mechanism's
+internals.
