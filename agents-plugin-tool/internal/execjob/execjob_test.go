@@ -247,6 +247,12 @@ func TestHelperProcess(t *testing.T) {
 				_, _ = os.Stdout.WriteString("done\n")
 			case "large":
 				_, _ = os.Stdout.WriteString(strings.Repeat("x", 5000))
+			case "spawnparent":
+				// args: -- spawnparent <childPidFile>
+				runSpawnParent(args[i+2])
+			case "spawnchild":
+				// args: -- spawnchild <childPidFile>
+				runSpawnChild(args[i+2])
 			default:
 				_, _ = os.Stdout.WriteString(args[i+1] + "\n")
 			}
