@@ -166,6 +166,40 @@ configures independently of `large`; `config_test`/`agent_test`/
 `mercenary_surface_test` pass with capability literals. Deferred: template var
 (Phase 2), doc/skill prose (Phase 3).
 
+### Result (ea545a51) - 2026-06-20
+
+Implemented. `wsconfig` is now keyed by the capability vocabulary
+(`small`/`medium`/`large`/`xlarge`); `config.agents_tier` accepts capability
+tiers (schema enum updated) with `light`/`core`/`deep` kept as read-compat
+synonyms. `firstClassTierToAlias` is retired (`server.go:972` passes the tier
+through directly). `xlarge` is independently configurable, seeded to the `large`
+default. Reviewed partitioned (correctness/fit/test) — clean; test-coverage
+polish landed in `cb46727e`.
+
+Read-compat mechanism: a load-time map-key migration (`normalizeLegacyTierKeys`)
+remaps persisted `light`/`core`/`deep` keys to capability keys in-memory before
+default backfill (capability key wins on collision; no file rewrite,
+`schemaVersion` stays 1). `normalizedTier` folds `light/core/deep` +
+`haiku/sonnet/opus` to capability words; `ModelAlias` recognizes alias *names*
+only and deliberately excludes `haiku/sonnet/opus` (concrete models — verified
+across callers `config.go:179,320`, `wsagent/agent.go:525`).
+
+Plan corrections (code-grounded deviations from the phase bullets):
+- **No `wsstore/store.go` change.** The SQLite `tier` column is vestigial
+  metadata (agents resolve concrete `(backend, model, effort)` at registration);
+  normalizing it would require importing `wsconfig` into `wsstore`, a forbidden
+  reverse-import cycle. Old stored `light` labels are cosmetic.
+- **No `runtime.json` change.** It pins no tier enum for `config.agents_tier`,
+  only a version range.
+- Capability-vocabulary spots updated beyond the listed bullets:
+  `formatConfigView` aliases list (`server.go`) and the `agent.go` empty-tier
+  fallback (`core`→`medium`).
+
+> Forward (Phase 3): also update the `named-agent-runtime` and `mcp-runtime`
+> mental models — they still describe the config layer as `light/core/deep`-keyed.
+> Deferred from Phase 1 on purpose: the vocabulary is only fully settled after
+> Phase 3, so updating mid-migration would describe a transient state.
+
 ### Phase 2: Tier-derived native model hint
 
 Replace the fixed alias-named template-var set with a single tier-derived
