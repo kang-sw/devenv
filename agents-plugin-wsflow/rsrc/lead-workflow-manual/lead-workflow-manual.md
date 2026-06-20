@@ -72,6 +72,8 @@ single-step edits — inline. When context budget runs short, lean harder toward
 delegation.
 <!-- ws:/override:DelegationSection -->
 
+To tune this posture or other workflow knobs, invoke `{{.SkillNamespace}}:lead-tune`.
+
 ### Scoped Exploration (native Explore)
 
 Use for scoped fact-finding, surveys, and one-turn answers. Pattern: spawn a
