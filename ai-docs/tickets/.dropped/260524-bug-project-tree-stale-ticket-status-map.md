@@ -2,6 +2,7 @@
 title: project_tree stale ticket status map
 related:
   260514-epic-ws-web-dashboard-mvp: dashboard discussion exposed stale active ticket projection
+dropped: 2026-06-20
 ---
 
 # project_tree stale ticket status map

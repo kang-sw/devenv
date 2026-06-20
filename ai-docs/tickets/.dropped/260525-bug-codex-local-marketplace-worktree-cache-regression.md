@@ -4,6 +4,7 @@ related:
   260524-bug-codex-plugin-cache-refresh-mcp-startup-race: adjacent cache materialization race, but not the same version-source regression
 related-mental-model:
   - plugin-runtime
+dropped: 2026-06-20
 ---
 
 # Codex local marketplace refresh can regress ws plugin cache from a sibling worktree
