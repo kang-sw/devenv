@@ -1,6 +1,8 @@
 ---
 title: ws:lead-tune umbrella workflow-tuning entry skill
 parent: 260619-epic-ws-layered-config-prompt-tuning
+spec:
+  - 260505-lead-skill-namespace-surface
 related:
   260619-feat-ws-config-prompt-tool-self-doc: prerequisite — the config.prompt.* data plane this skill drives (list + set)
   260619-feat-ws-prompt-override-marker-engine: prerequisite — the override-points (e.g. DelegationSection) this skill teaches users to tune
