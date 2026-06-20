@@ -56,6 +56,7 @@ fn accidental_public_bind_requires_explicit_public_mode() {
     let err = ServeConfig::from_args(ServeArgs {
         host: "0.0.0.0".to_owned(),
         bind_mode: BindMode::Local,
+        no_auth: false,
         port: 0,
         static_dir: None,
     })
@@ -69,6 +70,7 @@ fn explicit_public_bind_mode_accepts_public_host_with_owner_auth() {
     let config = ServeConfig::from_args(ServeArgs {
         host: "0.0.0.0".to_owned(),
         bind_mode: BindMode::Public,
+        no_auth: false,
         port: 0,
         static_dir: None,
     })
@@ -80,11 +82,46 @@ fn explicit_public_bind_mode_accepts_public_host_with_owner_auth() {
 }
 
 #[test]
+fn loopback_no_auth_sets_disabled_owner_auth() {
+    let config = Cli::parse_from(["ws-dashboard", "serve", "--no-auth", "--host", "127.0.0.1"])
+        .into_serve_config()
+        .expect("loopback no-auth config");
+
+    assert_eq!(config.bind_addr.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    assert_eq!(config.bind_mode, BindMode::Local);
+    assert!(!config.owner_auth_enabled);
+}
+
+#[test]
 fn public_bind_mode_requires_owner_auth() {
     let err = validate_bind_guard(BindMode::Public, IpAddr::V4(Ipv4Addr::UNSPECIFIED), false)
         .expect_err("public bind mode without owner auth");
 
-    assert!(err.to_string().contains("owner authentication"));
+    assert!(err.to_string().contains("--bind-mode public"));
+}
+
+#[test]
+fn no_auth_rejects_public_bind_mode() {
+    let err = Cli::parse_from([
+        "ws-dashboard",
+        "serve",
+        "--no-auth",
+        "--bind-mode",
+        "public",
+    ])
+    .into_serve_config()
+    .expect_err("no-auth public mode");
+
+    assert!(err.to_string().contains("--bind-mode public"));
+}
+
+#[test]
+fn no_auth_rejects_non_loopback_hosts() {
+    let err = Cli::parse_from(["ws-dashboard", "serve", "--no-auth", "--host", "0.0.0.0"])
+        .into_serve_config()
+        .expect_err("no-auth non-loopback host");
+
+    assert!(err.to_string().contains("loopback bind address"));
 }
 
 #[test]
@@ -92,17 +129,38 @@ fn startup_info_builds_local_pairing_url_and_remote_link_passphrase() {
     let auth = OwnerAuthState::new_ephemeral();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
 
-    let info = startup_info(addr, &auth);
+    let info = startup_info(addr, &auth, true);
 
     assert_eq!(info.bound_addr, addr);
+    assert!(info.owner_auth_enabled);
     assert!(info.pairing_url.starts_with("http://127.0.0.1:"));
     assert!(info
         .pairing_url
         .contains(auth.pairing_token().expose_for_owner_url()));
+    assert_eq!(info.direct_dashboard_url, None);
     assert_eq!(
         info.link_passphrase,
         auth.link_passphrase().expose_for_owner_record()
     );
+}
+
+#[test]
+fn startup_info_reports_direct_dashboard_url_for_no_auth() {
+    let auth = OwnerAuthState::new_ephemeral();
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 4387));
+
+    let info = startup_info(addr, &auth, false);
+
+    assert!(!info.owner_auth_enabled);
+    assert_eq!(
+        info.direct_dashboard_url.as_deref(),
+        Some("http://127.0.0.1:4387/")
+    );
+    assert!(!info
+        .direct_dashboard_url
+        .as_deref()
+        .expect("direct dashboard URL")
+        .contains(auth.pairing_token().expose_for_owner_url()));
 }
 
 #[tokio::test]
@@ -150,6 +208,7 @@ async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
     let accidental_public = ServeConfig::from_args(ServeArgs {
         host: "0.0.0.0".to_owned(),
         bind_mode: BindMode::Local,
+        no_auth: false,
         port: 0,
         static_dir: None,
     })
@@ -161,7 +220,7 @@ async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
             .expect_err("public bind without owner auth");
     assert!(disabled_owner_auth
         .to_string()
-        .contains("owner authentication"));
+        .contains("--bind-mode public"));
 }
 
 fn unused_loopback_addr() -> SocketAddr {
