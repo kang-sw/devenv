@@ -281,6 +281,59 @@ appears only as documented read-compat synonyms); `spec_index.verify` clean; no
 `{{.LightModel}}`-family vars or alias-keyed tuning instructions remain. Depends
 on Phases 1-2.
 
+### Result (5f059b55) - 2026-06-20
+
+Implemented. All caller-facing prose now speaks the single capability vocabulary
+(`small`/`medium`/`large`/`xlarge`); `light`/`core`/`deep` and
+`haiku`/`sonnet`/`opus` appear only as documented read-compat synonyms (or as
+still-valid `model`-field alias names), and no live `{{.LightModel}}`-family var or
+`firstClassTierToAlias` bridge is described as current behavior. No code or test
+changes — behavior shipped in Phases 1-2; the only build-side action was
+regenerating `agents-plugin/rsrc/manifest.json` and the `agents-plugin-wsflow/rsrc`
+mirror for the edited skill text.
+
+Surface (9 files — wider than this phase's original bullets; a completeness grep +
+`mental_models.find` revealed the full set):
+- Spec `mcp-tools.md`: the `🚧 Planned` callout folded to implemented body prose
+  (anchor `{#260620-tier-vocabulary-collapse-direct-model-map}` preserved); `#260612`
+  "remains keyed by `light`/`core`/`deep`" superseded; `#260508` and the
+  `config.agents_tier` description reconciled to capability-primary; the superseded
+  "pending `config.model_alias` rename" references dropped; the
+  `#260619-layered-config-scope-model` constraint re-pointed to this collapse.
+- Spec `named-agent-runtime.md`: minimal touch on the RETAINED `model`-field alias
+  axis — the capability `tier` is current (not "legacy"); light/core/deep framed as
+  read-compat.
+- Skills (rsrc + wsflow mirror): `lead-tune` "tune model tier" handler,
+  `lead-workflow-manual` register/render notes, `lead-implement` mercenary-mapping line.
+- Mental models: `named-agent-runtime`, `mcp-runtime`, `prompt-bundle`,
+  `workflow-skills` (the Phase 1 forward note's `named-agent-runtime`/`mcp-runtime`
+  + the Phase 2 forward note's `prompt-bundle`, plus the grep-found `workflow-skills`).
+
+Reviewed (single general reviewer, opus) — clean, no Critical/Important/Minor; it
+independently verified mirror byte-identity, spec-anchor integrity, decision
+preservation, scope discipline (retained model-field axis intact), and completeness.
+
+Verification: `go build ./...` ok; `go test ./internal/mcp/... ./internal/wsconfig/...
+./internal/wsrsrc/...` all `ok` (uncached); `spec_index.verify` clean; completeness
+grep clean (residual `light/core/deep` only as read-compat; no `{{.*Model}}`-family
+var; `firstClassTierToAlias` only in retired context).
+
+Deviations from the listed bullets:
+- **Scope was wider than enumerated.** The bullets named `lead-tune`,
+  `lead-workflow-manual`, `mcp-tools.md`, the `🚧` callout, and the
+  `named-agent-runtime`/`mcp-runtime`/`prompt-bundle` mental models; the grep added
+  `named-agent-runtime.md` (spec), `lead-implement.md` (rsrc), and `workflow-skills.md`
+  (mental model). All are the same single-vocabulary alignment.
+- **Doc Pre-Pass `mental-model-updater` skipped.** This phase's deliverable IS the
+  mental-model alignment (the updates Phases 1-2 deferred here); re-dispatching the
+  updater on the commit range that contains its own output would be circular.
+  `lead-update-spec` ran as a verification no-op — the spec finalization landed in the
+  implementation commit.
+
+This completes all three phases of the collapse. The ticket is fully implemented;
+the `.done/` status move and spec-stem closure are deferred to the merge/close
+decision.
+
 ## Documentation Conflicts (must reconcile)
 
 This direction conflicts with shipped documentation and requires conscious
