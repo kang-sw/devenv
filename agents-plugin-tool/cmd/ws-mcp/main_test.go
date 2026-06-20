@@ -563,17 +563,20 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if before.Path != wantConfigPath() {
 		t.Fatalf("config show path = %q", before.Path)
 	}
-	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 3 {
+	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 4 {
 		t.Fatalf("default config show = %#v", before.Config)
 	}
-	if light := before.Config.Agents.Tiers["light"]; light.Backend != "codex" || light.Model != "gpt-5.4-mini" {
-		t.Fatalf("default light tier = %#v", light)
+	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-5.4-mini" {
+		t.Fatalf("default small tier = %#v", small)
 	}
-	if core := before.Config.Agents.Tiers["core"]; core.Backend != "codex" || core.Model != "gpt-5.5" {
-		t.Fatalf("default core tier = %#v", core)
+	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-5.5" {
+		t.Fatalf("default medium tier = %#v", medium)
 	}
-	if deep := before.Config.Agents.Tiers["deep"]; deep.Backend != "codex" || deep.Model != "gpt-5.5" {
-		t.Fatalf("default deep tier = %#v", deep)
+	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-5.5" {
+		t.Fatalf("default large tier = %#v", large)
+	}
+	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-5.5" {
+		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 
 	show("config", "agents-tier", "--tier", "light", "--model", "claude-sonnet-4")
@@ -596,9 +599,9 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		} `json:"config"`
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &after)
-	light := after.Config.Agents.Tiers["light"]
-	if after.Path != wantConfigPath() || light.Backend != "claude" || light.Model != "claude-sonnet-4" {
-		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
+	small := after.Config.Agents.Tiers["small"]
+	if after.Path != wantConfigPath() || small.Backend != "claude" || small.Model != "claude-sonnet-4" {
+		t.Fatalf("configured config show = path %q small %#v", after.Path, small)
 	}
 
 	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4", "--effort", "medium")
@@ -614,16 +617,16 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		} `json:"config"`
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
-	claudeCore := harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
-	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.4" || claudeCore.Effort != "medium" {
-		t.Fatalf("claude core alias = %#v", claudeCore)
+	claudeMedium := harnessAfter.Config.Agents.ModelAliases["medium"]["claude"]
+	if claudeMedium.Backend != "codex" || claudeMedium.Model != "gpt-5.4" || claudeMedium.Effort != "medium" {
+		t.Fatalf("claude medium alias = %#v", claudeMedium)
 	}
 
 	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.5")
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
-	claudeCore = harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
-	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.5" || claudeCore.Effort != "" {
-		t.Fatalf("claude core alias after omitted effort update = %#v", claudeCore)
+	claudeMedium = harnessAfter.Config.Agents.ModelAliases["medium"]["claude"]
+	if claudeMedium.Backend != "codex" || claudeMedium.Model != "gpt-5.5" || claudeMedium.Effort != "" {
+		t.Fatalf("claude medium alias after omitted effort update = %#v", claudeMedium)
 	}
 }
 
