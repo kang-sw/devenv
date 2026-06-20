@@ -456,6 +456,24 @@ func TestLoadReadCompatLegacyKeys(t *testing.T) {
 	if backend != "codex" || model != "gpt-custom-deep" {
 		t.Fatalf("large resolved = %q/%q, want codex/gpt-custom-deep", backend, model)
 	}
+
+	// Querying by the legacy "core"/"deep" synonyms must also resolve to the
+	// custom models (symmetry with the "light" synonym check above): the
+	// synonym + custom-alias intersection is pinned for all three legacy names.
+	backend, model, err = ResolveAgent(Options{CacheHome: cache}, "core", "", "")
+	if err != nil {
+		t.Fatalf("ResolveAgent core synonym: %v", err)
+	}
+	if backend != "codex" || model != "gpt-custom-core" {
+		t.Fatalf("core synonym resolved = %q/%q, want codex/gpt-custom-core", backend, model)
+	}
+	backend, model, err = ResolveAgent(Options{CacheHome: cache}, "deep", "", "")
+	if err != nil {
+		t.Fatalf("ResolveAgent deep synonym: %v", err)
+	}
+	if backend != "codex" || model != "gpt-custom-deep" {
+		t.Fatalf("deep synonym resolved = %q/%q, want codex/gpt-custom-deep", backend, model)
+	}
 }
 
 func TestLoadBackfillsMissingDefaultTiers(t *testing.T) {
@@ -556,12 +574,14 @@ func TestModelAliasCapabilityVocabulary(t *testing.T) {
 }
 
 // TestXlargeIndependentOfLarge verifies that xlarge and large are independently
-// configurable: setting one does not change the other, and unset xlarge defaults
-// to the same model as large.
+// configurable: setting one does not change the other. Unset, xlarge is seeded
+// with the same default model as large — an independent seed, NOT a live follow
+// of large's configured value (the strong pin below confirms a custom large does
+// not propagate to xlarge).
 func TestXlargeIndependentOfLarge(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 
-	// Unset xlarge defaults to the large default.
+	// Unset, xlarge shares large's default seed (same hardcoded default model).
 	backendL, modelL, err := ResolveAgent(Options{CacheHome: cache}, "large", "", "")
 	if err != nil {
 		t.Fatalf("ResolveAgent large: %v", err)
