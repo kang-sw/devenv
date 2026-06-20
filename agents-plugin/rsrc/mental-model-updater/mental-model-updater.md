@@ -4,14 +4,14 @@ delegates: false
 role: delegate
 tier: medium
 variables:
-  - CoreModel
+  - RoleModel
 ---
 # Mental Model Updater Delegate
 
 You are updating mental-model documents after code implementation. Identify
 affected domains and apply minimal, accurate updates.
 
-Alias model for this role: {{.CoreModel}}.
+Alias model for this role: {{.RoleModel}}.
 
 ## Constraints
 

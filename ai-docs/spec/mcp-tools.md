@@ -192,53 +192,59 @@ minted after they fall out of its own (compacted or restarted) context.
 configuration without modifying it. The default response is compact labeled
 text, and structured JSON remains available for callers that need stable fields.
 
-`config.agents_tier` is the compatibility surface for updating the
-backend/model/effort mapping for a model alias. Callers provide `tier` as the
-alias name and may provide a backend, a concrete model, a portable effort, a
+`config.agents_tier` is the surface for updating the backend/model/effort mapping
+for a capability tier. Callers provide `tier` as the capability tier name
+(`small`/`medium`/`large`/`xlarge`); the `light`/`core`/`deep` aliases and
+`haiku`/`sonnet`/`opus` provider names are accepted as read-compat synonyms on
+input. A caller may also provide a backend, a concrete model, a portable effort, a
 harness selector, or any combination of those fields. When backend is omitted,
 ws infers it from the model family where possible. Empty effort, omitted effort,
 and `none` store the no-override state; supported non-empty effort values are
 visible through configuration output. The update applies to the explicit harness
 when provided, otherwise the detected MCP session harness when available, and
-otherwise the default alias mapping. This makes `backend` mean the execution
-backend rather than the alias-table key. {#260513-harness-local-agent-tier-config}
+otherwise the default tier mapping. This makes `backend` mean the execution
+backend rather than the tier-table key. {#260513-harness-local-agent-tier-config}
 
-Configuration exposes harness-aware model alias mappings. `light`, `core`, and
-`deep` map to backend/model defaults per harness, existing tier-shaped config is
-migrated or wrapped for compatibility, and new documentation speaks in terms of
-model aliases rather than workload tiers. {#260508-model-alias-config-tools}
+Configuration exposes harness-aware capability-tier mappings. The capability
+tiers `small`/`medium`/`large`/`xlarge` map to backend/model defaults per harness;
+the historical `light`/`core`/`deep` aliases (this entry's original keys) and the
+`haiku`/`sonnet`/`opus` provider names are folded to capability tiers as
+read-compat synonyms, so existing tier-shaped and alias-shaped config still
+resolves without migration. {#260508-model-alias-config-tools}
 
-The delegation tier abstraction is the first-class capability vocabulary
+The delegation tier abstraction is the capability vocabulary
 `small`/`medium`/`large`/`xlarge`, which names task-intrinsic reasoning depth
-independent of host or subscription plan. `light`/`core`/`deep` are conventional
-aliases at the concrete-model layer (alongside provider model names), connected
-to the capability axis by the locked mapping `light↦small`, `core↦medium`,
-`deep↦large`; `xlarge` (fable-class) has no legacy alias. Playbook frontmatter
-declares `role:` and `tier:` in the first-class vocabulary; a first-class tier is
-resolved to a concrete backend/model by mapping through the alias layer into
-`config.agents_tier` (`#260513-harness-local-agent-tier-config`), which remains
-keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
+independent of host or subscription plan, and is the single tier vocabulary across
+every surface. `light`/`core`/`deep` (and the `haiku`/`sonnet`/`opus` provider
+names) are accepted as read-compat synonyms on input, folded to the capability
+tiers `light↦small`, `core↦medium`, `deep↦large`; `xlarge` (fable-class) has no
+legacy alias and is independently configurable. Playbook frontmatter declares
+`role:` and `tier:` in the capability vocabulary; a tier resolves directly to a
+concrete backend/model through `config.agents_tier`
+(`#260513-harness-local-agent-tier-config`), which is keyed by the capability tier
+(the earlier "remains keyed by `light`/`core`/`deep`" framing is superseded by
+`#260620-tier-vocabulary-collapse-direct-model-map`).
+{#260612-first-class-tier-vocabulary}
 
-> [!note] Planned 🚧
-> The two-vocabulary split is collapsed to a single tier vocabulary. The
-> capability vocabulary `small`/`medium`/`large`/`xlarge` becomes the only tier
-> vocabulary across every surface — playbook frontmatter, `playbook.render`,
-> `ws.mercenary.register`, and the model-config tool (the `config.agents_tier`
-> surface, re-homed by this change rather than by the previously pending
-> `config.model_alias` rename, which this supersedes). Config is keyed directly by
-> the capability tier: a tier resolves to its per-harness `(backend, model,
-> effort)` with no intervening `light`/`core`/`deep` alias step, and the
-> `firstClassTierToAlias` bridge is retired. `xlarge` gains an independently
-> configurable mapping instead of folding onto `deep`. The `light`/`core`/`deep`
-> aliases and the `haiku`/`sonnet`/`opus` provider names remain accepted as
-> read-compatibility synonyms on input — and for existing on-disk config and
-> persisted agent records — so no stored configuration breaks and no schema
-> migration is required. Per-harness mapping, portable effort, and backend-affinity
-> resolution are unchanged; only the key vocabulary changes. Delegate playbooks
-> declare a single tier-derived model hint variable (`{{.RoleModel}}`) resolved
-> from the playbook's own `tier:`, replacing the alias-named
-> `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` set; the rendered native model
-> hint is preserved. {#260620-tier-vocabulary-collapse-direct-model-map}
+The two-vocabulary split is collapsed to a single tier vocabulary. The capability
+vocabulary `small`/`medium`/`large`/`xlarge` is the only tier vocabulary across
+every surface — playbook frontmatter, `playbook.render`, `ws.mercenary.register`,
+and the model-config tool (the `config.agents_tier` surface, re-homed by this
+change rather than by the previously pending `config.model_alias` rename, which
+this supersedes). Config is keyed directly by the capability tier: a tier resolves
+to its per-harness `(backend, model, effort)` with no intervening
+`light`/`core`/`deep` alias step, and the `firstClassTierToAlias` bridge is
+retired. `xlarge` has an independently configurable mapping instead of folding
+onto `deep`. The `light`/`core`/`deep` aliases and the `haiku`/`sonnet`/`opus`
+provider names remain accepted as read-compatibility synonyms on input — and for
+existing on-disk config and persisted agent records — so no stored configuration
+breaks and no schema migration is required. Per-harness mapping, portable effort,
+and backend-affinity resolution are unchanged; only the key vocabulary changed.
+Delegate playbooks declare a single tier-derived model hint variable
+(`{{.RoleModel}}`) resolved from the playbook's own `tier:`, replacing the
+alias-named `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` set; the rendered
+native model hint is preserved.
+{#260620-tier-vocabulary-collapse-direct-model-map}
 
 ### Layered Config Scope Model {#260619-layered-config-scope-model}
 
@@ -274,7 +280,8 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 > [!note] Constraints
 > - Scope-awareness is opt-in per config item; this contract does not retrofit
 >   the existing `config.agents_tier` surface, which is re-homed under the same
->   model by the separate model-alias/role-tier rename rather than here.
+>   model by the capability-tier collapse
+>   (`#260620-tier-vocabulary-collapse-direct-model-map`) rather than here.
 > - Item-level write gating still applies: a scope-aware setter honors an item's
 >   existing role/capability restrictions (not every item is freely settable at
 >   every scope).
@@ -289,7 +296,7 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 
 The prompt-override surface (`#260619-prompt-override-marker-engine`) is tunable
 from inside the MCP through a dedicated `config.prompt.*` namespace, distinct from
-`config.agents_tier`/`config.show` and the pending `config.model_alias` rename.
+`config.agents_tier`/`config.show`.
 
 `config.prompt.set(point id, harness, prompt, scope?)` stores a prompt override
 keyed by `(point id, harness)`, where `harness` is `claude`, `codex`, or `*`

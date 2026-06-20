@@ -526,7 +526,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		opts.Tier = alias
 	}
 	if strings.TrimSpace(opts.Tier) == "" {
-		opts.Tier = "core"
+		opts.Tier = "medium"
 	}
 	resolvedBackend, resolvedModel, resolvedEffort, err := wsconfig.ResolveAgentForHarnessConfig(wsconfig.Options{CacheHome: m.opts.CacheHome}, opts.Tier, explicitBackend, opts.Model, opts.Harness)
 	if err != nil {

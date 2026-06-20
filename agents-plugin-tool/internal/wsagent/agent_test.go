@@ -237,7 +237,7 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		Root:             repo,
 		Name:             "review worker",
 		Backend:          "codex",
-		Tier:             "core",
+		Tier:             "medium",
 		Model:            "gpt-test",
 		SystemPromptText: "system prompt\n",
 	})
@@ -304,13 +304,13 @@ func TestRegisterExplicitTierWins(t *testing.T) {
 	agent, _, err := manager.Register(RegisterOptions{
 		Root:             repo,
 		Name:             "reviewer",
-		Tier:             "deep",
+		Tier:             "large",
 		SystemPromptText: "reviewer role",
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Tier != "deep" {
+	if agent.Tier != "large" {
 		t.Fatalf("tier = %q", agent.Tier)
 	}
 }
@@ -318,7 +318,7 @@ func TestRegisterExplicitTierWins(t *testing.T) {
 func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "core", "", "claude-sonnet-4"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "medium", "", "claude-sonnet-4"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -334,7 +334,7 @@ func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Tier != "core" || agent.Backend != "claude" || agent.Model != "claude-sonnet-4" {
+	if agent.Tier != "medium" || agent.Backend != "claude" || agent.Model != "claude-sonnet-4" {
 		t.Fatalf("tier/backend/model = %q/%q/%q", agent.Tier, agent.Backend, agent.Model)
 	}
 }
@@ -342,7 +342,7 @@ func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 func TestRegisterExplicitModelBypassesTierConfig(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "core", "gemini", "gemini-3-1-pro"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "medium", "gemini", "gemini-3-1-pro"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -353,7 +353,7 @@ func TestRegisterExplicitModelBypassesTierConfig(t *testing.T) {
 	agent, _, err := manager.Register(RegisterOptions{
 		Root:  repo,
 		Name:  "reviewer",
-		Tier:  "core",
+		Tier:  "medium",
 		Model: "gpt-5.2",
 	})
 	if err != nil {
@@ -376,12 +376,12 @@ func TestRegisterModelAliasUsesHarness(t *testing.T) {
 		Root:    repo,
 		Name:    "reviewer",
 		Harness: "claude",
-		Model:   "core",
+		Model:   "medium", // capability synonym for core
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "claude" || agent.Model != "sonnet" {
+	if agent.Harness != "claude" || agent.Tier != "medium" || agent.Backend != "claude" || agent.Model != "sonnet" {
 		t.Fatalf("harness/tier/backend/model = %q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model)
 	}
 }
@@ -389,7 +389,7 @@ func TestRegisterModelAliasUsesHarness(t *testing.T) {
 func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "claude", "high"); err != nil {
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "medium", "codex", "gpt-5.4", "claude", "high"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -401,12 +401,12 @@ func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 		Root:    repo,
 		Name:    "reviewer",
 		Harness: "claude",
-		Model:   "core",
+		Model:   "medium", // capability synonym for core
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "codex" || agent.Model != "gpt-5.4" || agent.Effort != "high" {
+	if agent.Harness != "claude" || agent.Tier != "medium" || agent.Backend != "codex" || agent.Model != "gpt-5.4" || agent.Effort != "high" {
 		t.Fatalf("harness/tier/backend/model/effort = %q/%q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model, agent.Effort)
 	}
 	status, err := manager.Status(repo, "reviewer")
@@ -421,7 +421,7 @@ func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 func TestCallThreadsAgentEffortToRunner(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "codex", "high"); err != nil {
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "medium", "codex", "gpt-5.4", "codex", "high"); err != nil {
 		t.Fatal(err)
 	}
 	runner := &fakeRunner{}
@@ -434,7 +434,7 @@ func TestCallThreadsAgentEffortToRunner(t *testing.T) {
 		Root:    repo,
 		Name:    "impl",
 		Harness: "codex",
-		Model:   "core",
+		Model:   "medium",
 	}); err != nil {
 		t.Fatal(err)
 	}

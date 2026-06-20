@@ -100,10 +100,10 @@ Register a stable task name with a self-contained system prompt. Registration
 takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
 `prompts`/`prompt_refs`/`model` fields are gone. Omit `system_prompt_text` for a
 general-purpose named agent; registration applies delegate orientation and the
-default model alias. Call the agent for each continuity turn.
+default tier mapping. Call the agent for each continuity turn.
 Bundled delegate prompts are not registered by stem — render them. Obtain a
 delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "<delegate>")`
-(model-alias vars auto-inject; a lead key splices a child-key credential block and
+(the tier-derived model-hint var auto-injects; a lead key splices a child-key credential block and
 the call returns a `recommended-tier`). Hand the rendered prompt to a native
 subagent (default), or pass it as `system_prompt_text` with `tier:
 <recommended-tier>` to a mercenary `ws.mercenary.register` + `ws.mercenary.call`, then

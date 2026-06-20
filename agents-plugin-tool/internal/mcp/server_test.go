@@ -155,7 +155,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 		t.Fatalf("config.show json response mismatch: %s", byID["1"])
 	}
 
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "claude-sonnet-4", "low"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "small", "", "claude-sonnet-4", "low"); err != nil {
 		t.Fatalf("SetAgentsTier returned error: %v", err)
 	}
 	out.Reset()
@@ -243,7 +243,7 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"claude-sonnet-4"}}}`+"\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"small","model":"claude-sonnet-4"}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	}
 	deniedTier := callToolOnce(t, server, 3, "config.agents_tier", map[string]any{
 		"session_key": leafKey,
-		"tier":        "light",
+		"tier":        "small",
 		"model":       "gpt-5.2",
 	})
 	if !strings.Contains(deniedTier, "tool not available") {
@@ -1100,7 +1100,7 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 
 	out.Reset()
-	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","backend":"codex","model":"gpt-5.4","effort":"medium"}}}`
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"medium","backend":"codex","model":"gpt-5.4","effort":"medium"}}}`
 	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
 		t.Fatalf("ServeStdio config returned error: %v", err)
 	}
@@ -1111,7 +1111,7 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 
 	out.Reset()
-	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"}}}`, root)
 	if err := serveStdioWithSession(t, server, root, registerInput, &out); err != nil {
 		t.Fatalf("ServeStdio register returned error: %v", err)
 	}
@@ -1132,9 +1132,9 @@ func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.
 	var out bytes.Buffer
 	server := NewServer(root, "test")
 	inputs := []string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.5","effort":"medium"}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.4"}}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"medium","harness":"codex","model":"gpt-5.5","effort":"medium"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"medium","harness":"codex","model":"gpt-5.4"}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
 	}
 	for _, input := range inputs {
 		out.Reset()
@@ -1271,7 +1271,7 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
-	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"}}}`, root)
 	checkInput := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.mercenary.status","arguments":{"name":"reviewer"}}}`
 
 	var out bytes.Buffer
@@ -1299,7 +1299,7 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	root := initTicketRepo(t, "260508-feat-codex-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
-	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
 	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
 	var out bytes.Buffer
 	server := NewServer(t.TempDir(), "test")

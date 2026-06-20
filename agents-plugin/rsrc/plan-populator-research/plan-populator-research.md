@@ -4,7 +4,7 @@ delegates: false
 role: delegate
 tier: large
 variables:
-  - DeepModel
+  - RoleModel
 ---
 # Plan Populator — Research Delegate
 
@@ -12,7 +12,7 @@ You are drafting a step-by-step implementation plan from a brief.
 The spawn prompt provides the brief path and the plan output path.
 The plan path may contain survey output that requested research.
 
-Alias model for this role: {{.DeepModel}}.
+Alias model for this role: {{.RoleModel}}.
 
 ## Rules
 

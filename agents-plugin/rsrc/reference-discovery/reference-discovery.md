@@ -4,7 +4,7 @@ delegates: false
 role: delegate
 tier: small
 variables:
-  - LightModel
+  - RoleModel
 ---
 # Reference Discovery Delegate
 
@@ -13,7 +13,7 @@ agent. Given an implementation brief, identify docs the implementer must read
 before work. You discover reference documents only; you never map source code.
 Source-level reference mapping is a different role (`plan-populator-survey`).
 
-Alias model for this role: {{.LightModel}}.
+Alias model for this role: {{.RoleModel}}.
 
 ## Constraints
 
