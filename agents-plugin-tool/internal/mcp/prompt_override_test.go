@@ -673,3 +673,67 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	assertNoMarkerSyntax(t, "config.prompt.set precedence render", precedenceBody)
 	assertManualStructureIntact(t, "config.prompt.set precedence render", precedenceBody)
 }
+
+// TestConfigPromptSetValidationAndDefaultScope covers the setter's input-validation
+// guards and the omitted-scope path (DefaultScope → project), which the happy-path
+// end-to-end test does not exercise.
+func TestConfigPromptSetValidationAndDefaultScope(t *testing.T) {
+	useLeadProfile(t)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 920100, root, nil))
+
+	// --- Validation negatives: each must return an isError response with a clear message. ---
+	negatives := []struct {
+		label   string
+		args    map[string]any
+		wantMsg string
+	}{
+		{
+			label:   "empty session_key",
+			args:    map[string]any{"session_key": "", "pointId": "DelegationSection", "harness": "claude", "prompt": "x"},
+			wantMsg: "session_key is required",
+		},
+		{
+			label:   "empty pointId",
+			args:    map[string]any{"session_key": key, "pointId": "", "harness": "claude", "prompt": "x"},
+			wantMsg: "pointId must be non-empty",
+		},
+		{
+			label:   "invalid harness",
+			args:    map[string]any{"session_key": key, "pointId": "DelegationSection", "harness": "vscode", "prompt": "x"},
+			wantMsg: "harness must be one of",
+		},
+		{
+			label:   "empty prompt",
+			args:    map[string]any{"session_key": key, "pointId": "DelegationSection", "harness": "claude", "prompt": "   "},
+			wantMsg: "prompt must be non-empty",
+		},
+	}
+	for i, tc := range negatives {
+		resp := callToolOnce(t, s, 1000+i, "config.prompt.set", tc.args)
+		if !strings.Contains(resp, `"isError":true`) {
+			t.Errorf("%s: expected isError:true response, got: %s", tc.label, resp)
+		}
+		if msg := toolText(t, resp); !strings.Contains(msg, tc.wantMsg) {
+			t.Errorf("%s: error message %q must contain %q", tc.label, msg, tc.wantMsg)
+		}
+	}
+
+	// --- Default scope: omitting scope resolves to project for unregistered prompt.* keys. ---
+	defResp := callToolOnce(t, s, 1100, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "DelegationSection",
+		"harness":     "codex",
+		"prompt":      "default-scope override text",
+	})
+	if defText := toolText(t, defResp); !strings.Contains(defText, "scope: project") {
+		t.Errorf("omitted scope must resolve to project, got: %s", defText)
+	}
+}
