@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// runSpawnChild and runSpawnParent are dispatched by the shared
+// TestHelperProcess switch in execjob_test.go (the "spawnchild" / "spawnparent"
+// cases) under GO_WANT_HELPER_PROCESS=1 — that re-exec entry point lives in the
+// sibling file, not here.
+//
 // runSpawnChild is the leaf helper: it records its own PID so the test can poll
 // liveness, then blocks long enough that only the cancel path should reap it.
 func runSpawnChild(pidFile string) {

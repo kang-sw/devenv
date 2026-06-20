@@ -15,8 +15,9 @@ import (
 // rooted at pid, and TerminateProcess each PID individually. The kill is
 // strictly PID-scoped (no image-name termination), so it cannot reach unrelated
 // host processes such as a live claude.exe. The contract stays best-effort: the
-// first error is returned for the caller's cleanup_needed signal while we still
-// attempt to terminate the remaining PIDs.
+// first error is surfaced to the caller (as diagnostic errText) while we still
+// attempt to terminate the remaining PIDs. Whether cleanup is still needed is
+// decided independently by the post-cancel liveness re-probe, not by this error.
 func cancelAsyncProcessTree(pid int) error {
 	if pid <= 0 {
 		return nil
