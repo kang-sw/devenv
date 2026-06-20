@@ -219,6 +219,27 @@ resolved to a concrete backend/model by mapping through the alias layer into
 `config.agents_tier` (`#260513-harness-local-agent-tier-config`), which remains
 keyed by the `light`/`core`/`deep` alias. {#260612-first-class-tier-vocabulary}
 
+> [!note] Planned 🚧
+> The two-vocabulary split is collapsed to a single tier vocabulary. The
+> capability vocabulary `small`/`medium`/`large`/`xlarge` becomes the only tier
+> vocabulary across every surface — playbook frontmatter, `playbook.render`,
+> `ws.mercenary.register`, and the model-config tool (the `config.agents_tier`
+> surface, re-homed by this change rather than by the previously pending
+> `config.model_alias` rename, which this supersedes). Config is keyed directly by
+> the capability tier: a tier resolves to its per-harness `(backend, model,
+> effort)` with no intervening `light`/`core`/`deep` alias step, and the
+> `firstClassTierToAlias` bridge is retired. `xlarge` gains an independently
+> configurable mapping instead of folding onto `deep`. The `light`/`core`/`deep`
+> aliases and the `haiku`/`sonnet`/`opus` provider names remain accepted as
+> read-compatibility synonyms on input — and for existing on-disk config and
+> persisted agent records — so no stored configuration breaks and no schema
+> migration is required. Per-harness mapping, portable effort, and backend-affinity
+> resolution are unchanged; only the key vocabulary changes. Delegate playbooks
+> declare a single tier-derived model hint variable (`{{.RoleModel}}`) resolved
+> from the playbook's own `tier:`, replacing the alias-named
+> `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` set; the rendered native model
+> hint is preserved. {#260620-tier-vocabulary-collapse-direct-model-map}
+
 ### Layered Config Scope Model {#260619-layered-config-scope-model}
 
 Config items resolve across four ordered scopes, highest precedence first:

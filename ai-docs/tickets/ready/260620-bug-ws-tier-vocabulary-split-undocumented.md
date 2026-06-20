@@ -2,6 +2,8 @@
 title: tier vocabulary split is redundant — collapse to one capability vocabulary with direct capability→model config
 related:
   260611-research-ws-per-role-delegation-tuning-config: collapse simplifies its 3-layer config model to 2 layers
+spec:
+  - 260620-tier-vocabulary-collapse-direct-model-map
 related-mental-model:
   - named-agent-runtime
   - prompt-bundle
@@ -129,31 +131,77 @@ buys nothing at this scale.
   renames the tool while keeping `light/core/deep` keys — preserves the redundant
   layer. This decision supersedes that planned rename.
 
-## Direction
+## Phases
 
-Single-vocabulary collapse, transition-safe. Implementation sketch (not yet
-phased; promote to `ready/` with phases after the open question below is settled):
+Single-vocabulary collapse, transition-safe. Sequential: each phase is one
+reviewable, verifiable behavior; Phase 2 depends on Phase 1, Phase 3 on both.
+Skill/doc edits run under `lead-skill-authoring`. This is observable API/protocol
+surface change (Always-ask territory). Spec addressed by the `🚧` planned entry
+`#260620-tier-vocabulary-collapse-direct-model-map`.
 
-1. **Direct config map.** Re-key `Agents.Tiers` / `Agents.ModelAliases` semantics
-   so `config.agents_tier` (renamed appropriately) accepts and stores capability
-   vocabulary. Give `xlarge` its own resolvable entry. Keep the per-harness map
-   shape, effort field, and backend-affinity guard unchanged (Evidence 2).
-2. **Read-compat synonyms.** Extend `normalizedTier` (`config.go:428`) to fold
-   `light→small`/`core→medium`/`deep→large` (and keep `haiku/sonnet/opus`),
-   applied at config load and SQLite tier read, so existing on-disk config and
-   stored agents keep resolving (Evidence 3). No schema migration.
-3. **Tier-derived native hint.** Replace the fixed `resolveModelVars` alias-var
-   list with a `tier`-derived single `{{.RoleModel}}`; migrate the ~9 delegate
-   playbooks and the `variables:` frontmatter (Evidence 4). Native hint preserved.
-4. **Surface + enum.** Update the `config.agents_tier` / `ws.mercenary.register`
-   tool enums and help (`server.go:2209`, `cmd/ws-mcp/main.go`), and both
-   `runtime.json` contracts (the full one; wsflow omits `config.agents_tier`).
-5. **Tests + docs + mirror.** ~132 code literals (mostly tests), `lead-tune`
-   "tune model tier" handler and Storage notes, the bridge prose, and the
-   `agents-plugin-wsflow/rsrc` mirror regen.
+### Phase 1: Capability-keyed model config + read-compat
 
-Skill/doc edits run under `lead-skill-authoring`. This is observable
-API/protocol surface change (Always-ask territory).
+Re-home the model-config surface so it accepts, stores, and resolves the
+capability vocabulary directly, retiring the `firstClassTierToAlias` bridge for
+the config path.
+
+- Re-key `Agents.Tiers` / `Agents.ModelAliases` semantics to capability
+  vocabulary (`config.go:32-35`); give `xlarge` its own resolvable entry instead
+  of folding onto `deep`.
+- Extend `normalizedTier` (`config.go:428`) to fold `light→small`/`core→medium`/
+  `deep→large` and keep `haiku/sonnet/opus`; apply at config load
+  (`config.go:75-85`) and SQLite tier read (`wsstore/store.go:592-636`).
+- Keep the per-harness map shape, effort field (`config.go:53-56`), and
+  backend-affinity guard (`config.go:396-410`) unchanged — only the key
+  vocabulary changes (Evidence 2).
+- Update the `config.agents_tier` tool enum + help (`server.go:2209`,
+  `cmd/ws-mcp/main.go`) to capability vocabulary; route `ws.mercenary.register`
+  tier directly (drop the `firstClassTierToAlias` call at `server.go:972`).
+- Update the full `runtime.json` enum if it pins one; `wsflow` omits
+  `config.agents_tier`.
+
+Verification: existing `light/core/deep` config.json and stored agents still
+resolve unchanged; `config.agents_tier(tier: small)` succeeds; `xlarge`
+configures independently of `large`; `config_test`/`agent_test`/
+`mercenary_surface_test` pass with capability literals. Deferred: template var
+(Phase 2), doc/skill prose (Phase 3).
+
+### Phase 2: Tier-derived native model hint
+
+Replace the fixed alias-named template-var set with a single tier-derived
+`{{.RoleModel}}` (Evidence 4; native hint preserved).
+
+- Add a `tier` arg to `buildPlaybookVars`; replace `resolveModelVars`
+  (`playbook_tools.go:85-103`) with a `pb.Meta.Tier`-derived resolver; update
+  `reservedToolVarNames` (`:51-66`).
+- Migrate delegate playbooks' `variables:` frontmatter and bodies from
+  `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` to `{{.RoleModel}}`
+  (`reference-discovery` and any other model-var playbooks).
+- Regen the `agents-plugin-wsflow/rsrc` mirror (`WS_REGEN_WSFLOW_RSRC=1`).
+
+Verification: `playbook.render(reference-discovery)` substitutes the concrete
+model resolved from `tier:`; `recommended-tier` still emitted; `playbook_tools_test`
+and the wsflow mirror drift guard pass. Depends on Phase 1.
+
+### Phase 3: Single-vocabulary docs, skills, and spec finalization
+
+Align caller-facing prose to one vocabulary and mark the spec implemented.
+
+- Rewrite `lead-tune` "tune model tier" handler + Storage notes to capability
+  vocabulary; remove bridge prose; update `lead-workflow-manual` register/render
+  notes.
+- Clean the superseded "pending `config.model_alias` rename" references
+  (`mcp-tools.md:256,271`).
+- Convert the `🚧` planned callout
+  `#260620-tier-vocabulary-collapse-direct-model-map` to implemented (remove `🚧`,
+  fold into body) and reconcile `#260612`/`#260508` body vocabulary; the commit
+  `## Spec` references the stem.
+- Regen the wsflow rsrc mirror for skill-text changes.
+
+Verification: docs/skills speak only capability vocabulary (`light/core/deep`
+appears only as documented read-compat synonyms); `spec_index.verify` clean; no
+`{{.LightModel}}`-family vars or alias-keyed tuning instructions remain. Depends
+on Phases 1-2.
 
 ## Documentation Conflicts (must reconcile)
 
