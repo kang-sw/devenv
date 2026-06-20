@@ -46,6 +46,17 @@ Confirmed with the user (2026-06-20):
   the immutable `YYMMDD` date prefix; reject re-closing an already-closed ticket;
   apply the status-specific dated field (done→`completed`, dropped→`dropped`).
 
+- **Usage guidance lives in three layers, not per-playbook.** Transition is
+  directed from ~8 scattered playbooks (`lead-write-ticket`, `lead-proceed`,
+  `lead-discuss`, `lead-forge-spec`, `lead-salvage`, ...), so usage is not copied
+  into each. The `ticket-conventions` convention doc — the single source every
+  transition-directing playbook already reads via `convention.read` — owns the
+  transition *rule* and names the tools as canonical with `git mv` as fallback;
+  `lead-workflow-manual` registers them in the primitive *catalog*; individual
+  playbooks keep only "when to transition" and reference the convention rather
+  than repeating `git mv`/frontmatter steps. One convention edit then propagates
+  to every transition site.
+
 ## Phases
 
 ### Phase 1: tickets.close + tickets.move
@@ -77,3 +88,27 @@ Verification:
 - Convention guards reject: unknown stem, invalid target status, re-close of an
   already-closed ticket, and any date-prefix mutation.
 - `go test ./...` green, including the runtime-contract cross-checks.
+
+### Phase 2: transition-guidance rewiring
+
+Point the scattered transition directives at the new tools through their
+canonical home rather than per-playbook copies. Skill/convention edits here run
+under `lead-skill-authoring` (read its SKILL.md and apply the invariant checklist
+to every changed Invariants/Constraints/Doctrine line).
+
+- `ticket-conventions` (convention doc): make `tickets.close`/`tickets.move` the
+  canonical transition mechanism, with `git mv` named as the fallback; the
+  dated-field and status-flow rules describe what the tools enforce.
+- `lead-workflow-manual`: register `tickets.close`/`tickets.move` in the
+  primitive catalog (mutation tools; call form).
+- Transition-directing playbooks (the `lead-write-ticket` Move section first;
+  `lead-proceed`, `lead-discuss`, `lead-forge-spec`, `lead-salvage` where they
+  direct transitions): replace direct `git mv`/frontmatter steps with a reference
+  to the convention rule; keep only when-to-transition semantics.
+
+Depends on Phase 1 (the tools must exist before guidance points at them).
+
+Verification:
+- The convention doc names the tools as canonical with `git mv` as fallback.
+- No transition-directing playbook repeats `git mv` usage the convention now owns.
+- rsrc manifest + wsflow mirror regenerated; playbook render/freshness guards green.
