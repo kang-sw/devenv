@@ -35,7 +35,8 @@ Storage
 4. Call `{{.McpNamespace}}/config.prompt.set(session_key: <lead key>, pointId, harness, prompt, scope)`.
 5. Report the stored `pointId`/`harness`/`scope`; note it applies at the next playbook render, not retroactively.
 
-Worked example — making the lead delegate less: override the `DelegationSection` point with the user's posture text.
+Worked example — making the lead delegate less: override the `DelegationSection` point with the user's posture text, then report the point and scope changed.
+Worked example — adding standing communication preferences: override the `UserPreferenceSection` point, then report the point and scope changed.
 
 <!-- ws:full-only:start -->
 ## On: tune delegation mode
@@ -60,7 +61,9 @@ Worked example — making the lead delegate less: override the `DelegationSectio
 ## Judgments
 
 ### judge: tune-target
-- Prompt wording, a named manual section, or "delegate more/less"/posture -> prompt override (`DelegationSection` for delegation posture).
+- User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
+- Prompt wording or a named manual section -> prompt override for that named override point.
+- "delegate more/less" or delegation posture -> prompt override (`DelegationSection`).
 <!-- ws:full-only:start -->
 - A preference for mercenary or persistent agents over native spawning -> delegation mode (`prefer_mercenary`).
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`config.agents_tier`).

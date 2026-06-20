@@ -652,7 +652,7 @@ stripped, so the rendered output contains only resolved content and never the
 marker syntax. An **empty seed body** is a pure extension slot: it renders the
 stored override if one exists, or nothing when none is set — so overriding
 existing text and appending new text are the same primitive (for example a
-`DelegationSection` override-point versus a `WorkflowManualExt` extension slot).
+`DelegationSection` override-point versus a `UserPreferenceSection` extension slot).
 
 Override values resolve through the layered config scope model under the key
 `prompt.<point id>.<harness>`, so a write at any scope through the config layer
@@ -663,13 +663,15 @@ override surface tunable from inside the MCP without external docs; a
 self-documenting `config.prompt()` listing makes that surface discoverable from
 inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
 
-The first shipped override-point is `DelegationSection`, seeded in the lead
-workflow manual. Its seed states the lead's default delegation posture — how
-eagerly to delegate work to subagents to preserve execution context — and a user
-tunes that posture by storing an override under `prompt.DelegationSection.<harness>`
-without editing the shipped resource tree. The override replaces only the
-posture section of the rendered manual; the surrounding primitive reference is
-untouched. {#260619-delegation-section-override-point}
+Shipped lead workflow-manual override-points include `DelegationSection`, seeded
+with the lead's default delegation posture, and `UserPreferenceSection`, an empty
+extension slot for standing communication, terminology, and workflow
+preferences. A user tunes delegation posture by storing an override under
+`prompt.DelegationSection.<harness>`; a user adds standing preferences by storing
+an override under `prompt.UserPreferenceSection.<harness>` without editing the
+shipped resource tree. The resolved override replaces or fills only its marked
+section; the surrounding primitive reference is untouched.
+{#260619-delegation-section-override-point}
 
 > [!note] Constraints
 > - The marker grammar is a ws-private schema (ws is the sole reader); it is not

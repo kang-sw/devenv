@@ -70,8 +70,9 @@ runtime trigger surface that fires when the user signals intent to tune how the
 workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
 so the skill can proactively propose a tune. Its playbook is the tuning manual —
 it drives the `config.prompt.*` data plane for prompt overrides
-(`#260620-config-prompt-override-tuning-tools`, the `DelegationSection` override is
-the worked example) and introduces or links `prefer_mercenary` and
+(`#260620-config-prompt-override-tuning-tools`, with `DelegationSection` for
+delegation posture and `UserPreferenceSection` for standing preferences) and
+introduces or links `prefer_mercenary` and
 `config.agents_tier` without reimplementing their set paths. The always-on
 `lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
 of general-task routing attention. In agentless wsflow only the prompt-override

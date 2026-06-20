@@ -539,6 +539,47 @@ func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
 	assertManualStructureIntact(t, "shipped override", ovBody)
 }
 
+// TestShippedUserPreferenceSectionEmptySlotAndOverride verifies the shipped
+// user-preference extension slot. With no override it renders no body text; an
+// all-harness override appends preference guidance without replacing delegation
+// posture.
+func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	const preferenceText = "User preferences:\n- Prefer conventional terminology when user wording is imprecise."
+	const delegationSeed = "Delegate to preserve lead execution context"
+
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (base): %v", err)
+	}
+	if !strings.Contains(baseBody, "### User preferences") {
+		t.Errorf("base render must keep the user-preferences heading:\n%s", baseBody)
+	}
+	if strings.Contains(baseBody, "Prefer conventional terminology") {
+		t.Errorf("empty user-preference slot must not render preference text without override:\n%s", baseBody)
+	}
+	assertNoMarkerSyntax(t, "user preference base", baseBody)
+	assertManualStructureIntact(t, "user preference base", baseBody)
+
+	lookup := staticLookup(map[string]string{
+		"UserPreferenceSection/all": preferenceText,
+	})
+	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, lookup)
+	if err != nil {
+		t.Fatalf("printPlaybook (override): %v", err)
+	}
+	if !strings.Contains(ovBody, preferenceText) {
+		t.Errorf("user-preference override must render:\n%s", ovBody)
+	}
+	if !strings.Contains(ovBody, delegationSeed) {
+		t.Errorf("user-preference override must not replace delegation seed:\n%s", ovBody)
+	}
+	assertNoMarkerSyntax(t, "user preference override", ovBody)
+	assertManualStructureIntact(t, "user preference override", ovBody)
+}
+
 // assertManualStructureIntact bounds the override replacement region: the
 // far-above heading, the `### Delegation posture` heading (immediately above the
 // override block, outside it), and the following `Scoped Exploration` section
@@ -546,7 +587,7 @@ func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
 // swallowed the heading or the next section would fail here.
 func assertManualStructureIntact(t *testing.T, label, body string) {
 	t.Helper()
-	for _, want := range []string{"WS Workflow Primitives", "### Delegation posture", "Scoped Exploration"} {
+	for _, want := range []string{"WS Workflow Primitives", "### User preferences", "### Delegation posture", "Scoped Exploration"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s: manual structure must remain intact, missing %q:\n%s", label, want, body)
 		}
@@ -794,6 +835,40 @@ func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
 	// (ExtSlot sorts before SeedSection).
 	if idxExt, idxSeed := strings.Index(text, "ExtSlot"), strings.Index(text, "SeedSection"); idxExt < 0 || idxSeed < 0 || idxExt > idxSeed {
 		t.Errorf("expected ExtSlot to sort before SeedSection in listing:\n%s", text)
+	}
+}
+
+// TestConfigPromptListIncludesShippedUserPreferenceSection verifies that the
+// listing discovers shipped override-point markers from the rsrc tree rather
+// than from a curated schema.
+func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900300, root, nil))
+
+	resp := callToolOnce(t, s, 1, "config.prompt", map[string]any{
+		"session_key": key,
+	})
+	text := toolText(t, resp)
+
+	for _, want := range []string{
+		"DelegationSection",
+		"lead delegation eagerness and context-saving stance",
+		"UserPreferenceSection",
+		"user standing preferences for communication, terminology, and workflow behavior",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("shipped config.prompt listing missing %q:\n%s", want, text)
+		}
 	}
 }
 

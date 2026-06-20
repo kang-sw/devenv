@@ -61,6 +61,11 @@ its own top-level, so it counts as a distinct root. Call `ws.ferrule` once per
 working root, and thread the matching `session_key` through every subsequent
 root-aware {{.McpNamespace}} tool call that targets that root.
 
+### User preferences
+
+<!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
+<!-- ws:/override:UserPreferenceSection -->
+
 ### Delegation posture
 
 <!-- ws:override:DelegationSection desc="lead delegation eagerness and context-saving stance" -->
@@ -72,7 +77,7 @@ single-step edits — inline. When context budget runs short, lean harder toward
 delegation.
 <!-- ws:/override:DelegationSection -->
 
-To tune this posture or other workflow knobs, invoke `{{.SkillNamespace}}:lead-tune`.
+For lead-owned tuning of this posture or other workflow knobs, use the `{{.SkillNamespace}}:lead-tune` skill.
 
 ### Scoped Exploration (native Explore)
 
