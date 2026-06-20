@@ -485,6 +485,89 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolJSONResponse(req.ID, cfg, err)
 
+	case "config.prompt.set":
+		// Lead-only setter for prompt override-points. The config.* prefix gate in
+		// roleAllowsTool already blocks delegate and leaf keys, so no extra role
+		// check is needed here (sole keyed-gate-is-authority rule, per mcp-runtime
+		// mental model).
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: session_key is required"))
+		}
+		pointID, _ := params.Arguments["pointId"].(string)
+		pointID = strings.TrimSpace(pointID)
+		if pointID == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: pointId must be non-empty"))
+		}
+		harness, _ := params.Arguments["harness"].(string)
+		// Normalize the harness value and reject unrecognized inputs.
+		// The caller-visible enum is ["claude","codex","*"]; "*" is stored as "all"
+		// to match the buildOverrideLookup reader which reads prompt.<id>.all.
+		switch harness {
+		case "claude", "codex":
+			// accepted as-is
+		case "*":
+			harness = "all"
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: harness must be one of claude, codex, or *; got %q", harness))
+		}
+		promptText, _ := params.Arguments["prompt"].(string)
+		if strings.TrimSpace(promptText) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: prompt must be non-empty"))
+		}
+		// Parse optional scope arg. Empty/absent passes ExplicitScope:"" so the
+		// resolver applies DefaultScope (project for unregistered prompt.* keys).
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(scopeArg)
+		}
+		// Write through the layered config resolver. Use wsconfig.Options{} (ambient
+		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as config.agents_tier and
+		// prefer_mercenary do; do NOT call resolveToolRoot (config.* tools are not
+		// root-aware per mcp-runtime mental model).
+		overrideKey := "prompt." + pointID + "." + harness
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{
+			ExplicitScope: explicitScope,
+			SessionKey:    sessionKey,
+		}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: %w", err))
+		}
+		// Determine the resolved scope for the confirmation message.
+		resolvedScope := explicitScope
+		if resolvedScope == "" {
+			resolvedScope = wsconfig.DefaultScope(overrideKey)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
+
+	case "config.prompt":
+		// Read-only listing of declared prompt override-points. Lead-only via the
+		// config.* prefix gate (a keyless caller passes, exactly like config.show);
+		// no extra role check is needed here.
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		points, err := scanOverridePoints(rsrcRoot)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// Build the resolver exactly as the setter does: ambient Options, not
+		// root-aware (config.* tools resolve from WS_CACHE_HOME/WS_CONFIG_HOME).
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		list := buildPromptOverrideListing(points, &resolver, sessionKey)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, list, nil)
+		}
+		return toolTextResponse(req.ID, formatPromptOverrideListing(list), nil)
+
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1253,6 +1336,73 @@ func formatConfigView(view wsconfig.View) string {
 			fmt.Fprintf(&b, "  %s: %s  [scope:%s]\n", item.Key, item.Value, item.Scope)
 		}
 	}
+	return b.String()
+}
+
+// promptOverrideValue is one resolved override for a declared point: the harness
+// bucket it applies to, the scope it resolved from, and the stored value.
+type promptOverrideValue struct {
+	Harness string `json:"harness"`
+	Scope   string `json:"scope"`
+	Value   string `json:"value"`
+}
+
+// promptOverridePoint is a declared override-point plus any current override
+// values, shaped for the config.prompt JSON listing.
+type promptOverridePoint struct {
+	PointId   string                `json:"pointId"`
+	Desc      string                `json:"desc"`
+	Overrides []promptOverrideValue `json:"overrides"`
+}
+
+// promptOverrideHarnessBuckets is the fixed set of harness buckets a stored
+// override can target, in listing order. "all" is the stored spelling of the
+// caller-facing "*".
+var promptOverrideHarnessBuckets = []string{"claude", "codex", "all"}
+
+// buildPromptOverrideListing resolves the current override value+scope for each
+// declared point across every harness bucket. Unset buckets (empty resolved
+// value) are omitted. Session-scope values are only visible when sessionKey is
+// non-empty (mirroring config.show).
+func buildPromptOverrideListing(points []overridePointDecl, resolver *wsconfig.Resolver, sessionKey string) []promptOverridePoint {
+	listing := make([]promptOverridePoint, 0, len(points))
+	for _, p := range points {
+		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc}
+		for _, harness := range promptOverrideHarnessBuckets {
+			rv, _ := resolver.Get(sessionKey, "prompt."+p.PointId+"."+harness)
+			if strings.TrimSpace(rv.Value) == "" {
+				continue
+			}
+			entry.Overrides = append(entry.Overrides, promptOverrideValue{
+				Harness: harness,
+				Scope:   string(rv.Scope),
+				Value:   rv.Value,
+			})
+		}
+		listing = append(listing, entry)
+	}
+	return listing
+}
+
+// formatPromptOverrideListing renders the canonical text view of the override
+// listing: one block per point and a single trailing pointer to ws:lead-tune.
+func formatPromptOverrideListing(listing []promptOverridePoint) string {
+	var b strings.Builder
+	for _, p := range listing {
+		fmt.Fprintf(&b, "%s\n", p.PointId)
+		if p.Desc != "" {
+			fmt.Fprintf(&b, "  %s\n", p.Desc)
+		}
+		if len(p.Overrides) == 0 {
+			b.WriteString("  (no overrides set)\n")
+		} else {
+			for _, o := range p.Overrides {
+				fmt.Fprintf(&b, "  harness=%s scope=%s\n", o.Harness, o.Scope)
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Tuning manual & how-to: run the ws:lead-tune skill.\n")
 	return b.String()
 }
 
@@ -2063,6 +2213,33 @@ func tools() []map[string]any {
 					"harness": stringProperty("Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known."),
 				},
 				"required": []string{"tier"},
+			},
+		},
+		{
+			"name":        "config.prompt.set",
+			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate and to support session-scope writes."),
+					"pointId":     stringProperty("Override-point id, e.g. DelegationSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket the override applies to. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"prompt":      stringProperty("Override text that replaces the seed block at render time. Must be non-empty."),
+					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
+				},
+				"required": []string{"session_key", "pointId", "harness", "prompt"},
+			},
+		},
+		{
+			"name":        "config.prompt",
+			"description": "List every declared prompt override-point (id + description) found in the shipped playbook tree, with any current override values and the scope each resolved from. Read-only; lead-only via the config.* prefix gate. Points to the ws:lead-tune skill for the tuning how-to.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope overrides are included and annotated."),
+					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
+				},
 			},
 		},
 		{

@@ -3,6 +3,8 @@ package mcp
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -321,6 +323,88 @@ func parseOverrideMarkerPointId(trimmed, prefix string) (string, bool) {
 		return "", false
 	}
 	return pointId, true
+}
+
+// parseOverrideOpenMarkerDesc extracts the pointId and optional desc from a
+// trimmed open-marker line of the form `<!-- ws:override:<pointId> desc="..." -->`.
+// It mirrors parseOverrideMarkerPointId for the pointId token but additionally
+// surfaces the `desc="..."` attribute (the render engine discards desc, so this is
+// a separate parser dedicated to the config.prompt listing).
+//
+// Returns (pointId, desc, true) for a well-formed open marker; desc is "" when the
+// attribute is absent. A non-marker line or empty pointId returns ("", "", false).
+func parseOverrideOpenMarkerDesc(trimmed string) (pointId, desc string, ok bool) {
+	if !strings.HasPrefix(trimmed, overrideOpenPrefix) || !strings.HasSuffix(trimmed, "-->") {
+		return "", "", false
+	}
+	rest := strings.TrimSuffix(trimmed[len(overrideOpenPrefix):], "-->")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", "", false
+	}
+	pointId = rest
+	if spaceIdx := strings.IndexAny(rest, " \t"); spaceIdx >= 0 {
+		pointId = rest[:spaceIdx]
+	}
+	pointId = strings.TrimSpace(pointId)
+	if pointId == "" {
+		return "", "", false
+	}
+	// Extract desc="..." from the remainder, if present. Find the opening
+	// `desc="` then the next `"` to delimit the value.
+	if start := strings.Index(rest, `desc="`); start >= 0 {
+		valueStart := start + len(`desc="`)
+		if end := strings.IndexByte(rest[valueStart:], '"'); end >= 0 {
+			desc = rest[valueStart : valueStart+end]
+		}
+	}
+	return pointId, desc, true
+}
+
+// overridePointDecl is a single declared override-point discovered in the rsrc
+// playbook tree: the pointId and its short desc (empty when undeclared).
+type overridePointDecl struct {
+	PointId string
+	Desc    string
+}
+
+// scanOverridePoints walks the rsrc tree rooted at rsrcRoot, scans every `.md`
+// file for override open markers, and returns the declared override-points
+// deduped by pointId (the first non-empty desc wins) sorted by PointId. It is a
+// pure function (root in, data out) so it unit-tests without a Server.
+func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
+	descByPoint := map[string]string{}
+	err := filepath.Walk(rsrcRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			pointId, desc, ok := parseOverrideOpenMarkerDesc(strings.TrimSpace(line))
+			if !ok {
+				continue
+			}
+			if existing, seen := descByPoint[pointId]; !seen || (existing == "" && desc != "") {
+				descByPoint[pointId] = desc
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	points := make([]overridePointDecl, 0, len(descByPoint))
+	for id, desc := range descByPoint {
+		points = append(points, overridePointDecl{PointId: id, Desc: desc})
+	}
+	sort.Slice(points, func(i, j int) bool { return points[i].PointId < points[j].PointId })
+	return points, nil
 }
 
 // buildOverrideLookup returns an overrideLookupFn backed by the session-keyed

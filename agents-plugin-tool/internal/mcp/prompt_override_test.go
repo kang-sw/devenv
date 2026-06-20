@@ -552,3 +552,320 @@ func assertManualStructureIntact(t *testing.T, label, body string) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Case 7: config.prompt.set end-to-end — setter drives real override through
+// to render, matching the brief's integration-test contract.
+// ---------------------------------------------------------------------------
+
+// TestConfigPromptSetEndToEnd verifies the config.prompt.set tool dispatch path
+// end-to-end against the shipped lead-workflow-manual:
+//
+//  1. Calling config.prompt.set with a lead session key writes the override
+//     through the real layered config resolver.
+//  2. Rendering lead-workflow-manual via buildOverrideLookup + printPlaybook
+//     (the same path used by playbook.print dispatch) shows the stored override
+//     instead of the DelegationSection seed.
+//  3. Marker syntax is absent; manual structure is intact.
+//  4. Harness-exact match vs all-bucket: a harness-specific override (claude)
+//     wins over a previously stored all-bucket override when both are present.
+func TestConfigPromptSetEndToEnd(t *testing.T) {
+	useLeadProfile(t)
+
+	// Use the real shipped rsrc tree so lead-workflow-manual loads with its
+	// real DelegationSection marker.
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	// Separate git repo as the session-bound worktree root.
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	// Set harness to "claude" so per-harness lookups resolve predictably.
+	s.observeHarness("test", "claude")
+
+	// Bootstrap a lead session key.
+	key, _ := parseLoginResponse(t, callLogin(t, s, 910100, root, nil))
+
+	const seedPhrase = "Delegate to preserve lead execution context"
+
+	// --- Baseline: without any override, seed renders ---
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (baseline): %v", err)
+	}
+	if !strings.Contains(baseBody, seedPhrase) {
+		t.Errorf("baseline: seed phrase must appear before any override is set:\n%s", baseBody)
+	}
+
+	// --- Set override via the real config.prompt.set dispatch ---
+	// Scope: session (explicit) so the test exercises the session-scope write path
+	// and does not touch the project-scope file on disk.
+	const overrideText = "ALWAYS delegate to save context — custom override for test."
+	setResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "DelegationSection",
+		"harness":     "claude",
+		"prompt":      overrideText,
+		"scope":       "session",
+	})
+	setText := toolText(t, setResp)
+	// Confirm the tool returned the expected confirmation line.
+	if !strings.Contains(setText, "prompt override set: DelegationSection/claude") {
+		t.Fatalf("config.prompt.set confirmation missing: %s", setText)
+	}
+	if !strings.Contains(setText, "scope: session") {
+		t.Fatalf("config.prompt.set must report session scope: %s", setText)
+	}
+
+	// --- Render with the override active ---
+	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (after set): %v", err)
+	}
+
+	// Override text must appear; seed must be gone.
+	if !strings.Contains(overrideBody, overrideText) {
+		t.Errorf("config.prompt.set: stored override must appear in render:\n%s", overrideBody)
+	}
+	if strings.Contains(overrideBody, seedPhrase) {
+		t.Errorf("config.prompt.set: seed phrase must not appear when override is set:\n%s", overrideBody)
+	}
+
+	// Marker syntax must be absent; manual structure intact.
+	assertNoMarkerSyntax(t, "config.prompt.set render", overrideBody)
+	assertManualStructureIntact(t, "config.prompt.set render", overrideBody)
+
+	// --- Harness-exact vs all-bucket precedence ---
+	// Store an all-bucket override. Since a claude-specific override already exists,
+	// the per-harness key must win and the all-bucket text must not appear.
+	const allOverrideText = "All-harness override — should lose to claude-specific."
+	allSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "DelegationSection",
+		"harness":     "*",
+		"prompt":      allOverrideText,
+		"scope":       "session",
+	})
+	allSetText := toolText(t, allSetResp)
+	// Confirm the harness normalization: "*" is stored as "all".
+	if !strings.Contains(allSetText, "prompt override set: DelegationSection/all") {
+		t.Fatalf("config.prompt.set (all bucket) confirmation missing: %s", allSetText)
+	}
+
+	// Render again — claude-specific override must still win.
+	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (precedence): %v", err)
+	}
+	if !strings.Contains(precedenceBody, overrideText) {
+		t.Errorf("harness-specific (claude) override must win over all-bucket:\n%s", precedenceBody)
+	}
+	if strings.Contains(precedenceBody, allOverrideText) {
+		t.Errorf("all-bucket text must not appear when harness-specific override is set:\n%s", precedenceBody)
+	}
+	if strings.Contains(precedenceBody, seedPhrase) {
+		t.Errorf("seed phrase must not appear when overrides are set:\n%s", precedenceBody)
+	}
+	assertNoMarkerSyntax(t, "config.prompt.set precedence render", precedenceBody)
+	assertManualStructureIntact(t, "config.prompt.set precedence render", precedenceBody)
+}
+
+// TestConfigPromptSetValidationAndDefaultScope covers the setter's input-validation
+// guards and the omitted-scope path (DefaultScope → project), which the happy-path
+// end-to-end test does not exercise.
+func TestConfigPromptSetValidationAndDefaultScope(t *testing.T) {
+	useLeadProfile(t)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 920100, root, nil))
+
+	// --- Validation negatives: each must return an isError response with a clear message. ---
+	negatives := []struct {
+		label   string
+		args    map[string]any
+		wantMsg string
+	}{
+		{
+			label:   "empty session_key",
+			args:    map[string]any{"session_key": "", "pointId": "DelegationSection", "harness": "claude", "prompt": "x"},
+			wantMsg: "session_key is required",
+		},
+		{
+			label:   "empty pointId",
+			args:    map[string]any{"session_key": key, "pointId": "", "harness": "claude", "prompt": "x"},
+			wantMsg: "pointId must be non-empty",
+		},
+		{
+			label:   "invalid harness",
+			args:    map[string]any{"session_key": key, "pointId": "DelegationSection", "harness": "vscode", "prompt": "x"},
+			wantMsg: "harness must be one of",
+		},
+		{
+			label:   "empty prompt",
+			args:    map[string]any{"session_key": key, "pointId": "DelegationSection", "harness": "claude", "prompt": "   "},
+			wantMsg: "prompt must be non-empty",
+		},
+	}
+	for i, tc := range negatives {
+		resp := callToolOnce(t, s, 1000+i, "config.prompt.set", tc.args)
+		if !strings.Contains(resp, `"isError":true`) {
+			t.Errorf("%s: expected isError:true response, got: %s", tc.label, resp)
+		}
+		if msg := toolText(t, resp); !strings.Contains(msg, tc.wantMsg) {
+			t.Errorf("%s: error message %q must contain %q", tc.label, msg, tc.wantMsg)
+		}
+	}
+
+	// --- Default scope: omitting scope resolves to project for unregistered prompt.* keys. ---
+	defResp := callToolOnce(t, s, 1100, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "DelegationSection",
+		"harness":     "codex",
+		"prompt":      "default-scope override text",
+	})
+	if defText := toolText(t, defResp); !strings.Contains(defText, "scope: project") {
+		t.Errorf("omitted scope must resolve to project, got: %s", defText)
+	}
+}
+
+// TestConfigPromptListEnumeratesDeclaredPoints verifies the read-only
+// config.prompt listing: it enumerates the two declared override-points in the
+// test tree (SeedSection, ExtSlot) with their descs, annotates the one seeded
+// override with its harness + session scope, shows the unset point as having no
+// overrides, and ends with the ws:lead-tune pointer.
+func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900200, root, nil))
+
+	// Seed one session-scope override so the listing has an annotated value.
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	if err := resolver.Set("prompt.SeedSection.claude", "seeded override value", wsconfig.SetOptions{
+		ExplicitScope: wsconfig.ScopeSession,
+		SessionKey:    key,
+	}); err != nil {
+		t.Fatalf("seed override via resolver: %v", err)
+	}
+
+	resp := callToolOnce(t, s, 1, "config.prompt", map[string]any{
+		"session_key": key,
+	})
+	text := toolText(t, resp)
+
+	wantSubstrings := []string{
+		"SeedSection",
+		"a seeded override point",
+		"ExtSlot",
+		"an empty extension slot",
+		"harness=claude scope=session",
+		"(no overrides set)",
+		"ws:lead-tune",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(text, want) {
+			t.Errorf("config.prompt listing missing %q:\n%s", want, text)
+		}
+	}
+
+	// ExtSlot has no override seeded, so its block must carry "(no overrides set)";
+	// SeedSection must carry the seeded annotation. Verify ordering is stable
+	// (ExtSlot sorts before SeedSection).
+	if idxExt, idxSeed := strings.Index(text, "ExtSlot"), strings.Index(text, "SeedSection"); idxExt < 0 || idxSeed < 0 || idxExt > idxSeed {
+		t.Errorf("expected ExtSlot to sort before SeedSection in listing:\n%s", text)
+	}
+}
+
+// TestParseOverrideOpenMarkerDesc unit-tests the desc-aware open-marker parser
+// across desc-present, desc-absent, and non-marker lines.
+func TestParseOverrideOpenMarkerDesc(t *testing.T) {
+	cases := []struct {
+		name        string
+		line        string
+		wantPointId string
+		wantDesc    string
+		wantOK      bool
+	}{
+		{"desc present", `<!-- ws:override:Foo desc="a thing" -->`, "Foo", "a thing", true},
+		{"desc absent", `<!-- ws:override:Bar -->`, "Bar", "", true},
+		{"empty seed slot no space", `<!-- ws:override:Baz-->`, "Baz", "", true},
+		{"non-marker line", `just some prose`, "", "", false},
+		{"close marker is not an open marker", `<!-- ws:/override:Foo -->`, "", "", false},
+		{"missing terminator", `<!-- ws:override:Foo desc="x"`, "", "", false},
+		{"empty pointId", `<!-- ws:override: -->`, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pointId, desc, ok := parseOverrideOpenMarkerDesc(tc.line)
+			if ok != tc.wantOK || pointId != tc.wantPointId || desc != tc.wantDesc {
+				t.Errorf("parseOverrideOpenMarkerDesc(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tc.line, pointId, desc, ok, tc.wantPointId, tc.wantDesc, tc.wantOK)
+			}
+		})
+	}
+}
+
+// TestScanOverridePoints unit-tests the tree scan against a small temp tree:
+// desc present, desc absent, dedup across files (first non-empty desc wins), and
+// stable sort by PointId.
+func TestScanOverridePoints(t *testing.T) {
+	root := t.TempDir()
+	// File A declares Alpha (with desc) and Gamma (no desc).
+	mustWrite(t, root, "a/a.md", `# A
+<!-- ws:override:Alpha desc="alpha desc" -->
+seed
+<!-- ws:/override:Alpha -->
+<!-- ws:override:Gamma -->
+<!-- ws:/override:Gamma -->
+`)
+	// File B re-declares Alpha (different desc — must NOT win over A's first
+	// non-empty desc) and declares Beta.
+	mustWrite(t, root, "b/b.md", `# B
+<!-- ws:override:Alpha desc="second alpha desc" -->
+<!-- ws:/override:Alpha -->
+<!-- ws:override:Beta desc="beta desc" -->
+<!-- ws:/override:Beta -->
+`)
+	// A non-md file must be ignored even if it carries marker text.
+	mustWrite(t, root, "c/notes.txt", `<!-- ws:override:Ignored desc="nope" -->`)
+
+	points, err := scanOverridePoints(root)
+	if err != nil {
+		t.Fatalf("scanOverridePoints: %v", err)
+	}
+
+	want := []overridePointDecl{
+		{PointId: "Alpha", Desc: "alpha desc"},
+		{PointId: "Beta", Desc: "beta desc"},
+		{PointId: "Gamma", Desc: ""},
+	}
+	if len(points) != len(want) {
+		t.Fatalf("scanOverridePoints returned %d points, want %d: %+v", len(points), len(want), points)
+	}
+	for i, w := range want {
+		if points[i] != w {
+			t.Errorf("point[%d] = %+v, want %+v", i, points[i], w)
+		}
+	}
+}

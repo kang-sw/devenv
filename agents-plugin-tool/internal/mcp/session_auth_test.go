@@ -499,6 +499,22 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	})
 	assertGateError(t, "delegate/config.agents_tier", deniedDelegateResp, -32601)
 
+	// delegate key: config.prompt.set must be denied with -32601 (same config.* prefix gate).
+	deniedPromptSetResp := callToolOnce(t, server, 5, "config.prompt.set", map[string]any{
+		"session_key": delegateKey,
+		"pointId":     "DelegationSection",
+		"harness":     "claude",
+		"prompt":      "should be blocked before any write",
+	})
+	assertGateError(t, "delegate/config.prompt.set", deniedPromptSetResp, -32601)
+
+	// delegate key: config.prompt (read-only listing) must also be denied with
+	// -32601 (same config.* prefix gate).
+	deniedPromptListResp := callToolOnce(t, server, 6, "config.prompt", map[string]any{
+		"session_key": delegateKey,
+	})
+	assertGateError(t, "delegate/config.prompt", deniedPromptListResp, -32601)
+
 	// Non-lead key calling the bootstrap tool must be denied (self-bootstrap escalation block).
 	deniedLoginResp := callToolOnce(t, server, 3, "ws.ferrule", map[string]any{
 		"session_key": leafKey,

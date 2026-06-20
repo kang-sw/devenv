@@ -297,14 +297,16 @@ dropped tickets live in hidden archive dirs and git history.
   Substrate + marker-engine **both shipped** (done). Remaining work is the
   tuning surface, split into two children (discuss 2026-06-19): a data plane +
   a dedicated entry skill.
-- `260619-feat-ws-config-prompt-tool-self-doc` (ready) - **data plane**, current
-  implementation target. `config.prompt.set(pointId, harness, prompt, scope?)` +
-  no-arg `config.prompt()` that tree-scans override markers and returns the point
-  list / current values / scopes **plus a one-line pointer to `ws:lead-tune`**
-  (tuning manual moved out). Both deps shipped (substrate + marker engine; live
-  point `DelegationSection` keyed `prompt.DelegationSection.<harness>`). Contract
-  pinned in spec `260620-config-prompt-override-tuning-tools` (🚧). Phase 1 setter
-  → Phase 2 listing; implementation commits carry `## Spec` for that stem.
+- `260619-feat-ws-config-prompt-tool-self-doc` (.done) - **data plane, COMPLETE**.
+  Phase 1 `config.prompt.set` (`24e7e0d1` setter, `85b7b63f` test) + Phase 2
+  read-only `config.prompt()` listing (`4e4460a1`: marker tree-scan with `desc`,
+  per-harness/scope current values, `ws:lead-tune` pointer) both on
+  `implement/260619-config-prompt-tool`. Setter: lead-only `config.*`-gated, key
+  `prompt.<pointId>.<harness>` (`*`→`all`), default scope project, session writes
+  need `session_key`, wsflow-visible. Listing mirrors `config.show` (optional
+  `session_key`, declared-marker-keyed, no orphan surfacing). Spec
+  `260620-config-prompt-override-tuning-tools` both tools implemented; mental-model
+  `prompt-bundle` synced. Awaiting whole-ticket merge to the epic branch.
 - `260619-feat-ws-lead-tune-skill` (todo) - **new entry skill** `ws:lead-tune`:
   the umbrella workflow-tuning surface (prompt overrides primary; introduces/links
   `prefer_mercenary` + `config.agents_tier`; slot for future `model_alias`/`role_tier`).
