@@ -38,7 +38,7 @@ func TestShippedManifestUpToDate(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Files, want.Files) {
 		t.Fatalf("shipped manifest.json is stale: generated tree hashes differ from committed manifest.\n"+
-			"Regenerate with: WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -run TestRegenerateShippedManifest\n"+
+			"Regenerate with: WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest\n"+
 			"generated %d files, committed %d files", len(got.Files), len(want.Files))
 	}
 }

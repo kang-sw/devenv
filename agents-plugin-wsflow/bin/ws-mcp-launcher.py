@@ -7,13 +7,48 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 import urllib.request
 from pathlib import Path
 
 
+_BREADCRUMB_DIR: Path | None = None
+
+
+def set_breadcrumb_dir(runtime_dir: Path) -> None:
+    global _BREADCRUMB_DIR
+    _BREADCRUMB_DIR = runtime_dir
+
+
+def write_launch_breadcrumb(message: str) -> None:
+    # Best-effort durable record of why startup failed, so a -32000 connect
+    # failure leaves a readable reason in the runtime dir instead of vanishing
+    # with the launcher's stderr. Never mask the original failure.
+    if _BREADCRUMB_DIR is None:
+        return
+    try:
+        _BREADCRUMB_DIR.mkdir(parents=True, exist_ok=True)
+        (_BREADCRUMB_DIR / "last-launch-error").write_text(
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} ws-mcp-launcher: {message}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def clear_launch_breadcrumb() -> None:
+    if _BREADCRUMB_DIR is None:
+        return
+    try:
+        (_BREADCRUMB_DIR / "last-launch-error").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def fail(message: str) -> None:
     print(f"ws-mcp-launcher: {message}", file=sys.stderr)
+    write_launch_breadcrumb(message)
     raise SystemExit(1)
 
 
@@ -673,6 +708,7 @@ def main() -> int:
     arch_name = host_arch()
     platform_name = f"{os_name}-{arch_name}"
     runtime_dir = Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name)))
+    set_breadcrumb_dir(runtime_dir)
     binary_name = runtime_binary_name(contract, contract_path, os_name)
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
@@ -707,6 +743,9 @@ def main() -> int:
             fail("incompatible ws-mcp runtime after repair")
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
 
+    # Runtime is present and compatible; clear any stale failure breadcrumb so
+    # last-launch-error only exists when the most recent launch actually failed.
+    clear_launch_breadcrumb()
     detect_project_root(plugin_dir)
     note(f"plugin_dir={plugin_dir}")
     note(f"runtime_dir={runtime_dir}")

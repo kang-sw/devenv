@@ -111,10 +111,13 @@ identical to canonical — including `manifest.json`.
 
 - **Generation / drift guard:** `TestWsflowRsrcMirrorUpToDate` (in
   `internal/wsrsrc`) asserts byte-equality between the two trees; regenerate the
-  copy with `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run
+  copy with `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run
   TestRegenerateWsflowRsrcMirror` after any canonical rsrc change (mirrors the
-  `WS_REGEN_MANIFEST` pattern). git content-dedupes the copy, so storage cost is
-  ~0.
+  `WS_REGEN_MANIFEST` pattern). The `-count=1` is mandatory: the regen
+  entrypoints are env-gated test bodies with no changing input, so go's test
+  cache returns a green `ok` without running the write side effect — omitting it
+  silently leaves the artifact stale. git content-dedupes the copy, so storage
+  cost is ~0.
 - **Runtime:** the wsflow launcher's `apply_rsrc_root_env` sets `WS_RSRC_ROOT` to
   the sibling `rsrc/` when present, so the committed copy is resolved with no
   launcher change.

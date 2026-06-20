@@ -75,7 +75,7 @@ func TestWsflowRsrcMirrorUpToDate(t *testing.T) {
 	if len(diffs) > 0 {
 		sort.Strings(diffs)
 		t.Fatalf("wsflow rsrc mirror has drifted from canonical agents-plugin/rsrc:\n%s\n\n"+
-			"Regenerate with: WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMirror",
+			"Regenerate with: WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror",
 			strings.Join(diffs, "\n"))
 	}
 }

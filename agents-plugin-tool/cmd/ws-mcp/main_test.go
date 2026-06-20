@@ -131,6 +131,48 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 	}
 }
 
+// TestRuntimeCapabilitiesCommandReportsWsflowContractSurface is the agentless
+// analogue of the full-surface contract test above: it asserts the live wsflow
+// no-agent tool/command set equals agents-plugin-wsflow/runtime.json exactly.
+// The wsflow launcher checks this manifest with runtime_capabilities.match
+// "exact", so without this test the hand-maintained wsflow manifest can drift
+// silently and only fail at launcher runtime for users while CI stays green.
+func TestRuntimeCapabilitiesCommandReportsWsflowContractSurface(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	contract := readRuntimeContractAtTest(t, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "runtime.json"))
+	cmd := exec.Command(bin, "runtime", "capabilities")
+	cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow", "WS_MCP_SETUP_TOOL=setup")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("ws-mcp runtime capabilities (wsflow) failed: %v", err)
+	}
+
+	var got struct {
+		MCPProtocol string   `json:"mcp_protocol"`
+		Tools       []string `json:"tools"`
+		Commands    []string `json:"commands"`
+	}
+	mustUnmarshalCLIJSON(t, out, &got)
+	if got.MCPProtocol != contract.MCPProtocol {
+		t.Fatalf("wsflow mcp_protocol = %q, want %q", got.MCPProtocol, contract.MCPProtocol)
+	}
+	wantTools := sortedMapKeys(contract.Tools)
+	slices.Sort(got.Tools)
+	if !slices.Equal(got.Tools, wantTools) {
+		t.Fatalf("wsflow tools = %v, want wsflow runtime contract tools %v", got.Tools, wantTools)
+	}
+	wantCommands := sortedMapKeys(contract.Commands)
+	slices.Sort(got.Commands)
+	if !slices.Equal(got.Commands, wantCommands) {
+		t.Fatalf("wsflow commands = %v, want wsflow runtime contract commands %v", got.Commands, wantCommands)
+	}
+}
+
 func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
@@ -593,7 +635,11 @@ type runtimeContractTest struct {
 
 func readRuntimeContractTest(t *testing.T) runtimeContractTest {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "agents-plugin", "runtime.json")
+	return readRuntimeContractAtTest(t, filepath.Join("..", "..", "..", "agents-plugin", "runtime.json"))
+}
+
+func readRuntimeContractAtTest(t *testing.T, path string) runtimeContractTest {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
