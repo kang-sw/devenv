@@ -2,6 +2,7 @@
 title: rsrc manifest/mirror regen test entrypoints silently no-op when go-test-cached
 related:
   260611-bug-rsrc-manifest-regen-missed: the up-to-date guard this regen entrypoint feeds; same maintenance loop
+completed: 2026-06-20
 ---
 
 # rsrc manifest/mirror regen test entrypoints silently no-op when go-test-cached
@@ -47,3 +48,17 @@ confusing and wastes a cycle.
 
 Lowest-effort partial fix is correcting the printed/ documented commands to
 include `-count=1`; the cleaner fix is a non-cached generator entrypoint.
+
+## Resolution (2026-06-20)
+
+Took the lowest-effort fix: added `-count=1` to the regen command strings printed
+by both guard failures (`manifest_shipped_test.go`, `wsflow_mirror_test.go`) and
+to `ai-docs/ref/wsflow-mirroring.md`, where the caveat is now stated explicitly
+(the flag is mandatory because the env-gated test body has no changing input).
+A maintainer who copies the guard's own failure message or the doc command now
+always runs the side effect.
+
+The non-cached generator entrypoint was deliberately not built — it is the
+cleaner shape but over-engineering for a footgun fully neutralized by the printed
+commands. If a `//go:generate` regen path is wanted later, open a fresh `idea/`
+ticket; this one closes as resolved.
