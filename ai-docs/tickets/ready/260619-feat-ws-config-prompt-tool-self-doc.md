@@ -54,6 +54,36 @@ Verification: an override set via the tool is honored at render time by the
 override engine for the matching `(pointId, harness)` and resolves at the
 expected scope.
 
+### Result (24e7e0d1) - 2026-06-20
+
+Added the `config.prompt.set(session_key, pointId, harness, prompt, scope?)` MCP
+tool (`internal/mcp/server.go`): schema + dispatch adjacent to
+`config.agents_tier`, runtime-contract entries in both `agents-plugin/runtime.json`
+and `agents-plugin-wsflow/runtime.json`, and end-to-end test
+`TestConfigPromptSetEndToEnd` driving the real dispatch through render. Coverage
+follow-up `85b7b63f` added validation negatives, the default-scope path, and a
+delegate role-gate assertion (`TestConfigPromptSetValidationAndDefaultScope`,
+`TestCapabilityScopedKeyGatesTools`).
+
+Implementation facts established for Phase 2:
+- `session_key` is **required** on the tool (engages the keyed gate; needed for
+  session-scope writes).
+- `harness` enum is `claude | codex | *`; `*` is stored under the `all` bucket
+  (key `prompt.<pointId>.all`) to match `buildOverrideLookup`.
+- Default scope for unregistered `prompt.*` keys is **project**
+  (`wsconfig.DefaultScope` fallback); explicit `scope` wins.
+- Lead-only via the existing `config.*` prefix gate in `roleAllowsTool` — no
+  custom `CapabilityCheck`.
+- **Visible in both full-ws and wsflow** (NOT added to `noAgentHiddenTool`):
+  prompt overrides are mode-neutral rendering, unlike `config.agents_tier`. Phase
+  2's `config.prompt()` should follow the same wsflow-visibility stance.
+- Setter writes through `wsconfig.NewResolver(...).Set` with ambient
+  `wsconfig.Options{}`; config.* tools are NOT root-aware (no `resolveToolRoot`).
+
+Spec `260620-config-prompt-override-tuning-tools`: setter marked implemented,
+`config.prompt()` kept as a `Planned 🚧` callout. Reviews: fit clean, correctness
+clean (one cosmetic note), test gaps fixed.
+
 ### Phase 2: config.prompt() data listing
 
 Implement no-arg `config.prompt()`: tree-scan override markers, render the point
