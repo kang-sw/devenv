@@ -528,6 +528,16 @@ availability, bounded diagnostics, selected item hint, feed cursor, and update
 mode. Ordering favors active, live, attention, blocked, failed, and recently
 updated activity before using alphabetical order as a tie-breaker.
 
+> [!note] Implementation Gap · 2026-06-20
+> Missing behavior: the Activity Console read model is source-neutral, but the
+> dashboard does not yet expose dashboard-owned Activity source adapters for
+> host-owned agent-client surfaces such as Codex app-server or OpenCode serve.
+> Current provider projection remains centered on ws named-agent / mercenary
+> state. Future adapters should normalize provider thread, turn, message, tool,
+> and status events into Activity Items and Transcript Blocks without exposing
+> provider session ids, ws session keys, cache paths, process ids, or raw
+> provider event ids as browser authority.
+
 Transcript backfill returns bounded normalized blocks rather than backend-native
 cache records, raw session JSON, stdout/stderr paths, or file contents. Each
 block carries a cursor, timestamp when available, a render kind such as user,
