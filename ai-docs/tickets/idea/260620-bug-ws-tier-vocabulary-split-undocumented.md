@@ -172,12 +172,21 @@ re-opening, not silent contradiction:
   its 3-layer model to 2; coordinate so the per-role surface is designed against
   the single vocabulary.
 
-## Open Question (single decision input)
+## Resolution: direct map, even at scale
 
-The *only* scenario that would revive a two-vocabulary design: making the alias a
-**reusable named model-palette** — fewer slots than capabilities, with multiple
-capabilities pointed at one slot, where the `capability → slot` assignment is
-itself user-configurable. At 4-capability / 3-slot scale this saves only "typing
-sonnet twice" while costing a vocabulary, a bridge, and the footgun, so it is not
-justified now. If a reusable-palette routing surface becomes an explicit roadmap
-goal, revisit; otherwise the direct map stands.
+The reusable-palette scenario (the alias as a named model-bundle that multiple
+capabilities reference, with a user-configurable `capability → slot` assignment)
+was the one design that could have justified two vocabularies. Decided against
+**even at larger scale and richer capability names** (e.g. `quick`,
+`heavy-thinker`): named capabilities are self-documenting, so the alias adds no
+clarity, and the palette's only real benefit (define-once / edit-the-group-once)
+is dominated by the cost of the indirection plus the per-capability freedom it
+removes. Direct `capability → (backend, model, effort)` stands.
+
+Direct mapping also keeps more room open, not less. A capability-keyed entry is
+the natural place to later carry an **execution-dispatch hint**
+(`capability → [native subagent | mercenary]`, alongside backend/model/effort):
+native consumes an advisory model hint while mercenary binds the model, so the
+dispatch choice belongs next to the model choice. An alias indirection would add
+a seam over where that hint lives. This is forward room to preserve, not a
+planned requirement.
