@@ -297,6 +297,18 @@ dropped tickets live in hidden archive dirs and git history.
   (`260619-feat-ws-lead-tune-skill`: `670e37dd`, merged `d3ca7a90`). Future
   `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
   fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
+- `260620-chore-pre-shipping-windows-surface-verification` (ready, chore;
+  parent `260605` epic, gates its closure) - **implementation-ready, current
+  target.** Pre-ship hardening of the Windows surface (six `*_windows.go` files
+  are 0%-covered on Linux). Phase 1 (P0, in progress): cross-platform
+  process-tree cancellation test + Windows `cancelAsyncProcessTree` tree-reap fix
+  (today kills root pid only → orphans), conforming to existing cancel contract
+  `260505-agent-cancel-recovery` (best-effort + `cleanup_needed`; no new
+  contract). Phase 2 stabilizes flaky `260616` before trusting Windows abort;
+  Phase 3 runs the full suite on the WSL2→Windows interop host; Phase 4 (stretch)
+  worktree path-layout. **Hard constraint:** tree-kills scoped to the spawned
+  subtree by PID/job — never image-name (`taskkill /IM`) — because the dogfooding
+  WSL2 host runs a live `claude.exe`.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

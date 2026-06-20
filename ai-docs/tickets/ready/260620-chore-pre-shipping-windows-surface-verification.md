@@ -3,6 +3,8 @@ title: Pre-shipping verification — Windows surface hardening
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite: Phase 2 stabilizes this flaky abort before Windows abort/cancel results are trusted
+spec:
+  - 260505-agent-cancel-recovery
 related-mental-model:
   - named-agent-runtime
 ---
@@ -50,12 +52,25 @@ known cancel-tree divergence.
 ## Constraints
 
 - The abort/cancel behavior change in Phase 1 must bring Windows into
-  conformance with the existing cancel contract
-  (`named-agent-runtime` `#260505-agent-cancel-recovery`), not introduce a new
-  caller-visible contract. No spec change is expected; if one becomes necessary,
-  route through `lead-write-spec`.
+  conformance with the existing cancel contract (`named-agent-runtime`
+  `#260505-agent-cancel-recovery`: best-effort local process cancellation for the
+  stored worker pid plus a `cleanup_needed` signal). The fix strengthens Windows
+  best-effort coverage (reap the spawned child tree, not only the root pid); it
+  does NOT elevate the promise beyond best-effort and introduces no new
+  caller-visible contract. The existing anchor is listed in `spec:`; no spec text
+  change is expected. If one becomes necessary, route through `lead-write-spec`.
 - Process-tree assertions must be deterministic (no sleep-races) — spawn a child
   that blocks on a sentinel, cancel, then assert the child is reaped.
+- Windows builds and tests are invoked through WSL2 → Windows interop
+  (`cmd.exe` / `powershell.exe` from the WSL2 shell); invoking the Go toolchain
+  (`go build` / `go test`) over that interop boundary is the expected execution
+  path for the Windows phases.
+- **Live-host safety (hard constraint).** The dogfooding WSL2 host runs an active
+  `claude.exe` (the harness driving this work). Process-tree termination — in both
+  the new test helper and the `cancelAsyncProcessTree` fix — MUST be scoped to the
+  test's own spawned subtree by PID or job object. Never terminate by image name
+  (`taskkill /IM`, process-name sweeps) or any broad mechanism that could reach
+  the live `claude.exe`.
 
 ## Phases
 
@@ -76,7 +91,10 @@ Then fix `cancelAsyncProcessTree` (and `execjob` `cancelProcess`) on Windows to
 terminate the child tree, not only the root PID. Options to evaluate:
 `CREATE_NEW_PROCESS_GROUP` + `GenerateConsoleCtrlEvent`, `taskkill /T`, or a job
 object. Pick the simplest that reliably reaps children created by the runner
-backends; record the rejected alternatives.
+backends; record the rejected alternatives. Whichever mechanism is chosen, the
+kill MUST be scoped to the spawned root's subtree (PID- or job-scoped, e.g.
+`taskkill /T /PID <root>`); image-name termination (`taskkill /IM`) is forbidden
+because the dogfooding host runs a live `claude.exe` (see Constraints).
 
 Verification boundary: new test green on Linux; the Windows path is structurally
 exercised (asserted on the Windows run in Phase 3). Also review
