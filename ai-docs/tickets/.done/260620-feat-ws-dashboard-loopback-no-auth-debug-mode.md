@@ -1,5 +1,6 @@
 ---
 title: ws dashboard loopback no-auth debug mode
+completed: 2026-06-20
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260620-feat-ws-dashboard-agent-client-activity-sources: WSL dashboard dogfood needs fast unauthenticated iteration before Codex app-server Activity smoke runs are practical
@@ -77,3 +78,26 @@ no-auth mode. Existing paired-auth and bearer-auth route tests must continue to
 pass. A WSL dogfood note should verify that a daemon started inside WSL with
 loopback no-auth can be reached through the intended local browser path without
 requiring `0.0.0.0`.
+
+### Result (bc799496) - 2026-06-20
+
+Implemented `ws-dashboard serve --no-auth` as an explicit loopback-only debug
+serving profile. CLI/config parsing disables owner auth only after bind guard
+validation accepts a loopback, non-public target; public bind mode and
+non-loopback hosts are rejected before listen. Server startup also revalidates
+manually constructed `ServeConfig` values before binding, so CLI parsing is not
+the only safety boundary.
+
+The router now builds the protected route set once and applies the existing
+owner-auth middleware only when `owner_auth_enabled` is true. Handlers and
+frontend serving remain oblivious to the profile. Startup output preserves the
+owner pairing URL and remote link passphrase and adds a token-free direct
+dashboard URL when no-auth mode is active.
+
+Verification: `cd ws-dashboard && cargo test -p ws-dashboard-daemon` passed
+after review fixes with 34 lib tests, 120 route tests, 15 server tests, and 0
+doc tests failed. Review fixes tightened startup guard coverage for manually
+constructed invalid no-auth configs and strengthened WebSocket no-auth coverage
+to use the live test-server pattern. WSL browser dogfood remains a manual
+post-implementation check for the printed loopback URL; it must not use
+`0.0.0.0`.

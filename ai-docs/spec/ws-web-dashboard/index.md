@@ -56,6 +56,17 @@ non-loopback host only while owner authentication is enabled; bind-mode
 acceptance does not relax browser cookie auth, bearer auth, Host/Origin checks,
 or WebSocket pre-upgrade auth.
 
+For explicit local debugging, `ws-dashboard serve --no-auth` disables the owner
+auth middleware only for loopback, non-public serving. The daemon rejects
+no-auth serving for public bind mode or non-loopback bind hosts before it
+listens, and server startup revalidates the serving config so manually
+constructed configs cannot bypass that guard. In no-auth mode the protected
+router is still built as one route set, but the owner-auth layer is omitted for
+that whole protected router; individual handlers do not select behavior by auth
+mode. Startup output continues to expose the owner pairing URL, and additionally
+prints a token-free direct dashboard URL after the listener address is known so
+local debug sessions do not need to use `/pair`.
+
 The `ws-dashboard --remote-guide` CLI surface prints an AI-agent-readable
 remote deployment guide and exits without starting the daemon. The guide
 describes the local-dashboard-as-gateway model, remote loopback serving,
