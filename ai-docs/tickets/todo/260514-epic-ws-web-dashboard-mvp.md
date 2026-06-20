@@ -133,7 +133,7 @@ Active or planned product tracks:
   re-grounding pass: keep Activity rendering source-neutral, treat ws mercenary
   state, Codex app-server, and OpenCode serve as provider inputs, and avoid
   restarting direct harness/runtime development under the dashboard.
-  `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is todo for the
+  `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is ready for the
   WSL/local dogfood support needed before tight Codex app-server dashboard
   iteration is practical; it must remain loopback-only and must not weaken
   normal owner-auth or public-bind behavior.

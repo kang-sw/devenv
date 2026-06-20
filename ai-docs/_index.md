@@ -153,7 +153,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode serve activity into dashboard Activity sources |
-| `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` | todo | Add loopback-only dashboard no-auth serving for WSL/local debug iteration |
+| `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` | ready | Add loopback-only dashboard no-auth serving for WSL/local debug iteration |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
@@ -196,6 +196,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` - ready; add explicit
+  loopback-only `ws-dashboard serve --no-auth` debug serving so WSL/local
+  dashboard dogfood can skip pairing without weakening normal owner-auth or
+  public-bind behavior.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
