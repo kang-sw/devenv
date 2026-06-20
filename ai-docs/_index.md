@@ -294,9 +294,10 @@ dropped tickets live in hidden archive dirs and git history.
   Phase 2 `c65326bd` `prefer_mercenary` migrated to a session-scope desired-state
   item, closes `260618`). Future `config.model_alias`/`config.role_tier` rename
   slice must adopt (not fork) the shared scope primitive.
-  Substrate + marker-engine **both shipped** (done). Remaining work is the
-  tuning surface, split into two children (discuss 2026-06-19): a data plane +
-  a dedicated entry skill.
+  Substrate + marker-engine **both shipped** (done). The tuning surface (two
+  children, discuss 2026-06-19) is now **both shipped**: data plane 3a
+  (`config.prompt.*`, merged) + entry skill 3b (`ws:lead-tune`, awaiting merge).
+  All epic children complete — close the epic once 3b merges.
 - `260619-feat-ws-config-prompt-tool-self-doc` (.done) - **data plane, COMPLETE**.
   Phase 1 `config.prompt.set` (`24e7e0d1` setter, `85b7b63f` test) + Phase 2
   read-only `config.prompt()` listing (`4e4460a1`: marker tree-scan with `desc`,
@@ -306,12 +307,17 @@ dropped tickets live in hidden archive dirs and git history.
   need `session_key`, wsflow-visible. Listing mirrors `config.show` (optional
   `session_key`, declared-marker-keyed, no orphan surfacing). Spec
   `260620-config-prompt-override-tuning-tools` both tools implemented; mental-model
-  `prompt-bundle` synced. Awaiting whole-ticket merge to the epic branch.
-- `260619-feat-ws-lead-tune-skill` (todo) - **new entry skill** `ws:lead-tune`:
-  the umbrella workflow-tuning surface (prompt overrides primary; introduces/links
-  `prefer_mercenary` + `config.agents_tier`; slot for future `model_alias`/`role_tier`).
-  Owns the tuning manual + the proactive-proposal trigger (description = trigger
-  surface). Depends on the data-plane child. Sequence: data plane (3a) → skill (3b).
+  `prompt-bundle` synced. Merged to the epic (`461fef11`, whole-ticket `--no-ff`).
+- `260619-feat-ws-lead-tune-skill` (.done) - **entry skill COMPLETE** (`670e37dd`).
+  `ws:lead-tune`, the 13th user-invocable lead entry skill: thin shim + `kind:print`
+  umbrella tuning manual driving `config.prompt.*` for prompt overrides
+  (`DelegationSection` worked example), introducing/linking `prefer_mercenary` +
+  `config.agents_tier`, with a `proactive-propose` judge (description = trigger
+  surface) and a future `model_alias`/`role_tier` slot. Agent-backed knobs are
+  `ws:full-only`; wsflow renders only the prompt-override knob. Spec
+  `260505-lead-skill-namespace-surface` (`#260619-lead-tune-workflow-tuning-skill`)
+  + `workflow-skills` mental-model updated; Fresh-Reader Audit passed. On
+  `implement/260619-lead-tune-skill`, awaiting merge to the epic branch.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
