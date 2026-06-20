@@ -1194,6 +1194,12 @@ fallback. Native Windows prefers `pwsh.exe`, then `powershell.exe`, then
 testable independently from the compile-time host platform so Unix and Windows
 fallback behavior can be verified on any developer machine.
 
+Browser-backed PTY sessions do not blindly inherit an unusable daemon launch
+terminal type. If the daemon process has no `TERM`, an empty `TERM`, or
+`TERM=dumb`, new dashboard terminal sessions use `xterm-256color` so shell
+programs see terminal capabilities compatible with the browser emulator.
+Explicit non-dumb parent `TERM` values are preserved.
+
 Shell spawn failures stay bounded to recoverable diagnostics. Authenticated
 terminal creation may report that terminal spawning failed, but private
 workRoot host paths are not exposed to unauthenticated callers.
