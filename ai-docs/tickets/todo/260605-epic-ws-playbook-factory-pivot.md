@@ -122,6 +122,15 @@ subagents. Direction, decisions, and evidence live in
   creation and merge-back stay out of scope (native git tooling + the
   merge/cleanup idea tickets). Captured from the 2026-06-19 lead-discuss dogfood
   that added the per-workroot `ferrule` manual clarification (`13eeccd9`).
+- `260620-chore-pre-shipping-windows-surface-verification` (**todo** — final
+  pre-ship pass): all core milestones landed and the Linux surface is
+  continuously dogfooded; this child hardens the **Windows surface** before
+  shipping. Linux baseline is green (12 pkgs pass, vet clean, pure-Go
+  `modernc.org/sqlite` so Windows needs no CGO). Records P0–P3: process-tree
+  cancellation cross-platform test + Windows root-PID-only `cancelAsyncProcessTree`
+  fix (P0), stabilize the `260616` flaky abort as a prereq, a Windows full-suite
+  run validating the six `*_windows.go` branches, and optional Windows worktree
+  path-layout coverage. Gates epic closure.
 
 ## Cross-Child Decisions
 
@@ -232,7 +241,8 @@ subagents. Direction, decisions, and evidence live in
   engine is reshaped into a scoped mercenary surface (codex retained,
   implementer/reviewer only) rather than deleted; the actor model is replaced by
   session-auth; the agent-backed api tool family is removed; M0–M4 children
-  closed.
+  closed; pre-ship Windows-surface verification
+  (`260620-chore-pre-shipping-windows-surface-verification`) closed.
 - Dropped: direction reversal recorded in the research ticket.
 - Deferred: memory./mutation contracts and TUI implementation leave through
   their own follow-up tickets. Future pure-tooling api namespace work leaves
