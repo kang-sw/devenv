@@ -737,3 +737,135 @@ func TestConfigPromptSetValidationAndDefaultScope(t *testing.T) {
 		t.Errorf("omitted scope must resolve to project, got: %s", defText)
 	}
 }
+
+// TestConfigPromptListEnumeratesDeclaredPoints verifies the read-only
+// config.prompt listing: it enumerates the two declared override-points in the
+// test tree (SeedSection, ExtSlot) with their descs, annotates the one seeded
+// override with its harness + session scope, shows the unset point as having no
+// overrides, and ends with the ws:lead-tune pointer.
+func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900200, root, nil))
+
+	// Seed one session-scope override so the listing has an annotated value.
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	if err := resolver.Set("prompt.SeedSection.claude", "seeded override value", wsconfig.SetOptions{
+		ExplicitScope: wsconfig.ScopeSession,
+		SessionKey:    key,
+	}); err != nil {
+		t.Fatalf("seed override via resolver: %v", err)
+	}
+
+	resp := callToolOnce(t, s, 1, "config.prompt", map[string]any{
+		"session_key": key,
+	})
+	text := toolText(t, resp)
+
+	wantSubstrings := []string{
+		"SeedSection",
+		"a seeded override point",
+		"ExtSlot",
+		"an empty extension slot",
+		"harness=claude scope=session",
+		"(no overrides set)",
+		"ws:lead-tune",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(text, want) {
+			t.Errorf("config.prompt listing missing %q:\n%s", want, text)
+		}
+	}
+
+	// ExtSlot has no override seeded, so its block must carry "(no overrides set)";
+	// SeedSection must carry the seeded annotation. Verify ordering is stable
+	// (ExtSlot sorts before SeedSection).
+	if idxExt, idxSeed := strings.Index(text, "ExtSlot"), strings.Index(text, "SeedSection"); idxExt < 0 || idxSeed < 0 || idxExt > idxSeed {
+		t.Errorf("expected ExtSlot to sort before SeedSection in listing:\n%s", text)
+	}
+}
+
+// TestParseOverrideOpenMarkerDesc unit-tests the desc-aware open-marker parser
+// across desc-present, desc-absent, and non-marker lines.
+func TestParseOverrideOpenMarkerDesc(t *testing.T) {
+	cases := []struct {
+		name        string
+		line        string
+		wantPointId string
+		wantDesc    string
+		wantOK      bool
+	}{
+		{"desc present", `<!-- ws:override:Foo desc="a thing" -->`, "Foo", "a thing", true},
+		{"desc absent", `<!-- ws:override:Bar -->`, "Bar", "", true},
+		{"empty seed slot no space", `<!-- ws:override:Baz-->`, "Baz", "", true},
+		{"non-marker line", `just some prose`, "", "", false},
+		{"close marker is not an open marker", `<!-- ws:/override:Foo -->`, "", "", false},
+		{"missing terminator", `<!-- ws:override:Foo desc="x"`, "", "", false},
+		{"empty pointId", `<!-- ws:override: -->`, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pointId, desc, ok := parseOverrideOpenMarkerDesc(tc.line)
+			if ok != tc.wantOK || pointId != tc.wantPointId || desc != tc.wantDesc {
+				t.Errorf("parseOverrideOpenMarkerDesc(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tc.line, pointId, desc, ok, tc.wantPointId, tc.wantDesc, tc.wantOK)
+			}
+		})
+	}
+}
+
+// TestScanOverridePoints unit-tests the tree scan against a small temp tree:
+// desc present, desc absent, dedup across files (first non-empty desc wins), and
+// stable sort by PointId.
+func TestScanOverridePoints(t *testing.T) {
+	root := t.TempDir()
+	// File A declares Alpha (with desc) and Gamma (no desc).
+	mustWrite(t, root, "a/a.md", `# A
+<!-- ws:override:Alpha desc="alpha desc" -->
+seed
+<!-- ws:/override:Alpha -->
+<!-- ws:override:Gamma -->
+<!-- ws:/override:Gamma -->
+`)
+	// File B re-declares Alpha (different desc — must NOT win over A's first
+	// non-empty desc) and declares Beta.
+	mustWrite(t, root, "b/b.md", `# B
+<!-- ws:override:Alpha desc="second alpha desc" -->
+<!-- ws:/override:Alpha -->
+<!-- ws:override:Beta desc="beta desc" -->
+<!-- ws:/override:Beta -->
+`)
+	// A non-md file must be ignored even if it carries marker text.
+	mustWrite(t, root, "c/notes.txt", `<!-- ws:override:Ignored desc="nope" -->`)
+
+	points, err := scanOverridePoints(root)
+	if err != nil {
+		t.Fatalf("scanOverridePoints: %v", err)
+	}
+
+	want := []overridePointDecl{
+		{PointId: "Alpha", Desc: "alpha desc"},
+		{PointId: "Beta", Desc: "beta desc"},
+		{PointId: "Gamma", Desc: ""},
+	}
+	if len(points) != len(want) {
+		t.Fatalf("scanOverridePoints returned %d points, want %d: %+v", len(points), len(want), points)
+	}
+	for i, w := range want {
+		if points[i] != w {
+			t.Errorf("point[%d] = %+v, want %+v", i, points[i], w)
+		}
+	}
+}
