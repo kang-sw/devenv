@@ -129,16 +129,18 @@ Spawn: {{.SpawnIdiom}}
 Continue: {{.ContinueIdiom}}
 `
 
-	// modelAliasPlaybookContent: declares one model alias variable.
+	// modelAliasPlaybookContent: declares RoleModel, resolved from the playbook's tier.
+	// tier: medium is used so the derivation path is exercised in tests.
 	modelAliasPlaybookContent = `---
 kind: print
 delegates: false
+tier: medium
 variables:
-  - CoreModel
+  - RoleModel
 ---
 # Model Alias Playbook
 
-Model: {{.CoreModel}}
+Model: {{.RoleModel}}
 `
 
 	// noVarsPlaybookContent: no variables, static content.
@@ -1120,7 +1122,7 @@ func TestTermsDifferThreeWay(t *testing.T) {
 }
 
 func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
-	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "LightModel", "CoreModel", "DeepModel", "McpNamespace", "SkillNamespace"} {
+	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "RoleModel", "McpNamespace", "SkillNamespace"} {
 		if !reservedToolVarNames[name] {
 			t.Errorf("reservedToolVarNames missing %q", name)
 		}

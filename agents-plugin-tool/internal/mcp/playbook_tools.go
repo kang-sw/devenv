@@ -20,7 +20,7 @@ import (
 // to their harness-specific text.
 //
 // Model names are NOT in this table — they are always resolved from config at
-// render time via resolveModelVars. Only non-model idioms belong here.
+// render time via resolveRoleModelVar. Only non-model idioms belong here.
 var playbookTerminologyTable = map[string]map[string]string{
 	"claude": {
 		"ExploreAgent":  "the Explore agent",
@@ -55,10 +55,8 @@ var reservedToolVarNames = func() map[string]bool {
 			set[name] = true
 		}
 	}
-	// Model alias reserved names.
-	set["LightModel"] = true
-	set["CoreModel"] = true
-	set["DeepModel"] = true
+	// Tier-derived model var reserved name.
+	set["RoleModel"] = true
 	for _, name := range wsrsrc.ImplicitVariableNames {
 		set[name] = true
 	}
@@ -75,32 +73,22 @@ func terminologyForHarness(harness string) map[string]string {
 	return playbookTerminologyTable[""]
 }
 
-// resolveModelVars resolves model alias vars from config for the given harness.
-// Returns PascalCase var names ("LightModel", "CoreModel", "DeepModel") mapped to
-// concrete model strings. Values may be empty if the config has no alias set for
-// that tier/harness combination.
+// resolveRoleModelVar resolves the single RoleModel var from the playbook's
+// declared capability tier. The tier string ("small"/"medium"/"large"/"xlarge")
+// maps directly to a concrete per-harness model via config, so the playbook author
+// only needs to declare a tier — not pick an alias name.
+//
+// Returns map[string]string{"RoleModel": model}. On error or empty model result,
+// RoleModel is set to "" (same graceful-empty behavior the old per-alias resolver used).
 //
 // configOpts is a call-site-overridable seam; MCP tool handlers pass
 // wsconfig.Options{} (empty, env-driven); tests pass Options{CacheHome: tmpDir}.
-func resolveModelVars(harness string, configOpts wsconfig.Options) map[string]string {
-	type aliasEntry struct {
-		varName string
-		alias   string
+func resolveRoleModelVar(harness, tier string, configOpts wsconfig.Options) map[string]string {
+	_, model, _, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, tier, "", "", harness)
+	if err != nil {
+		model = ""
 	}
-	entries := []aliasEntry{
-		{"LightModel", "light"},
-		{"CoreModel", "core"},
-		{"DeepModel", "deep"},
-	}
-	result := make(map[string]string, len(entries))
-	for _, e := range entries {
-		_, model, _, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, e.alias, "", "", harness)
-		if err != nil {
-			model = ""
-		}
-		result[e.varName] = model
-	}
-	return result
+	return map[string]string{"RoleModel": model}
 }
 
 func resolveNamespaceVars() map[string]string {
@@ -125,7 +113,7 @@ func isReservedNamespaceVar(name string) bool {
 // Merge rules:
 //  1. Caller-supplied context vars are accepted as-is.
 //  2. Tool-injected terminology vars overwrite caller context for reserved names.
-//  3. Tool-injected model alias vars overwrite caller context for reserved names.
+//  3. Tool-injected RoleModel var (tier-derived) overwrites caller context for reserved names.
 //  4. Tool-injected namespace vars overwrite caller context for reserved names.
 //  5. Only keys present in declared, plus namespace reserved vars, are included
 //     in the result.
@@ -134,8 +122,9 @@ func isReservedNamespaceVar(name string) bool {
 // ErrUndeclaredVar so the contract "undeclared caller context → loud error" is
 // preserved while common namespace vars do not require frontmatter declarations.
 //
-// configOpts is forwarded to resolveModelVars unchanged.
-func buildPlaybookVars(declared []string, callerContext map[string]string, harness string, configOpts wsconfig.Options) (map[string]string, error) {
+// tier is the playbook's declared capability tier (from pb.Meta.Tier); it drives
+// RoleModel resolution. configOpts is forwarded to resolveRoleModelVar unchanged.
+func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options) (map[string]string, error) {
 	declaredSet := make(map[string]bool, len(declared))
 	for _, v := range declared {
 		declaredSet[v] = true
@@ -163,8 +152,8 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 		// Not declared → silently skip; tool does not force error for unused idioms.
 	}
 
-	// Layer 3: model alias vars overwrite caller context for reserved names.
-	for k, v := range resolveModelVars(harness, configOpts) {
+	// Layer 3: tier-derived RoleModel var overwrites caller context for reserved names.
+	for k, v := range resolveRoleModelVar(harness, tier, configOpts) {
 		if declaredSet[k] {
 			merged[k] = v
 		}
@@ -601,7 +590,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// uses it as a host model-selection guide, mercenary passes it to ws.mercenary.register.
 	recommendedTier := pb.Meta.Tier
 
-	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, configOpts)
+	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts)
 	if err != nil {
 		return "", "", err
 	}

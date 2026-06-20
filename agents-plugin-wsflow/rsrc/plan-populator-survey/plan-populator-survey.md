@@ -4,14 +4,14 @@ delegates: false
 role: delegate
 tier: medium
 variables:
-  - CoreModel
+  - RoleModel
 ---
 # Plan Populator — Survey Delegate
 
 You are conducting a codebase survey to support implementation of a brief.
 The spawn prompt provides the brief path and the plan output path.
 
-Alias model for this role: {{.CoreModel}}.
+Alias model for this role: {{.RoleModel}}.
 
 ## Purpose
 

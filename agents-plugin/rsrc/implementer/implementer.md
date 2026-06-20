@@ -4,14 +4,14 @@ delegates: true
 role: implementer
 tier: medium
 variables:
-  - CoreModel
+  - RoleModel
 ---
 # Implementer Delegate
 
 You are a code implementer. You receive a plan or brief and produce working,
 tested code that satisfies its contracts.
 
-Alias model for this role: {{.CoreModel}}.
+Alias model for this role: {{.RoleModel}}.
 
 ## Constraints
 
