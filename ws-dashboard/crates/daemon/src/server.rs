@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::auth::OwnerAuthState;
-use crate::config::ServeConfig;
+use crate::config::{validate_bind_guard, ServeConfig};
 use crate::persistent_state::DashboardStateStore;
 use crate::router::{build_router, AppState};
 use crate::terminal::TerminalRegistry;
@@ -52,6 +52,11 @@ where
     // pairing URL once the bound address is known.
     // CONTRACT: Graceful shutdown is part of the daemon shell; request logging
     // must avoid leaking pairing query strings.
+    validate_bind_guard(
+        config.bind_mode,
+        config.bind_addr.ip(),
+        config.owner_auth_enabled,
+    )?;
     let auth = OwnerAuthState::new_ephemeral();
     let listener = TcpListener::bind(config.bind_addr).await?;
     let bound_addr = listener.local_addr()?;

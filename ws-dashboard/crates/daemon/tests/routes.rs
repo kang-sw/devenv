@@ -9031,19 +9031,20 @@ async fn no_auth_mode_reaches_protected_http_and_websocket_routes_without_creden
         .expect("no-auth resources response");
     assert_eq!(resources.status(), StatusCode::OK);
 
-    let websocket = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/dashboard/terminals/term_test/socket")
-                .header(header::UPGRADE, "websocket")
-                .header(header::CONNECTION, "upgrade")
-                .header(header::HOST, "127.0.0.1")
-                .body(Body::empty())
-                .expect("no-auth terminal websocket request"),
-        )
+    let (addr, server) = spawn_test_server(app.clone()).await;
+    let websocket_request = format!("ws://{addr}/api/dashboard/terminals/term_test/socket")
+        .into_client_request()
+        .expect("no-auth terminal websocket request");
+    let error = tokio_tungstenite::connect_async(websocket_request)
         .await
-        .expect("no-auth terminal websocket response");
-    assert_ne!(websocket.status(), StatusCode::UNAUTHORIZED);
+        .expect_err("no-auth terminal websocket rejects unknown terminal");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        other => panic!("unexpected no-auth websocket error: {other}"),
+    }
+    server.abort();
 }
 
 #[tokio::test]

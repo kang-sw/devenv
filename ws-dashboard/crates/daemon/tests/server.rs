@@ -124,6 +124,19 @@ fn no_auth_rejects_non_loopback_hosts() {
     assert!(err.to_string().contains("loopback bind address"));
 }
 
+#[tokio::test]
+async fn startup_revalidates_manually_constructed_no_auth_config() {
+    let mut config = ServeConfig::default_loopback();
+    config.bind_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0));
+    config.owner_auth_enabled = false;
+
+    let err = run_with_shutdown(config, async {})
+        .await
+        .expect_err("startup rejects invalid no-auth bind");
+
+    assert!(err.to_string().contains("loopback bind address"));
+}
+
 #[test]
 fn startup_info_builds_local_pairing_url_and_remote_link_passphrase() {
     let auth = OwnerAuthState::new_ephemeral();
