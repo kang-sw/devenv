@@ -1,68 +1,183 @@
 ---
-title: capability-tier vs model-alias vocabulary split is invisible at caller surfaces
+title: tier vocabulary split is redundant — collapse to one capability vocabulary with direct capability→model config
+related:
+  260611-research-ws-per-role-delegation-tuning-config: collapse simplifies its 3-layer config model to 2 layers
 related-mental-model:
   - named-agent-runtime
   - prompt-bundle
 ---
 
-# capability-tier vs model-alias vocabulary split is invisible at caller surfaces
+# tier vocabulary split is redundant — collapse to one capability vocabulary with direct capability→model config
 
 ## Background
 
 Found while dogfooding the playbook-factory delegate-render path. The tier system
-has two intentional planes (per the `firstClassTierToAlias` comment in
-`agents-plugin-tool/internal/mcp/playbook_tools.go`): a first-class capability
-tier `small/medium/large/xlarge` (abstraction layer, spoken by playbook
-frontmatter / render / register) and a model-alias layer `light/core/deep`
-(concrete-model layer, where per-harness model config lives). The translation is
-by design: `small→light`, `medium→core`, `large→deep`, `xlarge→deep`.
+carries two vocabularies for what is effectively one axis:
 
-The split is not surfaced to callers, and the three tools that touch tiers accept
-*disjoint* synonym sets:
+- a first-class **capability tier** `small/medium/large/xlarge`, spoken by
+  playbook frontmatter `tier:`, `playbook.render` (`recommended-tier`), and
+  `ws.mercenary.register(tier)`;
+- a **model alias** `light/core/deep`, the only vocabulary `config.agents_tier`
+  accepts, where the per-harness concrete `(backend, model, effort)` is configured.
 
-| Surface | tier vocabulary accepted / emitted |
-|---|---|
-| `playbook.render` return | emits `recommended-tier: small` (the frontmatter capability tier) |
-| `ws.mercenary.register(tier)` | `small/medium/large/xlarge` **and** `light/core/deep` (translates internally) |
-| `config.agents_tier(tier)` | `light/core/deep` **and** `haiku/sonnet/opus` only — **rejects** `small/...` (`normalizedTier` → "tier must be light, core, or deep") |
+They are bridged by the hardcoded `firstClassTierToAlias`
+(`agents-plugin-tool/internal/mcp/playbook_tools.go:223`):
+`small→light, medium→core, large→deep, xlarge→deep`.
 
-So the only vocabulary every tier surface accepts is `light/core/deep`, yet
-`render` emits `small` and `register`'s schema advertises
-`small/medium/large/xlarge`. The `small↔light` / `medium↔core` /
-`large,xlarge↔deep` bridge lives only in an internal Go comment — not in the
-`config.agents_tier` param description, the `register` param description, or the
-`lead-tune` "tune model tier" handler (which speaks only `light/core/deep`).
+The original caller-visible symptom: a lead renders a delegate, reads
+`recommended-tier: small`, wants to change which model backs it, and calls the
+documented model-tuning tool `config.agents_tier(tier: small)` — which is
+**rejected** (`normalizedTier` accepts only `light/core/deep` + `haiku/sonnet/opus`,
+`config.go:428`; error "tier must be light, core, or deep", `config.go:108`).
+Nothing at any surface connects the `recommended-tier` a lead just saw to the
+alias they must configure. The render→register happy path works only because
+`register` translates internally (`server.go:972`).
 
-Caller-visible failure: a lead renders a delegate, reads `recommended-tier:
-small`, wants to change which model backs that delegate, and invokes the
-documented model-tuning tool `config.agents_tier` with `tier: small` — which is
-rejected with no hint that `small` means the `light` alias. Nothing at the
-surface connects the recommended-tier a lead just saw to the alias they must
-configure.
+Initially captured as a documentation/coherence gap ("document the bridge").
+Fan-out verification (5 read-only audits, 2026-06-20) reframed it: the split is
+not just undocumented, it is **redundant** in the current structure, and the
+sound resolution is to collapse it rather than document it.
 
-This is a coherence/discoverability gap, not a code bug: the render→register
-happy path works because register translates. It bites only at the tuning seam.
+## Verified Evidence
+
+Five independent audits, cited to source. None of these conclusions rests on
+"the spec decided so" — they are structural facts.
+
+1. **Capability tier is inert beyond the bridge.** `firstClassTierToAlias`
+   (`playbook_tools.go:223`) is the *sole* consumer of `small/medium/large/xlarge`.
+   After translation, no code branches on the four-way distinction; `recommended-tier`
+   is display-only metadata (`playbook_tools.go:243-248`, surfaced at `:632`).
+   `xlarge` and `large` resolve to an **identical** `(backend, model, effort)` —
+   both map to `deep` (test `mercenary_surface_test.go:555` comment
+   `"xlarge": "deep" // no legacy alias`; `TestMercenaryTierRoutingResolvesCustomModel`
+   `:611-646` does not distinguish them). So one of the two vocabularies is pure
+   passthrough today.
+
+2. **The alias layer is a near-identity key, not added machinery.** The genuine
+   value in `wsconfig` — per-harness polymorphism (`light` → haiku on claude,
+   gpt-5.4-mini on codex; `ModelAliases[alias][harness]`, `config.go:291-309`),
+   effort isolation (`config.go:53-56`), and backend-affinity guarding
+   (`useAliasMappingForBackend`, `config.go:396-410`) — is **orthogonal to the key
+   name** and survives a rename of the keys to capability vocabulary unchanged.
+   The second vocabulary adds zero machinery.
+
+3. **No hard blocker to collapsing.** The three silent-failure risks are persisted
+   config map keys (`config.go:32-35`, stored in config.json), the SQLite agent
+   `tier` column (`wsstore/store.go:62,592-636`, metadata-only — call-time reads
+   concrete backend/model/effort, not tier), and the hardcoded tool enum
+   (`server.go:2209`). All three are absorbed by extending the **existing**
+   `normalizedTier` read-compat path (`config.go:428`, already does
+   `haiku/sonnet/opus → light/core/deep`) to also accept capability vocabulary.
+   `schemaVersion=1` is never incremented and there is no migration machinery
+   (`config.go:13`, additive backfill only) — and none is needed with read-compat.
+   Cost is mechanical churn: ~132 code occurrences (mostly test literals —
+   `config_test.go` ~46, `config.go` ~20, `agent_test.go` ~15, others), ~15 doc
+   sections, plus the byte-identical `agents-plugin-wsflow/rsrc` mirror doubling.
+
+4. **The native model hint is preservable (hard user constraint).** Today playbooks
+   hand-pick an alias-named var (`{{.LightModel}}`, e.g.
+   `agents-plugin/rsrc/reference-discovery/reference-discovery.md` line 16) injected
+   by the fixed-list `resolveModelVars` (`playbook_tools.go:85-103`). `pb.Meta.Tier`
+   is already in scope at the injection site (`renderPlaybookBody`, read at `:632`,
+   vars built at `:634`), so the hint can be derived from the playbook's own `tier:`
+   into a single `{{.RoleModel}}` with a minimal change (add a `tier` arg to
+   `buildPlaybookVars`, replace `resolveModelVars`). Concrete model string and
+   `recommended-tier` both still ship. Native hint is not a blocker.
+
+5. **The dual state is substantially accretion, and the future feature does not
+   need two vocabularies.** The `light/core/deep` config layer shipped first
+   (2026-05-08, spec `#260508-model-alias-config-tools`); the capability vocabulary
+   was retrofitted 34 days later (2026-06-12, `#260612-first-class-tier-vocabulary`).
+   Spec language is transitional, not a settled end-state: `config.agents_tier`
+   "**remains** keyed by the `light`/`core`/`deep` alias" (`mcp-tools.md:219-220`)
+   and a "**pending** `config.model_alias` rename" (`mcp-tools.md:271`).
+   `260611-research-ws-per-role-delegation-tuning-config` proposes a 3-layer config
+   `(skill,role)→tier`, `tier→alias/model`, `alias→concrete` — but these are three
+   *maps*, not three *vocabularies*: layers all key off one capability word. The
+   per-role override is `(role)→tier`; the model binding is `tier→model`. Collapsing
+   the vocabularies merges the middle layer away and reduces 260611 from 3 layers to
+   2. The future feature is *easier* after collapse, not blocked by it.
+
+## Decision
+
+**Collapse upward to a single capability vocabulary (`small/medium/large/xlarge`)
+with a direct `capability → (backend, model, effort)` config map.** The
+`capability → alias → model` indirection is redundant: the alias is a renamed
+intermediate key that adds no configurability a direct map lacks, and actively
+*subtracts* it (it forces `large` and `xlarge` to share `deep`, which a user
+cannot split). A direct map removes the locked bridge, gives `xlarge` an
+independent slot, and eliminates the discoverability footgun class entirely.
+
+The composite `capability → model` is *already* user-controllable today, only
+through alias names — e.g. "medium and large both to sonnet" is achievable by
+setting `core=sonnet` and `deep=sonnet`. The resolve hook
+(`ResolveAgentForHarnessConfig`, `config.go:175-218`) is vocabulary-agnostic;
+keying it by capability directly is a normalizer + key-rename change, not a
+structural one. So the room for direct tuning is already open and the alias step
+buys nothing at this scale.
+
+### Rejected alternatives
+
+- **Keep both vocabularies / document the bridge only** (the original Direction):
+  pays the full cost (two synonym sets, the footgun seam, doubled surface area)
+  for benefit that is unrealized — capability tier is inert (Evidence 1) and the
+  alias adds no machinery (Evidence 2).
+- **Collapse downward to `light/core/deep`**: drags model-budget words up into
+  authoring and loses the "authors speak capability, models stay hidden" boundary,
+  and cannot name a 4th tier. Collapse *up* keeps that boundary and adds `xlarge`.
+- **Pending `config.model_alias` rename (`#260612`/`260611` follow-up)**: only
+  renames the tool while keeping `light/core/deep` keys — preserves the redundant
+  layer. This decision supersedes that planned rename.
 
 ## Direction
 
-Make the two planes legible where callers meet them. Options, roughly in
-increasing scope:
+Single-vocabulary collapse, transition-safe. Implementation sketch (not yet
+phased; promote to `ready/` with phases after the open question below is settled):
 
-- **Document the bridge** at every caller-facing tier surface: the
-  `config.agents_tier` and `ws.mercenary.register` tier param descriptions, and
-  the `lead-tune` "tune model tier" handler, should state the
-  `small↔light / medium↔core / large,xlarge↔deep` mapping so a lead who saw a
-  `recommended-tier` knows which alias to configure.
-- **Accept both vocabularies symmetrically** at `config.agents_tier`: route its
-  `tier` through `firstClassTierToAlias` too, so `tier: small` configures the
-  `light` alias instead of erroring. Then every tier surface accepts the same
-  capability vocabulary, and `light/core/deep` remain the canonical alias keys.
-- Decide whether `xlarge` collapsing to `deep` (two capability tiers → one
-  alias) should be visible to the lead, since configuring `deep` then silently
-  also backs `xlarge` delegations.
+1. **Direct config map.** Re-key `Agents.Tiers` / `Agents.ModelAliases` semantics
+   so `config.agents_tier` (renamed appropriately) accepts and stores capability
+   vocabulary. Give `xlarge` its own resolvable entry. Keep the per-harness map
+   shape, effort field, and backend-affinity guard unchanged (Evidence 2).
+2. **Read-compat synonyms.** Extend `normalizedTier` (`config.go:428`) to fold
+   `light→small`/`core→medium`/`deep→large` (and keep `haiku/sonnet/opus`),
+   applied at config load and SQLite tier read, so existing on-disk config and
+   stored agents keep resolving (Evidence 3). No schema migration.
+3. **Tier-derived native hint.** Replace the fixed `resolveModelVars` alias-var
+   list with a `tier`-derived single `{{.RoleModel}}`; migrate the ~9 delegate
+   playbooks and the `variables:` frontmatter (Evidence 4). Native hint preserved.
+4. **Surface + enum.** Update the `config.agents_tier` / `ws.mercenary.register`
+   tool enums and help (`server.go:2209`, `cmd/ws-mcp/main.go`), and both
+   `runtime.json` contracts (the full one; wsflow omits `config.agents_tier`).
+5. **Tests + docs + mirror.** ~132 code literals (mostly tests), `lead-tune`
+   "tune model tier" handler and Storage notes, the bridge prose, and the
+   `agents-plugin-wsflow/rsrc` mirror regen.
 
-Skill/doc edits run under `lead-skill-authoring`; any docstring change to a
-shipped tool surface also touches both `runtime.json` contracts and the rsrc
-manifest. Narrower than `260611-research-ws-per-role-delegation-tuning-config`:
-this is about reconciling the *existing* two tier planes, not adding per-role
-axes.
+Skill/doc edits run under `lead-skill-authoring`. This is observable
+API/protocol surface change (Always-ask territory).
+
+## Documentation Conflicts (must reconcile)
+
+This direction conflicts with shipped documentation and requires conscious
+re-opening, not silent contradiction:
+
+- **`#260612-first-class-tier-vocabulary`** (`mcp-tools.md:211-220`) states
+  `config.agents_tier` "remains keyed by `light/core/deep`" and frames the
+  locked `small↦light…xlarge↦deep` mapping as intended. Collapse-up reverses the
+  "remains keyed" decision; `#260612` must be re-opened/amended, not bypassed.
+- **The pending `config.model_alias` rename** (`mcp-tools.md:271`) is superseded:
+  that rename kept `light/core/deep`; this collapses them.
+- **`lead-tune`** "tune model tier" handler and Storage section speak only
+  `light/core/deep` and must be rewritten to capability vocabulary.
+- **`260611-research-ws-per-role-delegation-tuning-config`**: collapse simplifies
+  its 3-layer model to 2; coordinate so the per-role surface is designed against
+  the single vocabulary.
+
+## Open Question (single decision input)
+
+The *only* scenario that would revive a two-vocabulary design: making the alias a
+**reusable named model-palette** — fewer slots than capabilities, with multiple
+capabilities pointed at one slot, where the `capability → slot` assignment is
+itself user-configurable. At 4-capability / 3-slot scale this saves only "typing
+sonnet twice" while costing a vocabulary, a bridge, and the footgun, so it is not
+justified now. If a reusable-palette routing surface becomes an explicit roadmap
+goal, revisit; otherwise the direct map stands.
