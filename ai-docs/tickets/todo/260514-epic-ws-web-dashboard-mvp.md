@@ -129,6 +129,14 @@ Active or planned product tracks:
   reshape removed the SQLite actor registry. Re-ground this track's activity source
   on the mercenary lifecycle before any further agent-panel work (see
   `260523-feat-ws-dashboard-main-session-activity-source`). [staleness audit 2026-06-19]
+  `260620-feat-ws-dashboard-agent-client-activity-sources` is todo for the
+  re-grounding pass: keep Activity rendering source-neutral, treat ws mercenary
+  state, Codex app-server, and OpenCode serve as provider inputs, and avoid
+  restarting direct harness/runtime development under the dashboard.
+  `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is done: WSL/local
+  dogfood can start the daemon with explicit loopback-only `--no-auth` and get
+  a direct local dashboard URL without weakening normal owner-auth or
+  public-bind behavior.
 - Multi-server management - active child track.
   `260525-feat-ws-dashboard-multi-server-gateway` is done for
   linked-server registry, selected-server resource forwarding, passphrase
@@ -161,9 +169,9 @@ Active or planned product tracks:
 Implementation sequence:
 
 1. Agent view panel: dedicated agent-oriented visibility over Activity Console
-   and future main-session/subtask sources. Keep custom harness versus deeper
-   Codex integration as an explicit unresolved design choice until the panel
-   scope clarifies.
+   and future main-session/subtask sources. Re-ground source integration through
+   dashboard-owned Activity source adapters for ws mercenary, Codex app-server,
+   and OpenCode serve; avoid direct harness/runtime development.
 2. Multi-server management: local dashboard as gateway for local, WSL, and
    remote linked daemons, including remote Windows dogfood deployment and
    seamless resource integration under `serverId`.

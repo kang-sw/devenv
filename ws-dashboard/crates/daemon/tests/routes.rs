@@ -133,6 +133,12 @@ fn app_state() -> AppState {
     app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled())
 }
 
+fn app_state_without_owner_auth() -> AppState {
+    let mut state = app_state();
+    state.config.owner_auth_enabled = false;
+    state
+}
+
 fn app_state_with_opened_and_store(
     opened_work_roots: OpenedWorkRoots,
     dashboard_state: DashboardStateStore,
@@ -8995,6 +9001,50 @@ async fn invalid_bearer_auth_cannot_access_http_smoke_routes_without_cookie() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().get(header::SET_COOKIE).is_none());
+}
+
+#[tokio::test]
+async fn no_auth_mode_reaches_protected_http_and_websocket_routes_without_credentials() {
+    let app = build_router(app_state_without_owner_auth());
+
+    let health = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .body(Body::empty())
+                .expect("no-auth health request"),
+        )
+        .await
+        .expect("no-auth health response");
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let resources = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .body(Body::empty())
+                .expect("no-auth resources request"),
+        )
+        .await
+        .expect("no-auth resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+
+    let (addr, server) = spawn_test_server(app.clone()).await;
+    let websocket_request = format!("ws://{addr}/api/dashboard/terminals/term_test/socket")
+        .into_client_request()
+        .expect("no-auth terminal websocket request");
+    let error = tokio_tungstenite::connect_async(websocket_request)
+        .await
+        .expect_err("no-auth terminal websocket rejects unknown terminal");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        other => panic!("unexpected no-auth websocket error: {other}"),
+    }
+    server.abort();
 }
 
 #[tokio::test]

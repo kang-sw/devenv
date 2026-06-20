@@ -15,8 +15,8 @@ pub struct ServeConfig {
     // and tests can distinguish accidental public exposure from explicit
     // public serving.
     pub bind_mode: BindMode,
-    // CONTRACT: Public binding cannot start unless owner authentication remains
-    // enabled.
+    // CONTRACT: Disabled owner authentication is a loopback-only debug serving
+    // profile. Public serving requires owner authentication.
     pub owner_auth_enabled: bool,
 }
 
@@ -34,12 +34,13 @@ impl ServeConfig {
         let ip = parse_bind_host(&args.host)
             .with_context(|| format!("invalid --host value {:?}", args.host))?;
 
-        validate_bind_guard(args.bind_mode, ip, true)?;
+        let owner_auth_enabled = !args.no_auth;
+        validate_bind_guard(args.bind_mode, ip, owner_auth_enabled)?;
         Ok(Self {
             bind_addr: SocketAddr::new(ip, args.port),
             static_dir: args.static_dir,
             bind_mode: args.bind_mode,
-            owner_auth_enabled: true,
+            owner_auth_enabled,
         })
     }
 }
@@ -49,6 +50,18 @@ pub fn validate_bind_guard(
     ip: IpAddr,
     owner_auth_enabled: bool,
 ) -> anyhow::Result<()> {
+    if !owner_auth_enabled {
+        ensure!(
+            mode != BindMode::Public,
+            "no-auth debug mode cannot use --bind-mode public"
+        );
+        ensure!(
+            ip.is_loopback(),
+            "no-auth debug mode requires a loopback bind address"
+        );
+        return Ok(());
+    }
+
     // CONTRACT: Accidental public interface exposure fails unless public mode is
     // explicit and owner authentication is enabled.
     ensure!(

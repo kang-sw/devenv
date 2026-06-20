@@ -33,11 +33,17 @@ pub struct ServeArgs {
     #[arg(long, value_enum, default_value_t = BindMode::Local)]
     pub bind_mode: BindMode,
 
+    #[arg(
+        long,
+        help = "Disable owner authentication for loopback-only local debug serving"
+    )]
+    pub no_auth: bool,
+
     #[arg(long, default_value_t = 0)]
     pub port: u16,
 
-    // CONTRACT: Static UI serving is behind owner auth even when this points at
-    // a placeholder or absent frontend build directory.
+    // CONTRACT: Static UI serving follows the central router auth boundary; the
+    // loopback-only no-auth debug profile is the only bypass.
     #[arg(long)]
     pub static_dir: Option<std::path::PathBuf>,
 }
@@ -146,6 +152,17 @@ mod tests {
 
         assert!(help.contains("--remote-guide"));
         assert!(help.contains("SSH-tunneled remote deployment guide"));
+    }
+
+    #[test]
+    fn serve_no_auth_flag_is_discoverable_from_help() {
+        let mut command = ServeArgs::command();
+        let mut help = Vec::new();
+        command.write_long_help(&mut help).expect("write help");
+        let help = String::from_utf8(help).expect("utf8 help");
+
+        assert!(help.contains("--no-auth"));
+        assert!(help.contains("loopback-only local debug serving"));
     }
 
     #[test]
