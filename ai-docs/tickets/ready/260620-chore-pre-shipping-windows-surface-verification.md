@@ -101,6 +101,49 @@ exercised (asserted on the Windows run in Phase 3). Also review
 `processAlive` (Windows) — `OpenProcess`/`FindProcess` can report a zombie/exited
 handle as alive; cover or document the recovery-path implication.
 
+### Result (d89e6539) - 2026-06-20
+
+Both Windows cancel paths now reap the whole spawned subtree instead of only the
+root PID, mirroring the Unix process-group/tree intent. Contract unchanged
+(best-effort + `cleanup_needed`); spec pass found no caller-visible change.
+
+- **Mechanism (chosen):** Toolhelp32 snapshot (`CreateToolhelp32Snapshot` +
+  `Process32First/Next`) reads the live PID/PPID table; walk parent→child links
+  rooted at the cancel target; `OpenProcess(PROCESS_TERMINATE)` +
+  `TerminateProcess` per PID. Strictly PID-scoped, in-process, no spawn-side
+  change (the existing `CREATE_NEW_PROCESS_GROUP` suffices). New file
+  `wsagent/process_snapshot_windows.go`; `wsagent/cancel_process_windows.go` and
+  `execjob/process_windows.go` rewritten.
+- **Rejected:** `GenerateConsoleCtrlEvent` (console-bound, catchable, unreliable
+  with detached `CREATE_NEW_PROCESS_GROUP` children); `taskkill /T` (shells out,
+  depends on `taskkill` presence, harder to unit-test); Windows Job Object
+  (cleanest boundary but needs spawn-side assignment across all three spawn
+  paths — brief said avoid spawn-side changes).
+- **Test:** deterministic cross-platform behavioral tests in both packages
+  (`cancel_tree_test.go`) — parent self-execs a child that blocks on a sentinel,
+  cancel, then poll-until-dead (no fixed sleeps), following the repo's
+  `TestHelperProcess` + `GO_WANT_HELPER_PROCESS=1` idiom. Verified meaningful by a
+  throwaway negative mutation (root-only `Kill` leaves the child alive → test
+  FAILS; the tree kill → PASSES).
+- **Verification:** `go test ./internal/wsagent/... ./internal/execjob/...` green
+  on Linux; `go vet` clean on Linux and `GOOS=windows`; `GOOS=windows go build
+  ./...` clean. `go.mod` promoted `golang.org/x/sys` to a direct dependency.
+- **Review:** 3-partition (correctness/fit/test) all clean, zero
+  Critical/Important. Two comment-clarity minors fixed by the lead (`5fe37ea9`);
+  remaining minors recorded won't-fix: `terminateProcess` swallows only
+  `ERROR_INVALID_PARAMETER` (Unix `ESRCH`-only parity); `procInfo` struct
+  divergence + test-helper duplication (per-module structure accepted by brief);
+  import-block style (gofmt-neutral).
+- **processAlive:** zombie/exited-handle issue left DEFERRED to Phase 3 per scope
+  (one-line code comment); `processAlive` switched to `x/sys`.
+
+> Forward (Phase 3): the Windows subtree-reap assertion COMPILES under build tags
+> but has NOT run on a Windows host — Phase 3 must actually execute it there.
+> Also validate on Windows: the `processAlive` zombie handling, and the
+> reparented/orphaned-child limitation (descendants that no longer chain to the
+> root PID are not reaped — same as the Unix ps-table walk, no Windows group
+> analogue).
+
 ### Phase 2: Stabilize flaky abort under the full suite (P1-priority, prereq)
 
 Abort/cancel is the OS-divergent axis, so its Linux flakiness must be removed

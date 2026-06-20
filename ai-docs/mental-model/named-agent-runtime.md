@@ -72,12 +72,12 @@ related:
 - Assuming public agent names, `AgentKey` strings, or old instance directories are globally authoritative; `AgentInternalKey(publicName)` is only unique inside one resolved worktree store, and the role pointer selects the current stored path.
 - Inferring login state from backend output is brittle; preserve raw backend errors and present configuration options as hints.
 - Treating every stdout line after a completed Codex result as model output can discard a valid Windows result when process-control messages are appended.
-- Cancelling by killing only the parent process can leave children alive on Unix; process-group behavior is intentional. {#260505-agent-cancel-recovery}
+- Cancelling by killing only the parent process can leave children alive on both Unix and Windows; process-group/subtree behavior is intentional. On Unix the cancel path sends SIGKILL to the spawned process group (`Kill(-pgid, SIGKILL)`). On Windows there is no negative-PID group-signal primitive; `cancelProcess` takes a Toolhelp32 snapshot, walks PPID parent→child links rooted at the cancel target, and calls `TerminateProcess` on each PID individually. The kill must stay strictly PID-scoped — image-name termination (e.g. taskkill /IM) could reach unrelated host processes and is forbidden. {#260505-agent-cancel-recovery}
 - `WS_MCP_TOOL_PROFILE` is retired (Phase 3) — do not reach for it to contain a spawned child's capabilities; it never gated the child's tool surface and is no longer read or propagated. Recursion and capability containment use the keyed server-side gate: a render-minted child key is non-lead, so the `ws.lead.*` block stops it from logging in or spawning (spawn depth stays 1).
 - Relying on MCP `tools/list` (schema) filtering to contain capabilities is the same class of mistake (2026-06). What the schema advertises is harness-owned and advisory — a caller that knows a tool name can still issue `tools/call`, so hiding a tool from the schema (e.g. `noAgentHiddenTool`) only reduces LLM confusion; it does not deny the capability. The session-key keyed `callTool` gate checks `roleAllowsTool` and the `ws.lead.*` prefix block for known scoped keys; root-aware keyless paths are rejected. This keyed gate is the sole capability-scope authority (Phase 3, implemented).
 
 ## Technical Debt
 
 - Malformed lock files without parseable PIDs are not treated as stale, so manual cleanup may be required.
-- Windows process liveness is weaker than Unix and can keep dead calls active until better probing exists.
+- Windows process liveness is weaker than Unix and can keep dead calls active until better probing exists. (`processAlive` uses `OpenProcess` which can report an exited-but-unreaped process as alive; fixing the zombie/cached-handle issue is deferred to Phase 3, tracked in ticket `260620-chore-pre-shipping-windows-surface-verification`.)
 - `OutboxDir`, `Agent.Capabilities`, and some session directories are scaffolded for future use.

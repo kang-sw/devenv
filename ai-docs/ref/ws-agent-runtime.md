@@ -385,8 +385,10 @@ request `--lines 3`; larger tails are for concrete failure diagnosis.
 `agents.cancel` uses the stored worker pid for a best-effort local process kill
 and marks the current call `cancelled`. After process restart, `wait`, `result`,
 `status`, `tail`, and `print` still work from disk state; `cancel` can only
-terminate a process when the stored pid still refers to a live local worker, and
-it does not yet provide backend-specific process-group cleanup.
+terminate a process when the stored pid still refers to a live local worker. The
+kill reaps the whole spawned subtree rooted at that pid on both platforms
+(best-effort) — Unix via a process-group / ps-table walk, Windows via a
+Toolhelp32 PID-tree enumeration — rather than only the root pid.
 Cancelled status output includes a recovery tip for no-result timeout cases and
 points callers toward `agents.call` on the same registered agent before erase.
 
