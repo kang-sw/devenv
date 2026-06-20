@@ -1,6 +1,8 @@
 ---
 title: config.prompt.* setter + self-documenting override listing
 parent: 260619-epic-ws-layered-config-prompt-tuning
+spec:
+  - 260620-config-prompt-override-tuning-tools
 related:
   260619-feat-ws-layered-config-scope-substrate: prerequisite — setter writes through the layered scope primitive
   260619-feat-ws-prompt-override-marker-engine: prerequisite — listing tree-scans the override markers this defines
