@@ -217,19 +217,26 @@ Target: user request
    b. Render `ticket-reviewer-completeness`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-completeness")`;
       spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
       Capture completeness verdict result.
-6. Parse `verdict:` from each result.
+6. Parse `verdict:` from each result. Each reviewer result text contains a `verdict:` line
+   whose value is one of `pass`, `concern`, or `block` (exhaustive set).
 7. Apply aggregation:
    - Design `block` → final verdict is `block` regardless of completeness.
    - Design not-block and completeness `block` → final verdict is `block`.
-   - Design `concern` and completeness `pass|concern` → lead judgment: default to `pass`
-     unless issues are `resolution: missing`.
+   - Design `concern` and completeness `pass|concern` → default to `pass`; if ANY issue in
+     either reviewer result has `resolution: missing`, elevate to `concern`. On `concern`,
+     lead decides whether to block; default is do not block unless the missing decision is
+     judged critical.
    - All `pass` → final verdict is `pass`.
 8. If final verdict is `block`:
-   a. Write `## Blocked (YYYY-MM-DD)` section to ticket body using the **Blocked Section Template**.
-   b. Add or update `sage-review: blocked` in ticket frontmatter.
+   a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the ticket body using the
+      **Blocked Section Template**. If a `## Blocked` section already exists from a prior sage
+      review cycle, replace it.
+   b. Edit the ticket file directly to add or update `sage-review: blocked` in the frontmatter
+      block; do not use a dedicated tool call.
    c. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on sage review", ai_context: ["sage review blocked: design and/or completeness issues"])`.
 9. If final verdict is `pass` or `concern` resolved to pass:
-   a. Add or update `sage-review: completed` in ticket frontmatter.
+   a. Edit the ticket file directly to add or update `sage-review: completed` in the frontmatter
+      block; do not use a dedicated tool call.
    b. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark sage review completed", ai_context: ["sage review passed"])`.
 
 ## On: Cross-ticket decision review
@@ -339,9 +346,9 @@ Blocker: missing spec traceability for caller-visible behavior.
 
 ### Completeness Reviewer — <verdict>
 
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | <title> | <severity> |
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | <title> | <severity> | <resolution> |
 ```
 
 ## Doctrine
