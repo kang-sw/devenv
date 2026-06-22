@@ -69,6 +69,12 @@ Confirmed with the user (2026-06-20):
   than repeating `git mv`/frontmatter steps. One convention edit then propagates
   to every transition site.
 
+## Spec Impact
+
+- **Target spec**: `mcp-tools` (`ai-docs/spec/mcp-tools.md`) — ticket tools section
+- **Expected caller-visible change**: adds `tickets.close(stem, status, resolution?)` and `tickets.move(stem, to)` to the MCP tool surface in both the full `ws` and `wsflow` runtime contracts; both tools write frontmatter, stage atomically, and enforce ticket-convention guards at the MCP layer.
+- **Contract-first spec**: no — tool schemas are finalized during Phase 1 implementation; the `mcp-tools.md` update is a Phase 1 deliverable, not a pre-implementation contract.
+
 ## Phases
 
 ### Phase 1: tickets.close + tickets.move
