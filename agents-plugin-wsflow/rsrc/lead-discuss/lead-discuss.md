@@ -106,7 +106,7 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
    b. No other ticket references this stem -> call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline to remove or close the linked in-progress spec entry for that stem.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
-   d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
+   d. Use `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`; fall back to native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md` when MCP tools are unavailable.
 5. Commit through `{{.McpNamespace}}/git.commit`.
 
 ## On: user signals done
