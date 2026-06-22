@@ -386,6 +386,19 @@ ticket stem, and optional status filters. `tickets.status` returns structured
 metadata for a single ticket stem and can optionally include archived done or
 dropped tickets.
 
+`tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
+(status=dropped), writing the appropriate `completed:` or `dropped:` date into
+frontmatter and optionally appending a `## Resolution (YYYY-MM-DD)` body section.
+The operation is atomic: the frontmatter write, `git add`, and `git mv` happen as
+one staged change set, and the tool never commits. {#260620-ticket-close-tool}
+
+`tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
+moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
+Upward moves check the `sage_review` config key and the ticket's `sage-review`
+frontmatter field when the config is enabled; a `pending` or `blocked` field
+blocks the promotion. The move stages atomically and never commits.
+{#260620-ticket-move-tool}
+
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
 `mental_models.list` returns available mental-model documents with domain,
