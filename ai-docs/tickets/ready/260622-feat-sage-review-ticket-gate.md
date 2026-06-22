@@ -90,7 +90,7 @@ sage_review_completeness_tier: medium
 
 ### `create-ticket` MCP tool
 
-New `ws/create_ticket(session_key, stem, initial_state)`:
+New `ws/tickets.create(session_key, stem, initial_state)`:
 - Auto-prefixes today's date to semantic `stem`.
 - Writes frontmatter stub (title placeholder, `sage-review: pending` for `todo/+`).
 - Returns `{path, tip}`:
@@ -174,7 +174,7 @@ integration on top.
 
 ### Phase 1: `create-ticket` MCP tool
 
-New `ws/create_ticket(session_key, stem, initial_state)` Go MCP handler.
+New `ws/tickets.create(session_key, stem, initial_state)` Go MCP handler.
 Auto-prefixes today's date to form the full stem. Writes a frontmatter stub
 (`title:` placeholder; `sage-review: pending` for `todo/+`). Returns `{path, tip}`;
 tip is non-empty for both `idea/` and `todo/+`.

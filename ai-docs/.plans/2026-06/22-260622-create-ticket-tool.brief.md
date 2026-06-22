@@ -2,10 +2,14 @@
 
 ## Intent
 
-Add a `ws/create_ticket(session_key, stem, initial_state)` MCP tool and matching CLI
+Add a `ws/tickets.create(session_key, stem, initial_state)` MCP tool and matching CLI
 mirror that creates a dated ticket stub file, writes minimal frontmatter (`title: ""`
 plus `sage-review: pending` for `todo/+`), and returns `{path, tip}`. Phase 1 of
 `260622-feat-sage-review-ticket-gate`.
+
+Note: MCP tool name is `tickets.create` (dotted, consistent with `tickets.close`/
+`tickets.move`). The ticket Decisions section uses `ws/create_ticket` notation
+(underscore) — treat `tickets.create` as the correct name throughout this brief.
 
 ## Scope Boundary
 
@@ -15,7 +19,7 @@ created file is unstaged; callers commit via `git.commit`.
 
 ## Caller-Visible Contract
 
-`ws/create_ticket(session_key, stem, initial_state)`:
+`ws/tickets.create(session_key, stem, initial_state)`:
 
 - `stem`: caller-supplied semantic portion of the ticket name (e.g., `feat-foo-bar`).
 - `initial_state`: `"idea"` | `"todo"` | `"ready"`. Terminal states (`"done"`,
@@ -74,9 +78,14 @@ Implementation:
   review."; `todo` or `ready` → "run sage review before promoting further."
 - Return `{Path: rel-path-from-root, Tip: tip}`.
 
-Existing mechanisms to reuse: `wsdoc.writeFrontmatterField` is NOT used here (new
-file write, not a field update). `filepath.Join`, `os.MkdirAll`, `os.WriteFile`,
-`os.Stat` from stdlib only.
+Existing mechanisms to reuse:
+- `ticketRelPath(statusDir, stem)` in `tickets_mutate.go` (unexported): builds
+  `ai-docs/tickets/<dir>/<stem>.md` with forward slashes. Reuse to compute return path;
+  pass `<Today>-<Stem>` as stem.
+- `statusDirs` map in `tickets_mutate.go`: `idea/todo/ready` → same dir names; reuse
+  for initial_state → directory mapping.
+- `wsdoc.writeFrontmatterField` is NOT used here (new file write, not a field update).
+  Use `filepath.Join`, `os.MkdirAll`, `os.WriteFile`, `os.Stat` from stdlib only.
 
 Do NOT call any git commands. Do NOT import wsgit.
 
@@ -98,16 +107,17 @@ Use `t.TempDir()` as root for all tests.
 
 ### `agents-plugin-tool/internal/mcp/server.go`
 
-- Add `create_ticket` to `tools()` schema with params:
+- Add `tickets.create` to `tools()` schema with params:
   ```
   session_key (string, required, description: "ws session key")
   stem        (string, required, description: "semantic ticket stem without date prefix")
   initial_state (string, required, description: "ticket status: idea | todo | ready")
   ```
-- Add dispatch case in `callTool` switch following `tickets.move` pattern:
+- Add dispatch case in `callTool` switch for `"tickets.create"` following `tickets.move`
+  pattern (simpler: no config lookup needed, mirror `tickets.close` dispatch shape):
   - Extract params, call `resolveToolRoot(session_key)` for root, call
-    `wsdoc.TicketCreate(root, opts)`, return `mcp.FormatTicketCreate(res)`.
-- Add `"create_ticket"` to `rootAwareToolSchemaRequiresSessionKey` switch.
+    `wsdoc.TicketCreate(root, opts)`, return `toolTextResponse(req.ID, FormatTicketCreate(res), err)`.
+- Add `"tickets.create"` to `rootAwareToolSchemaRequiresSessionKey` switch.
 
 ### `agents-plugin-tool/internal/mcp/format.go`
 
@@ -129,19 +139,26 @@ tickets create <stem> <initial_state>
 ```
 - Parse args, call `wsdoc.TicketCreate(root, opts)` (root from repo root helper),
   print `FormatTicketCreate(res)`.
-- Add `"tickets create"` to `runtimeCapabilityCommandNames`.
+- Add `"tickets.create"` (dotted form, NOT argv form) to `runtimeCapabilityCommandNames`.
+  Existing entries are `tickets.close`, `tickets.move`; the new entry must be `tickets.create`
+  to satisfy the exact-match contract test.
 
 ### `agents-plugin/runtime.json`
 
-Add in both `"tools"` section and `"commands"` section:
+Add in the `"tools"` section:
 ```json
-"create_ticket": ">=0.30.2-dev <0.31.0"
+"tickets.create": ">=0.30.2-dev <0.31.0"
 ```
+Add in the `"commands"` section:
+```json
+"tickets.create": ">=0.30.2-dev <0.31.0"
+```
+Both keys use the dotted form `tickets.create` (consistent with `tickets.close`, `tickets.move`).
 
 ### `agents-plugin-wsflow/runtime.json`
 
 Same 2 insertions (tools + commands) — this file uses `"match": "exact"`, so the
-entry must match the full ws tool surface exactly.
+entry must match the full ws tool surface exactly. Both keys are `tickets.create`.
 
 ## Integration Test Instructions
 
@@ -192,7 +209,7 @@ Pass criteria:
 1. Write `ticket_create_test.go` (TDD: tests first for pure logic).
 2. Write `ticket_create.go` implementing `TicketCreate` until tests pass.
 3. Add `FormatTicketCreate` to `format.go`.
-4. Add `create_ticket` to `tools()` + `callTool` + `rootAwareToolSchemaRequiresSessionKey`
+4. Add `tickets.create` to `tools()` + `callTool` + `rootAwareToolSchemaRequiresSessionKey`
    in `server.go`.
 5. Add `tickets create` CLI mirror in `main.go` + `runtimeCapabilityCommandNames`.
 6. Update both `runtime.json` files.
@@ -210,8 +227,8 @@ Pass criteria:
 - Manifest regen order: `WSRSRC_REGEN` → `WS_REGEN_MANIFEST` → `WS_REGEN_WSFLOW_RSRC`.
   Skipping or reordering causes stale manifest test failures.
 - wsflow `runtime.json` uses `"match": "exact"`: every tool in the full
-  `agents-plugin/runtime.json` must appear in wsflow too. The `create_ticket` entry
-  must be added to both files.
+  `agents-plugin/runtime.json` must appear in wsflow too. The `tickets.create` entry
+  (in both tools and commands sections) must be added to both files.
 
 ## Out of Scope
 
