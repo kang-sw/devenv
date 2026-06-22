@@ -77,17 +77,19 @@ def read_runtime_contract(path: Path) -> dict:
     wait_for_runtime_contract(path)
     # The file may exist but be momentarily unreadable (AV sharing hold on
     # Windows).  Retry a small number of times on OSError (covers PermissionError)
-    # and JSON decode errors before giving up; a first-try success incurs no
-    # added latency.
+    # and ValueError (covers json.JSONDecodeError and UnicodeDecodeError — both
+    # subclasses of ValueError) before giving up.  A partially-written or
+    # byte-corrupt file in the cold-install window can raise UnicodeDecodeError,
+    # which is NOT an OSError; catching (OSError, ValueError) ensures every
+    # transient read/parse error reaches fail() rather than escaping as a
+    # traceback.  A first-try success incurs no added latency.
     _read_attempts = 4
     _read_backoff = 0.05  # seconds; kept short — this is a transient window only
     last_exc: Exception | None = None
     for attempt in range(_read_attempts):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except OSError as exc:
-            last_exc = exc
-        except json.JSONDecodeError as exc:
+        except (OSError, ValueError) as exc:
             last_exc = exc
         if attempt < _read_attempts - 1:
             time.sleep(_read_backoff)

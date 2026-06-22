@@ -295,8 +295,8 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 
             self.assertFalse(installed)
-            # All retry attempts were made (5 total), each targeting the same pair.
-            self.assertTrue(len(calls) > 0)
+            # All 5 retry attempts must have been made (_replace_attempts = 5).
+            self.assertEqual(len(calls), 5)
             self.assertTrue(all(c == (tmp, binary) for c in calls))
 
     def test_bootstrap_or_local_devenv_marker_forces_runtime_install(self):

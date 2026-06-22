@@ -154,6 +154,71 @@ class ReadRuntimeContractRetryTest(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     launcher.read_runtime_contract(contract_path)
 
+    def test_transient_json_decode_error_retries_and_succeeds(self):
+        # First read_text returns invalid JSON (mid-write); second returns valid.
+        # Exercises the ValueError (JSONDecodeError) branch of the retry.
+        launcher = load_launcher()
+        launcher.time.sleep = lambda _: None
+        launcher.wait_for_runtime_contract = lambda path, **kw: None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+            contract_path.write_text('{"plugin_version":"0.20.0"}\n', encoding="utf-8")
+            attempt = [0]
+            _orig = Path.read_text
+
+            def fake_read_text(self_path, encoding="utf-8"):
+                attempt[0] += 1
+                if attempt[0] < 2:
+                    return "not valid json {"
+                return _orig(self_path, encoding=encoding)
+
+            with mock.patch.object(Path, "read_text", fake_read_text):
+                result = launcher.read_runtime_contract(contract_path)
+
+            self.assertEqual(result["plugin_version"], "0.20.0")
+
+    def test_transient_unicode_decode_error_retries_and_succeeds(self):
+        # read_text raises UnicodeDecodeError (invalid UTF-8 bytes in cold-install
+        # window) on first attempt, succeeds on second.  UnicodeDecodeError is a
+        # ValueError subclass — exercises the (OSError, ValueError) catch.
+        launcher = load_launcher()
+        launcher.time.sleep = lambda _: None
+        launcher.wait_for_runtime_contract = lambda path, **kw: None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+            contract_path.write_text('{"plugin_version":"0.21.0"}\n', encoding="utf-8")
+            attempt = [0]
+            _orig = Path.read_text
+
+            def fake_read_text(self_path, encoding="utf-8"):
+                attempt[0] += 1
+                if attempt[0] < 2:
+                    raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+                return _orig(self_path, encoding=encoding)
+
+            with mock.patch.object(Path, "read_text", fake_read_text):
+                result = launcher.read_runtime_contract(contract_path)
+
+            self.assertEqual(result["plugin_version"], "0.21.0")
+
+    def test_persistent_decode_error_raises_system_exit(self):
+        # Persistent JSONDecodeError across all attempts → fail() → SystemExit.
+        launcher = load_launcher()
+        launcher.time.sleep = lambda _: None
+        launcher.wait_for_runtime_contract = lambda path, **kw: None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+
+            def always_bad_json(self_path, encoding="utf-8"):
+                return "not valid json {"
+
+            with mock.patch.object(Path, "read_text", always_bad_json):
+                with self.assertRaises(SystemExit):
+                    launcher.read_runtime_contract(contract_path)
+
 
 class InstallTmpRuntimeReplaceRetryTest(unittest.TestCase):
     """Tests for install_tmp_runtime bounded os.replace retry.
@@ -232,7 +297,8 @@ class InstallTmpRuntimeReplaceRetryTest(unittest.TestCase):
                 installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 
             self.assertFalse(installed)
-            self.assertTrue(len(replace_calls) > 0)
+            # All 5 retry attempts must have been made (_replace_attempts = 5).
+            self.assertEqual(len(replace_calls), 5)
             self.assertTrue(all(c == (tmp, binary) for c in replace_calls))
 
     def test_persistent_os_error_incompatible_binary_raises_system_exit(self):
