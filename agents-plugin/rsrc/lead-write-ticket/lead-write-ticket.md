@@ -1,5 +1,6 @@
 ---
 kind: print
+delegates: true
 includes:
   - task-list
 ---
@@ -57,7 +58,11 @@ Target: user request
 1. If no file changed because the requested move was refused, skip commit.
 2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
-### 8. Handoff
+### 8. Sage Review Gate
+
+1. Run **Sage Review Gate**.
+
+### 9. Handoff
 
 1. Run **Output Handoff**.
 
@@ -196,6 +201,37 @@ Target: user request
 7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
 8. Preserve the final `Ticket:` line; callers such as `{{.SkillNamespace}}:lead-proceed` capture this path from prefix-stage output.
 
+## On: Sage Review Gate
+
+1. If landing status is `idea/`, skip this gate.
+2. Call `{{.McpNamespace}}/config.show()` and extract the `sage_review` value.
+3. If `sage_review` is `off`, empty, or unset, skip this gate.
+4. If `sage_review` is `ask`: ask the user "Run sage review for this ticket?".
+   - If user declines: add `sage-review: skipped` to ticket frontmatter, commit with
+     `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "chore(sage): skip sage review", ai_context: ["user declined sage review in ask mode"])`,
+     then skip the rest of this gate.
+5. Spawn both reviewers in parallel:
+   a. Render `ticket-reviewer-design`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")`;
+      spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
+      Capture design verdict result.
+   b. Render `ticket-reviewer-completeness`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-completeness")`;
+      spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
+      Capture completeness verdict result.
+6. Parse `verdict:` from each result.
+7. Apply aggregation:
+   - Design `block` → final verdict is `block` regardless of completeness.
+   - Design not-block and completeness `block` → final verdict is `block`.
+   - Design `concern` and completeness `pass|concern` → lead judgment: default to `pass`
+     unless issues are `resolution: missing`.
+   - All `pass` → final verdict is `pass`.
+8. If final verdict is `block`:
+   a. Write `## Blocked (YYYY-MM-DD)` section to ticket body using the **Blocked Section Template**.
+   b. Add or update `sage-review: blocked` in ticket frontmatter.
+   c. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on sage review", ai_context: ["sage review blocked: design and/or completeness issues"])`.
+9. If final verdict is `pass` or `concern` resolved to pass:
+   a. Add or update `sage-review: completed` in ticket frontmatter.
+   b. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark sage review completed", ai_context: ["sage review passed"])`.
+
 ## On: Cross-ticket decision review
 
 1. Identify the target's parent/epic relationships, any worksets that list the target, relevant co-listed workset tickets, child board entries, and explicitly related tickets when those links are available.
@@ -287,6 +323,26 @@ Trigger: a phase implements caller-visible behavior with no confirmed stem, `spe
 Action: stop the authoring flow.
 Report: name the uncovered phase and blocker.
 Blocker: missing spec traceability for caller-visible behavior.
+
+## Templates
+
+### Blocked Section Template
+
+```markdown
+## Blocked (YYYY-MM-DD)
+
+### Design Reviewer — <verdict>
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | <title> | <severity> | <resolution> |
+
+### Completeness Reviewer — <verdict>
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | <title> | <severity> |
+```
 
 ## Doctrine
 
