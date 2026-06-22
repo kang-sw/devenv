@@ -186,6 +186,66 @@ expand scope into speculative fixes — let Phase C reveal which actually bite.
 
 Depends on: independent of A, but C verifies both A and B.
 
+### Result (da1047fb) - 2026-06-22
+
+All Phase B items implemented in the canonical launcher
+`agents-plugin/bin/ws-mcp-launcher.py` (commits `ab1460d4` impl, `da1047fb`
+review-fix); behavior-preserving robustness, no caller-visible contract change
+(Fit review confirmed; spec closeout below).
+
+Per-item outcome:
+1. rsrc materialization race: new `wait_for_rsrc_tree(plugin_dir)` does a bounded
+   wait for `<plugin>/rsrc/manifest.json` (populated-tree sentinel) before the
+   one-shot `apply_rsrc_root_env` seam decision in `main()`. **Refinement vs the
+   planned "extend the runtime.json wait":** made it **best-effort** — on timeout
+   it `note()`s and proceeds rather than `fail()`, because `apply_rsrc_root_env`
+   already no-ops gracefully when `rsrc/` is absent, so a hard-fail would add a
+   new unproven failure path. Happy path short-circuits (sentinel already present
+   → immediate return, zero latency).
+2. AV/transient tolerance: `wait_for_runtime_contract` timeout is OS-aware (10s on
+   `os.name=="nt"`, 2s elsewhere); `read_runtime_contract` retries on
+   `(OSError, ValueError)` before `fail()`. The `(OSError, ValueError)` width is
+   required, not cosmetic — a correctness-review **critical** caught that the
+   first cut narrowed to `(OSError, json.JSONDecodeError)`, which drops
+   `UnicodeDecodeError` (also a `ValueError` subclass); a mid-write/byte-corrupt
+   contract — exactly the cold-install window targeted — would have escaped as an
+   uncaught traceback instead of the clean `fail()` path. Fixed in `da1047fb`.
+3. `os.replace` contention: `install_tmp_runtime` wraps the replace in a bounded
+   retry (5 attempts, ~10ms exp backoff), then falls through to the **existing**
+   compatible-binary fallback, then `fail`. **Item-2b interpretation:** version-
+   stamped binary names mean a true upgrade targets a *new* filename, so the only
+   locked-target case is a same-version reinstall race (existing binary is
+   byte-compatible → fallback reuses it). The speculative rename-aside / unlink-
+   then-replace dance was rejected for Phase B (scope discipline) and deferred to
+   Phase C iff empirically needed.
+
+Scope: **canonical launcher only.** Discovered the two launcher copies already
+intentionally diverge — `agents-plugin-wsflow/bin/ws-mcp-launcher.py` never
+received the `260524` `wait_for_runtime_contract` fix and did not receive Phase B.
+wsflow is the non-user-facing agentless derivative and is not the Windows shipping
+target, so porting would expand scope. Captured as follow-up idea ticket
+`260622-bug-wsflow-launcher-coldload-divergence`.
+
+Verification (Linux/WSL2 host): `python3 -m unittest discover agents-plugin/tests`
+**39 tests green** (3 new coldload tests + tightened retry-count assertions),
+`python3 -m py_compile agents-plugin/bin/ws-mcp-launcher.py` clean,
+`python3 -m unittest discover agents-plugin-wsflow/tests` 8 green (untouched). Lead
+re-ran all three independently. Review: partitioned correctness/fit/test — Fit and
+Test clean (Fit 3 style minors no-action; Test 2 minors fixed), Correctness 1
+critical fixed and lead-adjudicated after the verbatim fix landed with new test
+coverage. Live-host safety honored: no process-termination logic added. Mental-
+model invariants recorded in `plugin-runtime.md` (`14694cc3`).
+
+**Spec closeout:** no `ai-docs/spec/plugin-runtime.md` wording drifted. The
+materialization-wait (lines ~135-138) and `WS_RSRC_ROOT`-when-present (lines
+~102-103) descriptions still hold; Phase B only ensures those documented
+behaviors survive Windows cold-install timing — no new interface, env var, or
+contract field. Contract-first remained: no.
+
+Deferred to Phase C (require a real Windows host): empirical confirmation that the
+rsrc wait, AV-scan timeout/retry, and `os.replace` retry actually clear the cold-
+install paths under a real AV/extraction race; code is in place and unit-tested.
+
 ### Phase C: Branch-pinned Windows acceptance
 
 Goal: prove the epic build on a real Windows host without exposing it to other

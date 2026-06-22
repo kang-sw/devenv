@@ -204,11 +204,16 @@ dropped tickets live in hidden archive dirs and git history.
   cold-install path. **Epic merge to `main` is deferred until this passes.**
   Implementation-ready; spec addressing via `## Spec Impact` (Contract-first: no —
   Windows conformance to existing `named-agent-runtime` + `plugin-runtime`
-  contracts). **Phase A done** (`8461b4cf`, branch `implement/260622-windows-phase-a`,
-  unmerged): 7 Windows code fixes, partitioned-review clean, cross-compile green;
-  cmd.exe/backslash/tree-kill assertions deferred to Phase C (real Windows host).
-  Next target: **Phase B** (launcher cold-load robustness), then Phase C
-  (branch-pinned acceptance) gates the epic merge.
+  contracts). **Phases A+B done** (branch `implement/260622-windows-shipping-hardening`,
+  unmerged). Phase A (`8461b4cf`): 7 Windows Go fixes, partitioned-review clean,
+  cross-compile green. Phase B (`da1047fb`): canonical Python launcher cold-load
+  hardening — best-effort rsrc-tree wait, OS-aware contract-read timeout +
+  `(OSError, ValueError)` retry, bounded `os.replace` retry; 39 launcher tests
+  green, review clean (1 correctness critical fixed). Canonical-launcher-only;
+  wsflow divergence captured as `260622-bug-wsflow-launcher-coldload-divergence`.
+  Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
+  Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
+  — gates the epic merge to `main`.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
