@@ -346,15 +346,7 @@ func upsertJSON(path string, next any) error {
 }
 
 func replaceFile(tmp, path string) error {
-	if err := os.Rename(tmp, path); err == nil {
-		return nil
-	} else if _, statErr := os.Stat(path); statErr != nil {
-		return err
-	}
-	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return removeErr
-	}
-	return os.Rename(tmp, path)
+	return atomicReplaceFile(tmp, path)
 }
 
 func readProjectMetadata(path string) (ProjectMetadata, bool) {
