@@ -129,10 +129,12 @@ to every changed Invariants/Constraints/Doctrine line).
   dated-field and status-flow rules describe what the tools enforce.
 - `lead-workflow-manual`: register `tickets.close`/`tickets.move` in the
   primitive catalog (mutation tools; call form).
-- Transition-directing playbooks (the `lead-write-ticket` Move section first;
-  `lead-proceed`, `lead-discuss`, `lead-forge-spec`, `lead-salvage` where they
-  direct transitions): replace direct `git mv`/frontmatter steps with a reference
-  to the convention rule; keep only when-to-transition semantics.
+- Transition-directing playbooks: run `grep -rn "git mv" agents-plugin/rsrc/` to
+  find every playbook with a ticket-transition directive. Replace direct
+  `git mv`/frontmatter steps with a reference to the convention rule; keep only
+  when-to-transition semantics. (`lead-write-ticket` Move section first; then
+  `lead-proceed`, `lead-discuss`, `lead-forge-spec`, `lead-salvage`, and any
+  others the grep surfaces.)
 
 Depends on Phase 1 (the tools must exist before guidance points at them).
 
