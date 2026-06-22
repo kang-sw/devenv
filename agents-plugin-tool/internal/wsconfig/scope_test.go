@@ -3,6 +3,7 @@ package wsconfig
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -276,7 +277,7 @@ func TestGlobalPathUsesConfigHomeEnvVar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GlobalPath: %v", err)
 	}
-	wantPath := dir + "/config.json"
+	wantPath := filepath.Join(dir, "config.json")
 	if path != wantPath {
 		t.Errorf("GlobalPath = %q, want %q", path, wantPath)
 	}
@@ -293,7 +294,7 @@ func TestGlobalPathUsesConfigHomeOption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GlobalPath: %v", err)
 	}
-	wantPath := dir + "/config.json"
+	wantPath := filepath.Join(dir, "config.json")
 	if path != wantPath {
 		t.Errorf("GlobalPath = %q, want %q", path, wantPath)
 	}

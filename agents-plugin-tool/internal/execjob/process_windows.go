@@ -16,20 +16,27 @@ func configureCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }
 
+// processAlive reports whether pid is a live (not-yet-exited) process.
+//
+// OpenProcess alone is insufficient on Windows: the kernel process object
+// survives termination until every handle closes, so it keeps succeeding for an
+// exited-but-unreaped process (the zombie/cached-handle case). A zero-timeout
+// wait disambiguates — WAIT_TIMEOUT means still running, WAIT_OBJECT_0 means the
+// object is signaled (exited) — so reconcile does not keep a dead worker running.
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	// DEFERRED (Phase 3): OpenProcess can report an exited-but-unreaped process
-	// as alive (zombie/cached-handle issue). Left intentionally unguarded here;
-	// the Phase 1 verification boundary is Linux-only. See ticket
-	// 260620-chore-pre-shipping-windows-surface-verification.
-	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		return false
 	}
-	_ = windows.CloseHandle(handle)
-	return true
+	defer windows.CloseHandle(handle)
+	state, err := windows.WaitForSingleObject(handle, 0)
+	if err != nil {
+		return false
+	}
+	return state == uint32(windows.WAIT_TIMEOUT)
 }
 
 // cancelProcess terminates the whole process subtree rooted at pid.

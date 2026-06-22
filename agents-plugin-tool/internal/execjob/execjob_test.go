@@ -77,7 +77,7 @@ func TestLaunchResultRawReadersAndWorkingDir(t *testing.T) {
 func TestLongLargeAndAbort(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)
-	long, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "slow"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
+	long, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "slowabort"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +244,14 @@ func TestHelperProcess(t *testing.T) {
 			case "slow":
 				_, _ = os.Stdout.WriteString("start\n")
 				time.Sleep(6 * time.Second)
+				_, _ = os.Stdout.WriteString("done\n")
+			case "slowabort":
+				// Long sleep so abort deterministically lands while the job is
+				// still running, even after the 5s ForegroundWindow and under
+				// Windows scheduling/kill latency. Abort reaps it promptly, so
+				// the test does not wait the full duration.
+				_, _ = os.Stdout.WriteString("start\n")
+				time.Sleep(30 * time.Second)
 				_, _ = os.Stdout.WriteString("done\n")
 			case "large":
 				_, _ = os.Stdout.WriteString(strings.Repeat("x", 5000))

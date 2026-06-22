@@ -1920,10 +1920,11 @@ func mcpLargeShellArgs() map[string]any {
 	return map[string]any{"command": "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"}
 }
 
+// execToolJSONPath returns the path as it appears in a tool response's decoded
+// text. The assertions match against toolText() output, which json-decodes the
+// content "text" field, so Windows paths already carry native single
+// backslashes — no JSON backslash-escaping is applied here.
 func execToolJSONPath(path string) string {
-	if runtime.GOOS == "windows" {
-		return strings.ReplaceAll(path, `\`, `\\`)
-	}
 	return path
 }
 
