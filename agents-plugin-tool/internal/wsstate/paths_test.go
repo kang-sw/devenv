@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -177,10 +176,13 @@ func TestEnsurePreservesCreatedAtAndUpdatesLastSeenAt(t *testing.T) {
 	}
 }
 
+// TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState runs on every
+// platform: the assertions are path-separator neutral (filepath.Join,
+// canonicalForTest) and both the derived keys and the test expectations flow
+// through canonicalPath, so a drive-letter root (Windows t.TempDir lives under
+// C:\...\Temp) is exercised the same way as a POSIX root. The earlier Windows
+// skip was an untested-surface placeholder, not a known incompatibility.
 func TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("git worktree temp path behavior is covered on Unix CI/local hosts for now")
-	}
 	repo := initRepo(t)
 	worktreeParent := t.TempDir()
 	worktreePath := filepath.Join(worktreeParent, "feature-test")

@@ -152,7 +152,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode serve activity into dashboard Activity sources |
+| `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
@@ -177,7 +177,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
-| `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | idea | Investigate exec MCP running/abort timing flakiness under full agents-plugin-tool test suite load |
+| `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | done | Fixed exec finalize/reconcile race + too-tight abort window flaking the full-suite abort test (260620 Phase 2) |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -297,18 +297,34 @@ dropped tickets live in hidden archive dirs and git history.
   (`260619-feat-ws-lead-tune-skill`: `670e37dd`, merged `d3ca7a90`). Future
   `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
   fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
-- `260620-chore-pre-shipping-windows-surface-verification` (ready, chore;
-  parent `260605` epic, gates its closure) - **implementation-ready, current
-  target.** Pre-ship hardening of the Windows surface (six `*_windows.go` files
-  are 0%-covered on Linux). Phase 1 (P0, in progress): cross-platform
-  process-tree cancellation test + Windows `cancelAsyncProcessTree` tree-reap fix
-  (today kills root pid only → orphans), conforming to existing cancel contract
-  `260505-agent-cancel-recovery` (best-effort + `cleanup_needed`; no new
-  contract). Phase 2 stabilizes flaky `260616` before trusting Windows abort;
-  Phase 3 runs the full suite on the WSL2→Windows interop host; Phase 4 (stretch)
-  worktree path-layout. **Hard constraint:** tree-kills scoped to the spawned
-  subtree by PID/job — never image-name (`taskkill /IM`) — because the dogfooding
-  WSL2 host runs a live `claude.exe`.
+- `260620-chore-pre-shipping-windows-surface-verification` (done, chore, in
+  `.done/`; parent `260605` epic, gates its closure) - **All phases DONE: 1
+  (`d89e6539`), 2 (`f6c4e7d1`), 3 (`326fa74f`), 4 (`994974af`); branch
+  unmerged pending merge to the `260605` epic.** Pre-ship
+  hardening of the Windows surface (six `*_windows.go` files were 0%-covered on
+  Linux). All phases live on branch `implement/260620-win-surface` (unmerged; was
+  `implement/win-cancel-process-tree`, renamed when Phase 2 stacked on). **Phase
+  1:** both Windows cancel paths (`cancelAsyncProcessTree` + execjob
+  `cancelProcess`) now reap the whole spawned subtree via Toolhelp32 PID-tree
+  enumeration (was root-pid-only → orphans); deterministic cross-platform reap
+  tests added. **Phase 2:** fixed the flaky exec abort (`260616`, now `.done/`) —
+  a real `finalize()`/`reconcile()` race (active-map delete moved inside the `mu`
+  section, after the terminal status write) plus a too-tight abort window;
+  green under `-race`. **Phase 3:** first real Windows full-suite run
+  (go1.26.3) — `go test ./...` now green 12/12. It found a real defect Phase 1
+  could not (the subtree kill worked but Windows `processAlive` mis-reported an
+  exited-but-unreaped process as alive); fixed across wsagent/execjob/wsstate
+  with a zero-timeout `WaitForSingleObject` signaled-state check (also closes a
+  Windows recovery-path defect). Three anticipated test-side divergences
+  (abort timing, JSON-path matching, separator) also fixed; review clean. Single
+  host / single toolchain. Contract unchanged (`260505-agent-cancel-recovery`
+  best-effort + `cleanup_needed`; no new contract). **Phase 4:** dropped the
+  Windows skip on the linked-worktree layout test (`internal/wsstate/paths_test.go`,
+  `994974af`) so it runs on a Windows drive-letter root; test-only, no defect
+  found (key derivation was already correct on Windows), review clean. **Hard
+  constraint:** tree-kills scoped
+  to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
+  because the dogfooding WSL2 host runs a live `claude.exe`.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
