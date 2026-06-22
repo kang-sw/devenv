@@ -285,3 +285,40 @@ a Windows-aware variant, or add a new test covering linked-worktree project
 identity + worktree-state separation under drive-letter/UNC roots. Stretch
 because it is lower frequency than the cancel/abort path; promote if Windows
 worktree usage is on the near-term roadmap.
+
+### Result (994974af) - 2026-06-22
+
+Test-only. Chose option (a) — drop the Windows skip and let the existing test run
+everywhere — over option (b) (a separate drive-letter/UNC test). Unlike Phase 3,
+the Windows run surfaced no defect: the linked-worktree key derivation was
+already correct on Windows, so this phase confirms rather than fixes.
+
+- **Why un-skip suffices:** the test body is already separator-neutral
+  (`filepath.Join`, `canonicalForTest`), and both the derived keys
+  (`gitIdentity` -> `canonicalPath` -> `sha256[:8]`) and the test expectations
+  (`canonicalForTest` -> the same `canonicalPath`) flow through one
+  canonicalization pipeline, so a Windows drive-letter root (`t.TempDir` lives
+  under `C:\...\Temp`) is exercised symmetrically with a POSIX root. The old skip
+  ("git worktree temp path behavior is covered on Unix ... for now") was an
+  untested-surface placeholder, not a known incompatibility. Removed the
+  now-unused `runtime` import and replaced the skip with a doc comment so the
+  portability rationale survives.
+- **UNC root not covered:** setting up a real UNC share in-process is out of scope
+  for a P3 stretch; the ticket lists drive-letter/UNC as alternatives, and the
+  drive-letter root is now covered for free by the Windows `t.TempDir`.
+- **Verification:** Windows host (go1.26.3 windows/amd64, the `C:\temp\devenv-wintest`
+  native copy — Go cannot build over the WSL 9p mount) — target test PASS (0.76s),
+  full `internal/wsstate` package PASS (6.3s), target test `-count=3` stable.
+  Linux — target test + full package PASS, `go vet` clean, `GOOS=windows go vet`
+  clean. No production code touched.
+- **Review:** single general reviewer, clean (0 Critical/Important/minor);
+  independently traced the shared `canonicalPath`+`sha256[:8]` pipeline, confirmed
+  no dangling `runtime` reference, and confirmed the doc comment does not overstate
+  coverage (no UNC claim).
+- **Spec:** no changes (test-only; no caller-visible interface). Mental model:
+  no changes (test-only confirmation; the Windows-liveness debt and Toolhelp32
+  cancel behavior were already recorded by Phase 3, and this introduces no new
+  invariant).
+
+This completes every enumerated Windows-surface phase (1-4); the ticket's
+remaining work is the merge decision.

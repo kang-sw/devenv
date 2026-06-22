@@ -297,9 +297,10 @@ dropped tickets live in hidden archive dirs and git history.
   (`260619-feat-ws-lead-tune-skill`: `670e37dd`, merged `d3ca7a90`). Future
   `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
   fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
-- `260620-chore-pre-shipping-windows-surface-verification` (ready, chore;
-  parent `260605` epic, gates its closure) - **Phases 1 (`d89e6539`), 2
-  (`f6c4e7d1`) & 3 (`326fa74f`) DONE; Phase 4 (P3, stretch) optional.** Pre-ship
+- `260620-chore-pre-shipping-windows-surface-verification` (done, chore, in
+  `.done/`; parent `260605` epic, gates its closure) - **All phases DONE: 1
+  (`d89e6539`), 2 (`f6c4e7d1`), 3 (`326fa74f`), 4 (`994974af`); branch
+  unmerged pending merge to the `260605` epic.** Pre-ship
   hardening of the Windows surface (six `*_windows.go` files were 0%-covered on
   Linux). All phases live on branch `implement/260620-win-surface` (unmerged; was
   `implement/win-cancel-process-tree`, renamed when Phase 2 stacked on). **Phase
@@ -317,8 +318,11 @@ dropped tickets live in hidden archive dirs and git history.
   Windows recovery-path defect). Three anticipated test-side divergences
   (abort timing, JSON-path matching, separator) also fixed; review clean. Single
   host / single toolchain. Contract unchanged (`260505-agent-cancel-recovery`
-  best-effort + `cleanup_needed`; no new contract). Phase 4 (worktree
-  path-layout) remains optional/stretch. **Hard constraint:** tree-kills scoped
+  best-effort + `cleanup_needed`; no new contract). **Phase 4:** dropped the
+  Windows skip on the linked-worktree layout test (`internal/wsstate/paths_test.go`,
+  `994974af`) so it runs on a Windows drive-letter root; test-only, no defect
+  found (key derivation was already correct on Windows), review clean. **Hard
+  constraint:** tree-kills scoped
   to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
   because the dogfooding WSL2 host runs a live `claude.exe`.
 ## Session Notes
