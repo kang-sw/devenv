@@ -122,15 +122,20 @@ subagents. Direction, decisions, and evidence live in
   creation and merge-back stay out of scope (native git tooling + the
   merge/cleanup idea tickets). Captured from the 2026-06-19 lead-discuss dogfood
   that added the per-workroot `ferrule` manual clarification (`13eeccd9`).
-- `260620-chore-pre-shipping-windows-surface-verification` (**todo** — final
-  pre-ship pass): all core milestones landed and the Linux surface is
-  continuously dogfooded; this child hardens the **Windows surface** before
-  shipping. Linux baseline is green (12 pkgs pass, vet clean, pure-Go
-  `modernc.org/sqlite` so Windows needs no CGO). Records P0–P3: process-tree
-  cancellation cross-platform test + Windows root-PID-only `cancelAsyncProcessTree`
-  fix (P0), stabilize the `260616` flaky abort as a prereq, a Windows full-suite
-  run validating the six `*_windows.go` branches, and optional Windows worktree
-  path-layout coverage. Gates epic closure.
+- `260620-chore-pre-shipping-windows-surface-verification` (**done** `.done/`,
+  merged `45ec2a2a` — final pre-ship Windows-surface pass): all four phases landed
+  — Windows cancel subtree-reap (P1 `d89e6539`), exec finalize/reconcile race fix
+  (P2 `f6c4e7d1`), first real Windows full-suite run + exited-process liveness fix
+  (P3 `326fa74f`), un-skip linked-worktree layout test (P4 `994974af`). Key
+  limitation: verified via `go test` only — never the launcher cold-install path.
+- `260622-chore-windows-shipping-hardening` (**todo** — Windows shipping gate):
+  successor to 260620; makes the Windows surface shipping-correct with
+  **mercenary-on-Windows in v1 scope** (Phase A static code hardening — POSIX
+  quoting / backslash codex path / `.exe` launcher probe / atomic `replaceFile` /
+  `OpenProcess` ACCESS_DENIED / sync-runner tree-kill; Phase B launcher cold-load
+  robustness — rsrc materialization race, AV timeout, replace-over-running-exe;
+  Phase C branch-pinned real-Windows acceptance). Epic merge to `main` is deferred
+  until this passes. **Now gates epic closure** (replaces 260620 as the gate).
 
 ## Cross-Child Decisions
 
