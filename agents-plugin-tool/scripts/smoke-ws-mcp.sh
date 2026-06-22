@@ -50,7 +50,7 @@ login = call(
         "jsonrpc": "2.0",
         "id": 3,
         "method": "tools/call",
-        "params": {"name": "ws.lead.login", "arguments": {"root": root, "format": "json"}},
+        "params": {"name": "ws.ferrule", "arguments": {"root": root, "format": "json"}},
     }
 )
 login_text = "".join(part.get("text", "") for part in login.get("content", []))
