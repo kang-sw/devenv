@@ -2235,6 +2235,8 @@ func interruptHookCommand(root, name string) string {
 	return cmd
 }
 
+// shellQuote wraps value in POSIX single quotes, escaping any embedded single
+// quotes via the '"'"' splice. Used by quoteHookArg on non-Windows platforms.
 func shellQuote(value string) string {
 	if value == "" {
 		return "''"

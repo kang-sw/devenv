@@ -43,11 +43,10 @@ func TestCacheLauncherCommandSkipsShellShimOnWindows(t *testing.T) {
 
 	cmd, ok := cacheLauncherCommand(fakeExe)
 	if !ok {
-		// No python3/python on this host; the probe may legitimately return
-		// false. The important invariant is that if ok is true, it must not
-		// be the shell shim.
-		t.Logf("cacheLauncherCommand returned ok=false (no python on PATH); shell-shim skip is still the correct code path")
-		return
+		// No python3/python on this host and no .exe present — the probe
+		// legitimately returns false. Skip so the result is distinguishable
+		// from a passing assertion in the test report.
+		t.Skip("cacheLauncherCommand returned ok=false (no python on PATH, no .exe); shell-shim skip code path is correct but assertion is unverifiable without python")
 	}
 	if cmd.Path == shimPath {
 		t.Errorf("cacheLauncherCommand returned shell shim path %q on Windows; must not select extensionless launcher", shimPath)

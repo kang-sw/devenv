@@ -21,3 +21,11 @@ func TestOpenErrorMeansAliveInvalidParameter(t *testing.T) {
 		t.Error("openErrorMeansAlive(ERROR_INVALID_PARAMETER) = true, want false")
 	}
 }
+
+// TestOpenErrorMeansAliveNil verifies that a nil error is not "alive" via this
+// helper (the nil case means OpenProcess succeeded and we go to WaitForSingle).
+func TestOpenErrorMeansAliveNil(t *testing.T) {
+	if openErrorMeansAlive(nil) {
+		t.Error("openErrorMeansAlive(nil) = true, want false")
+	}
+}
