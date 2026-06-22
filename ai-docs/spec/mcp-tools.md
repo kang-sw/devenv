@@ -399,6 +399,16 @@ frontmatter field when the config is enabled; a `pending` or `blocked` field
 blocks the promotion. The move stages atomically and never commits.
 {#260620-ticket-move-tool}
 
+`tickets.create` creates a dated ticket stub at a caller-specified initial state
+(`idea`, `todo`, or `ready`). It auto-prefixes today's date to form the full
+ticket stem, writes a minimal frontmatter stub (`title: ""` placeholder;
+`sage-review: pending` for `todo/+` states), and returns the created path and a
+caller-facing tip. Terminal states (`done`, `dropped`) and an empty stem are
+rejected with errors. The tool is not idempotent: a duplicate path returns an
+error. The `idea/` tip directs the caller to promote through `todo/` to trigger
+sage review; the `todo/+` tip directs the caller to run sage review before
+promoting further. {#260622-create-ticket-tool}
+
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
 `mental_models.list` returns available mental-model documents with domain,
