@@ -869,6 +869,24 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
+	case "tickets.create":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		stem, _ := params.Arguments["stem"].(string)
+		initialState, _ := params.Arguments["initial_state"].(string)
+		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
+			Stem:         stem,
+			InitialState: initialState,
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTicketCreate(result), nil)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1708,6 +1726,13 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 			b.WriteString("\n")
 		}
 	}
+	return b.String()
+}
+
+func formatTicketCreate(res wsdoc.TicketCreateResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Created %s\n", res.Path)
+	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
 	return b.String()
 }
 
@@ -2563,6 +2588,18 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "tickets.create",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus sage-review: pending for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar)."),
+					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
+				},
+				"required": []string{"stem", "initial_state"},
+			},
+		},
+		{
 			"name":        "path.generate",
 			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
 			"inputSchema": map[string]any{
@@ -2779,7 +2816,7 @@ func rootAwareToolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "path.generate", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "path.generate", "playbook.render",
 		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
 		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
 		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",

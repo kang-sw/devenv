@@ -232,6 +232,7 @@ func runtimeCapabilityCommandNames() []string {
 		"specs.list",
 		"specs.status",
 		"tickets.close",
+		"tickets.create",
 		"tickets.find",
 		"tickets.list",
 		"tickets.move",
@@ -519,6 +520,8 @@ func ticketsCommand(args []string) {
 		ticketsClose(args[1:])
 	case "move":
 		ticketsMove(args[1:])
+	case "create":
+		ticketsCreate(args[1:])
 	default:
 		ticketsUsage()
 		os.Exit(2)
@@ -526,7 +529,7 @@ func ticketsCommand(args []string) {
 }
 
 func ticketsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create>")
 }
 
 func ticketsList(args []string) {
@@ -645,6 +648,28 @@ func ticketsMove(args []string) {
 		SageReview: resolved.Value,
 	})
 	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), err)
+}
+
+func ticketsCreate(args []string) {
+	fs := flag.NewFlagSet("tickets create", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	stem := fs.String("stem", "", "semantic ticket stem without date prefix")
+	initialState := fs.String("initial-state", "", "ticket status: idea, todo, or ready")
+	_ = fs.Parse(args)
+	rest := fs.Args()
+	if *stem == "" && len(rest) > 0 {
+		*stem = rest[0]
+		rest = rest[1:]
+	}
+	if *initialState == "" && len(rest) > 0 {
+		*initialState = rest[0]
+	}
+
+	result, err := wsdoc.TicketCreate(defaultRoot(*root), wsdoc.TicketCreateOptions{
+		Stem:         *stem,
+		InitialState: *initialState,
+	})
+	printTextOrFatal("tickets create", mcp.FormatTicketCreate(result), err)
 }
 
 func specsCommand(args []string) {
