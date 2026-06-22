@@ -695,6 +695,31 @@ func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
 	}
 }
 
+// TestBuildCodexInvocationSystemPromptForwardSlash verifies that
+// buildCodexInvocation applies filepath.ToSlash to the SystemPromptPath before
+// formatting it into the model_instructions_file config arg. On Unix
+// filepath.ToSlash is a no-op (backslash is a valid filename character, not a
+// path separator), so this test exercises a Unix path; the active Windows
+// transform (backslash → forward-slash) is verified on a Windows host in
+// Phase C.
+func TestBuildCodexInvocationSystemPromptForwardSlash(t *testing.T) {
+	// Use a normal Unix path; filepath.ToSlash is identity here, so the emitted
+	// arg must be the double-quoted path with no backslash escaping.
+	unixPath := "/home/user/ws/system.md"
+	invocation, err := buildCodexInvocation(RunnerRequest{
+		Prompt:           "prompt",
+		SystemPromptPath: unixPath,
+	})
+	if err != nil {
+		t.Fatalf("buildCodexInvocation returned error: %v", err)
+	}
+	joined := strings.Join(invocation.Args, "\x00")
+	want := `model_instructions_file="/home/user/ws/system.md"`
+	if !strings.Contains(joined, want) {
+		t.Fatalf("codex args: expected %q; got args: %+v", want, invocation.Args)
+	}
+}
+
 func TestBuildCodexInvocationAddsEffortOverrideWhenPresent(t *testing.T) {
 	invocation, err := buildCodexInvocation(RunnerRequest{
 		Prompt: "effort prompt",
