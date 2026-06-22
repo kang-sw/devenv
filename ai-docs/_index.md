@@ -177,7 +177,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
-| `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | idea | Investigate exec MCP running/abort timing flakiness under full agents-plugin-tool test suite load |
+| `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | done | Fixed exec finalize/reconcile race + too-tight abort window flaking the full-suite abort test (260620 Phase 2) |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
@@ -298,20 +298,26 @@ dropped tickets live in hidden archive dirs and git history.
   `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
   fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
 - `260620-chore-pre-shipping-windows-surface-verification` (ready, chore;
-  parent `260605` epic, gates its closure) - **Phase 1 (P0) DONE
-  (`d89e6539`), Phase 2 next.** Pre-ship hardening of the Windows surface (six
-  `*_windows.go` files are 0%-covered on Linux). **Phase 1 done** (branch
-  `implement/win-cancel-process-tree`, unmerged): both Windows cancel paths
-  (`cancelAsyncProcessTree` + execjob `cancelProcess`) now reap the whole spawned
-  subtree via Toolhelp32 PID-tree enumeration (was root-pid-only → orphans);
-  deterministic cross-platform reap tests added; Linux green + `GOOS=windows`
-  build/vet clean (Windows kill path runs only in Phase 3). Contract unchanged
-  (`260505-agent-cancel-recovery` best-effort + `cleanup_needed`; no new
-  contract). Phase 2 stabilizes flaky `260616` before trusting Windows abort;
-  Phase 3 runs the full suite on the WSL2→Windows interop host; Phase 4 (stretch)
-  worktree path-layout. **Hard constraint:** tree-kills scoped to the spawned
-  subtree by PID/job — never image-name (`taskkill /IM`) — because the dogfooding
-  WSL2 host runs a live `claude.exe`.
+  parent `260605` epic, gates its closure) - **Phases 1 (P0, `d89e6539`) & 2
+  (`f6c4e7d1`) DONE; Phase 3 (P1) next.** Pre-ship hardening of the Windows
+  surface (six `*_windows.go` files are 0%-covered on Linux). All phases live on
+  branch `implement/260620-win-surface` (unmerged; was
+  `implement/win-cancel-process-tree`, renamed when Phase 2 stacked on). **Phase
+  1:** both Windows cancel paths (`cancelAsyncProcessTree` + execjob
+  `cancelProcess`) now reap the whole spawned subtree via Toolhelp32 PID-tree
+  enumeration (was root-pid-only → orphans); deterministic cross-platform reap
+  tests added; Linux green + `GOOS=windows` build/vet clean (Windows kill path
+  runs only in Phase 3). **Phase 2:** fixed the flaky exec abort
+  (`260616`, now `.done/`) — a real `finalize()`/`reconcile()` race
+  (active-map delete moved inside the `mu` section, after the terminal status
+  write) plus a too-tight abort window (abort test now uses a dedicated
+  `sleep 30` helper; non-blocking budget relaxed `1s→5s`); review clean, green
+  under `-race`. Contract unchanged (`260505-agent-cancel-recovery` best-effort
+  + `cleanup_needed`; no new contract). Phase 3 runs the full suite on the
+  WSL2→Windows interop host; Phase 4 (stretch) worktree path-layout. **Hard
+  constraint:** tree-kills scoped to the spawned subtree by PID/job — never
+  image-name (`taskkill /IM`) — because the dogfooding WSL2 host runs a live
+  `claude.exe`.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

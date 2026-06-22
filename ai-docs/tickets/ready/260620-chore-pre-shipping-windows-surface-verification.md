@@ -153,6 +153,59 @@ abort flaky only under the full `internal/mcp` suite). Land the fix or, if it is
 environmental, document the trigger and a deterministic guard. This phase gates
 confidence in Phase 3's abort assertions.
 
+### Result (f6c4e7d1) - 2026-06-22
+
+Landed a real runtime fix — the flake was a concurrency defect, not just a
+scheduler-sensitive assertion. `260616` is resolved and moved to `.done/`.
+
+- **Root cause:** `execjob.finalize()` deleted the `active` sync.Map worker entry
+  BEFORE taking `mu` to write the terminal status. After `cmd.Wait()` the OS
+  process is already gone, so a concurrent `mu`-guarded `reconcile()` (driven by
+  an `exec.result`/`exec.status` poll) could observe the window
+  {active absent, process dead, status still running} and mis-mark a
+  just-succeeded job `failed: exec job worker is no longer active` (exit_code 0,
+  stdout already had the completion marker). The job self-healed when
+  `finalize()` later wrote `succeeded`, but the poll had already returned the
+  transient bad state — the "flaky under full-suite load" failure, since
+  back-to-back tests shift scheduling into the window.
+- **Fix (runtime):** delete the active entry via a `defer` registered after the
+  `defer mu.Unlock()` so it runs (LIFO) still under `mu`, after
+  `writeRecordLocked`. `finalize()` and `reconcile()` are now serialized;
+  reconcile only ever sees {active present, status maybe running} or
+  {active absent, status terminal}, never the bad window. The defer also covers
+  the `loadErr` early return so an unreadable record cannot leak a stale entry.
+- **Fix (test):** the abort test (`TestExecMCPRunningLargeAndAbort`) shared the
+  `sleep 6` helper, which after the 5s `ForegroundWindow` left only ~1s before
+  natural completion — under load the job finished before abort landed
+  (`status: succeeded`). Gave it a dedicated `sleep 30` helper
+  (`mcpAbortShellArgs`) so abort deterministically lands while running (abort
+  reaps it promptly, so no 30s wait). Relaxed the non-blocking budget
+  `1s → 5s` (the 1.16s spike was `serveStdioWithSession` setup jitter, not a
+  block; a real block against the long job would be ~25s). The shared `sleep 6`
+  `mcpLongShellArgs` is preserved for its other consumer
+  (`TestExecMCPResultReadableJSONStdoutAndTimeout`).
+- **Verification:** negative mutation proved causality — old ordering + a
+  throwaway pre-lock sleep failed the timeout test deterministically; fixed
+  ordering + a widened locked window PASSED. Full `go test ./... ×6` green,
+  `internal/mcp ×5` green, affected tests + full `execjob` package green under
+  `-race`, `go vet` clean on Linux and `GOOS=windows`, `GOOS=windows go build`
+  clean.
+- **Review:** single general reviewer, **clean** (zero Critical/Important/minor);
+  independently re-verified the defer-LIFO ordering, no deadlock/cleanup
+  regression, the lost-worker invariant for genuine crashes, and the test
+  changes under `-race`.
+- **Spec:** no changes (concurrency bug fix restoring documented best-effort
+  behavior; `exec.result/status/abort` contracts unchanged). Mental model
+  `mcp-runtime` gained one Common Mistakes entry for the active-delete ordering
+  invariant.
+
+> Forward (Phase 3): Linux abort/cancel assertions are now trustworthy, so the
+> Windows full-suite run can rely on them. The Windows abort path
+> (`execjob/process_windows.go` subtree reap from Phase 1) still has not run on a
+> Windows host — Phase 3 must execute it and confirm the same finalize/reconcile
+> ordering holds there (the race fix is OS-agnostic; only `processAlive` /
+> `cancelProcess` differ by platform).
+
 ### Phase 3: Windows full-suite run + Windows-branch validation (P1)
 
 On the WSL-attached Windows host, run `go test ./... -count=1` and capture the

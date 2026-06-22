@@ -105,6 +105,7 @@ related:
 - Migrating agent or exec state into SQLite while also moving large stream payloads into the database; that defeats raw tail/read/grep and increases lock pressure.
 - Classifying `*_path` fields as file-backed payloads; the path strings are SQLite metadata indexes even when the bytes at those paths stay file-backed.
 - Treating a missing exec stream file as empty output; status/result/raw readers must surface the recoverable file-backed payload consistency state so prune/tombstone or repair paths can diagnose the artifact.
+- Moving `active.Delete` in `execjob.finalize()` outside the `mu` critical section, or before `writeRecordLocked`: after `cmd.Wait()` the process is gone, so any window where the active-map entry is absent but the record still says running lets a concurrent `reconcile()` (driven by `exec.result`/`exec.status`) mis-mark a just-succeeded job as "exec job worker is no longer active". The active entry is proof that a worker still owns the terminal status transition; it must be removed only inside the same `mu` section that writes the terminal status.
 - Testing session-key agent dispatch only with a live bogus worker; use controlled completed fixtures for wait/result/print assertions so timing does not decide whether dispatch was correct.
 
 ## Technical Debt
