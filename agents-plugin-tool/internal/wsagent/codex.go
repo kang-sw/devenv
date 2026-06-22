@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -149,7 +150,10 @@ func buildCodexInvocation(req RunnerRequest) (codexInvocation, error) {
 		args = append(args, "-m", req.Model)
 	}
 	if req.SystemPromptPath != "" {
-		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
+		// Use forward slashes so Windows paths (C:\...) do not produce
+		// backslash-escape ambiguity when codex parses the -c config value.
+		// filepath.ToSlash is a no-op on Unix, so the Unix behavior is unchanged.
+		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", filepath.ToSlash(req.SystemPromptPath)))
 	}
 	if effort := strings.TrimSpace(req.Effort); effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+effort)

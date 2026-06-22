@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -257,9 +258,22 @@ func cacheLauncherCommand(exe string) (asyncWorkerCommand, bool) {
 	}
 	sort.Strings(pluginDirs)
 	for i := len(pluginDirs) - 1; i >= 0; i-- {
-		shim := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher")
-		if regularFileExists(shim) {
-			return asyncWorkerCommand{Path: shim}, true
+		// On Windows the extensionless shell shim (ws-mcp-launcher) is not
+		// executable; skip it so the .py + python branch is reached. On non-
+		// Windows keep the original probe order (shell shim first, then .py).
+		if runtime.GOOS != "windows" {
+			shim := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher")
+			if regularFileExists(shim) {
+				return asyncWorkerCommand{Path: shim}, true
+			}
+		}
+		// Native Windows launcher: ws-mcp-launcher.exe (Windows LookPath already
+		// resolves .exe, but probe the explicit path first if it is present).
+		if runtime.GOOS == "windows" {
+			native := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher.exe")
+			if regularFileExists(native) {
+				return asyncWorkerCommand{Path: native}, true
+			}
 		}
 		py := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher.py")
 		if regularFileExists(py) {
@@ -2217,10 +2231,12 @@ func interruptHookCommand(root, name string) string {
 	if err != nil || exe == "" {
 		exe = "ws-mcp"
 	}
-	cmd := shellQuote(exe) + " mercenary check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
+	cmd := quoteHookArg(exe) + " mercenary check-inbox --root " + quoteHookArg(root) + " --name " + quoteHookArg(name)
 	return cmd
 }
 
+// shellQuote wraps value in POSIX single quotes, escaping any embedded single
+// quotes via the '"'"' splice. Used by quoteHookArg on non-Windows platforms.
 func shellQuote(value string) string {
 	if value == "" {
 		return "''"
@@ -2326,15 +2342,7 @@ func writeCurrentCall(path string, call CurrentCall) error {
 }
 
 func replaceFile(tmp, path string) error {
-	if err := os.Rename(tmp, path); err == nil {
-		return nil
-	} else if _, statErr := os.Stat(path); statErr != nil {
-		return err
-	}
-	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return removeErr
-	}
-	return os.Rename(tmp, path)
+	return atomicReplaceFile(tmp, path)
 }
 
 func isActiveCallStatus(status string) bool {
