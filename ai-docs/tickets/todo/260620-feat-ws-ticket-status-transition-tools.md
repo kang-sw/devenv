@@ -4,7 +4,7 @@ related:
   260622-feat-sage-review-ticket-gate: sage-review pre-condition hook and downward demotion tip are required additions to Phase 1 of this ticket
 ---
 
-# ws ticket status-transition MCP tools (close/drop/promote)
+# ws ticket status-transition MCP tools (close/drop/promote/demote)
 
 ## Background
 
@@ -85,23 +85,37 @@ parity. Update `ai-docs/spec/mcp-tools.md` and both `runtime.json` contracts
 manifest update; `TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`
 covers the full surface.
 
-Open design points to settle at implementation start (deliberately not decided
-yet):
-- Whether `tickets.move(stem, to=ready)` is permitted at all, or whether ready
-  promotion stays exclusively in `lead-write-ticket` so the spec-address gate is
-  never bypassed — and if permitted, whether the tool refuses a ready move that
-  lacks `spec:`/`spec-remove:`/`## Spec Impact`.
-- Whether close/move are exposed in the agentless (wsflow) surface or full-only.
+Settled design points (resolved in discussion):
+- **`tickets.move(stem, to=ready)` is permitted.** The spec-address gate lives in
+  `lead-write-ticket` as a playbook-layer concern, not an MCP-layer hard lock.
+  The tool does not enforce `spec:`/`spec-remove:`/`## Spec Impact` presence;
+  that validation stays in the playbook.
+- **Both tools land in the wsflow surface as well as the full surface.** wsflow
+  diverges from the full ws surface only for mercenary and exec (external-process)
+  features. Ticket lifecycle tools are not in that category and belong in both
+  contracts. This boundary rule should be documented in the wsflow surface mental
+  model (currently implicit; a doc update is a follow-on from this ticket).
+- **`sage_review` config absent → no-op.** If the `sage_review` config key is not
+  yet registered (260622 Phase 3 registers it), the pre-condition check treats it
+  as `off` and allows the move. Same logic as `sage-review` field absent passing
+  the gate.
 
 Verification:
 - An atomic close/move/demote leaves frontmatter + directory move + (on close)
   the Resolution section all in one staged change set, with no unstaged remainder.
+  Implementation must stage via: write file → `git add <old-path>` → `git mv
+  <old-path> <new-path>` to preserve the edit in the index before rename.
 - Downward move from `ready/` returns the spec-cleanup tip in the tool response.
 - Upward move with `sage_review` config on: fails on `sage-review: pending |
-  blocked`; passes on `completed | skipped | absent`.
+  blocked`; passes on `completed | skipped | absent`. Config key absent → passes
+  (no-op, treated as `off`).
 - Convention guards reject: unknown stem, invalid target status, re-close of an
   already-closed ticket, and any date-prefix mutation.
-- `go test ./...` green, including the runtime-contract cross-checks.
+- `go test ./...` green, including both runtime-contract cross-checks: full
+  surface (`TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`) and
+  wsflow surface (`TestRuntimeCapabilitiesCommandReportsWsflowContractSurface`).
+- `ai-docs/spec/mcp-tools.md` updated with new tool entries under the ticket
+  tools section, using `{#YYMMDD-slug}` anchor convention.
 
 ### Phase 2: transition-guidance rewiring
 
