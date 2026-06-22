@@ -56,3 +56,27 @@ config *reads* may not be applied on the *render auto-inject* path.
 - Decide whether the fix is in the render auto-inject resolver (apply the
   light/core/deep ↦ small/medium/large synonym map) or in normalizing the
   playbooks to canonical tier-named vars.
+
+## Resolution — dropped (2026-06-22)
+
+Not a code bug. The suspected cause was wrong: current source already normalizes
+every bundled delegate playbook to the single `{{.RoleModel}}` var (the
+`light/core/deep` → `small/medium/large/xlarge` collapse landed on 2026-06-20 in
+`260620-bug-ws-tier-vocabulary-split-undocumented`, Phase 2 `ddc2caf9`, merged
+`2601bc8a`). There is no `DeepModel`/`CoreModel` var left in source to resolve.
+
+The runtime error came from a **stale installed plugin**: the ws MCP server was
+serving a pre-`2601bc8a` rsrc snapshot whose `reviewer.md` still declared
+`DeepModel`, so render demanded an alias-named var that the post-collapse caller
+no longer supplies. The `context: {"DeepModel": ...}` workaround was patching the
+stale binary, not source.
+
+Confirmed fixed by rebuilding/reinstalling the plugin (dev build, 2026-06-22):
+the installed `reviewer.md` now declares `RoleModel`, no `Light/Core/DeepModel`
+remains anywhere in the installed rsrc, and `playbook.render(name: "reviewer")`
+with no `context` succeeds (`recommended-tier: large`, body resolves
+`Alias model for this role: opus.`). Dropped — no source defect to track.
+
+Possible (separate, not filed here): a plugin-version-drift guard so a stale
+installed runtime surfaces the mismatch instead of failing opaquely on a renamed
+var. Raise as a fresh idea if drift recurs.
