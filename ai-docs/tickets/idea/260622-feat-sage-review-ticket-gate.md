@@ -147,6 +147,8 @@ Auto-prefixes date, writes frontmatter stub with `sage-review: pending` for
   design coherence, duct-tape, right-problem, and autonomous-vs-missing gaps.
 - `ticket-reviewer-completeness` playbook: receives ticket path, returns structured
   verdict on ticket structure and clarity gaps.
+- Both reviewer playbooks are **read-only**: no file writes, no shell execution,
+  no MCP mutations. Return verdict text only.
 - `lead-write-ticket` gains the judge gate (see Decisions) and invokes both
   reviewers in parallel after ticket commit when `sage_review` config is `auto |
   ask` and landing status is `todo/+`. Lead synthesizes verdicts and writes
