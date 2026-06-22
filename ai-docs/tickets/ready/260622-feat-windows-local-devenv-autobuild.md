@@ -77,6 +77,25 @@ gate conservative (atomic replace, path handling, processAlive) were fixed in
 - Update `ai-docs/spec/plugin-runtime.md`, `ai-docs/ref/ws-mcp.md`, and
   `ai-docs/mental-model/plugin-runtime.md` to reflect Windows local-devenv build.
 
+### Result (ba67f61e) - 2026-06-22
+
+Done. Gate `os_name == "windows"` removed from `read_local_devenv_contract` in
+both launchers; `go` check made Windows-aware (require existing file, keep X_OK on
+POSIX); `local_devenv_build_env` now takes `os_name` and recovers
+`USERPROFILE`/`LOCALAPPDATA` on Windows (`os_name` threaded through
+`build_local_devenv_runtime`). Tests: two Windows-disabled assertions inverted to
+`assertTrue`, new Windows build-env recovery test + non-Windows negative
+assertions, `fake_build` stubs widened. 40 canonical + 8 wsflow tests green,
+both launchers `py_compile` clean.
+
+- **No spec change:** `plugin-runtime.md` local-devenv text is already OS-neutral
+  (no Windows exclusion clause); the change makes it more accurate, not divergent.
+  `ws-mcp.md` runbook + `plugin-runtime` mental model updated.
+- **End-user-safe:** marker-absent installs return `None` (release path) on every
+  OS; only Windows + valid marker + present `go` newly activates.
+- Closes the gate-divergence portion of
+  `260622-bug-wsflow-launcher-coldload-divergence` (wsflow mirrored).
+
 ### Phase 2: PowerShell one-shot installer + marker writer + dogfood doc
 
 - Add `scripts/install-claude-plugin.ps1`: snapshot `agents-plugin/` into
@@ -87,6 +106,23 @@ gate conservative (atomic replace, path handling, processAlive) were fixed in
 - Update `ai-docs/ref/windows-dogfood.md`: replace the manual
   `WS_MCP_BOOTSTRAP_BINARY` route with the one-shot installer + auto-build loop;
   keep the bootstrap route documented as the no-clone fallback.
+
+### Result (cbb7f983) - 2026-06-22
+
+Done. `scripts/install-claude-plugin.ps1` ports install.sh's registration
+(snapshot + marketplace.json + settings.json + known_marketplaces.json) and writes
+the marker; JSON merges delegated to `python3` (PS-version agnostic), marker via
+`ConvertTo-Json`, `-DryRun` supported, `claude plugin install` invoked when
+present. `windows-dogfood.md` rewritten to lead with the one-shot + auto-build
+loop, `WS_MCP_BOOTSTRAP_BINARY` kept as no-clone fallback.
+
+- **PowerShell syntax deferred to the Windows host** (no `pwsh` on the Linux dev
+  host). The embedded python JSON-merge logic was functionally verified on Linux:
+  settings merge preserves unrelated keys + drops obsolete `ws`/`ws@ws`,
+  marketplace.json generated against the real `plugin.json` (v0.30.1, `./ws`),
+  known_marketplaces entry correct.
+- Empirical Windows cold-load + auto-build remains deferred to `260622-chore`
+  Phase C.
 
 ## Verification
 
