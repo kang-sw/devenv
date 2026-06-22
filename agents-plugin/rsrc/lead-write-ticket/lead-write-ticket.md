@@ -106,11 +106,11 @@ Target: user request
 
 ### 3. Move
 
-1. For moves, use native `git mv`.
-2. For `.done/` moves, add `completed:` date in frontmatter.
+1. For moves, use `{{.McpNamespace}}/tickets.close(stem, status)` for done/dropped, or `{{.McpNamespace}}/tickets.move(stem, to)` for idea/todo/ready; fall back to native `git mv` when MCP tools are unavailable.
+2. For `.done/` moves via native `git mv`, add `completed:` date in frontmatter; `tickets.close` writes this automatically.
 3. If the only requested change is moving a `workset` to `ready/`, make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.
 4. For `workset` moves to `ready/` with other edits, do not move status; keep only valid content edits.
-5. For proceed-routed `todo/` -> `ready/` promotion, defer `git mv` until **Spec-address Check** passes.
+5. For proceed-routed `todo/` -> `ready/` promotion, defer the move until **Spec-address Check** passes.
 
 ### 4. Shape
 
@@ -183,7 +183,7 @@ Target: user request
 2. For non-ready focus entries, use `` `stem` (`status`, `<role>`) - one-line purpose and why it is in focus; not implementation-ready ``.
 3. For `ready/`, remind that implementation commits should include a `## Spec` section for existing stems or the doc closeout should resolve `## Spec Impact`.
 4. For `ready/`, ensure `ai-docs/_index.md ## Ticket Focus` has `` `stem` - one-line purpose, readiness, and dependency notes ``.
-5. For deferred `todo/` -> `ready/` promotion, perform native `git mv` before commit.
+5. For deferred `todo/` -> `ready/` promotion, use `{{.McpNamespace}}/tickets.move(stem, to: "ready")` or native `git mv` as fallback; then commit.
 
 ## On: Output Handoff
 
