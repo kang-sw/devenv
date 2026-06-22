@@ -67,6 +67,7 @@ history.
 | `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
 | `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
+| `ai-docs/ref/windows-dogfood.md` | Native-Windows source-build dogfood / Phase C cold-load acceptance procedure |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
 | `ws/infra.read("impl-playbook")` | Implementation discipline |
