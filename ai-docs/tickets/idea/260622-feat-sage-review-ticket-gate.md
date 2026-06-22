@@ -97,19 +97,39 @@ New `ws/create_ticket(session_key, stem, initial_state)`:
   - `idea/`: tip = "promoting to `todo/` will trigger sage review."
   - `todo/+`: tip = "run sage review before promoting further."
 
+### `create-ticket` and `lead-write-ticket` relationship
+
+`create-ticket` is an MCP tool (stub write + frontmatter). `lead-write-ticket` is
+a playbook that calls `create-ticket` for the actual file creation, then wraps it
+with consent gate, intent review, spec-address check, and cross-ticket decision
+review. Different layers — no conflict.
+
+### `ask` mode interaction
+
+When `sage_review: ask`, after the ticket write the lead agent asks the user
+whether to run sage review. A "no" answer sets `sage-review: skipped` and
+proceeds. A "yes" (or `auto` mode) runs the reviewers.
+
+### `skipped` write authority
+
+`sage-review: skipped` is set only when the user explicitly declines in `ask`
+mode. It is never set when `sage_review: off` — in that mode the `sage-review`
+field is not checked by the transition tool at all.
+
 ### 260620 coupling
 
-260620 implements the transition tool with the `sage-review` pre-condition hook
-(sage-agnostic: field read only, gated on `sage_review` config). This ticket
-builds the sage reviewer playbooks, `create-ticket` tool, and config integration
-on top.
+260620 implements the transition tool. The `sage-review` pre-condition hook
+belongs in Phase 1 of 260620 (alongside the mutation path — natural fit).
+This ticket builds the sage reviewer playbooks, `create-ticket` tool, and config
+integration on top.
 
 ## Open Questions
 
-- Should `todo/ → ready/` re-run sage review (ticket may have gained
-  implementation phases since `todo/` write), or is one review per lifecycle
-  sufficient?
-- Should `create-ticket` infer `parent:` from the session's active epic context?
+- `todo/ → ready/` re-review: ticket may have gained implementation phases since
+  `todo/` write. Re-run sage or treat `completed` as sufficient? Affects Phase 3
+  transition hook condition.
+- `create-ticket` `parent:` inference: should the tool query the session's active
+  epic context and pre-fill `parent:`? Affects Phase 1 implementation scope.
 
 ## Phases
 
@@ -131,6 +151,39 @@ Auto-prefixes date, writes frontmatter stub with `sage-review: pending` for
   reviewers in parallel after ticket commit when `sage_review` config is `auto |
   ask` and landing status is `todo/+`. Lead synthesizes verdicts and writes
   `## Blocked` section on block.
+
+**Verdict schema** (each reviewer emits):
+
+```
+verdict: pass | concern | block
+
+issues:
+  - title: <short label>
+    severity: critical | important | minor
+    detail: <what is unclear or wrong>
+    resolution: autonomous | missing
+```
+
+**Lead synthesis output** (written to `## Blocked` section on block):
+
+```markdown
+## Blocked (YYYY-MM-DD)
+
+### Design Reviewer — <verdict>
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | ...   | important | missing   |
+
+### Completeness Reviewer — <verdict>
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | ...   | important |
+```
+
+Aggregation rule: design `block` → final block regardless of completeness result.
+Completeness `concern` → lead judgment on whether to set `blocked`.
 
 ### Phase 3: Config integration + 260620 transition hook
 
