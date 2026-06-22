@@ -298,26 +298,29 @@ dropped tickets live in hidden archive dirs and git history.
   `config.model_alias`/`config.role_tier` rename (260611 axis) must adopt — not
   fork — the shared scope primitive, and can slot into the `ws:lead-tune` umbrella.
 - `260620-chore-pre-shipping-windows-surface-verification` (ready, chore;
-  parent `260605` epic, gates its closure) - **Phases 1 (P0, `d89e6539`) & 2
-  (`f6c4e7d1`) DONE; Phase 3 (P1) next.** Pre-ship hardening of the Windows
-  surface (six `*_windows.go` files are 0%-covered on Linux). All phases live on
-  branch `implement/260620-win-surface` (unmerged; was
+  parent `260605` epic, gates its closure) - **Phases 1 (`d89e6539`), 2
+  (`f6c4e7d1`) & 3 (`326fa74f`) DONE; Phase 4 (P3, stretch) optional.** Pre-ship
+  hardening of the Windows surface (six `*_windows.go` files were 0%-covered on
+  Linux). All phases live on branch `implement/260620-win-surface` (unmerged; was
   `implement/win-cancel-process-tree`, renamed when Phase 2 stacked on). **Phase
   1:** both Windows cancel paths (`cancelAsyncProcessTree` + execjob
   `cancelProcess`) now reap the whole spawned subtree via Toolhelp32 PID-tree
   enumeration (was root-pid-only → orphans); deterministic cross-platform reap
-  tests added; Linux green + `GOOS=windows` build/vet clean (Windows kill path
-  runs only in Phase 3). **Phase 2:** fixed the flaky exec abort
-  (`260616`, now `.done/`) — a real `finalize()`/`reconcile()` race
-  (active-map delete moved inside the `mu` section, after the terminal status
-  write) plus a too-tight abort window (abort test now uses a dedicated
-  `sleep 30` helper; non-blocking budget relaxed `1s→5s`); review clean, green
-  under `-race`. Contract unchanged (`260505-agent-cancel-recovery` best-effort
-  + `cleanup_needed`; no new contract). Phase 3 runs the full suite on the
-  WSL2→Windows interop host; Phase 4 (stretch) worktree path-layout. **Hard
-  constraint:** tree-kills scoped to the spawned subtree by PID/job — never
-  image-name (`taskkill /IM`) — because the dogfooding WSL2 host runs a live
-  `claude.exe`.
+  tests added. **Phase 2:** fixed the flaky exec abort (`260616`, now `.done/`) —
+  a real `finalize()`/`reconcile()` race (active-map delete moved inside the `mu`
+  section, after the terminal status write) plus a too-tight abort window;
+  green under `-race`. **Phase 3:** first real Windows full-suite run
+  (go1.26.3) — `go test ./...` now green 12/12. It found a real defect Phase 1
+  could not (the subtree kill worked but Windows `processAlive` mis-reported an
+  exited-but-unreaped process as alive); fixed across wsagent/execjob/wsstate
+  with a zero-timeout `WaitForSingleObject` signaled-state check (also closes a
+  Windows recovery-path defect). Three anticipated test-side divergences
+  (abort timing, JSON-path matching, separator) also fixed; review clean. Single
+  host / single toolchain. Contract unchanged (`260505-agent-cancel-recovery`
+  best-effort + `cleanup_needed`; no new contract). Phase 4 (worktree
+  path-layout) remains optional/stretch. **Hard constraint:** tree-kills scoped
+  to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
+  because the dogfooding WSL2 host runs a live `claude.exe`.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

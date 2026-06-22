@@ -222,6 +222,61 @@ Record any build-tag breakage, separator/quoting failures, or behavioral
 divergence. Verification boundary: green `go test ./...` on Windows (or an
 enumerated, triaged failure list).
 
+### Result (326fa74f) - 2026-06-22
+
+First real Windows full-suite run (go1.26.3 windows/amd64) on the WSL2->Windows
+interop host. Go cannot build over the WSL 9p mount (`RLock go.mod: Incorrect
+function` — 9p has no file locking), so the tree was copied to a Windows-native
+path (sibling layout preserved so wsrsrc shipped/mirror tests resolve
+`../../../agents-plugin/rsrc`). Run #1: 8/12 packages passed, 4 failed; all four
+fixed, re-run green.
+
+- **Verification boundary met:** `go test ./... -count=1` green, 12/12 packages,
+  `go vet`/`go build` clean on Windows. The six `*_windows.go` files compiled and
+  ran for the first time; the Phase 1 cancel subtree-reap executed on the real
+  Windows kill path; abort/cancel tests re-run x3 each, stable (cancel-tree
+  ~0.09s, execjob abort ~18.5s, mcp abort ~11.4s).
+- **#1 runtime defect (why Phase 3 mattered):** the Phase 1 Windows subtree kill
+  *worked*, but the liveness probe lied — Windows `processAlive` treated
+  `OpenProcess` success as alive, yet the kernel process object survives
+  termination until all handles close, so an exited-but-unreaped child was
+  reported alive (`TestCancelAsyncProcessTreeReapsChildTree` failed). This is
+  exactly the zombie/cached-handle issue Phase 1 deferred here. Fixed in all
+  three packages (wsagent, execjob, wsstate) via a zero-timeout
+  `WaitForSingleObject` signaled-state check (WAIT_TIMEOUT=running,
+  WAIT_OBJECT_0=exited). The probe feeds reconcile/reconcileActiveCall, so this
+  also closes a Windows recovery-path defect (a dead worker stuck `running`).
+  Per-package duplication kept (no new shared package), matching Phase 1's
+  accepted per-module structure.
+- **#2–#4 Windows test-side divergences (anticipated):** execjob abort timing —
+  shared `slow`(6s) left ~1s after the 5s ForegroundWindow, so a dedicated
+  `slowabort`(30s) helper makes abort land while running (reaped promptly, no
+  full wait); mcp `execToolJSONPath` doubled backslashes but assertions match
+  json-decoded `toolText` output, so it returns the native path; wsconfig
+  expectation hard-coded `/` -> `filepath.Join`.
+- **Review:** single general reviewer, clean (0 Critical/Important/minor);
+  statically confirmed the `WaitForSingleObject` semantics (error only on
+  WAIT_FAILED, so the 259/STILL_ACTIVE ambiguity is avoided), handle
+  rights/no-leak, recovery-path consumers, and that the Unix variants are
+  untouched.
+- **Spec:** no changes (portability bug fix restoring documented best-effort
+  cancel/liveness; no new caller-visible interface). Mental model
+  `named-agent-runtime` updated (`3587c2c1`): the deferred Windows-liveness
+  Technical Debt is resolved and a Common Mistakes entry records the
+  OpenProcess-success != alive invariant.
+- **processAlive zombie handling (Phase 1 forward item): RESOLVED** here.
+- **Live-host safety:** all kills stayed strictly PID-scoped (Toolhelp32 PPID
+  walk from the test's own spawned root); no image-name termination. `tasklist`
+  shows no Windows `claude.exe` image — the live harness is the WSL2 Linux
+  process — so the PID-scoped kills had no Windows process to reach regardless.
+
+> Forward (Phase 4 / merge): the Windows surface is now green on a real host
+> (Windows 11, go1.26.3) — single host / single toolchain, not multi-version.
+> The reparented/orphaned-child limitation noted in Phase 1 (descendants that no
+> longer chain to the root PID are not reaped — no Windows group analogue) still
+> holds and was not exercised. Phase 4 (worktree path-layout, P3 stretch) remains
+> optional.
+
 ### Phase 4: Windows worktree path-layout coverage (P3, optional/stretch)
 
 `TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState`
