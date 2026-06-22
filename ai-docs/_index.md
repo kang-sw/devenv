@@ -215,6 +215,19 @@ dropped tickets live in hidden archive dirs and git history.
   Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
   Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
   — gates the epic merge to `main`.
+- `260622-feat-windows-local-devenv-autobuild` (ready, feat, child of 260605) -
+  makes the chore's Phase C "cold install -> real Go build" actually work on
+  Windows. **Both phases done** (branch
+  `implement/260622-windows-local-devenv-autobuild`, unmerged). Phase 1
+  (`ba67f61e`): lifted the launcher `os_name == "windows"` gate so a valid
+  `.local-devenv-runtime` marker drives source build-on-launch on Windows
+  (canonical + wsflow mirror), Windows-aware `go` check, `USERPROFILE`/`LOCALAPPDATA`
+  build-env recovery; 40+8 tests green; no spec change (text already OS-neutral).
+  Phase 2 (`cbb7f983`): `scripts/install-claude-plugin.ps1` one-shot installer
+  (install.sh port + marker) and `windows-dogfood.md` rewrite. PowerShell syntax
+  deferred to Windows host; empirical auto-build cold-load deferred to chore
+  Phase C. Partially closes `260622-bug-wsflow-launcher-coldload-divergence`
+  (gate mirrored).
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

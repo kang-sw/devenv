@@ -439,7 +439,7 @@ def local_devenv_cache_package(plugin_dir: Path) -> str | None:
 
 
 def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
-    if os_name == "windows" or local_devenv_cache_package(plugin_dir) is None:
+    if local_devenv_cache_package(plugin_dir) is None:
         return None
     marker = plugin_dir / ".local-devenv-runtime"
     if not marker.is_file():
@@ -472,7 +472,11 @@ def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
     if not resolved["tool_dir"].is_dir() or not (resolved["tool_dir"] / "cmd" / "ws-mcp").is_dir():
         note("local devenv runtime contract is inactive: tool_dir is not a ws-mcp module")
         return None
-    if not resolved["go"].is_file() or not os.access(resolved["go"], os.X_OK):
+    # On Windows os.access(..., X_OK) is effectively meaningless (it returns True
+    # for any existing file), so require the file to exist and trust the marker's
+    # absolute go path; on POSIX keep the executable-bit check.
+    go_path = resolved["go"]
+    if not go_path.is_file() or (os_name != "windows" and not os.access(go_path, os.X_OK)):
         note("local devenv runtime contract is inactive: go is not executable")
         return None
     return resolved
@@ -532,7 +536,7 @@ def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | Non
     return digest.hexdigest()
 
 
-def local_devenv_build_env() -> dict:
+def local_devenv_build_env(os_name: str) -> dict:
     # The MCP host may launch the launcher with a sanitized environment that
     # lacks HOME (observed on Claude Code launches). `go build` then cannot
     # locate GOMODCACHE/GOCACHE (default under $HOME) and fails, aborting the
@@ -544,17 +548,30 @@ def local_devenv_build_env() -> dict:
             build_env["HOME"] = str(Path.home())
         except Exception:
             pass
+    if os_name == "windows":
+        # Windows `go build` resolves GOMODCACHE under %USERPROFILE%\go and
+        # GOCACHE under %LOCALAPPDATA%\go-build; recover them when the launch
+        # environment was sanitized, mirroring the HOME recovery above.
+        if not build_env.get("USERPROFILE"):
+            try:
+                build_env["USERPROFILE"] = str(Path.home())
+            except Exception:
+                pass
+        if not build_env.get("LOCALAPPDATA"):
+            profile = build_env.get("USERPROFILE")
+            if profile:
+                build_env["LOCALAPPDATA"] = str(Path(profile) / "AppData" / "Local")
     return build_env
 
 
-def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict) -> bool:
+def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict, os_name: str) -> bool:
     tool_dir = local_contract["tool_dir"]
     go_binary = local_contract["go"]
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
     proc = subprocess.run(
         [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
         cwd=str(tool_dir),
-        env=local_devenv_build_env(),
+        env=local_devenv_build_env(os_name),
         check=False,
     )
     if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
@@ -571,7 +588,7 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
         return False
 
     if prefer_build:
-        return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
+        return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract, os_name)
 
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
     source_root = local_contract["source_root"]
@@ -589,7 +606,7 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
             tmp.unlink(missing_ok=True)
             note(f"local devenv runtime candidate is incompatible: {candidate}")
 
-    return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
+    return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract, os_name)
 
 
 def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, force_local: bool = False) -> None:

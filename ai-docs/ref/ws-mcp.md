@@ -200,10 +200,15 @@ The contract format is:
 ```
 
 All paths must be absolute. `source_root` and `tool_dir` must exist, `tool_dir`
-must contain `cmd/ws-mcp`, and `go` must be an executable file. If the marker is
-missing, invalid JSON, missing required fields, references missing paths, or is
-installed on Windows, local repair is inactive and the launcher uses the normal
-cache/release path.
+must contain `cmd/ws-mcp`, and `go` must be an existing file (an executable bit is
+required on POSIX; on Windows the `go.exe` file is trusted because
+`os.access(X_OK)` is not meaningful there). If the marker is missing, invalid
+JSON, missing required fields, or references missing paths, local repair is
+inactive and the launcher uses the normal cache/release path. Local devenv repair
+is honored on all platforms including Windows; the build inherits a launch
+environment with `HOME` recovered on POSIX and `USERPROFILE`/`LOCALAPPDATA`
+recovered on Windows so `go build` resolves its module/build caches under a
+sanitized launch env.
 
 When the contract is valid, the forced local path builds
 `<tool_dir>/cmd/ws-mcp` with the declared Go executable first so pre-release

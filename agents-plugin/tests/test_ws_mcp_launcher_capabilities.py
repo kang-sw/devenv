@@ -311,7 +311,9 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with mock.patch.object(launcher.Path, "home", return_value=home):
                 self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
                 self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
-                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
+                # Windows now honors a valid local-devenv marker (gate lifted in
+                # 260622-feat-windows-local-devenv-autobuild).
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
 
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
@@ -365,11 +367,35 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
         with mock.patch.object(launcher.Path, "home", return_value=Path("/home/recovered")):
             with mock.patch.dict(launcher.os.environ, {}, clear=True):
-                env = launcher.local_devenv_build_env()
+                env = launcher.local_devenv_build_env("linux")
                 self.assertEqual(env["HOME"], "/home/recovered")
+                # Non-Windows must not inject Windows cache vars.
+                self.assertNotIn("USERPROFILE", env)
+                self.assertNotIn("LOCALAPPDATA", env)
             with mock.patch.dict(launcher.os.environ, {"HOME": "/home/real"}, clear=True):
-                env = launcher.local_devenv_build_env()
+                env = launcher.local_devenv_build_env("linux")
                 self.assertEqual(env["HOME"], "/home/real")
+
+    def test_local_devenv_build_env_recovers_windows_profile_when_absent(self):
+        launcher = load_launcher()
+
+        recovered = Path("/home/winuser")
+        with mock.patch.object(launcher.Path, "home", return_value=recovered):
+            with mock.patch.dict(launcher.os.environ, {}, clear=True):
+                env = launcher.local_devenv_build_env("windows")
+                self.assertEqual(env["USERPROFILE"], str(recovered))
+                self.assertEqual(
+                    env["LOCALAPPDATA"], str(recovered / "AppData" / "Local")
+                )
+            # Existing USERPROFILE/LOCALAPPDATA are preserved untouched.
+            with mock.patch.dict(
+                launcher.os.environ,
+                {"USERPROFILE": "D:\\u", "LOCALAPPDATA": "D:\\u\\local"},
+                clear=True,
+            ):
+                env = launcher.local_devenv_build_env("windows")
+                self.assertEqual(env["USERPROFILE"], "D:\\u")
+                self.assertEqual(env["LOCALAPPDATA"], "D:\\u\\local")
 
     def test_claude_cache_local_devenv_marker_forces_runtime_install(self):
         launcher = load_launcher()
@@ -384,7 +410,9 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
                 self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
                 self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
-                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
+                # Windows now honors a valid local-devenv marker (gate lifted in
+                # 260622-feat-windows-local-devenv-autobuild).
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
 
     def test_invalid_local_devenv_contract_falls_back_to_release_path(self):
         launcher = load_launcher()
@@ -477,7 +505,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             (dist / asset).write_text("stale dist", encoding="utf-8")
             build_calls = []
 
-            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract):
+            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract, got_os_name):
                 build_calls.append((got_runtime_dir, got_binary, got_contract, got_local_contract))
                 return True
 
@@ -524,7 +552,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                     raise AssertionError("legacy fixed-name source runtime must not be copied")
                 destination.write_text("copied", encoding="utf-8")
 
-            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract):
+            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract, got_os_name):
                 build_calls.append((got_runtime_dir, got_binary, got_contract, got_local_contract))
                 return True
 
