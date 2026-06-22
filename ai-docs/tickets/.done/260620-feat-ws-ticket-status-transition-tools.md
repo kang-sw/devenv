@@ -4,6 +4,7 @@ related:
   260622-feat-sage-review-ticket-gate: sage-review pre-condition hook and downward demotion tip are required additions to Phase 1 of this ticket
 plans:
   phase-1: 2026-06/22-260620-ticket-status-tools.brief
+completed: 2026-06-22
 ---
 
 # ws ticket status-transition MCP tools (close/drop/promote/demote)
@@ -183,3 +184,21 @@ Verification:
 - The convention doc names the tools as canonical with `git mv` as fallback.
 - No transition-directing playbook repeats `git mv` usage the convention now owns.
 - rsrc manifest + wsflow mirror regenerated; playbook render/freshness guards green.
+
+### Result (a7c40cec) - 2026-06-22
+
+All ticket-transition `git mv` directives rewired across 4 files and 7 sites
+(6 specified in brief + 1 Drop handler site in `lead-discuss` recovered after
+brief grep filter `grep -v '\.dropped'` accidentally excluded it).
+
+**Files changed:**
+- `agents-plugin-tool/internal/wsdoc/conventions/ticket-conventions.md` — line 16: `tickets.close`/`tickets.move` canonical, `git mv` fallback.
+- `agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md` — primitive catalog updated with both tools + fallback.
+- `agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md` — Move section steps 1/2/5 and Ready Focus step 5 rewired.
+- `agents-plugin/rsrc/lead-discuss/lead-discuss.md` — triage handler idea→todo (line 99), ownership line (line 103), and Drop handler (line 109) all rewired.
+- `agents-plugin/rsrc/manifest.json`, `agents-plugin-wsflow/rsrc/manifest.json`, `agents-plugin-wsflow/rsrc/lead-discuss/lead-discuss.md` — regenerated.
+
+**Brief gap:** Drop handler site was excluded from the brief by a faulty grep filter;
+recovered during lead review and fixed in a follow-up commit `a7c40cec`.
+
+**Verification:** `go test ./...` green (all packages). `TestWsflowRsrcMirrorUpToDate` PASS.
