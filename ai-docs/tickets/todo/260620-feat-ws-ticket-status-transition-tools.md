@@ -1,5 +1,7 @@
 ---
-title: ws ticket status-transition MCP tools (close/drop/promote)
+title: ws ticket status-transition MCP tools (close/drop/promote/demote)
+related:
+  260622-feat-sage-review-ticket-gate: sage-review pre-condition hook and downward demotion tip are required additions to Phase 1 of this ticket
 ---
 
 # ws ticket status-transition MCP tools (close/drop/promote)
@@ -26,14 +28,24 @@ and turns ticket-convention rules into enforced guards instead of lead memory.
 
 Confirmed with the user (2026-06-20):
 
-- **Scope = close + drop + promote.** Two tools:
+- **Scope = close + drop + promote + demote.** Two tools:
   - `tickets.close(stem, status, resolution?)` — `status ∈ {done, dropped}`.
     Writes the dated frontmatter field (`completed:` for done, `dropped:` for
     dropped, both = today), moves the file to `.done/`/`.dropped/`, and when
     `resolution` is supplied appends a `## Resolution (<today>)` body section.
-  - `tickets.move(stem, to)` — promotes along `idea → todo → ready`.
+  - `tickets.move(stem, to)` — moves along the `idea ↔ todo ↔ ready` axis in
+    both directions. Upward: promotion. Downward: demotion (e.g. `ready → idea`
+    to reopen design). On downward move from `ready/`, the tool returns a tip:
+    "This ticket had spec entries; clear `spec:`, `spec-remove:`, and review
+    `## Spec Impact` before re-promoting." Spec cleanup is not automatic.
   - Out of scope: `tickets.set` (general frontmatter such as `parent:` tagging),
     `tickets.create`, and any full-CRUD surface. Those stay manual `Edit`.
+
+- **sage-review pre-condition on upward moves.** When the `sage_review` config
+  is `auto | ask`, `tickets.move` for upward transitions checks the ticket's
+  `sage-review` frontmatter field: fails the move if value is `pending | blocked`.
+  Value `completed | skipped` (or field absent, for tickets predating the feature)
+  passes. When `sage_review: off`, the field is ignored entirely.
 
 - **git boundary = mutation only.** The tools mutate files (frontmatter + move +
   optional Resolution append) and stage that change set; they do **not** commit.
@@ -64,7 +76,7 @@ Confirmed with the user (2026-06-20):
 Implement both tools in the native MCP tooling tree (`agents-plugin-tool`,
 `internal/mcp` over the existing `tickets.*` handlers and the `wsdoc` ticket
 layer), sharing one frontmatter read-modify-write + atomic-move helper so the
-close and promote paths cannot diverge on staging behavior.
+close, promote, and demote paths cannot diverge on staging behavior.
 
 Surface both as MCP tools, and as CLI commands if the namespace ships CLI
 parity. Update `ai-docs/spec/mcp-tools.md` and both `runtime.json` contracts
@@ -82,9 +94,11 @@ yet):
 - Whether close/move are exposed in the agentless (wsflow) surface or full-only.
 
 Verification:
-- An atomic close/move leaves frontmatter + directory move + (on close) the
-  Resolution section all in one staged change set, with no unstaged remainder —
-  the staging footgun this fixes.
+- An atomic close/move/demote leaves frontmatter + directory move + (on close)
+  the Resolution section all in one staged change set, with no unstaged remainder.
+- Downward move from `ready/` returns the spec-cleanup tip in the tool response.
+- Upward move with `sage_review` config on: fails on `sage-review: pending |
+  blocked`; passes on `completed | skipped | absent`.
 - Convention guards reject: unknown stem, invalid target status, re-close of an
   already-closed ticket, and any date-prefix mutation.
 - `go test ./...` green, including the runtime-contract cross-checks.
