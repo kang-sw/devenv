@@ -59,6 +59,25 @@ so the epic merges to `main` only after Windows passes.
   existing `named-agent-runtime` behavior on Windows; no new caller-visible
   interface. Spec text should need no change (confirm at closeout).
 
+## Spec Impact
+
+- **Target spec areas:** `named-agent-runtime` (mercenary process spawn, command
+  quoting, file replacement, and process-liveness behavior) and `plugin-runtime`
+  `## Windows Plugin-Managed Startup` (`#260505-windows-plugin-managed-startup`,
+  launcher cold-load). The `python3`-on-PATH prerequisite is already specified
+  there (lines ~266-269), matching this ticket's out-of-scope decision.
+- **Expected caller-visible change:** none. Every Phase A/B item brings the
+  Windows runtime into behavioral parity with the cross-platform contract these
+  specs already describe (mercenary spawn/quoting correctness, atomic file
+  replacement, `ERROR_ACCESS_DENIED → alive` liveness symmetry, PID-scoped
+  tree-kill on the sync-runner timeout, rsrc/runtime cold-load ordering). No new
+  tool, schema, or semantic surface is introduced.
+- **Contract-first spec: no.** These are behavior-preserving conformance fixes;
+  the existing spec text describes the intended behavior already. Confirm at
+  closeout that no spec wording drifted; if any Windows item turns out to require
+  a contract clarification (e.g. an observable mercenary-on-Windows nuance found
+  in Phase C), capture it then.
+
 ## Findings map (evidence for the implementer)
 
 Verified-safe already: PID-scoped tree-kill (Toolhelp32 PPID walk, no image-name

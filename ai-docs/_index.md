@@ -196,13 +196,15 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260622-chore-windows-shipping-hardening` (todo, chore, child of 260605) -
+- `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
   verifiable on Windows), B launcher cold-load robustness, C branch-pinned
   real-Windows acceptance. 260620 verified `go test` only, never the launcher
-  cold-install path. **Epic merge to `main` is deferred until this passes.** Not
-  implementation-ready yet; `ws:lead-proceed` promotes to ready + Phase A.
+  cold-install path. **Epic merge to `main` is deferred until this passes.**
+  Implementation-ready; spec addressing via `## Spec Impact` (Contract-first: no —
+  Windows conformance to existing `named-agent-runtime` + `plugin-runtime`
+  contracts). Active target: **Phase A** (the `go test`-verifiable code fixes).
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
