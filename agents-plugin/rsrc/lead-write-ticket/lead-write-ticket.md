@@ -1,6 +1,5 @@
 ---
 kind: print
-delegates: true
 includes:
   - task-list
 ---
@@ -224,8 +223,8 @@ Target: user request
    - Design not-block and completeness `block` → final verdict is `block`.
    - Design `concern` and completeness `pass|concern` → default to `pass`; if ANY issue in
      either reviewer result has `resolution: missing`, elevate to `concern`. On `concern`,
-     lead decides whether to block; default is do not block unless the missing decision is
-     judged critical.
+     proceed to step 9 (do not block by default); lead may escalate to `block` if the missing
+     decision is judged critical.
    - All `pass` → final verdict is `pass`.
 8. If final verdict is `block`:
    a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the ticket body using the
@@ -346,9 +345,9 @@ Blocker: missing spec traceability for caller-visible behavior.
 
 ### Completeness Reviewer — <verdict>
 
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | <title> | <severity> | <resolution> |
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | <title> | <severity> |
 ```
 
 ## Doctrine
