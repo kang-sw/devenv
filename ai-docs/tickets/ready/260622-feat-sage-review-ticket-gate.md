@@ -159,14 +159,46 @@ integration on top.
   well-defined "active epic" concept in the session; stub leaves `parent:` empty
   for the caller to fill. Separate idea ticket if needed later.
 
+## Spec Impact
+
+- **Phase 1** — `ai-docs/spec/mcp-tools.md`: add `{#260622-create-ticket-tool}` entry
+  for the new `ws/create_ticket` tool. Contract-first spec: no (contract fully specified
+  in Decisions section; spec entry is post-implementation closeout).
+- **Phase 2** — `ai-docs/spec/workflow-skills.md`: add the two new reviewer playbook
+  names (`ticket-reviewer-design`, `ticket-reviewer-completeness`) and the
+  `lead-write-ticket` sage-gate routing addition. Contract-first spec: no.
+- **Phase 3** — `ai-docs/spec/mcp-tools.md`: add `sage_review*` config key entries
+  under the config section. Contract-first spec: no.
+
 ## Phases
 
 ### Phase 1: `create-ticket` MCP tool
 
 New `ws/create_ticket(session_key, stem, initial_state)` Go MCP handler.
-Auto-prefixes date, writes frontmatter stub with `sage-review: pending` for
-`todo/+`, returns `{path, tip}`. Tip is non-empty for both `idea/` (reminder) and
-`todo/+` (sage prompt).
+Auto-prefixes today's date to form the full stem. Writes a frontmatter stub
+(`title:` placeholder; `sage-review: pending` for `todo/+`). Returns `{path, tip}`;
+tip is non-empty for both `idea/` and `todo/+`.
+
+`initial_state`: accepted values are `"idea"`, `"todo"`, and `"ready"`;
+terminal states (`"done"`, `"dropped"`) are rejected with an error.
+
+Constraints:
+- Follow the `tickets.close`/`tickets.move` registration pattern from 260620:
+  wsdoc logic layer, MCP server dispatch, `rootAwareToolSchemaRequiresSessionKey`,
+  both `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json`, and
+  CLI mirror in `cmd/ws-mcp/main.go` with `runtimeCapabilityCommandNames` entry.
+- `sage-review: pending` written only when `initial_state` is `"todo"` or `"ready"`.
+- `idea/` creation writes `title:` placeholder only; no `sage-review` field.
+
+Deferred: `parent:` inference, workset membership, any frontmatter fields beyond
+`title:` and `sage-review:`.
+
+Verification:
+- Unit tests: `idea/` creation (no sage-review field), `todo/` creation (sage-review:
+  pending), `ready/` creation, rejected terminal states, date auto-prefix.
+- `TestRuntimeCapabilitiesCommandReportsWsflowContractSurface` passes after both
+  `runtime.json` updates.
+- `{#260622-create-ticket-tool}` entry written in `ai-docs/spec/mcp-tools.md`.
 
 ### Phase 2: Reviewer playbooks + lead-write-ticket integration
 

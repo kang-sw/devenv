@@ -178,7 +178,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260620-feat-ws-ticket-status-transition-tools` | done | New `tickets.close` and `tickets.move` MCP tools for atomic ticket status transitions (promotion/demotion/close/drop) with convention guards |
-| `260622-feat-sage-review-ticket-gate` | todo | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and config substrate |
+| `260622-feat-sage-review-ticket-gate` | ready | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and config substrate |
 | `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
 | `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | done | Fixed exec finalize/reconcile race + too-tight abort window flaking the full-suite abort test (260620 Phase 2) |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
@@ -230,6 +230,12 @@ dropped tickets live in hidden archive dirs and git history.
   deferred to Windows host; empirical auto-build cold-load deferred to chore
   Phase C. Partially closes `260622-bug-wsflow-launcher-coldload-divergence`
   (gate mirrored).
+- `260622-feat-sage-review-ticket-gate` (ready, feat) - design-quality gate for
+  ticket writes: `create-ticket` MCP tool, reviewer playbooks (design + completeness),
+  `lead-write-ticket` judge-gate integration, and `sage_review*` config substrate.
+  Phase 1: `create-ticket` MCP tool ready for implementation (spec: `mcp-tools.md`
+  `{#260622-create-ticket-tool}`). Follow `tickets.close`/`tickets.move` registration
+  pattern from 260620.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
