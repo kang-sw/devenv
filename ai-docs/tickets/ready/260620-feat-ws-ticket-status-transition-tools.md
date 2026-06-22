@@ -2,6 +2,8 @@
 title: ws ticket status-transition MCP tools (close/drop/promote/demote)
 related:
   260622-feat-sage-review-ticket-gate: sage-review pre-condition hook and downward demotion tip are required additions to Phase 1 of this ticket
+plans:
+  phase-1: 2026-06/22-260620-ticket-status-tools.brief
 ---
 
 # ws ticket status-transition MCP tools (close/drop/promote/demote)
@@ -122,6 +124,39 @@ Verification:
   wsflow surface (`TestRuntimeCapabilitiesCommandReportsWsflowContractSurface`).
 - `ai-docs/spec/mcp-tools.md` updated with new tool entries under the ticket
   tools section, using `{#YYMMDD-slug}` anchor convention.
+
+### Result (735acfe4) - 2026-06-22
+
+Both tools implemented in full on branch `implement/260620-ticket-status-tools`.
+
+**Delivered:**
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate.go` (new) — `TicketsClose`,
+  `TicketsMove`, `findTicketPath`, `writeFrontmatterField`, `atomicGitMove`,
+  `checkSageReview`; local `GitRunner` interface (no `wsgit` import).
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate_test.go` (new) — all 14
+  brief test cases pass.
+- `agents-plugin-tool/internal/mcp/server.go` — dispatch cases, JSON schemas,
+  both tools added to `rootAwareToolSchemaRequiresSessionKey`, inline
+  `wsconfig.Resolver` for `sage_review` read on move.
+- `agents-plugin-tool/internal/mcp/format.go` — `FormatTicketMutate` helper
+  exported for CLI (minor scope addition: brief had inline formatting; extracted
+  to keep CLI and MCP consistent).
+- `agents-plugin-tool/cmd/ws-mcp/main.go` — `tickets close|move` CLI mirrors +
+  `runtimeCapabilityCommandNames` entries.
+- `agents-plugin/runtime.json` + `agents-plugin-wsflow/runtime.json` — both
+  tools in `tools` AND `commands` sections (4 insertion points total).
+- `ai-docs/spec/mcp-tools.md` — entries with anchors
+  `{#260620-ticket-close-tool}` / `{#260620-ticket-move-tool}`.
+
+**Bug found during CLI spot-check (not caught by unit tests):** `git mv --force`
+does not create the destination directory (e.g., `.done/` on a fresh repo). The
+mock runner had been masking this via implicit `os.MkdirAll`. Fix: `atomicGitMove`
+now calls `os.MkdirAll` on the destination parent before invoking `git mv`; mock
+hardened to stop silently mkdir-ing. All 14 tests re-verified after fix.
+
+**Verification results:** `go test ./...` green (all packages). 14/14 new tests
+PASS. `TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`,
+`...WsflowContractSurface`, and `...NoAgentSurface` all PASS.
 
 ### Phase 2: transition-guidance rewiring
 
