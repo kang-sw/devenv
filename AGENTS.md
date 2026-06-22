@@ -122,6 +122,15 @@ When a spec heading `{#slug}` changes, include
 Keep unrelated untracked files out of commits. `.codex` may exist locally; do
 not stage it unless explicitly requested.
 
+**Version bump on dev-merge.** Every merge of an implementation branch into an
+integration/epic branch or `main` bumps the plugin patch version through
+`agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>`. Never hand-edit the
+version edition points (both `plugin.json` pairs, both `runtime.json`, `main.go`,
+release assets, `_index.md`); the script is the single bump surface. Claude Code
+keys plugin-cache invalidation on the `version` string, so an unchanged version
+serves stale builds even across branch-pin reinstalls. Bump per dev-merge, not
+per ship.
+
 ### Context Window Discipline
 
 - Source code is ground truth; load only docs relevant to the task.
