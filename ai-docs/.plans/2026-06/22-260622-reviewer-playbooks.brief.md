@@ -243,6 +243,33 @@ link; implicit knowledge gaps block implementation.
 
 Two changes:
 
+**Change 0: Add `delegates: true` to `lead-write-ticket` frontmatter.**
+
+The current frontmatter:
+```yaml
+---
+kind: print
+includes:
+  - task-list
+---
+```
+
+Must become:
+```yaml
+---
+kind: print
+delegates: true
+includes:
+  - task-list
+---
+```
+
+Rationale: skill-authoring rule "set `delegates: true` if it spawns subagents".
+The Sage Review Gate spawns two native subagents; `lead-implement` (which also
+spawns subagents from a `kind: print` playbook) carries `delegates: true` as
+precedent. `playbook.render` can be called from a `kind: print` context — the
+`kind` flag does not restrict MCP tool calls.
+
 **Change 1: Add step 8 in "On: invoke" handler.**
 
 The existing handler steps are:
@@ -431,10 +458,11 @@ Pass criteria:
 1. Create `agents-plugin/rsrc/ticket-reviewer-design/ticket-reviewer-design.md`.
 2. Create `agents-plugin/rsrc/ticket-reviewer-completeness/ticket-reviewer-completeness.md`.
 3. Modify `agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md`:
-   a. Renumber "8. Handoff" to "9. Handoff".
-   b. Insert "8. Sage Review Gate" step before Handoff.
-   c. Add "On: Sage Review Gate" handler (after "On: Output Handoff").
-   d. Add "## Templates" section with Blocked Section Template (before Doctrine).
+   a. Add `delegates: true` to frontmatter (Change 0 above).
+   b. Renumber "8. Handoff" to "9. Handoff".
+   c. Insert "8. Sage Review Gate" step before Handoff.
+   d. Add "On: Sage Review Gate" handler (after "On: Output Handoff", before "On: Cross-ticket decision review").
+   e. Add "## Templates" section with Blocked Section Template (before existing Doctrine).
 4. Run manifest regen (both steps).
 5. Run Fresh-Reader Audit on all three changed files; fix findings classified as `fix`.
 6. Run `go test ./...`; verify green.
@@ -538,14 +566,15 @@ After change:
 2. `ticket-reviewer-completeness/ticket-reviewer-completeness.md` exists with `kind: render`,
    `tier: medium`, same section structure.
 3. Both playbooks: `verdict:` yaml block in Output section, no `includes: code-reviewer`.
-4. `lead-write-ticket.md`: "On: invoke" has exactly 9 numbered steps; step 8 is
+4. `lead-write-ticket.md`: frontmatter has `delegates: true`.
+5. `lead-write-ticket.md`: "On: invoke" has exactly 9 numbered steps; step 8 is
    "Sage Review Gate"; step 9 is "Handoff".
-5. `lead-write-ticket.md`: "On: Sage Review Gate" handler present with config read,
+6. `lead-write-ticket.md`: "On: Sage Review Gate" handler present with config read,
    parallel reviewer spawn, aggregation logic, and frontmatter update.
-6. `agents-plugin/rsrc/manifest.json` contains both new playbook file entries.
-7. wsflow rsrc mirror contains both new playbook files.
-8. `go test ./...` green (no new failures).
-9. Fresh-Reader Audit completed for all three files; no unfixed `fix`-classified findings.
+7. `agents-plugin/rsrc/manifest.json` contains both new playbook file entries.
+8. wsflow rsrc mirror contains both new playbook files.
+9. `go test ./...` green (no new failures).
+10. Fresh-Reader Audit completed for all three files; no unfixed `fix`-classified findings.
 
 ## References
 
