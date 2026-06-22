@@ -327,9 +327,21 @@ func finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {
 	for _, closer := range closers {
 		_ = closer.Close()
 	}
-	active.Delete(activeKey(root, key))
 	mu.Lock()
 	defer mu.Unlock()
+	// Drop the active-worker entry only after the terminal status is written
+	// below, inside this same mu critical section. reconcile() is mu-guarded and
+	// treats "absent from the active map AND process not alive AND status still
+	// running" as a lost worker. cmd.Wait() has already returned, so the process
+	// is gone; deleting the active entry before the terminal status is durable
+	// would let a concurrent reconcile (an exec.result/exec.status poll) observe
+	// that window and mis-mark a just-succeeded job as
+	// "exec job worker is no longer active". This defer is registered after the
+	// mu.Unlock defer, so it runs first (LIFO) — i.e. still holding mu, after the
+	// write — making the active entry a durable proof that a worker still owns
+	// the terminal transition. The defer also covers the loadErr early return so
+	// a worker whose record became unreadable cannot leak a stale active entry.
+	defer active.Delete(activeKey(root, key))
 	rec, loadErr := readRecord(root, key)
 	if loadErr != nil {
 		return

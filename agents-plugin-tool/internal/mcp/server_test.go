@@ -1746,7 +1746,7 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	server := NewServer(root, "test")
 
-	input := toolCallLine(t, 1, "exec.shell", mcpLongShellArgs()) + "\n"
+	input := toolCallLine(t, 1, "exec.shell", mcpAbortShellArgs()) + "\n"
 	var out bytes.Buffer
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatal(err)
@@ -1766,7 +1766,13 @@ func TestExecMCPRunningLargeAndAbort(t *testing.T) {
 	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
+	// Both result calls are non-blocking (default and explicit timeout_seconds:0),
+	// so they must not wait for the long-running job. The job has ~25s left at
+	// this point, so a regression that blocked on completion would take that
+	// long; the generous 5s ceiling cleanly catches it while tolerating
+	// serveStdioWithSession setup jitter under full-suite scheduling pressure
+	// (observed ~1.16s spikes that tripped the old sub-second budget).
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("non-blocking result calls took %s", elapsed)
 	}
 	resultByID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -1891,6 +1897,20 @@ func mcpLongShellArgs() map[string]any {
 		return map[string]any{"command": "echo start & ping -n 7 127.0.0.1 >NUL & echo done"}
 	}
 	return map[string]any{"command": "echo start; sleep 6; echo done"}
+}
+
+// mcpAbortShellArgs is a deliberately long-running job for abort tests. It must
+// outlive the 5s ForegroundWindow plus the non-blocking result calls and the
+// abort round-trip by a wide margin, so the abort always lands while the job is
+// still running instead of racing its natural completion (the prior sleep-6
+// command left only ~1s after the foreground window, which flaked to
+// "status: succeeded" under full-suite load). The abort terminates it promptly,
+// so the test does not actually wait the full duration.
+func mcpAbortShellArgs() map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{"command": "echo start & ping -n 31 127.0.0.1 >NUL & echo done"}
+	}
+	return map[string]any{"command": "echo start; sleep 30; echo done"}
 }
 
 func mcpLargeShellArgs() map[string]any {
