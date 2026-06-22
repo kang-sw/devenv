@@ -204,7 +204,11 @@ dropped tickets live in hidden archive dirs and git history.
   cold-install path. **Epic merge to `main` is deferred until this passes.**
   Implementation-ready; spec addressing via `## Spec Impact` (Contract-first: no —
   Windows conformance to existing `named-agent-runtime` + `plugin-runtime`
-  contracts). Active target: **Phase A** (the `go test`-verifiable code fixes).
+  contracts). **Phase A done** (`8461b4cf`, branch `implement/260622-windows-phase-a`,
+  unmerged): 7 Windows code fixes, partitioned-review clean, cross-compile green;
+  cmd.exe/backslash/tree-kill assertions deferred to Phase C (real Windows host).
+  Next target: **Phase B** (launcher cold-load robustness), then Phase C
+  (branch-pinned acceptance) gates the epic merge.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

@@ -122,6 +122,49 @@ Items (each with a Windows unit test where `go test` can cover it):
 Verification: `go test ./...` green on a Windows host (go1.26.x), plus the new
 Windows-specific unit tests above.
 
+### Result (8461b4cf) - 2026-06-22
+
+All 7 items implemented (range `e910b3f6..8461b4cf`); every fix is isolated behind
+a `//go:build windows` file or a `runtime.GOOS == "windows"` branch, so Unix code
+paths are behaviorally unchanged and no caller-visible contract changed
+(confirmed by the Fit review).
+
+Per-item outcome:
+1. Platform-aware interrupt-hook quoting: new build-tagged `quoteHookArg`
+   (`hook_quote_windows.go` double-quote / `hook_quote_unix.go` → `shellQuote`);
+   `interruptHookCommand` calls it.
+2. `codex.go` applies `filepath.ToSlash` before `%q` for `model_instructions_file`
+   (no-op on Unix; removes backslash-escape ambiguity on Windows).
+3. `cacheLauncherCommand` Windows-correct probe — **refinement vs the planned
+   ".exe probe"**: the real defect was that the extensionless POSIX shell shim
+   (which ships) was returned before the `.py`+python branch and is unrunnable on
+   Windows. Fix: on Windows skip the shell shim, try `ws-mcp-launcher.exe`, then
+   fall through to `.py`+python; non-Windows order unchanged.
+4. `replaceFile` (wsagent + wsstate) delegates to a build-tagged
+   `atomicReplaceFile` — Windows uses `MoveFileEx(REPLACE_EXISTING|WRITE_THROUGH)`
+   with a bounded `ERROR_SHARING_VIOLATION` retry; Unix stays `os.Rename`.
+5. `processAlive` (wsagent/execjob/wsstate) treats `OpenProcess`
+   `ERROR_ACCESS_DENIED` as alive via `openErrorMeansAlive` (mirrors Unix `EPERM`);
+   the existing `WaitForSingleObject` zombie probe is untouched.
+6. `runner_command_windows.go` sets `cmd.Cancel` to the existing PID-scoped
+   `cancelAsyncProcessTree` (Toolhelp32 PPID walk) — **PID-scoped hard constraint
+   verified honored; no image-name termination anywhere in the diff** (Fit review
+   grep-confirmed).
+7. `smoke-ws-mcp.sh` tool name `ws.lead.login` → `ws.ferrule` (confirmed against
+   `bootstrapToolName` in `internal/mcp/server.go`).
+
+Verification (Linux/WSL2 host): `go build/test/vet ./...` and
+`GOOS=windows GOARCH=amd64 go build/vet ./...` plus
+`GOOS=windows go test -c ./internal/wsagent ./internal/execjob ./internal/wsstate`
+all green (lead re-ran independently). Review: partitioned correctness/fit/test,
+all clean after one cycle (test nil-case gap fixed). Mental-model invariants
+recorded in `named-agent-runtime.md` (`eea18f81`).
+
+Deferred to Phase C (require a real Windows host to execute, code is in place and
+cross-compiles): item 1 cmd.exe hook-quoting empirical behavior, item 2
+backslash→slash transform on native Windows paths, item 6 sync-runner subtree
+reap on context timeout.
+
 ### Phase B: Launcher cold-load robustness
 
 Goal: harden the first-install / first-load launcher paths that only a real
