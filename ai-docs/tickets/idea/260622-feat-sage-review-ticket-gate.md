@@ -116,6 +116,31 @@ proceeds. A "yes" (or `auto` mode) runs the reviewers.
 mode. It is never set when `sage_review: off` — in that mode the `sage-review`
 field is not checked by the transition tool at all.
 
+### Ticket demotion via `tickets.move`
+
+`tickets.move` handles both upward promotion and downward demotion. On downward
+move from `ready/`, the tool returns a tip: "This ticket had spec entries; clear
+`spec:`, `spec-remove:`, and review `## Spec Impact` before re-promoting."
+
+Spec cleanup is not automatic — the tip directs the caller. This matches the
+`create-ticket` tip pattern. The `## Spec Impact` section is preserved as a
+historical trace; only frontmatter `spec:` / `spec-remove:` entries need clearing.
+
+`lead-workflow-manual` carries a strong directive to use `tickets.move` for all
+ticket moves (promotion and demotion alike); it does not repeat spec cleanup
+instructions. That detail belongs in the tool tip and ticket conventions.
+
+260620 scope expansion required: Phase 1 of 260620 must include downward demotion
+support and the ready-demotion tip alongside the existing upward promotion path.
+
+### `todo/` direct-edit guard
+
+`lead-write-ticket` and `lead-workflow-manual` must state: do not directly edit a
+`todo/` ticket's design sections (`## Decisions`, `## Phases`, `## Constraints`,
+`## Background`) without first demoting to `idea/`. File edits are too easy to
+bypass otherwise. The judge gate in `lead-write-ticket` enforces this for
+playbook-mediated writes; the manual sets the expectation for all paths.
+
 ### 260620 coupling
 
 260620 implements the transition tool. The `sage-review` pre-condition hook
@@ -123,13 +148,16 @@ belongs in Phase 1 of 260620 (alongside the mutation path — natural fit).
 This ticket builds the sage reviewer playbooks, `create-ticket` tool, and config
 integration on top.
 
-## Open Questions
+## Closed Questions
 
-- `todo/ → ready/` re-review: ticket may have gained implementation phases since
-  `todo/` write. Re-run sage or treat `completed` as sufficient? Affects Phase 3
-  transition hook condition.
-- `create-ticket` `parent:` inference: should the tool query the session's active
-  epic context and pre-fill `parent:`? Affects Phase 1 implementation scope.
+- **`todo/ → ready/` re-review**: no re-review. `todo/` is a "sterile room" —
+  any substantive change after sage review must go through idea/ demotion + new
+  review cycle first. By definition, a ticket ready for `ready/` promotion is
+  already up-to-date with its last sage review. Transition tool checks
+  `sage-review: completed` only.
+- **`create-ticket` `parent:` inference**: out of scope for Phase 1. No
+  well-defined "active epic" concept in the session; stub leaves `parent:` empty
+  for the caller to fill. Separate idea ticket if needed later.
 
 ## Phases
 
@@ -187,9 +215,16 @@ issues:
 Aggregation rule: design `block` → final block regardless of completeness result.
 Completeness `concern` → lead judgment on whether to set `blocked`.
 
-### Phase 3: Config integration + 260620 transition hook
+### Phase 3: Config integration + 260620 coordination
 
-Add all four `sage_review*` keys to the config schema (session > proj > user).
-Coordinate with 260620: add the `sage-review` pre-condition check gated on
-`sage_review` config. If 260620 ships first without the hook, append an Edition to
-its Phase result.
+Add all four `sage_review*` keys to the config schema (session > proj > user),
+following the `ItemPreferMercenary` registration pattern in `scope.go`.
+
+Coordinate with 260620 Phase 1 for two additions:
+- `sage-review` pre-condition check on upward moves (gated on `sage_review`
+  config; fails transition on `pending | blocked`).
+- Downward demotion support + ready-demotion tip (clear `spec:`/`spec-remove:`
+  reminder).
+
+If 260620 Phase 1 ships before this phase, append an Edition to its Phase 1
+result for both additions.
