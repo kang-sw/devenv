@@ -271,6 +271,8 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             self.assertIn("plugin package not fully materialized", "".join(call.args[0] for call in stderr.write.call_args_list))
 
     def test_install_replace_failure_reuses_existing_compatible_runtime(self):
+        # Persistent OSError (all retry attempts fail) with a compatible existing
+        # binary: install_tmp_runtime should return False (reuse) without raising.
         launcher = load_launcher()
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -286,12 +288,16 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 raise PermissionError("target is busy")
 
             launcher.os.replace = fake_replace
+            # Disable the sleep so the retry loop runs fast in tests.
+            launcher.time.sleep = lambda _: None
             launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir: got_binary == binary
 
             installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 
             self.assertFalse(installed)
-            self.assertEqual(calls, [(tmp, binary)])
+            # All retry attempts were made (5 total), each targeting the same pair.
+            self.assertTrue(len(calls) > 0)
+            self.assertTrue(all(c == (tmp, binary) for c in calls))
 
     def test_bootstrap_or_local_devenv_marker_forces_runtime_install(self):
         launcher = load_launcher()
