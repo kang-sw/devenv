@@ -41,7 +41,7 @@ Response
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline (loads orchestration primitives reference).
+1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline. Reload after session compaction; a duplicate load is safe.
 2. Call `{{.McpNamespace}}/project_tree()` to load the current project map.
 3. Call `{{.McpNamespace}}/git.status()`.
 4. If `user request` references a ticket, read it.
