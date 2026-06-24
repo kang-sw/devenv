@@ -61,3 +61,21 @@ Migrate the candidate surfaces onto the shared generator, one tool family per
 reviewable slice. Verification: each migrated surface mints word-chain ids
 through the shared generator with no regression in id uniqueness or opacity, and
 no caller parses id structure.
+
+## Drop Note
+
+Investigated as part of epic pre-merge review (2026-06-24). Sage review verdict:
+generalization not warranted beyond session keys (already done in M3).
+
+- `path.generate`: excluded — readable token is caller-supplied (`stems`); hex prefix is a
+  non-LLM-facing collision-avoidance disambiguator.
+- Mercenary handles: excluded — handle IS the caller's agent name; word-chain would regress
+  native-idiom alignment.
+- `exec_key`: validation-contract breaking change (`keyPattern` regex in `execjob.go:36`);
+  exec surface not yet exposed in `lead-workflow-manual`, so LLM echo-fidelity pain point
+  does not currently exist.
+
+Selection principle: word-chain ids add value only for minted, LLM-echoed, long-lived
+identities that the model must reproduce out-of-band. Only `ws.ferrule` session keys (done
+in M3) meet that bar at this time. Re-evaluate if exec surface is exposed in
+lead-workflow-manual and exec_key contract is revisited.
