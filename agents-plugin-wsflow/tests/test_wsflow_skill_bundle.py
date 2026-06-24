@@ -32,6 +32,7 @@ EXPECTED_SKILLS = {
     "lead-workflow-manual",
     "lead-write-spec",
     "lead-write-ticket",
+    "lead-prefer-subagent",
 }
 
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set()

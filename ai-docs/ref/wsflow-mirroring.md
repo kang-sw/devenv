@@ -47,6 +47,7 @@ Included:
 - `lead-forge-spec`
 - `lead-forge-mental-model`
 - `lead-review`
+- `lead-prefer-subagent`
 
 Excluded:
 

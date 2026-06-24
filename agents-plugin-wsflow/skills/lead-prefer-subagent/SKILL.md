@@ -5,5 +5,6 @@ description: Switch to maximum-delegation posture. Delegate all work — includi
 
 # Prefer Subagent
 
-Call `ws/playbook.print(name: "lead-prefer-subagent")` and execute the returned procedure
-inline. If the playbook cannot be loaded, stop and report that blocker.
+Call `wsflow/playbook.print(name: "lead-prefer-subagent")` and execute the returned procedure
+inline against the current user request. If the playbook cannot be loaded, stop
+and report that blocker.

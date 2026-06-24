@@ -1,11 +1,13 @@
 ---
 kind: print
+variables:
+  - WorkflowLang
 ---
 # Workflow Manual
 
-> **Session invariant:** Keep this reference active while writing or executing ws
-> workflow skills. After compaction, call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when primitive
-> names or orchestration boundaries matter.
+> **Session invariant:** Must reload after session compaction or continuation. Call
+> `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute inline.
+> When in doubt, reload — a duplicate load is safe.
 
 ## On: invoke
 
@@ -64,6 +66,7 @@ root-aware {{.McpNamespace}} tool call that targets that root.
 ### User preferences
 
 <!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
+{{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
 
 ### Delegation posture

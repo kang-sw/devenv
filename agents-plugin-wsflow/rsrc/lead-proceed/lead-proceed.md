@@ -11,7 +11,7 @@ Target: user request
 Scope
 - Route only; do not implement or plan here.
 - Proceed may invoke `lead-implement`, but source inspection, planning, and editing belong only to `lead-implement`.
-- Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline when workflow primitives are not already in context.
+- Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline. Always reload after session compaction; a duplicate load is safe.
 - Assess from conversation state and artifacts only; do not read source code.
 - Do not rejudge general ticket quality or mutate ticket structure.
 - Request phase or ticket slicing only when scope resolution blocks safe implementation.
