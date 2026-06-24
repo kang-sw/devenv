@@ -20,13 +20,20 @@ related-mental-model:
 
 The dashboard was briefly marked for deprecation during the native-subagent
 pivot, then explicitly retained as a usable web-tmux-style surface. The retained
-surface should not restart direct harness development. Instead, the dashboard
-needs a small, source-neutral activity bridge that can read host-owned agent
-surfaces such as Codex app-server and OpenCode ACP, normalize their session,
-turn, message, tool, permission, and status events, and render them through the
-existing WorkRoot Activity / Activity Console model. OpenCode serve remains a
-useful read-only observation surface, but it is not the primary counterpart to
-Codex app-server when the dashboard needs an interactive agent-client bridge.
+surface should not restart direct harness development. As of the 2026-06-24
+dashboard direction discussion, this structured Activity adapter track is
+deferred back to idea level. The nearer todo milestone is
+`260624-feat-ws-dashboard-managed-cli-terminal`, which provides a terminal-first
+managed vendor CLI surface and browser-side composer without treating provider
+protocol adapters as the first milestone.
+
+When this idea is revisited, the dashboard still needs a small, source-neutral
+activity bridge that can read host-owned agent surfaces such as Codex app-server
+and OpenCode ACP, normalize their session, turn, message, tool, permission, and
+status events, and render them through the existing WorkRoot Activity / Activity
+Console model. OpenCode serve remains a useful read-only observation surface,
+but it is not the primary counterpart to Codex app-server when the dashboard
+needs an interactive agent-client bridge.
 
 The existing Activity Console read model is the right public shape: source-
 neutral `ActivityItem` rows, selected transcript backfill, bounded diagnostics,

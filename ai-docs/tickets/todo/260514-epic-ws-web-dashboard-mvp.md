@@ -119,21 +119,30 @@ Active or planned product tracks:
   fast-forward-only pull controls.
   `260525-feat-ws-dashboard-workroot-polishing-backlog` is todo for
   on-demand WorkRoot lifecycle and Git toolbar polish.
-- Agent view panel - planned child track. Promote read-only Activity Console
+- Managed vendor CLI terminal - active child track.
+  `260624-feat-ws-dashboard-managed-cli-terminal` is todo for the nearer
+  terminal-first milestone: commonize the PTY text I/O substrate, add a managed
+  Codex/Claude/OpenCode-style CLI terminal surface, keep the long-text composer
+  as browser UI outside the PTY, and define vendor profile plus bootstrap/submit
+  policy without turning the dashboard into a ws MCP or provider-session
+  authority.
+- Agent view panel - deferred child track. Promote read-only Activity Console
   foundations into a dedicated agent-oriented panel for named-agent/main-
-  session/subtask visibility while keeping control actions such as interrupt,
-  cancel, erase, retry, or terminate behind separate high-friction tickets.
+  session/subtask visibility only after the terminal-first path is useful,
+  while keeping control actions such as interrupt, cancel, erase, retry, or
+  terminate behind separate high-friction tickets.
   `260525-feat-ws-dashboard-sqlite-agent-activity-source` is now in `.done/`; its
   original basis — aligning the backend Activity projection with ws-mcp's SQLite
   role/instance registry — no longer exists after the epic 260605 session-auth
   reshape removed the SQLite actor registry. Re-ground this track's activity source
   on the mercenary lifecycle before any further agent-panel work (see
   `260523-feat-ws-dashboard-main-session-activity-source`). [staleness audit 2026-06-19]
-  `260620-feat-ws-dashboard-agent-client-activity-sources` is todo for the
-  re-grounding pass: keep Activity rendering source-neutral, treat ws mercenary
-  state plus Codex app-server and OpenCode ACP as provider inputs, keep OpenCode
-  serve as optional observation/discovery, and avoid restarting direct
-  harness/runtime development under the dashboard.
+  `260620-feat-ws-dashboard-agent-client-activity-sources` is back in idea/ as
+  the deferred structured Activity adapter track: keep Activity rendering
+  source-neutral later, treat ws mercenary state plus Codex app-server and
+  OpenCode ACP as provider inputs, keep OpenCode serve as optional
+  observation/discovery, and avoid restarting direct harness/runtime development
+  under the dashboard.
   `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is done: WSL/local
   dogfood can start the daemon with explicit loopback-only `--no-auth` and get
   a direct local dashboard URL without weakening normal owner-auth or
@@ -169,18 +178,19 @@ Active or planned product tracks:
 
 Implementation sequence:
 
-1. Agent view panel: dedicated agent-oriented visibility over Activity Console
-   and future main-session/subtask sources. Re-ground source integration through
-   an ACP-shaped dashboard agent-client provider contract and Activity
-   projections for ws mercenary compatibility state, Codex app-server, and
-   OpenCode ACP; keep OpenCode serve as optional observation/discovery and avoid
-   direct harness/runtime development.
-2. Multi-server management: local dashboard as gateway for local, WSL, and
+1. Managed vendor CLI terminal: terminal-first Codex/Claude/OpenCode-style CLI
+   sessions with shared PTY text I/O, browser-side long-text composition, and
+   explicit bootstrap/submit policy.
+2. Agent view panel and structured Activity adapters: deferred idea-level work
+   over Activity Console and future main-session/subtask sources; re-ground
+   source integration through an ACP-shaped dashboard agent-client provider
+   contract only after the managed CLI path is dogfoodable.
+3. Multi-server management: local dashboard as gateway for local, WSL, and
    remote linked daemons, including remote Windows dogfood deployment and
    seamless resource integration under `serverId`.
-3. Editor/document and WorkRoot management polishing continue on demand through
+4. Editor/document and WorkRoot management polishing continue on demand through
    backlog tickets, but they no longer block the MVP sequence.
-4. Diagnostics/task panels, persistence expansion, terminal UX redesign, and
+5. Diagnostics/task panels, persistence expansion, terminal UX redesign, and
    broader visual-system research should be split into child tickets when their
    boundaries are ready.
 
