@@ -2850,6 +2850,9 @@ func LeadToolNames() []string {
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
+		if permanentlyHiddenTool(name) {
+			continue
+		}
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
@@ -2867,6 +2870,9 @@ func (s *Server) filteredTools() []map[string]any {
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
+		if permanentlyHiddenTool(name) {
+			continue
+		}
 		if s.toolAllowed(name) {
 			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
@@ -3002,8 +3008,16 @@ func agentCallHandleText(name, status string, pid int) string {
 	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", name, status, pid)
 }
 
+// permanentlyHiddenTool returns true for tools that must never appear on the
+// public MCP surface regardless of mode. exec.* tools are under active
+// development (epic 260524) and not yet documented in lead-workflow-manual;
+// they are hidden until the surface stabilizes.
+func permanentlyHiddenTool(name string) bool {
+	return strings.HasPrefix(name, "exec.")
+}
+
 func noAgentHiddenTool(name string) bool {
-	if strings.HasPrefix(name, "exec.") {
+	if permanentlyHiddenTool(name) {
 		return true
 	}
 	if strings.HasPrefix(name, "ws.mercenary.") {

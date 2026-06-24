@@ -906,7 +906,6 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	rootAwareTools := []string{
 		"api.list",
-		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
@@ -961,6 +960,12 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if strings.Contains(byID["2"], "ws.mercenary.recall") {
 		t.Fatalf("tools/list should not advertise ws.mercenary.recall: %s", byID["2"])
+	}
+	// exec.* tools are permanently hidden from the public MCP surface in all modes.
+	for _, execTool := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+		if strings.Contains(byID["2"], execTool) {
+			t.Fatalf("tools/list should not advertise exec tool %s: %s", execTool, byID["2"])
+		}
 	}
 	if !strings.Contains(byID["3"], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", byID["3"])
@@ -1674,9 +1679,10 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	// exec.* tools are permanently hidden from the public MCP surface in all modes.
 	for _, name := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
-		if !strings.Contains(byID["1"], name) {
-			t.Fatalf("tools/list missing %s: %s", name, byID["1"])
+		if strings.Contains(byID["1"], name) {
+			t.Fatalf("tools/list should not advertise exec tool %s: %s", name, byID["1"])
 		}
 	}
 	text := toolText(t, byID["2"])
