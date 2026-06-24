@@ -153,6 +153,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
+| `260624-feat-workflow-lead-language-config` | ready | Add `workflow.lang` config key so lead agent responds in user's preferred language while keeping CoT and subagent prompts in English |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -359,6 +360,12 @@ dropped tickets live in hidden archive dirs and git history.
   constraint:** tree-kills scoped
   to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
   because the dogfooding WSL2 host runs a live `claude.exe`.
+- `260624-feat-workflow-lead-language-config` (ready, feat) - add `workflow.lang`
+  config key; when set, `lead-workflow-manual` injects a language binding so the
+  lead agent responds in the user's preferred language while keeping CoT and all
+  subagent prompts in English. Phase 1: Go config schema + render var injection +
+  workflow-manual template.
+
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
