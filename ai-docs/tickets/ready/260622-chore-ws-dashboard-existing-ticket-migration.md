@@ -29,6 +29,20 @@ the current managed CLI and Activity adapter tickets through that board, and
 leaves stale spec/mental-model cleanup as the next documentation pass before
 implementation-ready promotion.
 
+## Spec Impact
+
+Target spec area: `ai-docs/spec/ws-web-dashboard/index.md` and
+`ai-docs/mental-model/ws-web-dashboard.md`.
+
+Expected caller-visible change: none. This phase is documentation cleanup that
+reclassifies stale pre-session-key named-agent, SQLite, actor, and Activity
+authority assumptions as compatibility behavior or deferred provider-adapter
+scope. It should preserve implemented dashboard contracts while making the
+accepted daemon-private ferrule/session-binding invariant recoverable for future
+dashboard implementation tickets.
+
+Contract-first spec: no.
+
 ## Phases
 
 ### Phase 1: Board import and active ticket routing
