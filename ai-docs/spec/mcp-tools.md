@@ -409,6 +409,17 @@ error. The `idea/` tip directs the caller to promote through `todo/` to trigger
 sage review; the `todo/+` tip directs the caller to run sage review before
 promoting further. {#260622-create-ticket-tool}
 
+`tickets.template` returns the typed body skeleton for a given ticket type.
+`type` is required; accepted values are `feat`, `bug`, `refactor`, `chore`,
+`research`, `workset`, and `epic`. `feat`/`bug`/`refactor`/`chore` share a
+single actionable skeleton (phases-driven structure); `research`, `workset`, and
+`epic` each return a distinct skeleton reflecting their section shapes. The
+returned markdown is a ready-to-fill stub — section headers and inline fill-in
+prompts with no surrounding convention prose, so callers can paste it directly
+into a new ticket body. An unknown or empty `type` is rejected with an error
+listing valid types. Capability range: `>=0.30.6-dev <0.31.0`.
+{#260624-tickets-template-tool}
+
 The Sage Review Gate runs after `lead-write-ticket` commits a ticket to `todo/` or
 `ready/`. It reads the `sage_review` project config key (`off|ask|auto`; empty or
 absent resolves as `off`), and when enabled dispatches two delegate playbooks in
