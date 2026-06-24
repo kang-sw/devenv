@@ -270,3 +270,25 @@ Coordinate with 260620 Phase 1 for two additions:
 
 If 260620 Phase 1 ships before this phase, append an Edition to its Phase 1
 result for both additions.
+
+### Result
+
+#### Edition (1b715fa1) - 2026-06-22
+
+Delivered on branch `implement/260622-sage-review-ticket-gate`.
+
+- `ticket-reviewer-design` (`kind: render`, `tier: large`, `delegates: true`): reads
+  ticket + linked specs/mental-models via `specs.find` / `mental_models.find`, sketches
+  implementation plan, emits structured `pass|concern|block` verdict with issues list.
+- `ticket-reviewer-completeness` (`kind: render`, `tier: medium`, `delegates: true`):
+  reads ticket only (no linked docs), emits structured verdict on structure/clarity gaps.
+- `lead-write-ticket`: `delegates: true` removed from frontmatter (flag is for
+  `kind: render` only; on `kind: print` it injects a Continuity tip that broke the
+  golden test). Sage Review Gate added as step 8 after Commit; "On: Sage Review Gate"
+  handler added; `## Templates` section with Blocked Section Template added before Doctrine.
+- Both manifests regenerated (`agents-plugin` + `agents-plugin-wsflow`).
+- Golden tests added: `TestRenderGoldenShippedPhase4Delegates` and
+  `TestRenderReturnsFrontmatterRecommendedTier` extended to cover both new playbooks.
+- `go test ./...`: 12/12 PASS.
+- Spec: `{#260624-sage-review-gate}` added to `ai-docs/spec/mcp-tools.md`.
+- Mental model: `workflow-skills.md` updated with Sage Review Gate behavior + Phase 3 config note.

@@ -409,6 +409,25 @@ error. The `idea/` tip directs the caller to promote through `todo/` to trigger
 sage review; the `todo/+` tip directs the caller to run sage review before
 promoting further. {#260622-create-ticket-tool}
 
+The Sage Review Gate runs after `lead-write-ticket` commits a ticket to `todo/` or
+`ready/`. It reads the `sage_review` project config key (`off|ask|auto`; empty or
+absent resolves as `off`), and when enabled dispatches two delegate playbooks in
+parallel: `ticket-reviewer-design` (tier: large) and `ticket-reviewer-completeness`
+(tier: medium). Each reviewer emits a structured verdict (`pass`, `concern`, or
+`block`) with an issues list. The gate aggregates the pair and writes `sage-review:
+completed` or `sage-review: blocked` into the ticket frontmatter and commits. A
+`blocked` result also appends a `## Blocked (YYYY-MM-DD)` summary section to the
+ticket body. `concern` elevated from design reviewer resolves to `completed` by
+default unless the lead escalates to `block`. `idea/` tickets bypass the gate.
+{#260624-sage-review-gate}
+
+> [!note] Planned 🚧
+> The `sage_review` config key is not yet registered in the config scope schema.
+> `config.show` returns empty for this key until Phase 3 registers it; the gate
+> treats empty as `off` and skips. Phase 3 will also wire the `tickets.move`
+> upward-promotion pre-condition check to enforce `sage-review: completed` before
+> promotion.
+
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
 `mental_models.list` returns available mental-model documents with domain,

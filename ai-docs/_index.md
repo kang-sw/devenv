@@ -234,8 +234,10 @@ dropped tickets live in hidden archive dirs and git history.
   ticket writes: `create-ticket` MCP tool, reviewer playbooks (design + completeness),
   `lead-write-ticket` judge-gate integration, and `sage_review*` config substrate.
   **Phase 1 done** (`8ced5351`): `tickets.create` MCP tool + CLI mirror; spec
-  `{#260622-create-ticket-tool}` written. Phase 2 (reviewer playbooks +
-  `lead-write-ticket` judge gate) is next.
+  `{#260622-create-ticket-tool}` written. **Phase 2 done** (`1b715fa1`):
+  `ticket-reviewer-design` + `ticket-reviewer-completeness` delegate playbooks,
+  Sage Review Gate in `lead-write-ticket`; spec `{#260624-sage-review-gate}` written.
+  Phase 3 (`sage_review*` config registration in `scope.go` + `tickets.move` gate) next.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
