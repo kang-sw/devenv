@@ -129,7 +129,7 @@ func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
 
 	// --- Enable prefer_mercenary ---
 	enableResp := callToolOnce(t, s, 1, "ws.lead.prefer_mercenary", map[string]any{"session_key": key})
-	if !strings.Contains(toolText(t, enableResp), "prefer_mercenary: enabled") {
+	if !strings.Contains(toolText(t, enableResp), "prefer_mercenary: on") {
 		t.Fatalf("enable call must succeed: %s", enableResp)
 	}
 
@@ -155,7 +155,7 @@ func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
 		"session_key": key,
 		"enabled":     false,
 	})
-	if !strings.Contains(toolText(t, disableResp), "prefer_mercenary: disabled") {
+	if !strings.Contains(toolText(t, disableResp), "prefer_mercenary: off") {
 		t.Fatalf("disable call must succeed: %s", disableResp)
 	}
 
@@ -193,7 +193,7 @@ func TestPreferMercenaryLegacyEnableShape(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	text := toolText(t, byID["1"])
-	if !strings.Contains(text, "prefer_mercenary: enabled") {
+	if !strings.Contains(text, "prefer_mercenary: on") {
 		t.Fatalf("legacy shape (no enabled arg) must enable: %s", byID["1"])
 	}
 }
@@ -224,10 +224,10 @@ func TestPreferMercenaryDisableViaEnabledFalse(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(toolText(t, byID["1"]), "prefer_mercenary: enabled") {
+	if !strings.Contains(toolText(t, byID["1"]), "prefer_mercenary: on") {
 		t.Fatalf("first call (enable) must return enabled: %s", byID["1"])
 	}
-	if !strings.Contains(toolText(t, byID["2"]), "prefer_mercenary: disabled") {
+	if !strings.Contains(toolText(t, byID["2"]), "prefer_mercenary: off") {
 		t.Fatalf("second call (disable) must return disabled: %s", byID["2"])
 	}
 }
@@ -253,7 +253,7 @@ func TestPreferMercenaryConfigShowReportsIt(t *testing.T) {
 	// Enable prefer_mercenary for the lead key.
 	enableResp := callToolOnce(t, s, 1, "ws.lead.prefer_mercenary", map[string]any{"session_key": key})
 	enableText := toolText(t, enableResp)
-	if !strings.Contains(enableText, "prefer_mercenary: enabled") {
+	if !strings.Contains(enableText, "prefer_mercenary: on") {
 		t.Fatalf("enable call did not succeed: %s", enableResp)
 	}
 

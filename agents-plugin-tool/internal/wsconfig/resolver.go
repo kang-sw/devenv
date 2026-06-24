@@ -151,6 +151,107 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	}
 }
 
+// Unset removes an override entry from the target scope. Only project and
+// global scopes are supported; session-scope overrides are ephemeral and do
+// not need an explicit unset path. Removing a key that does not exist is a
+// no-op (not an error).
+func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
+	targetScope := setOpts.ExplicitScope
+	if targetScope == "" {
+		targetScope = DefaultScope(itemKey)
+	}
+
+	// Capability check hook — mirrors Set's item-level write gating.
+	if setOpts.CapabilityCheck != nil {
+		if err := setOpts.CapabilityCheck(itemKey, targetScope); err != nil {
+			return err
+		}
+	}
+
+	switch targetScope {
+	case ScopeProject:
+		path, err := Path(r.opts)
+		if err != nil {
+			return err
+		}
+		return deleteOverrideInFile(path, itemKey)
+	case ScopeGlobal:
+		path, err := GlobalPath(r.opts)
+		if err != nil {
+			return err
+		}
+		return deleteOverrideInFile(path, itemKey)
+	case ScopeSession:
+		return fmt.Errorf("resolver: session-scope override cannot be unset (ephemeral; expires with session)")
+	default:
+		return fmt.Errorf("resolver: unsupported unset scope %q", targetScope)
+	}
+}
+
+// deleteOverrideInFile performs an flock-serialized read-modify-write on the
+// config file at path, removing overrides[key]. A missing key or missing file
+// is a no-op.
+func deleteOverrideInFile(path, itemKey string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	lockPath := path + ".lock"
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("acquire config lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
+	}
+	defer fl.Unlock() //nolint:errcheck
+
+	var cfg Config
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read config for update: %w", err)
+	}
+	if err == nil {
+		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
+			return fmt.Errorf("parse config for update: %w", jerr)
+		}
+	}
+	if _, exists := cfg.Overrides[itemKey]; !exists {
+		return nil
+	}
+	delete(cfg.Overrides, itemKey)
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("encode config: %w", err)
+	}
+	payload = append(payload, '\n')
+	if _, werr := tmp.Write(payload); werr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write temp config: %w", werr)
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close temp config: %w", cerr)
+	}
+	if rerr := os.Rename(tmpName, path); rerr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("atomic rename config: %w", rerr)
+	}
+	return nil
+}
+
 // GetBool resolves the value for itemKey and interprets it as a boolean.
 // "true" (case-sensitive exact match) → true; any other value including empty
 // or absent → false. Also returns the scope the value resolved from.

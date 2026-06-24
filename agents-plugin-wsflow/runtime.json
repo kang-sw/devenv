@@ -15,6 +15,7 @@
     "session.children": ">=0.30.6-dev <0.31.0",
     "config.show": ">=0.30.6-dev <0.31.0",
     "config.prompt.set": ">=0.30.6-dev <0.31.0",
+    "config.prompt.unset": ">=0.30.6-dev <0.31.0",
     "config.prompt": ">=0.30.6-dev <0.31.0",
     "project_tree": ">=0.30.6-dev <0.31.0",
     "infra.read": ">=0.30.6-dev <0.31.0",

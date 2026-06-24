@@ -311,7 +311,7 @@ func TestPreferMercenaryEnabledForLeadKey(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	text := toolText(t, byID["1"])
-	if !strings.Contains(text, "prefer_mercenary: enabled") {
+	if !strings.Contains(text, "prefer_mercenary: on") {
 		t.Fatalf("lead prefer_mercenary did not enable: %s", byID["1"])
 	}
 }
@@ -366,7 +366,7 @@ func TestPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	line := strings.TrimSpace(out.String())
-	if strings.Contains(line, "prefer_mercenary: enabled") {
+	if strings.Contains(line, "prefer_mercenary: on") {
 		t.Fatalf("delegate key must NOT enable prefer_mercenary: %s", line)
 	}
 	if !strings.Contains(line, "ws.lead.prefer_mercenary") || !strings.Contains(line, `"error"`) {

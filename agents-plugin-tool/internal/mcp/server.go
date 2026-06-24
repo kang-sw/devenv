@@ -543,6 +543,48 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
 
+	case "config.prompt.unset":
+		// Removes a prompt override from the project or global config layer.
+		// Lead-only via the config.* prefix gate (same as config.prompt.set).
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: session_key is required"))
+		}
+		pointID, _ := params.Arguments["pointId"].(string)
+		pointID = strings.TrimSpace(pointID)
+		if pointID == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: pointId must be non-empty"))
+		}
+		harness, _ := params.Arguments["harness"].(string)
+		switch harness {
+		case "claude", "codex":
+			// accepted as-is
+		case "*":
+			harness = "all"
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: harness must be one of claude, codex, or *; got %q", harness))
+		}
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(scopeArg)
+		}
+		overrideKey := "prompt." + pointID + "." + harness
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Unset(overrideKey, wsconfig.SetOptions{
+			ExplicitScope: explicitScope,
+			SessionKey:    sessionKey,
+		}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: %w", err))
+		}
+		resolvedScope := explicitScope
+		if resolvedScope == "" {
+			resolvedScope = wsconfig.DefaultScope(overrideKey)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
+
 	case "config.prompt":
 		// Read-only listing of declared prompt override-points. Lead-only via the
 		// config.* prefix gate (a keyless caller passes, exactly like config.show);
@@ -992,29 +1034,47 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if keyStr == "" {
 			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
 		}
-		// enabled defaults to true when absent (backward-compatible call shape).
-		enabled := true
-		if v, ok := params.Arguments["enabled"]; ok {
-			if b, isBool := v.(bool); isBool {
+		// Resolve value from the new `value` string param (on|off|hide) first;
+		// fall back to the legacy `enabled` bool for backward compatibility.
+		var configValue string
+		if v, ok := params.Arguments["value"].(string); ok {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "on":
+				configValue = "true"
+			case "off":
+				configValue = "false"
+			case "hide":
+				configValue = "hide"
+			default:
+				return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: value must be one of on, off, hide; got %q", v))
+			}
+		} else {
+			// Legacy bool path.
+			enabled := true
+			if b, ok := params.Arguments["enabled"].(bool); ok {
 				enabled = b
 			}
-		}
-		// Write through the layered config resolver (declared default scope: session).
-		value := "false"
-		if enabled {
-			value = "true"
+			if enabled {
+				configValue = "true"
+			} else {
+				configValue = "false"
+			}
 		}
 		adapter := sessionConfigAdapter{s: s.sessions}
 		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-		if err := resolver.Set(wsconfig.ItemPreferMercenary, value, wsconfig.SetOptions{
+		if err := resolver.Set(wsconfig.ItemPreferMercenary, configValue, wsconfig.SetOptions{
 			SessionKey: keyStr,
 		}); err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual and retry"))
 		}
-		if enabled {
-			return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
+		switch configValue {
+		case "true":
+			return toolTextResponse(req.ID, "prefer_mercenary: on\n", nil)
+		case "hide":
+			return toolTextResponse(req.ID, "prefer_mercenary: hide\n", nil)
+		default:
+			return toolTextResponse(req.ID, "prefer_mercenary: off\n", nil)
 		}
-		return toolTextResponse(req.ID, "prefer_mercenary: disabled\n", nil)
 
 	case "ws.mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -2216,12 +2276,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.lead.prefer_mercenary",
-			"description": "Set or clear the default delegation guidance for this session key. When enabled (default), playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default; when disabled, it reverts to host-native subagent guidance. Does not affect tool availability — mercenary is always reachable on request regardless of this setting. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"description": "Set the mercenary delegation mode for this session. 'on': playbook.render for implementer/reviewer advises the ws.mercenary.call path as default. 'off': reverts to host-native subagent guidance (default). 'hide': removes ws.mercenary.* from the public tool surface (filteredTools + toolAllowed) and suppresses mercenary content from rendered playbooks. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's lead ws session key."),
-					"enabled":     boolProperty("Whether to enable (true, default) or disable (false) the mercenary-primary delegation guidance. Omit to enable (backward-compatible call shape)."),
+					"value":       enumStringProperty("Desired mode: on, off, or hide. When omitted, falls back to the legacy `enabled` bool parameter.", []string{"on", "off", "hide"}),
+					"enabled":     boolProperty("Legacy: true = on, false = off. Ignored when `value` is set."),
 				},
 				"required": []string{"session_key"},
 			},
@@ -2315,6 +2376,20 @@ func tools() []map[string]any {
 					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
 				},
 				"required": []string{"session_key", "pointId", "harness", "prompt"},
+			},
+		},
+		{
+			"name":        "config.prompt.unset",
+			"description": "Remove a stored prompt override for a named override-point and harness bucket, restoring the inline seed default. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate."),
+					"pointId":     stringProperty("Override-point id, e.g. DelegationSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket to clear. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). Session scope is not supported.", wsconfig.ScopeSchemaEnum()),
+				},
+				"required": []string{"session_key", "pointId", "harness"},
 			},
 		},
 		{
@@ -2846,6 +2921,9 @@ func appendRequiredString(raw any, value string) []string {
 }
 
 func LeadToolNames() []string {
+	// LeadToolNames is called without a Server instance; for mercenary-hide
+	// we cannot read session-keyed config here. Callers that need hide-aware
+	// filtering should use Server.filteredTools() instead.
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
@@ -2867,10 +2945,14 @@ func LeadToolNames() []string {
 func (s *Server) filteredTools() []map[string]any {
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
+	mercenaryHidden := s.mercenaryHiddenFromConfig()
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
+			continue
+		}
+		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
 			continue
 		}
 		if s.toolAllowed(name) {
@@ -2919,6 +3001,9 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 
 func (s *Server) toolAllowed(name string) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
+		return false
+	}
+	if strings.HasPrefix(name, "ws.mercenary.") && s.mercenaryHiddenFromConfig() {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
@@ -3014,6 +3099,20 @@ func agentCallHandleText(name, status string, pid int) string {
 // they are hidden until the surface stabilizes.
 func permanentlyHiddenTool(name string) bool {
 	return strings.HasPrefix(name, "exec.")
+}
+
+// mercenaryHiddenFromConfig returns true when prefer_mercenary is set to "hide"
+// at project or global scope (session scope is not checked — filteredTools and
+// toolAllowed are request-level but not session-keyed). ws.lead.prefer_mercenary
+// itself is never blocked by this check so the lead can always change the value.
+func (s *Server) mercenaryHiddenFromConfig() bool {
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	rv, err := resolver.Get("", wsconfig.ItemPreferMercenary)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(rv.Value), "hide")
 }
 
 func noAgentHiddenTool(name string) bool {
