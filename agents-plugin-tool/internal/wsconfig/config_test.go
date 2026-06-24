@@ -191,8 +191,8 @@ func TestSetAgentsTierForHarnessStoresEffortWithoutModelChange(t *testing.T) {
 	if mapping.Backend != "codex" || mapping.Model != "gpt-5.5" || mapping.Effort != "medium" {
 		t.Fatalf("codex medium alias mapping = %#v", mapping)
 	}
-	if legacy := cfg.Agents.Tiers["medium"]; legacy.Effort != "" {
-		t.Fatalf("default tier effort was overwritten = %#v", legacy)
+	if legacy := cfg.Agents.Tiers["medium"]; legacy.Effort != "high" {
+		t.Fatalf("default tier effort unexpected = %#v", legacy)
 	}
 
 	backend, model, effort, err := ResolveAgentForHarnessConfig(Options{CacheHome: cache}, "medium", "", "", "codex")
