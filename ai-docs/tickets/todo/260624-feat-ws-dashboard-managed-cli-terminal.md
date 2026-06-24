@@ -1,7 +1,9 @@
 ---
 title: ws dashboard managed vendor CLI terminal
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260622-epic-ws-dashboard-session-key-realignment
 related:
+  260514-epic-ws-web-dashboard-mvp: predecessor dashboard MVP board whose reusable PTY/workbench surface this ticket extends
+  260622-research-ws-dashboard-ferrule-session-binding: settled ferrule-backed top-level harness binding model this ticket must follow
   260620-feat-ws-dashboard-agent-client-activity-sources: deferred structured Activity adapter track; this ticket provides the nearer terminal-first milestone
   260517-bug-ws-dashboard-windows-terminal-control-keys: existing Windows control-key risk for PTY-backed dashboard terminal surfaces
   260605-research-ws-native-subagent-pivot: ferrule/session-key and mercenary boundary context
@@ -15,12 +17,14 @@ sage-review: pending
 
 ## Background
 
-The dashboard's richer agent-client direction through Codex app-server and
-OpenCode ACP remains useful, but that milestone is too far from a dogfoodable
-interactive surface. The nearer accepted backlog is a terminal-first layer for
-vendor agent CLIs: the dashboard daemon starts and owns PTY-backed Codex,
-Claude, OpenCode, or similar CLI sessions, while the browser renders the output
-as a terminal and adds a web-native prompt composition affordance.
+The dashboard session-key realignment epic keeps the browser dashboard but moves
+agent and harness integration onto ferrule-backed, daemon-private session
+bindings. The richer agent-client direction through Codex app-server and OpenCode
+ACP remains useful, but that milestone is too far from a dogfoodable interactive
+surface. The nearer accepted backlog is a terminal-first layer for vendor agent
+CLIs: the dashboard daemon starts and owns PTY-backed Codex, Claude, OpenCode, or
+similar CLI sessions, while the browser renders the output as a terminal and adds
+a web-native prompt composition affordance.
 
 The long-text input surface is a browser-side composer, not an editor embedded
 inside the PTY. It may use a React/CodeMirror-style floating editor, snippets,
@@ -48,18 +52,22 @@ not parse terminal output into source-neutral Activity as its success criterion.
 - Keep vendor differences in thin profiles: executable, args, environment,
   cwd behavior, submit policy, bootstrap text policy, and optional extraction
   hints. Do not build a universal agent protocol over ANSI output.
-- Treat ferrule/bootstrap injection as explicit and auditable. Session keys and
-  bootstrap text must not become browser route identity, Activity ids, command
-  logs, or transcript metadata. A daemon-side `ws.ferrule` call belongs behind a
-  later spec decision if it becomes necessary.
+- Treat ferrule/bootstrap injection as explicit and auditable. Top-level
+  dashboard-launched harness sessions follow
+  `260622-research-ws-dashboard-ferrule-session-binding`: the target daemon may
+  call `ws.ferrule(root)`, store the returned `wsSessionKey` only in
+  daemon-private binding state, and inject the launch/bootstrap context into the
+  managed CLI. Session keys and bootstrap text must not become browser route
+  identity, Activity ids, command logs, or transcript metadata.
 - Preserve the pure terminal contract: it stays a shell terminal substrate and
   does not gain Codex, Claude, OpenCode, bootstrap, or composer semantics.
 
 ## Constraints
 
-- The dashboard may own PTY lifecycle and stdin delivery for managed CLI
-  sessions, but it must not become the canonical ws MCP root, model loop,
-  permission runtime, provider session authority, or ws agent runtime.
+- The dashboard may own PTY lifecycle, stdin delivery, and daemon-private
+  session binding for managed CLI sessions, but it must not become the canonical
+  ws MCP root, model loop, permission runtime, provider session authority, or ws
+  agent runtime.
 - Browser composer submission must be a deliberate action. Editing, IME
   composition, snippets, and previews happen in browser UI; no PTY-side editor
   or adapter editor is introduced.
@@ -136,11 +144,13 @@ long-text submit strategy, newline/final-Enter handling, optional bracketed
 paste support, interrupt/close expectations, and bootstrap text policy.
 
 Bootstrap/ferrule behavior starts as explicit visible text insertion or
-submission. The policy may offer a "prepare ws bootstrap" action that composes
-the workflow instructions and root-specific context for the user to inspect
-before sending. Direct daemon-side `ws.ferrule` minting is not required in this
-phase unless a separate spec decision authorizes the dashboard to hold and inject
-that credential.
+submission governed by the session-key realignment model. For a top-level
+dashboard-launched harness CLI, the target daemon may prepare the workflow
+instructions, call `ws.ferrule(root)` in its local ws environment, store the
+resulting `wsSessionKey` only in daemon-private binding state, and inject the
+approved launch/bootstrap context into the CLI. Profiles that do not support ws
+bootstrap yet must degrade explicitly rather than silently starting with an
+untracked authority model.
 
 Verification boundary: profile fixture tests for command construction and
 submit encoding, bounded missing-binary errors, no leakage of `session_key` or

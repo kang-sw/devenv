@@ -153,8 +153,11 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add a terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
-| `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Deferred structured Activity adapter track for Codex app-server and OpenCode ACP provider data |
+| `260622-epic-ws-dashboard-session-key-realignment` | todo | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
+| `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
+| `260622-chore-ws-dashboard-existing-ticket-migration` | todo | Migrate existing dashboard tickets after the session-key pivot |
+| `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
+| `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Deferred structured Activity adapter track for Codex app-server and OpenCode ACP provider data after the managed CLI path |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
@@ -200,6 +203,11 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260622-chore-ws-dashboard-existing-ticket-migration` (`todo`, dashboard
+  migration context) - active dashboard worktree cleanup after the session-key
+  realignment branch split; Phase 1 routes `260624` managed CLI work through the
+  realignment epic and defers `260620` Activity adapters to idea-level. Not an
+  implementation-ready target.
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-

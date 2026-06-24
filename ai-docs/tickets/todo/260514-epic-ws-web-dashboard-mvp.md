@@ -10,6 +10,7 @@ related:
   260516-epic-ws-web-dashboard-workroot-io-substrate: next workRoot filesystem and terminal substrate milestone
   260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
   260516-feat-ws-web-minimal-frontend-shell: inspectable frontend child of the visible substrate milestone
+  260622-epic-ws-dashboard-session-key-realignment: successor board for ferrule-backed dashboard agent and harness integration
 related-mental-model:
   - ws-web-dashboard
   - developer-environment-tools
@@ -86,6 +87,10 @@ Completed follow-up clusters:
 
 Active or planned product tracks:
 
+Current migration note (2026-06-24): this ticket remains the predecessor MVP
+board for reusable dashboard product surfaces. Session-key-aware agent and
+harness work now routes through `260622-epic-ws-dashboard-session-key-realignment`.
+
 - `260524-feat-ws-dashboard-document-viewer-editor-substrate` - done; editor
   implementation track. Completed reusable Markdown/document viewing,
   daemon-backed translation overlay, raw-text edit/save fan-out, and document
@@ -119,8 +124,9 @@ Active or planned product tracks:
   fast-forward-only pull controls.
   `260525-feat-ws-dashboard-workroot-polishing-backlog` is todo for
   on-demand WorkRoot lifecycle and Git toolbar polish.
-- Managed vendor CLI terminal - active child track.
-  `260624-feat-ws-dashboard-managed-cli-terminal` is todo for the nearer
+- Managed vendor CLI terminal - successor child track under session-key
+  realignment. `260624-feat-ws-dashboard-managed-cli-terminal` is todo under
+  `260622-epic-ws-dashboard-session-key-realignment` for the nearer
   terminal-first milestone: commonize the PTY text I/O substrate, add a managed
   Codex/Claude/OpenCode-style CLI terminal surface, keep the long-text composer
   as browser UI outside the PTY, and define vendor profile plus bootstrap/submit
@@ -137,12 +143,12 @@ Active or planned product tracks:
   reshape removed the SQLite actor registry. Re-ground this track's activity source
   on the mercenary lifecycle before any further agent-panel work (see
   `260523-feat-ws-dashboard-main-session-activity-source`). [staleness audit 2026-06-19]
-  `260620-feat-ws-dashboard-agent-client-activity-sources` is back in idea/ as
-  the deferred structured Activity adapter track: keep Activity rendering
-  source-neutral later, treat ws mercenary state plus Codex app-server and
-  OpenCode ACP as provider inputs, keep OpenCode serve as optional
-  observation/discovery, and avoid restarting direct harness/runtime development
-  under the dashboard.
+  `260620-feat-ws-dashboard-agent-client-activity-sources` is back in idea/
+  under `260622-epic-ws-dashboard-session-key-realignment` as the deferred
+  structured Activity adapter track: keep Activity rendering source-neutral
+  later, treat ws mercenary state plus Codex app-server and OpenCode ACP as
+  provider inputs, keep OpenCode serve as optional observation/discovery, and
+  avoid restarting direct harness/runtime development under the dashboard.
   `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is done: WSL/local
   dogfood can start the daemon with explicit loopback-only `--no-auth` and get
   a direct local dashboard URL without weakening normal owner-auth or
@@ -177,6 +183,10 @@ Active or planned product tracks:
   visual-polishing line.
 
 Implementation sequence:
+
+For session-key-aware agent and harness work, follow
+`260622-epic-ws-dashboard-session-key-realignment`. This predecessor board keeps
+the reusable dashboard surface order visible:
 
 1. Managed vendor CLI terminal: terminal-first Codex/Claude/OpenCode-style CLI
    sessions with shared PTY text I/O, browser-side long-text composition, and

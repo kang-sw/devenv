@@ -1,0 +1,86 @@
+---
+title: ws dashboard existing ticket migration
+parent: 260622-epic-ws-dashboard-session-key-realignment
+related:
+  260514-epic-ws-web-dashboard-mvp: predecessor board to audit and migrate
+  260620-feat-ws-dashboard-agent-client-activity-sources: deferred Activity adapter ticket now routed under the realignment epic
+  260525-feat-ws-dashboard-server-scoped-operation-forwarding: linked-server ticket whose serverId assumptions should be preserved during migration
+  260622-research-ws-dashboard-ferrule-session-binding: research capture that defines the intended session-binding model
+related-mental-model:
+  - ws-web-dashboard
+  - mcp-runtime
+  - named-agent-runtime
+---
+
+# ws dashboard existing ticket migration
+
+## Background
+
+The existing dashboard MVP epic and many dashboard child tickets were written
+before the session-key/ferrule pivot fully settled. The implementation is not
+yet committed for the new dashboard harness model, but the direction changed:
+top-level harness sessions should own lead-scoped ws keys, the dashboard daemon
+should keep only private ferrule-backed bindings, and browser-visible Activity
+should remain source-neutral.
+
+This ticket is the migration slice for the new dashboard session-key realignment
+epic. It imports the realignment board into the active dashboard branch, routes
+the current managed CLI and Activity adapter tickets through that board, and
+leaves stale spec/mental-model cleanup as the next documentation pass before
+implementation-ready promotion.
+
+## Phases
+
+### Phase 1: Board import and active ticket routing
+
+Import the session-key realignment epic and its research child into the active
+dashboard branch. Route the active dashboard agent/harness backlog through the
+realignment epic:
+
+- `260622-epic-ws-dashboard-session-key-realignment` becomes the active
+  coordination board for session-key-aware dashboard agent and harness work.
+- `260514-epic-ws-web-dashboard-mvp` remains the predecessor product board for
+  reusable workbench, PTY, document, WorkRoot, Activity, and linked-server
+  surfaces.
+- `260624-feat-ws-dashboard-managed-cli-terminal` becomes the first concrete todo
+  child under the realignment epic.
+- `260620-feat-ws-dashboard-agent-client-activity-sources` moves or stays at
+  idea-level as deferred structured Activity adapter work after the managed CLI
+  path is dogfoodable.
+- `ai-docs/_index.md` lists the realignment board and current child tickets so a
+  fresh dashboard session does not re-derive the branch split.
+
+Deferred scope: do not implement provider adapters, daemon ferrule clients,
+browser Activity redesign, linked-server forwarding changes, or spec contract
+entries in this phase. This phase is ticket/index migration only.
+
+Verification boundary: ticket status/reference checks should show the
+realignment epic, the managed CLI child, the deferred Activity adapter ticket,
+and the predecessor MVP board without stale parentage. No browser or daemon
+runtime verification is required for this documentation-only phase.
+
+### Phase 2: Spec and mental-model drift cleanup
+
+Audit `ai-docs/spec/ws-web-dashboard/index.md` and
+`ai-docs/mental-model/ws-web-dashboard.md` for stale assumptions from the
+pre-session-key / actor / named-agent era.
+
+Target migration questions:
+
+- Which spec entries still describe named-agent SQLite/wsstate authority as the
+  main Activity source after the session-key pivot?
+- Which Activity Console and linked-server sections need the
+  `wsSessionKey` / `providerSessionId` / `activityId` separation made explicit?
+- Which mental-model rules should be updated so future implementers preserve the
+  daemon-private binding and do not expose ws session keys to browser routes or
+  logs?
+- Which current spec wording should remain as implemented compatibility behavior
+  rather than planned provider-adapter behavior?
+
+Deferred scope: do not create contract-first implementation spec entries until a
+child ticket is promoted to `ready/`.
+
+Verification boundary: a fresh session should be able to identify stale
+compatibility sources, deferred provider-adapter work, and the accepted
+daemon-private session-binding invariant without reading the old discussion
+thread.

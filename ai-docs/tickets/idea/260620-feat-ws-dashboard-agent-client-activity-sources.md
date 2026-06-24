@@ -1,7 +1,9 @@
 ---
 title: ws dashboard agent-client activity sources
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260622-epic-ws-dashboard-session-key-realignment
 related:
+  260514-epic-ws-web-dashboard-mvp: predecessor dashboard MVP board with reusable Activity Console and workbench surfaces
+  260622-research-ws-dashboard-ferrule-session-binding: session-binding model that future provider adapters must build on
   260605-research-ws-native-subagent-pivot: supersedes dashboard deprecation and preserves the web dashboard while moving agent visibility away from removed agents.* surfaces
   260523-feat-ws-dashboard-main-session-activity-source: prior main-session freshness gap that must be re-grounded on host-owned agent/client activity
   260525-feat-ws-dashboard-server-scoped-operation-forwarding: serverId forwarding must carry Activity source identity before remote provider streams are transparent
@@ -22,7 +24,8 @@ The dashboard was briefly marked for deprecation during the native-subagent
 pivot, then explicitly retained as a usable web-tmux-style surface. The retained
 surface should not restart direct harness development. As of the 2026-06-24
 dashboard direction discussion, this structured Activity adapter track is
-deferred back to idea level. The nearer todo milestone is
+deferred back to idea level under
+`260622-epic-ws-dashboard-session-key-realignment`. The nearer todo milestone is
 `260624-feat-ws-dashboard-managed-cli-terminal`, which provides a terminal-first
 managed vendor CLI surface and browser-side composer without treating provider
 protocol adapters as the first milestone.
