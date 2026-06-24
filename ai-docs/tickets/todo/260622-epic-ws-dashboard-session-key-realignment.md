@@ -5,7 +5,7 @@ related:
   260605-epic-ws-playbook-factory-pivot: epic that changed ws delegation, root authority, actor removal, and mercenary/session-key behavior
   260605-research-ws-native-subagent-pivot: research anchor that briefly deprecated the dashboard before later retention decisions
   260620-feat-ws-dashboard-agent-client-activity-sources: deferred Activity adapter ticket that now routes through this realignment epic
-  260525-feat-ws-dashboard-server-scoped-operation-forwarding: linked-server operation-forwarding ticket whose serverId boundary constrains session binding
+  260525-feat-ws-dashboard-server-scoped-operation-forwarding: linked-server operation-forwarding ticket whose Server Route boundary constrains session binding
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
@@ -29,8 +29,8 @@ session-key-aware model:
   session keys minted with `ws.ferrule(root)`;
 - the dashboard daemon keeps a private binding between dashboard activity/session
   ids, provider-native session ids, and ws session keys;
-- browser-facing identity remains dashboard-owned (`serverId`, `workspaceId`,
-  `workRootId`, `activityId`, transcript cursors);
+- browser-facing identity remains dashboard-owned (`serverRoute`,
+  `workspaceId`, `workRootId`, `activityId`, transcript cursors);
 - existing Activity Console, workbench, terminal, document, and server gateway UI
   should be reused where their contracts still fit;
 - old dashboard tickets and specs are audited and migrated away from stale
@@ -68,8 +68,9 @@ session-key-aware model:
   dogfoodable; future provider adapters must build on the session-binding model
   instead of the pre-pivot named-agent/SQLite authority assumptions.
 - Existing: `260525-feat-ws-dashboard-server-scoped-operation-forwarding`
-  remains the linked-server forwarding ticket; this epic should treat serverId
-  scoping as an identity constraint rather than a separate remote session model.
+  remains the linked-server forwarding ticket; this epic should treat Server
+  Route scoping as an identity constraint rather than a separate remote session
+  model.
 - Existing: `260514-epic-ws-web-dashboard-mvp` remains the predecessor board for
   reusable workbench, PTY, document, WorkRoot, Activity, and server gateway
   surfaces; session-key-aware agent/harness work now routes through this epic.
@@ -100,7 +101,7 @@ session-key-aware model:
 
 - Done: the dashboard ticket/spec/mental-model set has been migrated so future
   implementation sessions can proceed from the ferrule-backed top-level harness
-  model without re-deriving the session-key, provider-session, and serverId
+  model without re-deriving the session-key, provider-session, and Server Route
   boundaries.
 - Dropped: a later decision retires the browser dashboard or replaces the
   ferrule-backed harness-session model with a different accepted architecture.

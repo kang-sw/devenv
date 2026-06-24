@@ -4,7 +4,7 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260525-feat-ws-dashboard-multi-server-gateway: introduced linked-server registry, link-auth, selected-server resource forwarding, and server-first navigation
   260525-feat-ws-dashboard-endpoint-linked-server-add: exposed endpoint-first linked server add flow and revealed non-resource API locality during Windows dogfood
-  260624-feat-ws-dashboard-managed-cli-terminal: must build new terminal-like daemon APIs on the corrected server-scoped route substrate instead of adding more local-only debt
+  260624-feat-ws-dashboard-managed-cli-terminal: must build new terminal-like daemon APIs on the corrected Server Route substrate instead of adding more local-only debt
   260514-research-ws-web-dashboard-direction: longer-range remote hardening and server federation direction
 related-mental-model:
   - ws-web-dashboard
@@ -15,7 +15,7 @@ related-mental-model:
 ## Background
 
 Endpoint-linked servers can now be added and selected, and
-`GET /api/dashboard/servers/{serverId}/resources` forwards remote resource
+`GET /api/dashboard/servers/{serverRoute}/resources` forwards remote resource
 snapshots through the local dashboard gateway. Dogfood against a remote Windows
 daemon showed that this is not enough for a transparent multi-server dashboard:
 most follow-up operations still call local-only routes such as
@@ -24,7 +24,7 @@ most follow-up operations still call local-only routes such as
 routes, Activity routes, and terminal routes.
 
 The product model should be: the browser talks only to the local gateway, while
-the selected `serverId` determines whether the local gateway handles the
+the selected Server Route determines whether the local gateway handles the
 operation locally or forwards it to a linked daemon with the memory-only bearer
 token. A user should be able to attach a remote Windows daemon, click that
 server's folder/open-root affordance, browse remote paths, open a remote
@@ -35,38 +35,60 @@ This ticket is now the priority dashboard architecture correction before new
 managed CLI or agent-facing daemon APIs are added. The current partial model is
 conceptually wrong because most operation routes still target the gateway's
 local host implicitly. New dashboard operation work should either depend on this
-ticket's substrate or introduce only the same canonical server-scoped route
-shapes.
+ticket's substrate or introduce only the same canonical Server Route-prefixed
+route shapes.
 
 ## Decisions
 
-- Make `serverId` part of every operation whose target is a server, workspace,
-  workRoot, instance, file, Activity item, terminal, or host filesystem path.
+- Use **Server Route** / `serverRoute` as the canonical term for browser-visible
+  daemon routing identity. Existing JSON/resource fields named `serverId` are
+  compatibility field names that carry the selected Server Route unless a code
+  path explicitly documents a daemon-local server id.
+- Make `serverRoute` part of every operation whose target is a server,
+  workspace, workRoot, instance, file, Activity item, terminal, or host
+  filesystem path.
 - Treat this as an "all daemon-scoped operations" rule: every REST operation
   whose authority belongs to a selected dashboard daemon must be server-aware,
   including future managed CLI operations. Gateway-owned routes such as
   `/healthz`, static assets, the browser shell, pairing/link bootstrap, linked
   server registry/tunnel management, and gateway-local provider configuration
   are explicit exceptions rather than accidental bare routes.
-- Keep existing non-server-scoped routes as local compatibility aliases for
-  `server-local`; new frontend calls should prefer canonical server-scoped
-  routes.
+- Keep existing bare daemon routes as local compatibility aliases for
+  `server-local` through this ticket. New frontend calls should prefer
+  canonical Server Route-prefixed routes, and alias removal/deprecation belongs
+  in a later cleanup ticket.
 - Route all browser-to-remote traffic through the local gateway. The browser
   must not call the linked endpoint directly.
 - Implement the current forwarding model as one-hop through the directly
   connected daemon selected by the local gateway. The route grammar must remain
   compatible with future multi-hop forwarding, but recursive federation,
   transitive auth, loop prevention, and remote gateway discovery are deferred.
-- Reserve dot (`.`) as a future hop separator. Direct linked-server ids must be
-  generated from a dot-free slug alphabet such as `[A-Za-z0-9_-]+`; labels and
-  endpoint hostnames may contain dots but must not become route ids. A future
-  gateway-relative route such as `server-win.server-linux` would resolve the
-  first hop locally, forward the remaining suffix to the next daemon, and rewrite
-  returned resource identities back to the full gateway-relative route.
+- Reserve dot (`.`) as a future hop separator. Direct linked-server route
+  segments must be generated from a dot-free slug alphabet such as
+  `[A-Za-z0-9_-]+`; labels and endpoint hostnames may contain dots but must not
+  become route segments. A future gateway-relative Server Route such as
+  `server-win.server-linux` would resolve the first hop locally, forward the
+  remaining suffix to the next daemon, and rewrite returned resource identities
+  back to the full gateway-relative route.
+- Reject new linked-server requests whose requested Server Route contains a dot.
+  Existing persisted dotted linked-server route values should not be silently
+  rewritten; handle them with a bounded invalid-route refusal that tells the
+  owner to re-add the linked server under a dot-free Server Route.
 - For linked servers, forward requests with the linked server's memory-only
   bearer token and preserve upstream status/error shape as much as practical.
+- Treat authenticated linked-server mutations as owner-authorized host control
+  on the target daemon: file writes, Git mutations, terminal input/resize/close,
+  activation changes, workspace removal, and Git worktree add are allowed when
+  local owner auth, linked-server auth, and the target daemon's own gates all
+  pass. The UI must keep the selected Server Route visible enough that a remote
+  host operation is not confused with a local host operation.
+- Preserve upstream HTTP status and error shape where practical. Gateway-level
+  refusal cases should use bounded dashboard errors for unknown Server Route,
+  invalid Server Route, auth required, tunnel required, unreachable upstream,
+  and upstream rejection, without leaking endpoints, tokens, private paths, or
+  daemon/session metadata.
 - Rewrite returned `DashboardResourcesView` and nested `ResourcePath.serverId`
-  values to the gateway-relative server route visible to the browser, matching
+  values to the gateway-relative Server Route visible to the browser, matching
   the existing selected-server resources forwarding behavior for direct linked
   servers and leaving room for later multi-hop route rewriting.
 - Do not solve credential persistence, automatic deployment, public exposure
@@ -78,9 +100,9 @@ shapes.
 Already server-aware:
 
 - `GET /api/dashboard/servers`
-- `GET /api/dashboard/servers/{serverId}/resources`
-- `POST /api/dashboard/servers/{serverId}/link-auth`
-- `POST /api/dashboard/servers/{serverId}/tunnel/reconnect`
+- `GET /api/dashboard/servers/{serverRoute}/resources`
+- `POST /api/dashboard/servers/{serverRoute}/link-auth`
+- `POST /api/dashboard/servers/{serverRoute}/tunnel/reconnect`
 - `POST /api/dashboard/servers/link`
 
 Must become server-aware for transparent linked-server operation:
@@ -130,28 +152,29 @@ Deferred or local-gateway surfaces:
 - Document translation provider routes may stay local-gateway-owned because the
   frontend sends document blocks and provider configuration belongs to the
   gateway. If translation cache identity includes document source identity, it
-  must include `serverId`.
-- Fixture/mock instance events should remain deferred until a real
-  server-scoped instance-event stream contract exists.
+  must include the source Server Route.
+- Fixture/mock instance events should remain deferred until a real Server
+  Route-scoped instance-event stream contract exists.
 
 ## Constraints
 
 - Frontend identity is the first dependency. Do not forward new remote
   operations until pane keys, route helpers, command payloads, stream keys, and
-  persisted state either carry `serverId` or deliberately map old local-only
+  persisted state either carry `serverRoute` or deliberately map old local-only
   state to `server-local`.
-- Direct server ids must reject dot. If existing persisted linked-server ids can
-  contain dot, add a bounded migration or refusal path before treating dot as a
-  hop separator in browser-visible route identity.
-- Root picker and open-WorkRoot paths are remote host paths when `serverId` is
+- Direct linked-server route segments must reject dot. If existing persisted
+  linked-server route values contain dot, add a bounded invalid-route refusal
+  path before treating dot as a hop separator in browser-visible route identity;
+  do not silently rewrite those values.
+- Root picker and open-WorkRoot paths are remote host paths when `serverRoute` is
   not `server-local`; UI labels and placeholders must make the selected server
   context explicit enough that users do not mistake remote filesystem paths for
   local paths.
-- Server-scoped routes must avoid bare-id collisions. Frontend pane keys,
-  terminal state, document event subscriptions, Activity stream keys, and any
-  persisted UI state must include `serverId` where the same `workRootId`,
-  `workspaceId`, `activityId`, or `terminalId` could exist on more than one
-  server.
+- Server Route-scoped operations must avoid bare-id collisions. Frontend pane
+  keys, terminal state, document event subscriptions, Activity stream keys, and
+  any persisted UI state must include `serverRoute` where the same
+  `workRootId`, `workspaceId`, `activityId`, or `terminalId` could exist on
+  more than one server.
 - SSE routes require proxying stream semantics, not just one-shot fetch
   forwarding. This applies to document events and Activity events.
 - Terminal WebSocket forwarding requires a distinct gateway plan for upgrade
@@ -161,18 +184,18 @@ Deferred or local-gateway surfaces:
   fetch/push/pull, activation changes, workspace removal, Git worktree add,
   terminal input, terminal resize, and terminal close must preserve owner-auth
   gating at the local gateway and bearer auth to the linked daemon.
-- Existing local-only frontend helpers should either accept `serverId` or be
-  wrapped by server-scoped helpers. Avoid ad hoc URL string construction in
+- Existing local-only frontend helpers should either accept `serverRoute` or be
+  wrapped by Server Route helpers. Avoid ad hoc URL string construction in
   components.
 - Backend forwarding should be allowlisted. A generic proxy is acceptable only
-  when it is constrained to this ticket's server-scoped dashboard routes and
-  does not expose private, unauthenticated, or future daemon paths.
+  when it is constrained to this ticket's Server Route-prefixed dashboard routes
+  and does not expose private, unauthenticated, or future daemon paths.
 
 ## Implementation Strategy
 
-- Treat `serverId` as an explicit UI and route dimension before adding remote
+- Treat `serverRoute` as an explicit UI and route dimension before adding remote
   behavior. Bare daemon ids are not unique across linked servers, and future
-  multi-hop routes require direct ids to remain dot-free.
+  multi-hop routes require direct route segments to remain dot-free.
 - Recover the already-written frontend Phase 1 substrate from `origin/discuss`
   by selectively replaying the code commits that still apply cleanly:
   `2954a622`, `9c169d1c`, and `bfab8b7b`. Do not bulk-merge `origin/discuss`;
@@ -182,18 +205,19 @@ Deferred or local-gateway surfaces:
   before forwarding individual operations. Reuse it for ordinary HTTP routes;
   implement SSE and WebSocket forwarding separately.
 - Keep old local routes as `server-local` compatibility aliases, but move new
-  frontend calls to canonical `/api/dashboard/servers/{serverId}/...` helpers.
+  frontend calls to canonical `/api/dashboard/servers/{serverRoute}/...`
+  helpers.
 - Use remote root picker/open WorkRoot as the first end-to-end proof because it
   exercises host-path locality and resource rewriting without SSE or terminal
   gateway complexity.
 
 ## Phases
 
-### Phase 1: Frontend server identity and endpoint helpers
+### Phase 1: Frontend Server Route identity and endpoint helpers
 
-Introduce frontend route helper APIs for every canonical server-scoped
+Introduce frontend route helper APIs for every canonical Server Route-scoped
 dashboard operation this ticket will eventually forward. Callers should pass a
-`serverId` or a full `ResourcePath`; components should stop constructing
+`serverRoute` or a full `ResourcePath`; components should stop constructing
 server-sensitive API URLs inline.
 
 Define collision-safe frontend identities for workbench panes, file pane
@@ -207,13 +231,13 @@ a bounded compatibility decision.
 The canonical route shapes are:
 
 ```text
-/api/dashboard/servers/{serverId}/root-picker
-/api/dashboard/servers/{serverId}/root-picker/directories
-/api/dashboard/servers/{serverId}/root-picker/pins
-/api/dashboard/servers/{serverId}/work-roots/open
-/api/dashboard/servers/{serverId}/workspaces/{workspaceId}/...
-/api/dashboard/servers/{serverId}/work-roots/{workRootId}/...
-/api/dashboard/servers/{serverId}/terminals/{terminalId}/...
+/api/dashboard/servers/{serverRoute}/root-picker
+/api/dashboard/servers/{serverRoute}/root-picker/directories
+/api/dashboard/servers/{serverRoute}/root-picker/pins
+/api/dashboard/servers/{serverRoute}/work-roots/open
+/api/dashboard/servers/{serverRoute}/workspaces/{workspaceId}/...
+/api/dashboard/servers/{serverRoute}/work-roots/{workRootId}/...
+/api/dashboard/servers/{serverRoute}/terminals/{terminalId}/...
 ```
 
 Deferred scope: backend remote forwarding and browser-visible remote behavior.
@@ -223,11 +247,11 @@ should not try to proxy SSE or WebSockets.
 Verification should cover endpoint helper tests for every canonical route,
 collision tests for same bare ids on different servers, persisted-state
 compatibility tests where state formats change, and command payload tests that
-prove `serverId` is carried where it constrains execution.
+prove `serverRoute` is carried where it constrains execution.
 
 ### Phase 2: Backend local aliases and one-shot forwarding skeleton
 
-Add server-scoped daemon routes for one-shot HTTP operations, with
+Add Server Route-scoped daemon routes for one-shot HTTP operations, with
 `server-local` handled in-process through the existing local handlers and
 linked servers resolved through daemon-owned linked-server metadata,
 memory-only bearer tokens, and endpoint hints.
@@ -236,17 +260,17 @@ Introduce an allowlisted forwarding helper for JSON or ordinary HTTP routes.
 It should preserve upstream status/error shape as much as practical, translate
 unknown/auth-required/tunnel-required/unreachable cases into bounded gateway
 errors, and rewrite any returned `DashboardResourcesView` plus nested
-`ResourcePath.serverId` values to the selected linked server id.
+`ResourcePath.serverId` values to the selected Server Route.
 
 Keep old local routes as compatibility aliases for `server-local`. The aliases
 must preserve existing local tests and browser behavior while new frontend
-helpers prefer canonical server-scoped routes.
+helpers prefer canonical Server Route-prefixed routes.
 
 Deferred scope: full operation coverage, SSE forwarding, terminal WebSocket
 gatewaying, credential persistence, deployment automation, and public endpoint
 hardening.
 
-Verification should cover protected-route auth on new server-scoped aliases,
+Verification should cover protected-route auth on new Server Route aliases,
 local alias equivalence for representative routes, linked-server refusal
 states, bearer forwarding on at least one test remote route, upstream error
 preservation, and resource-view rewriting.
@@ -260,7 +284,7 @@ submit `open workRoot` requests against the selected server, forwarding through
 the local gateway for linked servers.
 
 Opening a remote WorkRoot should return a resources view rewritten to the
-linked server id and should refresh/select that linked server without mutating
+linked Server Route and should refresh/select that linked server without mutating
 local host registry state. Server-local behavior must remain unchanged.
 
 Deferred scope: credential persistence, remote deployment, and public endpoint
@@ -273,14 +297,14 @@ directory, and confirm the opened remote workspace appears under that server.
 ### Phase 4: Remote files, documents, and document events
 
 Forward file listing, file read, file write, and document-event SSE routes
-through server-scoped routes. The file explorer, read-only/code/markdown views,
-edit mode, save/revert behavior, stale/conflict handling, and document
-content-change fan-out must work for remote WorkRoots as they do for local
-WorkRoots.
+through Server Route-scoped routes. The file explorer,
+read-only/code/markdown views, edit mode, save/revert behavior,
+stale/conflict handling, and document content-change fan-out must work for
+remote WorkRoots as they do for local WorkRoots.
 
 Document pane identity, document event subscriptions, and write conflict keys
-must include `serverId`. Remote file write responses must preserve content hash
-and conflict semantics.
+must include `serverRoute`. Remote file write responses must preserve content
+hash and conflict semantics.
 
 Deferred scope: document translation provider forwarding. Translation may stay
 local-gateway-owned, but source/cache identity must not collapse remote and
@@ -294,12 +318,12 @@ and remote Windows dogfood opening/editing a small markdown or text file.
 
 Forward WorkRoot Activity snapshots, transcript reads, Activity event SSE,
 activation changes, workspace removal, Git toolbar operations, and Git
-worktree-add operations through server-scoped routes.
+worktree-add operations through Server Route-scoped routes.
 
-Activity stream keys and transcript lookups must include `serverId`. Git and
+Activity stream keys and transcript lookups must include `serverRoute`. Git and
 workspace mutation responses that include resources must be rewritten to the
-linked server id. Git worktree path previews and error messages are remote host
-paths and should be presented as such.
+linked Server Route. Git worktree path previews and error messages are remote
+host paths and should be presented as such.
 
 Deferred scope: agent control actions such as interrupt, cancel, erase, retry,
 or terminate. This phase covers the existing read/activity and practical
@@ -312,9 +336,9 @@ bounded non-destructive Git operations when a remote Git fixture is available.
 ### Phase 6: Remote terminal HTTP lifecycle
 
 Forward terminal creation, list, output polling, input, resize, and close
-through server-scoped terminal routes before adding the live WebSocket gateway.
-Terminal panes must carry server identity, and gateway terminal routing must
-prevent terminal id collisions across linked servers.
+through Server Route-scoped terminal routes before adding the live WebSocket
+gateway. Terminal panes must carry Server Route identity, and gateway terminal
+routing must prevent terminal id collisions across linked servers.
 
 HTTP terminal routes should use the same linked-server auth, refusal, and
 bounded-error behavior as other forwarded operations. Closing a remote
@@ -333,8 +357,8 @@ closed through the local gateway.
 ### Phase 7: Remote terminal WebSocket gatewaying
 
 Forward live terminal WebSocket transport through the local gateway after the
-HTTP terminal lifecycle is already server-scoped. The browser should connect
-only to the local gateway, and the gateway should connect upstream to the
+HTTP terminal lifecycle is already Server Route-scoped. The browser should
+connect only to the local gateway, and the gateway should connect upstream to the
 linked daemon with bearer auth.
 
 The WebSocket route needs explicit upgrade proxy behavior from browser to local

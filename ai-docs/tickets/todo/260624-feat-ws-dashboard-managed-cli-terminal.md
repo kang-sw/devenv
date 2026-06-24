@@ -3,7 +3,7 @@ title: ws dashboard managed vendor CLI terminal
 parent: 260622-epic-ws-dashboard-session-key-realignment
 related:
   260514-epic-ws-web-dashboard-mvp: predecessor dashboard MVP board whose reusable PTY/workbench surface this ticket extends
-  260525-feat-ws-dashboard-server-scoped-operation-forwarding: server-scoped route and identity prerequisite for new terminal-like operations
+  260525-feat-ws-dashboard-server-scoped-operation-forwarding: Server Route substrate and identity prerequisite for new terminal-like operations
   260622-research-ws-dashboard-ferrule-session-binding: settled ferrule-backed top-level harness binding model this ticket must follow
   260620-feat-ws-dashboard-agent-client-activity-sources: deferred structured Activity adapter track; this ticket provides the nearer terminal-first milestone
   260517-bug-ws-dashboard-windows-terminal-control-keys: existing Windows control-key risk for PTY-backed dashboard terminal surfaces
@@ -98,16 +98,16 @@ not parse terminal output into source-neutral Activity as its success criterion.
   ws MCP root, model loop, permission runtime, provider session authority, or ws
   agent runtime.
 - New managed CLI route helpers, pane keys, command payloads, restore records,
-  WebSocket URLs, and daemon APIs must carry `serverId` or explicitly remain a
-  `server-local` compatibility alias. Do not add new bare local-only API debt;
+  WebSocket URLs, and daemon APIs must carry `serverRoute` or explicitly remain
+  a `server-local` compatibility alias. Do not add new bare local-only API debt;
   if `260525-feat-ws-dashboard-server-scoped-operation-forwarding` has not
   landed the needed route substrate, this ticket should either depend on that
-  phase or introduce server-scoped shapes from the start.
-- Direct linked-server ids are dot-free, with dot reserved by
+  phase or introduce Server Route-prefixed shapes from the start.
+- Direct linked-server route segments are dot-free, with dot reserved by
   `260525-feat-ws-dashboard-server-scoped-operation-forwarding` as a future hop
   separator. Managed CLI browser-visible route identity should follow the same
-  gateway-relative server route grammar instead of inventing a separate
-  provider or terminal routing key.
+  gateway-relative Server Route grammar instead of inventing a separate provider
+  or terminal routing key.
 - Browser composer submission must be a deliberate action. Editing, IME
   composition, snippets, and previews happen in browser UI; no PTY-side editor
   or adapter editor is introduced.
@@ -191,7 +191,7 @@ explicit yes/no actions instead of silently relaunching.
 Verification boundary: route tests for create/list/socket/submit/resize/close
 and auth; TypeScript tests for surface identity, composer open/submit/cancel,
 focus isolation, payload sizing, primary placement, restore prompt behavior, and
-server-scoped route/helper identity; browser acceptance for a local installed CLI
+Server Route helper identity; browser acceptance for a local installed CLI
 profile when available, with a fixture or harmless command profile fallback when
 the vendor binary is absent.
 

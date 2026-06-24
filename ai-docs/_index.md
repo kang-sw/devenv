@@ -205,13 +205,14 @@ dropped tickets live in hidden archive dirs and git history.
 - `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`todo`, feat) -
   top-priority dashboard architecture correction before managed CLI or new
   agent-facing daemon APIs. All daemon-scoped operation routes should become
-  server-aware through the local gateway, with bare local routes kept only as
-  `server-local` compatibility aliases. Direct linked-server ids are dot-free;
-  dot is reserved as a future multi-hop separator. First implementation should
-  selectively replay the clean frontend substrate commits from `origin/discuss`
-  (`2954a622`, `9c169d1c`, `bfab8b7b`) and then design the backend
-  server-target resolver plus allowlisted one-shot forwarding skeleton against
-  current docs.
+  server-aware through the local gateway, with **Server Route** / `serverRoute`
+  as the canonical browser-visible routing term. Bare local routes remain
+  `server-local` compatibility aliases through this ticket; direct linked-server
+  route segments are dot-free because dot is reserved as a future multi-hop
+  separator. First implementation should selectively replay the clean frontend
+  substrate commits from `origin/discuss` (`2954a622`, `9c169d1c`,
+  `bfab8b7b`) and then design the backend server-target resolver plus
+  allowlisted one-shot forwarding skeleton against current docs.
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
