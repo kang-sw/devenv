@@ -103,6 +103,11 @@ not parse terminal output into source-neutral Activity as its success criterion.
   if `260525-feat-ws-dashboard-server-scoped-operation-forwarding` has not
   landed the needed route substrate, this ticket should either depend on that
   phase or introduce server-scoped shapes from the start.
+- Direct linked-server ids are dot-free, with dot reserved by
+  `260525-feat-ws-dashboard-server-scoped-operation-forwarding` as a future hop
+  separator. Managed CLI browser-visible route identity should follow the same
+  gateway-relative server route grammar instead of inventing a separate
+  provider or terminal routing key.
 - Browser composer submission must be a deliberate action. Editing, IME
   composition, snippets, and previews happen in browser UI; no PTY-side editor
   or adapter editor is introduced.

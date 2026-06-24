@@ -159,7 +159,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Deferred structured Activity adapter track for Codex app-server and OpenCode ACP provider data after the managed CLI path |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
-| `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make root picker, workRoot, file, Activity, Git, and terminal operations transparent across linked servers |
+| `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -202,6 +202,16 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`todo`, feat) -
+  top-priority dashboard architecture correction before managed CLI or new
+  agent-facing daemon APIs. All daemon-scoped operation routes should become
+  server-aware through the local gateway, with bare local routes kept only as
+  `server-local` compatibility aliases. Direct linked-server ids are dot-free;
+  dot is reserved as a future multi-hop separator. First implementation should
+  selectively replay the clean frontend substrate commits from `origin/discuss`
+  (`2954a622`, `9c169d1c`, `bfab8b7b`) and then design the backend
+  server-target resolver plus allowlisted one-shot forwarding skeleton against
+  current docs.
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-

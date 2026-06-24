@@ -4,6 +4,7 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260525-feat-ws-dashboard-multi-server-gateway: introduced linked-server registry, link-auth, selected-server resource forwarding, and server-first navigation
   260525-feat-ws-dashboard-endpoint-linked-server-add: exposed endpoint-first linked server add flow and revealed non-resource API locality during Windows dogfood
+  260624-feat-ws-dashboard-managed-cli-terminal: must build new terminal-like daemon APIs on the corrected server-scoped route substrate instead of adding more local-only debt
   260514-research-ws-web-dashboard-direction: longer-range remote hardening and server federation direction
 related-mental-model:
   - ws-web-dashboard
@@ -30,23 +31,47 @@ server's folder/open-root affordance, browse remote paths, open a remote
 workRoot, browse and edit remote files, view Activity, use Git controls, and
 spawn terminal panes without routes silently falling back to the local host.
 
+This ticket is now the priority dashboard architecture correction before new
+managed CLI or agent-facing daemon APIs are added. The current partial model is
+conceptually wrong because most operation routes still target the gateway's
+local host implicitly. New dashboard operation work should either depend on this
+ticket's substrate or introduce only the same canonical server-scoped route
+shapes.
+
 ## Decisions
 
 - Make `serverId` part of every operation whose target is a server, workspace,
   workRoot, instance, file, Activity item, terminal, or host filesystem path.
+- Treat this as an "all daemon-scoped operations" rule: every REST operation
+  whose authority belongs to a selected dashboard daemon must be server-aware,
+  including future managed CLI operations. Gateway-owned routes such as
+  `/healthz`, static assets, the browser shell, pairing/link bootstrap, linked
+  server registry/tunnel management, and gateway-local provider configuration
+  are explicit exceptions rather than accidental bare routes.
 - Keep existing non-server-scoped routes as local compatibility aliases for
   `server-local`; new frontend calls should prefer canonical server-scoped
   routes.
 - Route all browser-to-remote traffic through the local gateway. The browser
   must not call the linked endpoint directly.
+- Implement the current forwarding model as one-hop through the directly
+  connected daemon selected by the local gateway. The route grammar must remain
+  compatible with future multi-hop forwarding, but recursive federation,
+  transitive auth, loop prevention, and remote gateway discovery are deferred.
+- Reserve dot (`.`) as a future hop separator. Direct linked-server ids must be
+  generated from a dot-free slug alphabet such as `[A-Za-z0-9_-]+`; labels and
+  endpoint hostnames may contain dots but must not become route ids. A future
+  gateway-relative route such as `server-win.server-linux` would resolve the
+  first hop locally, forward the remaining suffix to the next daemon, and rewrite
+  returned resource identities back to the full gateway-relative route.
 - For linked servers, forward requests with the linked server's memory-only
   bearer token and preserve upstream status/error shape as much as practical.
 - Rewrite returned `DashboardResourcesView` and nested `ResourcePath.serverId`
-  values to the linked server id, matching the existing selected-server
-  resources forwarding behavior.
+  values to the gateway-relative server route visible to the browser, matching
+  the existing selected-server resources forwarding behavior for direct linked
+  servers and leaving room for later multi-hop route rewriting.
 - Do not solve credential persistence, automatic deployment, public exposure
   hardening, or cross-server federation beyond one local gateway forwarding to
-  remembered linked servers.
+  remembered directly linked servers in this ticket.
 
 ## API Inventory
 
@@ -98,6 +123,10 @@ Must become server-aware for transparent linked-server operation:
 
 Deferred or local-gateway surfaces:
 
+- Gateway-owned routes such as `/healthz`, `/pair`, static assets, browser shell
+  routes, server listing/linking/tunnel control, and remote link-auth bootstrap
+  stay owned by the local gateway. They should be documented as exceptions when
+  touched rather than silently following local-only operation patterns.
 - Document translation provider routes may stay local-gateway-owned because the
   frontend sends document blocks and provider configuration belongs to the
   gateway. If translation cache identity includes document source identity, it
@@ -111,6 +140,9 @@ Deferred or local-gateway surfaces:
   operations until pane keys, route helpers, command payloads, stream keys, and
   persisted state either carry `serverId` or deliberately map old local-only
   state to `server-local`.
+- Direct server ids must reject dot. If existing persisted linked-server ids can
+  contain dot, add a bounded migration or refusal path before treating dot as a
+  hop separator in browser-visible route identity.
 - Root picker and open-WorkRoot paths are remote host paths when `serverId` is
   not `server-local`; UI labels and placeholders must make the selected server
   context explicit enough that users do not mistake remote filesystem paths for
@@ -139,7 +171,13 @@ Deferred or local-gateway surfaces:
 ## Implementation Strategy
 
 - Treat `serverId` as an explicit UI and route dimension before adding remote
-  behavior. Bare daemon ids are not unique across linked servers.
+  behavior. Bare daemon ids are not unique across linked servers, and future
+  multi-hop routes require direct ids to remain dot-free.
+- Recover the already-written frontend Phase 1 substrate from `origin/discuss`
+  by selectively replaying the code commits that still apply cleanly:
+  `2954a622`, `9c169d1c`, and `bfab8b7b`. Do not bulk-merge `origin/discuss`;
+  its ticket/spec/index state is stale relative to the dashboard realignment and
+  managed CLI decisions. Rewrite any closeout/spec notes against current docs.
 - Add a backend linked-server resolver plus one-shot JSON forwarding helper
   before forwarding individual operations. Reuse it for ordinary HTTP routes;
   implement SSE and WebSocket forwarding separately.
