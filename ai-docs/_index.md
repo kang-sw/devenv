@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.30.2`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.2`).
+Active plugin package: `agents-plugin/` (`ws@0.30.3`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.3`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -177,8 +177,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260620-bug-mercenary-path-visible-when-prefer-off` | idea | Reduce mercenary dispatch guidance salience when prefer_mercenary is off |
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
-| `260620-feat-ws-ticket-status-transition-tools` | ready | New `tickets.close` and `tickets.move` MCP tools for atomic ticket status transitions (promotion/demotion/close/drop) with convention guards |
-| `260622-feat-sage-review-ticket-gate` | todo | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and config substrate |
+| `260620-feat-ws-ticket-status-transition-tools` | done | New `tickets.close` and `tickets.move` MCP tools for atomic ticket status transitions (promotion/demotion/close/drop) with convention guards |
+| `260622-feat-sage-review-ticket-gate` | done | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and `sage_review*` config substrate (all 3 phases done) |
 | `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
 | `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | done | Fixed exec finalize/reconcile race + too-tight abort window flaking the full-suite abort test (260620 Phase 2) |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
@@ -199,7 +199,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260620-feat-ws-ticket-status-transition-tools` (ready, feat) - `tickets.close` + `tickets.move` MCP tools for atomic frontmatter-write + `git mv` staging; removes the lead `git mv` footgun; convention guards enforced at MCP layer. Phase 1: implement both tools in `agents-plugin-tool/internal/mcp/`, frontmatter write-back helper, wsflow + full runtime.json contract update, `mcp-tools.md` spec update. Phase 2: rewire scattered `git mv` playbook directives via `ticket-conventions` convention doc. Next: **Phase 1**.
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-

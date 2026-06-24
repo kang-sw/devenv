@@ -499,6 +499,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 		"code-review-correctness", "code-review-fit", "code-review-test",
 		"reference-discovery", "mental-model-updater",
 		"plan-populator-survey", "plan-populator-research",
+		"ticket-reviewer-design", "ticket-reviewer-completeness",
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -572,7 +573,12 @@ func TestWithRecommendedTier(t *testing.T) {
 // is the value the lead routes to both native (model guide) and mercenary (register).
 func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	rsrcRoot := shippedRsrcRootForTest()
-	want := map[string]string{"implementer": "medium", "reviewer": "large"}
+	want := map[string]string{
+		"implementer":                    "medium",
+		"reviewer":                       "large",
+		"ticket-reviewer-design":         "large",
+		"ticket-reviewer-completeness":   "medium",
+	}
 	for name, wantTier := range want {
 		s := newTestServerWithHarness(t, "claude")
 		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)

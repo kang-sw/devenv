@@ -177,7 +177,7 @@ Prefer:
 Use `{{.McpNamespace}}/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves plus
 `### Result` and `#### Edition` headings, and avoids shell quoting drift.
-For ticket status moves, use native `git mv` between status directories and commit through `{{.McpNamespace}}/git.commit`; `ready/` is implementation-ready and `todo/` is accepted backlog.
+For ticket status moves, use `{{.McpNamespace}}/tickets.close(stem, status)` to close (done/dropped) or `{{.McpNamespace}}/tickets.move(stem, to)` to transition (idea/todo/ready); both stage atomically with convention guards. Fall back to native `git mv` when MCP tools are unavailable. Commit the staged change with `{{.McpNamespace}}/git.commit`. `ready/` is implementation-ready and `todo/` is accepted backlog.
 
 Prefer:
 - `{{.McpNamespace}}/git.status()` for branch, staged state, and changed-file discovery.

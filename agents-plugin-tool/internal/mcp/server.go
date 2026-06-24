@@ -825,6 +825,68 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
+	case "tickets.close":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		stem, _ := params.Arguments["stem"].(string)
+		status, _ := params.Arguments["status"].(string)
+		resolution, _ := params.Arguments["resolution"].(string)
+		result, err := wsdoc.TicketsClose(root, wsgit.ExecRunner{}, wsdoc.TicketCloseOptions{
+			TicketStem: stem,
+			Status:     status,
+			Resolution: resolution,
+			Today:      time.Now().Format("2006-01-02"),
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTicketMutate("closed", result), nil)
+	case "tickets.move":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		stem, _ := params.Arguments["stem"].(string)
+		to, _ := params.Arguments["to"].(string)
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
+			TicketStem: stem,
+			To:         to,
+			SageReview: resolved.Value,
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
+	case "tickets.create":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		stem, _ := params.Arguments["stem"].(string)
+		initialState, _ := params.Arguments["initial_state"].(string)
+		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
+			Stem:         stem,
+			InitialState: initialState,
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTicketCreate(result), nil)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1667,6 +1729,23 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 	return b.String()
 }
 
+func formatTicketCreate(res wsdoc.TicketCreateResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Created %s\n", res.Path)
+	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
+	return b.String()
+}
+
+func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
+	stem := strings.TrimSuffix(filepath.Base(result.NewPath), ".md")
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %s\n  %s -> %s\n", verb, stem, result.OldPath, result.NewPath)
+	if result.Tip != "" {
+		fmt.Fprintf(&b, "tip: %s\n", result.Tip)
+	}
+	return b.String()
+}
+
 func formatTickets(tickets []wsdoc.TicketInfo) string {
 	var b strings.Builder
 	for _, ticket := range tickets {
@@ -2484,6 +2563,43 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "tickets.close",
+			"description": "Close a ticket to .done/ (status=done) or .dropped/ (status=dropped), writing the dated frontmatter field and optionally appending a ## Resolution section. Stages the change set atomically (frontmatter write -> git add -> git mv); does not commit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem":       stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"status":     stringProperty("Close target: done or dropped."),
+					"resolution": stringProperty("Optional resolution text appended as a ## Resolution (today) section."),
+				},
+				"required": []string{"stem", "status"},
+			},
+		},
+		{
+			"name":        "tickets.move",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves check the sage_review config and the ticket's sage-review frontmatter field. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem": stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"to":   stringProperty("Target status: idea, todo, or ready."),
+				},
+				"required": []string{"stem", "to"},
+			},
+		},
+		{
+			"name":        "tickets.create",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus sage-review: pending for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar)."),
+					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
+				},
+				"required": []string{"stem", "initial_state"},
+			},
+		},
+		{
 			"name":        "path.generate",
 			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
 			"inputSchema": map[string]any{
@@ -2700,7 +2816,7 @@ func rootAwareToolSchemaRequiresSessionKey(name string) bool {
 		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
-		"tickets.list", "tickets.find", "tickets.status", "path.generate", "playbook.render",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "path.generate", "playbook.render",
 		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
 		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
 		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",

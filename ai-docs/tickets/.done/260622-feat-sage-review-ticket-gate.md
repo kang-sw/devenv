@@ -4,6 +4,7 @@ related:
   260620-feat-ws-ticket-status-transition-tools: transition tool must check sage-review frontmatter field; this ticket builds the sage reviewer playbook and create-ticket surface on top
 related-mental-model:
   - workflow-skills
+completed: 2026-06-24
 ---
 
 # Sage review — design-quality gate for ticket writes
@@ -90,7 +91,7 @@ sage_review_completeness_tier: medium
 
 ### `create-ticket` MCP tool
 
-New `ws/create_ticket(session_key, stem, initial_state)`:
+New `ws/tickets.create(session_key, stem, initial_state)`:
 - Auto-prefixes today's date to semantic `stem`.
 - Writes frontmatter stub (title placeholder, `sage-review: pending` for `todo/+`).
 - Returns `{path, tip}`:
@@ -159,14 +160,56 @@ integration on top.
   well-defined "active epic" concept in the session; stub leaves `parent:` empty
   for the caller to fill. Separate idea ticket if needed later.
 
+## Spec Impact
+
+- **Phase 1** — `ai-docs/spec/mcp-tools.md`: add `{#260622-create-ticket-tool}` entry
+  for the new `ws/create_ticket` tool. Contract-first spec: no (contract fully specified
+  in Decisions section; spec entry is post-implementation closeout).
+- **Phase 2** — `ai-docs/spec/workflow-skills.md`: add the two new reviewer playbook
+  names (`ticket-reviewer-design`, `ticket-reviewer-completeness`) and the
+  `lead-write-ticket` sage-gate routing addition. Contract-first spec: no.
+- **Phase 3** — `ai-docs/spec/mcp-tools.md`: add `sage_review*` config key entries
+  under the config section. Contract-first spec: no.
+
 ## Phases
 
 ### Phase 1: `create-ticket` MCP tool
 
-New `ws/create_ticket(session_key, stem, initial_state)` Go MCP handler.
-Auto-prefixes date, writes frontmatter stub with `sage-review: pending` for
-`todo/+`, returns `{path, tip}`. Tip is non-empty for both `idea/` (reminder) and
-`todo/+` (sage prompt).
+New `ws/tickets.create(session_key, stem, initial_state)` Go MCP handler.
+Auto-prefixes today's date to form the full stem. Writes a frontmatter stub
+(`title:` placeholder; `sage-review: pending` for `todo/+`). Returns `{path, tip}`;
+tip is non-empty for both `idea/` and `todo/+`.
+
+`initial_state`: accepted values are `"idea"`, `"todo"`, and `"ready"`;
+terminal states (`"done"`, `"dropped"`) are rejected with an error.
+
+Constraints:
+- Follow the `tickets.close`/`tickets.move` registration pattern from 260620:
+  wsdoc logic layer, MCP server dispatch, `rootAwareToolSchemaRequiresSessionKey`,
+  both `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json`, and
+  CLI mirror in `cmd/ws-mcp/main.go` with `runtimeCapabilityCommandNames` entry.
+- `sage-review: pending` written only when `initial_state` is `"todo"` or `"ready"`.
+- `idea/` creation writes `title:` placeholder only; no `sage-review` field.
+
+Deferred: `parent:` inference, workset membership, any frontmatter fields beyond
+`title:` and `sage-review:`.
+
+Verification:
+- Unit tests: `idea/` creation (no sage-review field), `todo/` creation (sage-review:
+  pending), `ready/` creation, rejected terminal states, date auto-prefix.
+- `TestRuntimeCapabilitiesCommandReportsWsflowContractSurface` passes after both
+  `runtime.json` updates.
+- `{#260622-create-ticket-tool}` entry written in `ai-docs/spec/mcp-tools.md`.
+
+### Result
+
+#### Edition (8ced5351) - 2026-06-22
+
+`tickets.create` MCP tool + CLI mirror landed in `8ced5351` (branch
+`implement/260622-sage-review-ticket-gate`). All 3 review partitions clean.
+Spec entry `{#260622-create-ticket-tool}` written to `ai-docs/spec/mcp-tools.md`.
+`TestRuntimeCapabilitiesCommandReportsWsflowContractSurface` passes; full
+`go test ./...` green. Version bump deferred to epic-merge per convention.
 
 ### Phase 2: Reviewer playbooks + lead-write-ticket integration
 
@@ -228,3 +271,43 @@ Coordinate with 260620 Phase 1 for two additions:
 
 If 260620 Phase 1 ships before this phase, append an Edition to its Phase 1
 result for both additions.
+
+### Result
+
+#### Edition (1b715fa1) - 2026-06-22
+
+Delivered on branch `implement/260622-sage-review-ticket-gate`.
+
+- `ticket-reviewer-design` (`kind: render`, `tier: large`, `delegates: true`): reads
+  ticket + linked specs/mental-models via `specs.find` / `mental_models.find`, sketches
+  implementation plan, emits structured `pass|concern|block` verdict with issues list.
+- `ticket-reviewer-completeness` (`kind: render`, `tier: medium`, `delegates: true`):
+  reads ticket only (no linked docs), emits structured verdict on structure/clarity gaps.
+- `lead-write-ticket`: `delegates: true` removed from frontmatter (flag is for
+  `kind: render` only; on `kind: print` it injects a Continuity tip that broke the
+  golden test). Sage Review Gate added as step 8 after Commit; "On: Sage Review Gate"
+  handler added; `## Templates` section with Blocked Section Template added before Doctrine.
+- Both manifests regenerated (`agents-plugin` + `agents-plugin-wsflow`).
+- Golden tests added: `TestRenderGoldenShippedPhase4Delegates` and
+  `TestRenderReturnsFrontmatterRecommendedTier` extended to cover both new playbooks.
+- `go test ./...`: 12/12 PASS.
+- Spec: `{#260624-sage-review-gate}` added to `ai-docs/spec/mcp-tools.md`.
+- Mental model: `workflow-skills.md` updated with Sage Review Gate behavior + Phase 3 config note.
+
+#### Edition (e207815e) - 2026-06-24
+
+All four `sage_review*` config keys registered in `wsconfig/scope.go` (Phase 3 complete).
+All phases done; ticket closed.
+
+- `internal/wsconfig/scope.go`: `ItemSageReview`, `ItemSageReviewDesignTier`,
+  `ItemSageReviewCompleteness`, `ItemSageReviewCompletenessTier` constants + `ScopeProject`
+  `init()` registrations. All four keys now visible in `config.show` output when unset
+  (matching the `ItemPreferMercenary` / `scoped_show.go:63` precedent).
+- `internal/mcp/server.go`: inline `"sage_review"` string literal replaced with
+  `wsconfig.ItemSageReview` typed constant.
+- 260620 coordination: both required additions (sage-review upward-move pre-condition
+  check + downward demotion ready-demotion tip) were already delivered in 260620 Phase 1
+  (`735acfe4`). Edition appended to 260620 Phase 1 Result confirming coordination complete.
+- Spec `{#260624-sage-review-gate}`: `Planned 🚧` note stripped (feature fully implemented).
+- Mental model: `workflow-skills.md` stale "not yet registered until Phase 3" caveat removed (`9f410884`).
+- `go test ./...`: 12/12 PASS.

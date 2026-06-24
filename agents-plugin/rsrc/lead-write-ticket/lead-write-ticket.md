@@ -57,7 +57,11 @@ Target: user request
 1. If no file changed because the requested move was refused, skip commit.
 2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
-### 8. Handoff
+### 8. Sage Review Gate
+
+1. Run **Sage Review Gate**.
+
+### 9. Handoff
 
 1. Run **Output Handoff**.
 
@@ -106,11 +110,11 @@ Target: user request
 
 ### 3. Move
 
-1. For moves, use native `git mv`.
-2. For `.done/` moves, add `completed:` date in frontmatter.
+1. For moves, use `{{.McpNamespace}}/tickets.close(stem, status)` for done/dropped, or `{{.McpNamespace}}/tickets.move(stem, to)` for idea/todo/ready; fall back to native `git mv` when MCP tools are unavailable.
+2. For `.done/` moves via native `git mv`, add `completed:` date in frontmatter; `tickets.close` writes this automatically.
 3. If the only requested change is moving a `workset` to `ready/`, make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.
 4. For `workset` moves to `ready/` with other edits, do not move status; keep only valid content edits.
-5. For proceed-routed `todo/` -> `ready/` promotion, defer `git mv` until **Spec-address Check** passes.
+5. For proceed-routed `todo/` -> `ready/` promotion, defer the move until **Spec-address Check** passes.
 
 ### 4. Shape
 
@@ -183,7 +187,7 @@ Target: user request
 2. For non-ready focus entries, use `` `stem` (`status`, `<role>`) - one-line purpose and why it is in focus; not implementation-ready ``.
 3. For `ready/`, remind that implementation commits should include a `## Spec` section for existing stems or the doc closeout should resolve `## Spec Impact`.
 4. For `ready/`, ensure `ai-docs/_index.md ## Ticket Focus` has `` `stem` - one-line purpose, readiness, and dependency notes ``.
-5. For deferred `todo/` -> `ready/` promotion, perform native `git mv` before commit.
+5. For deferred `todo/` -> `ready/` promotion, use `{{.McpNamespace}}/tickets.move(stem, to: "ready")` or native `git mv` as fallback; then commit.
 
 ## On: Output Handoff
 
@@ -195,6 +199,44 @@ Target: user request
 6. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
 7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
 8. Preserve the final `Ticket:` line; callers such as `{{.SkillNamespace}}:lead-proceed` capture this path from prefix-stage output.
+
+## On: Sage Review Gate
+
+1. If landing status is `idea/`, skip this gate.
+2. Call `{{.McpNamespace}}/config.show()` and extract the `sage_review` value.
+3. If `sage_review` is `off`, empty, or unset, skip this gate.
+4. If `sage_review` is `ask`: ask the user "Run sage review for this ticket?".
+   - If user declines: add `sage-review: skipped` to ticket frontmatter, commit with
+     `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "chore(sage): skip sage review", ai_context: ["user declined sage review in ask mode"])`,
+     then skip the rest of this gate.
+5. Spawn both reviewers in parallel:
+   a. Render `ticket-reviewer-design`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")`;
+      spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
+      Capture design verdict result.
+   b. Render `ticket-reviewer-completeness`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-completeness")`;
+      spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
+      Capture completeness verdict result.
+6. Parse `verdict:` from each result. Each reviewer result text contains a `verdict:` line
+   whose value is one of `pass`, `concern`, or `block` (exhaustive set).
+7. Apply aggregation:
+   - Design `block` → final verdict is `block` regardless of completeness.
+   - Design not-block and completeness `block` → final verdict is `block`.
+   - Design `concern` and completeness `pass|concern` → default to `pass`; if ANY issue in
+     either reviewer result has `resolution: missing`, elevate to `concern`. On `concern`,
+     proceed to step 9 (do not block by default); lead may escalate to `block` if the missing
+     decision is judged critical.
+   - All `pass` → final verdict is `pass`.
+8. If final verdict is `block`:
+   a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the ticket body using the
+      **Blocked Section Template**. If a `## Blocked` section already exists from a prior sage
+      review cycle, replace it.
+   b. Edit the ticket file directly to add or update `sage-review: blocked` in the frontmatter
+      block; do not use a dedicated tool call.
+   c. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on sage review", ai_context: ["sage review blocked: design and/or completeness issues"])`.
+9. If final verdict is `pass` or `concern` resolved to pass:
+   a. Edit the ticket file directly to add or update `sage-review: completed` in the frontmatter
+      block; do not use a dedicated tool call.
+   b. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark sage review completed", ai_context: ["sage review passed"])`.
 
 ## On: Cross-ticket decision review
 
@@ -287,6 +329,26 @@ Trigger: a phase implements caller-visible behavior with no confirmed stem, `spe
 Action: stop the authoring flow.
 Report: name the uncovered phase and blocker.
 Blocker: missing spec traceability for caller-visible behavior.
+
+## Templates
+
+### Blocked Section Template
+
+```markdown
+## Blocked (YYYY-MM-DD)
+
+### Design Reviewer — <verdict>
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | <title> | <severity> | <resolution> |
+
+### Completeness Reviewer — <verdict>
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | <title> | <severity> |
+```
 
 ## Doctrine
 

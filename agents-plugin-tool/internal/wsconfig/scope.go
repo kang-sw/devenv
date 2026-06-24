@@ -24,12 +24,38 @@ const (
 	// Declared default scope: ScopeSession (rides the per-key session Overrides
 	// overlay). Builtin default: false (absent = disabled).
 	ItemPreferMercenary = "prefer_mercenary"
+
+	// ItemSageReview is the layered config key for the sage review gate on ticket
+	// writes. Value "auto" runs reviewers unconditionally after a todo/ready commit;
+	// "ask" prompts the user first; absent/empty/"off" disables the gate entirely.
+	// Builtin default: off (absent = disabled).
+	ItemSageReview = "sage_review"
+
+	// ItemSageReviewDesignTier is the model capability tier for the design reviewer
+	// delegate. Accepted values mirror the ws tier vocabulary (small/medium/large/xlarge).
+	// Builtin default: "large".
+	ItemSageReviewDesignTier = "sage_review_design_tier"
+
+	// ItemSageReviewCompleteness controls whether the completeness reviewer runs
+	// alongside the design reviewer. Value "true" enables it; "false" disables.
+	// Builtin default: "true".
+	ItemSageReviewCompleteness = "sage_review_completeness"
+
+	// ItemSageReviewCompletenessTier is the model capability tier for the
+	// completeness reviewer delegate. Builtin default: "medium".
+	ItemSageReviewCompletenessTier = "sage_review_completeness_tier"
 )
 
 func init() {
 	// prefer_mercenary defaults to session scope: a lead's flip is session-local
 	// and does not persist to the project or global config files.
 	RegisterDefaultScope(ItemPreferMercenary, ScopeSession)
+	// sage_review* keys default to project scope: they are project-level opt-ins
+	// that should persist across sessions for the same project.
+	RegisterDefaultScope(ItemSageReview, ScopeProject)
+	RegisterDefaultScope(ItemSageReviewDesignTier, ScopeProject)
+	RegisterDefaultScope(ItemSageReviewCompleteness, ScopeProject)
+	RegisterDefaultScope(ItemSageReviewCompletenessTier, ScopeProject)
 }
 
 // ResolvedValue carries a config item value together with the scope it was

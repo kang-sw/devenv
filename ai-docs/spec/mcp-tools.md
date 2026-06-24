@@ -386,6 +386,41 @@ ticket stem, and optional status filters. `tickets.status` returns structured
 metadata for a single ticket stem and can optionally include archived done or
 dropped tickets.
 
+`tickets.close` moves a ticket to `.done/` (status=done) or `.dropped/`
+(status=dropped), writing the appropriate `completed:` or `dropped:` date into
+frontmatter and optionally appending a `## Resolution (YYYY-MM-DD)` body section.
+The operation is atomic: the frontmatter write, `git add`, and `git mv` happen as
+one staged change set, and the tool never commits. {#260620-ticket-close-tool}
+
+`tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
+moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
+Upward moves check the `sage_review` config key and the ticket's `sage-review`
+frontmatter field when the config is enabled; a `pending` or `blocked` field
+blocks the promotion. The move stages atomically and never commits.
+{#260620-ticket-move-tool}
+
+`tickets.create` creates a dated ticket stub at a caller-specified initial state
+(`idea`, `todo`, or `ready`). It auto-prefixes today's date to form the full
+ticket stem, writes a minimal frontmatter stub (`title: ""` placeholder;
+`sage-review: pending` for `todo/+` states), and returns the created path and a
+caller-facing tip. Terminal states (`done`, `dropped`) and an empty stem are
+rejected with errors. The tool is not idempotent: a duplicate path returns an
+error. The `idea/` tip directs the caller to promote through `todo/` to trigger
+sage review; the `todo/+` tip directs the caller to run sage review before
+promoting further. {#260622-create-ticket-tool}
+
+The Sage Review Gate runs after `lead-write-ticket` commits a ticket to `todo/` or
+`ready/`. It reads the `sage_review` project config key (`off|ask|auto`; empty or
+absent resolves as `off`), and when enabled dispatches two delegate playbooks in
+parallel: `ticket-reviewer-design` (tier: large) and `ticket-reviewer-completeness`
+(tier: medium). Each reviewer emits a structured verdict (`pass`, `concern`, or
+`block`) with an issues list. The gate aggregates the pair and writes `sage-review:
+completed` or `sage-review: blocked` into the ticket frontmatter and commits. A
+`blocked` result also appends a `## Blocked (YYYY-MM-DD)` summary section to the
+ticket body. `concern` elevated from design reviewer resolves to `completed` by
+default unless the lead escalates to `block`. `idea/` tickets bypass the gate.
+{#260624-sage-review-gate}
+
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
 `mental_models.list` returns available mental-model documents with domain,

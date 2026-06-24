@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
@@ -19,7 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-var version = "0.30.2-dev"
+var version = "0.30.3-dev"
 var sourceCommit = "dev"
 
 func main() {
@@ -230,8 +231,11 @@ func runtimeCapabilityCommandNames() []string {
 		"specs.find",
 		"specs.list",
 		"specs.status",
+		"tickets.close",
+		"tickets.create",
 		"tickets.find",
 		"tickets.list",
+		"tickets.move",
 		"tickets.status",
 	}
 	if mcp.NoAgentMode() {
@@ -512,6 +516,12 @@ func ticketsCommand(args []string) {
 		ticketsFind(args[1:])
 	case "status":
 		ticketsStatus(args[1:])
+	case "close":
+		ticketsClose(args[1:])
+	case "move":
+		ticketsMove(args[1:])
+	case "create":
+		ticketsCreate(args[1:])
 	default:
 		ticketsUsage()
 		os.Exit(2)
@@ -519,7 +529,7 @@ func ticketsCommand(args []string) {
 }
 
 func ticketsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create>")
 }
 
 func ticketsList(args []string) {
@@ -598,6 +608,68 @@ func ticketsStatus(args []string) {
 		tickets = append(tickets, *result)
 	}
 	printTextOrFatal("tickets status", mcp.FormatTickets(tickets), err)
+}
+
+func ticketsClose(args []string) {
+	fs := flag.NewFlagSet("tickets close", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	stem := fs.String("stem", "", "ticket stem to close")
+	status := fs.String("status", "", "close target: done or dropped")
+	resolution := fs.String("resolution", "", "optional resolution text appended as a ## Resolution section")
+	_ = fs.Parse(args)
+	if *stem == "" && len(fs.Args()) > 0 {
+		*stem = fs.Args()[0]
+	}
+
+	result, err := wsdoc.TicketsClose(defaultRoot(*root), wsgit.ExecRunner{}, wsdoc.TicketCloseOptions{
+		TicketStem: *stem,
+		Status:     *status,
+		Resolution: *resolution,
+		Today:      time.Now().Format("2006-01-02"),
+	})
+	printTextOrFatal("tickets close", mcp.FormatTicketMutate("closed", result), err)
+}
+
+func ticketsMove(args []string) {
+	fs := flag.NewFlagSet("tickets move", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	stem := fs.String("stem", "", "ticket stem to move")
+	to := fs.String("to", "", "target status: idea, todo, or ready")
+	_ = fs.Parse(args)
+	if *stem == "" && len(fs.Args()) > 0 {
+		*stem = fs.Args()[0]
+	}
+
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+	resolved, _ := resolver.Get("", "sage_review")
+	result, err := wsdoc.TicketsMove(defaultRoot(*root), wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
+		TicketStem: *stem,
+		To:         *to,
+		SageReview: resolved.Value,
+	})
+	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), err)
+}
+
+func ticketsCreate(args []string) {
+	fs := flag.NewFlagSet("tickets create", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	stem := fs.String("stem", "", "semantic ticket stem without date prefix")
+	initialState := fs.String("initial-state", "", "ticket status: idea, todo, or ready")
+	_ = fs.Parse(args)
+	rest := fs.Args()
+	if *stem == "" && len(rest) > 0 {
+		*stem = rest[0]
+		rest = rest[1:]
+	}
+	if *initialState == "" && len(rest) > 0 {
+		*initialState = rest[0]
+	}
+
+	result, err := wsdoc.TicketCreate(defaultRoot(*root), wsdoc.TicketCreateOptions{
+		Stem:         *stem,
+		InitialState: *initialState,
+	})
+	printTextOrFatal("tickets create", mcp.FormatTicketCreate(result), err)
 }
 
 func specsCommand(args []string) {

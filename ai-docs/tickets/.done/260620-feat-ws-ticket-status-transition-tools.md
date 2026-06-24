@@ -2,6 +2,9 @@
 title: ws ticket status-transition MCP tools (close/drop/promote/demote)
 related:
   260622-feat-sage-review-ticket-gate: sage-review pre-condition hook and downward demotion tip are required additions to Phase 1 of this ticket
+plans:
+  phase-1: 2026-06/22-260620-ticket-status-tools.brief
+completed: 2026-06-22
 ---
 
 # ws ticket status-transition MCP tools (close/drop/promote/demote)
@@ -123,6 +126,56 @@ Verification:
 - `ai-docs/spec/mcp-tools.md` updated with new tool entries under the ticket
   tools section, using `{#YYMMDD-slug}` anchor convention.
 
+### Result (735acfe4) - 2026-06-22
+
+Both tools implemented in full on branch `implement/260620-ticket-status-tools`.
+
+**Delivered:**
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate.go` (new) — `TicketsClose`,
+  `TicketsMove`, `findTicketPath`, `writeFrontmatterField`, `atomicGitMove`,
+  `checkSageReview`; local `GitRunner` interface (no `wsgit` import).
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate_test.go` (new) — all 14
+  brief test cases pass.
+- `agents-plugin-tool/internal/mcp/server.go` — dispatch cases, JSON schemas,
+  both tools added to `rootAwareToolSchemaRequiresSessionKey`, inline
+  `wsconfig.Resolver` for `sage_review` read on move.
+- `agents-plugin-tool/internal/mcp/format.go` — `FormatTicketMutate` helper
+  exported for CLI (minor scope addition: brief had inline formatting; extracted
+  to keep CLI and MCP consistent).
+- `agents-plugin-tool/cmd/ws-mcp/main.go` — `tickets close|move` CLI mirrors +
+  `runtimeCapabilityCommandNames` entries.
+- `agents-plugin/runtime.json` + `agents-plugin-wsflow/runtime.json` — both
+  tools in `tools` AND `commands` sections (4 insertion points total).
+- `ai-docs/spec/mcp-tools.md` — entries with anchors
+  `{#260620-ticket-close-tool}` / `{#260620-ticket-move-tool}`.
+
+**Bug found during CLI spot-check (not caught by unit tests):** `git mv --force`
+does not create the destination directory (e.g., `.done/` on a fresh repo). The
+mock runner had been masking this via implicit `os.MkdirAll`. Fix: `atomicGitMove`
+now calls `os.MkdirAll` on the destination parent before invoking `git mv`; mock
+hardened to stop silently mkdir-ing. All 14 tests re-verified after fix.
+
+**Verification results:** `go test ./...` green (all packages). 14/14 new tests
+PASS. `TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`,
+`...WsflowContractSurface`, and `...NoAgentSurface` all PASS.
+
+#### Edition (e207815e) - 2026-06-24
+
+260622 Phase 3 coordination confirmed. Both additions required by
+`260622-feat-sage-review-ticket-gate` Phase 3 were already included in this Phase 1:
+
+- **`sage-review` pre-condition on upward moves**: `checkSageReview` wired in
+  `TicketsMove`; inline `wsconfig.Resolver` reads `sage_review` config on every
+  upward move. Behaviour: `pending | blocked` → error; `completed | skipped | absent` → pass;
+  config absent/`off` → no-op.
+- **Downward demotion + ready-demotion tip**: `TicketsMove` returns spec-cleanup tip
+  on downward move from `ready/`.
+
+`sage_review*` config keys were not yet registered in `scope.go` at Phase 1 ship time
+(registered in 260622 Phase 3, `e207815e`). Until registration, `config.show` returned
+empty for these keys and the pre-condition check treated that as `off` (no-op). Both
+tools behave correctly now that the keys are registered.
+
 ### Phase 2: transition-guidance rewiring
 
 Point the scattered transition directives at the new tools through their
@@ -148,3 +201,21 @@ Verification:
 - The convention doc names the tools as canonical with `git mv` as fallback.
 - No transition-directing playbook repeats `git mv` usage the convention now owns.
 - rsrc manifest + wsflow mirror regenerated; playbook render/freshness guards green.
+
+### Result (a7c40cec) - 2026-06-22
+
+All ticket-transition `git mv` directives rewired across 4 files and 7 sites
+(6 specified in brief + 1 Drop handler site in `lead-discuss` recovered after
+brief grep filter `grep -v '\.dropped'` accidentally excluded it).
+
+**Files changed:**
+- `agents-plugin-tool/internal/wsdoc/conventions/ticket-conventions.md` — line 16: `tickets.close`/`tickets.move` canonical, `git mv` fallback.
+- `agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md` — primitive catalog updated with both tools + fallback.
+- `agents-plugin/rsrc/lead-write-ticket/lead-write-ticket.md` — Move section steps 1/2/5 and Ready Focus step 5 rewired.
+- `agents-plugin/rsrc/lead-discuss/lead-discuss.md` — triage handler idea→todo (line 99), ownership line (line 103), and Drop handler (line 109) all rewired.
+- `agents-plugin/rsrc/manifest.json`, `agents-plugin-wsflow/rsrc/manifest.json`, `agents-plugin-wsflow/rsrc/lead-discuss/lead-discuss.md` — regenerated.
+
+**Brief gap:** Drop handler site was excluded from the brief by a faulty grep filter;
+recovered during lead review and fixed in a follow-up commit `a7c40cec`.
+
+**Verification:** `go test ./...` green (all packages). `TestWsflowRsrcMirrorUpToDate` PASS.
