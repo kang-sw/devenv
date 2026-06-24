@@ -604,7 +604,7 @@ func TestProductModeBlockSelection(t *testing.T) {
 	}, "\n")
 
 	t.Setenv(envNoAgent, "1")
-	wsflow := renderProductModePlaybookBody(input)
+	wsflow := renderProductModePlaybookBody(input, false)
 	for _, forbidden := range []string{"full-only text", fullOnlyStart, wsflowOnlyStart} {
 		if strings.Contains(wsflow, forbidden) {
 			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
@@ -617,7 +617,7 @@ func TestProductModeBlockSelection(t *testing.T) {
 	}
 
 	t.Setenv(envNoAgent, "")
-	full := renderProductModePlaybookBody(input)
+	full := renderProductModePlaybookBody(input, true)
 	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
 		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
 	}

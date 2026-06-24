@@ -507,25 +507,30 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 	return strings.Join(result, "\n")
 }
 
-func renderProductModePlaybookBody(body string) string {
-	return selectProductModeBlocks(body)
+func renderProductModePlaybookBody(body string, mercenaryEnabled bool) string {
+	return selectProductModeBlocks(body, mercenaryEnabled)
 }
 
 const (
-	fullOnlyStart   = "<!-- ws:full-only:start -->"
-	fullOnlyEnd     = "<!-- ws:full-only:end -->"
-	wsflowOnlyStart = "<!-- ws:wsflow-only:start -->"
-	wsflowOnlyEnd   = "<!-- ws:wsflow-only:end -->"
+	fullOnlyStart      = "<!-- ws:full-only:start -->"
+	fullOnlyEnd        = "<!-- ws:full-only:end -->"
+	wsflowOnlyStart    = "<!-- ws:wsflow-only:start -->"
+	wsflowOnlyEnd      = "<!-- ws:wsflow-only:end -->"
+	mercenaryOnlyStart = "<!-- ws:mercenary-on:start -->"
+	mercenaryOnlyEnd   = "<!-- ws:mercenary-on:end -->"
 )
 
 // selectProductModeBlocks removes marker comments and keeps only the sections
-// that apply to the current product mode. The source rsrc remains shared; the
-// rendered playbook is the product-specific contract.
-func selectProductModeBlocks(body string) string {
+// that apply to the current product mode and mercenary preference. The source
+// rsrc remains shared; the rendered playbook is the product-specific contract.
+// mercenaryEnabled=true preserves ws:mercenary-on blocks; false strips them.
+// printPlaybook passes mercenaryEnabled=true to expose the full source view.
+func selectProductModeBlocks(body string, mercenaryEnabled bool) string {
 	lines := strings.Split(body, "\n")
 	filtered := make([]string, 0, len(lines))
 	fullOnly := false
 	wsflowOnly := false
+	mercenaryOnly := false
 	noAgent := NoAgentMode()
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -542,8 +547,14 @@ func selectProductModeBlocks(body string) string {
 		case wsflowOnlyEnd:
 			wsflowOnly = false
 			continue
+		case mercenaryOnlyStart:
+			mercenaryOnly = true
+			continue
+		case mercenaryOnlyEnd:
+			mercenaryOnly = false
+			continue
 		}
-		if (fullOnly && noAgent) || (wsflowOnly && !noAgent) {
+		if (fullOnly && noAgent) || (wsflowOnly && !noAgent) || (mercenaryOnly && !mercenaryEnabled) {
 			continue
 		}
 		filtered = append(filtered, line)
@@ -653,7 +664,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// every override-point renders its inline seed default.
 	body = applyOverrideMarkers(body, harness, overrideLookup)
 
-	return renderProductModePlaybookBody(body), recommendedTier, nil
+	return renderProductModePlaybookBody(body, preferMercenary), recommendedTier, nil
 }
 
 func substitutePlaybookVars(body string, declared []string, vars map[string]string) (string, error) {
