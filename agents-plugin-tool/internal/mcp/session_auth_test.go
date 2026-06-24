@@ -1014,6 +1014,8 @@ func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 	server := NewServer(root, "test")
 
 	resp := callToolOnce(t, server, 1, "ws.mercenary.status", map[string]any{"name": "worker"})

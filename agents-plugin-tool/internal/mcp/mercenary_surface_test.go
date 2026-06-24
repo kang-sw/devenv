@@ -274,6 +274,7 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
 	var out bytes.Buffer

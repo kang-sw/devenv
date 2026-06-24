@@ -2276,7 +2276,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.lead.prefer_mercenary",
-			"description": "Set the mercenary delegation mode for this session. 'on': playbook.render for implementer/reviewer advises the ws.mercenary.call path as default. 'off': reverts to host-native subagent guidance (default). 'hide': removes ws.mercenary.* from the public tool surface (filteredTools + toolAllowed) and suppresses mercenary content from rendered playbooks. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"description": "Set the mercenary delegation mode for this session. 'on': playbook.render for implementer/reviewer advises the ws.mercenary.call path as default. 'off': reverts to host-native subagent guidance. 'hide' (default): removes ws.mercenary.* from the public tool surface (filteredTools + toolAllowed) and suppresses mercenary content from rendered playbooks. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3112,7 +3112,8 @@ func (s *Server) mercenaryHiddenFromConfig() bool {
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(rv.Value), "hide")
+	v := strings.TrimSpace(rv.Value)
+	return v == "" || strings.EqualFold(v, "hide")
 }
 
 func noAgentHiddenTool(name string) bool {

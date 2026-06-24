@@ -259,6 +259,7 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 	useLeadProfile(t)
 	root := t.TempDir()
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
@@ -464,6 +465,8 @@ func TestKeyedScopeGatesRestrictedTools(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	server := NewServer(root, "test")
 	leafKey, err := server.sessions.mint(root, roleLeaf, "")
@@ -751,6 +754,24 @@ func callToolsList(t *testing.T, server *Server) string {
 	return strings.TrimSpace(out.String())
 }
 
+// mustEnableMercenary writes a project config file to WS_CACHE_HOME that sets
+// prefer_mercenary=true. Required for tests that call ws.mercenary.* tools,
+// since the default is now hide (tools hidden until explicitly enabled).
+func mustEnableMercenary(t *testing.T) {
+	t.Helper()
+	cacheHome := os.Getenv("WS_CACHE_HOME")
+	if cacheHome == "" {
+		t.Fatal("mustEnableMercenary: WS_CACHE_HOME not set")
+	}
+	if err := os.MkdirAll(cacheHome, 0755); err != nil {
+		t.Fatalf("mustEnableMercenary: mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheHome, "config.json"),
+		[]byte(`{"schema_version":1,"overrides":{"prefer_mercenary":"true"}}`), 0644); err != nil {
+		t.Fatalf("mustEnableMercenary: write config: %v", err)
+	}
+}
+
 func responseLinesByID(t *testing.T, lines []string) map[string]string {
 	t.Helper()
 	byID := make(map[string]string, len(lines))
@@ -835,6 +856,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo\n\nMentions 260503-epic-demo.\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
@@ -1019,6 +1041,7 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	initGit(t, root)
 	cache := filepath.Join(t.TempDir(), "cache")
 	t.Setenv("WS_CACHE_HOME", cache)
+	mustEnableMercenary(t)
 	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
 	if err != nil {
 		t.Fatal(err)
@@ -1059,6 +1082,7 @@ func TestServeStdioAgentTailIsBoundedButDebugTailIsRaw(t *testing.T) {
 	initGit(t, root)
 	cache := filepath.Join(t.TempDir(), "cache")
 	t.Setenv("WS_CACHE_HOME", cache)
+	mustEnableMercenary(t)
 	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
 	if err != nil {
 		t.Fatal(err)
@@ -1096,6 +1120,7 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	server := NewServer(t.TempDir(), "test")
 	var out bytes.Buffer
@@ -1133,6 +1158,7 @@ func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260513-feat-agent-tier-effort-config")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	var out bytes.Buffer
 	server := NewServer(root, "test")
@@ -1274,6 +1300,7 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-claude-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
 	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"}}}`, root)
@@ -1303,6 +1330,7 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260508-feat-codex-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.mercenary.register","arguments":{"root":%q,"name":"reviewer","model":"medium"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
 	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.mercenary.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
@@ -1327,6 +1355,7 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 	agent, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
 	if err != nil {
 		t.Fatal(err)
@@ -1386,6 +1415,7 @@ func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 	manager := wsagent.NewManager(wsagent.Options{})
 	agent, layout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "ephemeral-tmp-test", Ephemeral: true})
 	if err != nil {
@@ -1932,6 +1962,43 @@ func mcpLargeShellArgs() map[string]any {
 // backslashes — no JSON backslash-escaping is applied here.
 func execToolJSONPath(path string) string {
 	return path
+}
+
+// TestMercenaryDefaultHideAndOnVisibility verifies that:
+// - ws.mercenary.* tools are hidden from tools/list by default (no config),
+// - ws.lead.prefer_mercenary remains visible so the lead can toggle back, and
+// - after writing prefer_mercenary=on to project config, ws.mercenary.* tools
+//   appear in tools/list.
+func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	// Default (unset): ws.mercenary.* must be hidden.
+	listResp := callToolsList(t, server)
+	if strings.Contains(listResp, `"name":"ws.mercenary.call"`) {
+		t.Fatalf("ws.mercenary.call must be hidden by default: %s", listResp)
+	}
+	if strings.Contains(listResp, `"name":"ws.mercenary.register"`) {
+		t.Fatalf("ws.mercenary.register must be hidden by default: %s", listResp)
+	}
+	// ws.lead.prefer_mercenary must remain visible (lead must be able to toggle on).
+	if !strings.Contains(listResp, `"name":"ws.lead.prefer_mercenary"`) {
+		t.Fatalf("ws.lead.prefer_mercenary must be visible even when mercenary hidden: %s", listResp)
+	}
+
+	// After enabling: ws.mercenary.* must appear in tools/list.
+	mustEnableMercenary(t)
+	listRespOn := callToolsList(t, server)
+	if !strings.Contains(listRespOn, `"name":"ws.mercenary.call"`) {
+		t.Fatalf("ws.mercenary.call must be visible when prefer_mercenary=on: %s", listRespOn)
+	}
+	if !strings.Contains(listRespOn, `"name":"ws.mercenary.register"`) {
+		t.Fatalf("ws.mercenary.register must be visible when prefer_mercenary=on: %s", listRespOn)
+	}
 }
 
 func TestMCPExecHelperProcess(t *testing.T) {
