@@ -59,6 +59,22 @@ realignment epic, the managed CLI child, the deferred Activity adapter ticket,
 and the predecessor MVP board without stale parentage. No browser or daemon
 runtime verification is required for this documentation-only phase.
 
+### Result (05a0a9b4) - 2026-06-24
+
+Imported the realignment epic, research child, and migration chore from
+`review/dashboard-260622` into the active `dashboard` branch. Reparented
+`260624-feat-ws-dashboard-managed-cli-terminal` and
+`260620-feat-ws-dashboard-agent-client-activity-sources` under the realignment
+epic, kept `260620` at idea level as deferred structured Activity adapter work,
+and marked `260514-epic-ws-web-dashboard-mvp` as the predecessor board for
+reusable dashboard product surfaces.
+
+The managed CLI ticket now follows the settled daemon-private `ws.ferrule(root)`
+binding model from `260622-research-ws-dashboard-ferrule-session-binding` rather
+than treating daemon-side ferrule as an undecided future question. `_index.md`
+lists the realignment board and adds this migration chore as non-ready dashboard
+focus.
+
 ### Phase 2: Spec and mental-model drift cleanup
 
 Audit `ai-docs/spec/ws-web-dashboard/index.md` and
