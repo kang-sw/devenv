@@ -7,7 +7,6 @@ Read at every session start, before other action:
 1. **Preamble** - read `ai-docs/_index.md`; keep only context a session must not re-derive.
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored machine context.
 3. **Project arc** - run `git log --oneline --graph -50`.
-4. **Recent history** - run `git log --oneline -20` for recent commit stems.
 
 ## Response Discipline
 
@@ -186,6 +185,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   clear status or readiness wording, report that a follow-up `lead-write-ticket`
   focus cleanup is needed.
 - v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
+- v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
 -->
 
-<!-- Template Version: v0042 -->
+<!-- Template Version: v0043 -->
