@@ -250,11 +250,14 @@ evidence instead of presenting inference as established fact.
 
 When a discussion answer depends on a documented decision, prior rejection,
 architecture fact, or cross-ticket constraint that is not loaded, `lead-discuss`
-searches the ticket/spec/mental-model cascade before answering. Migration topics
-such as plugin architecture, host-neutral migration, spawn-removal, or adapter
-boundaries load the native-subagent pivot anchor before the lead states a
-direction. If the cascade has no documented answer, the reply says that before
-making an inference or proposing the next lookup.
+searches the ticket/spec/mental-model cascade before answering. Commit history is
+an additional project memory tier: `## AI Context` bodies carry decision rationale
+that docs may not yet reflect; `lead-discuss` accesses this tier through
+Explore-type subagent dispatch rather than inline reads. Migration topics such as
+plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries
+load the native-subagent pivot anchor before the lead states a direction. If the
+cascade has no documented answer, the reply says that before making an inference
+or proposing the next lookup.
 
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible

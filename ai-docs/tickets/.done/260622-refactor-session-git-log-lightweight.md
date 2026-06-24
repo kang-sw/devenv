@@ -1,5 +1,6 @@
 ---
 title: Lightweight session git-log + commit-history-as-memory dispatch rule
+completed: 2026-06-24
 ---
 
 # Lightweight session git-log + commit-history-as-memory dispatch rule
@@ -55,3 +56,11 @@ mandatory enforcement is intentionally deferred.
 Rejected alternative: remove step 4 entirely — step 3 already covers
 `--oneline --graph -50`, but removal requires bootstrap migration coordination
 beyond a template text update and was deemed out of scope.
+
+### Result (5a79a5d2) - 2026-06-24
+
+Phase 1 implemented as specified. Deviation: ticket specified migration entry v0037,
+but v0037 was already taken by the `.deps/` gitignore entry; used v0042 (next
+available after v0041) and bumped Template Version tag accordingly.
+Spec closeout: `workflow-skills.md` cascade paragraph updated with commit-history
+tier description; mental-model was already current.
