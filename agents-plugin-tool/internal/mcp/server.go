@@ -859,7 +859,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		to, _ := params.Arguments["to"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
 		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-		resolved, _ := r.Get(sessionKey, "sage_review")
+		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
 			TicketStem: stem,
 			To:         to,
