@@ -4,6 +4,7 @@ related:
   260620-feat-ws-ticket-status-transition-tools: transition tool must check sage-review frontmatter field; this ticket builds the sage reviewer playbook and create-ticket surface on top
 related-mental-model:
   - workflow-skills
+completed: 2026-06-24
 ---
 
 # Sage review — design-quality gate for ticket writes
@@ -292,3 +293,21 @@ Delivered on branch `implement/260622-sage-review-ticket-gate`.
 - `go test ./...`: 12/12 PASS.
 - Spec: `{#260624-sage-review-gate}` added to `ai-docs/spec/mcp-tools.md`.
 - Mental model: `workflow-skills.md` updated with Sage Review Gate behavior + Phase 3 config note.
+
+#### Edition (e207815e) - 2026-06-24
+
+All four `sage_review*` config keys registered in `wsconfig/scope.go` (Phase 3 complete).
+All phases done; ticket closed.
+
+- `internal/wsconfig/scope.go`: `ItemSageReview`, `ItemSageReviewDesignTier`,
+  `ItemSageReviewCompleteness`, `ItemSageReviewCompletenessTier` constants + `ScopeProject`
+  `init()` registrations. All four keys now visible in `config.show` output when unset
+  (matching the `ItemPreferMercenary` / `scoped_show.go:63` precedent).
+- `internal/mcp/server.go`: inline `"sage_review"` string literal replaced with
+  `wsconfig.ItemSageReview` typed constant.
+- 260620 coordination: both required additions (sage-review upward-move pre-condition
+  check + downward demotion ready-demotion tip) were already delivered in 260620 Phase 1
+  (`735acfe4`). Edition appended to 260620 Phase 1 Result confirming coordination complete.
+- Spec `{#260624-sage-review-gate}`: `Planned 🚧` note stripped (feature fully implemented).
+- Mental model: `workflow-skills.md` stale "not yet registered until Phase 3" caveat removed (`9f410884`).
+- `go test ./...`: 12/12 PASS.

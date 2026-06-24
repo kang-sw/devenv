@@ -159,6 +159,23 @@ hardened to stop silently mkdir-ing. All 14 tests re-verified after fix.
 PASS. `TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`,
 `...WsflowContractSurface`, and `...NoAgentSurface` all PASS.
 
+#### Edition (e207815e) - 2026-06-24
+
+260622 Phase 3 coordination confirmed. Both additions required by
+`260622-feat-sage-review-ticket-gate` Phase 3 were already included in this Phase 1:
+
+- **`sage-review` pre-condition on upward moves**: `checkSageReview` wired in
+  `TicketsMove`; inline `wsconfig.Resolver` reads `sage_review` config on every
+  upward move. Behaviour: `pending | blocked` → error; `completed | skipped | absent` → pass;
+  config absent/`off` → no-op.
+- **Downward demotion + ready-demotion tip**: `TicketsMove` returns spec-cleanup tip
+  on downward move from `ready/`.
+
+`sage_review*` config keys were not yet registered in `scope.go` at Phase 1 ship time
+(registered in 260622 Phase 3, `e207815e`). Until registration, `config.show` returned
+empty for these keys and the pre-condition check treated that as `off` (no-op). Both
+tools behave correctly now that the keys are registered.
+
 ### Phase 2: transition-guidance rewiring
 
 Point the scattered transition directives at the new tools through their
