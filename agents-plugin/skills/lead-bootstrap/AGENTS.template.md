@@ -176,7 +176,6 @@ Adapt structure to the project; this is a starting point, not a schema.
   `ai-docs/mental-model.md ## Project Reading Map` during later
   mental-model work. Bootstrap may report the drift, but must not move mixed
   status or feature inventory automatically.
-- v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0041: Replace `_index.md ## Ticket Queue` with `## Ticket Focus`. If both
   sections exist, preserve `Ticket Focus` and remove `Ticket Queue`; if only
   `Ticket Queue` exists, move the entries already listed in that section into
@@ -186,6 +185,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   wording, reorder, or promote ticket status. If any migrated entry still lacks
   clear status or readiness wording, report that a follow-up `lead-write-ticket`
   focus cleanup is needed.
+- v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 -->
 
 <!-- Template Version: v0042 -->
