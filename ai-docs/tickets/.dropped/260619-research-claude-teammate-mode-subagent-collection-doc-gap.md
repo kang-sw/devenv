@@ -85,3 +85,9 @@ this ticket only captures the gap and options; it does not pre-commit a doc chan
   affected surface? Confirm mercenary result delivery is unaffected by teammate mode.
 - Is "configures teammate mode" in the installer still desired given the team-free
   orchestration intent, or should it be reconsidered?
+
+## Drop Note
+
+Dropped 2026-06-24. Claude teammate-mode API surface is in active flux; the
+subagent result-collection contract it describes may change before stabilizing.
+Re-evaluate after the feature stabilizes in Claude Code.
