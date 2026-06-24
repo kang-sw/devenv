@@ -85,7 +85,7 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// nil lookup: every override-point falls back to its seed.
-	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Claude harness: should get the per-harness override.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -142,7 +142,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Codex harness: no codex-specific or "all" override → must fall back to seed.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -174,7 +174,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Claude harness: no claude-specific override → "all" applies.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -187,7 +187,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Codex harness: same expectation.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -200,7 +200,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 		"SeedSection/claude": "claude wins",
 		"SeedSection/all":    "all-bucket",
 	})
-	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookupBoth)
+	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookupBoth)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (both): %v", err)
 	}
@@ -221,7 +221,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// No override stored: extension slot must render nothing (empty body).
-	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (no override): %v", err)
 	}
@@ -234,7 +234,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"ExtSlot/claude": "injected extension text",
 	})
-	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (with override): %v", err)
 	}
@@ -510,7 +510,7 @@ func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
 	const seedPhrase = "Delegate to preserve lead execution context"
 
 	// No override → seed posture renders, markers stripped, structure intact.
-	seedBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	seedBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (seed): %v", err)
 	}
@@ -525,7 +525,7 @@ func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"DelegationSection/all": "ALWAYS delegate aggressively to conserve context.",
 	})
-	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, lookup)
+	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", lookup)
 	if err != nil {
 		t.Fatalf("printPlaybook (override): %v", err)
 	}
@@ -550,7 +550,7 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	const preferenceText = "User preferences:\n- Prefer conventional terminology when user wording is imprecise."
 	const delegationSeed = "Delegate to preserve lead execution context"
 
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (base): %v", err)
 	}
@@ -566,7 +566,7 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"UserPreferenceSection/all": preferenceText,
 	})
-	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, lookup)
+	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", lookup)
 	if err != nil {
 		t.Fatalf("printPlaybook (override): %v", err)
 	}
@@ -578,6 +578,38 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	}
 	assertNoMarkerSyntax(t, "user preference override", ovBody)
 	assertManualStructureIntact(t, "user preference override", ovBody)
+}
+
+// TestWorkflowLangInjectionIntoUserPreferenceSection verifies that a non-empty
+// workflowLang generates a language-binding instruction in the ### User preferences
+// seed, and that an empty workflowLang leaves the section empty.
+func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	// Empty workflowLang → section stays empty (no lang instruction).
+	emptyBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (empty lang): %v", err)
+	}
+	if strings.Contains(emptyBody, "Respond to the user in") {
+		t.Errorf("empty workflowLang must not inject lang instruction:\n%s", emptyBody)
+	}
+	assertNoMarkerSyntax(t, "empty lang", emptyBody)
+
+	// Non-empty workflowLang → instruction appears in User preferences seed.
+	langBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "Korean", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (Korean): %v", err)
+	}
+	if !strings.Contains(langBody, "Respond to the user in Korean") {
+		t.Errorf("workflowLang=Korean must inject lang instruction:\n%s", langBody)
+	}
+	if !strings.Contains(langBody, "### User preferences") {
+		t.Errorf("User preferences heading must survive lang injection:\n%s", langBody)
+	}
+	assertNoMarkerSyntax(t, "Korean lang", langBody)
+	assertManualStructureIntact(t, "Korean lang", langBody)
 }
 
 // assertManualStructureIntact bounds the override replacement region: the
@@ -634,7 +666,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	const seedPhrase = "Delegate to preserve lead execution context"
 
 	// --- Baseline: without any override, seed renders ---
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", buildOverrideLookup(s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (baseline): %v", err)
 	}
@@ -663,7 +695,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// --- Render with the override active ---
-	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", buildOverrideLookup(s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (after set): %v", err)
 	}
@@ -698,7 +730,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// Render again — claude-specific override must still win.
-	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", buildOverrideLookup(s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (precedence): %v", err)
 	}

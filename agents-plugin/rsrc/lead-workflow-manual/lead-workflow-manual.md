@@ -1,5 +1,7 @@
 ---
 kind: print
+variables:
+  - WorkflowLang
 ---
 # Workflow Manual
 
@@ -64,6 +66,7 @@ root-aware {{.McpNamespace}} tool call that targets that root.
 ### User preferences
 
 <!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
+{{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
 
 ### Delegation posture

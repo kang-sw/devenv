@@ -44,6 +44,13 @@ const (
 	// ItemSageReviewCompletenessTier is the model capability tier for the
 	// completeness reviewer delegate. Builtin default: "medium".
 	ItemSageReviewCompletenessTier = "sage_review_completeness_tier"
+
+	// ItemWorkflowLang is the layered config key for the user's preferred
+	// conversation language. When set, playbook.print injects a language-binding
+	// instruction into the UserPreferenceSection seed of lead-workflow-manual.
+	// Empty string means no binding (no injection). Declared default scope:
+	// ScopeGlobal (language is a cross-project user preference).
+	ItemWorkflowLang = "workflow.lang"
 )
 
 func init() {
@@ -56,6 +63,8 @@ func init() {
 	RegisterDefaultScope(ItemSageReviewDesignTier, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewCompleteness, ScopeProject)
 	RegisterDefaultScope(ItemSageReviewCompletenessTier, ScopeProject)
+	// workflow.lang defaults to global scope: language is a cross-project user preference.
+	RegisterDefaultScope(ItemWorkflowLang, ScopeGlobal)
 }
 
 // ResolvedValue carries a config item value together with the scope it was

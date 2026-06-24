@@ -48,7 +48,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 		t.Fatalf("after enable: got=%v scope=%s, want true/session", enabled, scope)
 	}
 
-	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", enabled, nil)
+	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", enabled, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody on: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 		t.Fatalf("after disable: got=%v scope=%s, want false/session", disabled, scope2)
 	}
 
-	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", disabled, nil)
+	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", disabled, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody off: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestPreferMercenaryOnOffRenderGuidance(t *testing.T) {
 	if !reEnabled {
 		t.Fatalf("re-enable: got false, want true")
 	}
-	bodyOn2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", reEnabled, nil)
+	bodyOn2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", reEnabled, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody re-on: %v", err)
 	}
