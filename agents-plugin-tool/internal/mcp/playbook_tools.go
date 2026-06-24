@@ -57,6 +57,8 @@ var reservedToolVarNames = func() map[string]bool {
 	}
 	// Tier-derived model var reserved name.
 	set["RoleModel"] = true
+	// workflow.lang language-binding injection.
+	set["WorkflowLang"] = true
 	for _, name := range wsrsrc.ImplicitVariableNames {
 		set[name] = true
 	}
@@ -89,6 +91,16 @@ func resolveRoleModelVar(harness, tier string, configOpts wsconfig.Options) map[
 		model = ""
 	}
 	return map[string]string{"RoleModel": model}
+}
+
+// resolveWorkflowLangVar generates the WorkflowLang instruction text from the
+// resolved workflow.lang config value. Returns "" when lang is empty.
+func resolveWorkflowLangVar(lang string) string {
+	if strings.TrimSpace(lang) == "" {
+		return ""
+	}
+	return "Respond to the user in " + strings.TrimSpace(lang) +
+		". Keep all internal reasoning, subagent prompts, code comments, and AI-authored artifacts in English."
 }
 
 func resolveNamespaceVars() map[string]string {
@@ -124,7 +136,8 @@ func isReservedNamespaceVar(name string) bool {
 //
 // tier is the playbook's declared capability tier (from pb.Meta.Tier); it drives
 // RoleModel resolution. configOpts is forwarded to resolveRoleModelVar unchanged.
-func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options) (map[string]string, error) {
+// workflowLang is the resolved workflow.lang value; it drives WorkflowLang injection.
+func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options, workflowLang string) (map[string]string, error) {
 	declaredSet := make(map[string]bool, len(declared))
 	for _, v := range declared {
 		declaredSet[v] = true
@@ -163,6 +176,12 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 	// context so display namespace cannot be spoofed through render context.
 	for k, v := range resolveNamespaceVars() {
 		merged[k] = v
+	}
+
+	// Layer 5: workflow.lang language-binding instruction — injected only when
+	// the playbook declares WorkflowLang and a language is configured.
+	if declaredSet["WorkflowLang"] {
+		merged["WorkflowLang"] = resolveWorkflowLangVar(workflowLang)
 	}
 
 	return merged, nil
@@ -575,7 +594,7 @@ func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // declared in the playbook frontmatter, surfaced so one render call routes both
 // delegation paths — native uses it as a host model-selection guide, mercenary
 // passes it to ws.mercenary.register's pass-through tier arg.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, overrideLookup overrideLookupFn) (string, string, error) {
+func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	harness := s.currentHarness()
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
@@ -590,7 +609,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// uses it as a host model-selection guide, mercenary passes it to ws.mercenary.register.
 	recommendedTier := pb.Meta.Tier
 
-	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts)
+	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts, workflowLang)
 	if err != nil {
 		return "", "", err
 	}
@@ -711,8 +730,8 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
-func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, overrideLookup overrideLookupFn) (string, string, error) {
-	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, overrideLookup)
+func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, workflowLang, overrideLookup)
 }
 
 // renderPlaybook loads a playbook, renders it (with optional child-key mint and
@@ -725,7 +744,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, overrideLookup overrideLookupFn) (string, string, error) {
+func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, preferMercenary bool, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -736,7 +755,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		templateContext = nil
 		renderContext = callerContext
 	}
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary, overrideLookup)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary, workflowLang, overrideLookup)
 	if err != nil {
 		return "", "", err
 	}

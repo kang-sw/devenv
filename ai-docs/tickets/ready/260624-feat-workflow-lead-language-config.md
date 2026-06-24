@@ -86,3 +86,19 @@ keeping internal reasoning and subagent prompts in English.
 - Leave `workflow.lang` unset; assert `### User preferences` section is empty.
 - Call `playbook.render` on an implementer delegate with the same session key;
   assert the rendered output does NOT contain the language instruction.
+
+### Result
+
+Implemented. All tests pass.
+
+Key implementation decisions:
+- `resolveWorkflowLangVar(lang)` generates the instruction text when lang is
+  non-empty; empty lang → empty string → seed renders as empty (UserPreferenceSection
+  unchanged behavior). Go code handles the conditional, not the template engine
+  (which is `strings.NewReplacer`, not Go text/template).
+- `WorkflowLang` added as Layer 5 in `buildPlaybookVars`; only injected when declared
+  in playbook frontmatter, so `playbook.render` delegate outputs are naturally isolated.
+- `workflow.lang` registered at `ScopeGlobal` (cross-project user preference).
+- `TestWorkflowLangInjectionIntoUserPreferenceSection` covers positive (Korean) and
+  negative (empty) cases.
+- Manifest regenerated; installed plugin manifest updated.

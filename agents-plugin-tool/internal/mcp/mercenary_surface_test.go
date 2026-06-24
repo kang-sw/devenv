@@ -80,7 +80,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	mintRoot := "/work/tree-a"
 
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	}
 
 	// A second render mints a DISTINCT key (registry uniqueness).
-	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, nil)
+	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (2nd): %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRenderNoMintForNonLeadCaller(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// mintRoot empty → caller is not a lead → no mint, no key block.
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestRenderNoMintForNonDelegateRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Lead caller (mintRoot set) but the playbook role is not delegate-eligible → no mint.
-	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 
 	// renderPlaybookBody binds the minted key to mintRoot; the dispatch passes
 	// root_override as mintRoot when set (server.go playbook.render handler).
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
 
 	// preferMercenary=false: always-on mercenary tip present (delegates:true),
 	// but the prefer-mercenary "Delegation mode" guidance block absent.
-	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody off: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
 	}
 
 	// preferMercenary=true on an implementer playbook: guidance block present.
-	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", true, nil)
+	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", true, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody on: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestPreferMercenaryGuidanceAbsentForNonImplementerRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// preferMercenary=true but role is leaf (not implementer/reviewer): no guidance block.
-	body, _, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", "", true, nil)
+	body, _, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", "", true, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 	for _, name := range []string{"implementer", "reviewer"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -451,7 +451,7 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	render := func(t *testing.T, name, harness string) string {
 		t.Helper()
 		s := newTestServerWithHarness(t, harness)
-		body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)
+		body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
@@ -504,7 +504,7 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -538,7 +538,7 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -581,7 +581,7 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	}
 	for name, wantTier := range want {
 		s := newTestServerWithHarness(t, "claude")
-		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)
+		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 		}

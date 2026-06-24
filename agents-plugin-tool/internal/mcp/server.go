@@ -917,7 +917,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// is present (same pattern as the prefer_mercenary read path in playbook.render).
 		keyStr, _ := params.Arguments["session_key"].(string)
 		printOverrideLookup := buildOverrideLookup(s, keyStr)
-		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printOverrideLookup)
+		// Resolve workflow.lang for language-binding injection.
+		printLangAdapter := sessionConfigAdapter{s: s.sessions}
+		printLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, printLangAdapter, printLangAdapter)
+		printWorkflowLangRV, _ := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
 	case "playbook.render":
@@ -972,7 +976,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			}
 		}
 
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderOverrideLookup)
+		// Resolve workflow.lang for language-binding injection.
+		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
+		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
+		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
 	case "ws.lead.prefer_mercenary":
