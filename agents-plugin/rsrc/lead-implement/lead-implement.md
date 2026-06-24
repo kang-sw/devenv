@@ -211,9 +211,9 @@ Choose the smallest partition set that covers material risk.
 Full review (all three): reserve for cross-cutting behavior plus runtime/tooling plus test surface.
 Default reviewer tier per partition in first-class vocabulary (`small`/`medium`/`large`/`xlarge`); raise a partition's tier for unusually subtle risk. When a delegate playbook declares its own `tier:`, the `recommended-tier` returned by `{{.McpNamespace}}/playbook.render` is the source of truth for that delegate.
 Native delegation treats the tier as a model-selection guide.
-<!-- ws:full-only:start -->
+<!-- ws:mercenary-on:start -->
 Mercenary delegation passes the recommended capability tier to `ws.mercenary.register`, which resolves it directly to a concrete per-harness model via capability-keyed config.
-<!-- ws:full-only:end -->
+<!-- ws:mercenary-on:end -->
 
 ## Templates
 
@@ -237,16 +237,21 @@ Proceeding with implementation.
 
 Canonical render+spawn idiom for every bundled delegate (`reference-discovery`,
 `implementer`, `reviewer` / review partitions, `mental-model-updater`,
-`plan-populator-survey`/`plan-populator-research`). Native is the default.
+`plan-populator-survey`/`plan-populator-research`). Every dispatch is a fresh
+spawn — there is no session continuation between calls; the lead owns loop
+continuity via commit `## AI Context`. Native is the default.
 <!-- ws:full-only:start -->
-Mercenary is available on user request or under `ws.lead.prefer_mercenary`.
+Mercenary is available on user request or under `ws.lead.prefer_mercenary`;
+it provides host-neutral stateful continuation when the same mercenary name is
+reused across relay calls (replace step 1 Native with the Mercenary path below,
+reusing the registered name from the initial implementer dispatch).
 <!-- ws:full-only:end -->
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
-1. Native (default): spawn a native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide.
-<!-- ws:full-only:start -->
+1. Native (default): spawn a **fresh** native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide. Every relay to a prior delegate role is also a fresh spawn with a self-contained prompt.
+<!-- ws:mercenary-on:start -->
 1. Mercenary (on request): `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`.
-<!-- ws:full-only:end -->
+<!-- ws:mercenary-on:end -->
 1. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus the target output path. File-writing delegates write to their caller-created output path or return content; free-response delegates return text the lead integrates.
 
 ### Brief template
@@ -382,6 +387,8 @@ Instructions:
 ```
 
 ### Review relay prompt
+
+Send to a **fresh implementer spawn** (not a continuation of the prior implementer session).
 
 ```text
 Review cycle <N> (self-contained — rely only on this prompt and the paths it names, not on prior conversation).
