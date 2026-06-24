@@ -35,6 +35,12 @@ follow-up only when they affect the result.
 Follow the output contract from the role prompt or caller prompt. Keep the answer
 focused on the delegated result, evidence, and any lead-owned follow-up.
 
+## Language
+
+Write all status messages, progress notes, and internal reasoning in English
+regardless of the session language. Write deliverables in the language specified
+by the task prompt or brief; default to English if none is specified.
+
 ## Doctrine
 
 Delegate orientation optimizes for **lead orchestration attention**: return
