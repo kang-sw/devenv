@@ -28,8 +28,7 @@ Read at every session start, before other action:
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored
    machine context.
 3. **Project arc** - run `git log --oneline --graph -50`.
-4. **Recent history** - run `git log -10` for `## AI Context` rationale.
-5. **Migration anchor** - read
+4. **Migration anchor** - read
    `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` (under epic
    `260605-epic-ws-playbook-factory-pivot`) when the task touches plugin
    architecture, host-neutral migration, the spawn-removal pivot, or adapter

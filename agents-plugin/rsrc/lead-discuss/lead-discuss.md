@@ -21,6 +21,7 @@ Evidence
 - For plugin architecture, host-neutral migration, spawn-removal, or adapter-boundary topics, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` before answering.
 - Use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) for focused implementation-detail questions beyond mental-model docs; read the result before responding.
 - When docs are stale or insufficient, say so - do not speculate.
+- Commit history is a project memory tier: `## AI Context` bodies carry decision rationale that docs may not yet reflect. Access this memory through Explore-type subagent dispatch rather than inline git log reads.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 
 Conversation
