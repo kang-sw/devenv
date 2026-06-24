@@ -16,6 +16,7 @@ related:
 - User-visible dashboard controls must expose stable command identities and route their mouse/click behavior through the same dashboard command dispatch path that future tmux-like prefix keybindings will invoke; terminal raw byte input is the narrow exception and must not fork shell input semantics.
 - Dashboard terminal work must treat cross-platform behavior as part of the contract: shell selection, PTY commands, browser/harness tests, and control-key evidence must avoid POSIX-only assumptions or record explicit OS-scoped limitations.
 - After owner authentication, ws-dashboard viewers have PC-owner-level visibility for dashboard-captured command/tool output: prefer bounded faithful rendering over redacting ordinary command output, and reserve redaction for daemon-private implementation metadata such as pairing tokens, session ids, cache/transcript storage paths, and unauthenticated diagnostics.
+- All daemon-scoped ws-dashboard REST operations must carry gateway-relative server route identity from API route through frontend helpers, command payloads, pane keys, and restore state; direct linked-server ids are dot-free with `.` reserved for future hop routing, and bare routes are allowed only for explicit gateway-local surfaces or `server-local` compatibility aliases.
 
 ## Entry Points
 
