@@ -7,7 +7,7 @@ Read at every session start, before other action:
 1. **Preamble** - read `ai-docs/_index.md`; keep only context a session must not re-derive.
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored machine context.
 3. **Project arc** - run `git log --oneline --graph -50`.
-4. **Recent history** - run `git log -10` for `## AI Context` rationale.
+4. **Recent history** - run `git log --oneline -20` for recent commit stems.
 
 ## Response Discipline
 
@@ -176,6 +176,7 @@ Adapt structure to the project; this is a starting point, not a schema.
   `ai-docs/mental-model.md ## Project Reading Map` during later
   mental-model work. Bootstrap may report the drift, but must not move mixed
   status or feature inventory automatically.
+- v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
 - v0041: Replace `_index.md ## Ticket Queue` with `## Ticket Focus`. If both
   sections exist, preserve `Ticket Focus` and remove `Ticket Queue`; if only
   `Ticket Queue` exists, move the entries already listed in that section into
@@ -187,4 +188,4 @@ Adapt structure to the project; this is a starting point, not a schema.
   focus cleanup is needed.
 -->
 
-<!-- Template Version: v0041 -->
+<!-- Template Version: v0042 -->
