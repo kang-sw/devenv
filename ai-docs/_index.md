@@ -230,6 +230,7 @@ dropped tickets live in hidden archive dirs and git history.
   deferred to Windows host; empirical auto-build cold-load deferred to chore
   Phase C. Partially closes `260622-bug-wsflow-launcher-coldload-divergence`
   (gate mirrored).
+- `260622-refactor-session-git-log-lightweight` - replace bootstrap step 4 `git log -10` with `git log --oneline -20` and add commit-history-as-memory Evidence rule to lead-discuss; single Phase 1, implementation-ready.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

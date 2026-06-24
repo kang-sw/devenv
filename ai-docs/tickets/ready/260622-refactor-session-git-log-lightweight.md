@@ -20,6 +20,12 @@ Two coordinated changes address this:
    decision rationale that docs may not yet reflect, and access should go
    through an Explore-type subagent rather than inline reads.
 
+## Spec Impact
+
+Target spec area: `workflow-skills.md` — lead-bootstrap Project Memory section (step 4) and lead-discuss Evidence invariant block.
+Expected caller-visible change: bootstrap sessions receive `git log --oneline -20` output instead of full `git log -10` bodies; lead-discuss Evidence invariant gains a recommendation to route commit-history access through Explore-type subagent dispatch rather than inline reads.
+Contract-first spec: no
+
 ## Phases
 
 ### Phase 1: Oneline step 4 + commit-history-as-memory rule
