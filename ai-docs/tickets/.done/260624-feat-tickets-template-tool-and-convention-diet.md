@@ -88,6 +88,15 @@ dimensions (correctness, fit, test) passed.
     spec-address gate, cascade logic).
 - Regenerate manifest after playbook edit.
 
+### Result
+
+Commit `05f1239a`. `lead-write-ticket.md` updated: `On: invoke → 1. Resolve`
+removed and merged into new `On: invoke → 1. Route` (convention.read kept at
+route step 1 for structural rules); `On: Create Ticket → 1. Classify` step 3
+added — `tickets.template(type: "<category>")`; `On: Edit Ticket → 1. Load`
+step 2 added — `tickets.template(type: "<type>")` when known. `manifest.json`
+regenerated.
+
 ## Verification
 
 - `go test ./internal/mcp/...` green including new `tickets.template` tests.
