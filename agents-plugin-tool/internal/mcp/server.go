@@ -929,6 +929,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketCreate(result), nil)
+	case "tickets.template":
+		typeStr, _ := params.Arguments["type"].(string)
+		text, err := wsdoc.TicketTemplate(typeStr)
+		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2680,6 +2684,17 @@ func tools() []map[string]any {
 					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
 				},
 				"required": []string{"stem", "initial_state"},
+			},
+		},
+		{
+			"name":        "tickets.template",
+			"description": "Return the fill-in body skeleton for a given ticket type. Use at creation time instead of loading the full ticket-conventions document.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+				},
+				"required": []string{"type"},
 			},
 		},
 		{

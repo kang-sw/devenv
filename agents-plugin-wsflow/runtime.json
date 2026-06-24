@@ -35,6 +35,7 @@
     "tickets.close": ">=0.30.6-dev <0.31.0",
     "tickets.move": ">=0.30.6-dev <0.31.0",
     "tickets.create": ">=0.30.6-dev <0.31.0",
+    "tickets.template": ">=0.30.6-dev <0.31.0",
     "path.generate": ">=0.30.6-dev <0.31.0",
     "playbook.print": ">=0.30.6-dev <0.31.0",
     "playbook.render": ">=0.30.6-dev <0.31.0",
