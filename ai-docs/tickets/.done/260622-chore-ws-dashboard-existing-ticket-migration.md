@@ -10,6 +10,7 @@ related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-06-24
 ---
 
 # ws dashboard existing ticket migration
@@ -114,3 +115,25 @@ Verification boundary: a fresh session should be able to identify stale
 compatibility sources, deferred provider-adapter work, and the accepted
 daemon-private session-binding invariant without reading the old discussion
 thread.
+
+### Result (fb731f6) - 2026-06-24
+
+Updated the dashboard spec and mental model so WorkRoot Activity and Activity
+Console documentation distinguish the implemented SQLite/wsstate named-agent
+compatibility source from future provider-native Activity authority. The spec now
+keeps `ActivityFeed.items` as the forward source-neutral contract, treats
+`ActivityFeed.agents` as compatibility projection data, and records the
+daemon-private `wsSessionKey` / `providerSessionId` / browser-facing
+`activityId` split for dashboard-launched harness and provider work.
+
+No runtime behavior changed. Verification covered `ws/spec_index.verify`, a
+targeted stale-authority grep over the edited docs, and partitioned correctness
+and fit review.
+
+
+## Resolution (2026-06-24)
+
+Phase 1 imported and routed the realignment board. Phase 2 updated the
+dashboard spec and mental model to separate current named-agent/SQLite
+compatibility Activity sources from daemon-private ferrule/session-binding and
+deferred provider-adapter scope.

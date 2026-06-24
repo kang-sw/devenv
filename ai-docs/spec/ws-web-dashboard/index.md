@@ -33,7 +33,7 @@ without redirecting into an authenticated-looking app route.
 Authenticated owner sessions have broad host-control authority for dashboard
 features, but the daemon remains separate from ws MCP stdio session authority.
 The daemon must not make itself the canonical ws MCP root, harness, model
-backend, or named-agent session owner.
+backend, or provider/native-agent session owner.
 
 HTTP routes other than pairing reject unauthenticated requests before handler
 execution, including the health route, the placeholder UI route, and fallback
@@ -135,6 +135,12 @@ The server list is separate from the selected server's resource tree. This lets
 existing callers keep consuming the single-server `DashboardResourcesView`
 shape while new callers can render a multi-server navigation shell from a
 server list plus the selected server resources.
+
+Linked-server identity stays dashboard-owned and local-gateway scoped. `serverId`
+selects the target daemon for browser requests; it is not a ws MCP session key,
+provider session id, endpoint, or remote host path. Any future ws MCP binding for
+a linked server belongs to the selected target daemon and remains daemon-private
+to that target.
 
 Authenticated callers can request resources through
 `/api/dashboard/servers/{serverId}/resources`. The local server id returns the
@@ -475,21 +481,25 @@ not show mock or default panes when no live or user-opened surface exists.
 The dashboard exposes a workRoot-owned runtime activity projection for opened
 workRoots. Authenticated callers request it through
 `GET /api/dashboard/work-roots/{workRootId}/activity`. The projection summarizes
-read-only named-agent activity
-from daemon-owned wsstate and wsagent state without making browser callers read
-cache files or host paths directly.
+source-neutral Activity for daemon-owned sources without making browser callers
+read cache files, host paths, provider records, or ws runtime state directly.
 
-The projection reports bounded status for named agents, including identity,
-backend or model metadata when available, current-call state, last-call timing,
-and unavailable or diagnostic states for stale or malformed records. It does not
-provide agent control actions such as start, interrupt, cancel, erase, or retry.
-Running command activity remains absent until the async exec job model exists.
+The implemented source today is the legacy named-agent/mercenary compatibility
+projection over daemon-owned wsstate and wsagent state. That source reports
+bounded status for named agents, including identity, backend or model metadata
+when available, current-call state, last-call timing, and unavailable or
+diagnostic states for stale or malformed records. It is not the future authority
+for provider-native Codex/OpenCode sessions or managed vendor CLI sessions, and
+the projection does not expose agent control actions such as start, interrupt,
+cancel, erase, or retry. Running command activity remains absent until the async
+exec job model exists.
 
 ### WorkRoot Activity Top-Bar Badge {#260517-ws-dashboard-workroot-activity-topbar-badge}
 
 Opened workRoot top bars show a compact activity badge in the existing badge
-row. The badge summarizes named-agent activity counts for the selected workRoot
-and opens or focuses the detailed WorkRoot Activity pane.
+row. The badge summarizes source-neutral Activity state for the selected
+workRoot and opens or focuses the detailed WorkRoot Activity pane. The current
+implemented counts are derived from the named-agent compatibility projection.
 
 Adding activity summary does not add a new top-bar row or increase the top-bar
 height. Under constrained widths the badge compacts, truncates, or hides
@@ -511,14 +521,15 @@ available or creatable, while duplicate opens focus the existing Activity pane
 in whatever split currently owns it. Activity pane close remains reversible and
 has no daemon-side effect.
 
-The pane displays named-agent projection rows and an explicit empty Running
-Commands section. Real running-command rows remain absent until the async exec
-job model exists.
+The pane displays source-neutral Activity rows plus any legacy named-agent
+compatibility projection rows still required by current UI consumers. It also
+shows an explicit empty Running Commands section. Real running-command rows
+remain absent until the async exec job model exists.
 
 While the Activity pane is open, the dashboard refreshes recently updated
-named-agent rows and merges them into the existing projection so newly
-registered or called agents appear without a browser reload. The full projection
-remains available for the initial selected-workRoot fetch.
+Activity rows and merges them into the existing projection so newly observed
+compatibility named-agent activity appears without a browser reload. The full
+projection remains available for the initial selected-workRoot fetch.
 
 ## Activity Console Read Model {#260521-ws-dashboard-activity-console-read-model}
 
@@ -542,12 +553,13 @@ updated activity before using alphabetical order as a tie-breaker.
 > [!note] Implementation Gap · 2026-06-20
 > Missing behavior: the Activity Console read model is source-neutral, but the
 > dashboard does not yet expose dashboard-owned Activity source adapters for
-> host-owned agent-client surfaces such as Codex app-server or OpenCode serve.
-> Current provider projection remains centered on ws named-agent / mercenary
-> state. Future adapters should normalize provider thread, turn, message, tool,
-> and status events into Activity Items and Transcript Blocks without exposing
-> provider session ids, ws session keys, cache paths, process ids, or raw
-> provider event ids as browser authority.
+> host-owned agent-client surfaces such as Codex app-server or OpenCode ACP.
+> OpenCode serve may later supplement observation/discovery, but it is not the
+> primary interactive provider counterpart. Current projection remains centered
+> on ws named-agent / mercenary compatibility state. Future adapters should
+> normalize provider thread, turn, message, tool, and status events into Activity
+> Items and Transcript Blocks without exposing provider session ids, ws session
+> keys, cache paths, process ids, or raw provider event ids as browser authority.
 
 Transcript backfill returns bounded normalized blocks rather than backend-native
 cache records, raw session JSON, stdout/stderr paths, or file contents. Each
@@ -567,21 +579,33 @@ ids, process ids, stdout/stderr paths, stream paths, or backend-native
 transcript paths. The read model remains read-only and does not add agent start,
 interrupt, cancel, erase, retry, or exec-job control actions.
 
-### SQLite-Backed Agent Activity Source {#260525-ws-dashboard-sqlite-agent-activity-source}
+The dashboard keeps three activity/session identity classes separate:
+`activityId` is the browser-facing opaque Activity identifier;
+`providerSessionId` is a daemon-private provider-native thread/session/rollout
+identifier used only by source adapters; and `wsSessionKey` is a daemon-private
+ws MCP credential returned by `ws.ferrule(root)` for future dashboard-launched
+top-level harness sessions. Browser routes, command payloads, diagnostic
+payloads, and Activity ids must not carry `providerSessionId` or `wsSessionKey`.
 
-The Activity Console read model uses the ws runtime SQLite registry as the
-named-agent metadata authority for opened workRoots. Current named-agent role
-rows are the source for the compatibility agent projection and current agent
-counts, and file-backed payload readers resolve current call state, output, and
-transcripts through registry `state_path` metadata rather than legacy
-`agent.json` discovery.
+### SQLite-Backed Named-Agent Compatibility Source {#260525-ws-dashboard-sqlite-agent-activity-source}
+
+The Activity Console read model currently uses the ws runtime SQLite registry as
+the named-agent compatibility metadata source for opened workRoots. Current
+named-agent role rows are the source for the compatibility agent projection and
+current agent counts, and file-backed payload readers resolve current call
+state, output, and transcripts through registry `state_path` metadata rather
+than legacy `agent.json` discovery. This source is implemented compatibility
+behavior for ws mercenary/named-agent history; it is not the long-term Activity
+authority for provider-native Codex/OpenCode adapters or managed vendor CLI
+sessions.
 
 Browser-visible routes and payload shapes stay stable. Activity snapshots,
 watch stream events, and transcript reads continue to use opaque workRoot and
 activity ids, and transcript/output bytes remain normalized by daemon-owned
 file-backed transcript readers. Missing, locked, unavailable, or incompatible
 registry state degrades to an empty or partial read model rather than failing
-the whole route or exposing cache paths.
+the whole route or exposing cache paths, provider session ids, ws session keys,
+or raw registry identifiers.
 
 Retained named-agent instance rows add historical Activity Items when their
 payloads or diagnostics remain useful. Historical instance items use stable
