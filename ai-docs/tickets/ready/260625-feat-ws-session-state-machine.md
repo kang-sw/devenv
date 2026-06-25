@@ -5,6 +5,7 @@ related-mental-model:
   - plugin-runtime
 spec:
   - mcp-tools
+sage-review: completed
 ---
 
 # ws session state machine — agenda and todo persistence across compaction
@@ -80,6 +81,9 @@ internally.
 remind section; they are not re-injected at intermediate checkpoints.
 
 ### Enter API (typed MCP tools, hidden behind ToolSearch)
+
+All `ws.enter.*` and `ws.todo.*` tools take `session_key` as a required first
+argument; it is elided from the per-tool tuples below for brevity.
 
 Each `ws.enter.*` tool atomically:
 1. Stores a typed, schema-validated payload as an agenda blob.
@@ -163,9 +167,9 @@ the lead explicitly shares its own session key.
 | Layer  | Restoration point                                    | Mechanism                         |
 |--------|------------------------------------------------------|-----------------------------------|
 | agenda | workflow manual load only                            | remind (show blobs at bottom of Session State section) |
-| todo   | workflow manual load + `ws.commit` + major checkpoints | inject (summary mode render)    |
+| todo   | workflow manual load + `git.commit` + major checkpoints | inject (summary mode render)    |
 
-`ws.commit` does not auto-mark todos as done. Status transitions are always
+`git.commit` does not auto-mark todos as done. Status transitions are always
 explicit via `ws.todo.check`.
 
 ### Session restoration entry (revised 260625)
@@ -184,8 +188,11 @@ entry. It renders the primitives reference plus mode-dependent content:
   in and thread its `session_key`. A continued lead still spins up new
   worktrees/children that each need their own key, so this rule is never gated.
 - Fresh-only (`session_key` empty/omitted): the self-bootstrap line — "you have no
-  key yet; call `ws.ferrule` for this root to mint your lead key." This line is the
-  only content the override-marker gates.
+  key yet; call `ws.ferrule` for this root to mint your lead key." The handler's
+  mode branch is the sole gate that emits or omits this line; the rsrc delimits the
+  fresh-only region with a dedicated mode-gating marker the handler recognizes (not
+  the override-marker, which only governs user text customization via config.prompt
+  and is orthogonal to fresh-vs-continue visibility).
 - Continue-only (`session_key` present and the record resolves): the restored
   "Session State" section — agenda (remind) + todo (summary) from the session
   record.
@@ -292,19 +299,21 @@ produce transcript-only routing or implementation context.
 #### Priority 1 — immediate integrations
 
 **lead-proceed**
-- Call `ws.enter.proceed(ticket, phase, next_skill, conditions)` when a
+- Call `ws.enter.proceed(session_key, ticket, phase, next_skill, conditions)` when a
   next-skill decision is made.
 - The enter call records routing context in agenda and replaces todo with a
   routing-phase checklist.
 
 **lead-implement**
-- Call `ws.enter.implement(delegation, plan_depth, branch_mode, review_alloc,
-  current_branch, merge_target, start_commit, active_agents)` immediately after
-  the Route step.
+- Call `ws.enter.implement(session_key, delegation, plan_depth, branch_mode,
+  review_alloc, need_review, need_doc, current_branch, merge_target, start_commit,
+  active_agents)` immediately after the Route step.
 - Include `active_agents: [{name, role, started}]` to preserve agent-name
   context across compaction.
-- Todo list is derived automatically by the enter tool; remove any manual
-  `ws.todo.append` calls for the standard implement steps.
+- Todo list is derived automatically by the enter tool from `need_review`
+  (= review-allocation != lead-only) and `need_doc` (= true for the standard
+  pipeline); pass both explicitly. No manual `ws.todo.append` removal is needed —
+  lead-implement uses a host Markdown task list, not `ws.todo.append`.
 
 **lead-forge-spec**
 - Replace host task-list dependency with `ws.todo` for domain-task tracking.
@@ -318,13 +327,13 @@ produce transcript-only routing or implementation context.
 #### Priority 2 — secondary integrations
 
 **lead-sprint**
-- Call `ws.enter.sprint(episode_slug, episode_start, current_edit_context)`
+- Call `ws.enter.sprint(session_key, episode_slug, episode_start, current_edit_context)`
   when an episode starts.
 - Replaces `Sprint-Edit:` commit-marker resume logic; enables in-progress
   episode recovery without requiring a prior commit.
 
 **lead-salvage**
-- Call `ws.enter.salvage(failure_claim, confirmed_premises, survey_status)`
+- Call `ws.enter.salvage(session_key, failure_claim, confirmed_premises, survey_status)`
   after the failure-claim confirmation step.
 - Prevents user re-confirmation after compaction when premises are already
   locked.
@@ -343,6 +352,10 @@ Verify via: per-skill smoke test confirming the enter tool is called at the
 correct point and the derived todo list matches expected items; review of
 `delegate-orientation.md` update for accuracy.
 
+> Phase 3 is split into Phase 3a (the `ws.workflow_manual` tool + restore rendering
+> + runtime/spec registration) and Phase 3b (manual-entry skill restructure, which
+> depends on 3a). There is no standalone Phase 3.
+
 ### Phase 3a: `ws.workflow_manual` tool and restore rendering
 
 Implement the `ws.workflow_manual(session_key?: string)` MCP tool (see Design →
@@ -358,12 +371,21 @@ Implement the `ws.workflow_manual(session_key?: string)` MCP tool (see Design �
     server-side from the session record).
   - present but no record resolves → fail loud (primitives + explicit
     no-restorable-state notice; never mint a key).
-- Wrap ONLY the fresh-only self-bootstrap line of `lead-workflow-manual.md` in the
-  override-marker convention (the per-root ferrule rule stays always-shown);
-  regenerate `manifest.json` + the wsflow rsrc mirror.
-- Update `ws.commit` checkpoint logic to re-inject the todo summary after commit.
+- Delimit ONLY the fresh-only self-bootstrap line of `lead-workflow-manual.md` with
+  a dedicated mode-gating region marker that the `ws.workflow_manual` handler strips
+  in continue mode (the per-root ferrule rule stays always-shown). Do NOT reuse the
+  override-marker convention for this gate — override markers carry user-customization
+  (config.prompt) lookup semantics and do not perform conditional show/hide; they may
+  still wrap text for customization, but that is orthogonal to mode gating. Regenerate
+  `manifest.json` + the wsflow rsrc mirror.
+- Update the `git.commit` checkpoint logic to re-inject the todo summary after
+  commit. The injection lives in the MCP formatter layer (`internal/mcp`,
+  `formatGitCommit`), not `internal/wsgit` — formatting stays in `internal/mcp` per
+  the mcp-runtime mental model.
 - Register `ws.workflow_manual` in both `runtime.json` files (ws + wsflow) under
-  the current-line version fence; add it to the capabilities fast-path tool list.
+  the current-line version fence so it surfaces through `LeadToolNames` /
+  `runtime.capabilities` (there is no separate fast-path subset — the capability
+  list derives lead tool names from `tools()`).
 - Spec closeout: add `ws.workflow_manual` to `ai-docs/spec/mcp-tools.md`; document
   restoration behavior in `ai-docs/spec/plugin-runtime.md` and
   `ai-docs/ref/ws-mcp.md`.
