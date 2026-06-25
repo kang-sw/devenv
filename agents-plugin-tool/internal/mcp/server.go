@@ -2699,7 +2699,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate and to support session-scope writes."),
-					"pointId":     stringProperty("Override-point id, e.g. DelegationSection. Must be non-empty."),
+					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
 					"harness":     enumStringProperty("Harness bucket the override applies to. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
 					"prompt":      stringProperty("Override text that replaces the seed block at render time. Must be non-empty."),
 					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
@@ -2714,7 +2714,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate."),
-					"pointId":     stringProperty("Override-point id, e.g. DelegationSection. Must be non-empty."),
+					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
 					"harness":     enumStringProperty("Harness bucket to clear. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
 					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). Session scope is not supported.", wsconfig.ScopeSchemaEnum()),
 				},

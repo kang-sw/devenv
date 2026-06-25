@@ -54,6 +54,14 @@ func newTestServerWithHarness(t *testing.T, harness string) *Server {
 	return s
 }
 
+func isolatedPlaybookConfigOptions(t *testing.T) wsconfig.Options {
+	t.Helper()
+	return wsconfig.Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "config"),
+	}
+}
+
 // initGitRepo creates a git repository in a temp dir and returns its path.
 // Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
@@ -565,29 +573,57 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	t.Setenv(envNamespace, "wsflow")
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
+	configOpts := isolatedPlaybookConfigOptions(t)
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
+	assertCleanWsflowManual := func(label, body string) {
+		t.Helper()
+		for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws", "ws:override:", "ws:/override:"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s: wsflow playbook output contains forbidden %q:\n%s", label, forbidden, body)
+			}
+		}
+		if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+			t.Fatalf("%s: wsflow playbook output contains bare ws namespace notation:\n%s", label, body)
+		}
+		if strings.Contains(body, "{{.") {
+			t.Fatalf("%s: wsflow playbook output contains unsubstituted placeholder:\n%s", label, body)
+		}
+		for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s: wsflow playbook output missing %q:\n%s", label, want, body)
+			}
+		}
+		if !strings.Contains(body, "ws.ferrule") {
+			t.Fatalf("%s: wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", label, body)
+		}
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("wsflow playbook output contains forbidden %q:\n%s", forbidden, body)
+	assertCleanWsflowManual("prefer-subagent off", body)
+	if strings.Contains(body, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+		t.Fatalf("wsflow workflow manual must not append lead-prefer-subagent while preference is off:\n%s", body)
+	}
+
+	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
+	if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, "on", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("enable workflow.prefer_subagent: %v", err)
+	}
+	bodyOn, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook on: %v", err)
+	}
+	assertCleanWsflowManual("prefer-subagent on", bodyOn)
+	for _, want := range []string{
+		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
+		"Maximum-delegation posture for this session",
+		"spawn_agent(fork_context:true, message:<prompt>)",
+	} {
+		if !strings.Contains(bodyOn, want) {
+			t.Fatalf("wsflow workflow manual with prefer-subagent on missing %q:\n%s", want, bodyOn)
 		}
-	}
-	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
-		t.Fatalf("wsflow playbook output contains bare ws namespace notation:\n%s", body)
-	}
-	if strings.Contains(body, "{{.") {
-		t.Fatalf("wsflow playbook output contains unsubstituted placeholder:\n%s", body)
-	}
-	for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("wsflow playbook output missing %q:\n%s", want, body)
-		}
-	}
-	if !strings.Contains(body, "ws.ferrule") {
-		t.Fatalf("wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", body)
 	}
 }
 
@@ -1204,7 +1240,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}

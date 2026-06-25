@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"sort"
@@ -347,6 +348,13 @@ type overridePointDecl struct {
 }
 
 const preferSubagentInvocationGuidancePointID = "PreferSubagentInvocationGuidance"
+
+const (
+	workflowManualPlaybookName  = "lead-workflow-manual"
+	preferSubagentPlaybookName  = "lead-prefer-subagent"
+	preferSubagentPlaybookTitle = "Prefer Subagent"
+	preferSubagentEnabledValue  = "on"
+)
 
 const preferSubagentCodexInvocationGuidancePrompt = "" +
 	"- Codex binding: call `spawn_agent(fork_context:true, message:<prompt>)`; " +
@@ -749,11 +757,32 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 	return result, nil
 }
 
+// wrapRenderedPlaybookForConcatenation wraps an already-rendered playbook body
+// for code-side pragmatic concatenation. It does not load or parse source text.
+func wrapRenderedPlaybookForConcatenation(name, title, body string) string {
+	trimmedBody := strings.TrimRight(body, "\n")
+	return fmt.Sprintf(
+		"<playbook name=\"%s\" title=\"%s\">\n%s\n</playbook>",
+		html.EscapeString(name),
+		html.EscapeString(title),
+		trimmedBody,
+	)
+}
+
+func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
+	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
+	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferSubagent)
+	if err != nil {
+		return false, err
+	}
+	return strings.ToLower(strings.TrimSpace(rv.Value)) == preferSubagentEnabledValue, nil
+}
+
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
-// Zero-logic wrapper over renderPlaybookBody: the indirection is intentional
-// forward-compat, where print and render may diverge (e.g., different
-// session-scoped output constraints or inline vs. path semantics).
+// The workflow manual has one code-side pragmatic concatenation hook: when the
+// global workflow.prefer_subagent preference is on, append the normally-rendered
+// lead-prefer-subagent playbook wrapped in a playbook boundary.
 // printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
 //
 // rsrcRoot is a call-site-overridable seam for root_override support.
@@ -761,7 +790,26 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
-	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, workflowLang, overrideLookup)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, workflowLang, overrideLookup)
+	if err != nil {
+		return "", "", err
+	}
+	if name != workflowManualPlaybookName {
+		return body, recommendedTier, nil
+	}
+	enabled, err := workflowPreferSubagentEnabled(configOpts)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
+	}
+	if !enabled {
+		return body, recommendedTier, nil
+	}
+	appendBody, _, err := renderPlaybookBody(s, rsrcRoot, preferSubagentPlaybookName, nil, configOpts, "", "", false, workflowLang, overrideLookup)
+	if err != nil {
+		return "", "", fmt.Errorf("render appended %s: %w", preferSubagentPlaybookName, err)
+	}
+	body += "\n\n" + wrapRenderedPlaybookForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
+	return body, recommendedTier, nil
 }
 
 // renderPlaybook loads a playbook, renders it (with optional child-key mint and

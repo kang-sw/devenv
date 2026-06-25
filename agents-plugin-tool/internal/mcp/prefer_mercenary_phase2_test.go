@@ -225,3 +225,105 @@ func TestWorkflowPreferSubagentWriterProductionPath(t *testing.T) {
 		t.Fatalf("config.show must report workflow.prefer_subagent off/global: %s", showOff)
 	}
 }
+
+func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
+	useLeadProfile(t)
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "codex")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900006, root, nil))
+
+	offText := toolText(t, callToolOnce(t, s, 1, "playbook.print", map[string]any{
+		"name": "lead-workflow-manual",
+	}))
+	if strings.Contains(offText, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+		t.Fatalf("builtin/off workflow.prefer_subagent must not append lead-prefer-subagent:\n%s", offText)
+	}
+
+	onResp := callToolOnce(t, s, 2, "config.workflow_prefer_subagent", map[string]any{
+		"session_key": key,
+		"value":       "on",
+	})
+	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {
+		t.Fatalf("subagent on call must succeed: %s", onResp)
+	}
+
+	onText := toolText(t, callToolOnce(t, s, 3, "playbook.print", map[string]any{
+		"name": "lead-workflow-manual",
+	}))
+	for _, want := range []string{
+		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
+		"Maximum-delegation posture for this session",
+		"spawn_agent(fork_context:true, message:<prompt>)",
+		"</playbook>",
+	} {
+		if !strings.Contains(onText, want) {
+			t.Fatalf("prefer-subagent manual render missing %q:\n%s", want, onText)
+		}
+	}
+	if strings.Contains(onText, "ws:override:") || strings.Contains(onText, "ws:/override:") {
+		t.Fatalf("prefer-subagent append must render through override marker stripping:\n%s", onText)
+	}
+
+	offResp := callToolOnce(t, s, 4, "config.workflow_prefer_subagent", map[string]any{
+		"session_key": key,
+		"value":       "off",
+	})
+	if !strings.Contains(toolText(t, offResp), "workflow.prefer_subagent: off [scope:global]") {
+		t.Fatalf("subagent off call must succeed: %s", offResp)
+	}
+	offAgainText := toolText(t, callToolOnce(t, s, 5, "playbook.print", map[string]any{
+		"name": "lead-workflow-manual",
+	}))
+	if strings.Contains(offAgainText, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+		t.Fatalf("global off workflow.prefer_subagent must remove appended lead-prefer-subagent:\n%s", offAgainText)
+	}
+}
+
+func TestWorkflowPreferSubagentWorkflowManualClaudeOmitsCodexGuidance(t *testing.T) {
+	useLeadProfile(t)
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900007, root, nil))
+
+	onResp := callToolOnce(t, s, 1, "config.workflow_prefer_subagent", map[string]any{
+		"session_key": key,
+		"value":       "on",
+	})
+	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {
+		t.Fatalf("subagent on call must succeed: %s", onResp)
+	}
+
+	text := toolText(t, callToolOnce(t, s, 2, "playbook.print", map[string]any{
+		"name": "lead-workflow-manual",
+	}))
+	if !strings.Contains(text, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+		t.Fatalf("prefer-subagent manual render must append wrapper for Claude:\n%s", text)
+	}
+	for _, forbidden := range []string{
+		"spawn_agent(fork_context:true, message:<prompt>)",
+		"`agent_type: explorer`",
+		"`agent_type: worker`",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("Claude appended playbook must not include Codex binding %q:\n%s", forbidden, text)
+		}
+	}
+}
