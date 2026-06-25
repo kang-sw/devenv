@@ -5,7 +5,6 @@ related-mental-model:
   - plugin-runtime
 spec:
   - mcp-tools
-sage-review: completed
 ---
 
 # ws session state machine — agenda and todo persistence across compaction
@@ -33,6 +32,15 @@ per-session record file (`<cache-root>/keys/<session-key>.json`) that
 Mode transitions are recorded via typed `ws.enter.*` MCP tools, which
 atomically update the agenda blob and replace the todo list with items derived
 from the transition parameters.
+
+**Restoration-entry defect (discovered during Phase 2/3 design).** `ws.ferrule`
+is non-idempotent — two calls on the same root return different session keys — so
+a surviving key cannot be re-derived; the only cross-compaction anchor is the key
+preserved in the compaction summary. The current `lead-load-workflow-manual`
+skill conflates fresh-session init with post-compaction reload, and its
+post-compaction path guides the agent to call `ws.ferrule`, which mints a new key
+and silently orphans the prior agenda/todo. Phase 3 is redesigned to close this
+defect; see Design → "Session restoration entry".
 
 ## Design
 
@@ -159,6 +167,52 @@ the lead explicitly shares its own session key.
 
 `ws.commit` does not auto-mark todos as done. Status transitions are always
 explicit via `ws.todo.check`.
+
+### Session restoration entry (revised 260625)
+
+This supersedes the original "workflow manual load" restoration point for the
+**agenda** and **todo** layers (see Background → restoration-entry defect).
+
+**`ws.workflow_manual(session_key?: string)` MCP tool** is the canonical manual
+entry. It renders the primitives reference plus mode-dependent content:
+
+- Sources manual text from the rsrc `lead-workflow-manual` playbook and reuses the
+  existing variable substitution; the handler owns only mode branching, never
+  prompt text (rsrc stays the single prompt source of truth).
+- Always shown (both modes): the per-root rule — each git worktree/repo root is a
+  distinct session root; call `ws.ferrule(root: <abs path>)` once per root you work
+  in and thread its `session_key`. A continued lead still spins up new
+  worktrees/children that each need their own key, so this rule is never gated.
+- Fresh-only (`session_key` empty/omitted): the self-bootstrap line — "you have no
+  key yet; call `ws.ferrule` for this root to mint your lead key." This line is the
+  only content the override-marker gates.
+- Continue-only (`session_key` present and the record resolves): the restored
+  "Session State" section — agenda (remind) + todo (summary) from the session
+  record.
+- `session_key` present but no record resolves → fail loud: render primitives plus
+  an explicit "no restorable state for this key" notice; never mint a key.
+- The pre-existing `playbook.print(name: "lead-workflow-manual")` path stays valid
+  as the ungated form (backward compatible); callers migrate to the tool.
+
+Rejected: adding a general template-conditional feature to the rsrc render engine.
+Mode logic lives in the dedicated tool handler instead, avoiding a conditional
+surface across all playbooks.
+
+**Skill restructure:**
+
+- Remove `lead-load-workflow-manual` (its only role was the broken post-compaction
+  reload).
+- Add `lead-revive`: a strong-attention post-compaction entry. Description (host
+  surfaced): if the session was compacted or continued, the agent must invoke this
+  before any other ws lead skill, passing the summary-preserved `session_key`, to
+  restore agenda/todo and reload primitives. Body (essence): recover your
+  `session_key` from the compaction summary, then call
+  `ws.workflow_manual(session_key: <it>)` and follow it. No no-key fallback prose is
+  needed — the tool's no-key mode handles a missing key.
+- Repoint the "always reload after compaction" invariant in the manual-self-load
+  skills (lead-proceed, lead-discuss, lead-sprint, lead-tune, lead-salvage,
+  lead-skill-authoring): reload via `ws.workflow_manual(session_key: <held key>)`;
+  after a compaction, recover the key via `lead-revive` first.
 
 ## Phases
 
@@ -289,17 +343,51 @@ Verify via: per-skill smoke test confirming the enter tool is called at the
 correct point and the derived todo list matches expected items; review of
 `delegate-orientation.md` update for accuracy.
 
-### Phase 3: Workflow manual integration
+### Phase 3a: `ws.workflow_manual` tool and restore rendering
 
-- Add a "Session State" section to the workflow manual render, injected at load.
-- Agenda subsection: show all active agenda blobs (remind only; not repeated at
-  intermediate checkpoints).
-- Todo subsection: show the todo list in summary mode (injected at every
-  restoration point).
-- Update `ws.commit` checkpoint logic to re-inject the todo list after commit.
-- Document restoration behavior in `ai-docs/spec/plugin-runtime.md` and
+Implement the `ws.workflow_manual(session_key?: string)` MCP tool (see Design →
+"Session restoration entry"):
+
+- Handler loads the `lead-workflow-manual` rsrc playbook, runs the existing
+  variable substitution, and branches on `session_key`:
+  - empty/omitted → fresh mode (primitives + the always-shown per-root ferrule
+    rule + the gated self-bootstrap line).
+  - present and record resolves → continue mode (primitives + the always-shown
+    per-root ferrule rule, self-bootstrap line omitted; append a "Session State"
+    section: agenda blobs as remind, todo list in summary mode, rendered
+    server-side from the session record).
+  - present but no record resolves → fail loud (primitives + explicit
+    no-restorable-state notice; never mint a key).
+- Wrap ONLY the fresh-only self-bootstrap line of `lead-workflow-manual.md` in the
+  override-marker convention (the per-root ferrule rule stays always-shown);
+  regenerate `manifest.json` + the wsflow rsrc mirror.
+- Update `ws.commit` checkpoint logic to re-inject the todo summary after commit.
+- Register `ws.workflow_manual` in both `runtime.json` files (ws + wsflow) under
+  the current-line version fence; add it to the capabilities fast-path tool list.
+- Spec closeout: add `ws.workflow_manual` to `ai-docs/spec/mcp-tools.md`; document
+  restoration behavior in `ai-docs/spec/plugin-runtime.md` and
   `ai-docs/ref/ws-mcp.md`.
 
-Verify via: compaction simulation confirming the agenda remind section appears
-in workflow-manual reload output; checkpoint probe confirming todo summary
-injects after `ws.commit`.
+Verify via: fresh-mode render shows the self-bootstrap line and no Session State;
+continue-mode render (valid key) omits the self-bootstrap line, keeps the per-root
+ferrule rule, and shows restored agenda (remind) + todo (summary); unknown-key
+render fails loud without minting; checkpoint probe confirms todo summary
+re-injects after `ws.commit`; drift guards green.
+
+### Phase 3b: Manual-entry skill restructure
+
+Depends on Phase 3a (the `ws.workflow_manual` tool must exist before skills call
+it).
+
+- Remove the `lead-load-workflow-manual` skill.
+- Add the `lead-revive` skill (description + body per Design → "Session
+  restoration entry").
+- Repoint the "always reload after compaction" invariant in the manual-self-load
+  skills (lead-proceed, lead-discuss, lead-sprint, lead-tune, lead-salvage,
+  lead-skill-authoring) to reload via `ws.workflow_manual(session_key: <held key>)`,
+  recovering the key through `lead-revive` after a compaction.
+- Regenerate `manifest.json` + the wsflow rsrc mirror after rsrc edits.
+
+Verify via: per-skill check that the manual self-load and revival call
+`ws.workflow_manual` with the correct `session_key` argument; confirm
+`lead-load-workflow-manual` is gone and `lead-revive` renders; drift guards green.
