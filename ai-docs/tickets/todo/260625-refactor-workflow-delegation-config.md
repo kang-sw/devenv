@@ -1,6 +1,6 @@
 ---
 title: Refactor workflow delegation posture into config keys
-sage-review: pending
+sage-review: blocked
 spec:
   - 260505-config-tools
   - 260625-tuning-catalog
@@ -170,3 +170,26 @@ Align the surrounding workflow surfaces:
 
 This phase should also include spec closeout updates if implementation details
 require planned spec text to be finalized or narrowed.
+
+## Blocked (2026-06-25)
+
+Sage Review Gate final verdict: block.
+
+### Design Reviewer Verdict: block
+
+- Title: Session-key path for manual auto-insertion is undefined
+- Severity: critical
+- Resolution: missing
+- Detail: The ticket makes `"workflow.prefer_subagent"` a session-default config
+  item and says `lead-workflow-manual` should append `lead-prefer-subagent`
+  when it is `on`, but the documented/manual loading idiom is still
+  `playbook.print(name: "lead-workflow-manual")` without a `session_key`.
+  Existing render/config behavior needs a session key to resolve
+  session/project/global config, so the new toggle may not affect the manual in
+  the common keyless load path. A competent implementer would have to choose
+  whether to change the default scope, require/thread `session_key` through
+  workflow-manual loading, or define keyless behavior differently.
+
+### Completeness Reviewer Verdict: pass
+
+No blocking issues.
