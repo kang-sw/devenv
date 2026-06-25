@@ -304,9 +304,11 @@ func TestWorkflowPreferMercenaryWriterSetsGlobalPreference(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.workflow_prefer_mercenary","arguments":{"value":"on"}}}` + "\n"
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 900006, root, nil))
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.workflow_prefer_mercenary","arguments":{"session_key":"` + key + `","value":"on"}}}` + "\n"
 	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
@@ -346,9 +348,10 @@ func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 	}
 }
 
-// TestWorkflowPreferMercenaryRejectedForNonLeadKey exercises the config.* keyed
-// gate: a delegate-scoped key cannot call the global workflow writer.
-func TestWorkflowPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
+// TestWorkflowPreferenceWritersRequireLeadSessionKey verifies that global
+// workflow preference writers still require lead authority even though they
+// write global config.
+func TestWorkflowPreferenceWritersRequireLeadSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -358,22 +361,42 @@ func TestWorkflowPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
 
 	server := NewServer(root, "test")
 	// Mint a delegate-scoped key directly (a delegate never logs in; it receives
-	// a render-minted key). The keyed gate must reject its ws.lead.* call.
+	// a render-minted key). The keyed gate must reject workflow preference writes.
 	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatalf("mint delegate key: %v", err)
 	}
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.workflow_prefer_mercenary","arguments":{"session_key":"` + delegateKey + `","value":"on"}}}` + "\n"
-	var out bytes.Buffer
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatalf("ServeStdio: %v", err)
-	}
-	line := strings.TrimSpace(out.String())
-	if strings.Contains(line, "workflow.prefer_mercenary: on") {
-		t.Fatalf("delegate key must NOT enable workflow.prefer_mercenary: %s", line)
-	}
-	if !strings.Contains(line, "config.workflow_prefer_mercenary") || !strings.Contains(line, `"error"`) {
-		t.Fatalf("expected a keyed-gate error rejecting config.workflow_prefer_mercenary: %s", line)
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "config.workflow_prefer_mercenary",
+			args: map[string]any{"value": "on"},
+		},
+		{
+			name: "config.workflow_prefer_subagent",
+			args: map[string]any{"value": "on"},
+		},
+	} {
+		resp := callToolOnce(t, server, 1, tc.name, tc.args)
+		if !toolIsError(t, resp) || !strings.Contains(toolText(t, resp), "session_key is required") {
+			t.Fatalf("%s keyless write must require session_key: %s", tc.name, resp)
+		}
+
+		argsWithDelegateKey := map[string]any{}
+		for key, value := range tc.args {
+			argsWithDelegateKey[key] = value
+		}
+		argsWithDelegateKey["session_key"] = delegateKey
+		resp = callToolOnce(t, server, 2, tc.name, argsWithDelegateKey)
+		if strings.Contains(resp, "workflow.prefer_") && strings.Contains(resp, "[scope:global]") {
+			t.Fatalf("delegate key must NOT write %s: %s", tc.name, resp)
+		}
+		if !strings.Contains(resp, tc.name) || !strings.Contains(resp, `"error"`) {
+			t.Fatalf("expected a keyed-gate error rejecting %s: %s", tc.name, resp)
+		}
 	}
 
 	showResp := callToolOnce(t, server, 2, "config.show", map[string]any{"format": "json"})

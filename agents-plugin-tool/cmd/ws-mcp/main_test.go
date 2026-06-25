@@ -54,7 +54,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 
 	contract := readRuntimeContractTest(t)
 	cmd := exec.Command(bin, "runtime", "capabilities")
-	cmd.Env = append(os.Environ(), "WS_MCP_TOOL_PROFILE=leaf", "WS_MCP_ALLOWED_TOOLS=project_tree")
+	cmd.Env = append(os.Environ(),
+		"WS_CONFIG_HOME="+t.TempDir(),
+		"WS_MCP_TOOL_PROFILE=leaf",
+		"WS_MCP_ALLOWED_TOOLS=project_tree",
+	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -83,6 +87,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	slices.Sort(got.Tools)
 	if !slices.Equal(got.Tools, wantTools) {
 		t.Fatalf("tools = %v, want full lead runtime contract tools %v", got.Tools, wantTools)
+	}
+	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register"} {
+		if slices.Contains(got.Tools, hidden) {
+			t.Fatalf("runtime capabilities exposed hidden mercenary tool %s in %v", hidden, got.Tools)
+		}
 	}
 	wantCommands := sortedMapKeys(contract.Commands)
 	slices.Sort(got.Commands)

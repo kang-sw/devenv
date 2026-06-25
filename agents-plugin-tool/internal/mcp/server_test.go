@@ -754,9 +754,9 @@ func callToolsList(t *testing.T, server *Server) string {
 	return strings.TrimSpace(out.String())
 }
 
-// mustEnableMercenary writes a project config file to WS_CACHE_HOME that sets
-// prefer_mercenary=true. Required for tests that call ws.mercenary.* tools,
-// since the default is now hide (tools hidden until explicitly enabled).
+// mustEnableMercenary writes the global WS_CONFIG_HOME/config.json override
+// {"workflow.prefer_mercenary":"on"}. Tests that call ws.mercenary.* tools need
+// this because the builtin default is hide.
 func mustEnableMercenary(t *testing.T) {
 	t.Helper()
 	configHome := os.Getenv("WS_CONFIG_HOME")

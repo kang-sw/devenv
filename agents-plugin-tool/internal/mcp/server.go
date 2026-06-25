@@ -57,7 +57,16 @@ const bootstrapToolName = "ws.ferrule"
 // `ws.lead.*` prefix (260617 obscurity rename) — a prefix-only check would
 // silently stop blocking it for non-lead keys.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || strings.HasPrefix(name, "ws.lead.")
+	return name == bootstrapToolName || strings.HasPrefix(name, "ws.lead.") || workflowPreferenceWriterTool(name)
+}
+
+func workflowPreferenceWriterTool(name string) bool {
+	switch name {
+	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+		return true
+	default:
+		return false
+	}
 }
 
 type request struct {
@@ -493,6 +502,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolJSONResponse(req.ID, cfg, err)
 
 	case "config.workflow_prefer_subagent":
+		if _, err := s.requireLeadSessionKey("config.workflow_prefer_subagent", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		value, _ := params.Arguments["value"].(string)
 		value = strings.ToLower(strings.TrimSpace(value))
 		switch value {
@@ -508,6 +520,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:global]\n", value), nil)
 
 	case "config.workflow_prefer_mercenary":
+		if _, err := s.requireLeadSessionKey("config.workflow_prefer_mercenary", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		value, _ := params.Arguments["value"].(string)
 		value = strings.ToLower(strings.TrimSpace(value))
 		switch value {
@@ -3202,13 +3217,13 @@ func tools() []map[string]any {
 			},
 		},
 	}
-	return withRootAwareToolSchemas(toolList)
+	return withSessionKeyToolSchemas(toolList)
 }
 
-func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
+func withSessionKeyToolSchemas(toolList []map[string]any) []map[string]any {
 	for _, tool := range toolList {
 		name, _ := tool["name"].(string)
-		if !rootAwareToolSchemaRequiresSessionKey(name) {
+		if !toolSchemaRequiresSessionKey(name) {
 			continue
 		}
 		schema, _ := tool["inputSchema"].(map[string]any)
@@ -3229,7 +3244,7 @@ func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
 	return toolList
 }
 
-func rootAwareToolSchemaRequiresSessionKey(name string) bool {
+func toolSchemaRequiresSessionKey(name string) bool {
 	switch name {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
@@ -3240,7 +3255,8 @@ func rootAwareToolSchemaRequiresSessionKey(name string) bool {
 		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
 		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
 		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
-		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase":
+		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase",
+		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
 		return true
 	default:
 		return false
@@ -3258,6 +3274,7 @@ func appendRequiredString(raw any, value string) []string {
 }
 
 func LeadToolNames() []string {
+	mercenaryHidden := mercenaryHiddenFromGlobalConfig()
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
@@ -3266,6 +3283,9 @@ func LeadToolNames() []string {
 			continue
 		}
 		if NoAgentMode() && noAgentHiddenTool(name) {
+			continue
+		}
+		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
 			continue
 		}
 		if name != "" {
@@ -3439,13 +3459,32 @@ func permanentlyHiddenTool(name string) bool {
 // to "hide" from global/builtin state. The item is global-only because
 // filteredTools and toolAllowed are request-level, not session/root keyed.
 func (s *Server) mercenaryHiddenFromConfig() bool {
-	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+	return mercenaryHiddenFromGlobalConfig()
+}
+
+func mercenaryHiddenFromGlobalConfig() bool {
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), nil, nil)
 	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
 	if err != nil {
 		return false
 	}
 	return canonicalPreferMercenaryValue(rv.Value) == "hide"
+}
+
+func (s *Server) requireLeadSessionKey(toolName string, arguments map[string]any) (string, error) {
+	key, _ := arguments["session_key"].(string)
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", fmt.Errorf("%s: session_key is required", toolName)
+	}
+	entry, found := s.sessions.lookup(key)
+	if !found {
+		return "", fmt.Errorf("%s: unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
+	}
+	if entry.scope != roleLead {
+		return "", fmt.Errorf("%s: session_key must belong to a lead session", toolName)
+	}
+	return key, nil
 }
 
 func noAgentHiddenTool(name string) bool {
