@@ -4,39 +4,41 @@ kind: print
 
 # Prefer Subagent
 
-Maximum-delegation posture for this session. Keep the lead thin: route, spawn
-forks, wait, collect results, adjudicate, ask the user, and write the final
-synthesis.
+Maximum-delegation posture. Applies from invocation until the user changes it or
+the session ends. Keep the lead thin: route, spawn forks, wait, collect results,
+adjudicate, ask the user, and write the final synthesis.
 
 ## Invariants
 
-- Use forked subagents for all work that reads, inspects, mutates, verifies, or summarizes project state; in Codex set `fork_context:true` when available.
+- Use forked subagents for all work that reads, inspects, mutates, verifies, or summarizes project state.
+- Treat a subagent as forked only when it inherits current conversation/project context and runs in isolated execution.
 <!-- ws:override:PreferSubagentInvocationGuidance desc="harness-specific forked subagent invocation guidance" -->
 <!-- ws:/override:PreferSubagentInvocationGuidance -->
-- Outside Codex, use the host mode that gives the subagent the current conversation/project context while isolating execution.
+- For any host without injected invocation guidance, use only a mode with inherited current context and isolated execution; uncertainty means unavailable.
 - Do not use ordinary clean-context subagents for project work under this posture.
 - Do not perform inline reads, searches, edits, tests, commits, or artifact writing to solve the task.
-- If no forked subagent mechanism is available, stop and ask before doing project work inline.
+- If no forked subagent mechanism is available, ask whether to proceed inline; after explicit approval, state that this posture cannot be fully applied.
 - If a required workflow explicitly mandates clean-context review, state that exception before dispatch and use the mandated clean-context reviewer only for that review.
-- Every fork prompt ends with the exact closing sentence in Fork Prompt Shape.
+- End every fork prompt with the exact Markdown line in Fork Prompt Shape.
 
 ## Dispatch
 
 Send to a forked subagent:
 
 - Source reads, searches, grep, command execution, and fact lookups.
-- Brief writing, plan files, ticket/spec/mental-model/playbook edits, and docs updates.
+- Repository/workflow artifact writing: brief files, plans, tickets, specs, mental models, playbooks, and docs updates.
 - Code edits, small single-file edits, tests, verification, review, and fixes.
 - Commits, generated artifact updates, manifest refreshes, and closeout notes.
 - Any work traditionally owned by the lead when it inspects or mutates project state.
 
 The lead may only:
 
-- Use only playbook text already present in lead context and needed to obey this posture.
+- Rely on this playbook text once loaded; do not open additional project files or workflow docs inline to solve the task.
 - Write fork prompts with explicit task, files, constraints, verification, and output shape.
-- Inspect fork summaries, reported paths, and reported verification results only as needed to choose the next routing step; do not open project files inline.
-- Ask the user when forks disagree, block, or require approval.
+- Inspect fork summaries, reported paths, and reported verification results only as needed to route; if insufficient, dispatch a narrower verification/review fork.
+- If a fork fails, returns partial output, or disagrees with another fork, dispatch a clarifying fork when progress is possible; ask the user only for approval or external judgment.
 - Produce the final synthesis from fork results.
+- Include outcome, changed paths or `none`, verification results or `not run` with reason, blockers, and user decisions needed.
 
 ## Fork Prompt Shape
 
@@ -48,7 +50,7 @@ Include:
 - Verification command expectations.
 - Requested return: changed paths or "none"; verification command and result or "not run" with reason; blockers; summary.
 
-End with the exact sentence: "**You are a forked agent. Execute all work directly — do not sub-delegate.**"
+End with this exact Markdown line: `**You are a forked agent. Execute all work directly — do not sub-delegate.**`
 
 Doctrine: this posture spends subagent turns to preserve the lead context window.
 When ambiguous, fork the work instead of proving it inline.
