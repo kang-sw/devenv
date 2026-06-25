@@ -1,6 +1,16 @@
 ---
 title: Refactor workflow delegation posture into config keys
 sage-review: pending
+spec:
+  - 260505-config-tools
+  - 260625-tuning-catalog
+  - 260619-layered-config-scope-model
+  - 260609-playbook-tools
+  - 260619-delegation-section-override-point
+  - 260610-mercenary-delegation-surface
+  - 260619-prefer-mercenary-session-scope-item
+  - 260619-lead-tune-workflow-tuning-skill
+  - 260505-workflow-primitive-reference
 related-mental-model:
   - mcp-runtime
   - prompt-bundle
@@ -106,25 +116,6 @@ format.
 - Double insertion is accepted by design. Avoid adding stateful guards or
   suppression logic unless a later ticket changes this decision.
 
-## Spec Impact
-
-Before promoting this ticket to `ready`, spec-address the caller-visible
-behavior in `mcp-tools` and `workflow-skills`.
-
-Expected spec changes include:
-
-- config writer tools and stored key semantics for `"workflow.prefer_subagent"`
-  and `"workflow.prefer_mercenary"`;
-- removal of `ws.lead.prefer_mercenary` from the public MCP tool contract;
-- `lead-workflow-manual` automatic append behavior when
-  `"workflow.prefer_subagent" == "on"`;
-- the XML-style wrapper standard for code-side pragmatic playbook
-  concatenation;
-- `config.tuning` catalog behavior after `DelegationSection` removal and new
-  workflow config key registration.
-
-Contract-first spec: yes.
-
 ## Phases
 
 ### Phase 1: Config namespace and API refactor
@@ -177,5 +168,5 @@ Align the surrounding workflow surfaces:
 - add or update tests for full ws, wsflow/no-agent expectations, prompt override
   catalog behavior, render output, and removed tool visibility.
 
-This phase should also include the ready-promotion spec updates noted in
-`## Spec Impact` if they were not already completed before implementation.
+This phase should also include spec closeout updates if implementation details
+require planned spec text to be finalized or narrowed.

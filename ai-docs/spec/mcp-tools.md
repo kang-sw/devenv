@@ -205,6 +205,15 @@ when provided, otherwise the detected MCP session harness when available, and
 otherwise the default tier mapping. This makes `backend` mean the execution
 backend rather than the tier-table key. {#260513-harness-local-agent-tier-config}
 
+> [!note] Planned 🚧
+> Workflow delegation posture will move to explicit workflow config writers.
+> `config.workflow_prefer_subagent(value: "on"|"off")` will set the
+> `"workflow.prefer_subagent"` item, whose builtin default is `off` and whose
+> default write scope is `session`. `config.workflow_prefer_mercenary(value:
+> "on"|"off"|"hide")` will set `"workflow.prefer_mercenary"`, preserving the
+> builtin `hide` default. The former unprefixed `"prefer_mercenary"` entry and
+> `prompt.DelegationSection.*` prompt override keys are not migrated.
+
 ## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
@@ -220,6 +229,13 @@ override entries derive their point ids from the same shipped override-marker
 scan used by `config.prompt`; model-tier entries derive their fields from
 `config.agents_tier`; delegation-mode entries derive their values from
 `ws.lead.prefer_mercenary`.
+
+> [!note] Planned 🚧
+> Delegation-mode catalog entries will derive their values from the
+> `config.workflow_prefer_subagent` and `config.workflow_prefer_mercenary`
+> writer schemas. Removing the shipped `DelegationSection` override marker will
+> remove `prompt.DelegationSection` from `config.tuning` and `config.prompt`
+> discovery; orphaned stored prompt keys remain ignored.
 
 Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
 structured shape for callers that need to build a proposal or compare runtime
@@ -286,6 +302,13 @@ Config items resolve across four ordered scopes, highest precedence first:
 `session > project > global > builtin`. `builtin` is the code default (for
 example the `wsconfig` tier/alias defaults and `prefer_mercenary=false`). A read
 returns the value from the highest-precedence scope that holds one.
+
+> [!note] Planned 🚧
+> Workflow render-behavior toggles will use quoted workflow-prefixed item keys:
+> `"workflow.prefer_subagent"` and `"workflow.prefer_mercenary"`. Both are
+> session-default items. The old unprefixed `"prefer_mercenary"` key remains
+> readable only as orphaned local state unless a later ticket introduces
+> migration.
 
 Each config item declares a natural **default write scope** in code; items that
 declare nothing fall back to `project`. A write without an explicit scope lands
@@ -649,6 +672,17 @@ set is fixed at authoring time, not chosen by the caller per call. This does not
 replace `convention.read` / `infra.read`, which remain standalone discovery tools
 for raw access.
 
+> [!note] Planned 🚧
+> Code-side pragmatic playbook concatenation will be a renderer-owned behavior,
+> not a source-template syntax. When `"workflow.prefer_subagent"` resolves to
+> `on`, `playbook.print(name: "lead-workflow-manual")` will render
+> `lead-prefer-subagent` through the same harness-aware renderer, prompt
+> override resolver, and product-mode pass, then append it to the manual. The
+> appended body is wrapped as `<playbook name="lead-prefer-subagent"
+> title="Prefer Subagent">...</playbook>`. Standalone `playbook.print` and
+> `playbook.render` output remains Markdown, and no duplicate-insertion guard is
+> applied.
+
 A playbook marked as delegating carries a compact continuation tip in its
 rendered output, reminding the caller to reuse the host-returned subagent agent
 id for continuation instead of respawning. The tip is the only continuity
@@ -760,6 +794,14 @@ for its `spawn_agent(fork_context:true, ...)` binding, while Claude uses the
 empty shared seed unless configured otherwise.
 {#260619-delegation-section-override-point}
 
+> [!note] Planned 🚧
+> `lead-workflow-manual` will remove the shipped `DelegationSection`
+> override-point. Delegation posture will be controlled by
+> `"workflow.prefer_subagent"` instead of freeform prompt text.
+> `UserPreferenceSection` remains the standing freeform extension point, and
+> `PreferSubagentInvocationGuidance` remains the generic harness-specific slot
+> used by `lead-prefer-subagent`.
+
 > [!note] Constraints
 > - The marker grammar is a ws-private schema (ws is the sole reader); it is not
 >   an external comment-processing standard and carries no meaning outside the
@@ -852,6 +894,14 @@ toggle.
 > former one-way flip. It stays lead-only — the scope-aware setter honors the
 > existing lead-only gating. Mercenary *availability* is unchanged; only the
 > default-guidance toggle gains a revert path. {#260619-prefer-mercenary-session-scope-item}
+
+> [!note] Planned 🚧
+> The mercenary preference toggle will be written through
+> `config.workflow_prefer_mercenary` and stored as `"workflow.prefer_mercenary"`
+> with values `on`, `off`, and `hide`. `ws.lead.prefer_mercenary` will be
+> removed with no alias and no migration from the old `"prefer_mercenary"` key.
+> Availability remains unchanged: mercenaries stay reachable on explicit request,
+> while the config item controls only default render guidance.
 
 **Scope: implementer and reviewer roles only.** Mercenaries cover implementer and
 reviewer delegation. Exploration, survey (reference-discovery, plan-populator),

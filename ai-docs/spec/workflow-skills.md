@@ -82,11 +82,28 @@ delegation-mode and model-tier sections are `ws:full-only` and the wsflow shim
 advertises only prompt-override tuning.
 {#260619-lead-tune-workflow-tuning-skill}
 
+> [!note] Planned 🚧
+> `lead-tune` will route delegation posture to the workflow config catalog
+> instead of the `DelegationSection` prompt override. "Delegate more" and
+> "delegate less" style requests will set `"workflow.prefer_subagent"` through
+> `config.workflow_prefer_subagent`; mercenary preference requests will set
+> `"workflow.prefer_mercenary"` through `config.workflow_prefer_mercenary`.
+> `UserPreferenceSection` remains the freeform standing-preference path.
+
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
 `lead-workflow-manual` is the shared primitive reference for writing or executing ws
 workflow skills. It defines host-neutral notation: `ws/<tool-name>` means an MCP
 tool on the `ws` server, while `ws:` names plugin skills.
+
+> [!note] Planned 🚧
+> When `"workflow.prefer_subagent"` is `on`, loading `lead-workflow-manual` will
+> also load the rendered `lead-prefer-subagent` posture inside an XML-style
+> `<playbook name="lead-prefer-subagent" title="Prefer Subagent">` boundary.
+> The appended posture is rendered through the normal playbook pipeline so
+> harness-specific defaults, including Codex invocation guidance, remain
+> harness-scoped. Explicitly invoking `lead-prefer-subagent` may duplicate this
+> short posture text; that duplication is accepted.
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
 queries, generated artifact paths, runtime metadata, workflow discovery, Git
