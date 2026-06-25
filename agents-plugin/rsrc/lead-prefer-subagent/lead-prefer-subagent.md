@@ -1,60 +1,17 @@
 ---
 kind: print
 ---
+Maximum-delegation posture for this session: delegate all project work and route — do not execute inline. The lead reads this playbook, writes delegate prompts, adjudicates results, asks the user for approval or judgment, and writes the final synthesis. No inline reads, searches, edits, tests, commits, or artifact writing to solve the task.
 
-# Prefer Subagent
+Choose the delegation type by whether the work needs this conversation's context:
+- fork (inherits full conversation/project context) — context-dependent authoring and mutation whose correctness depends on prior conversation not yet captured in a written artifact: brief/plan/ticket/spec/doc/skill authoring, commits, and conversation-dependent code edits.
+- fresh spawn (clean context) — stateless work (survey, search, grep, reads, command runs, fact lookups) and plan/instruction-following implementation where a written brief, plan, or spec fully specifies the work.
 
-Maximum-delegation posture. Applies from invocation until the user changes it or
-the session ends. Keep the lead thin: route, spawn forks, wait, collect results,
-adjudicate, ask the user, and write the final synthesis.
-
-## Invariants
-
-- Use forked subagents for all primary-source project-state work: reads, inspections, mutations, verification, and summaries.
-- Treat a subagent as forked only when it inherits current conversation/project context and runs in isolated execution.
+Treat a subagent as forked only when it inherits current conversation/project context and runs in isolated execution.
 <!-- ws:override:PreferSubagentInvocationGuidance desc="harness-specific forked subagent invocation guidance" -->
 <!-- ws:/override:PreferSubagentInvocationGuidance -->
-- For any host without injected invocation guidance, use only a mode with inherited current context and isolated execution; uncertainty means unavailable.
-- Do not use ordinary clean-context subagents for project work under this posture.
-- Do not perform inline reads, searches, edits, tests, commits, or artifact writing to solve the task.
-- If no forked subagent mechanism is available, ask whether to suspend this posture for the current task and proceed inline; after explicit approval, state that this posture cannot be fully applied and continue under normal inline rules.
-- If the current user request, already-loaded instructions, or a fork result identifies a required clean-context review, state that exception before dispatch and use the mandated clean-context reviewer only for that review.
-- Frame every fork prompt with a strong up-front fork-awareness declaration and the exact trailing Markdown line — see Fork Prompt Shape.
+For any host without injected invocation guidance, use only a mode with inherited current context and isolated execution; uncertainty means unavailable. If no forked mechanism exists at all, ask whether to suspend this posture and proceed inline; after approval, say so and continue under normal rules.
 
-## Dispatch
+A fork prompt states its task, scope, target files, verification expectation, and requested return shape. Open it with a strongly delimited up-front declaration that the recipient is a forked executor and this posture is suspended for it — composed per dispatch, not a fixed template — and end with the exact line:
 
-Send to a forked subagent:
-
-- Source reads, searches, grep, command execution, and fact lookups.
-- Repository/workflow artifact writing: brief files, plans, tickets, specs, mental models, playbooks, and docs updates.
-- Code edits, small single-file edits, tests, verification, review, and fixes.
-- Commits, generated artifact updates, manifest refreshes, and closeout notes.
-- Planning, triage, routing, or closeout preparation that requires inspecting or mutating project state.
-
-The lead may only:
-
-- Rely on this playbook text once loaded; do not open additional project files or workflow docs inline to solve the task.
-- Write fork prompts with explicit task, files, constraints, verification, and output shape.
-- Inspect fork summaries, reported paths, and reported verification results only as needed to route; if insufficient, dispatch a narrower verification/review fork.
-- If a fork fails, returns partial output, or disagrees with another fork, dispatch a clarifying fork when progress is possible; ask the user only for approval or external judgment.
-- Produce the final synthesis only from fork-reported results.
-- Include outcome, changed paths or `none`, verification results or `not run` with reason, blockers, and user decisions needed.
-
-## Fork Prompt Shape
-
-Open with a strongly delimited block — a separator line plus an emphatic statement
-that the recipient is a forked executor and the prefer-subagent posture is
-suspended for it — composed per dispatch, not a fixed template.
-
-Include:
-
-- Task goal and bounded scope.
-- Relevant conversation intent or constraints.
-- Exact files or search targets when known.
-- Verification command expectations.
-- Requested return: changed paths or "none"; verification command and result or "not run" with reason; blockers; summary.
-
-End with this exact Markdown line: `**You are a forked agent. Execute all work directly — do not sub-delegate.**`
-
-Doctrine: this posture spends subagent turns to preserve the lead context window.
-When ambiguous, fork the work instead of proving it inline.
+`**You are a forked agent. Execute all work directly — do not sub-delegate.**`
