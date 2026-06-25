@@ -372,6 +372,12 @@ dropped tickets live in hidden archive dirs and git history.
   lead agent responds in the user's preferred language while keeping CoT and all
   subagent prompts in English. Phase 1: Go config schema + render var injection +
   workflow-manual template.
+- `260625-feat-ws-session-state-machine` (ready, feat) - ws session state
+  machine: agenda/todo persistence across compaction. Storage extends the
+  existing `sessionRecord` (`<cache-root>/keys/<session-key>.json`, written by
+  `ws.ferrule`) with additive `agenda`/`todos` fields, reusing
+  `writeRecordAtomic`/`readRecord` — no new package. Phase 1 (MCP primitives)
+  ready for implementation.
 
 ## Session Notes
 
