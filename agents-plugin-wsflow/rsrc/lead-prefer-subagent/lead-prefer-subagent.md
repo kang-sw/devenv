@@ -19,7 +19,7 @@ adjudicate, ask the user, and write the final synthesis.
 - Do not perform inline reads, searches, edits, tests, commits, or artifact writing to solve the task.
 - If no forked subagent mechanism is available, ask whether to suspend this posture for the current task and proceed inline; after explicit approval, state that this posture cannot be fully applied and continue under normal inline rules.
 - If the current user request, already-loaded instructions, or a fork result identifies a required clean-context review, state that exception before dispatch and use the mandated clean-context reviewer only for that review.
-- End every fork prompt with the exact Markdown line in Fork Prompt Shape.
+- Frame every fork prompt with a strong up-front fork-awareness declaration and the exact trailing Markdown line — see Fork Prompt Shape.
 
 ## Dispatch
 
@@ -41,6 +41,10 @@ The lead may only:
 - Include outcome, changed paths or `none`, verification results or `not run` with reason, blockers, and user decisions needed.
 
 ## Fork Prompt Shape
+
+Open with a strongly delimited block — a separator line plus an emphatic statement
+that the recipient is a forked executor and the prefer-subagent posture is
+suspended for it — composed per dispatch, not a fixed template.
 
 Include:
 
