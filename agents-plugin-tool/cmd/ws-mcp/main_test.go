@@ -114,7 +114,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "tickets.list"} {
 		if !slices.Contains(got.Tools, visible) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}

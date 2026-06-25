@@ -69,16 +69,17 @@ playbook. {#260610-entry-skill-surface-reduction}
 runtime trigger surface that fires when the user signals intent to tune how the
 workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
 so the skill can proactively propose a tune. Its playbook is the tuning manual —
-it drives the `config.prompt.*` data plane for prompt overrides
-(`#260620-config-prompt-override-tuning-tools`, with `DelegationSection` for
-delegation posture and `UserPreferenceSection` for standing preferences) and
-introduces or links `prefer_mercenary` and
-`config.agents_tier` without reimplementing their set paths. The always-on
+it loads the `config.tuning` catalog (`#260625-tuning-catalog`) and uses that
+catalog's knob ids, writer tools, field options, and current values to drive
+prompt overrides (`#260620-config-prompt-override-tuning-tools`, with
+`DelegationSection` for delegation posture and `UserPreferenceSection` for
+standing preferences), `prefer_mercenary`, and `config.agents_tier` without
+reimplementing their set paths. The always-on
 `lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
-of general-task routing attention. In agentless wsflow only the prompt-override
-knob exists (`prefer_mercenary` and `config.agents_tier` are agent-backed and
-hidden there), so the delegation-mode and model-tier sections are `ws:full-only`
-and the wsflow shim advertises only prompt-override tuning.
+of general-task routing attention. In agentless wsflow the catalog omits
+full-ws-only knobs (`prefer_mercenary` and `config.agents_tier`), so the
+delegation-mode and model-tier sections are `ws:full-only` and the wsflow shim
+advertises only prompt-override tuning.
 {#260619-lead-tune-workflow-tuning-skill}
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}

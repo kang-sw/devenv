@@ -610,6 +610,28 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, formatPromptOverrideListing(list), nil)
 
+	case "config.tuning":
+		// Read-only catalog of workflow tuning knobs. The catalog is a projection
+		// over existing writer schemas plus dynamic prompt override-point discovery;
+		// it never mutates config itself.
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		catalog, err := buildTuningCatalog(rsrcRoot, &resolver, sessionKey, NoAgentMode())
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, catalog, nil)
+		}
+		return toolTextResponse(req.ID, formatTuningCatalog(catalog), nil)
+
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1501,7 +1523,7 @@ var promptOverrideHarnessBuckets = []string{"claude", "codex", "all"}
 func buildPromptOverrideListing(points []overridePointDecl, resolver *wsconfig.Resolver, sessionKey string) []promptOverridePoint {
 	listing := make([]promptOverridePoint, 0, len(points))
 	for _, p := range points {
-		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc}
+		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc, Overrides: []promptOverrideValue{}}
 		for _, harness := range promptOverrideHarnessBuckets {
 			rv, _ := resolver.Get(sessionKey, "prompt."+p.PointId+"."+harness)
 			if strings.TrimSpace(rv.Value) == "" {
@@ -1538,6 +1560,286 @@ func formatPromptOverrideListing(listing []promptOverridePoint) string {
 	}
 	b.WriteString("Tuning manual & how-to: run the ws:lead-tune skill.\n")
 	return b.String()
+}
+
+type tuningCatalog struct {
+	Knobs []tuningKnob `json:"knobs"`
+}
+
+type tuningKnob struct {
+	ID             string        `json:"id"`
+	Kind           string        `json:"kind"`
+	Description    string        `json:"description,omitempty"`
+	Writer         tuningWriter  `json:"writer"`
+	Reset          *tuningWriter `json:"reset,omitempty"`
+	SelectorFields []tuningField `json:"selector_fields,omitempty"`
+	ValueFields    []tuningField `json:"value_fields,omitempty"`
+	Current        any           `json:"current"`
+}
+
+type tuningWriter struct {
+	Tool           string            `json:"tool"`
+	FixedArguments map[string]string `json:"fixed_arguments,omitempty"`
+}
+
+type tuningField struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+}
+
+type tuningScopedValue struct {
+	Value string `json:"value"`
+	Scope string `json:"scope"`
+}
+
+type tuningAgentTierCurrent struct {
+	Tier    string `json:"tier"`
+	Harness string `json:"harness"`
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+}
+
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey string, noAgentMode bool) (tuningCatalog, error) {
+	points, err := scanOverridePoints(rsrcRoot)
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	promptListing := buildPromptOverrideListing(points, resolver, sessionKey)
+
+	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+2)}
+	for _, p := range promptListing {
+		catalog.Knobs = append(catalog.Knobs, tuningKnob{
+			ID:          "prompt." + p.PointId,
+			Kind:        "prompt_override",
+			Description: p.Desc,
+			Writer: tuningWriter{
+				Tool:           "config.prompt.set",
+				FixedArguments: map[string]string{"pointId": p.PointId},
+			},
+			Reset: &tuningWriter{
+				Tool:           "config.prompt.unset",
+				FixedArguments: map[string]string{"pointId": p.PointId},
+			},
+			SelectorFields: tuningFieldsFromSchema("config.prompt.set", "harness", "scope"),
+			ValueFields:    tuningFieldsFromSchema("config.prompt.set", "prompt"),
+			Current:        p.Overrides,
+		})
+	}
+
+	if noAgentMode {
+		return catalog, nil
+	}
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "delegation.prefer_mercenary",
+		Kind:        "delegation_mode",
+		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
+		Writer:      tuningWriter{Tool: "ws.lead.prefer_mercenary"},
+		ValueFields: tuningFieldsFromSchema("ws.lead.prefer_mercenary", "value"),
+		Current:     currentPreferMercenary(resolver, sessionKey),
+	})
+
+	agentTiers, err := currentAgentTierMappings()
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:             "agents.tier",
+		Kind:           "model_tier",
+		Description:    "Configure the backend/model mapping for a ws agent capability tier.",
+		Writer:         tuningWriter{Tool: "config.agents_tier"},
+		SelectorFields: tuningFieldsFromSchema("config.agents_tier", "tier", "harness"),
+		ValueFields:    tuningFieldsFromSchema("config.agents_tier", "backend", "model", "effort"),
+		Current:        agentTiers,
+	})
+
+	return catalog, nil
+}
+
+func currentPreferMercenary(resolver *wsconfig.Resolver, sessionKey string) tuningScopedValue {
+	rv, _ := resolver.Get(sessionKey, wsconfig.ItemPreferMercenary)
+	return tuningScopedValue{
+		Value: canonicalPreferMercenaryValue(rv.Value),
+		Scope: string(rv.Scope),
+	}
+}
+
+func canonicalPreferMercenaryValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "on":
+		return "on"
+	case "false", "off":
+		return "off"
+	default:
+		return "hide"
+	}
+}
+
+func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
+	cfg, err := wsconfig.Load(wsconfig.Options{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tuningAgentTierCurrent, 0)
+	for _, tier := range sortedAgentModelAliasKeys(cfg.Agents.ModelAliases) {
+		byHarness := cfg.Agents.ModelAliases[tier]
+		for _, harness := range sortedAgentTierKeys(byHarness) {
+			value := byHarness[harness]
+			rows = append(rows, tuningAgentTierCurrent{
+				Tier:    tier,
+				Harness: harness,
+				Backend: value.Backend,
+				Model:   value.Model,
+				Effort:  value.Effort,
+			})
+		}
+	}
+	return rows, nil
+}
+
+func tuningFieldsFromSchema(toolName string, fieldNames ...string) []tuningField {
+	fields := make([]tuningField, 0, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		fields = append(fields, tuningFieldFromSchema(toolName, fieldName))
+	}
+	return fields
+}
+
+func tuningFieldFromSchema(toolName, fieldName string) tuningField {
+	field := tuningField{Name: fieldName}
+	properties, required := toolInputSchemaDetails(toolName)
+	field.Required = required[fieldName]
+	raw, ok := properties[fieldName]
+	if !ok {
+		return field
+	}
+	if description, ok := propertyString(raw, "description"); ok {
+		field.Description = description
+	}
+	if enum := propertyStringSlice(raw, "enum"); len(enum) > 0 {
+		field.Enum = enum
+	}
+	return field
+}
+
+func toolInputSchemaDetails(toolName string) (map[string]any, map[string]bool) {
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		if name != toolName {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		required := map[string]bool{}
+		switch values := schema["required"].(type) {
+		case []string:
+			for _, value := range values {
+				required[value] = true
+			}
+		case []any:
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					required[text] = true
+				}
+			}
+		}
+		return properties, required
+	}
+	return map[string]any{}, map[string]bool{}
+}
+
+func propertyString(raw any, key string) (string, bool) {
+	switch typed := raw.(type) {
+	case map[string]any:
+		value, ok := typed[key].(string)
+		return value, ok
+	case map[string]string:
+		value, ok := typed[key]
+		return value, ok
+	default:
+		return "", false
+	}
+}
+
+func propertyStringSlice(raw any, key string) []string {
+	switch typed := raw.(type) {
+	case map[string]any:
+		switch values := typed[key].(type) {
+		case []string:
+			return append([]string(nil), values...)
+		case []any:
+			out := make([]string, 0, len(values))
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					out = append(out, text)
+				}
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+func formatTuningCatalog(catalog tuningCatalog) string {
+	var b strings.Builder
+	for _, knob := range catalog.Knobs {
+		fmt.Fprintf(&b, "%s (%s)\n", knob.ID, knob.Kind)
+		if knob.Description != "" {
+			fmt.Fprintf(&b, "  %s\n", knob.Description)
+		}
+		fmt.Fprintf(&b, "  writer: %s\n", knob.Writer.Tool)
+		if len(knob.SelectorFields) > 0 {
+			fmt.Fprintf(&b, "  selectors: %s\n", strings.Join(tuningFieldLabels(knob.SelectorFields), ", "))
+		}
+		if len(knob.ValueFields) > 0 {
+			fmt.Fprintf(&b, "  values: %s\n", strings.Join(tuningFieldLabels(knob.ValueFields), ", "))
+		}
+		if current := formatTuningCurrent(knob.Current); current != "" {
+			fmt.Fprintf(&b, "  current: %s\n", current)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func tuningFieldLabels(fields []tuningField) []string {
+	labels := make([]string, 0, len(fields))
+	for _, field := range fields {
+		label := field.Name
+		if len(field.Enum) > 0 {
+			values := make([]string, 0, len(field.Enum))
+			for _, value := range field.Enum {
+				if value == "" {
+					values = append(values, "<empty>")
+				} else {
+					values = append(values, value)
+				}
+			}
+			label += "[" + strings.Join(values, "|") + "]"
+		}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func formatTuningCurrent(current any) string {
+	raw, err := json.Marshal(current)
+	if err != nil || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+func sortedAgentModelAliasKeys(values map[string]map[string]wsconfig.AgentTier) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func sortedAgentTierKeys(values map[string]wsconfig.AgentTier) []string {
@@ -2403,6 +2705,18 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope overrides are included and annotated."),
+					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
+				},
+			},
+		},
+		{
+			"name":        "config.tuning",
+			"description": "Return a read-only catalog of supported ws workflow tuning knobs, including writer tools, schema-derived field options, and current values when available.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope prompt overrides and scoped config values are included."),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
 					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
 				},

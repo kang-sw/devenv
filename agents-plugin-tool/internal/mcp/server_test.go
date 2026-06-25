@@ -1209,7 +1209,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list", "playbook.print", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "tickets.list", "playbook.print", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
@@ -1965,10 +1965,10 @@ func execToolJSONPath(path string) string {
 }
 
 // TestMercenaryDefaultHideAndOnVisibility verifies that:
-// - ws.mercenary.* tools are hidden from tools/list by default (no config),
-// - ws.lead.prefer_mercenary remains visible so the lead can toggle back, and
-// - after writing prefer_mercenary=on to project config, ws.mercenary.* tools
-//   appear in tools/list.
+//   - ws.mercenary.* tools are hidden from tools/list by default (no config),
+//   - ws.lead.prefer_mercenary remains visible so the lead can toggle back, and
+//   - after writing prefer_mercenary=on to project config, ws.mercenary.* tools
+//     appear in tools/list.
 func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

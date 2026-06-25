@@ -205,7 +205,7 @@ when provided, otherwise the detected MCP session harness when available, and
 otherwise the default tier mapping. This makes `backend` mean the execution
 backend rather than the tier-table key. {#260513-harness-local-agent-tier-config}
 
-## 🚧 Tuning Catalog {#260625-tuning-catalog}
+## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
 by `ws:lead-tune`. It returns a compact catalog whose entries describe
@@ -223,11 +223,12 @@ scan used by `config.prompt`; model-tier entries derive their fields from
 
 Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
 structured shape for callers that need to build a proposal or compare runtime
-support. Compatibility-only writer arguments may be omitted from the catalog
-even when they remain accepted by the writer tool; the catalog exposes the
-canonical tuning syntax, not every legacy call shape. Product mode is honored:
-agent-backed full-ws-only knobs are absent when the runtime is in wsflow/no-agent
-mode.
+support: `knobs[]` entries carry `id`, `kind`, `description`, `writer`,
+optional `reset`, `selector_fields`, `value_fields`, and `current`.
+Compatibility-only writer arguments may be omitted from the catalog even when
+they remain accepted by the writer tool; the catalog exposes the canonical
+tuning syntax, not every legacy call shape. Product mode is honored:
+full-ws-only knobs are absent when the runtime is in wsflow/no-agent mode.
 
 > [!note] Constraints
 > - `config.tuning` does not mutate config and does not replace

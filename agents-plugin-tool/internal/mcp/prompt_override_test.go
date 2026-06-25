@@ -21,6 +21,7 @@ package mcp
 // playbook.render) so the server-side resolver wiring is exercised end-to-end.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -507,7 +508,7 @@ func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	const seedPhrase = "Delegate to preserve lead execution context"
+	const seedPhrase = "Delegate all work to subagents for this session."
 
 	// No override → seed posture renders, markers stripped, structure intact.
 	seedBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
@@ -548,7 +549,7 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	s := newTestServerWithHarness(t, "codex")
 
 	const preferenceText = "User preferences:\n- Prefer conventional terminology when user wording is imprecise."
-	const delegationSeed = "Delegate to preserve lead execution context"
+	const delegationSeed = "Delegate all work to subagents for this session."
 
 	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
@@ -663,7 +664,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	// Bootstrap a lead session key.
 	key, _ := parseLoginResponse(t, callLogin(t, s, 910100, root, nil))
 
-	const seedPhrase = "Delegate to preserve lead execution context"
+	const seedPhrase = "Delegate all work to subagents for this session."
 
 	// --- Baseline: without any override, seed renders ---
 	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, "", buildOverrideLookup(s, key))
@@ -902,6 +903,178 @@ func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 			t.Errorf("shipped config.prompt listing missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900400, root, nil))
+
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	if err := resolver.Set("prompt.SeedSection.claude", "seeded override value", wsconfig.SetOptions{
+		ExplicitScope: wsconfig.ScopeSession,
+		SessionKey:    key,
+	}); err != nil {
+		t.Fatalf("seed override via resolver: %v", err)
+	}
+
+	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	})
+	catalog := parseTuningCatalogResponse(t, resp)
+
+	textResp := callToolOnce(t, s, 2, "config.tuning", map[string]any{
+		"session_key": key,
+	})
+	text := toolText(t, textResp)
+	for _, want := range []string{
+		"prompt.SeedSection",
+		"harness[claude|codex|*]",
+		"scope[session|project|global]",
+		`"scope":"session"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config.tuning text missing %q:\n%s", want, text)
+		}
+	}
+
+	promptKnob := requireTuningKnob(t, catalog, "prompt.SeedSection")
+	if promptKnob.Writer.Tool != "config.prompt.set" || promptKnob.Writer.FixedArguments["pointId"] != "SeedSection" {
+		t.Fatalf("prompt knob writer mismatch: %+v", promptKnob.Writer)
+	}
+	if promptKnob.Reset == nil || promptKnob.Reset.Tool != "config.prompt.unset" || promptKnob.Reset.FixedArguments["pointId"] != "SeedSection" {
+		t.Fatalf("prompt knob reset mismatch: %+v", promptKnob.Reset)
+	}
+	assertFieldEnum(t, promptKnob.SelectorFields, "harness", []string{"claude", "codex", "*"})
+	assertFieldEnum(t, promptKnob.SelectorFields, "scope", []string{"session", "project", "global"})
+	assertFieldRequired(t, promptKnob.ValueFields, "prompt", true)
+	if !strings.Contains(mustMarshalJSON(t, promptKnob.Current), `"scope":"session"`) {
+		t.Fatalf("prompt knob current override missing session scope: %+v", promptKnob.Current)
+	}
+
+	preferKnob := requireTuningKnob(t, catalog, "delegation.prefer_mercenary")
+	assertFieldEnum(t, preferKnob.ValueFields, "value", []string{"on", "off", "hide"})
+	if findTuningField(preferKnob.ValueFields, "enabled") != nil {
+		t.Fatalf("prefer_mercenary catalog must suppress legacy enabled field: %+v", preferKnob.ValueFields)
+	}
+	if !strings.Contains(mustMarshalJSON(t, preferKnob.Current), `"value":"hide"`) {
+		t.Fatalf("prefer_mercenary default should be cataloged as hide: %+v", preferKnob.Current)
+	}
+
+	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
+	assertFieldEnum(t, agentsKnob.SelectorFields, "tier", []string{"small", "medium", "large", "xlarge"})
+	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
+}
+
+func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900500, root, nil))
+
+	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	})
+	catalog := parseTuningCatalogResponse(t, resp)
+
+	requireTuningKnob(t, catalog, "prompt.SeedSection")
+	for _, hidden := range []string{"delegation.prefer_mercenary", "agents.tier"} {
+		if knob := findTuningKnob(catalog, hidden); knob != nil {
+			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)
+		}
+	}
+}
+
+func parseTuningCatalogResponse(t *testing.T, line string) tuningCatalog {
+	t.Helper()
+	var catalog tuningCatalog
+	if err := json.Unmarshal([]byte(toolText(t, line)), &catalog); err != nil {
+		t.Fatalf("parse config.tuning JSON: %v", err)
+	}
+	return catalog
+}
+
+func requireTuningKnob(t *testing.T, catalog tuningCatalog, id string) tuningKnob {
+	t.Helper()
+	if knob := findTuningKnob(catalog, id); knob != nil {
+		return *knob
+	}
+	t.Fatalf("config.tuning missing knob %q in %+v", id, catalog.Knobs)
+	return tuningKnob{}
+}
+
+func findTuningKnob(catalog tuningCatalog, id string) *tuningKnob {
+	for i := range catalog.Knobs {
+		if catalog.Knobs[i].ID == id {
+			return &catalog.Knobs[i]
+		}
+	}
+	return nil
+}
+
+func assertFieldEnum(t *testing.T, fields []tuningField, name string, want []string) {
+	t.Helper()
+	field := findTuningField(fields, name)
+	if field == nil {
+		t.Fatalf("missing field %q in %+v", name, fields)
+	}
+	if strings.Join(field.Enum, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("field %q enum = %#v, want %#v", name, field.Enum, want)
+	}
+}
+
+func assertFieldRequired(t *testing.T, fields []tuningField, name string, want bool) {
+	t.Helper()
+	field := findTuningField(fields, name)
+	if field == nil {
+		t.Fatalf("missing field %q in %+v", name, fields)
+	}
+	if field.Required != want {
+		t.Fatalf("field %q required = %t, want %t", name, field.Required, want)
+	}
+}
+
+func findTuningField(fields []tuningField, name string) *tuningField {
+	for i := range fields {
+		if fields[i].Name == name {
+			return &fields[i]
+		}
+	}
+	return nil
+}
+
+func mustMarshalJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+	return string(raw)
 }
 
 // TestParseOverrideOpenMarkerDesc unit-tests the desc-aware open-marker parser

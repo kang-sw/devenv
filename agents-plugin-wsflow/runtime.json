@@ -17,6 +17,7 @@
     "config.prompt.set": ">=0.30.8-dev <0.31.0",
     "config.prompt.unset": ">=0.30.8-dev <0.31.0",
     "config.prompt": ">=0.30.8-dev <0.31.0",
+    "config.tuning": ">=0.30.8-dev <0.31.0",
     "project_tree": ">=0.30.8-dev <0.31.0",
     "infra.read": ">=0.30.8-dev <0.31.0",
     "convention.read": ">=0.30.8-dev <0.31.0",
