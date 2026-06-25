@@ -230,11 +230,9 @@ override entries derive their point ids from the same shipped override-marker
 scan used by `config.prompt`; model-tier entries derive their fields from
 `config.agents_tier`; workflow-preference entries derive their values from
 `config.workflow_prefer_subagent` and `config.workflow_prefer_mercenary`.
-
-> [!note] Planned 🚧
-> Removing the shipped `DelegationSection` override marker will remove
-> `prompt.DelegationSection` from `config.tuning` and `config.prompt` discovery;
-> orphaned stored prompt keys remain ignored.
+The shipped `DelegationSection` override marker is removed, so
+`prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
+discovery; orphaned stored prompt keys remain ignored.
 
 Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
 structured shape for callers that need to build a proposal or compare runtime
@@ -673,16 +671,14 @@ set is fixed at authoring time, not chosen by the caller per call. This does not
 replace `convention.read` / `infra.read`, which remain standalone discovery tools
 for raw access.
 
-> [!note] Planned 🚧
-> Code-side pragmatic playbook concatenation will be a renderer-owned behavior,
-> not a source-template syntax. When `"workflow.prefer_subagent"` resolves to
-> `on`, `playbook.print(name: "lead-workflow-manual")` will render
-> `lead-prefer-subagent` through the same harness-aware renderer, prompt
-> override resolver, and product-mode pass, then append it to the manual. The
-> appended body is wrapped as `<playbook name="lead-prefer-subagent"
-> title="Prefer Subagent">...</playbook>`. Standalone `playbook.print` and
-> `playbook.render` output remains Markdown, and no duplicate-insertion guard is
-> applied.
+Code-side pragmatic playbook concatenation is renderer-owned behavior, not a
+source-template syntax. When global `"workflow.prefer_subagent"` resolves to
+`on`, `playbook.print(name: "lead-workflow-manual")` renders
+`lead-prefer-subagent` through the same harness-aware renderer, prompt override
+resolver, and product-mode pass, then appends it to the manual. The appended
+body is wrapped as `<playbook name="lead-prefer-subagent" title="Prefer Subagent">...</playbook>`.
+Standalone `playbook.print` and `playbook.render` output remains Markdown, and
+no duplicate-insertion guard is applied.
 
 A playbook marked as delegating carries a compact continuation tip in its
 rendered output, reminding the caller to reuse the host-returned subagent agent
@@ -738,9 +734,9 @@ the shipped resource tree. An override-point is a pair of single-line markers,
 each on its own line, wrapping inline seed text:
 
 ```
-<!-- ws:override:DelegationSection desc="how eagerly the lead delegates" -->
+<!-- ws:override:ExampleSection desc="human-readable summary" -->
 <seed default text — the shipped wording for this point>
-<!-- ws:/override:DelegationSection -->
+<!-- ws:/override:ExampleSection -->
 ```
 
 The identifier after `ws:override:` is the **point id**. The text between the
@@ -766,9 +762,8 @@ two orthogonal axes:
 The resolved text replaces the block body and the marker lines themselves are
 stripped, so the rendered output contains only resolved content and never the
 marker syntax. An **empty seed body** is a pure extension slot: it renders the
-stored override if one exists, or nothing when none is set — so overriding
-existing text and appending new text are the same primitive (for example a
-`DelegationSection` override-point versus a `UserPreferenceSection` extension slot).
+stored override if one exists, or nothing when none is set. `UserPreferenceSection`
+uses this empty-slot shape for standing preferences.
 
 Override values resolve through the layered config scope model under the key
 `prompt.<point id>.<harness>`, so a write at any scope through the config layer
@@ -779,14 +774,12 @@ override surface tunable from inside the MCP without external docs; a
 self-documenting `config.prompt()` listing makes that surface discoverable from
 inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
 
-Shipped lead workflow-manual override-points include `DelegationSection`, seeded
-with the lead's default delegation posture, and `UserPreferenceSection`, an empty
-extension slot for standing communication, terminology, and workflow
-preferences. A user tunes delegation posture by storing an override under
-`prompt.DelegationSection.<harness>`; a user adds standing preferences by storing
-an override under `prompt.UserPreferenceSection.<harness>` without editing the
-shipped resource tree. The resolved override replaces or fills only its marked
-section; the surrounding primitive reference is untouched.
+Shipped lead workflow-manual override-points include `UserPreferenceSection`, an
+empty extension slot for standing communication, terminology, and workflow
+preferences. A user adds standing preferences by storing an override under
+`prompt.UserPreferenceSection.<harness>` without editing the shipped resource
+tree. Delegation posture is controlled by `"workflow.prefer_subagent"` rather
+than a freeform prompt override.
 
 Shipped lead-prefer-subagent uses the generic empty extension point
 `PreferSubagentInvocationGuidance` for harness invocation details. Codex receives
@@ -794,14 +787,6 @@ a code-owned builtin default under `prompt.PreferSubagentInvocationGuidance.code
 for its `spawn_agent(fork_context:true, ...)` binding, while Claude uses the
 empty shared seed unless configured otherwise.
 {#260619-delegation-section-override-point}
-
-> [!note] Planned 🚧
-> `lead-workflow-manual` will remove the shipped `DelegationSection`
-> override-point. Delegation posture will be controlled by
-> `"workflow.prefer_subagent"` instead of freeform prompt text.
-> `UserPreferenceSection` remains the standing freeform extension point, and
-> `PreferSubagentInvocationGuidance` remains the generic harness-specific slot
-> used by `lead-prefer-subagent`.
 
 > [!note] Constraints
 > - The marker grammar is a ws-private schema (ws is the sole reader); it is not

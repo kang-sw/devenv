@@ -71,24 +71,21 @@ workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
 so the skill can proactively propose a tune. Its playbook is the tuning manual —
 it loads the `config.tuning` catalog (`#260625-tuning-catalog`) and uses that
 catalog's knob ids, writer tools, field options, and current values to drive
-prompt overrides (`#260620-config-prompt-override-tuning-tools`, with
-`DelegationSection` for delegation posture and `UserPreferenceSection` for
-standing preferences), `prefer_mercenary`, and `config.agents_tier` without
-reimplementing their set paths. The always-on
+prompt overrides (`#260620-config-prompt-override-tuning-tools`, including
+`UserPreferenceSection` for standing preferences), workflow preference knobs,
+and `config.agents_tier` without reimplementing their set paths. The always-on
 `lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
 of general-task routing attention. In agentless wsflow the catalog omits
-full-ws-only knobs (`prefer_mercenary` and `config.agents_tier`), so the
-delegation-mode and model-tier sections are `ws:full-only` and the wsflow shim
-advertises only prompt-override tuning.
+full-ws-only knobs (`workflow.prefer_mercenary` and `config.agents_tier`), while
+keeping shared knobs such as `workflow.prefer_subagent`.
 {#260619-lead-tune-workflow-tuning-skill}
 
 > [!note] Planned 🚧
-> `lead-tune` will route delegation posture to the workflow config catalog
-> instead of the `DelegationSection` prompt override. "Delegate more" and
-> "delegate less" style requests will set `"workflow.prefer_subagent"` through
-> `config.workflow_prefer_subagent`; mercenary preference requests will set
-> `"workflow.prefer_mercenary"` through `config.workflow_prefer_mercenary`.
-> `UserPreferenceSection` remains the freeform standing-preference path.
+> `lead-tune` prose will be aligned with the workflow config catalog. "Delegate
+> more" and "delegate less" style requests should set
+> `"workflow.prefer_subagent"` through `config.workflow_prefer_subagent`;
+> mercenary preference requests should set `"workflow.prefer_mercenary"` through
+> `config.workflow_prefer_mercenary`.
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
@@ -96,14 +93,13 @@ advertises only prompt-override tuning.
 workflow skills. It defines host-neutral notation: `ws/<tool-name>` means an MCP
 tool on the `ws` server, while `ws:` names plugin skills.
 
-> [!note] Planned 🚧
-> When `"workflow.prefer_subagent"` is `on`, loading `lead-workflow-manual` will
-> also load the rendered `lead-prefer-subagent` posture inside an XML-style
-> `<playbook name="lead-prefer-subagent" title="Prefer Subagent">` boundary.
-> The appended posture is rendered through the normal playbook pipeline so
-> harness-specific defaults, including Codex invocation guidance, remain
-> harness-scoped. Explicitly invoking `lead-prefer-subagent` may duplicate this
-> short posture text; that duplication is accepted.
+When global `"workflow.prefer_subagent"` is `on`, loading
+`lead-workflow-manual` also loads the rendered `lead-prefer-subagent` posture
+inside an XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
+boundary. The appended posture is rendered through the normal playbook pipeline
+so harness-specific defaults, including Codex invocation guidance, remain
+harness-scoped. Explicitly invoking `lead-prefer-subagent` may duplicate this
+short posture text; that duplication is accepted.
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
 queries, generated artifact paths, runtime metadata, workflow discovery, Git

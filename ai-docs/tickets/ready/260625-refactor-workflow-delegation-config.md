@@ -230,6 +230,38 @@ file concatenation is not used. It should also prove keyless workflow manual
 loading applies global/builtin `"workflow.prefer_subagent"` state without a
 session key.
 
+### Result (ce23337) - 2026-06-25
+
+Phase 2 is complete. The implementation removes the shipped
+`DelegationSection` override marker from `lead-workflow-manual`, keeps
+`UserPreferenceSection`, and makes keyless
+`playbook.print(name: "lead-workflow-manual")` consume global/builtin
+`"workflow.prefer_subagent"` state. When the value is `on`, the manual appends
+the normally-rendered `lead-prefer-subagent` playbook inside
+`<playbook name="lead-prefer-subagent" title="Prefer Subagent">...</playbook>`;
+when the value is unset or `off`, no append occurs.
+
+The append path renders through `renderPlaybookBody`, not raw file
+concatenation, so harness-specific prompt override defaults and product-mode
+filtering still apply. Tests verify Codex receives the builtin
+`spawn_agent(fork_context:true, ...)` guidance inside the appended wrapper,
+Claude does not receive Codex-specific guidance, `DelegationSection` no longer
+appears in `config.prompt` / `config.tuning` discovery, and wsflow/no-agent
+rendering remains namespace-clean. The canonical rsrc manifest and wsflow rsrc
+mirror were regenerated. Fresh-reader audit fixes in `ce23337` clarified
+workflow-manual primitive wording without changing the Phase 2 contract.
+
+Verification passed: focused MCP render/discovery tests,
+`WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest`,
+`WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`,
+`go test ./internal/mcp ./internal/wsconfig ./internal/wsrsrc ./cmd/ws-mcp -count=1`,
+`python3 -m unittest discover ../agents-plugin-wsflow/tests`,
+`git diff --check`, and `ws/spec_index.verify`. Partitioned correctness, fit,
+and test reviews were clean.
+
+Deferred to Phase 3: `lead-tune` routing/prose alignment, broader tuning catalog
+polish, and any remaining docs/tests tied to the tuning workflow surface.
+
 ### Phase 3: Lead-tune, catalog, docs, tests, and wsflow polish
 
 Align the surrounding workflow surfaces:
