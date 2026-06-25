@@ -3,6 +3,7 @@ title: ws MCP runtime contract lists hidden exec tools and blocks Codex dev star
 related:
   260605-research-ws-native-subagent-pivot: playbook/MCP runtime surface migration anchor
   260524-chore-exec-surface-runtime-contract: exec tool contract follow-up
+completed: 2026-06-25
 ---
 
 # ws MCP runtime contract lists hidden exec tools and blocks Codex dev startup
@@ -44,3 +45,10 @@ Clarify whether hidden/experimental tools belong in `runtime.json` at all. If
 they remain intentionally hidden, remove them from the required runtime contract
 or add a separate non-public capability channel so launcher compatibility checks
 do not reject valid dev builds.
+
+## Resolution (2026-06-25)
+
+Removed the hidden `exec.*` MCP tools from `agents-plugin/runtime.json` so the
+launcher compatibility contract matches `ws-mcp runtime capabilities`. The
+tools remain implemented but intentionally absent from the public MCP surface
+until the exec surface is documented and shipped.
