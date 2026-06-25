@@ -1,5 +1,6 @@
 ---
 title: Schema-backed tuning knob catalog for lead-tune
+sage-review: completed
 related:
   260624-feat-prefer-mercenary-hide-option: prefer_mercenary gained a hide mode that lead-tune prose can miss
   260624-design-session-scope-hide-not-reflected-in-tools-list: adjacent visibility/schema tension for hidden mercenary tools
