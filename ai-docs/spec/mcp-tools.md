@@ -205,6 +205,39 @@ when provided, otherwise the detected MCP session harness when available, and
 otherwise the default tier mapping. This makes `backend` mean the execution
 backend rather than the tier-table key. {#260513-harness-local-agent-tier-config}
 
+## 🚧 Tuning Catalog {#260625-tuning-catalog}
+
+`config.tuning` is a read-only discovery surface for workflow-tuning knobs used
+by `ws:lead-tune`. It returns a compact catalog whose entries describe
+user-facing knobs, their current resolved values when available, the selector
+fields a caller must choose, the value fields a caller may set, and the writer
+tool that performs the actual mutation.
+
+The catalog is a projection, not a second setter schema. Each entry names a
+small semantic knob id and derives field names, enum values, required fields, and
+descriptions from the existing MCP writer tool schema where possible. Prompt
+override entries derive their point ids from the same shipped override-marker
+scan used by `config.prompt`; model-tier entries derive their fields from
+`config.agents_tier`; delegation-mode entries derive their values from
+`ws.lead.prefer_mercenary`.
+
+Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
+structured shape for callers that need to build a proposal or compare runtime
+support. Compatibility-only writer arguments may be omitted from the catalog
+even when they remain accepted by the writer tool; the catalog exposes the
+canonical tuning syntax, not every legacy call shape. Product mode is honored:
+agent-backed full-ws-only knobs are absent when the runtime is in wsflow/no-agent
+mode.
+
+> [!note] Constraints
+> - `config.tuning` does not mutate config and does not replace
+>   `config.prompt.set`, `ws.lead.prefer_mercenary`, or `config.agents_tier`.
+> - Adding a new lead-tune knob requires registering its semantic id and writer
+>   tool, but must not copy enum/property schema by hand when that schema already
+>   belongs to the writer tool.
+> - Prompt override discovery remains marker-driven; the tuning catalog must not
+>   invent or expose prompt `pointId` values absent from the shipped rsrc tree.
+
 Configuration exposes harness-aware capability-tier mappings. The capability
 tiers `small`/`medium`/`large`/`xlarge` map to backend/model defaults per harness;
 the historical `light`/`core`/`deep` aliases (this entry's original keys) and the
