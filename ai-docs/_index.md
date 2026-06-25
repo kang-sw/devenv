@@ -376,8 +376,12 @@ dropped tickets live in hidden archive dirs and git history.
   machine: agenda/todo persistence across compaction. Storage extends the
   existing `sessionRecord` (`<cache-root>/keys/<session-key>.json`, written by
   `ws.ferrule`) with additive `agenda`/`todos` fields, reusing
-  `writeRecordAtomic`/`readRecord` — no new package. Phase 1 (MCP primitives)
-  ready for implementation.
+  `writeRecordAtomic`/`readRecord` — no new package. **Phase 1 done**
+  (`54f94a53`, branch `implement/260625-ws-session-state-machine-p1`, unmerged):
+  14 MCP tools (2 agenda + 4 enter + 8 todo), both `runtime.json` files, spec
+  section, 15 tests green. **Next: Phase 2** (existing-skill integration) — note
+  `ws.enter.implement` needs `need_review`/`need_doc` + every enter/todo tool
+  needs `session_key`, both absent from the ticket's Phase 2 param tuples.
 
 ## Session Notes
 

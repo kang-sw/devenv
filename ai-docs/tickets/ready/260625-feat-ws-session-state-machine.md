@@ -191,6 +191,45 @@ Verify via: integration probe confirming all MCP handlers are reachable through
 `runtime.json`; unit tests for concurrent write safety, key uniqueness,
 enter-tool derivation per flag combination, reorder correctness.
 
+### Result (54f94a53)
+
+Landed the full Phase 1 session state surface: 14 MCP tools — 2 agenda
+(`ws.agenda.set`, `ws.agenda.clear`) + 4 enter (`ws.enter.implement`,
+`ws.enter.proceed`, `ws.enter.sprint`, `ws.enter.salvage`) + 8 todo
+(`ws.todo.append`, `insert_before`, `insert_after`, `check`, `erase`, `clear`,
+`list`, `reorder`).
+
+- Storage: additive `agenda` (map) and `todos` (list) fields on the existing
+  `sessionRecord` at `<cache-root>/keys/<session-key>.json`, reusing the record's
+  atomic temp+rename writer; empty fields omitted, unknown fields ignored. No
+  separate store/package introduced (supersedes the brief's Option A after source
+  verification showed ferrule/sessionStore already provide the primitives).
+- Pure list logic (derivation/append/insert/check/erase/clear/reorder/render,
+  key-uniqueness) kept free of disk I/O in `session_state.go`; store-bound atomic
+  read-modify-write wrappers and MCP handlers layered on top.
+- All 14 tools registered in both `runtime.json` files (ws and wsflow) under the
+  version fence `>=0.30.8-dev <0.31.0`.
+- Spec section `## Session State Tools {#260625-session-state-tools}` added to
+  `ai-docs/spec/mcp-tools.md` (14 tools, storage path, render markers,
+  derivations).
+- 15 tests passing: pure-logic derivation tables per flag combo, key
+  uniqueness/reuse, reorder, summary/full rendering, store concurrency + agenda
+  round-trip + enter-replaces-todos, an MCP integration flow, and handler-layer
+  arg-parse coverage.
+
+> Forward: version fence used the current-line `>=0.30.8-dev <0.31.0` instead of
+> the ticket's literal `>=<next-minor>` (correct: a next-minor fence breaks
+> launcher compatibility against the current binary and the wsflow exact-match
+> contract; the minor bump is a dev-merge step, not a Phase 1 deliverable).
+> Forward (Phase 2): `ws.enter.implement` todo derivation is driven ONLY by the
+> `need_review` and `need_doc` booleans, which the ticket's Phase 2 param tuple
+> omits; Phase 2 integration must pass them (`need_review` = review-allocation
+> != lead-only; `need_doc` = true for the standard pipeline) or the derived list
+> is wrong. Also every `ws.enter.*` / `ws.todo.*` tool requires `session_key`,
+> which is absent from the ticket tuples.
+> Forward (Phase 3): `ws.todo.list` does not expose item keys; a key-surface
+> affordance may be wanted for post-compaction mutation by key.
+
 ### Phase 2: Existing skill integration
 
 Update existing skills to call `ws.enter.*` tools at the point they currently
