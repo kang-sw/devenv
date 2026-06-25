@@ -346,6 +346,20 @@ type overridePointDecl struct {
 	Desc    string
 }
 
+const preferSubagentCodexBindingPointID = "PreferSubagentCodexBinding"
+
+const preferSubagentCodexBindingPrompt = "" +
+	"- Codex binding: call `spawn_agent(fork_context:true, message:<prompt>)`; " +
+	"omit `agent_type`, `model`, and `reasoning_effort` for full-history forks unless the host permits them.\n" +
+	"- If a typed fork is rejected, retry untyped with `fork_context:true`; " +
+	"do not satisfy this posture with `agent_type: explorer` or `agent_type: worker` unless `fork_context:true` is active."
+
+func builtinPromptOverrideDefaults() map[string]string {
+	return map[string]string{
+		"prompt." + preferSubagentCodexBindingPointID + ".codex": preferSubagentCodexBindingPrompt,
+	}
+}
+
 // scanOverridePoints walks the rsrc tree rooted at rsrcRoot, scans every `.md`
 // file for override open markers, and returns the declared override-points
 // deduped by pointId (the first non-empty desc wins) sorted by PointId. It is a
@@ -386,8 +400,9 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 }
 
 // buildOverrideLookup returns an overrideLookupFn backed by the session-keyed
-// layered-config resolver, or nil when sessionKey is empty (no session → no
-// overrides → seeds render). It is the single construction site shared by the
+// layered-config resolver. When sessionKey is empty, only code-owned builtin
+// prompt defaults participate; user/project/global prompt overrides still require
+// a session-keyed render. It is the single construction site shared by the
 // playbook.print and playbook.render dispatch paths, reusing the same
 // sessionConfigAdapter + resolver shape as the prefer_mercenary read path.
 //
@@ -397,10 +412,14 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 func buildOverrideLookup(s *Server, sessionKey string) overrideLookupFn {
 	capturedKey := strings.TrimSpace(sessionKey)
 	if capturedKey == "" {
-		return nil
+		builtins := builtinPromptOverrideDefaults()
+		return func(pointId, harness string) (string, bool) {
+			v := builtins["prompt."+pointId+"."+harness]
+			return v, v != ""
+		}
 	}
 	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
 	return func(pointId, harness string) (string, bool) {
 		rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
 		return rv.Value, rv.Value != ""

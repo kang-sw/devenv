@@ -11,6 +11,8 @@ synthesis.
 ## Invariants
 
 - Use forked subagents for all work that reads, inspects, mutates, verifies, or summarizes project state; in Codex set `fork_context:true` when available.
+<!-- ws:override:PreferSubagentCodexBinding desc="Codex forked subagent tool binding" -->
+<!-- ws:/override:PreferSubagentCodexBinding -->
 - Outside Codex, use the host mode that gives the subagent the current conversation/project context while isolating execution.
 - Do not use ordinary clean-context subagents for project work under this posture.
 - Do not perform inline reads, searches, edits, tests, commits, or artifact writing to solve the task.

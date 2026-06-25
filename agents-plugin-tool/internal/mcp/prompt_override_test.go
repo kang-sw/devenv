@@ -905,6 +905,72 @@ func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 	}
 }
 
+func TestLeadPreferSubagentCodexBindingUsesBuiltinPromptOverride(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+
+	sCodex := NewServer(root, "test")
+	sCodex.observeHarness("test", "codex")
+	codexPrintResp := callToolOnce(t, sCodex, 900309, "playbook.print", map[string]any{
+		"name": "lead-prefer-subagent",
+	})
+	if codexPrintText := toolText(t, codexPrintResp); !strings.Contains(codexPrintText, "spawn_agent(fork_context:true, message:<prompt>)") {
+		t.Fatalf("codex playbook.print without session_key must include builtin binding:\n%s", codexPrintText)
+	}
+
+	keyCodex, _ := parseLoginResponse(t, callLogin(t, sCodex, 900310, root, nil))
+
+	codexBody, _, err := printPlaybook(sCodex, rsrcRoot, "lead-prefer-subagent", nil, wsconfig.Options{}, "", buildOverrideLookup(sCodex, keyCodex))
+	if err != nil {
+		t.Fatalf("printPlaybook codex: %v", err)
+	}
+	for _, want := range []string{
+		"spawn_agent(fork_context:true, message:<prompt>)",
+		"retry untyped with `fork_context:true`",
+		"`agent_type: explorer`",
+		"`agent_type: worker`",
+	} {
+		if !strings.Contains(codexBody, want) {
+			t.Fatalf("codex render missing %q:\n%s", want, codexBody)
+		}
+	}
+	assertNoMarkerSyntax(t, "lead-prefer-subagent codex", codexBody)
+
+	sClaude := NewServer(root, "test")
+	sClaude.observeHarness("test", "claude")
+	claudePrintResp := callToolOnce(t, sClaude, 900312, "playbook.print", map[string]any{
+		"name": "lead-prefer-subagent",
+	})
+	if claudePrintText := toolText(t, claudePrintResp); strings.Contains(claudePrintText, "spawn_agent(fork_context:true, message:<prompt>)") {
+		t.Fatalf("claude playbook.print without session_key must not include codex binding:\n%s", claudePrintText)
+	}
+
+	keyClaude, _ := parseLoginResponse(t, callLogin(t, sClaude, 900311, root, nil))
+
+	claudeBody, _, err := printPlaybook(sClaude, rsrcRoot, "lead-prefer-subagent", nil, wsconfig.Options{}, "", buildOverrideLookup(sClaude, keyClaude))
+	if err != nil {
+		t.Fatalf("printPlaybook claude: %v", err)
+	}
+	for _, forbidden := range []string{
+		"spawn_agent(fork_context:true, message:<prompt>)",
+		"`agent_type: explorer`",
+		"`agent_type: worker`",
+	} {
+		if strings.Contains(claudeBody, forbidden) {
+			t.Fatalf("claude render must not include codex binding %q:\n%s", forbidden, claudeBody)
+		}
+	}
+	assertNoMarkerSyntax(t, "lead-prefer-subagent claude", claudeBody)
+}
+
 func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	useLeadProfile(t)
 

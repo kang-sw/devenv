@@ -725,7 +725,8 @@ two orthogonal axes:
   the cross-harness / `*` setting).
 - **Where** the override is stored is selected by scope through the layered
   config scope model (`#260619-layered-config-scope-model`); resolution reads the
-  highest-precedence scope that holds a value.
+  highest-precedence scope that holds a value, including code-owned builtin
+  defaults when a shipped harness binding must stay out of the shared seed text.
 
 The resolved text replaces the block body and the marker lines themselves are
 stripped, so the rendered output contains only resolved content and never the

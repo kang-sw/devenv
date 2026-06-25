@@ -603,7 +603,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Build the resolver exactly as the setter does: ambient Options, not
 		// root-aware (config.* tools resolve from WS_CACHE_HOME/WS_CONFIG_HOME).
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
 		list := buildPromptOverrideListing(points, &resolver, sessionKey)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, list, nil)
@@ -622,7 +622,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
 		catalog, err := buildTuningCatalog(rsrcRoot, &resolver, sessionKey, NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
