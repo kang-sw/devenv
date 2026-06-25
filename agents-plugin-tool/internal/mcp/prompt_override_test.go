@@ -898,14 +898,19 @@ func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 		"lead delegation eagerness and context-saving stance",
 		"UserPreferenceSection",
 		"user standing preferences for communication, terminology, and workflow behavior",
+		"PreferSubagentInvocationGuidance",
+		"harness-specific forked subagent invocation guidance",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("shipped config.prompt listing missing %q:\n%s", want, text)
 		}
 	}
+	if strings.Contains(text, "PreferSubagent"+"CodexBinding") {
+		t.Fatalf("shipped config.prompt listing must not expose Codex-specific point id:\n%s", text)
+	}
 }
 
-func TestLeadPreferSubagentCodexBindingUsesBuiltinPromptOverride(t *testing.T) {
+func TestLeadPreferSubagentInvocationGuidanceUsesCodexBuiltinPromptOverride(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")

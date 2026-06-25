@@ -752,6 +752,12 @@ preferences. A user tunes delegation posture by storing an override under
 an override under `prompt.UserPreferenceSection.<harness>` without editing the
 shipped resource tree. The resolved override replaces or fills only its marked
 section; the surrounding primitive reference is untouched.
+
+Shipped lead-prefer-subagent uses the generic empty extension point
+`PreferSubagentInvocationGuidance` for harness invocation details. Codex receives
+a code-owned builtin default under `prompt.PreferSubagentInvocationGuidance.codex`
+for its `spawn_agent(fork_context:true, ...)` binding, while Claude uses the
+empty shared seed unless configured otherwise.
 {#260619-delegation-section-override-point}
 
 > [!note] Constraints

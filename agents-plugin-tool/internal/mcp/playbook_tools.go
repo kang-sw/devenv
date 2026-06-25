@@ -346,9 +346,9 @@ type overridePointDecl struct {
 	Desc    string
 }
 
-const preferSubagentCodexBindingPointID = "PreferSubagentCodexBinding"
+const preferSubagentInvocationGuidancePointID = "PreferSubagentInvocationGuidance"
 
-const preferSubagentCodexBindingPrompt = "" +
+const preferSubagentCodexInvocationGuidancePrompt = "" +
 	"- Codex binding: call `spawn_agent(fork_context:true, message:<prompt>)`; " +
 	"omit `agent_type`, `model`, and `reasoning_effort` for full-history forks unless the host permits them.\n" +
 	"- If a typed fork is rejected, retry untyped with `fork_context:true`; " +
@@ -356,7 +356,7 @@ const preferSubagentCodexBindingPrompt = "" +
 
 func builtinPromptOverrideDefaults() map[string]string {
 	return map[string]string{
-		"prompt." + preferSubagentCodexBindingPointID + ".codex": preferSubagentCodexBindingPrompt,
+		"prompt." + preferSubagentInvocationGuidancePointID + ".codex": preferSubagentCodexInvocationGuidancePrompt,
 	}
 }
 
