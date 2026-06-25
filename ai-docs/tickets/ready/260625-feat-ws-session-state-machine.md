@@ -22,8 +22,9 @@ Workflow manual reload happens after compaction, but there is no mechanism to
 restore in-flight mode context (routing decisions, implementation choices) or
 task lists built up before the compaction boundary.
 
-The fix is a session-keyed state store on disk (`.ws/sessions/<session-key>.json`)
-holding two namespaces:
+The fix is a session-keyed state store on disk, added as fields on the existing
+per-session record file (`<cache-root>/keys/<session-key>.json`) that
+`ws.ferrule` already mints, holding two namespaces:
 
 - **agenda** — named blobs recording session-level mode context ("what are we
   doing and why"); reminded at workflow-manual load only.
@@ -166,7 +167,8 @@ explicit via `ws.todo.check`.
 Implement the storage layer and all MCP tool handlers in
 `agents-plugin-tool/internal/mcp/`:
 
-- `.ws/sessions/` directory convention and `<session-key>.json` schema.
+- Additive `agenda`/`todos` fields on the existing `sessionRecord`
+  (`<cache-root>/keys/<session-key>.json`), reusing its atomic temp+rename writer.
 - `ws.agenda.set`, `ws.agenda.clear` handlers.
 - `ws.enter.implement`, `ws.enter.proceed`, `ws.enter.sprint`,
   `ws.enter.salvage` handlers; each validates typed parameters, stores agenda

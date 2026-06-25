@@ -186,6 +186,68 @@ minted after they fall out of its own (compacted or restarted) context.
     `#260512-mcp-llm-readable-output-defaults`; `format: "json"` is the
     structured escape hatch.
 
+## Session State Tools {#260625-session-state-tools}
+
+The session state machine persists routing and implementation context across
+context compaction. After compaction the session key is the only stable anchor
+that survives, so the state is stored as additive fields on the existing
+per-session record file (`<cache-root>/keys/<session-key>.json`, the same file
+`ws.ferrule` mints) rather than in a separate store. Writes reuse the record's
+atomic temp-write+rename path, so a concurrent reader never observes a partial
+record; fields are omitted when empty and unknown fields are ignored, preserving
+backward and forward compatibility.
+
+Two namespaces share the record:
+
+- **agenda** — named blobs recording session-level mode context ("what are we
+  doing and why"). Reminded at workflow-manual load only, not at intermediate
+  checkpoints.
+- **todos** — an ordered step-level checklist. Injected at every restoration
+  point (workflow-manual load and major checkpoints).
+
+All session-state tools require a `session_key` and are reachable by any role
+that holds one — they carry no `session.`/`config.`/`ws.lead.` prefix, so the
+keyed capability gate does not restrict them to the lead. This lets a lead
+populate state and hand its key to a delegate that reads or extends it; a child
+that mints its own key via `ws.ferrule` has independent state.
+
+**Agenda (freeform).** `ws.agenda.set(key, value)` upserts an arbitrary JSON
+object blob; `ws.agenda.clear(key)` removes one (a missing key is a no-op). These
+are the fallback primitives for modes not covered by a typed enter tool.
+
+**Enter (typed mode switches).** `ws.enter.implement`, `ws.enter.proceed`,
+`ws.enter.sprint`, and `ws.enter.salvage` each perform one atomic write that both
+stores the typed payload as an agenda blob (keyed by the mode name) and
+**replaces** the entire todo list with items derived from the mode. Because the
+list is replaced, calling any enter tool is always a mode switch; a prior mode's
+derived list is discarded. Derivation logic lives in Go, so no skill-side
+`ws.todo.append` loop is needed for a covered mode:
+
+- `implement`: always Route, Prep, Edit, Final action gate, Merge; `need_review`
+  inserts Review after Edit; `need_doc` inserts Doc pre-pass, Doc commit gate, and
+  Doc closeout (mirroring the lead-implement pipeline order).
+- `proceed`: Build route context, Select route, Emit routing verdict, Execute
+  verdict.
+- `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
+- `salvage`: Containment, Survey fanout, Premise interview, Classification,
+  Capture.
+
+**Todo.** Item identity is a caller-provided `key`, unique within the active
+list; a duplicate key is rejected, and an erased key is reusable. Mutations
+(`ws.todo.append`, `insert_before`, `insert_after`, `check`, `erase`, `clear`,
+`reorder`) return a compact confirmation; `ws.todo.list` returns rendered text.
+`clear(done_only=false)` removes all items; `done_only=true` removes only `done`
+items. `reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
+contiguous span as a block; the ref_key must lie outside the span.
+
+Rendering markers: `- [ ]` pending, `- [~]` wip, `- [x]` done, `- [>]` defer.
+Summary mode (the default and the checkpoint-injection mode) shows every
+pending/wip item plus one adjacent context item on each side of each contiguous
+active block, collapsing every other run to a single `...` line; `defer`
+collapses the same as `done`. Full mode shows every item in order. `ws.commit`
+does not auto-mark todos; status transitions are always explicit via
+`ws.todo.check`.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current

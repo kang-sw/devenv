@@ -52,6 +52,13 @@ type sessionRecord struct {
 	// identifiers; values are string-encoded config values. Added as an additive
 	// field; existing records without it parse with a nil map.
 	Overrides map[string]string `json:"overrides,omitempty"`
+	// Agenda holds session-level mode-context blobs keyed by name. Values are
+	// arbitrary JSON objects (typed enter-payloads or freeform notes). Added as
+	// an additive field; older records parse with a nil map. See session_state.go.
+	Agenda map[string]json.RawMessage `json:"agenda,omitempty"`
+	// Todos is the ordered step-level checklist for the session. Added as an
+	// additive field; older records parse with a nil slice. See session_state.go.
+	Todos []todoItem `json:"todos,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1

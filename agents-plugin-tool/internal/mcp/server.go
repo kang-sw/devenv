@@ -364,6 +364,34 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.children":
 		return s.handleSessionChildren(req.ID, params.Arguments)
+	case "ws.agenda.set":
+		return s.handleAgendaSet(req.ID, params.Arguments)
+	case "ws.agenda.clear":
+		return s.handleAgendaClear(req.ID, params.Arguments)
+	case "ws.enter.implement":
+		return s.handleEnterImplement(req.ID, params.Arguments)
+	case "ws.enter.proceed":
+		return s.handleEnterProceed(req.ID, params.Arguments)
+	case "ws.enter.sprint":
+		return s.handleEnterSprint(req.ID, params.Arguments)
+	case "ws.enter.salvage":
+		return s.handleEnterSalvage(req.ID, params.Arguments)
+	case "ws.todo.append":
+		return s.handleTodoAppend(req.ID, params.Arguments)
+	case "ws.todo.insert_before":
+		return s.handleTodoInsert(req.ID, params.Arguments, false)
+	case "ws.todo.insert_after":
+		return s.handleTodoInsert(req.ID, params.Arguments, true)
+	case "ws.todo.check":
+		return s.handleTodoCheck(req.ID, params.Arguments)
+	case "ws.todo.erase":
+		return s.handleTodoErase(req.ID, params.Arguments)
+	case "ws.todo.clear":
+		return s.handleTodoClear(req.ID, params.Arguments)
+	case "ws.todo.list":
+		return s.handleTodoList(req.ID, params.Arguments)
+	case "ws.todo.reorder":
+		return s.handleTodoReorder(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -2292,6 +2320,213 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "ws.agenda.set",
+			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed ws.enter.* tool.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Agenda blob name to upsert."),
+					"value":       objectProperty("Arbitrary JSON object stored under key."),
+				},
+				"required": []string{"session_key", "key", "value"},
+			},
+		},
+		{
+			"name":        "ws.agenda.clear",
+			"description": "Remove the session-level agenda blob stored under a key. A missing key is a no-op.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Agenda blob name to remove."),
+				},
+				"required": []string{"session_key", "key"},
+			},
+		},
+		{
+			"name":        "ws.enter.implement",
+			"description": "Enter implement mode: store the typed payload as the 'implement' agenda blob AND replace the todo list with the derived implement checklist (Route, Prep, Edit, [Review], [Doc pre-pass/commit-gate/closeout], Final action gate, Merge). Calling any ws.enter.* tool is a mode switch; the prior todo list is discarded.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":    stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"delegation":     stringProperty("Delegation posture for this implementation (e.g. delegated, inline)."),
+					"plan_depth":     stringProperty("Planning depth (e.g. survey, full-plan)."),
+					"branch_mode":    stringProperty("Branch strategy (e.g. worktree, in-place)."),
+					"review_alloc":   stringProperty("Review allocation (e.g. partitioned, single)."),
+					"current_branch": stringProperty("Current implementation branch name."),
+					"merge_target":   stringProperty("Intended merge target branch."),
+					"start_commit":   stringProperty("Implementation-start commit hash."),
+					"active_agents":  objectArrayProperty("Active delegate agents as {name, role, started} objects, to preserve agent-name context across compaction."),
+					"need_review":    boolProperty("When true, include the Review step in the derived todo list."),
+					"need_doc":       boolProperty("When true, include Doc pre-pass, Doc commit gate, and Doc closeout steps."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.enter.proceed",
+			"description": "Enter routing mode: store the typed payload as the 'proceed' agenda blob AND replace the todo list with the lead-proceed checklist (Build route context, Select route, Emit routing verdict, Execute verdict).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"ticket":      stringProperty("Target ticket stem or path being routed."),
+					"phase":       stringProperty("Selected phase, when one is named."),
+					"next_skill":  stringProperty("Routed next skill (e.g. lead-implement, lead-write-ticket)."),
+					"conditions":  stringArrayProperty("Routing conditions or blockers captured during route context."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.enter.sprint",
+			"description": "Enter sprint-episode mode: store the typed payload as the 'sprint' agenda blob AND replace the todo list with the sprint episode lifecycle (Edit, Verify, Commit, Post-edit decision, Wrap episode).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":          stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"episode_slug":         stringProperty("Short kebab-case slug identifying the sprint-edit episode."),
+					"episode_start":        stringProperty("Episode-start commit hash (parent of the first marked commit)."),
+					"current_edit_context": stringProperty("One-line description of the current edit context."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.enter.salvage",
+			"description": "Enter salvage mode: store the typed payload as the 'salvage' agenda blob AND replace the todo list with the salvage pipeline (Containment, Survey fanout, Premise interview, Classification, Capture).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":        stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"failure_claim":      stringProperty("User-confirmed failure claim."),
+					"confirmed_premises": stringArrayProperty("Invalidated premises the user has confirmed."),
+					"survey_status":      stringProperty("Survey fanout status (e.g. pending, in-progress, complete)."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.todo.append",
+			"description": "Append a new pending todo item with a caller-provided key (unique within the active list) and title. Erased keys are reusable.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Caller-provided item key, unique within the active list."),
+					"title":       stringProperty("Human-facing item title."),
+				},
+				"required": []string{"session_key", "key", "title"},
+			},
+		},
+		{
+			"name":        "ws.todo.insert_before",
+			"description": "Insert a new pending todo item immediately before ref_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"ref_key":     stringProperty("Existing item key to insert before."),
+					"key":         stringProperty("Caller-provided item key, unique within the active list."),
+					"title":       stringProperty("Human-facing item title."),
+				},
+				"required": []string{"session_key", "ref_key", "key", "title"},
+			},
+		},
+		{
+			"name":        "ws.todo.insert_after",
+			"description": "Insert a new pending todo item immediately after ref_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"ref_key":     stringProperty("Existing item key to insert after."),
+					"key":         stringProperty("Caller-provided item key, unique within the active list."),
+					"title":       stringProperty("Human-facing item title."),
+				},
+				"required": []string{"session_key", "ref_key", "key", "title"},
+			},
+		},
+		{
+			"name":        "ws.todo.check",
+			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to update."),
+					"status":      enumStringProperty("New status.", []string{"pending", "wip", "done", "defer"}),
+				},
+				"required": []string{"session_key", "key", "status"},
+			},
+		},
+		{
+			"name":        "ws.todo.erase",
+			"description": "Remove a todo item by key. The key becomes reusable afterwards.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to remove."),
+				},
+				"required": []string{"session_key", "key"},
+			},
+		},
+		{
+			"name":        "ws.todo.clear",
+			"description": "Remove all todo items, or only done items when done_only is true (leaving pending, wip, defer).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"done_only":   boolProperty("When true, remove only done items. Defaults to false (remove all)."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.todo.list",
+			"description": "Render the todo list. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"mode":        enumStringProperty("Rendering mode. Defaults to summary.", []string{"summary", "full"}),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.todo.reorder",
+			"description": "Move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"span": map[string]any{
+						"type":        "object",
+						"description": "Contiguous span to move, by key.",
+						"properties": map[string]any{
+							"from_key": stringProperty("First item key of the span."),
+							"to_key":   stringProperty("Last item key of the span."),
+						},
+						"required": []string{"from_key", "to_key"},
+					},
+					"position": map[string]any{
+						"type":        "object",
+						"description": "Destination relative to a ref_key. Set exactly one of before or after.",
+						"properties": map[string]any{
+							"before": stringProperty("Move the span before this ref_key."),
+							"after":  stringProperty("Move the span after this ref_key."),
+						},
+					},
+				},
+				"required": []string{"session_key", "span", "position"},
+			},
+		},
+		{
 			"name":        "api.list",
 			"description": "Return sorted local API documentation cache domain names under ai-docs/.deps.",
 			"inputSchema": map[string]any{
@@ -3404,6 +3639,25 @@ func boolProperty(description string) map[string]string {
 	return map[string]string{
 		"type":        "boolean",
 		"description": description,
+	}
+}
+
+// objectProperty describes a free-form JSON object parameter (no fixed property
+// schema), used for arbitrary payloads such as ws.agenda.set value blobs.
+func objectProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": description,
+	}
+}
+
+// objectArrayProperty describes an array-of-objects parameter without pinning a
+// per-item schema, used for typed enter-payload lists such as active_agents.
+func objectArrayProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"description": description,
+		"items":       map[string]any{"type": "object"},
 	}
 }
 
