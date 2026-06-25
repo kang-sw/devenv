@@ -153,7 +153,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260625-feat-lead-tune-schema-backed-knob-catalog` | ready | Add a schema-backed `config.tuning` catalog so `lead-tune` discovers tuning knobs without copying writer schemas |
 | `260624-feat-workflow-lead-language-config` | ready | Add `workflow.lang` config key so lead agent responds in user's preferred language while keeping CoT and subagent prompts in English |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
@@ -191,6 +190,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
 | `260523-bug-ws-mcp-launcher-runtime-repair-race` | idea | Investigate ws-mcp launcher runtime repair race behavior |
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
+| `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit` | idea | Capture wsflow rsrc mirror drift when canonical shipped rsrc edits are not mirrored |
 | `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
 | `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
@@ -201,12 +201,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260625-feat-lead-tune-schema-backed-knob-catalog` (ready, feat) -
-  implement `config.tuning` as a read-only schema-backed catalog for
-  `ws:lead-tune`. Phase 1 adds the MCP catalog, derives prompt entries from
-  override markers, derives non-prompt fields from writer tool schemas where
-  possible, omits full-ws-only knobs in wsflow/no-agent mode, and updates
-  `lead-tune` to call the catalog instead of copying enum lists.
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-

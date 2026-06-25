@@ -10,6 +10,7 @@ related-mental-model:
   - mcp-runtime
   - prompt-bundle
   - workflow-skills
+completed: 2026-06-25
 ---
 
 # Schema-backed tuning knob catalog for lead-tune
@@ -110,3 +111,25 @@ Verification:
 - Lead-tune rsrc tests or snapshots confirm the playbook calls
   `config.tuning` and no longer copies the `prefer_mercenary` or tier enum
   lists.
+
+### Result (f171bd2) - 2026-06-25
+
+Implemented `config.tuning` as a read-only MCP catalog backed by existing writer
+tool schemas and live prompt override-point discovery. Full ws catalog output
+includes prompt override knobs, `delegation.prefer_mercenary`, and `agents.tier`;
+wsflow/no-agent catalog output keeps prompt knobs and omits full-ws-only knobs.
+
+Updated `lead-tune` to load `config.tuning` first and use catalog-provided
+writer/field metadata for proposals instead of duplicating enum lists in prose.
+Regenerated the canonical rsrc manifest and byte-identical wsflow rsrc mirror.
+
+Verification:
+
+- `go test ./internal/mcp ./internal/wsrsrc ./cmd/ws-mcp -count=1`
+- `python3 -m unittest discover ../agents-plugin-wsflow/tests`
+- `git diff --check`
+
+
+## Resolution (2026-06-25)
+
+Implemented schema-backed config.tuning catalog and updated lead-tune to consume catalog metadata. Verification passed with focused Go MCP/wsrsrc/ws-mcp tests and wsflow package tests.
