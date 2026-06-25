@@ -1,6 +1,6 @@
 ---
 title: Refactor workflow delegation posture into config keys
-sage-review: blocked
+sage-review: pending
 spec:
   - 260505-config-tools
   - 260625-tuning-catalog
@@ -42,8 +42,14 @@ subagent posture reusing the existing `lead-prefer-subagent` playbook.
   `prompt.DelegationSection.*` prompt override entries and old
   `"prefer_mercenary"` entries may remain unused because this behavior has not
   shipped.
-- Add stored config key `"workflow.prefer_subagent"` with values `on|off`,
-  builtin default `off`, and session default scope.
+- Add stored config key `"workflow.prefer_subagent"` with values `on|off` and
+  builtin default `off`.
+- Treat `"workflow.prefer_subagent"` as a global bootstrap preference, not as a
+  session or project scoped setting.
+- Keyless `playbook.print(name: "lead-workflow-manual")` honors only
+  global/builtin state for `"workflow.prefer_subagent"` bootstrap insertion.
+- Do not implement project-level prefer-subagent behavior in this ticket.
+- Do not move prefer-subagent prompt paste to `ws.ferrule` in this ticket.
 - Add writer tool `config.workflow_prefer_subagent`.
 - When `"workflow.prefer_subagent" == "on"`, `lead-workflow-manual` always
   appends the rendered `lead-prefer-subagent` playbook. Do not add a duplicate
@@ -51,6 +57,9 @@ subagent posture reusing the existing `lead-prefer-subagent` playbook.
 - Rename/refactor mercenary preference into stored config key
   `"workflow.prefer_mercenary"` with values `on|off|hide`, preserving builtin
   default `hide`.
+- Remove session-scope/default behavior from mercenary preference. Treat
+  `"workflow.prefer_mercenary"` as a workflow-prefixed file/global preference
+  because `hide` can affect keyless tool-surface visibility.
 - Add writer tool `config.workflow_prefer_mercenary`.
 - Remove `ws.lead.prefer_mercenary` immediately. Do not keep an alias and do not
   migrate old stored values.
@@ -63,6 +72,9 @@ subagent posture reusing the existing `lead-prefer-subagent` playbook.
 - The automatic `lead-prefer-subagent` append must render through the existing
   harness-aware playbook renderer, prompt override resolver, and product-mode
   filtering pipeline. Raw file concatenation is forbidden.
+- The automatic append path must not require a session key or project root.
+  During keyless workflow manual loading it may read only global and builtin
+  state.
 - Standalone `playbook.print` and `playbook.render` output remains Markdown.
 - Do not introduce a new template include syntax for this behavior.
 - The accepted behavior allows double insertion if a user enables
@@ -80,6 +92,26 @@ subagent posture reusing the existing `lead-prefer-subagent` playbook.
   small boolean or enum workflow posture state.
 - Existing playbook `includes:` are static fragments around one playbook, not a
   contract for conditionally rendering another playbook.
+
+## Blocker Resolution (2026-06-25)
+
+The Sage design review identified that the original plan made
+`"workflow.prefer_subagent"` a session-default item even though
+`lead-workflow-manual` is normally loaded before `ws.ferrule(root)` mints a
+session key. That would make the new toggle ineffective in the common keyless
+manual bootstrap path.
+
+Resolve that blocker with Option 1:
+
+- `"workflow.prefer_subagent"` is a global bootstrap preference, not a session
+  or project scoped setting.
+- Keyless `playbook.print(name: "lead-workflow-manual")` honors only global and
+  builtin state for `"workflow.prefer_subagent"` bootstrap insertion.
+- Project-level prefer-subagent behavior is out of scope for this ticket.
+- `ws.ferrule` prompt paste is out of scope for this ticket.
+- `"workflow.prefer_mercenary"` also removes session-scope/default behavior and
+  becomes a workflow-prefixed file/global preference. This is an intentional
+  contract change and requires a fresh Sage review.
 
 ## Pragmatic Playbook Concatenation Standard
 
@@ -122,17 +154,18 @@ format.
 
 Implement the workflow config keys and public writer tool changes:
 
-- register `"workflow.prefer_subagent"` with values `on|off`, builtin default
-  `off`, and session default scope;
+- register `"workflow.prefer_subagent"` with values `on|off` and builtin
+  default `off` as a global bootstrap preference;
 - register `"workflow.prefer_mercenary"` with values `on|off|hide`, preserving
-  builtin default `hide`;
+  builtin default `hide` as a workflow-prefixed file/global preference;
 - add `config.workflow_prefer_subagent`;
 - add `config.workflow_prefer_mercenary`;
 - remove `ws.lead.prefer_mercenary` immediately, with no alias and no migration;
 - leave old `"prefer_mercenary"` stored values orphaned.
 
-Verification should cover keyed access control, default resolution, config
-show/list behavior, and schema projection for the new writer tools.
+Verification should cover keyed access control, global/builtin default
+resolution in keyless paths, config show/list behavior, and schema projection
+for the new writer tools.
 
 ### Phase 2: Workflow manual auto-insertion and wrapper helper
 
@@ -141,7 +174,8 @@ Refactor `lead-workflow-manual` rendering:
 - remove the `DelegationSection` prompt override point;
 - keep `UserPreferenceSection`;
 - when `"workflow.prefer_subagent" == "on"`, append
-  `lead-prefer-subagent` every time the manual is rendered;
+  `lead-prefer-subagent` every time the manual is rendered from global/builtin
+  bootstrap state;
 - render the appended playbook through the normal harness-aware renderer,
   prompt override lookup, and product-mode pass;
 - wrap the appended body in
@@ -151,7 +185,9 @@ Refactor `lead-workflow-manual` rendering:
 
 Verification should prove Codex receives the Codex invocation guidance through
 the builtin override, Claude does not receive Codex-specific guidance, and raw
-file concatenation is not used.
+file concatenation is not used. It should also prove keyless workflow manual
+loading applies global/builtin `"workflow.prefer_subagent"` state without a
+session key.
 
 ### Phase 3: Lead-tune, catalog, docs, tests, and wsflow polish
 
