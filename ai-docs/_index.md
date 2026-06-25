@@ -153,6 +153,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
+| `260625-refactor-workflow-delegation-config` | ready | Move delegation posture into workflow config keys; Phase 1 config/API refactor complete, Phase 2 manual auto-insertion next |
 | `260624-feat-workflow-lead-language-config` | ready | Add `workflow.lang` config key so lead agent responds in user's preferred language while keeping CoT and subagent prompts in English |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |

@@ -180,6 +180,34 @@ Verification should cover keyed access control, global/builtin default
 resolution in keyless paths, config show/list behavior, and schema projection
 for the new writer tools.
 
+### Result (25c50a7a) - 2026-06-25
+
+Phase 1 is complete. The implementation introduced global-only workflow
+preference items `"workflow.prefer_subagent"` (`on|off`, builtin `off`) and
+`"workflow.prefer_mercenary"` (`on|off|hide`, builtin `hide`), added writer
+tools `config.workflow_prefer_subagent` and
+`config.workflow_prefer_mercenary`, and removed `ws.lead.prefer_mercenary`
+without alias or migration. Old `"prefer_mercenary"` stored values are
+intentionally orphaned.
+
+Review fixes in `25c50a7a` tightened the contract after the initial
+implementation in `f4144db5`: workflow preference writes now require a valid
+lead `session_key`, `runtime.capabilities` uses the same global/builtin
+`"workflow.prefer_mercenary" == "hide"` filter as `tools/list`, and tests cover
+subagent on/off, explicit mercenary hide, keyless re-hide, and production-path
+visibility behavior.
+
+Verification passed: `go test ./internal/wsconfig -count=1`,
+`go test ./internal/mcp -count=1 -run 'Test.*WorkflowPrefer|Test.*PreferMercenary|TestConfigTuning|TestNoAgent|TestRuntimeCapabilities|TestLeadToolNames'`,
+`go test ./internal/mcp ./internal/wsconfig ./cmd/ws-mcp -count=1`,
+`python3 -m unittest discover ../agents-plugin-wsflow/tests`,
+`git diff --check`, and `ws/spec_index.verify`. Follow-up reviews were clean.
+
+Deferred to Phase 2/3: `lead-workflow-manual` auto-insertion, XML playbook
+wrapper helper, `DelegationSection` removal, lead-tune routing, rsrc/wsflow
+prompt polish, and any remaining docs/tests tied to those unimplemented
+surfaces.
+
 ### Phase 2: Workflow manual auto-insertion and wrapper helper
 
 Refactor `lead-workflow-manual` rendering:
