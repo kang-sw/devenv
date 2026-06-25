@@ -58,8 +58,11 @@ subagent posture reusing the existing `lead-prefer-subagent` playbook.
   `"workflow.prefer_mercenary"` with values `on|off|hide`, preserving builtin
   default `hide`.
 - Remove session-scope/default behavior from mercenary preference. Treat
-  `"workflow.prefer_mercenary"` as a workflow-prefixed file/global preference
-  because `hide` can affect keyless tool-surface visibility.
+  `"workflow.prefer_mercenary"` as global-only, not project scoped and not
+  session scoped, because `hide` can affect keyless tool-surface visibility
+  before session, root, or project state is known.
+- Keyless tool-surface visibility and later render guidance both read the same
+  global/builtin `"workflow.prefer_mercenary"` value.
 - Add writer tool `config.workflow_prefer_mercenary`.
 - Remove `ws.lead.prefer_mercenary` immediately. Do not keep an alias and do not
   migrate old stored values.
@@ -110,8 +113,18 @@ Resolve that blocker with Option 1:
 - Project-level prefer-subagent behavior is out of scope for this ticket.
 - `ws.ferrule` prompt paste is out of scope for this ticket.
 - `"workflow.prefer_mercenary"` also removes session-scope/default behavior and
-  becomes a workflow-prefixed file/global preference. This is an intentional
-  contract change and requires a fresh Sage review.
+  becomes a global-only workflow preference. This is an intentional contract
+  change and requires a fresh Sage review.
+
+Resolve the second Sage design blocker with Option 1:
+
+- `"workflow.prefer_mercenary"` is global-only, not project+global and not
+  session scoped.
+- Rationale: `hide` affects keyless tool-surface visibility before session,
+  root, or project state can be known, so keyless visibility and later render
+  guidance should read the same global/builtin value.
+- Do not implement a hybrid where keyless visibility reads one scope subset and
+  later render guidance reads another.
 
 ## Pragmatic Playbook Concatenation Standard
 
@@ -157,7 +170,7 @@ Implement the workflow config keys and public writer tool changes:
 - register `"workflow.prefer_subagent"` with values `on|off` and builtin
   default `off` as a global bootstrap preference;
 - register `"workflow.prefer_mercenary"` with values `on|off|hide`, preserving
-  builtin default `hide` as a workflow-prefixed file/global preference;
+  builtin default `hide` as a global-only workflow preference;
 - add `config.workflow_prefer_subagent`;
 - add `config.workflow_prefer_mercenary`;
 - remove `ws.lead.prefer_mercenary` immediately, with no alias and no migration;
@@ -207,9 +220,11 @@ Align the surrounding workflow surfaces:
 This phase should also include spec closeout updates if implementation details
 require planned spec text to be finalized or narrowed.
 
-## Blocked (2026-06-25)
+## Superseded Blocked Review History (2026-06-25)
 
-Sage Review Gate final verdict: block.
+Historical Sage Review Gate final verdict: block. This section records the
+earlier blocker that is now superseded by `## Blocker Resolution (2026-06-25)`.
+It is not an active unresolved block for the current ticket text.
 
 ### Design Reviewer Verdict: block
 
