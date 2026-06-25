@@ -3,6 +3,9 @@ title: ws session state machine — agenda and todo persistence across compactio
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
+spec:
+  - mcp-tools
+sage-review: completed
 ---
 
 # ws session state machine — agenda and todo persistence across compaction
@@ -12,7 +15,8 @@ related-mental-model:
 After context compaction, routing and implementation context is lost from the
 session transcript. The session key (returned by `ws_ferrule`) is the only
 stable anchor that survives compaction, because it appears in the compaction
-summary.
+summary. Session key survival across compaction is accepted best-effort risk;
+fork-driven operation minimizes compaction frequency in practice.
 
 Workflow manual reload happens after compaction, but there is no mechanism to
 restore in-flight mode context (routing decisions, implementation choices) or
@@ -33,7 +37,11 @@ from the transition parameters.
 
 ### Storage
 
-`.ws/sessions/<session-key>.json` is the single backing file per session.
+Agenda and todo state is stored as additional fields in the existing session
+key backing file at `<cache-root>/keys/<session-key>.json`, merging into the
+file that `ws_ferrule` already manages. No separate file path is introduced.
+
+Added fields:
 
 ```json
 {
@@ -46,7 +54,9 @@ from the transition parameters.
 }
 ```
 
-The file is created on first write and ignored if absent (no state = clean session).
+Fields are omitted when empty. Writes use atomic write-and-replace (temp file +
+rename) to ensure consistency for concurrent readers such as the ws dashboard.
+The session actor is the sole writer; concurrent reads are safe.
 
 ### Agenda API (generic, freeform)
 
@@ -130,6 +140,15 @@ contiguous block of non-done/non-defer items, one adjacent item on each side
 Checkpoint injection always uses summary mode. Explicit `ws.todo.list()` defaults
 to summary; pass `mode: "full"` for the complete ordered list.
 
+### Scoping
+
+Agenda and todo state is accessible to any agent that holds a valid session key,
+not restricted to the lead session. This enables the lead to populate a todo list
+via `ws.enter.*` and pass the session key to a delegate, which can then read,
+update, or extend the list during its own execution. Each child actor mints its
+own session key via `ws_ferrule`; its agenda/todo state is independent unless
+the lead explicitly shares its own session key.
+
 ### Behavioral separation rule
 
 | Layer  | Restoration point                                    | Mechanism                         |
@@ -159,9 +178,16 @@ Implement the storage layer and all MCP tool handlers in
   `>=<next-minor>`.
 - Unit tests covering: concurrent write safety, key uniqueness enforcement,
   enter-tool todo derivation per flag combination, reorder correctness.
+- Note: todo derivation rules for `ws.enter.proceed`, `ws.enter.sprint`, and
+  `ws.enter.salvage` should be derived from the respective skill playbooks
+  (`lead-proceed.md`, `lead-sprint.md`, `lead-salvage.md`) during implementation.
 
 Spec closeout: add `ws.agenda.*`, `ws.enter.*`, and `ws.todo.*` tool entries to
 `ai-docs/spec/mcp-tools.md`.
+
+Verify via: integration probe confirming all MCP handlers are reachable through
+`runtime.json`; unit tests for concurrent write safety, key uniqueness,
+enter-tool derivation per flag combination, reorder correctness.
 
 ### Phase 2: Existing skill integration
 
@@ -218,6 +244,10 @@ produce transcript-only routing or implementation context.
   (layer purposes, restoration points, typed vs. freeform entry) for all
   delegate agents.
 
+Verify via: per-skill smoke test confirming the enter tool is called at the
+correct point and the derived todo list matches expected items; review of
+`delegate-orientation.md` update for accuracy.
+
 ### Phase 3: Workflow manual integration
 
 - Add a "Session State" section to the workflow manual render, injected at load.
@@ -228,3 +258,7 @@ produce transcript-only routing or implementation context.
 - Update `ws.commit` checkpoint logic to re-inject the todo list after commit.
 - Document restoration behavior in `ai-docs/spec/plugin-runtime.md` and
   `ai-docs/ref/ws-mcp.md`.
+
+Verify via: compaction simulation confirming the agenda remind section appears
+in workflow-manual reload output; checkpoint probe confirming todo summary
+injects after `ws.commit`.
