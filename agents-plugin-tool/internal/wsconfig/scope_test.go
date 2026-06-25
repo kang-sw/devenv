@@ -265,6 +265,67 @@ func TestDefaultScopeFallbackToProject(t *testing.T) {
 	}
 }
 
+func TestWorkflowPreferenceDefaultScopesAreGlobalOnly(t *testing.T) {
+	for _, key := range []string{ItemWorkflowPreferSubagent, ItemWorkflowPreferMercenary} {
+		if got := DefaultScope(key); got != ScopeGlobal {
+			t.Fatalf("DefaultScope(%q) = %s, want global", key, got)
+		}
+		if !GlobalOnly(key) {
+			t.Fatalf("GlobalOnly(%q) = false, want true", key)
+		}
+	}
+}
+
+func TestGlobalOnlyWorkflowPreferenceSkipsSessionAndProject(t *testing.T) {
+	sess := newFakeSessionStore()
+	builtins := map[string]string{ItemWorkflowPreferSubagent: "off"}
+	r, opts := newTestResolver(t, builtins, sess)
+	const sessionKey = "sk"
+
+	if err := r.Set(ItemWorkflowPreferSubagent, "project-on", SetOptions{ExplicitScope: ScopeProject}); err == nil {
+		t.Fatal("explicit project write for global-only item succeeded; want error")
+	}
+	if err := r.Set(ItemWorkflowPreferSubagent, "session-on", SetOptions{ExplicitScope: ScopeSession, SessionKey: sessionKey}); err == nil {
+		t.Fatal("explicit session write for global-only item succeeded; want error")
+	}
+
+	// Simulate orphaned/manual values in lower scopes. Global-only resolution must
+	// ignore them and fall through to builtin until a global value exists.
+	if err := setOverrideInFile(mustProjectPath(t, opts), ItemWorkflowPreferSubagent, "project-on"); err != nil {
+		t.Fatalf("seed project value: %v", err)
+	}
+	if err := sess.SetOverride(sessionKey, ItemWorkflowPreferSubagent, "session-on"); err != nil {
+		t.Fatalf("seed session value: %v", err)
+	}
+	rv, err := r.Get(sessionKey, ItemWorkflowPreferSubagent)
+	if err != nil {
+		t.Fatalf("get builtin: %v", err)
+	}
+	if rv.Value != "off" || rv.Scope != ScopeBuiltin {
+		t.Fatalf("global-only get with only session/project values = %q/%s, want off/builtin", rv.Value, rv.Scope)
+	}
+
+	if err := r.Set(ItemWorkflowPreferSubagent, "on", SetOptions{}); err != nil {
+		t.Fatalf("default global write: %v", err)
+	}
+	rv, err = r.Get(sessionKey, ItemWorkflowPreferSubagent)
+	if err != nil {
+		t.Fatalf("get global: %v", err)
+	}
+	if rv.Value != "on" || rv.Scope != ScopeGlobal {
+		t.Fatalf("global-only get after global write = %q/%s, want on/global", rv.Value, rv.Scope)
+	}
+}
+
+func mustProjectPath(t *testing.T, opts Options) string {
+	t.Helper()
+	path, err := Path(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestGlobalPathUsesConfigHomeEnvVar verifies that $WS_CONFIG_HOME controls
 // the global config file location.
 func TestGlobalPathUsesConfigHomeEnvVar(t *testing.T) {

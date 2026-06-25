@@ -301,6 +301,21 @@ func RuntimeNamespace() string {
 	return value
 }
 
+func builtinConfigDefaults() map[string]string {
+	return map[string]string{
+		wsconfig.ItemWorkflowPreferSubagent:  "off",
+		wsconfig.ItemWorkflowPreferMercenary: "hide",
+	}
+}
+
+func builtinConfigAndPromptDefaults() map[string]string {
+	defaults := builtinConfigDefaults()
+	for k, v := range builtinPromptOverrideDefaults() {
+		defaults[k] = v
+	}
+	return defaults
+}
+
 // wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
 // a word boundary so that words containing "ws" as an interior substring (e.g.
 // "news/", "rows:", "workflows/") are never mangled.
@@ -453,17 +468,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return execRawGrepResponse(req.ID, result, err)
 	case "config.show":
 		sessionKey, _ := params.Arguments["session_key"].(string)
-		var view wsconfig.View
-		var err error
-		if sessionKey != "" {
-			// When a session key is supplied, use ScopedShow so that
-			// ResolvedOverrides is populated with per-key scope labels.
-			adapter := sessionConfigAdapter{s: s.sessions}
-			r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-			view, err = wsconfig.ScopedShow(&r, wsconfig.Options{}, sessionKey)
-		} else {
-			view, err = wsconfig.Show(wsconfig.Options{})
-		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		view, err := wsconfig.ScopedShow(&r, wsconfig.Options{}, strings.TrimSpace(sessionKey))
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, view, err)
 		}
@@ -484,6 +491,36 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
 		}
 		return toolJSONResponse(req.ID, cfg, err)
+
+	case "config.workflow_prefer_subagent":
+		value, _ := params.Arguments["value"].(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value must be one of on, off; got %q", value))
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:global]\n", value), nil)
+
+	case "config.workflow_prefer_mercenary":
+		value, _ := params.Arguments["value"].(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off", "hide":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: value must be one of on, off, hide; got %q", value))
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_mercenary: %s [scope:global]\n", value), nil)
 
 	case "config.prompt.set":
 		// Lead-only setter for prompt override-points. The config.* prefix gate in
@@ -524,9 +561,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			explicitScope = wsconfig.Scope(scopeArg)
 		}
 		// Write through the layered config resolver. Use wsconfig.Options{} (ambient
-		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as config.agents_tier and
-		// prefer_mercenary do; do NOT call resolveToolRoot (config.* tools are not
-		// root-aware per mcp-runtime mental model).
+		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as other config.* tools do; do NOT
+		// call resolveToolRoot (config.* tools are not root-aware per mcp-runtime
+		// mental model).
 		overrideKey := "prompt." + pointID + "." + harness
 		adapter := sessionConfigAdapter{s: s.sessions}
 		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
@@ -603,7 +640,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Build the resolver exactly as the setter does: ambient Options, not
 		// root-aware (config.* tools resolve from WS_CACHE_HOME/WS_CONFIG_HOME).
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
 		list := buildPromptOverrideListing(points, &resolver, sessionKey)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, list, nil)
@@ -622,7 +659,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
 		catalog, err := buildTuningCatalog(rsrcRoot, &resolver, sessionKey, NoAgentMode())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -982,7 +1019,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// Build an override lookup from the session-keyed resolver when a session_key
-		// is present (same pattern as the prefer_mercenary read path in playbook.render).
+		// is present.
 		keyStr, _ := params.Arguments["session_key"].(string)
 		printOverrideLookup := buildOverrideLookup(s, keyStr)
 		// Resolve workflow.lang for language-binding injection.
@@ -1035,12 +1072,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 					mintRoot = entry.root
 				}
 				parentKey = capturedKey
-				// Resolve prefer_mercenary through the layered config resolver
-				// (session > project > global > builtin) so both enable and disable
-				// transitions are visible (260618 closer). Builtin default is false.
+				// Mercenary preference is a global workflow setting because it
+				// also controls keyless tool-surface visibility.
 				adapter := sessionConfigAdapter{s: s.sessions}
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-				preferMercenary, _, _ = resolver.GetBool(capturedKey, wsconfig.ItemPreferMercenary)
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+				rv, _ := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
+				preferMercenary = canonicalPreferMercenaryValue(rv.Value) == "on"
 			}
 		}
 
@@ -1050,57 +1087,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
 		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
-
-	case "ws.lead.prefer_mercenary":
-		// Lead-only desired-state setter for the default delegation guidance toggle.
-		// The ws.lead.* prefix gate in callTool already blocks non-lead keys —
-		// do not add a second role check here (sole keyed-gate-is-authority rule).
-		keyStr, _ := params.Arguments["session_key"].(string)
-		keyStr = strings.TrimSpace(keyStr)
-		if keyStr == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
-		}
-		// Resolve value from the new `value` string param (on|off|hide) first;
-		// fall back to the legacy `enabled` bool for backward compatibility.
-		var configValue string
-		if v, ok := params.Arguments["value"].(string); ok {
-			switch strings.ToLower(strings.TrimSpace(v)) {
-			case "on":
-				configValue = "true"
-			case "off":
-				configValue = "false"
-			case "hide":
-				configValue = "hide"
-			default:
-				return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: value must be one of on, off, hide; got %q", v))
-			}
-		} else {
-			// Legacy bool path.
-			enabled := true
-			if b, ok := params.Arguments["enabled"].(bool); ok {
-				enabled = b
-			}
-			if enabled {
-				configValue = "true"
-			} else {
-				configValue = "false"
-			}
-		}
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-		if err := resolver.Set(wsconfig.ItemPreferMercenary, configValue, wsconfig.SetOptions{
-			SessionKey: keyStr,
-		}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual and retry"))
-		}
-		switch configValue {
-		case "true":
-			return toolTextResponse(req.ID, "prefer_mercenary: on\n", nil)
-		case "hide":
-			return toolTextResponse(req.ID, "prefer_mercenary: hide\n", nil)
-		default:
-			return toolTextResponse(req.ID, "prefer_mercenary: off\n", nil)
-		}
 
 	case "ws.mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1609,7 +1595,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	}
 	promptListing := buildPromptOverrideListing(points, resolver, sessionKey)
 
-	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+2)}
+	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+3)}
 	for _, p := range promptListing {
 		catalog.Knobs = append(catalog.Knobs, tuningKnob{
 			ID:          "prompt." + p.PointId,
@@ -1629,17 +1615,26 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		})
 	}
 
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "workflow.prefer_subagent",
+		Kind:        "workflow_preference",
+		Description: "Select whether the workflow manual loads strict subagent posture.",
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_subagent"},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+	})
+
 	if noAgentMode {
 		return catalog, nil
 	}
 
 	catalog.Knobs = append(catalog.Knobs, tuningKnob{
-		ID:          "delegation.prefer_mercenary",
-		Kind:        "delegation_mode",
+		ID:          "workflow.prefer_mercenary",
+		Kind:        "workflow_preference",
 		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
-		Writer:      tuningWriter{Tool: "ws.lead.prefer_mercenary"},
-		ValueFields: tuningFieldsFromSchema("ws.lead.prefer_mercenary", "value"),
-		Current:     currentPreferMercenary(resolver, sessionKey),
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_mercenary"},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_mercenary", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
 	})
 
 	agentTiers, err := currentAgentTierMappings()
@@ -1659,10 +1654,14 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	return catalog, nil
 }
 
-func currentPreferMercenary(resolver *wsconfig.Resolver, sessionKey string) tuningScopedValue {
-	rv, _ := resolver.Get(sessionKey, wsconfig.ItemPreferMercenary)
+func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get("", itemKey)
+	value := rv.Value
+	if itemKey == wsconfig.ItemWorkflowPreferMercenary {
+		value = canonicalPreferMercenaryValue(value)
+	}
 	return tuningScopedValue{
-		Value: canonicalPreferMercenaryValue(rv.Value),
+		Value: value,
 		Scope: string(rv.Scope),
 	}
 }
@@ -2581,19 +2580,6 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.lead.prefer_mercenary",
-			"description": "Set the mercenary delegation mode for this session. 'on': playbook.render for implementer/reviewer advises the ws.mercenary.call path as default. 'off': reverts to host-native subagent guidance. 'hide' (default): removes ws.mercenary.* from the public tool surface (filteredTools + toolAllowed) and suppresses mercenary content from rendered playbooks. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's lead ws session key."),
-					"value":       enumStringProperty("Desired mode: on, off, or hide. When omitted, falls back to the legacy `enabled` bool parameter.", []string{"on", "off", "hide"}),
-					"enabled":     boolProperty("Legacy: true = on, false = off. Ignored when `value` is set."),
-				},
-				"required": []string{"session_key"},
-			},
-		},
-		{
 			"name":        "api.list",
 			"description": "Return sorted local API documentation cache domain names under ai-docs/.deps.",
 			"inputSchema": map[string]any{
@@ -2667,6 +2653,28 @@ func tools() []map[string]any {
 					"harness": stringProperty("Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known."),
 				},
 				"required": []string{"tier"},
+			},
+		},
+		{
+			"name":        "config.workflow_prefer_subagent",
+			"description": "Set the global workflow preference for loading strict subagent posture with the workflow manual.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off.", []string{"on", "off"}),
+				},
+				"required": []string{"value"},
+			},
+		},
+		{
+			"name":        "config.workflow_prefer_mercenary",
+			"description": "Set the global mercenary delegation preference. 'on' prefers ws.mercenary guidance for implementer/reviewer renders. 'off' keeps native-subagent default guidance while leaving explicit mercenary use available. 'hide' is the builtin default and hides ws.mercenary.* from the public tool surface.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on, off, or hide.", []string{"on", "off", "hide"}),
+				},
+				"required": []string{"value"},
 			},
 		},
 		{
@@ -3250,9 +3258,6 @@ func appendRequiredString(raw any, value string) []string {
 }
 
 func LeadToolNames() []string {
-	// LeadToolNames is called without a Server instance; for mercenary-hide
-	// we cannot read session-keyed config here. Callers that need hide-aware
-	// filtering should use Server.filteredTools() instead.
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
@@ -3430,19 +3435,17 @@ func permanentlyHiddenTool(name string) bool {
 	return strings.HasPrefix(name, "exec.")
 }
 
-// mercenaryHiddenFromConfig returns true when prefer_mercenary is set to "hide"
-// at project or global scope (session scope is not checked — filteredTools and
-// toolAllowed are request-level but not session-keyed). ws.lead.prefer_mercenary
-// itself is never blocked by this check so the lead can always change the value.
+// mercenaryHiddenFromConfig returns true when workflow.prefer_mercenary resolves
+// to "hide" from global/builtin state. The item is global-only because
+// filteredTools and toolAllowed are request-level, not session/root keyed.
 func (s *Server) mercenaryHiddenFromConfig() bool {
 	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-	rv, err := resolver.Get("", wsconfig.ItemPreferMercenary)
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
 	if err != nil {
 		return false
 	}
-	v := strings.TrimSpace(rv.Value)
-	return v == "" || strings.EqualFold(v, "hide")
+	return canonicalPreferMercenaryValue(rv.Value) == "hide"
 }
 
 func noAgentHiddenTool(name string) bool {
@@ -3455,7 +3458,7 @@ func noAgentHiddenTool(name string) bool {
 	switch name {
 	case "config.agents_tier":
 		return true
-	case "ws.lead.prefer_mercenary":
+	case "config.workflow_prefer_mercenary":
 		// Mercenary render-mode control is ws-only; the agentless wsflow surface
 		// has no mercenary path, so prefer_mercenary is hidden there. The
 		// bootstrap tool stays visible (wsflow still needs session-key bootstrap).

@@ -47,10 +47,10 @@ type SessionWriter interface {
 // Resolver resolves config item values across the session > project > global >
 // builtin precedence chain. It is a value type; construct one with NewResolver.
 type Resolver struct {
-	opts      Options
-	builtin   map[string]string
-	sessionR  SessionReader // nil when session scope is not available
-	sessionW  SessionWriter // nil when session scope writes are not supported
+	opts     Options
+	builtin  map[string]string
+	sessionR SessionReader // nil when session scope is not available
+	sessionW SessionWriter // nil when session scope writes are not supported
 }
 
 // NewResolver creates a Resolver. builtinDefaults provides the code-default
@@ -74,6 +74,10 @@ func NewResolver(opts Options, builtinDefaults map[string]string, sessionReader 
 // value and the scope it resolved from. If the key is absent from all scopes,
 // Scope is ScopeBuiltin and Value is "".
 func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
+	if GlobalOnly(itemKey) {
+		return r.getGlobalOnly(itemKey)
+	}
+
 	// Session scope.
 	if r.sessionR != nil && sessionKey != "" {
 		if v, ok := r.sessionR.GetOverride(sessionKey, itemKey); ok {
@@ -108,6 +112,20 @@ func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
 	return ResolvedValue{Value: v, Scope: ScopeBuiltin}, nil
 }
 
+func (r *Resolver) getGlobalOnly(itemKey string) (ResolvedValue, error) {
+	globalCfg, err := loadGlobalConfig(r.opts)
+	if err != nil {
+		return ResolvedValue{}, fmt.Errorf("resolver: load global config: %w", err)
+	}
+	if globalCfg.Overrides != nil {
+		if v, ok := globalCfg.Overrides[itemKey]; ok {
+			return ResolvedValue{Value: v, Scope: ScopeGlobal}, nil
+		}
+	}
+	v := r.builtin[itemKey]
+	return ResolvedValue{Value: v, Scope: ScopeBuiltin}, nil
+}
+
 // Set writes the value for the given item key to the appropriate scope. The
 // target scope is determined as: setOpts.ExplicitScope (when non-empty) else the
 // item's declared default scope. Item-level capability gating is honored via the
@@ -116,6 +134,9 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	targetScope := setOpts.ExplicitScope
 	if targetScope == "" {
 		targetScope = DefaultScope(itemKey)
+	}
+	if GlobalOnly(itemKey) && targetScope != ScopeGlobal {
+		return fmt.Errorf("resolver: item %q is global-only", itemKey)
 	}
 
 	// Capability check hook — item-level write gating.
@@ -159,6 +180,9 @@ func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
 	targetScope := setOpts.ExplicitScope
 	if targetScope == "" {
 		targetScope = DefaultScope(itemKey)
+	}
+	if GlobalOnly(itemKey) && targetScope != ScopeGlobal {
+		return fmt.Errorf("resolver: item %q is global-only", itemKey)
 	}
 
 	// Capability check hook — mirrors Set's item-level write gating.

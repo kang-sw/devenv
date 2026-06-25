@@ -26,6 +26,7 @@ HIDDEN_TOOLS = {
     "ws.mercenary.print",
     "ws.mercenary.erase",
     "config.agents_tier",
+    "config.workflow_prefer_mercenary",
     "api.ask",
     "api.ask_async",
     "api.status",

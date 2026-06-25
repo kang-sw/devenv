@@ -1037,13 +1037,19 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 		t.Fatalf("prompt knob current override missing session scope: %+v", promptKnob.Current)
 	}
 
-	preferKnob := requireTuningKnob(t, catalog, "delegation.prefer_mercenary")
-	assertFieldEnum(t, preferKnob.ValueFields, "value", []string{"on", "off", "hide"})
-	if findTuningField(preferKnob.ValueFields, "enabled") != nil {
-		t.Fatalf("prefer_mercenary catalog must suppress legacy enabled field: %+v", preferKnob.ValueFields)
+	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	assertFieldEnum(t, subagentKnob.ValueFields, "value", []string{"on", "off"})
+	if !strings.Contains(mustMarshalJSON(t, subagentKnob.Current), `"value":"off"`) {
+		t.Fatalf("workflow.prefer_subagent default should be cataloged as off: %+v", subagentKnob.Current)
 	}
-	if !strings.Contains(mustMarshalJSON(t, preferKnob.Current), `"value":"hide"`) {
-		t.Fatalf("prefer_mercenary default should be cataloged as hide: %+v", preferKnob.Current)
+
+	mercenaryKnob := requireTuningKnob(t, catalog, "workflow.prefer_mercenary")
+	assertFieldEnum(t, mercenaryKnob.ValueFields, "value", []string{"on", "off", "hide"})
+	if findTuningField(mercenaryKnob.ValueFields, "enabled") != nil {
+		t.Fatalf("workflow.prefer_mercenary catalog must not expose legacy enabled field: %+v", mercenaryKnob.ValueFields)
+	}
+	if !strings.Contains(mustMarshalJSON(t, mercenaryKnob.Current), `"value":"hide"`) {
+		t.Fatalf("workflow.prefer_mercenary default should be cataloged as hide: %+v", mercenaryKnob.Current)
 	}
 
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
@@ -1074,7 +1080,8 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, resp)
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
-	for _, hidden := range []string{"delegation.prefer_mercenary", "agents.tier"} {
+	requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary", "agents.tier"} {
 		if knob := findTuningKnob(catalog, hidden); knob != nil {
 			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)
 		}

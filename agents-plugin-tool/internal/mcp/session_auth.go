@@ -37,12 +37,10 @@ type sessionChild struct {
 // the format can grow (render lineage, permission/capability metadata) without a
 // migration; unknown future fields are simply ignored by older readers.
 //
-// Note: the former typed PreferMercenary bool field has been retired. The
-// prefer_mercenary toggle now lives in the generic Overrides map under the key
-// wsconfig.ItemPreferMercenary ("prefer_mercenary"), routed through the layered
-// config resolver. Old records with a "prefer_mercenary" JSON field are silently
-// ignored on read (Go's json.Unmarshal drops unknown fields); the resolver reads
-// the Overrides map instead.
+// Note: the former typed PreferMercenary bool field has been retired. Old records
+// with a "prefer_mercenary" JSON field are silently ignored on read (Go's
+// json.Unmarshal drops unknown fields). The live mercenary preference is the
+// global-only wsconfig.ItemWorkflowPreferMercenary item, not session state.
 type sessionRecord struct {
 	SchemaVersion int    `json:"schema_version"`
 	Root          string `json:"root"`

@@ -206,7 +206,7 @@ func delegationTip(harness string) string {
 		// Unit 3: always-on mercenary tip — present in every full-ws delegates:true rendering.
 		sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
 		sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
-		sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
+		sb.WriteString(" `config.workflow_prefer_mercenary`. Pass the session_key received with this prompt and")
 		sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
 		sb.WriteString(" agent id you can resume with the same continuation idiom.")
 	}
@@ -404,7 +404,7 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 // prompt defaults participate; user/project/global prompt overrides still require
 // a session-keyed render. It is the single construction site shared by the
 // playbook.print and playbook.render dispatch paths, reusing the same
-// sessionConfigAdapter + resolver shape as the prefer_mercenary read path.
+// sessionConfigAdapter + resolver shape as the workflow config read paths.
 //
 // Override values are stored under dynamic keys `prompt.<pointId>.<harness>`; the
 // resolver returns empty (not an error) for unset keys, so an absent override
