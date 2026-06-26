@@ -164,8 +164,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
-| `260626-bug-ws-todo-enter-derive-surface-gaps` | todo | Surface todo keys uniformly as `{key}` and make `enter.implement` checklist derivation reflect typed verdict inputs |
-| `260626-feat-surface-sage-review-posture` | todo | Stamp self-describing `sage-review:` posture from `sage_review` config so tickets show skipped/recommended/required without a config dive |
+| `260626-bug-ws-todo-enter-derive-surface-gaps` | ready | Surface todo keys uniformly as `{key}` and make `enter.implement` checklist derivation reflect typed verdict inputs |
+| `260626-feat-surface-sage-review-posture` | ready | Stamp self-describing `sage-review:` posture from `sage_review` config so tickets show skipped/recommended/required without a config dive |
 | `260626-bug-sage-review-config-setter-missing` | idea | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
 | `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
 | `260626-bug-workflow-manual-bootstrap-sentinel-surface` | idea | Investigate the fresh workflow-manual sentinel guidance not matching the visible session-state tool surface during dogfooding |
