@@ -15,6 +15,7 @@ related-mental-model:
   - mcp-runtime
   - prompt-bundle
   - workflow-skills
+completed: 2026-06-26
 ---
 
 # Refactor workflow delegation posture into config keys
@@ -280,6 +281,34 @@ Align the surrounding workflow surfaces:
 This phase should also include spec closeout updates if implementation details
 require planned spec text to be finalized or narrowed.
 
+### Result (031dbbc3) - 2026-06-26
+
+Phase 3 is complete. `lead-tune` now routes strict subagent posture requests to
+the `"workflow.prefer_subagent"` catalog knob and routes mercenary delegation
+requests to `"workflow.prefer_mercenary"`, using the catalog-provided writer
+rather than a hand-maintained setter table. Prompt overrides remain limited to
+currently discovered prompt knobs such as `UserPreferenceSection`; stale
+`prompt.DelegationSection`, `delegation.prefer_mercenary`, and
+`ws.lead.prefer_mercenary` guidance was removed from the rendered tuning
+workflow.
+
+Surrounding workflow polish also updated `lead-implement` so full ws printed
+guidance exposes the selectable `ws.mercenary.register` / `ws.mercenary.call` /
+`ws.mercenary.result` path while wsflow/no-agent rendering strips full-ws-only
+mercenary text. Tests now cover full ws and wsflow `lead-tune` rendering,
+removed `ws.lead.prefer_mercenary` visibility and explicit-call behavior,
+workflow-preference catalog writer tools, full ws `lead-implement` mercenary
+command visibility, and wsflow omission of mercenary commands. The canonical
+rsrc manifest and byte-identical wsflow rsrc mirror were regenerated.
+
+Fresh-reader audit findings were fixed in `291c3ece`. Partitioned review found
+one important correctness issue in the first implementation; `031dbbc3` fixed
+that issue and the correctness re-review was clean. Final verification passed:
+focused MCP render/catalog/runtime tests,
+`go test ./internal/mcp ./internal/wsconfig ./internal/wsrsrc ./cmd/ws-mcp -count=1`,
+`python3 -m unittest discover agents-plugin-wsflow/tests`, `git diff --check`,
+and `ws/spec_index.verify`.
+
 ## Sage Review Gate (2026-06-25)
 
 Final verdict: pass.
@@ -311,3 +340,8 @@ It is not an active unresolved block for the current ticket text.
 ### Completeness Reviewer Verdict: pass
 
 No blocking issues.
+
+
+## Resolution (2026-06-26)
+
+All three phases are complete: workflow preference writer/config refactor, workflow-manual prefer-subagent insertion with XML playbook wrapper, and lead-tune/catalog/wsflow/test closeout.

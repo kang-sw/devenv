@@ -80,13 +80,6 @@ full-ws-only knobs (`workflow.prefer_mercenary` and `config.agents_tier`), while
 keeping shared knobs such as `workflow.prefer_subagent`.
 {#260619-lead-tune-workflow-tuning-skill}
 
-> [!note] Planned 🚧
-> `lead-tune` prose will be aligned with the workflow config catalog. "Delegate
-> more" and "delegate less" style requests should set
-> `"workflow.prefer_subagent"` through `config.workflow_prefer_subagent`;
-> mercenary preference requests should set `"workflow.prefer_mercenary"` through
-> `config.workflow_prefer_mercenary`.
-
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
 `lead-workflow-manual` is the shared primitive reference for writing or executing ws
