@@ -191,6 +191,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-bug-ws-mcp-launcher-runtime-repair-race` | idea | Investigate ws-mcp launcher runtime repair race behavior |
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
 | `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit` | idea | Capture wsflow rsrc mirror drift when canonical shipped rsrc edits are not mirrored |
+| `260626-bug-wsflow-lead-revive-skill-inventory-drift` | idea | Capture wsflow lead-revive shipped skill inventory drift blocking the wsflow package test suite |
 | `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
 | `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
