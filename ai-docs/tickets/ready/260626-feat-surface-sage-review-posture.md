@@ -89,13 +89,28 @@ Verification boundary:
 - The existing sage review gate tests are updated to use resolved posture
   language instead of assuming `pending` is the default state.
 
+### Result (a0844564)
+
+Phase 1 is implemented. `tickets.create` now resolves `sage_review` into
+`sage-review: skipped`, `recommended`, or `required` for new `todo/` and
+`ready/` tickets, and `tickets.move` stamps the same posture on upward moves.
+Promotion into `ready/` now requires `completed` or `skipped`; unresolved
+`recommended` and `required` values stop with action-oriented guidance, while
+`blocked` continues to require addressing the review result.
+
+The sage review gate instructions now read the ticket frontmatter posture first:
+`recommended` asks for a run-or-skip decision, `required` runs review without
+asking, and gate completion resolves frontmatter to `completed`, `blocked`, or
+`skipped`. `ai-docs/spec/mcp-tools.md` was updated for the create, move, and gate
+contracts, and the wsflow rsrc mirror was regenerated.
+
 ## Spec Impact
 
-Addressed by planned callout in `ai-docs/spec/mcp-tools.md` under
+Addressed in `ai-docs/spec/mcp-tools.md` under
 `260620-ticket-move-tool`, `260622-create-ticket-tool`, and
 `260624-sage-review-gate`.
 
-Expected caller-visible change: ticket mutation tools stamp self-describing
+Caller-visible change: ticket mutation tools stamp self-describing
 `sage-review:` posture values, and the gate resolves `recommended` / `required`
 instead of relying on `pending`.
 
