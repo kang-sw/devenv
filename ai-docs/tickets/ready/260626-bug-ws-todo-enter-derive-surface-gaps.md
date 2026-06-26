@@ -115,8 +115,8 @@ Addressed by implemented contract text in `ai-docs/spec/mcp-tools.md` under
 `260625-session-state-tools`.
 
 Expected caller-visible change: todo list output exposes `{key}` tokens, todo
-key validation is specified, and `enter.implement` derivation is tied to typed
-verdict values.
+key validation rejects leading/trailing whitespace and invalid punctuation, and
+`enter.implement` derivation is tied to validated typed verdict values.
 
 Contract-first spec: yes, addressed before promotion to `ready/`; implemented
 contract text landed in `ea93b01c`.

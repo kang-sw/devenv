@@ -226,9 +226,9 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
 - `implement`: always Route, Prep, Edit, Final action gate, Merge; `need_review`
   inserts Review after Edit; `need_doc` inserts Doc pre-pass, Doc commit gate, and
   Doc closeout (mirroring the lead-implement pipeline order). The derived Prep,
-  Edit, and Review labels reflect the supplied typed verdict values
-  (`plan_depth`, `delegation`, and `review_alloc`) instead of using one hardcoded
-  delegated/partitioned label.
+  Edit, and Review labels reflect validated typed verdict values (`plan_depth`,
+  `delegation`, and `review_alloc`) instead of using one hardcoded
+  delegated/partitioned label or copying unknown strings into checklist titles.
 - `proceed`: Build route context, Select route, Emit routing verdict, Execute
   verdict.
 - `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
@@ -236,11 +236,12 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   Capture.
 
 **Todo.** Item identity is a caller-provided `key`, unique within the active
-list after normalization; keys are trimmed, lowercased, and may contain only
-lowercase letters, digits, `.`, `_`, and `-`. A duplicate key is rejected after
-normalization, and an erased key is reusable. Mutations (`ws.todo.append`,
-`insert_before`, `insert_after`, `check`, `erase`, `clear`, `reorder`) return a
-compact confirmation; `ws.todo.list` returns rendered text. `clear(done_only=false)`
+list after normalization; keys are lowercased, may contain only lowercase
+letters, digits, `.`, `_`, and `-`, and are rejected when they include leading or
+trailing whitespace. A duplicate key is rejected after normalization, and an
+erased key is reusable. Mutations (`ws.todo.append`, `insert_before`,
+`insert_after`, `check`, `erase`, `clear`, `reorder`) return a compact
+confirmation; `ws.todo.list` returns rendered text. `clear(done_only=false)`
 removes all items; `done_only=true` removes only `done` items.
 `reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
 contiguous span as a block; the ref_key must lie outside the span.

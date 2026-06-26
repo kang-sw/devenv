@@ -115,7 +115,7 @@ func TestTodoKeyValidation(t *testing.T) {
 			t.Fatalf("normalizeTodoKey(%q) errored: %v", key, err)
 		}
 	}
-	invalid := []string{"", " ", "a b", "{abc}", "abc/def", "abc:def"}
+	invalid := []string{"", " ", " a", "a ", "a b", "{abc}", "abc/def", "abc:def"}
 	for _, key := range invalid {
 		if _, err := normalizeTodoKey(key); err == nil {
 			t.Fatalf("normalizeTodoKey(%q) succeeded, want error", key)
@@ -408,6 +408,39 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 	}
 }
 
+func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902500, root, nil))
+
+	enter := callToolWithKey(t, server, 1, key, "ws.enter.implement", map[string]any{
+		"delegation":   "direct-edit",
+		"plan_depth":   "brief",
+		"review_alloc": "single",
+		"need_review":  true,
+	})
+	for _, want := range []string{
+		"- [ ] {prep} Prep (brief)",
+		"- [ ] {edit} Edit (direct)",
+		"- [ ] {review} Review (single)",
+	} {
+		if !strings.Contains(enter, want) {
+			t.Fatalf("enter.implement output missing %q:\n%s", want, enter)
+		}
+	}
+
+	if got := callToolWithKey(t, server, 2, key, "ws.enter.implement", map[string]any{
+		"review_alloc": "singel",
+		"need_review":  true,
+	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
+		t.Fatalf("invalid review_alloc error expected, got: %s", got)
+	}
+}
+
 func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -439,6 +472,11 @@ func TestServeStdioTodoKeyNormalization(t *testing.T) {
 		"key": "{bad}", "title": "bad",
 	}); !strings.Contains(got, "invalid character") {
 		t.Fatalf("invalid key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 6, key, "ws.todo.append", map[string]any{
+		"key": " Review ", "title": "bad",
+	}); !strings.Contains(got, "leading or trailing whitespace") {
+		t.Fatalf("whitespace key error expected, got: %s", got)
 	}
 }
 

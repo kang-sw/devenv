@@ -83,10 +83,13 @@ func indexOfTodo(list []todoItem, key string) int {
 // --- pure list mutations (no disk I/O) ---------------------------------------
 
 func normalizeTodoKey(raw string) (string, error) {
-	key := strings.ToLower(strings.TrimSpace(raw))
-	if key == "" {
+	if raw == "" {
 		return "", fmt.Errorf("todo key must be non-empty")
 	}
+	if raw != strings.TrimSpace(raw) {
+		return "", fmt.Errorf("todo key %q must not contain leading or trailing whitespace", raw)
+	}
+	key := strings.ToLower(raw)
 	for len(key) > 0 {
 		r, size := utf8.DecodeRuneInString(key)
 		if size == 0 || r == utf8.RuneError && size == 1 {
@@ -97,7 +100,7 @@ func normalizeTodoKey(raw string) (string, error) {
 		}
 		key = key[size:]
 	}
-	return strings.ToLower(strings.TrimSpace(raw)), nil
+	return strings.ToLower(raw), nil
 }
 
 // todoAppend adds a new item at the end. A duplicate key (still present in the
@@ -313,7 +316,13 @@ type implementTodoVerdict struct {
 // mirrors the lead-implement pipeline (Route -> Prep -> Edit -> Review -> Doc ->
 // Final action gate -> Merge).
 func deriveImplementTodos(needReview, needDoc bool) []todoItem {
-	return deriveImplementTodosFromVerdict(implementTodoVerdict{NeedReview: needReview, NeedDoc: needDoc})
+	return deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		PlanDepth:   "survey",
+		ReviewAlloc: "partitioned",
+		NeedReview:  needReview,
+		NeedDoc:     needDoc,
+	})
 }
 
 func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
@@ -339,6 +348,43 @@ func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	return withPendingStatus(items)
 }
 
+func parseImplementDelegation(raw string) (string, error) {
+	switch strings.ToLower(raw) {
+	case "", "delegated":
+		return "delegated", nil
+	case "direct-edit":
+		return "direct-edit", nil
+	default:
+		return "", fmt.Errorf("invalid delegation %q: want one of delegated, direct-edit", raw)
+	}
+}
+
+func parseImplementPlanDepth(raw string) (string, error) {
+	switch strings.ToLower(raw) {
+	case "":
+		return "survey", nil
+	case "none", "brief", "survey", "research":
+		return strings.ToLower(raw), nil
+	default:
+		return "", fmt.Errorf("invalid plan_depth %q: want one of none, brief, survey, research", raw)
+	}
+}
+
+func parseImplementReviewAlloc(raw string) (string, error) {
+	switch strings.ToLower(raw) {
+	case "":
+		return "partitioned", nil
+	case "lead-only", "single", "partitioned":
+		return strings.ToLower(raw), nil
+	case "partitioned: correctness", "partitioned: fit", "partitioned: test",
+		"partitioned: correctness, fit", "partitioned: correctness, test", "partitioned: fit, test",
+		"partitioned: correctness, fit, test":
+		return "partitioned", nil
+	default:
+		return "", fmt.Errorf("invalid review_alloc %q: want one of lead-only, single, partitioned", raw)
+	}
+}
+
 func implementPrepTitle(planDepth string) string {
 	switch strings.ToLower(strings.TrimSpace(planDepth)) {
 	case "none", "":
@@ -350,7 +396,7 @@ func implementPrepTitle(planDepth string) string {
 	case "research":
 		return "Prep (brief + research plan)"
 	default:
-		return fmt.Sprintf("Prep (%s)", strings.TrimSpace(planDepth))
+		return "Prep"
 	}
 }
 
@@ -363,7 +409,7 @@ func implementEditTitle(delegation string) string {
 	case "":
 		return "Edit"
 	default:
-		return fmt.Sprintf("Edit (%s)", strings.TrimSpace(delegation))
+		return "Edit"
 	}
 }
 
@@ -378,7 +424,7 @@ func implementReviewTitle(reviewAlloc string) string {
 	case "":
 		return "Review"
 	default:
-		return fmt.Sprintf("Review (%s)", strings.TrimSpace(reviewAlloc))
+		return "Review"
 	}
 }
 
@@ -537,6 +583,14 @@ func stringArg(toolName, name string, args map[string]any) (string, error) {
 	return v, nil
 }
 
+func rawStringArg(toolName, name string, args map[string]any) (string, error) {
+	v, _ := args[name].(string)
+	if v == "" {
+		return "", fmt.Errorf("%s: %s is required", toolName, name)
+	}
+	return v, nil
+}
+
 func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) response {
 	const tool = "ws.agenda.set"
 	sessionKey, err := sessionStateKey(tool, args)
@@ -605,9 +659,21 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
 	needReview, _ := args["need_review"].(bool)
 	needDoc, _ := args["need_doc"].(bool)
-	delegation, _ := args["delegation"].(string)
-	planDepth, _ := args["plan_depth"].(string)
-	reviewAlloc, _ := args["review_alloc"].(string)
+	delegation, err := parseImplementDelegation(stringValue(args["delegation"]))
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
+	}
+	planDepth, err := parseImplementPlanDepth(stringValue(args["plan_depth"]))
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
+	}
+	reviewAlloc, err := parseImplementReviewAlloc(stringValue(args["review_alloc"]))
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
+	}
+	args["delegation"] = delegation
+	args["plan_depth"] = planDepth
+	args["review_alloc"] = reviewAlloc
 	todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  delegation,
 		PlanDepth:   planDepth,
@@ -616,6 +682,11 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		NeedDoc:     needDoc,
 	})
 	return s.handleEnter(id, "ws.enter.implement", "implement", args, todos)
+}
+
+func stringValue(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
@@ -636,7 +707,7 @@ func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) respo
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	key, err := stringArg(tool, "key", args)
+	key, err := rawStringArg(tool, "key", args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -662,11 +733,11 @@ func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	refKey, err := stringArg(tool, "ref_key", args)
+	refKey, err := rawStringArg(tool, "ref_key", args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	key, err := stringArg(tool, "key", args)
+	key, err := rawStringArg(tool, "key", args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -689,7 +760,7 @@ func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) respon
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	key, err := stringArg(tool, "key", args)
+	key, err := rawStringArg(tool, "key", args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -719,7 +790,7 @@ func (s *Server) handleTodoErase(id json.RawMessage, args map[string]any) respon
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	key, err := stringArg(tool, "key", args)
+	key, err := rawStringArg(tool, "key", args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -779,7 +850,6 @@ func (s *Server) handleTodoReorder(id json.RawMessage, args map[string]any) resp
 	}
 	fromKey, _ := span["from_key"].(string)
 	toKey, _ := span["to_key"].(string)
-	fromKey, toKey = strings.TrimSpace(fromKey), strings.TrimSpace(toKey)
 	if fromKey == "" || toKey == "" {
 		return toolTextResponse(id, "", fmt.Errorf("%s: span.from_key and span.to_key are required", tool))
 	}
@@ -789,10 +859,10 @@ func (s *Server) handleTodoReorder(id json.RawMessage, args map[string]any) resp
 	}
 	var refKey string
 	var after bool
-	if v, ok := position["before"].(string); ok && strings.TrimSpace(v) != "" {
-		refKey, after = strings.TrimSpace(v), false
-	} else if v, ok := position["after"].(string); ok && strings.TrimSpace(v) != "" {
-		refKey, after = strings.TrimSpace(v), true
+	if v, ok := position["before"].(string); ok && v != "" {
+		refKey, after = v, false
+	} else if v, ok := position["after"].(string); ok && v != "" {
+		refKey, after = v, true
 	} else {
 		return toolTextResponse(id, "", fmt.Errorf("%s: position must set either before or after to a ref_key", tool))
 	}
