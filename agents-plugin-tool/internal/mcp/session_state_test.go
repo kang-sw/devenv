@@ -56,6 +56,25 @@ func TestDeriveImplementTodos(t *testing.T) {
 	}
 }
 
+func TestDeriveImplementTodosFromVerdictTitles(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "direct-edit",
+		PlanDepth:   "brief",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+	})
+	wantTitles := map[string]string{
+		"prep":   "Prep (brief)",
+		"edit":   "Edit (direct)",
+		"review": "Review (single)",
+	}
+	for _, item := range got {
+		if want, ok := wantTitles[item.Key]; ok && item.Title != want {
+			t.Fatalf("%s title = %q, want %q", item.Key, item.Title, want)
+		}
+	}
+}
+
 func TestDeriveOtherEnterTodos(t *testing.T) {
 	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "select-route", "routing-verdict", "execute-verdict") {
 		t.Fatalf("proceed derivation mismatch: %v", keysOf(deriveProceedTodos()))
@@ -69,9 +88,12 @@ func TestDeriveOtherEnterTodos(t *testing.T) {
 }
 
 func TestTodoKeyUniquenessAndReuse(t *testing.T) {
-	list, err := todoAppend(nil, "a", "A", todoPending)
+	list, err := todoAppend(nil, "A", "A", todoPending)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if list[0].Key != "a" {
+		t.Fatalf("key was not normalized: %q", list[0].Key)
 	}
 	if _, err := todoAppend(list, "a", "dup", todoPending); err == nil {
 		t.Fatal("expected duplicate key error")
@@ -83,6 +105,21 @@ func TestTodoKeyUniquenessAndReuse(t *testing.T) {
 	}
 	if _, err := todoAppend(list, "a", "A again", todoPending); err != nil {
 		t.Fatalf("re-append after erase failed: %v", err)
+	}
+}
+
+func TestTodoKeyValidation(t *testing.T) {
+	valid := []string{"abc", "abc-123", "abc.def", "abc_def", "ABC"}
+	for _, key := range valid {
+		if _, err := normalizeTodoKey(key); err != nil {
+			t.Fatalf("normalizeTodoKey(%q) errored: %v", key, err)
+		}
+	}
+	invalid := []string{"", " ", " a", "a ", "a b", "{abc}", "abc/def", "abc:def"}
+	for _, key := range invalid {
+		if _, err := normalizeTodoKey(key); err == nil {
+			t.Fatalf("normalizeTodoKey(%q) succeeded, want error", key)
+		}
 	}
 }
 
@@ -183,17 +220,17 @@ func TestRenderTodosSummaryAndFull(t *testing.T) {
 	// not shown; f+g collapse to a single trailing "..." (defer collapses like done).
 	wantSummary := strings.Join([]string{
 		"...",
-		"- [x] B",
-		"- [ ] C",
-		"- [~] D",
-		"- [x] E",
+		"- [x] {b} B",
+		"- [ ] {c} C",
+		"- [~] {d} D",
+		"- [x] {e} E",
 		"...",
 	}, "\n")
 	if got := renderTodos(list, false); got != wantSummary {
 		t.Fatalf("summary render mismatch:\n got:\n%s\nwant:\n%s", got, wantSummary)
 	}
 	wantFull := strings.Join([]string{
-		"- [x] A", "- [x] B", "- [ ] C", "- [~] D", "- [x] E", "- [>] F", "- [x] G",
+		"- [x] {a} A", "- [x] {b} B", "- [ ] {c} C", "- [~] {d} D", "- [x] {e} E", "- [>] {f} F", "- [x] {g} G",
 	}, "\n")
 	if got := renderTodos(list, true); got != wantFull {
 		t.Fatalf("full render mismatch:\n got:\n%s\nwant:\n%s", got, wantFull)
@@ -366,8 +403,80 @@ func TestServeStdioSessionStateFlow(t *testing.T) {
 	// After checking route done, the summary renders route with the done marker as
 	// adjacent context for the still-active prep step.
 	summary := callToolWithKey(t, server, 4, key, "ws.todo.list", nil)
-	if !strings.Contains(summary, "- [x] Route") {
+	if !strings.Contains(summary, "- [x] {route} Route") {
 		t.Fatalf("summary missing checked Route context: %s", summary)
+	}
+}
+
+func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902500, root, nil))
+
+	enter := callToolWithKey(t, server, 1, key, "ws.enter.implement", map[string]any{
+		"delegation":   "direct-edit",
+		"plan_depth":   "brief",
+		"review_alloc": "single",
+		"need_review":  true,
+	})
+	for _, want := range []string{
+		"- [ ] {prep} Prep (brief)",
+		"- [ ] {edit} Edit (direct)",
+		"- [ ] {review} Review (single)",
+	} {
+		if !strings.Contains(enter, want) {
+			t.Fatalf("enter.implement output missing %q:\n%s", want, enter)
+		}
+	}
+
+	if got := callToolWithKey(t, server, 2, key, "ws.enter.implement", map[string]any{
+		"review_alloc": "singel",
+		"need_review":  true,
+	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
+		t.Fatalf("invalid review_alloc error expected, got: %s", got)
+	}
+}
+
+func TestServeStdioTodoKeyNormalization(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903000, root, nil))
+
+	if got := callToolWithKey(t, server, 1, key, "ws.todo.append", map[string]any{
+		"key": "Review.Step_1", "title": "Review",
+	}); !strings.Contains(got, "todo appended: review.step_1") {
+		t.Fatalf("append did not report normalized key: %s", got)
+	}
+	if got := callToolWithKey(t, server, 2, key, "ws.todo.append", map[string]any{
+		"key": "review.step_1", "title": "dup",
+	}); !strings.Contains(got, "already exists") {
+		t.Fatalf("duplicate-after-normalization error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 3, key, "ws.todo.check", map[string]any{
+		"key": "REVIEW.STEP_1", "status": "done",
+	}); !strings.Contains(got, "todo done: review.step_1") {
+		t.Fatalf("check did not normalize lookup key: %s", got)
+	}
+	if full := callToolWithKey(t, server, 4, key, "ws.todo.list", map[string]any{"mode": "full"}); !strings.Contains(full, "- [x] {review.step_1} Review") {
+		t.Fatalf("full list missing normalized rendered key: %s", full)
+	}
+	if got := callToolWithKey(t, server, 5, key, "ws.todo.append", map[string]any{
+		"key": "{bad}", "title": "bad",
+	}); !strings.Contains(got, "invalid character") {
+		t.Fatalf("invalid key error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 6, key, "ws.todo.append", map[string]any{
+		"key": " Review ", "title": "bad",
+	}); !strings.Contains(got, "leading or trailing whitespace") {
+		t.Fatalf("whitespace key error expected, got: %s", got)
 	}
 }
 

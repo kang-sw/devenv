@@ -88,13 +88,35 @@ Verification boundary:
   `enter.implement` derivation for at least one non-partitioned review verdict.
 - Existing session-state tests remain green.
 
+### Result (ea93b01c) - 2026-06-26
+
+Implemented Phase 1 on branch `implement/260626-todo-enter-surface-gaps`.
+
+- Shared todo rendering now exposes keys as `- [ ] {key} Title` /
+  `- [x] {key} Title` and leaves collapsed `...` elision lines unchanged.
+- Todo key creation and lookup normalize to lowercase, reject characters outside
+  lowercase letters, digits, `.`, `_`, and `-`, and detect duplicates after
+  normalization.
+- `ws.enter.implement` derives Prep/Edit/Review labels from supplied verdict
+  fields (`plan_depth`, `delegation`, `review_alloc`) so `review_alloc: "single"`
+  renders `Review (single)` instead of `Review (partitioned)`.
+- Updated `mcp-tools.md` from planned callout to implemented caller-visible
+  contract.
+
+Verification:
+
+- `go test ./internal/mcp -count=1`
+- `ws.spec_index.verify` -> `Spec index: ok`
+- `git diff --check`
+
 ## Spec Impact
 
-Addressed by planned callout in `ai-docs/spec/mcp-tools.md` under
+Addressed by implemented contract text in `ai-docs/spec/mcp-tools.md` under
 `260625-session-state-tools`.
 
 Expected caller-visible change: todo list output exposes `{key}` tokens, todo
-key validation is specified, and `enter.implement` derivation is tied to typed
-verdict values.
+key validation rejects leading/trailing whitespace and invalid punctuation, and
+`enter.implement` derivation is tied to validated typed verdict values.
 
-Contract-first spec: yes, addressed before promotion to `ready/`.
+Contract-first spec: yes, addressed before promotion to `ready/`; implemented
+contract text landed in `ea93b01c`.

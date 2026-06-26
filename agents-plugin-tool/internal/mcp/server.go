@@ -2669,10 +2669,10 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key":    stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"delegation":     stringProperty("Delegation posture for this implementation (e.g. delegated, inline)."),
-					"plan_depth":     stringProperty("Planning depth (e.g. survey, full-plan)."),
+					"delegation":     enumStringProperty("Delegation posture for this implementation.", []string{"delegated", "direct-edit"}),
+					"plan_depth":     enumStringProperty("Planning depth.", []string{"none", "brief", "survey", "research"}),
 					"branch_mode":    stringProperty("Branch strategy (e.g. worktree, in-place)."),
-					"review_alloc":   stringProperty("Review allocation (e.g. partitioned, single)."),
+					"review_alloc":   enumStringProperty("Review allocation used to label the derived Review item.", []string{"lead-only", "single", "partitioned", "partitioned: correctness", "partitioned: fit", "partitioned: test", "partitioned: correctness, fit", "partitioned: correctness, test", "partitioned: fit, test", "partitioned: correctness, fit, test"}),
 					"current_branch": stringProperty("Current implementation branch name."),
 					"merge_target":   stringProperty("Intended merge target branch."),
 					"start_commit":   stringProperty("Implementation-start commit hash."),
@@ -2733,7 +2733,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"key":         stringProperty("Caller-provided item key, unique within the active list."),
+					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
 				},
 				"required": []string{"session_key", "key", "title"},
@@ -2747,7 +2747,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"ref_key":     stringProperty("Existing item key to insert before."),
-					"key":         stringProperty("Caller-provided item key, unique within the active list."),
+					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
 				},
 				"required": []string{"session_key", "ref_key", "key", "title"},
@@ -2761,7 +2761,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"ref_key":     stringProperty("Existing item key to insert after."),
-					"key":         stringProperty("Caller-provided item key, unique within the active list."),
+					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
 				},
 				"required": []string{"session_key", "ref_key", "key", "title"},
@@ -2806,7 +2806,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.todo.list",
-			"description": "Render the todo list. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
+			"description": "Render the todo list with visible {key} tokens. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

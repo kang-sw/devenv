@@ -225,7 +225,10 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
 
 - `implement`: always Route, Prep, Edit, Final action gate, Merge; `need_review`
   inserts Review after Edit; `need_doc` inserts Doc pre-pass, Doc commit gate, and
-  Doc closeout (mirroring the lead-implement pipeline order).
+  Doc closeout (mirroring the lead-implement pipeline order). The derived Prep,
+  Edit, and Review labels reflect validated typed verdict values (`plan_depth`,
+  `delegation`, and `review_alloc`) instead of using one hardcoded
+  delegated/partitioned label or copying unknown strings into checklist titles.
 - `proceed`: Build route context, Select route, Emit routing verdict, Execute
   verdict.
 - `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
@@ -233,29 +236,24 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   Capture.
 
 **Todo.** Item identity is a caller-provided `key`, unique within the active
-list; a duplicate key is rejected, and an erased key is reusable. Mutations
-(`ws.todo.append`, `insert_before`, `insert_after`, `check`, `erase`, `clear`,
-`reorder`) return a compact confirmation; `ws.todo.list` returns rendered text.
-`clear(done_only=false)` removes all items; `done_only=true` removes only `done`
-items. `reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
+list after normalization; keys are lowercased, may contain only lowercase
+letters, digits, `.`, `_`, and `-`, and are rejected when they include leading or
+trailing whitespace. A duplicate key is rejected after normalization, and an
+erased key is reusable. Mutations (`ws.todo.append`, `insert_before`,
+`insert_after`, `check`, `erase`, `clear`, `reorder`) return a compact
+confirmation; `ws.todo.list` returns rendered text. `clear(done_only=false)`
+removes all items; `done_only=true` removes only `done` items.
+`reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
 contiguous span as a block; the ref_key must lie outside the span.
 
-Rendering markers: `- [ ]` pending, `- [~]` wip, `- [x]` done, `- [>]` defer.
-Summary mode (the default and the checkpoint-injection mode) shows every
-pending/wip item plus one adjacent context item on each side of each contiguous
-active block, collapsing every other run to a single `...` line; `defer`
-collapses the same as `done`. Full mode shows every item in order. `ws.commit`
-does not auto-mark todos; status transitions are always explicit via
-`ws.todo.check`.
-
-> [!note] Planned 🚧
-> Todo rendering will expose each item key as `{key}` after the checkbox marker
-> in every shared rendered checklist, while collapsed `...` elision lines remain
-> unchanged. Keys will normalize to lowercase and accept only lowercase letters,
-> digits, `.`, `_`, and `-`; duplicate detection will occur after normalization.
-> `ws.enter.implement` will derive checklist items from typed verdict values so
-> caller-visible labels and item counts reflect the supplied implementation
-> verdicts.
+Rendering lines include the visible key after the marker: `- [ ] {key} Title`,
+`- [~] {key} Title`, `- [x] {key} Title`, or `- [>] {key} Title`. Summary mode
+(the default and the checkpoint-injection mode) shows every pending/wip item plus
+one adjacent context item on each side of each contiguous active block,
+collapsing every other run to a single `...` line with no synthetic key or
+checkbox marker; `defer` collapses the same as `done`. Full mode shows every item
+in order. `ws.commit` does not auto-mark todos; status transitions are always
+explicit via `ws.todo.check`.
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
