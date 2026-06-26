@@ -6,6 +6,7 @@ related-mental-model:
 spec:
   - mcp-tools
 sage-review: completed
+completed: 2026-06-27
 ---
 
 # ws session state machine — agenda and todo persistence across compaction

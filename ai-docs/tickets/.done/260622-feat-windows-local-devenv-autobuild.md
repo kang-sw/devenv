@@ -6,6 +6,7 @@ related:
   260622-bug-wsflow-launcher-coldload-divergence: wsflow launcher shares the same gate and must be mirrored
 related-mental-model:
   - plugin-runtime
+completed: 2026-06-27
 ---
 
 # Windows local-devenv auto-build (lift launcher gate + one-shot installer)

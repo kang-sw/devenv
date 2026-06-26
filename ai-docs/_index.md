@@ -164,7 +164,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
-| `260626-bug-ws-todo-enter-derive-surface-gaps` | ready | Surface todo keys uniformly as `{key}` and make `enter.implement` checklist derivation reflect typed verdict inputs |
 | `260626-feat-surface-sage-review-posture` | ready | Stamp self-describing `sage-review:` posture from `sage_review` config so tickets show skipped/recommended/required without a config dive |
 | `260626-bug-sage-review-config-setter-missing` | idea | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
 | `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
@@ -226,19 +225,6 @@ dropped tickets live in hidden archive dirs and git history.
   Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
   Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
   — gates the epic merge to `main`.
-- `260622-feat-windows-local-devenv-autobuild` (ready, feat, child of 260605) -
-  makes the chore's Phase C "cold install -> real Go build" actually work on
-  Windows. **Both phases done** (branch
-  `implement/260622-windows-local-devenv-autobuild`, unmerged). Phase 1
-  (`ba67f61e`): lifted the launcher `os_name == "windows"` gate so a valid
-  `.local-devenv-runtime` marker drives source build-on-launch on Windows
-  (canonical + wsflow mirror), Windows-aware `go` check, `USERPROFILE`/`LOCALAPPDATA`
-  build-env recovery; 40+8 tests green; no spec change (text already OS-neutral).
-  Phase 2 (`cbb7f983`): `scripts/install-claude-plugin.ps1` one-shot installer
-  (install.sh port + marker) and `windows-dogfood.md` rewrite. PowerShell syntax
-  deferred to Windows host; empirical auto-build cold-load deferred to chore
-  Phase C. Partially closes `260622-bug-wsflow-launcher-coldload-divergence`
-  (gate mirrored).
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
@@ -373,29 +359,6 @@ dropped tickets live in hidden archive dirs and git history.
   lead agent responds in the user's preferred language while keeping CoT and all
   subagent prompts in English. Phase 1: Go config schema + render var injection +
   workflow-manual template.
-- `260625-feat-ws-session-state-machine` (ready, feat) - ws session state
-  machine: agenda/todo persistence across compaction. Storage extends the
-  existing `sessionRecord` (`<cache-root>/keys/<session-key>.json`, written by
-  `ws.ferrule`) with additive `agenda`/`todos` fields, reusing
-  `writeRecordAtomic`/`readRecord` — no new package. **Phase 1 done** (`54f94a53`:
-  14 MCP tools — 2 agenda + 4 enter + 8 todo). **Phase 3a done** (`a75b80c2`:
-  `ws.workflow_manual` three-mode restoration entry + `git.commit` todo
-  re-injection; spec/mental-model closeout in `633c42ff`/`2a086e30`). **Phase 2
-  done** (`83d82077` enter-call integration + `14244ca6` forge/delegate migration
-  + `72503fd1` audit fixes; review-clean on branch
-  `implement/260625-forge-migration-audit-fix`). `lead-sprint` closed additively:
-  `enter.sprint` records pre-first-commit recovery while `Sprint-Edit:` commit
-  markers remain for episode closure/backward recovery. **Phase 3b done**
-  (`1860534f`+`ea8c686b`: removed `lead-load-workflow-manual`, added `lead-revive`
-  (ws+wsflow), repointed the 4 skills that actually carried a manual self-load line
-  — proceed/discuss/sprint/salvage, NOT the ticket's stated 6: lead-tune /
-  lead-skill-authoring have no self-load line; plus `ws.workflow_manual` hardening:
-  required key, lead-only gate, sentinel-gated fresh, fail-loud minimal).
-  Integrated to `feature/ferrule` by dev-merge `47aebbf9`; version bumped to
-  `ws@0.30.11` / `wsflow@0.30.11` on the same merge path. Follow-up: idea
-  `260626-research-playbook-print-lead-surface-leak` (playbook.print bypasses the
-  workflow_manual gate).
-
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
@@ -419,8 +382,5 @@ only on pre-existing `lead-revive` inventory drift, captured as
 `260626-bug-wsflow-lead-revive-skill-inventory-drift`.
 
 Dogfood findings from this session remain under epic
-`260605-epic-ws-playbook-factory-pivot`: fork executor-narration bug
-`260626-bug-prefer-subagent-fork-executor-narration` remains idea-level; todo
-key/list surface gap `260626-bug-ws-todo-enter-derive-surface-gaps` and
-sage-review posture surface `260626-feat-surface-sage-review-posture` are
-accepted backlog in `todo/`.
+`260605-epic-ws-playbook-factory-pivot`: sage-review posture surface
+`260626-feat-surface-sage-review-posture` is the remaining ready dogfood target.

@@ -5,6 +5,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260625-feat-ws-session-state-machine: motivating-feature
   260626-research-ws-todo-stack-nesting-model: out-of-scope-stack-semantics
+completed: 2026-06-27
 ---
 
 # ws session-state tool ergonomics: enter.* derive + todo key surface gaps
