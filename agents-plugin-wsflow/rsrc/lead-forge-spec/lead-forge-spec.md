@@ -16,13 +16,16 @@ Target: user request
 - Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `{{.McpNamespace}}/spec_index.verify()` after every spec file write or update.
 - Domain todo items use the key and title prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`); the key is derivable from the domain name for status mutation.
+- Domain todo item titles are resume state; read `Source paths:` and `old spec files:` from the exact title segments before each per-domain pass.
 - All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/todo.list(session_key: <lead key>, mode: "full")` and scan rendered item titles for the `forge-spec-` prefix.
-2. If matching todo items exist -> skip to **On: per-domain** with the first whose status marker is not done (`- [x]`).
-3. If no matching todo items exist -> proceed to **On: cold-start**.
+1. Establish `<your lead key>`: call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline. No lead key yet? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap. After compaction, recover the key through `{{.SkillNamespace}}:lead-revive` first.
+2. Call `{{.McpNamespace}}/todo.list(session_key: <your lead key>, mode: "full")` and scan rendered item titles for the `forge-spec-` prefix.
+3. If matching todo items exist and at least one is not done (`- [x]`) -> skip to **On: per-domain** with the first not-done item.
+4. If matching todo items exist and all are done (`- [x]`) -> proceed to **On: wrap-up**.
+5. If no matching todo items exist -> proceed to **On: cold-start**.
 
 ## On: cold-start
 
@@ -99,21 +102,22 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the todo list
 
-Call `{{.McpNamespace}}/todo.clear(session_key: <lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order:
+Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order.
+The title schema is resume state: `Source paths:` stores comma-separated module paths; `old spec files:` stores comma-separated archived spec paths or `none`.
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
+{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
 
 ## On: per-domain
 
-For each domain task in order, skipping tasks with status `completed`:
+For each domain task in order, skipping tasks whose status is done (`- [x]`):
 
 ### 1. Mark in-progress
 
-Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-spec-<domain>", status: "wip")`.
+Call `{{.McpNamespace}}/todo.check(session_key: <your lead key>, key: "forge-spec-<domain>", status: "wip")`.
 
 ### 2. Parallel domain survey
 
@@ -123,7 +127,7 @@ Query 1 — domain source code:
 
 ```text
 Survey source code for the <domain> domain.
-Module paths: <paths from the todo item title>
+Module paths: <paths from the `Source paths:` segment of the todo item title>
 
 Read listed source paths. Identify caller-visible public functions, CLI commands,
 HTTP endpoints, config options, output formats, events, and observable interfaces.
@@ -134,7 +138,7 @@ Query 2 — domain tickets:
 
 ```text
 Find tickets relevant to the <domain> domain.
-Module paths: <paths from the todo item title>
+Module paths: <paths from the `Source paths:` segment of the todo item title>
 
 Use `{{.McpNamespace}}/tickets.find(query: "<domain>")`; filter by module paths when needed.
 Return features -> ticket status. Only contract-first ready implementation items, plus epic/research/workset planned decomposition, investigation text, or operating context, are `🚧` candidates; todo items are ticket-intent evidence.
@@ -145,7 +149,7 @@ Query 3 — archived specs for this domain:
 ```text
 Survey the archived spec files for the <domain> domain.
 Archived location: ai-docs/.old/spec/ (most recent YYMMDD subdirectory)
-Old spec files for this domain: <files from the todo item title, or scan all>
+Old spec files for this domain: <files from the `old spec files:` segment of the todo item title, or scan all when `none`>
 
 Read relevant archived specs. For each `##` heading, note feature name,
 `🚧` status, and whether current source shows it.
@@ -156,7 +160,7 @@ Query 4 — domain commit history:
 
 ```text
 Survey commit history for the <domain> domain.
-Module paths: <paths from the todo item title>
+Module paths: <paths from the `Source paths:` segment of the todo item title>
 
 Use path-filtered native Git history until ws exposes path-history. Identify commits that added or changed
 caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
@@ -222,7 +226,7 @@ For each ticket:
 
 ### 7. Complete domain
 
-1. Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-spec-<domain>", status: "done")`.
+1. Call `{{.McpNamespace}}/todo.check(session_key: <your lead key>, key: "forge-spec-<domain>", status: "done")`.
 2. If more domain todo items remain, continue with the next incomplete one from step 1 of **On: per-domain**.
 3. When every `forge-spec-` todo item is done, proceed to **On: wrap-up**.
 
@@ -276,7 +280,7 @@ No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once 
 ### Todo entry
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
+{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
 ```
 
 ## Doctrine
