@@ -14,14 +14,17 @@ Target: user request
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain todo items use the key and title prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`); keep the prefix stable for resume scanning and derive the key from the domain name for status mutation.
+- Domain todo item titles are resume state; read `Source paths:` and `spec available:` from the exact title segments before each per-domain pass.
 - All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/todo.list(session_key: <lead key>, mode: "full")` and scan rendered item titles for the `forge-mental-model-` prefix.
-2. If matching todo items exist -> skip to **On: per-domain** with the first whose status marker is not done (`- [x]`).
-3. If no matching todo items exist -> proceed to **On: cold-start**.
+1. Establish `<your lead key>`: call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline. No lead key yet? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap. After compaction, recover the key through `{{.SkillNamespace}}:lead-revive` first.
+2. Call `{{.McpNamespace}}/todo.list(session_key: <your lead key>, mode: "full")` and scan rendered item titles for the `forge-mental-model-` prefix.
+3. If matching todo items exist and at least one is not done (`- [x]`) -> skip to **On: per-domain** with the first not-done item.
+4. If matching todo items exist and all are done (`- [x]`) -> proceed to **On: wrap-up**.
+5. If no matching todo items exist -> proceed to **On: cold-start**.
 
 ## On: cold-start
 
@@ -90,21 +93,22 @@ Wait for user response. Apply any adjustments. Do not proceed until the user exp
 
 ### 5. Lock the todo list
 
-Call `{{.McpNamespace}}/todo.clear(session_key: <lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order:
+Call `{{.McpNamespace}}/todo.clear(session_key: <your lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order.
+The title schema is resume state: `Source paths:` stores comma-separated source paths; `spec available:` stores the cold-start spec gate result (`yes` or `no`).
 
 ```text
-{{.McpNamespace}}/todo.append(session_key: <lead key>, key: "forge-mental-model-<domain>", title: "forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>")
+{{.McpNamespace}}/todo.append(session_key: <your lead key>, key: "forge-mental-model-<domain>", title: "forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
 
 ## On: per-domain
 
-For each domain task in order, skipping tasks with status `completed`:
+For each domain task in order, skipping tasks whose status is done (`- [x]`):
 
 ### 1. Mark in-progress
 
-Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-mental-model-<domain>", status: "wip")`.
+Call `{{.McpNamespace}}/todo.check(session_key: <your lead key>, key: "forge-mental-model-<domain>", status: "wip")`.
 
 ### 2. Domain survey
 
@@ -112,7 +116,7 @@ Spawn a host-native broad-scope exploration worker with the task prompt below; c
 
 ```text
 Analyze domain: <domain>
-Source paths: <paths from the todo item title>
+Source paths: <paths from the `Source paths:` segment of the todo item title>
 
 Analyze this domain for a developer who needs to modify it.
 Focus on what would cause wrong outcomes if unknown:
@@ -130,11 +134,11 @@ Be concrete: cite paths, functions, and types. Do not list fields or paraphrase 
 
 1. Call `{{.McpNamespace}}/convention.read(name: "mental-model-conventions")`. Read the output; apply the inclusion test to every claim before writing it.
 2. Draft the domain file content for `ai-docs/mental-model/<domain>.md` following the document format in `mental-model-conventions.md`.
-3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from the todo item title), `related` (other domains with coupling to this one).
+3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from the `Source paths:` segment of the todo item title), `related` (other domains with coupling to this one).
 
 ### 4. Embed spec stems (conditional)
 
-If spec is available (recorded in cold-start step 1):
+If the `spec available:` segment of the todo item title is `yes`:
 
 1. Inspect `ai-docs/spec/**/*.md` directly to collect all `{#YYMMDD-slug}` anchors in the repo.
 2. For each section in the domain draft: identify spec stems whose behavior corresponds to the section's topic. Embed the stem inline in the relevant body text (e.g., `{#260421-feature-name}`).
@@ -151,7 +155,7 @@ Verify the following mental-model domain document against the codebase.
 Domain file draft:
 <full draft content>
 
-Source paths to check: <paths from the todo item title>
+Source paths to check: <paths from the `Source paths:` segment of the todo item title>
 
 For each claim, assign a severity:
 - [HIGH] Factually wrong - misnames a function, inverts a dependency, states a constraint that is not enforced.
@@ -174,7 +178,7 @@ Write the verified draft to `ai-docs/mental-model/<domain>.md`. Commit with `(me
 
 ### 7. Complete domain
 
-1. Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-mental-model-<domain>", status: "done")`.
+1. Call `{{.McpNamespace}}/todo.check(session_key: <your lead key>, key: "forge-mental-model-<domain>", status: "done")`.
 2. If more domain todo items remain, continue with the next incomplete one.
 3. When every `forge-mental-model-` todo item is done, proceed to **On: wrap-up**.
 

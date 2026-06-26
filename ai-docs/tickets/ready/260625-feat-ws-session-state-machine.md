@@ -352,6 +352,36 @@ Verify via: per-skill smoke test confirming the enter tool is called at the
 correct point and the derived todo list matches expected items; review of
 `delegate-orientation.md` update for accuracy.
 
+### Result (72503fd1) - 2026-06-26
+
+Phase 2 is complete on branch `implement/260625-forge-migration-audit-fix`.
+
+- Enter-call integration landed earlier in `83d82077`: `lead-proceed`,
+  `lead-implement`, `lead-sprint`, and `lead-salvage` call the appropriate
+  `ws.enter.*` tools; salvage also locks confirmed premises back into
+  `agenda.set`.
+- The forge/delegate slice landed in `14244ca6` and was made review-clean in
+  `72503fd1`: `lead-forge-spec` and `lead-forge-mental-model` now use `ws.todo`
+  for per-domain tracking, define the lead session key before todo calls, resume
+  from rendered `- [x]`/`done` state, preserve title fields as resume state, and
+  route all-done resumes to wrap-up. `delegate-orientation.md` documents the
+  agenda/todo/enter layers and delegate boundaries.
+- The planned `lead-sprint` marker-resume replacement closed as an additive
+  integration: `enter.sprint` records an episode before its first commit so it
+  survives compaction, while the existing `Sprint-Edit:` commit markers remain
+  for episode closure and backward recovery.
+- Review closeout: correctness and test reviews are clean. Fit review is clean
+  after normalizing the reviewed commit messages from `## Updated Tickets` to the
+  canonical `## Ticket Updates` heading.
+
+Verification: the shipped-manifest regeneration guard, wsflow mirror regeneration
+guard, and `go test ./internal/wsrsrc -count=1` passed from
+`agents-plugin-tool/`; targeted audit keyword checks found no stale `<lead key>`,
+`completed`, or title-state wording in the changed forge resources. The wsflow
+Python unittest suite remains blocked by pre-existing `lead-revive` inventory
+drift, captured separately as
+`260626-bug-wsflow-lead-revive-skill-inventory-drift`.
+
 > Phase 3 is split into Phase 3a (the `ws.workflow_manual` tool + restore rendering
 > + runtime/spec registration) and Phase 3b (manual-entry skill restructure, which
 > depends on 3a). There is no standalone Phase 3.
