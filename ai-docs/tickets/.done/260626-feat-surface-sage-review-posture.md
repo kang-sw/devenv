@@ -5,6 +5,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260622-feat-sage-review-ticket-gate: current-gate
   260625-feat-ws-session-state-machine: motivating-dogfood
+completed: 2026-06-27
 ---
 
 # Surface sage-review posture without a config/frontmatter dive
@@ -115,3 +116,8 @@ Caller-visible change: ticket mutation tools stamp self-describing
 instead of relying on `pending`.
 
 Contract-first spec: yes, addressed before promotion to `ready/`.
+
+
+## Resolution (2026-06-27)
+
+Implemented in `a0844564`, reviewed clean across correctness/fit/test, merged to `feature/ferrule` in `56fbb5b0`, and version-bumped in `bbca7508`.
