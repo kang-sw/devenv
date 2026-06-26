@@ -1506,6 +1506,52 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 	}
 }
 
+// TestSkillsCallEnterTools verifies that the four skills modified in Phase 2
+// contain the expected enter.* and agenda.set call tokens after rendering.
+// Tokens are chosen to be non-incidental: enter.<mode> appears only from the
+// inserted calls, and need_review / agenda.set are argument-level signals that
+// cannot appear from surrounding prose alone.
+func TestSkillsCallEnterTools(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	cases := []struct {
+		skill     string
+		wantAll   []string
+	}{
+		{
+			skill:   "lead-implement",
+			wantAll: []string{"enter.implement", "need_review"},
+		},
+		{
+			skill:   "lead-proceed",
+			wantAll: []string{"enter.proceed"},
+		},
+		{
+			skill:   "lead-sprint",
+			wantAll: []string{"enter.sprint"},
+		},
+		{
+			skill:   "lead-salvage",
+			wantAll: []string{"enter.salvage", "agenda.set"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.skill, func(t *testing.T) {
+			body, _, err := printPlaybook(s, rsrcRoot, tc.skill, nil, wsconfig.Options{}, "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook(%q): %v", tc.skill, err)
+			}
+			for _, token := range tc.wantAll {
+				if !strings.Contains(body, token) {
+					t.Errorf("printPlaybook(%q): rendered body does not contain %q", tc.skill, token)
+				}
+			}
+		})
+	}
+}
+
 // TestPlaybookPrintGoldenLeadBootstrap verifies lead-bootstrap resolves from the
 // real rsrc tree and contains procedure body text. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {

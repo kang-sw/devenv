@@ -58,16 +58,17 @@ Review
 4. If continuing on `implement/*` and branch name no longer matches selected scope, rename with `git branch -m implement/<scope>`; stop if target branch exists or upstream tracking is ambiguous.
 5. Record `<implementation-start>` with `git rev-parse HEAD`.
 6. If `branch-mode` = create: create `implement/<scope>` before any source edit.
-7. Call `{{.McpNamespace}}/mental_models.find(query: <target or domain>)` or `{{.McpNamespace}}/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
-8. If the target or ticket touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md`.
-9. Call `{{.McpNamespace}}/infra.read(name: "impl-playbook")`.
-10. If an implementation choice depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint absent from the target or loaded docs, search the ticket/spec/mental-model cascade before editing and report a blocker instead of inferring.
-11. Identify integration test paths and their run command.
-12. If `plan-depth` ≥ survey: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in step 14 via `plan-populator-survey`.
-13. If delegated or `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; if the migration anchor was read, copy every binding implementation constraint into the brief and add the anchor as a `[Must]` reference; audit against target before committing or running plan population; commit.
-14. If `plan-depth` ≥ survey: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
-15. If delegated: render the implementer prompt via `{{.McpNamespace}}/playbook.render(name: "implementer")` per **Delegate dispatch**; save the rendered prompt path and `recommended-tier` for the Edit stage.
-16. Create and maintain task list:
+7. Call `{{.McpNamespace}}/enter.implement(session_key: <lead key>, delegation: <needs-delegation result>, plan_depth: <plan-depth>, branch_mode: <branch-mode>, review_alloc: <review-allocation>, current_branch: <current-branch>, merge_target: <merge-target>, start_commit: <implementation-start>, need_review: <review-allocation != lead-only>, need_doc: true, active_agents: [])` to record implement-mode context and replace the session-state todo list with the derived implement checklist. This mirrors (does not replace) the host task list created below.
+8. Call `{{.McpNamespace}}/mental_models.find(query: <target or domain>)` or `{{.McpNamespace}}/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
+9. If the target or ticket touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md`.
+10. Call `{{.McpNamespace}}/infra.read(name: "impl-playbook")`.
+11. If an implementation choice depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint absent from the target or loaded docs, search the ticket/spec/mental-model cascade before editing and report a blocker instead of inferring.
+12. Identify integration test paths and their run command.
+13. If `plan-depth` ≥ survey: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in step 14 via `plan-populator-survey`.
+14. If delegated or `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; if the migration anchor was read, copy every binding implementation constraint into the brief and add the anchor as a `[Must]` reference; audit against target before committing or running plan population; commit.
+15. If `plan-depth` ≥ survey: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
+16. If delegated: render the implementer prompt via `{{.McpNamespace}}/playbook.render(name: "implementer")` per **Delegate dispatch**; save the rendered prompt path and `recommended-tier` for the Edit stage.
+17. Create and maintain task list:
 
 ```text
 [ ] Route - delegation, plan depth, branch mode, review allocation

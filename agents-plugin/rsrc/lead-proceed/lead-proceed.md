@@ -138,15 +138,16 @@ Do not ask for confirmation; the user can interrupt.
 
 ### 4. Execute Verdict
 
-1. Read the emitted `NEXT:` line.
-2. If `NEXT:` names an entry skill (`{{.SkillNamespace}}:lead-discuss`), invoke that skill. If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute it inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, or editing. If `NEXT:` names another procedure, call `{{.McpNamespace}}/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
-3. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
-4. Do not call implementation tools from `lead-proceed`.
-5. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
-6. Stop on failure or user interruption.
-7. If the lead-write-ticket procedure ran, capture its `Ticket:` path before downstream routing.
-8. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
-9. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
+1. If `NEXT:` names a downstream skill (`{{.SkillNamespace}}:lead-discuss`, `lead-write-ticket`, or `lead-implement`), call `{{.McpNamespace}}/enter.proceed(session_key: <lead key>, ticket: <Target ticket path or stem>, phase: <Slice>, next_skill: <NEXT value>, conditions: [<notable route-context flags, e.g. "freshness=<value>", "discussion=<value>", "scope-blocker=<value>">])` to record routing context before invoking the route.
+2. Read the emitted `NEXT:` line.
+3. If `NEXT:` names an entry skill (`{{.SkillNamespace}}:lead-discuss`), invoke that skill. If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute it inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, or editing. If `NEXT:` names another procedure, call `{{.McpNamespace}}/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
+4. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
+5. Do not call implementation tools from `lead-proceed`.
+6. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
+7. Stop on failure or user interruption.
+8. If the lead-write-ticket procedure ran, capture its `Ticket:` path before downstream routing.
+9. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
+10. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
 
 ## Judgments
 

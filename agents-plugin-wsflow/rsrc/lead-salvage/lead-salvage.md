@@ -38,7 +38,8 @@ Call `{{.McpNamespace}}/project_tree()`.
 3. Ask the user for the **Failure Claim**: what is wrong, what must not be trusted, and what must not be lost.
 4. Restate the failure claim and ask the user to confirm or amend it.
 5. Stop if the user cannot confirm a failure claim; suggest `{{.SkillNamespace}}:lead-discuss` for exploratory diagnosis.
-6. Enter **Survey Fanout**.
+6. Call `{{.McpNamespace}}/enter.salvage(session_key: <lead key>, failure_claim: <user-confirmed failure claim>, confirmed_premises: [], survey_status: "pending")` to record the confirmed failure claim so it survives compaction without re-confirmation.
+7. Enter **Survey Fanout**.
 
 ## On: Survey Fanout
 
@@ -70,7 +71,8 @@ Call `{{.McpNamespace}}/project_tree()`.
 4. Separate low-level bugs from premise collapse; do not patch while the parent premise is unresolved.
 5. Move unconfirmed premise candidates to `Unresolved Premise Questions`; do not use them to justify recovery tickets.
 6. Stop interviewing when the salvage report can classify evidence without inventing user intent.
-7. Enter **Classification**.
+7. Call `{{.McpNamespace}}/agenda.set(session_key: <lead key>, key: "salvage", value: {failure_claim: <confirmed claim>, confirmed_premises: [<user-confirmed premises>], survey_status: "complete"})` to lock the confirmed premises into the salvage agenda blob.
+8. Enter **Classification**.
 
 ## On: Classification
 

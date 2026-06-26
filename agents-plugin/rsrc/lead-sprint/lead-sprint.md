@@ -60,22 +60,23 @@ Trigger: `judge: route-request` selects `Start or continue sprint-edit`.
 
 1. Apply `judge: sprint-edit`; if it fails, route through normal workflow instead.
 2. If no episode is active, set `<current-edit-context>` to a one-line context, set `<episode-slug>` to a short kebab-case slug, and set `<episode-start>` with `git rev-parse HEAD`.
-3. Edit directly in the lead session; do not delegate implementation.
-4. Run focused verification; read full output before claiming pass.
-5. Commit the edit with normal commit message content plus both marker lines:
+3. If a new episode was just initialized, call `{{.McpNamespace}}/enter.sprint(session_key: <lead key>, episode_slug: <episode-slug>, episode_start: <episode-start>, current_edit_context: <current-edit-context>)` to record the episode so it is recoverable before its first commit.
+4. Edit directly in the lead session; do not delegate implementation.
+5. Run focused verification; read full output before claiming pass.
+6. Commit the edit with normal commit message content plus both marker lines:
 
 ```text
 Sprint-Edit: <episode-slug>
 Sprint-Edit-Context: <one-line context>
 ```
 
-6. Ask, in the user's active language:
+7. Ask, in the user's active language:
 
 ```text
 [sprint] Should we keep refining <current edit context>, wrap it up here, or shift direction?
 ```
 
-7. Return to session loop.
+8. Return to session loop.
 
 ## On: wrap episode
 
