@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::auth::OwnerAuthState;
-use crate::config::ServeConfig;
+use crate::config::{validate_bind_guard, ServeConfig};
 use crate::persistent_state::DashboardStateStore;
 use crate::router::{build_router, AppState};
 use crate::terminal::TerminalRegistry;
@@ -20,7 +20,9 @@ use crate::work_root_files::{OpenedWorkRoots, RegisteredWorkRoot};
 pub struct StartupInfo {
     pub bound_addr: SocketAddr,
     pub pairing_url: String,
+    pub direct_dashboard_url: Option<String>,
     pub link_passphrase: String,
+    pub owner_auth_enabled: bool,
 }
 
 pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
@@ -50,12 +52,20 @@ where
     // pairing URL once the bound address is known.
     // CONTRACT: Graceful shutdown is part of the daemon shell; request logging
     // must avoid leaking pairing query strings.
+    validate_bind_guard(
+        config.bind_mode,
+        config.bind_addr.ip(),
+        config.owner_auth_enabled,
+    )?;
     let auth = OwnerAuthState::new_ephemeral();
     let listener = TcpListener::bind(config.bind_addr).await?;
     let bound_addr = listener.local_addr()?;
-    let info = startup_info(bound_addr, &auth);
+    let info = startup_info(bound_addr, &auth, config.owner_auth_enabled);
 
     eprintln!("ws-dashboard owner pairing URL: {}", info.pairing_url);
+    if let Some(url) = info.direct_dashboard_url.as_deref() {
+        eprintln!("ws-dashboard no-auth debug mode active: {url}");
+    }
     eprintln!(
         "ws-dashboard remote link passphrase: {}",
         info.link_passphrase
@@ -115,7 +125,11 @@ where
     Ok(info)
 }
 
-pub fn startup_info(bound_addr: SocketAddr, auth: &OwnerAuthState) -> StartupInfo {
+pub fn startup_info(
+    bound_addr: SocketAddr,
+    auth: &OwnerAuthState,
+    owner_auth_enabled: bool,
+) -> StartupInfo {
     StartupInfo {
         bound_addr,
         pairing_url: format!(
@@ -123,7 +137,10 @@ pub fn startup_info(bound_addr: SocketAddr, auth: &OwnerAuthState) -> StartupInf
             display_addr(bound_addr),
             auth.pairing_token().expose_for_owner_url()
         ),
+        direct_dashboard_url: (!owner_auth_enabled)
+            .then(|| format!("http://{}/", display_addr(bound_addr))),
         link_passphrase: auth.link_passphrase().expose_for_owner_record().to_owned(),
+        owner_auth_enabled,
     }
 }
 

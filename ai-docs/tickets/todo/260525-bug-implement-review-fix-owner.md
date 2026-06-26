@@ -63,3 +63,11 @@ Verification:
   section.
 - Verify the spec and mental-model entries no longer imply that the lead
   directly fixes delegated implementation findings.
+
+## Staleness audit (2026-06-19)
+
+Still live and unimplemented (Phase 1 has no Result). The current `lead-implement`
+expresses delegated review relay and direct-edit fixes as separate steps
+(`agents-plugin/rsrc/lead-implement/lead-implement.md:97-98`) but does not yet frame
+both as variants of a single "implementation owner" governing rule. The ticket's
+intent is unchanged; baseline confirmed against the current skill.

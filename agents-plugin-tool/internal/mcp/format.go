@@ -42,6 +42,14 @@ func FormatTickets(tickets []wsdoc.TicketInfo) string {
 	return formatTickets(tickets)
 }
 
+func FormatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
+	return formatTicketMutate(verb, result)
+}
+
+func FormatTicketCreate(res wsdoc.TicketCreateResult) string {
+	return formatTicketCreate(res)
+}
+
 func FormatMentalModels(models []wsdoc.MentalModelInfo) string {
 	return formatMentalModels(models)
 }

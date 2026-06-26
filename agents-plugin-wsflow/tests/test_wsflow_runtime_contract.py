@@ -10,29 +10,28 @@ REPO_ROOT = PLUGIN_DIR.parent
 TOOL_DIR = REPO_ROOT / "agents-plugin-tool"
 
 HIDDEN_TOOLS = {
-    "agents.register",
-    "agents.call",
-    "agents.wait",
-    "agents.result",
-    "agents.status",
-    "agents.interrupt",
-    "agents.tail",
-    "agents.debug.tail",
-    "agents.debug.stdout",
-    "agents.debug.stderr",
-    "agents.debug.runtime_log",
-    "agents.debug.events",
-    "agents.cancel",
-    "agents.print",
-    "agents.erase",
-    "subquery",
+    "ws.mercenary.register",
+    "ws.mercenary.call",
+    "ws.mercenary.wait",
+    "ws.mercenary.result",
+    "ws.mercenary.status",
+    "ws.mercenary.interrupt",
+    "ws.mercenary.tail",
+    "ws.mercenary.debug.tail",
+    "ws.mercenary.debug.stdout",
+    "ws.mercenary.debug.stderr",
+    "ws.mercenary.debug.runtime_log",
+    "ws.mercenary.debug.events",
+    "ws.mercenary.cancel",
+    "ws.mercenary.print",
+    "ws.mercenary.erase",
     "config.agents_tier",
+    "config.workflow_prefer_mercenary",
     "api.ask",
     "api.ask_async",
     "api.status",
     "api.result",
     "api.cancel",
-    "ws.setup",
     "exec.spawn",
     "exec.shell",
     "exec.status",
@@ -44,24 +43,23 @@ HIDDEN_TOOLS = {
 }
 
 HIDDEN_COMMANDS = {
-    "agents.register",
-    "agents.call",
-    "agents.run-current",
-    "agents.wait",
-    "agents.result",
-    "agents.status",
-    "agents.interrupt",
-    "agents.check-inbox",
-    "agents.tail",
-    "agents.debug.tail",
-    "agents.debug.stdout",
-    "agents.debug.stderr",
-    "agents.debug.runtime-log",
-    "agents.debug.events",
-    "agents.cancel",
-    "agents.print",
-    "agents.erase",
-    "subquery",
+    "mercenary.register",
+    "mercenary.call",
+    "mercenary.run-current",
+    "mercenary.wait",
+    "mercenary.result",
+    "mercenary.status",
+    "mercenary.interrupt",
+    "mercenary.check-inbox",
+    "mercenary.tail",
+    "mercenary.debug.tail",
+    "mercenary.debug.stdout",
+    "mercenary.debug.stderr",
+    "mercenary.debug.runtime-log",
+    "mercenary.debug.events",
+    "mercenary.cancel",
+    "mercenary.print",
+    "mercenary.erase",
     "config.agents-tier",
 }
 
@@ -113,27 +111,8 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         self.assertEqual(set(contract["commands"]), set(payload["commands"]))
         self.assertFalse(HIDDEN_TOOLS & set(contract["tools"]))
         self.assertFalse(HIDDEN_COMMANDS & set(contract["commands"]))
-        self.assertIn("setup", contract["tools"])
         self.assertIn("api.list", contract["tools"])
-        self.assertIn("prompt.render", contract["tools"])
-
-    def test_prompt_render_absent_from_full_ws_capabilities(self):
-        env = os.environ.copy()
-        env.pop("WS_MCP_NO_AGENT", None)
-        env.pop("WS_MCP_NAMESPACE", None)
-        env.pop("WS_MCP_SETUP_TOOL", None)
-
-        proc = subprocess.run(
-            ["go", "run", "./cmd/ws-mcp", "runtime", "capabilities"],
-            cwd=TOOL_DIR,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=60,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        payload = json.loads(proc.stdout)
+        self.assertNotIn("prompt.render", contract["tools"])
         self.assertNotIn("prompt.render", payload["tools"])
 
 

@@ -37,3 +37,13 @@ source-neutral Activity source.
   supports future tmux-like command binding?
 - How should the UI distinguish named-agent rows from main-session command
   history so the latest row does not look stale during direct implementation?
+
+## Staleness audit (2026-06-19)
+
+The Background frames the Activity source as a named-agent cache projection. That
+model changed under the epic 260605 ephemeral session-auth reshape (Option B): the
+SQLite actor/named-agent registry was removed and the mercenary lifecycle is now
+the activity source. The underlying question (should main-session work appear in
+Activity) is still open, but it is now a **port-vs-remove deferred product
+decision** under epic 260605, not a straightforward forward-design item.
+Re-ground the follow-up questions on the mercenary lifecycle before promoting.

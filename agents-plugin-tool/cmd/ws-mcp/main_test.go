@@ -14,6 +14,16 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
+// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so `mercenary register`
+// can load delegate-orientation (260611 Phase 6b moved it off the wsprompt
+// go:embed bundle).
+func TestMain(m *testing.M) {
+	if os.Getenv("WS_RSRC_ROOT") == "" {
+		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	}
+	os.Exit(m.Run())
+}
+
 func TestDefaultRootUsesExplicitRoot(t *testing.T) {
 	t.Setenv("WS_MCP_PROJECT_ROOT", "/env/root")
 	if got := defaultRoot("/explicit/root"); got != "/explicit/root" {
@@ -44,7 +54,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 
 	contract := readRuntimeContractTest(t)
 	cmd := exec.Command(bin, "runtime", "capabilities")
-	cmd.Env = append(os.Environ(), "WS_MCP_TOOL_PROFILE=leaf", "WS_MCP_ALLOWED_TOOLS=project_tree")
+	cmd.Env = append(os.Environ(),
+		"WS_CONFIG_HOME="+t.TempDir(),
+		"WS_MCP_TOOL_PROFILE=leaf",
+		"WS_MCP_ALLOWED_TOOLS=project_tree",
+	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -56,16 +70,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	}
 
 	var got struct {
-		Version      string `json:"version"`
-		SourceCommit string `json:"source_commit"`
-		MCPProtocol  string `json:"mcp_protocol"`
-		PromptBundle struct {
-			SourceCommit  string   `json:"source_commit"`
-			ContentSHA256 string   `json:"content_sha256"`
-			Prompts       []string `json:"prompts"`
-		} `json:"prompt_bundle"`
-		Tools    []string `json:"tools"`
-		Commands []string `json:"commands"`
+		Version      string   `json:"version"`
+		SourceCommit string   `json:"source_commit"`
+		MCPProtocol  string   `json:"mcp_protocol"`
+		Tools        []string `json:"tools"`
+		Commands     []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
 	if got.Version == "" || got.SourceCommit == "" {
@@ -74,13 +83,15 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	if got.MCPProtocol != contract.MCPProtocol {
 		t.Fatalf("mcp_protocol = %q, want %q", got.MCPProtocol, contract.MCPProtocol)
 	}
-	if got.PromptBundle.ContentSHA256 != contract.PromptBundle.ContentSHA256 || len(got.PromptBundle.Prompts) == 0 {
-		t.Fatalf("prompt bundle = %#v, want hash %q with prompt list", got.PromptBundle, contract.PromptBundle.ContentSHA256)
-	}
 	wantTools := sortedMapKeys(contract.Tools)
 	slices.Sort(got.Tools)
 	if !slices.Equal(got.Tools, wantTools) {
 		t.Fatalf("tools = %v, want full lead runtime contract tools %v", got.Tools, wantTools)
+	}
+	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register"} {
+		if slices.Contains(got.Tools, hidden) {
+			t.Fatalf("runtime capabilities exposed hidden mercenary tool %s in %v", hidden, got.Tools)
+		}
 	}
 	wantCommands := sortedMapKeys(contract.Commands)
 	slices.Sort(got.Commands)
@@ -107,17 +118,17 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list", "setup"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "tickets.list"} {
 		if !slices.Contains(got.Tools, visible) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}
 	}
-	for _, hidden := range []string{"agents.call", "agents.cancel", "agents.run-current", "subquery", "config.agents-tier"} {
+	for _, hidden := range []string{"mercenary.call", "mercenary.cancel", "mercenary.run-current", "subquery", "config.agents-tier"} {
 		if slices.Contains(got.Commands, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
 		}
@@ -126,6 +137,48 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		if !slices.Contains(got.Commands, visible) {
 			t.Fatalf("no-agent capabilities missing visible command %s in %v", visible, got.Commands)
 		}
+	}
+}
+
+// TestRuntimeCapabilitiesCommandReportsWsflowContractSurface is the agentless
+// analogue of the full-surface contract test above: it asserts the live wsflow
+// no-agent tool/command set equals agents-plugin-wsflow/runtime.json exactly.
+// The wsflow launcher checks this manifest with runtime_capabilities.match
+// "exact", so without this test the hand-maintained wsflow manifest can drift
+// silently and only fail at launcher runtime for users while CI stays green.
+func TestRuntimeCapabilitiesCommandReportsWsflowContractSurface(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	contract := readRuntimeContractAtTest(t, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "runtime.json"))
+	cmd := exec.Command(bin, "runtime", "capabilities")
+	cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow", "WS_MCP_SETUP_TOOL=setup")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("ws-mcp runtime capabilities (wsflow) failed: %v", err)
+	}
+
+	var got struct {
+		MCPProtocol string   `json:"mcp_protocol"`
+		Tools       []string `json:"tools"`
+		Commands    []string `json:"commands"`
+	}
+	mustUnmarshalCLIJSON(t, out, &got)
+	if got.MCPProtocol != contract.MCPProtocol {
+		t.Fatalf("wsflow mcp_protocol = %q, want %q", got.MCPProtocol, contract.MCPProtocol)
+	}
+	wantTools := sortedMapKeys(contract.Tools)
+	slices.Sort(got.Tools)
+	if !slices.Equal(got.Tools, wantTools) {
+		t.Fatalf("wsflow tools = %v, want wsflow runtime contract tools %v", got.Tools, wantTools)
+	}
+	wantCommands := sortedMapKeys(contract.Commands)
+	slices.Sort(got.Commands)
+	if !slices.Equal(got.Commands, wantCommands) {
+		t.Fatalf("wsflow commands = %v, want wsflow runtime contract commands %v", got.Commands, wantCommands)
 	}
 }
 
@@ -141,8 +194,7 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "subquery", args: []string{"subquery", "question"}, want: "wsflow agentless mode disables agent-backed command: subquery"},
-		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: agents"},
+		{name: "mercenary", args: []string{"mercenary", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: mercenary"},
 		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config agents-tier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -437,10 +489,10 @@ func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "stdout", args: []string{"agents", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
-		{name: "stderr", args: []string{"agents", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
-		{name: "runtime-log", args: []string{"agents", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
-		{name: "events", args: []string{"agents", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
+		{name: "stdout", args: []string{"mercenary", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
+		{name: "stderr", args: []string{"mercenary", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
+		{name: "runtime-log", args: []string{"mercenary", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
+		{name: "events", args: []string{"mercenary", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(bin, tc.args...)
@@ -454,10 +506,10 @@ func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
 		})
 	}
 
-	cmd := exec.Command(bin, "agents", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
+	cmd := exec.Command(bin, "mercenary", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("ws-mcp agents debug tail failed: %v\n%s", err, string(out))
+		t.Fatalf("ws-mcp mercenary debug tail failed: %v\n%s", err, string(out))
 	}
 	if text := string(out); !strings.Contains(text, "== events ==") || !strings.Contains(text, "event new") || !strings.Contains(text, "== stdout ==") {
 		t.Fatalf("debug tail output mismatch: %q", text)
@@ -520,20 +572,23 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if before.Path != wantConfigPath() {
 		t.Fatalf("config show path = %q", before.Path)
 	}
-	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 3 {
+	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 4 {
 		t.Fatalf("default config show = %#v", before.Config)
 	}
-	if light := before.Config.Agents.Tiers["light"]; light.Backend != "codex" || light.Model != "gpt-5.4-mini" {
-		t.Fatalf("default light tier = %#v", light)
+	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-5.4-mini" {
+		t.Fatalf("default small tier = %#v", small)
 	}
-	if core := before.Config.Agents.Tiers["core"]; core.Backend != "codex" || core.Model != "gpt-5.5" {
-		t.Fatalf("default core tier = %#v", core)
+	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-5.5" {
+		t.Fatalf("default medium tier = %#v", medium)
 	}
-	if deep := before.Config.Agents.Tiers["deep"]; deep.Backend != "codex" || deep.Model != "gpt-5.5" {
-		t.Fatalf("default deep tier = %#v", deep)
+	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-5.5" {
+		t.Fatalf("default large tier = %#v", large)
+	}
+	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-5.5" {
+		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 
-	show("config", "agents-tier", "--tier", "light", "--model", "gemini-3-1-pro")
+	show("config", "agents-tier", "--tier", "light", "--model", "claude-sonnet-4")
 
 	var after struct {
 		Path   string `json:"path"`
@@ -553,9 +608,9 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		} `json:"config"`
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &after)
-	light := after.Config.Agents.Tiers["light"]
-	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
-		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
+	small := after.Config.Agents.Tiers["small"]
+	if after.Path != wantConfigPath() || small.Backend != "claude" || small.Model != "claude-sonnet-4" {
+		t.Fatalf("configured config show = path %q small %#v", after.Path, small)
 	}
 
 	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4", "--effort", "medium")
@@ -571,31 +626,32 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		} `json:"config"`
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
-	claudeCore := harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
-	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.4" || claudeCore.Effort != "medium" {
-		t.Fatalf("claude core alias = %#v", claudeCore)
+	claudeMedium := harnessAfter.Config.Agents.ModelAliases["medium"]["claude"]
+	if claudeMedium.Backend != "codex" || claudeMedium.Model != "gpt-5.4" || claudeMedium.Effort != "medium" {
+		t.Fatalf("claude medium alias = %#v", claudeMedium)
 	}
 
 	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.5")
 	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
-	claudeCore = harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
-	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.5" || claudeCore.Effort != "" {
-		t.Fatalf("claude core alias after omitted effort update = %#v", claudeCore)
+	claudeMedium = harnessAfter.Config.Agents.ModelAliases["medium"]["claude"]
+	if claudeMedium.Backend != "codex" || claudeMedium.Model != "gpt-5.5" || claudeMedium.Effort != "" {
+		t.Fatalf("claude medium alias after omitted effort update = %#v", claudeMedium)
 	}
 }
 
 type runtimeContractTest struct {
-	MCPProtocol  string `json:"mcp_protocol"`
-	PromptBundle struct {
-		ContentSHA256 string `json:"content_sha256"`
-	} `json:"prompt_bundle"`
-	Tools    map[string]string `json:"tools"`
-	Commands map[string]string `json:"commands"`
+	MCPProtocol string            `json:"mcp_protocol"`
+	Tools       map[string]string `json:"tools"`
+	Commands    map[string]string `json:"commands"`
 }
 
 func readRuntimeContractTest(t *testing.T) runtimeContractTest {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "agents-plugin", "runtime.json")
+	return readRuntimeContractAtTest(t, filepath.Join("..", "..", "..", "agents-plugin", "runtime.json"))
+}
+
+func readRuntimeContractAtTest(t *testing.T, path string) runtimeContractTest {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

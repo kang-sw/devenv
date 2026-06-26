@@ -48,53 +48,6 @@ func TestOpenCloseReopenCreatesWorktreeDatabase(t *testing.T) {
 	}
 }
 
-func TestConcurrentShortActorWrites(t *testing.T) {
-	root := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	ctx := context.Background()
-	const workers = 8
-	var wg sync.WaitGroup
-	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			store, err := NewManager(Options{CacheHome: cache}).Open(root)
-			if err != nil {
-				errs <- err
-				return
-			}
-			defer store.Close()
-			errs <- store.UpsertActor(ctx, Actor{
-				ActorID:     fmt.Sprintf("actor-%02d", i),
-				Authority:   "lead",
-				RootPath:    root,
-				WorktreeKey: store.Layout().WorktreeKey,
-				Status:      "active",
-			})
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	store, err := NewManager(Options{CacheHome: cache}).Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	count, err := store.Count(ctx, "actors")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != workers {
-		t.Fatalf("actor count = %d, want %d", count, workers)
-	}
-}
-
 func TestArtifactMetadataKeepsFileBackedStreamPath(t *testing.T) {
 	root := initRepo(t)
 	store := openStore(t, root)
@@ -285,101 +238,6 @@ func mustRun(t *testing.T, dir, name string, args ...string) {
 	}
 }
 
-func TestSQLiteRetryRetriesBusyAndLockedErrors(t *testing.T) {
-	ctx := context.Background()
-	attempts := 0
-	err := withSQLiteRetry(ctx, func() error {
-		attempts++
-		if attempts < 3 {
-			return fmt.Errorf("synthetic SQLITE_BUSY")
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("retry returned error: %v", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("attempts = %d, want 3", attempts)
-	}
-
-	attempts = 0
-	err = withSQLiteRetry(ctx, func() error {
-		attempts++
-		if attempts < 2 {
-			return fmt.Errorf("synthetic SQLITE_LOCKED")
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("locked retry returned error: %v", err)
-	}
-	if attempts != 2 {
-		t.Fatalf("locked attempts = %d, want 2", attempts)
-	}
-}
-
-func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
-	root := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	ctx := context.Background()
-	store, err := NewManager(Options{CacheHome: cache}).Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	if _, err := store.db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
-		t.Fatal(err)
-	}
-
-	holder, err := sql.Open("sqlite", store.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer holder.Close()
-	if _, err := holder.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		t.Fatal(err)
-	}
-
-	busySeen := make(chan struct{}, 1)
-	previousHook := sqliteRetryBusyHook
-	sqliteRetryBusyHook = func(error) {
-		select {
-		case busySeen <- struct{}{}:
-		default:
-		}
-	}
-	defer func() { sqliteRetryBusyHook = previousHook }()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- store.UpsertActor(ctx, Actor{ActorID: "contended", Authority: "lead", RootPath: root, WorktreeKey: store.Layout().WorktreeKey, Status: "active"})
-	}()
-	select {
-	case <-busySeen:
-	case err := <-errCh:
-		t.Fatalf("contended write finished before observing busy retry: %v", err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for busy retry")
-	}
-	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("contended write did not recover: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("contended write timed out")
-	}
-	if _, ok, err := store.Actor(ctx, "contended"); err != nil || !ok {
-		t.Fatalf("actor after contended write ok=%t err=%v", ok, err)
-	}
-}
-
 func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 	if err := ValidateRuntimeMetadataInventory(); err != nil {
 		t.Fatal(err)
@@ -524,30 +382,6 @@ func jsonFieldSet(typ *ast.StructType, extras ...string) map[string]bool {
 	return fields
 }
 
-func TestAgentInternalKeyScopesPublicNamesByActor(t *testing.T) {
-	first, err := AgentInternalKey("actor-a", "implementer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := AgentInternalKey("actor-b", "implementer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second {
-		t.Fatalf("actor-scoped keys collided: %q", first)
-	}
-	if !strings.Contains(first, "implementer") || !strings.Contains(second, "implementer") {
-		t.Fatalf("public name missing from keys: %q %q", first, second)
-	}
-	global, err := AgentInternalKey("", "implementer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if global == first || !strings.HasPrefix(global, "global:") {
-		t.Fatalf("global compatibility key = %q, actor key = %q", global, first)
-	}
-}
-
 func TestMissingFileBackedPayloadIsRecoverableConsistencyState(t *testing.T) {
 	root := initRepo(t)
 	store := openStore(t, root)
@@ -591,11 +425,11 @@ func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := AgentInternalKey("actor-one", "implementer")
+	key, err := AgentInternalKey("implementer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	def := AgentDefinition{AgentKey: key, ActorID: "actor-one", PublicName: "implementer", StatePath: "actor-dir", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "gpt-test", Status: "idle", CreatedAt: "2026-05-25T00:00:00Z", LastSeenAt: "2026-05-25T00:00:00Z", LastOutputPath: "output.md", PromptRefs: []string{"delegate-orientation"}, SystemPromptPath: "system.md", Capabilities: map[string]bool{"resume": true}, Ephemeral: true}
+	def := AgentDefinition{AgentKey: key, PublicName: "implementer", StatePath: "actor-dir", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "gpt-test", Status: "idle", CreatedAt: "2026-05-25T00:00:00Z", LastSeenAt: "2026-05-25T00:00:00Z", LastOutputPath: "output.md", PromptRefs: []string{"delegate-orientation"}, SystemPromptPath: "system.md", Capabilities: map[string]bool{"resume": true}, Ephemeral: true}
 	if err := store.UpsertAgentDefinition(context.Background(), def); err != nil {
 		t.Fatal(err)
 	}
@@ -611,65 +445,46 @@ func TestAgentDefinitionsPersistSQLiteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || got.PublicName != "implementer" || got.ActorID != "actor-one" || got.SystemPromptPath != "system.md" || !got.Capabilities["resume"] || !got.Ephemeral {
+	if !ok || got.PublicName != "implementer" || got.SystemPromptPath != "system.md" || !got.Capabilities["resume"] || !got.Ephemeral {
 		t.Fatalf("persisted agent definition mismatch: ok=%t def=%+v", ok, got)
 	}
 }
 
-func TestAgentRolePointerHistoryAndCollision(t *testing.T) {
+func TestAgentInternalKeyScopesPublicNamesByWorktreeStore(t *testing.T) {
 	ctx := context.Background()
-	root := initRepo(t)
-	store := openStore(t, root)
-	defer store.Close()
-	actorKey, err := AgentInternalKey("actor-one", "impl")
+	rootA := initRepo(t)
+	rootB := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	storeA, err := NewManager(Options{CacheHome: cache}).Open(rootA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	globalKey, err := AgentInternalKey("", "impl")
+	defer storeA.Close()
+	storeB, err := NewManager(Options{CacheHome: cache}).Open(rootB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := AgentDefinition{AgentKey: actorKey, ActorID: "actor-one", PublicName: "impl", StatePath: "actor-first", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "old", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
-	if err := store.UpsertAgentDefinition(ctx, first); err != nil {
+	defer storeB.Close()
+	key, err := AgentInternalKey("same")
+	if err != nil {
 		t.Fatal(err)
 	}
-	second := first
-	second.StatePath = "actor-second"
-	second.Model = "new"
-	if err := store.UpsertAgentDefinition(ctx, second); err != nil {
+	if err := storeA.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: key, PublicName: "same", StatePath: "root-a", SchemaVersion: 1, Status: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	global := AgentDefinition{AgentKey: globalKey, PublicName: "impl", StatePath: "global", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "global", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
-	if err := store.UpsertAgentDefinition(ctx, global); err != nil {
+	if err := storeB.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: key, PublicName: "same", StatePath: "root-b", SchemaVersion: 1, Status: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	gotActor, ok, err := store.AgentDefinition(ctx, actorKey)
+	gotA, ok, err := storeA.AgentDefinition(ctx, key)
 	if err != nil || !ok {
-		t.Fatalf("actor role ok=%t err=%v", ok, err)
+		t.Fatalf("root A definition ok=%t err=%v", ok, err)
 	}
-	gotGlobal, ok, err := store.AgentDefinition(ctx, globalKey)
+	gotB, ok, err := storeB.AgentDefinition(ctx, key)
 	if err != nil || !ok {
-		t.Fatalf("global role ok=%t err=%v", ok, err)
+		t.Fatalf("root B definition ok=%t err=%v", ok, err)
 	}
-	if gotActor.StatePath != "actor-second" || gotActor.Model != "new" {
-		t.Fatalf("actor pointer = %+v", gotActor)
-	}
-	if gotGlobal.StatePath != "global" || gotGlobal.Model != "global" {
-		t.Fatalf("global pointer = %+v", gotGlobal)
-	}
-	count, err := store.Count(ctx, "agent_instances")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 3 {
-		t.Fatalf("agent instance count = %d, want 3", count)
-	}
-	var retired int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_instances WHERE agent_key = ? AND state_path = 'actor-first' AND cleanup_state = 'retired' AND retention_eligible_at != ''`, actorKey).Scan(&retired); err != nil {
-		t.Fatal(err)
-	}
-	if retired != 1 {
-		t.Fatalf("retired first instance rows = %d", retired)
+	if gotA.StatePath != "root-a" || gotB.StatePath != "root-b" {
+		t.Fatalf("same public name should stay distinct by worktree store: A=%+v B=%+v", gotA, gotB)
 	}
 }
 
@@ -678,7 +493,7 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	root := initRepo(t)
 	store := openStore(t, root)
 	defer store.Close()
-	key, err := AgentInternalKey("", "impl")
+	key, err := AgentInternalKey("impl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +526,7 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	if err := store.UpsertAgentDefinition(ctx, pinned); err != nil {
 		t.Fatal(err)
 	}
-	activeKey, err := AgentInternalKey("", "active")
+	activeKey, err := AgentInternalKey("active")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +544,7 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(activeDir, "current", "state.json"), []byte(`{"status":"running"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	recoveryKey, err := AgentInternalKey("", "recovery")
+	recoveryKey, err := AgentInternalKey("recovery")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +556,7 @@ func TestPruneAgentInstancesUsesRecordedSQLiteCandidates(t *testing.T) {
 	if err := store.UpsertAgentDefinition(ctx, recovery); err != nil {
 		t.Fatal(err)
 	}
-	backoffKey, err := AgentInternalKey("", "backoff")
+	backoffKey, err := AgentInternalKey("backoff")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -792,7 +607,7 @@ func TestPruneAgentInstancesRecordsRetryFence(t *testing.T) {
 	root := initRepo(t)
 	store := openStore(t, root)
 	defer store.Close()
-	key, err := AgentInternalKey("", "broken")
+	key, err := AgentInternalKey("broken")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -933,5 +748,249 @@ func TestExecArtifactsPruneEligibilityAndTombstones(t *testing.T) {
 	}
 	if count, err := store.Count(ctx, "artifact_tombstones"); err != nil || count != 1 {
 		t.Fatalf("artifact_tombstones count=%d err=%v", count, err)
+	}
+}
+
+func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+
+	holder, err := sql.Open("sqlite", store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	if _, err := holder.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+
+	busySeen := make(chan struct{}, 1)
+	previousHook := sqliteRetryBusyHook
+	sqliteRetryBusyHook = func(error) {
+		select {
+		case busySeen <- struct{}{}:
+		default:
+		}
+	}
+	defer func() { sqliteRetryBusyHook = previousHook }()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.UpsertAgentDefinition(ctx, AgentDefinition{AgentKey: "contended", PublicName: "contended", StatePath: "contended", SchemaVersion: 1, Status: "idle"})
+	}()
+	select {
+	case <-busySeen:
+	case err := <-errCh:
+		t.Fatalf("contended write finished before observing busy retry: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for busy retry")
+	}
+	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("contended write did not recover: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("contended write timed out")
+	}
+	if _, ok, err := store.AgentDefinition(ctx, "contended"); err != nil || !ok {
+		t.Fatalf("agent definition after contended write ok=%t err=%v", ok, err)
+	}
+}
+
+func TestAgentRolePointerHistoryAndCollision(t *testing.T) {
+	ctx := context.Background()
+	rootA := initRepo(t)
+	rootB := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	storeA, err := NewManager(Options{CacheHome: cache}).Open(rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeA.Close()
+	storeB, err := NewManager(Options{CacheHome: cache}).Open(rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeB.Close()
+	key, err := AgentInternalKey("impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "first", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "old", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
+	if err := storeA.UpsertAgentDefinition(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.StatePath = "second"
+	second.Model = "new"
+	if err := storeA.UpsertAgentDefinition(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	other := AgentDefinition{AgentKey: key, PublicName: "impl", StatePath: "other-root", SchemaVersion: 1, Backend: "codex", Tier: "core", Model: "other", Status: "idle", CreatedAt: testNow.Format(time.RFC3339Nano), LastSeenAt: testNow.Format(time.RFC3339Nano), LastOutputPath: "output.md"}
+	if err := storeB.UpsertAgentDefinition(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	gotA, ok, err := storeA.AgentDefinition(ctx, key)
+	if err != nil || !ok {
+		t.Fatalf("root A role ok=%t err=%v", ok, err)
+	}
+	gotB, ok, err := storeB.AgentDefinition(ctx, key)
+	if err != nil || !ok {
+		t.Fatalf("root B role ok=%t err=%v", ok, err)
+	}
+	if gotA.StatePath != "second" || gotA.Model != "new" {
+		t.Fatalf("root A pointer = %+v", gotA)
+	}
+	if gotB.StatePath != "other-root" || gotB.Model != "other" {
+		t.Fatalf("root B pointer = %+v", gotB)
+	}
+	count, err := storeA.Count(ctx, "agent_instances")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("root A agent instance count = %d, want 2", count)
+	}
+}
+
+func TestSQLiteRetryRetriesBusyAndLockedErrors(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+	err := withSQLiteRetry(ctx, func() error {
+		attempts++
+		if attempts < 3 {
+			return fmt.Errorf("synthetic SQLITE_BUSY")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retry returned error: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+
+	attempts = 0
+	err = withSQLiteRetry(ctx, func() error {
+		attempts++
+		if attempts < 2 {
+			return fmt.Errorf("synthetic SQLITE_LOCKED")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("locked retry returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("locked attempts = %d, want 2", attempts)
+	}
+}
+
+// execJobsHasOwnerActorColumn reports whether the exec_jobs table currently
+// defines an owner_actor_id column.
+func execJobsHasOwnerActorColumn(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `PRAGMA table_info(exec_jobs)`)
+	if err != nil {
+		t.Fatalf("table_info(exec_jobs): %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		if name == "owner_actor_id" {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	return false
+}
+
+// TestFreshDBOmitsExecJobOwnerActorColumn verifies a freshly created database
+// has no owner_actor_id column on exec_jobs.
+func TestFreshDBOmitsExecJobOwnerActorColumn(t *testing.T) {
+	root := initRepo(t)
+	store, err := NewManager(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if execJobsHasOwnerActorColumn(t, store.db) {
+		t.Fatal("fresh exec_jobs unexpectedly has owner_actor_id column")
+	}
+}
+
+// TestMigrateDropsExecJobOwnerActorColumn proves that an existing DB carrying the
+// legacy exec_jobs.owner_actor_id column migrates without error and that the
+// column is dropped while the surviving row data is preserved.
+func TestMigrateDropsExecJobOwnerActorColumn(t *testing.T) {
+	root := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	ctx := context.Background()
+
+	// Open once to materialize the layout/database path, then re-introduce the
+	// legacy owner_actor_id column with a populated row to simulate a pre-Phase-3
+	// database.
+	store, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := store.Path()
+	if _, err := store.db.ExecContext(ctx, `ALTER TABLE exec_jobs ADD COLUMN owner_actor_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatalf("add legacy column: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO exec_jobs(exec_key, owner_actor_id, status, command) VALUES('legacy-1', 'actor-xyz', 'completed', 'echo hi')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if !execJobsHasOwnerActorColumn(t, store.db) {
+		t.Fatal("legacy fixture should have owner_actor_id column before migration")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen: Open runs Migrate, which must drop the column without error.
+	reopened, err := NewManager(Options{CacheHome: cache}).Open(root)
+	if err != nil {
+		t.Fatalf("reopen/migrate legacy DB: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.Path() != path {
+		t.Fatalf("reopened path = %q, want %q", reopened.Path(), path)
+	}
+	if execJobsHasOwnerActorColumn(t, reopened.db) {
+		t.Fatal("migration did not drop exec_jobs.owner_actor_id")
+	}
+	// Surviving row data must be preserved through the table recreate.
+	job, ok, err := reopened.ExecJob(ctx, "legacy-1")
+	if err != nil || !ok {
+		t.Fatalf("legacy row lookup ok=%t err=%v", ok, err)
+	}
+	if job.Status != "completed" || job.Command != "echo hi" {
+		t.Fatalf("legacy row not preserved: %#v", job)
 	}
 }

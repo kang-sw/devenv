@@ -123,9 +123,21 @@ Active or planned product tracks:
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
   cancel, erase, retry, or terminate behind separate high-friction tickets.
-  `260525-feat-ws-dashboard-sqlite-agent-activity-source` is ready for
-  aligning the backend Activity projection with ws-mcp's SQLite role/instance
-  registry while keeping frontend routes and rendering stable.
+  `260525-feat-ws-dashboard-sqlite-agent-activity-source` is now in `.done/`; its
+  original basis — aligning the backend Activity projection with ws-mcp's SQLite
+  role/instance registry — no longer exists after the epic 260605 session-auth
+  reshape removed the SQLite actor registry. Re-ground this track's activity source
+  on the mercenary lifecycle before any further agent-panel work (see
+  `260523-feat-ws-dashboard-main-session-activity-source`). [staleness audit 2026-06-19]
+  `260620-feat-ws-dashboard-agent-client-activity-sources` is todo for the
+  re-grounding pass: keep Activity rendering source-neutral, treat ws mercenary
+  state plus Codex app-server and OpenCode ACP as provider inputs, keep OpenCode
+  serve as optional observation/discovery, and avoid restarting direct
+  harness/runtime development under the dashboard.
+  `260620-feat-ws-dashboard-loopback-no-auth-debug-mode` is done: WSL/local
+  dogfood can start the daemon with explicit loopback-only `--no-auth` and get
+  a direct local dashboard URL without weakening normal owner-auth or
+  public-bind behavior.
 - Multi-server management - active child track.
   `260525-feat-ws-dashboard-multi-server-gateway` is done for
   linked-server registry, selected-server resource forwarding, passphrase
@@ -158,9 +170,11 @@ Active or planned product tracks:
 Implementation sequence:
 
 1. Agent view panel: dedicated agent-oriented visibility over Activity Console
-   and future main-session/subtask sources. Keep custom harness versus deeper
-   Codex integration as an explicit unresolved design choice until the panel
-   scope clarifies.
+   and future main-session/subtask sources. Re-ground source integration through
+   an ACP-shaped dashboard agent-client provider contract and Activity
+   projections for ws mercenary compatibility state, Codex app-server, and
+   OpenCode ACP; keep OpenCode serve as optional observation/discovery and avoid
+   direct harness/runtime development.
 2. Multi-server management: local dashboard as gateway for local, WSL, and
    remote linked daemons, including remote Windows dogfood deployment and
    seamless resource integration under `serverId`.

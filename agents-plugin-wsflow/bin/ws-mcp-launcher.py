@@ -7,13 +7,48 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 import urllib.request
 from pathlib import Path
 
 
+_BREADCRUMB_DIR: Path | None = None
+
+
+def set_breadcrumb_dir(runtime_dir: Path) -> None:
+    global _BREADCRUMB_DIR
+    _BREADCRUMB_DIR = runtime_dir
+
+
+def write_launch_breadcrumb(message: str) -> None:
+    # Best-effort durable record of why startup failed, so a -32000 connect
+    # failure leaves a readable reason in the runtime dir instead of vanishing
+    # with the launcher's stderr. Never mask the original failure.
+    if _BREADCRUMB_DIR is None:
+        return
+    try:
+        _BREADCRUMB_DIR.mkdir(parents=True, exist_ok=True)
+        (_BREADCRUMB_DIR / "last-launch-error").write_text(
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} ws-mcp-launcher: {message}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def clear_launch_breadcrumb() -> None:
+    if _BREADCRUMB_DIR is None:
+        return
+    try:
+        (_BREADCRUMB_DIR / "last-launch-error").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def fail(message: str) -> None:
     print(f"ws-mcp-launcher: {message}", file=sys.stderr)
+    write_launch_breadcrumb(message)
     raise SystemExit(1)
 
 
@@ -22,13 +57,43 @@ def note(message: str) -> None:
         print(f"ws-mcp-launcher: {message}", file=sys.stderr)
 
 
+def wait_for_runtime_contract(path: Path, *, timeout_seconds: float | None = None, interval_seconds: float = 0.05) -> None:
+    # Use a longer default on Windows: AV scanners can delay file visibility on
+    # cold installs (freshly-extracted packages are held open by the AV service).
+    if timeout_seconds is None:
+        timeout_seconds = 10.0 if os.name == "nt" else 2.0
+    if path.is_file():
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        if path.is_file():
+            note(f"runtime contract appeared after package materialization wait: {path}")
+            return
+    fail(f"plugin package not fully materialized: missing runtime contract after {timeout_seconds:.1f}s: {path}")
+
+
 def read_runtime_contract(path: Path) -> dict:
-    if not path.is_file():
-        fail(f"missing runtime contract: {path}")
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        fail(f"invalid runtime contract {path}: {exc}")
+    wait_for_runtime_contract(path)
+    # The file may exist but be momentarily unreadable (AV sharing hold on
+    # Windows).  Retry a small number of times on OSError (covers PermissionError)
+    # and ValueError (covers json.JSONDecodeError and UnicodeDecodeError — both
+    # subclasses of ValueError) before giving up.  A partially-written or
+    # byte-corrupt file in the cold-install window can raise UnicodeDecodeError,
+    # which is NOT an OSError; catching (OSError, ValueError) ensures every
+    # transient read/parse error reaches fail() rather than escaping as a
+    # traceback.  A first-try success incurs no added latency.
+    _read_attempts = 4
+    _read_backoff = 0.05  # seconds; kept short — this is a transient window only
+    last_exc: Exception | None = None
+    for attempt in range(_read_attempts):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            last_exc = exc
+        if attempt < _read_attempts - 1:
+            time.sleep(_read_backoff)
+    fail(f"invalid runtime contract {path}: {last_exc}")
 
 
 def host_os() -> str:
@@ -186,23 +251,6 @@ def commands_compatible(binary: Path, contract: dict) -> bool:
     return True
 
 
-def prompt_bundle_compatible(binary: Path, contract: dict) -> bool:
-    expected = contract.get("prompt_bundle", {}).get("content_sha256")
-    if not expected:
-        return True
-    try:
-        proc = run_binary(binary, ["runtime", "info"])
-        if proc.returncode != 0 or not proc.stdout:
-            return False
-        info = json.loads(proc.stdout)
-    except Exception:
-        return False
-    if info.get("prompt_bundle", {}).get("content_sha256") != expected:
-        note("runtime prompt bundle hash mismatch")
-        return False
-    return True
-
-
 def _capabilities_string_list(payload: dict, key: str) -> list[str] | None:
     values = payload.get(key)
     if not isinstance(values, list):
@@ -248,7 +296,7 @@ def unique_runtime_temp_path(runtime_dir: Path, label: str) -> Path:
     return runtime_dir / f".{label}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
 
 
-def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path) -> dict | None:
+def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path, source_fingerprint: str | None = None) -> dict | None:
     try:
         stat = binary.stat()
     except OSError:
@@ -262,11 +310,12 @@ def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Pat
         "binary_path": str(binary.resolve()),
         "binary_size": stat.st_size,
         "binary_mtime_ns": stat.st_mtime_ns,
+        "local_devenv_source_fingerprint": source_fingerprint,
     }
 
 
-def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path) -> bool:
-    expected = compatibility_stamp_payload(binary, contract, contract_path)
+def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path, source_fingerprint: str | None = None) -> bool:
+    expected = compatibility_stamp_payload(binary, contract, contract_path, source_fingerprint)
     if expected is None:
         return False
     try:
@@ -279,8 +328,8 @@ def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Pat
     return False
 
 
-def write_compatibility_stamp(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path) -> None:
-    payload = compatibility_stamp_payload(binary, contract, contract_path)
+def write_compatibility_stamp(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path, source_fingerprint: str | None = None) -> None:
+    payload = compatibility_stamp_payload(binary, contract, contract_path, source_fingerprint)
     if payload is None:
         return
     try:
@@ -345,31 +394,52 @@ def copy_runtime(source: Path, destination: Path) -> None:
 
 
 def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Path, message: str) -> bool:
-    try:
-        os.replace(tmp, binary)
-    except OSError as exc:
-        if runtime_fully_compatible(binary, contract, runtime_dir):
-            note(f"using compatible runtime already installed at {binary} after replace failed: {exc}")
-            return False
-        fail(f"failed to install runtime at {binary}: {exc}")
-    note(message)
-    return True
+    # Bounded retry on OSError: AV scanners and concurrent installers can hold
+    # the target file open briefly on Windows, causing a sharing-violation error.
+    # Mirrors the Phase A Go-side MoveFileEx bounded retry (~5 attempts, ~10ms
+    # exponential backoff).  On POSIX, os.replace is atomic and never raises this
+    # error, so the retry loop never triggers and there is zero added latency.
+    _replace_attempts = 5
+    _replace_backoff = 0.01  # seconds; doubles per attempt
+    last_exc: OSError | None = None
+    for attempt in range(_replace_attempts):
+        try:
+            os.replace(tmp, binary)
+            note(message)
+            return True
+        except OSError as exc:
+            last_exc = exc
+            if attempt < _replace_attempts - 1:
+                time.sleep(_replace_backoff * (2 ** attempt))
+    # Replace budget exhausted; fall through to the existing compatible-binary
+    # fallback before failing hard.
+    if runtime_fully_compatible(binary, contract, runtime_dir):
+        note(f"using compatible runtime already installed at {binary} after replace failed: {last_exc}")
+        return False
+    fail(f"failed to install runtime at {binary}: {last_exc}")
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
-    home = Path.home()
-    try:
-        rel = plugin_dir.relative_to(home / ".codex" / "plugins" / "cache" / "kang-sw-devenv")
-    except ValueError:
+    # Recognize the repo-local plugin install regardless of on-disk layout.
+    # Claude Code runs a directory-source marketplace plugin from the install.sh
+    # snapshot (~/.claude/plugins/ws-plugin/<pkg>), while Codex/Claude package
+    # installs live under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>.
+    # Match the ws/wsflow package segment under any per-user (.codex/.claude)
+    # plugin tree; the gitignored .local-devenv-runtime marker is the actual
+    # dev opt-in, validated separately. This is HOME-independent.
+    parts = plugin_dir.resolve().parts
+    if "plugins" not in parts:
         return None
-    parts = rel.parts
-    if len(parts) < 2 or parts[0] not in {"ws", "wsflow"}:
+    if not any(host in parts for host in (".codex", ".claude")):
         return None
-    return parts[0]
+    for seg in parts[parts.index("plugins") + 1:]:
+        if seg in {"ws", "wsflow"}:
+            return seg
+    return None
 
 
 def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
-    if os_name == "windows" or local_devenv_cache_package(plugin_dir) is None:
+    if local_devenv_cache_package(plugin_dir) is None:
         return None
     marker = plugin_dir / ".local-devenv-runtime"
     if not marker.is_file():
@@ -402,7 +472,11 @@ def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
     if not resolved["tool_dir"].is_dir() or not (resolved["tool_dir"] / "cmd" / "ws-mcp").is_dir():
         note("local devenv runtime contract is inactive: tool_dir is not a ws-mcp module")
         return None
-    if not resolved["go"].is_file() or not os.access(resolved["go"], os.X_OK):
+    # On Windows os.access(..., X_OK) is effectively meaningless (it returns True
+    # for any existing file), so require the file to exist and trust the marker's
+    # absolute go path; on POSIX keep the executable-bit check.
+    go_path = resolved["go"]
+    if not go_path.is_file() or (os_name != "windows" and not os.access(go_path, os.X_OK)):
         note("local devenv runtime contract is inactive: go is not executable")
         return None
     return resolved
@@ -412,11 +486,94 @@ def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     return read_local_devenv_contract(plugin_dir, os_name) is not None
 
 
-def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict) -> bool:
+def bootstrap_runtime_forced() -> bool:
+    return bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL"))
+
+
+def runtime_install_forced(plugin_dir: Path, os_name: str, *, local_enabled: bool | None = None) -> bool:
+    if bootstrap_runtime_forced():
+        return True
+    if local_enabled is None:
+        local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    return local_enabled
+
+
+def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | None:
+    # Fingerprint the local ws-mcp source tree so an unchanged tree can reuse the
+    # cached runtime binary instead of forcing a `go build` on every launch (the
+    # forced rebuild blew past the MCP startup timeout on cold caches). Uses stat
+    # metadata only (no file reads) to stay cheap on the startup path.
+    contract = read_local_devenv_contract(plugin_dir, os_name)
+    if contract is None:
+        return None
+    tool_dir = contract["tool_dir"]
+    entries = []
+    try:
+        for path in tool_dir.rglob("*.go"):
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            entries.append((str(path.relative_to(tool_dir)), st.st_size, st.st_mtime_ns))
+    except OSError as exc:
+        note(f"local devenv source fingerprint walk failed: {exc}")
+        return None
+    for name in ("go.mod", "go.sum"):
+        candidate = tool_dir / name
+        try:
+            st = candidate.stat()
+        except OSError:
+            continue
+        entries.append((name, st.st_size, st.st_mtime_ns))
+    try:
+        go_st = contract["go"].stat()
+        entries.append(("::go-toolchain::", go_st.st_size, go_st.st_mtime_ns))
+    except OSError:
+        pass
+    digest = hashlib.sha256()
+    for rel, size, mtime in sorted(entries):
+        digest.update(f"{rel}\x00{size}\x00{mtime}\x00".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def local_devenv_build_env(os_name: str) -> dict:
+    # The MCP host may launch the launcher with a sanitized environment that
+    # lacks HOME (observed on Claude Code launches). `go build` then cannot
+    # locate GOMODCACHE/GOCACHE (default under $HOME) and fails, aborting the
+    # forced local repair. Recover HOME from the password database via
+    # Path.home() so the source build finds the user's module/build cache.
+    build_env = dict(os.environ)
+    if not build_env.get("HOME"):
+        try:
+            build_env["HOME"] = str(Path.home())
+        except Exception:
+            pass
+    if os_name == "windows":
+        # Windows `go build` resolves GOMODCACHE under %USERPROFILE%\go and
+        # GOCACHE under %LOCALAPPDATA%\go-build; recover them when the launch
+        # environment was sanitized, mirroring the HOME recovery above.
+        if not build_env.get("USERPROFILE"):
+            try:
+                build_env["USERPROFILE"] = str(Path.home())
+            except Exception:
+                pass
+        if not build_env.get("LOCALAPPDATA"):
+            profile = build_env.get("USERPROFILE")
+            if profile:
+                build_env["LOCALAPPDATA"] = str(Path(profile) / "AppData" / "Local")
+    return build_env
+
+
+def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict, os_name: str) -> bool:
     tool_dir = local_contract["tool_dir"]
     go_binary = local_contract["go"]
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
-    proc = subprocess.run([str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"], cwd=str(tool_dir), check=False)
+    proc = subprocess.run(
+        [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
+        cwd=str(tool_dir),
+        env=local_devenv_build_env(os_name),
+        check=False,
+    )
     if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir):
         install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}")
         return True
@@ -431,7 +588,7 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
         return False
 
     if prefer_build:
-        return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
+        return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract, os_name)
 
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
     source_root = local_contract["source_root"]
@@ -449,11 +606,7 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
             tmp.unlink(missing_ok=True)
             note(f"local devenv runtime candidate is incompatible: {candidate}")
 
-    return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract)
-
-
-def runtime_install_forced(plugin_dir: Path, os_name: str) -> bool:
-    return bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL")) or local_devenv_runtime_enabled(plugin_dir, os_name)
+    return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract, os_name)
 
 
 def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, force_local: bool = False) -> None:
@@ -520,13 +673,6 @@ def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
         note("runtime capabilities MCP protocol mismatch")
         return False
 
-    expected_prompt_hash = contract.get("prompt_bundle", {}).get("content_sha256")
-    if expected_prompt_hash:
-        prompt_bundle = payload.get("prompt_bundle")
-        if not isinstance(prompt_bundle, dict) or prompt_bundle.get("content_sha256") != expected_prompt_hash:
-            note("runtime capabilities prompt bundle hash mismatch")
-            return False
-
     exact = _capabilities_match_exact(contract)
     if not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
         return False
@@ -547,7 +693,7 @@ def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) ->
         return False
     if proc.returncode != 0 or not version_compatible(proc.stdout.strip(), contract):
         return False
-    return tools_compatible(binary, contract, runtime_dir) and commands_compatible(binary, contract) and prompt_bundle_compatible(binary, contract)
+    return tools_compatible(binary, contract, runtime_dir) and commands_compatible(binary, contract)
 
 
 def parent_env_value(key: str) -> str:
@@ -612,6 +758,39 @@ def detect_project_root(plugin_dir: Path) -> None:
             return
 
 
+def wait_for_rsrc_tree(plugin_dir: Path, *, timeout_seconds: float = 5.0, interval_seconds: float = 0.05) -> None:
+    """Wait for the rsrc tree to be materialized before the one-shot apply_rsrc_root_env check.
+
+    Uses manifest.json as the presence sentinel: it is written last during rsrc
+    tree extraction and proves the tree is populated, not merely an empty dir.
+    On timeout, emits a note and returns — apply_rsrc_root_env already no-ops
+    gracefully when the rsrc dir is absent, so this wait is best-effort.
+    """
+    sentinel = plugin_dir / "rsrc" / "manifest.json"
+    if sentinel.is_file():
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        if sentinel.is_file():
+            note(f"rsrc tree materialized after wait: {sentinel}")
+            return
+    note(f"rsrc tree sentinel not found after {timeout_seconds:.1f}s; proceeding without rsrc env (best-effort): {sentinel}")
+
+
+def apply_rsrc_root_env(plugin_dir: Path, env: dict) -> None:
+    """Point the runtime at the staged rsrc tree through its WS_RSRC_ROOT seam.
+
+    The runtime derives the rsrc tree as <dir(exe)>/../rsrc, but the launcher
+    installs the binary under <plugin>/.runtime/<platform>/ -- two levels below
+    the plugin root where the rsrc/ tree is staged -- so the derived path misses
+    <plugin>/rsrc. Set the seam unless the caller already provided it.
+    """
+    rsrc_root = plugin_dir / "rsrc"
+    if rsrc_root.is_dir() and not env.get("WS_RSRC_ROOT"):
+        env["WS_RSRC_ROOT"] = str(rsrc_root)
+
+
 def main() -> int:
     launcher_path = Path(__file__).resolve()
     plugin_dir = launcher_path.parent.parent
@@ -622,30 +801,45 @@ def main() -> int:
     arch_name = host_arch()
     platform_name = f"{os_name}-{arch_name}"
     runtime_dir = Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name)))
+    set_breadcrumb_dir(runtime_dir)
     binary_name = runtime_binary_name(contract, contract_path, os_name)
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
-    forced_install = runtime_install_forced(plugin_dir, os_name)
-    compatible = False
-    if forced_install:
-        note("forcing runtime install from bootstrap or local devenv source")
-        clear_compatibility_stamp(runtime_dir)
-    else:
-        compatible = compatibility_stamp_current(binary, contract, contract_path, runtime_dir)
-    if not forced_install and not compatible:
-        compatible = runtime_fully_compatible(binary, contract, runtime_dir)
-        if compatible:
-            write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
+    bootstrap_forced = bootstrap_runtime_forced()
+    local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    install_forced = runtime_install_forced(plugin_dir, os_name, local_enabled=local_enabled)
+    # The stamp encodes the local source fingerprint, so a stamp hit under local
+    # devenv proves the cached binary already matches the current source: skip the
+    # rebuild. A miss means the source changed (or no runtime exists) -> rebuild.
+    source_fingerprint = local_devenv_source_fingerprint(plugin_dir, os_name) if local_enabled else None
 
-    if forced_install or not compatible:
+    need_install = False
+    if bootstrap_forced:
+        note("forcing runtime install from bootstrap binary or url")
+        clear_compatibility_stamp(runtime_dir)
+        need_install = True
+    elif compatibility_stamp_current(binary, contract, contract_path, runtime_dir, source_fingerprint):
+        pass
+    elif install_forced and local_enabled:
+        note("local devenv source changed or runtime missing; rebuilding from source")
+        need_install = True
+    elif runtime_fully_compatible(binary, contract, runtime_dir):
+        write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
+    else:
+        need_install = True
+
+    if need_install:
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
-        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_devenv_runtime_enabled(plugin_dir, os_name))
+        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_enabled)
         if not runtime_fully_compatible(binary, contract, runtime_dir):
             fail("incompatible ws-mcp runtime after repair")
-        write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
+        write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
 
+    # Runtime is present and compatible; clear any stale failure breadcrumb so
+    # last-launch-error only exists when the most recent launch actually failed.
+    clear_launch_breadcrumb()
     detect_project_root(plugin_dir)
     note(f"plugin_dir={plugin_dir}")
     note(f"runtime_dir={runtime_dir}")
@@ -653,6 +847,8 @@ def main() -> int:
     note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
 
     os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
+    wait_for_rsrc_tree(plugin_dir)
+    apply_rsrc_root_env(plugin_dir, os.environ)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":
         return subprocess.call(args)

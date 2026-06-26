@@ -3,11 +3,9 @@ package mcp
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,22 +21,16 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
-	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 type Server struct {
-	root                  string
-	version               string
-	sourceCommit          string
-	role                  toolRole
-	api                   apiRuntime
-	rootMu                sync.RWMutex
-	sessionRoot           string
-	sessionHarness        string
-	sessionActorID        string
-	sessionActorAuthority string
+	root           string
+	version        string
+	sourceCommit   string
+	rootMu         sync.RWMutex
+	sessionHarness string
+	sessions       *sessionStore
 }
 
 type toolRole string
@@ -48,6 +40,34 @@ const (
 	roleDelegate toolRole = "delegate"
 	roleLeaf     toolRole = "leaf"
 )
+
+// bootstrapToolName is the deliberately obscure, function-inert name of the
+// lead session-bootstrap tool (mints a session key). Its name<->purpose mapping
+// is taught ONLY in ws:workflow-manual (260617 obscurity): a semantically
+// meaningless name removes the session-start "pull" that a descriptive name
+// (login/attach/bind) creates for every agent, lowering accidental/curious
+// invocation by subagents that share the lead's MCP connection. Invariants:
+// do not give it a descriptive alias, do not leak its purpose through its
+// tools/list description, and do not name it in error-guidance strings.
+const bootstrapToolName = "ws.ferrule"
+
+// isLeadOnlyTool reports whether a tool is restricted to lead-scoped session
+// keys. It is the authority for the keyed-gate escalation block. The bootstrap
+// tool must be listed explicitly because it no longer lives under the
+// `ws.lead.*` prefix (260617 obscurity rename) — a prefix-only check would
+// silently stop blocking it for non-lead keys.
+func isLeadOnlyTool(name string) bool {
+	return name == bootstrapToolName || strings.HasPrefix(name, "ws.lead.") || workflowPreferenceWriterTool(name)
+}
+
+func workflowPreferenceWriterTool(name string) bool {
+	switch name {
+	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+		return true
+	default:
+		return false
+	}
+}
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -82,7 +102,6 @@ const leadWorkflowBootstrapMethod = "lead-workflow-bootstrap"
 const (
 	envNoAgent   = "WS_MCP_NO_AGENT"
 	envNamespace = "WS_MCP_NAMESPACE"
-	envSetupTool = "WS_MCP_SETUP_TOOL"
 )
 
 var debugEvents = struct {
@@ -96,8 +115,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 		commit = sourceCommit[0]
 	}
 	cleanRoot := filepath.Clean(root)
-	role := requestedToolRole()
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, role: role}
+	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionStore()}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -139,18 +157,6 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		reqCtx, cancel := context.WithCancel(ctx)
 		id := rawMessageString(req.ID)
-		if isSetupFenceRequest(req) {
-			wg.Wait()
-			requests.Store(id, cancel)
-			resp := s.handle(reqCtx, req)
-			cancel()
-			requests.Delete(id)
-			if err := writeResponse(resp); err != nil {
-				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
-				return err
-			}
-			continue
-		}
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
@@ -165,19 +171,6 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	err := scanner.Err()
 	wg.Wait()
 	return err
-}
-
-func isSetupFenceRequest(req request) bool {
-	if req.Method != "tools/call" {
-		return false
-	}
-	var params struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return false
-	}
-	return params.Name == "ws.setup" || params.Name == setupToolName()
 }
 
 func (s *Server) handleNotification(req request, requests *sync.Map) {
@@ -317,13 +310,25 @@ func RuntimeNamespace() string {
 	return value
 }
 
-func setupToolName() string {
-	value := strings.TrimSpace(os.Getenv(envSetupTool))
-	if value == "" {
-		return "ws.setup"
+func builtinConfigDefaults() map[string]string {
+	return map[string]string{
+		wsconfig.ItemWorkflowPreferSubagent:  "off",
+		wsconfig.ItemWorkflowPreferMercenary: "hide",
 	}
-	return value
 }
+
+func builtinConfigAndPromptDefaults() map[string]string {
+	defaults := builtinConfigDefaults()
+	for k, v := range builtinPromptOverrideDefaults() {
+		defaults[k] = v
+	}
+	return defaults
+}
+
+// wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
+// a word boundary so that words containing "ws" as an interior substring (e.g.
+// "news/", "rows:", "workflows/") are never mangled.
+var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
 
 func (s *Server) callTool(ctx context.Context, req request) response {
 	var params struct {
@@ -337,25 +342,31 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
-	requestedToolName := params.Name
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
 	}
-	if !NoAgentMode() && wsflowOnlyTool(params.Name) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("%s: tool not available in full ws mode: %s", RuntimeNamespace(), params.Name))
-	}
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
-	if !s.subqueryAgentAccessAllowed(params.Name, params.Arguments) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("tool available only for subquery-* agents in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
-	}
-	if setupToolName() != "ws.setup" && params.Name == setupToolName() {
-		params.Name = "ws.setup"
-	}
-	if err := s.actorGate(params.Name, params.Arguments); err != nil {
-		return toolTextResponse(req.ID, "", err)
+	// Keyed capability gate: when a session_key is present and maps to a known
+	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
+	// are not rejected here; root-aware tools surface the unknown_session error
+	// via resolveToolRoot. Tools that do not call resolveToolRoot (e.g.
+	// runtime.info) silently ignore an unrecognised session_key.
+	//
+	// Lead-only tools (see isLeadOnlyTool) are additionally blocked for any
+	// non-lead scoped key to prevent self-bootstrap escalation: a delegate or
+	// leaf key must not be able to call the bootstrap tool and receive a
+	// lead-scoped key, bypassing all capability restrictions. A KEYLESS caller
+	// (no session_key) is unaffected — the normal lead bootstrap path remains
+	// open.
+	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+		if entry, found := s.sessions.lookup(keyStr); found && entry.scope != roleLead {
+			if isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name) {
+				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
+			}
+		}
 	}
 
 	switch params.Name {
@@ -371,31 +382,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
-	case "ws.setup":
-		if err := s.applySetup(ctx, params.Arguments); err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		state := s.setupState(requestedToolName)
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, state, nil)
-		}
-		return toolTextResponse(req.ID, formatSetupState(state), nil)
 	case "session.set_default_root":
-		root, _ := params.Arguments["root"].(string)
-		canonical, err := canonicalGitRoot(root)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		s.rootMu.Lock()
-		s.sessionRoot = canonical
-		s.rootMu.Unlock()
-		return toolJSONResponse(req.ID, s.setupState("session.compat"), nil)
+		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.get_default_root":
-		result := s.setupState("session.compat")
-		if wantsJSON(params.Arguments) {
-			return toolJSONResponse(req.ID, result, nil)
-		}
-		return toolTextResponse(req.ID, formatSetupState(result), nil)
+		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
+	case "session.children":
+		return s.handleSessionChildren(req.ID, params.Arguments)
+	case bootstrapToolName:
+		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -406,54 +400,6 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolJSONResponse(req.ID, domains, err)
 		}
 		return toolTextResponse(req.ID, formatStringLines(domains), err)
-	case "api.ask":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		prompt, _ := params.Arguments["prompt"].(string)
-		hint, _ := params.Arguments["domain_hint"].(string)
-		text, err := s.askAPI(ctx, root, prompt, hint)
-		if err != nil && text != "" {
-			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
-		}
-		return toolTextResponse(req.ID, text, err)
-	case "api.ask_async":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		prompt, _ := params.Arguments["prompt"].(string)
-		hint, _ := params.Arguments["domain_hint"].(string)
-		result, err := s.startAPIJob(ctx, root, prompt, hint)
-		return toolJSONResponse(req.ID, result, err)
-	case "api.status":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		key, _ := params.Arguments["api_job_key"].(string)
-		result, err := s.statusAPIJob(ctx, root, key)
-		return toolJSONResponse(req.ID, result, err)
-	case "api.result":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		key, _ := params.Arguments["api_job_key"].(string)
-		text, err := s.resultAPIJob(ctx, root, key)
-		if err != nil && text != "" {
-			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
-		}
-		return toolTextResponse(req.ID, text, err)
-	case "api.cancel":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		key, _ := params.Arguments["api_job_key"].(string)
-		result, err := s.cancelAPIJob(ctx, root, key)
-		return toolJSONResponse(req.ID, result, err)
 
 	case "exec.spawn":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -530,7 +476,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return execRawGrepResponse(req.ID, result, err)
 	case "config.show":
-		view, err := wsconfig.Show(wsconfig.Options{})
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		view, err := wsconfig.ScopedShow(&r, wsconfig.Options{}, strings.TrimSpace(sessionKey))
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, view, err)
 		}
@@ -551,6 +500,189 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
 		}
 		return toolJSONResponse(req.ID, cfg, err)
+
+	case "config.workflow_prefer_subagent":
+		if _, err := s.requireLeadSessionKey("config.workflow_prefer_subagent", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		value, _ := params.Arguments["value"].(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value must be one of on, off; got %q", value))
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:global]\n", value), nil)
+
+	case "config.workflow_prefer_mercenary":
+		if _, err := s.requireLeadSessionKey("config.workflow_prefer_mercenary", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		value, _ := params.Arguments["value"].(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off", "hide":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: value must be one of on, off, hide; got %q", value))
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_mercenary: %s [scope:global]\n", value), nil)
+
+	case "config.prompt.set":
+		// Lead-only setter for prompt override-points. The config.* prefix gate in
+		// roleAllowsTool already blocks delegate and leaf keys, so no extra role
+		// check is needed here (sole keyed-gate-is-authority rule, per mcp-runtime
+		// mental model).
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: session_key is required"))
+		}
+		pointID, _ := params.Arguments["pointId"].(string)
+		pointID = strings.TrimSpace(pointID)
+		if pointID == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: pointId must be non-empty"))
+		}
+		harness, _ := params.Arguments["harness"].(string)
+		// Normalize the harness value and reject unrecognized inputs.
+		// The caller-visible enum is ["claude","codex","*"]; "*" is stored as "all"
+		// to match the buildOverrideLookup reader which reads prompt.<id>.all.
+		switch harness {
+		case "claude", "codex":
+			// accepted as-is
+		case "*":
+			harness = "all"
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: harness must be one of claude, codex, or *; got %q", harness))
+		}
+		promptText, _ := params.Arguments["prompt"].(string)
+		if strings.TrimSpace(promptText) == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: prompt must be non-empty"))
+		}
+		// Parse optional scope arg. Empty/absent passes ExplicitScope:"" so the
+		// resolver applies DefaultScope (project for unregistered prompt.* keys).
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(scopeArg)
+		}
+		// Write through the layered config resolver. Use wsconfig.Options{} (ambient
+		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as other config.* tools do; do NOT
+		// call resolveToolRoot (config.* tools are not root-aware per mcp-runtime
+		// mental model).
+		overrideKey := "prompt." + pointID + "." + harness
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Set(overrideKey, promptText, wsconfig.SetOptions{
+			ExplicitScope: explicitScope,
+			SessionKey:    sessionKey,
+		}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.set: %w", err))
+		}
+		// Determine the resolved scope for the confirmation message.
+		resolvedScope := explicitScope
+		if resolvedScope == "" {
+			resolvedScope = wsconfig.DefaultScope(overrideKey)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
+
+	case "config.prompt.unset":
+		// Removes a prompt override from the project or global config layer.
+		// Lead-only via the config.* prefix gate (same as config.prompt.set).
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: session_key is required"))
+		}
+		pointID, _ := params.Arguments["pointId"].(string)
+		pointID = strings.TrimSpace(pointID)
+		if pointID == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: pointId must be non-empty"))
+		}
+		harness, _ := params.Arguments["harness"].(string)
+		switch harness {
+		case "claude", "codex":
+			// accepted as-is
+		case "*":
+			harness = "all"
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: harness must be one of claude, codex, or *; got %q", harness))
+		}
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(scopeArg)
+		}
+		overrideKey := "prompt." + pointID + "." + harness
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Unset(overrideKey, wsconfig.SetOptions{
+			ExplicitScope: explicitScope,
+			SessionKey:    sessionKey,
+		}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: %w", err))
+		}
+		resolvedScope := explicitScope
+		if resolvedScope == "" {
+			resolvedScope = wsconfig.DefaultScope(overrideKey)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
+
+	case "config.prompt":
+		// Read-only listing of declared prompt override-points. Lead-only via the
+		// config.* prefix gate (a keyless caller passes, exactly like config.show);
+		// no extra role check is needed here.
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		points, err := scanOverridePoints(rsrcRoot)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// Build the resolver exactly as the setter does: ambient Options, not
+		// root-aware (config.* tools resolve from WS_CACHE_HOME/WS_CONFIG_HOME).
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
+		list := buildPromptOverrideListing(points, &resolver, sessionKey)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, list, nil)
+		}
+		return toolTextResponse(req.ID, formatPromptOverrideListing(list), nil)
+
+	case "config.tuning":
+		// Read-only catalog of workflow tuning knobs. The catalog is a projection
+		// over existing writer schemas plus dynamic prompt override-point discovery;
+		// it never mutates config itself.
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
+		catalog, err := buildTuningCatalog(rsrcRoot, &resolver, sessionKey, NoAgentMode())
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, catalog, nil)
+		}
+		return toolTextResponse(req.ID, formatTuningCatalog(catalog), nil)
 
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -809,31 +941,71 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
-	case "subquery":
+	case "tickets.close":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		question, _ := params.Arguments["question"].(string)
-		if question == "" {
-			question, _ = params.Arguments["prompt"].(string)
-		}
-		deepResearch, _ := params.Arguments["deep_research"].(bool)
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
-		child, err := s.childActorSetupForSubquery(ctx, root, actorID)
+		stem, _ := params.Arguments["stem"].(string)
+		status, _ := params.Arguments["status"].(string)
+		resolution, _ := params.Arguments["resolution"].(string)
+		result, err := wsdoc.TicketsClose(root, wsgit.ExecRunner{}, wsdoc.TicketCloseOptions{
+			TicketStem: stem,
+			Status:     status,
+			Resolution: resolution,
+			Today:      time.Now().Format("2006-01-02"),
+		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
-			Root:                  root,
-			ActorID:               actorID,
-			Question:              question,
-			DeepResearch:          deepResearch,
-			Harness:               s.currentHarness(),
-			ChildActorID:          child.ActorID,
-			ChildActorAuthority:   child.Authority,
-			ChildSetupInstruction: child.Instruction,
+		return toolTextResponse(req.ID, formatTicketMutate("closed", result), nil)
+	case "tickets.move":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		stem, _ := params.Arguments["stem"].(string)
+		to, _ := params.Arguments["to"].(string)
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
+		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
+			TicketStem: stem,
+			To:         to,
+			SageReview: resolved.Value,
 		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
+	case "tickets.create":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		stem, _ := params.Arguments["stem"].(string)
+		initialState, _ := params.Arguments["initial_state"].(string)
+		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
+			Stem:         stem,
+			InitialState: initialState,
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTicketCreate(result), nil)
+	case "tickets.template":
+		typeStr, _ := params.Arguments["type"].(string)
+		text, err := wsdoc.TicketTemplate(typeStr)
 		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -850,125 +1022,178 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
-	case "prompt.render":
+	case "playbook.print":
+		// Phase 2: name + context; rsrc root is call-site-overridable seam for M3.
+		// Argument parsing is named/extensible (not positional) for forward-compat
+		// with M3's session_key prepend.
+		name, _ := params.Arguments["name"].(string)
+		callerContext := stringMapArgument(params.Arguments["context"])
+		// M3 forward-compat: rsrc root resolved here so M3 can pass root_override.
+		rsrcRoot, err := resolveRsrcRoot("")
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// Build an override lookup from the session-keyed resolver when a session_key
+		// is present.
+		keyStr, _ := params.Arguments["session_key"].(string)
+		printOverrideLookup := buildOverrideLookup(s, keyStr)
+		// Resolve workflow.lang for language-binding injection.
+		printLangAdapter := sessionConfigAdapter{s: s.sessions}
+		printLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, printLangAdapter, printLangAdapter)
+		printWorkflowLangRV, _ := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
+		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
+
+	case "playbook.render":
+		// Phase 2c: name + context + root_override; child-key mint for lead callers.
+		name, _ := params.Arguments["name"].(string)
+		callerContext := stringMapArgument(params.Arguments["context"])
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rootOverride = strings.TrimSpace(rootOverride)
+
+		// Determine worktree root: root_override (when set) or session-bound root.
+		var worktreeRoot string
+		if rootOverride != "" {
+			worktreeRoot = rootOverride
+		} else {
+			var err error
+			worktreeRoot, err = s.resolveToolRoot(params.Arguments, params.Meta)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+		}
+		// Rsrc root: root_override rebinds the auto-include resolution root when set.
+		rsrcRoot, err := resolveRsrcRoot(rootOverride)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+
+		// Lead-gate: check caller entry to determine whether to mint a child key.
+		// mintRoot is empty when caller is not a lead (no mint).
+		var mintRoot string
+		var parentKey string
+		var preferMercenary bool
+		// Override lookup is built for any present session_key (shared helper with
+		// the playbook.print path); it is independent of the lead-gate.
+		renderSessionKey, _ := params.Arguments["session_key"].(string)
+		renderOverrideLookup := buildOverrideLookup(s, renderSessionKey)
+		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+			capturedKey := strings.TrimSpace(keyStr)
+			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
+				// Child key binding root: root_override when set, else caller's bound root.
+				if rootOverride != "" {
+					mintRoot = rootOverride
+				} else {
+					mintRoot = entry.root
+				}
+				parentKey = capturedKey
+				// Mercenary preference is a global workflow setting because it
+				// also controls keyless tool-surface visibility.
+				adapter := sessionConfigAdapter{s: s.sessions}
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+				rv, _ := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
+				preferMercenary = canonicalPreferMercenaryValue(rv.Value) == "on"
+			}
+		}
+
+		// Resolve workflow.lang for language-binding injection.
+		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
+		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
+		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
+		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
+
+	case "ws.mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		stem, _ := params.Arguments["stem"].(string)
-		promptPath, err := renderPrompt(root, stem, stringMapArgument(params.Arguments["context"]))
-		return toolTextResponse(req.ID, promptPath+"\n", err)
-	case "agents.register":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
-		tier, _ := params.Arguments["tier"].(string)
-		model, _ := params.Arguments["model"].(string)
 		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		child, err := s.childActorSetupForAgent(ctx, root, name, actorID, false)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
+		// Phase 1 (260620): `tier` is a PASS-THROUGH of the recommended tier that
+		// playbook.render returns (origin = playbook frontmatter). The tier flows
+		// directly as a capability word to RegisterOptions.Tier; downstream
+		// ResolveAgentForHarnessConfig normalizes via normalizedTier. Empty/unknown
+		// tier leaves RegisterOptions.Tier empty so Register applies its built-in
+		// default instead of pinning to medium when a tier WAS declared. The other
+		// former fields (prompts/prompt_refs/model) stay removed from the MCP
+		// schema; RegisterOptions struct fields remain for internal callers (api_docs).
+		tier, _ := params.Arguments["tier"].(string)
 		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-			Root:                  root,
-			ActorID:               actorID,
-			Name:                  name,
-			Backend:               backend,
-			Harness:               s.currentHarness(),
-			Tier:                  tier,
-			Model:                 model,
-			Prompts:               stringList(params.Arguments["prompts"]),
-			PromptRefs:            stringList(params.Arguments["prompt_refs"]),
-			SystemPromptText:      systemPromptText,
-			ChildActorID:          child.ActorID,
-			ChildActorAuthority:   child.Authority,
-			ChildSetupInstruction: child.Instruction,
+			Root:             root,
+			Name:             name,
+			Backend:          backend,
+			Harness:          s.currentHarness(),
+			SystemPromptText: systemPromptText,
+			Tier:             tier,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "agents.call":
+	case "ws.mercenary.call":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
-		child, err := s.childActorSetupForAgent(ctx, root, name, actorID, true)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
 		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-			Root:                  root,
-			ActorID:               actorID,
-			Name:                  name,
-			Prompt:                prompt,
-			ChildActorID:          child.ActorID,
-			ChildActorAuthority:   child.Authority,
-			ChildSetupInstruction: child.Instruction,
+			Root:   root,
+			Name:   name,
+			Prompt: prompt,
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
-	case "agents.wait":
+		// Unit 5: native-shaped continuation handle — same shape as a host-native
+		// subagent id so the lead reuses one continuation idiom across both paths.
+		// Handle format: agentId=<name> matches the native agentId shape referenced
+		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
+		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
+	case "ws.mercenary.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		names := stringList(params.Arguments["names"])
 		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
 			Root:    root,
-			ActorID: actorID,
 			Name:    name,
 			Names:   names,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.result":
+	case "ws.mercenary.result":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
 			Root:    root,
-			ActorID: actorID,
 			Name:    name,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
 			Context: ctx,
-			OnEphemeralErased: func(agent wsagent.Agent) {
-				s.markActorInactive(context.Background(), root, agent.ChildActorID)
-			},
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.status":
+	case "ws.mercenary.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).StatusScoped(root, name, actorID)
+		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "agents.interrupt":
+	case "ws.mercenary.interrupt":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		message, _ := params.Arguments["message"].(string)
 		result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
 			Root:    root,
-			ActorID: actorID,
 			Name:    name,
 			Message: message,
 		})
@@ -976,95 +1201,84 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
-	case "agents.tail":
+	case "ws.mercenary.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:    root,
-			ActorID: actorID,
-			Name:    name,
-			Lines:   lines,
+			Root:  root,
+			Name:  name,
+			Lines: lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.debug.tail":
+	case "ws.mercenary.debug.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
 		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
-			Root:    root,
-			ActorID: actorID,
-			Name:    name,
-			Lines:   lines,
-			Raw:     true,
+			Root:  root,
+			Name:  name,
+			Lines: lines,
+			Raw:   true,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
+	case "ws.mercenary.debug.stdout", "ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
-		stream := strings.TrimPrefix(params.Name, "agents.debug.")
+		stream := strings.TrimPrefix(params.Name, "ws.mercenary.debug.")
 		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
-			Root:    root,
-			ActorID: actorID,
-			Name:    name,
-			Stream:  stream,
-			Lines:   lines,
+			Root:   root,
+			Name:   name,
+			Stream: stream,
+			Lines:  lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.cancel":
+	case "ws.mercenary.cancel":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).CancelScoped(root, name, actorID)
+		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "agents.recall":
+	case "ws.mercenary.recall":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
-			Root:    root,
-			ActorID: actorID,
-			Name:    name,
-			Prompt:  prompt,
+			Root:   root,
+			Name:   name,
+			Prompt: prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "agents.print":
+	case "ws.mercenary.print":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).PrintScoped(root, name, actorID)
+		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "agents.erase":
+	case "ws.mercenary.erase":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		actorID := s.actorScopeForAgentTool(root, params.Arguments)
 		name, _ := params.Arguments["name"].(string)
-		err = wsagent.NewManager(wsagent.Options{}).EraseScoped(root, name, actorID)
+		err = wsagent.NewManager(wsagent.Options{}).Erase(root, name)
 		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -1072,14 +1286,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 }
 
 func runtimeInfo(version, sourceCommit string) (map[string]any, error) {
-	bundle, err := wsprompt.Bundle(sourceCommit)
-	if err != nil {
-		return nil, err
-	}
 	return map[string]any{
 		"version":       version,
 		"source_commit": sourceCommit,
-		"prompt_bundle": bundle,
 	}, nil
 }
 
@@ -1096,172 +1305,7 @@ func formatRuntimeInfo(info map[string]any) string {
 	if commit, _ := info["source_commit"].(string); commit != "" {
 		fmt.Fprintf(&b, "source_commit: %s\n", commit)
 	}
-	if bundle, ok := info["prompt_bundle"].(wsprompt.BundleInfo); ok {
-		formatPromptBundle(&b, bundle)
-	} else if bundle, ok := info["prompt_bundle"].(map[string]any); ok {
-		formatPromptBundleMap(&b, bundle)
-	}
 	return b.String()
-}
-
-func formatPromptBundle(b *strings.Builder, bundle wsprompt.BundleInfo) {
-	fmt.Fprintf(b, "prompt_bundle: %d prompts", len(bundle.Prompts))
-	if bundle.ContentSHA256 != "" {
-		fmt.Fprintf(b, " sha256=%s", bundle.ContentSHA256)
-	}
-	if bundle.SourceCommit != "" {
-		fmt.Fprintf(b, " source_commit=%s", bundle.SourceCommit)
-	}
-	b.WriteString("\n")
-	if len(bundle.Prompts) > 0 {
-		b.WriteString("prompts:\n")
-		for _, prompt := range bundle.Prompts {
-			fmt.Fprintf(b, "  - %s\n", prompt)
-		}
-	}
-}
-
-func formatPromptBundleMap(b *strings.Builder, bundle map[string]any) {
-	prompts := stringAnySlice(bundle["prompts"])
-	fmt.Fprintf(b, "prompt_bundle: %d prompts", len(prompts))
-	if sha, _ := bundle["content_sha256"].(string); sha != "" {
-		fmt.Fprintf(b, " sha256=%s", sha)
-	}
-	if commit, _ := bundle["source_commit"].(string); commit != "" {
-		fmt.Fprintf(b, " source_commit=%s", commit)
-	}
-	b.WriteString("\n")
-	if len(prompts) > 0 {
-		b.WriteString("prompts:\n")
-		for _, prompt := range prompts {
-			fmt.Fprintf(b, "  - %s\n", prompt)
-		}
-	}
-}
-
-func stringAnySlice(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if text, ok := item.(string); ok {
-			out = append(out, text)
-		}
-	}
-	return out
-}
-
-func (s *Server) setupState(source string) map[string]any {
-	s.rootMu.RLock()
-	sessionRoot := s.sessionRoot
-	sessionHarness := s.sessionHarness
-	actorID := s.sessionActorID
-	actorAuthority := s.sessionActorAuthority
-	s.rootMu.RUnlock()
-	return map[string]any{
-		"root":                 sessionRoot,
-		"has_root":             sessionRoot != "",
-		"actor_id":             actorID,
-		"has_actor":            actorID != "",
-		"actor_authority":      actorAuthority,
-		"recovery_guidance":    recoveryGuidance(actorID),
-		"session_default_root": sessionRoot,
-		"has_session_default":  sessionRoot != "",
-		"session_harness":      sessionHarness,
-		"env_project_root":     strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")),
-		"server_root":          s.root,
-		"source":               source,
-	}
-}
-
-func formatSetupState(values map[string]any) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "root: %s\n", displayString(values["root"]))
-	fmt.Fprintf(&b, "has_root: %t\n", boolValue(values["has_root"]))
-	fmt.Fprintf(&b, "actor_id: %s\n", displayString(values["actor_id"]))
-	fmt.Fprintf(&b, "has_actor: %t\n", boolValue(values["has_actor"]))
-	fmt.Fprintf(&b, "actor_authority: %s\n", displayString(values["actor_authority"]))
-	if guidance := displayString(values["recovery_guidance"]); guidance != "" {
-		fmt.Fprintf(&b, "recovery_guidance: %s\n", guidance)
-	}
-	fmt.Fprintf(&b, "session_harness: %s\n", displayString(values["session_harness"]))
-	fmt.Fprintf(&b, "server_root: %s\n", displayString(values["server_root"]))
-	fmt.Fprintf(&b, "env_project_root: %s\n", displayString(values["env_project_root"]))
-	return b.String()
-}
-
-func recoveryGuidance(actorID string) string {
-	if actorID == "" {
-		return fmt.Sprintf("Lead bootstrap requires %s(method: %q, root: \"<absolute-working-directory>\").", setupToolName(), leadWorkflowBootstrapMethod)
-	}
-	return fmt.Sprintf("Do not forget this actor_id. If MCP restarts, call %s(id: %q).", setupToolName(), actorID)
-}
-
-func (s *Server) applySetup(ctx context.Context, arguments map[string]any) error {
-	if id, _ := arguments["id"].(string); strings.TrimSpace(id) != "" {
-		return s.restoreActor(ctx, strings.TrimSpace(id))
-	}
-	method, _ := arguments["method"].(string)
-	method = strings.TrimSpace(method)
-	if method != "" {
-		if method != leadWorkflowBootstrapMethod {
-			return fmt.Errorf("unsupported setup method %q", method)
-		}
-		return s.bootstrapLeadActor(ctx, arguments)
-	}
-	if root, _ := arguments["root"].(string); strings.TrimSpace(root) != "" {
-		canonical, err := canonicalSetupRoot(root)
-		if err != nil {
-			return err
-		}
-		s.rootMu.Lock()
-		s.sessionRoot = canonical
-		s.rootMu.Unlock()
-	}
-	return nil
-}
-
-func (s *Server) bootstrapLeadActor(ctx context.Context, arguments map[string]any) error {
-	root, _ := arguments["root"].(string)
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return fmt.Errorf("root is required for setup method %q; pass the repository's absolute filesystem path", leadWorkflowBootstrapMethod)
-	}
-	if root == "<cwd>" {
-		return fmt.Errorf("root for setup method %q must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", leadWorkflowBootstrapMethod, root)
-	}
-	if !filepath.IsAbs(root) {
-		return fmt.Errorf("root for setup method %q must be an absolute repository path", leadWorkflowBootstrapMethod)
-	}
-	canonical, err := canonicalSetupRoot(root)
-	if err != nil {
-		return err
-	}
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(canonical)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	worktreeKey := store.Layout().WorktreeKey
-	actorID, err := mintUniqueActorID(ctx, store, "lead")
-	if err != nil {
-		return err
-	}
-	actor := wsstore.Actor{
-		ActorID:     actorID,
-		Authority:   "lead",
-		RootPath:    canonical,
-		WorktreeKey: worktreeKey,
-		Status:      "active",
-		Pinned:      true,
-	}
-	if err := store.UpsertActor(ctx, actor); err != nil {
-		return err
-	}
-	s.bindActor(actor)
-	return nil
 }
 
 func canonicalSetupRoot(root string) (string, error) {
@@ -1272,303 +1316,144 @@ func canonicalSetupRoot(root string) (string, error) {
 	return canonicalGitRoot(root)
 }
 
-func (s *Server) restoreActor(ctx context.Context, actorID string) error {
-	actorID = strings.ToLower(strings.TrimSpace(actorID))
-	if _, err := actorAuthority(actorID); err != nil {
-		return err
+// handleLeadLogin implements the session-bootstrap tool (bootstrapToolName): canonicalize root, mint an
+// ephemeral session key, store the {root, scope} entry in the registry, and
+// return the key to the caller.
+func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) response {
+	rootArg, _ := arguments["root"].(string)
+	if strings.TrimSpace(rootArg) == "" {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: root is required"))
 	}
-	manager := wsstore.NewManager(wsstore.Options{})
-	var store *wsstore.Store
-	var actor wsstore.Actor
-	var ok bool
-	if worktreeKey, err := actorWorktreeKey(actorID); err == nil {
-		opened, err := manager.OpenWorktreeKey(worktreeKey)
-		if err != nil {
-			return err
+	canonical, err := canonicalSetupRoot(rootArg)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	scope := parseCapabilityScope(arguments["capability"])
+	parentKey, _ := arguments["parent_session_key"].(string)
+	parentKey = strings.TrimSpace(parentKey)
+	if parentKey != "" {
+		if _, ok := s.sessions.lookup(parentKey); !ok {
+			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", parentKey))
 		}
-		store = opened
-		defer store.Close()
-		actor, ok, err = store.Actor(ctx, actorID)
-		if err != nil {
-			return err
+	}
+	key, err := s.sessions.mint(canonical, scope, parentKey)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	result := map[string]any{
+		"session_key": key,
+		"root":        canonical,
+	}
+	if wantsJSON(arguments) {
+		return toolJSONResponse(id, result, nil)
+	}
+	return toolTextResponse(id, fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical), nil)
+}
+
+type sessionChildOutput struct {
+	Key    string `json:"key"`
+	Scope  string `json:"scope"`
+	Parent string `json:"parent"`
+	Depth  int    `json:"depth"`
+	Live   bool   `json:"live"`
+	Root   string `json:"root"`
+}
+
+func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]any) response {
+	sessionKey, _ := arguments["session_key"].(string)
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return toolTextResponse(id, "", fmt.Errorf("session.children: session_key is required"))
+	}
+
+	depth := 1
+	if raw, ok := arguments["depth"]; ok {
+		if f, ok := raw.(float64); ok {
+			depth = int(f)
 		}
-	} else {
-		found, foundOK, err := manager.FindActor(ctx, actorID)
-		if err != nil {
-			return err
+	}
+	includeDead, _ := arguments["include_dead"].(bool)
+
+	children, err := s.sessions.children(sessionKey, depth)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	filtered := make([]sessionChild, 0, len(children))
+	for _, child := range children {
+		if child.live || includeDead {
+			filtered = append(filtered, child)
 		}
-		actor, ok = found, foundOK
-		if ok {
-			opened, err := manager.OpenWorktreeKey(actor.WorktreeKey)
-			if err != nil {
-				return err
+	}
+
+	out := make([]sessionChildOutput, 0, len(filtered))
+	for _, child := range filtered {
+		out = append(out, sessionChildOutput{
+			Key:    child.key,
+			Scope:  sessionChildScopeLabel(child.scope),
+			Parent: child.parent,
+			Depth:  child.depth,
+			Live:   child.live,
+			Root:   child.root,
+		})
+	}
+
+	if wantsJSON(arguments) {
+		return toolJSONResponse(id, map[string]any{
+			"session_key": sessionKey,
+			"depth":       depth,
+			"children":    out,
+		}, nil)
+	}
+	return toolTextResponse(id, formatSessionChildren(sessionKey, out, includeDead), nil)
+}
+
+func sessionChildScopeLabel(scope toolRole) string {
+	switch scope {
+	case roleLead:
+		return "control"
+	case roleDelegate:
+		return "delegate"
+	case roleLeaf:
+		return "leaf"
+	default:
+		return string(scope)
+	}
+}
+
+func formatSessionChildren(sessionKey string, children []sessionChildOutput, includeDead bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "session_key: %s\n", sessionKey)
+	if len(children) == 0 {
+		b.WriteString("children: none\n")
+		return b.String()
+	}
+	b.WriteString("children:\n")
+	for _, child := range children {
+		indent := strings.Repeat("  ", child.Depth-1)
+		fmt.Fprintf(&b, "%s- key: %s scope: %s depth: %d", indent, child.Key, child.Scope, child.Depth)
+		if includeDead {
+			live := "no"
+			if child.Live {
+				live = "yes"
 			}
-			store = opened
-			defer store.Close()
+			fmt.Fprintf(&b, " live: %s", live)
 		}
+		fmt.Fprintf(&b, " root: %s\n", child.Root)
 	}
-	if !ok {
-		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<absolute-working-directory>\") to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
-	}
-	if actor.Status != "" && actor.Status != "active" {
-		return fmt.Errorf("actor id %q is not active: %s", actorID, actor.Status)
-	}
-	if store == nil {
-		return fmt.Errorf("actor id %q has no recoverable worktree state", actorID)
-	}
-	if err := store.UpsertActor(ctx, actor); err != nil {
-		return err
-	}
-	s.bindActor(actor)
-	return nil
+	return b.String()
 }
 
-func (s *Server) bindActor(actor wsstore.Actor) {
-	s.rootMu.Lock()
-	defer s.rootMu.Unlock()
-	s.sessionRoot = actor.RootPath
-	s.sessionActorID = actor.ActorID
-	s.sessionActorAuthority = actor.Authority
-}
-
-var generateActorPayload = randomActorPayload
-
-func mintUniqueActorID(ctx context.Context, store *wsstore.Store, authority string) (string, error) {
-	if !validActorAuthority(authority) {
-		return "", fmt.Errorf("invalid actor authority %q", authority)
-	}
-	manager := wsstore.NewManager(wsstore.Options{})
-	for attempt := 0; attempt < 32; attempt++ {
-		actorID, err := mintActorID(authority)
-		if err != nil {
-			return "", err
-		}
-		if _, ok, err := store.Actor(ctx, actorID); err != nil {
-			return "", err
-		} else if ok {
-			continue
-		}
-		if _, ok, err := manager.FindActor(ctx, actorID); err != nil {
-			return "", err
-		} else if ok {
-			continue
-		}
-		return actorID, nil
-	}
-	return "", fmt.Errorf("could not mint unique %s actor id after collision retries", authority)
-}
-
-func mintActorID(authority string) (string, error) {
-	payload, err := generateActorPayload(8)
-	if err != nil {
-		return "", err
-	}
-	return authority + "-" + payload, nil
-}
-
-func randomActorPayload(length int) (string, error) {
-	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-	if length <= 0 {
-		return "", nil
-	}
-	out := make([]byte, length)
-	for i := range out {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
-		if err != nil {
-			return "", err
-		}
-		out[i] = alphabet[n.Int64()]
-	}
-	return string(out), nil
-}
-
-func actorAuthority(actorID string) (string, error) {
-	authority, rest, ok := strings.Cut(strings.TrimSpace(actorID), "-")
-	if !ok || rest == "" || !validActorAuthority(authority) || !validActorIDRest(rest) {
-		return "", fmt.Errorf("invalid actor id %q", actorID)
-	}
-	return authority, nil
-}
-
-func validActorIDRest(value string) bool {
-	for _, r := range value {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '@' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func actorWorktreeKey(actorID string) (string, error) {
-	authority, rest, ok := strings.Cut(actorID, "-")
-	if !ok || !validActorAuthority(authority) {
-		return "", fmt.Errorf("invalid actor id %q", actorID)
-	}
-	idx := strings.LastIndex(rest, "-")
-	if idx <= 0 || idx == len(rest)-1 {
-		return "", fmt.Errorf("invalid actor id %q", actorID)
-	}
-	worktreeKey := rest[:idx]
-	if _, err := wsstate.LayoutForWorktreeKey("", worktreeKey); err != nil {
-		return "", fmt.Errorf("invalid actor id %q: %w", actorID, err)
-	}
-	return worktreeKey, nil
-}
-
-func validActorAuthority(value string) bool {
-	switch value {
-	case "lead", "delegate", "reader":
-		return true
+// parseCapabilityScope maps the optional capability argument to a toolRole.
+// An absent, nil, or "lead" capability maps to roleLead (unrestricted).
+func parseCapabilityScope(raw any) toolRole {
+	s, _ := raw.(string)
+	switch strings.TrimSpace(s) {
+	case "delegate":
+		return roleDelegate
+	case "leaf":
+		return roleLeaf
 	default:
-		return false
-	}
-}
-
-func blankDefault(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
-}
-
-type childActorSetup struct {
-	ActorID     string
-	Authority   string
-	Instruction string
-}
-
-func (s *Server) actorScopeForAgentTool(root string, arguments map[string]any) string {
-	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
-		return ""
-	}
-	if !s.actorBoundToRoot(root) {
-		return ""
-	}
-	return s.currentActorID()
-}
-
-func (s *Server) childActorSetupForAgent(ctx context.Context, root, name, actorID string, requireExisting bool) (childActorSetup, error) {
-	if strings.TrimSpace(actorID) == "" {
-		return childActorSetup{}, nil
-	}
-	if agent, err := wsagent.NewManager(wsagent.Options{}).AgentScoped(root, name, actorID); err == nil {
-		if strings.TrimSpace(agent.ChildActorID) != "" {
-			return s.ensureChildActor(ctx, root, strings.TrimSpace(agent.ChildActorID), blankDefault(agent.ChildActorAuthority, "delegate"))
-		}
-	} else if requireExisting {
-		return childActorSetup{}, err
-	}
-	return s.ensureChildActor(ctx, root, "", "delegate")
-}
-
-func (s *Server) childActorSetupForSubquery(ctx context.Context, root, actorID string) (childActorSetup, error) {
-	if strings.TrimSpace(actorID) == "" {
-		return childActorSetup{}, nil
-	}
-	return s.ensureChildActor(ctx, root, "", "reader")
-}
-
-func (s *Server) actorBoundToRoot(root string) bool {
-	s.rootMu.RLock()
-	defer s.rootMu.RUnlock()
-	return s.sessionActorID != "" && s.sessionRoot == root
-}
-
-func (s *Server) currentActorID() string {
-	s.rootMu.RLock()
-	defer s.rootMu.RUnlock()
-	return s.sessionActorID
-}
-
-func (s *Server) ensureChildActor(ctx context.Context, root, actorID, authority string) (childActorSetup, error) {
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
-	if err != nil {
-		return childActorSetup{}, err
-	}
-	defer store.Close()
-	authority = blankDefault(authority, "delegate")
-	if actorID == "" {
-		actorID, err = mintUniqueActorID(ctx, store, authority)
-		if err != nil {
-			return childActorSetup{}, err
-		}
-	}
-	actor := wsstore.Actor{
-		ActorID:       actorID,
-		Authority:     authority,
-		RootPath:      root,
-		WorktreeKey:   store.Layout().WorktreeKey,
-		ParentActorID: s.currentActorID(),
-		Status:        "active",
-		Pinned:        authority == "delegate",
-	}
-	if err := store.UpsertActor(ctx, actor); err != nil {
-		return childActorSetup{}, err
-	}
-	return childActorSetup{
-		ActorID:     actorID,
-		Authority:   authority,
-		Instruction: childActorInstruction(actorID),
-	}, nil
-}
-
-func childActorInstruction(actorID string) string {
-	if strings.TrimSpace(actorID) == "" {
-		return ""
-	}
-	return fmt.Sprintf("Before root-omitted ws MCP tool calls in this child process, call MCP tool `ws.setup` with `id: %q` to recover your assigned actor context.", actorID)
-}
-
-func (s *Server) markActorInactive(ctx context.Context, root, actorID string) {
-	actorID = strings.TrimSpace(actorID)
-	if actorID == "" {
-		return
-	}
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
-	if err != nil {
-		appendDebugEvent("actor.inactive.error", map[string]any{"actor_id": actorID, "error": err.Error()})
-		return
-	}
-	defer store.Close()
-	actor, ok, err := store.Actor(ctx, actorID)
-	if err != nil || !ok {
-		fields := map[string]any{"actor_id": actorID}
-		if err != nil {
-			fields["error"] = err.Error()
-		}
-		appendDebugEvent("actor.inactive.missing", fields)
-		return
-	}
-	actor.Status = "inactive"
-	actor.Pinned = false
-	if err := store.UpsertActor(ctx, actor); err != nil {
-		appendDebugEvent("actor.inactive.error", map[string]any{"actor_id": actorID, "error": err.Error()})
-	}
-}
-
-func (s *Server) actorGate(name string, arguments map[string]any) error {
-	if !rootOmittedActorTool(name) {
-		return nil
-	}
-	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
-		return nil
-	}
-	s.rootMu.RLock()
-	hasActor := s.sessionActorID != ""
-	s.rootMu.RUnlock()
-	if hasActor {
-		return nil
-	}
-	return fmt.Errorf("setup required before root-omitted %s; call %s(id: \"<actor-id>\")", name, setupToolName())
-}
-
-func rootOmittedActorTool(name string) bool {
-	switch name {
-	case "agents.register", "agents.call", "subquery":
-		return true
-	default:
-		return false
+		return roleLead
 	}
 }
 
@@ -1582,7 +1467,7 @@ func formatStringLines(values []string) string {
 func formatConfigView(view wsconfig.View) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "path: %s\n", view.Path)
-	aliases := []string{"light", "core", "deep"}
+	aliases := []string{"small", "medium", "large", "xlarge"}
 	b.WriteString("model_aliases:\n")
 	for _, alias := range aliases {
 		byHarness := view.Config.Agents.ModelAliases[alias]
@@ -1600,7 +1485,375 @@ func formatConfigView(view wsconfig.View) string {
 			b.WriteString("\n")
 		}
 	}
+	// Scope-resolved overrides are present when config.show is invoked with a
+	// session key (ScopedShow path). Print each resolved item with its source scope.
+	if len(view.ResolvedOverrides) > 0 {
+		b.WriteString("overrides:\n")
+		for _, item := range view.ResolvedOverrides {
+			fmt.Fprintf(&b, "  %s: %s  [scope:%s]\n", item.Key, item.Value, item.Scope)
+		}
+	}
 	return b.String()
+}
+
+// promptOverrideValue is one resolved override for a declared point: the harness
+// bucket it applies to, the scope it resolved from, and the stored value.
+type promptOverrideValue struct {
+	Harness string `json:"harness"`
+	Scope   string `json:"scope"`
+	Value   string `json:"value"`
+}
+
+// promptOverridePoint is a declared override-point plus any current override
+// values, shaped for the config.prompt JSON listing.
+type promptOverridePoint struct {
+	PointId   string                `json:"pointId"`
+	Desc      string                `json:"desc"`
+	Overrides []promptOverrideValue `json:"overrides"`
+}
+
+// promptOverrideHarnessBuckets is the fixed set of harness buckets a stored
+// override can target, in listing order. "all" is the stored spelling of the
+// caller-facing "*".
+var promptOverrideHarnessBuckets = []string{"claude", "codex", "all"}
+
+// buildPromptOverrideListing resolves the current override value+scope for each
+// declared point across every harness bucket. Unset buckets (empty resolved
+// value) are omitted. Session-scope values are only visible when sessionKey is
+// non-empty (mirroring config.show).
+func buildPromptOverrideListing(points []overridePointDecl, resolver *wsconfig.Resolver, sessionKey string) []promptOverridePoint {
+	listing := make([]promptOverridePoint, 0, len(points))
+	for _, p := range points {
+		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc, Overrides: []promptOverrideValue{}}
+		for _, harness := range promptOverrideHarnessBuckets {
+			rv, _ := resolver.Get(sessionKey, "prompt."+p.PointId+"."+harness)
+			if strings.TrimSpace(rv.Value) == "" {
+				continue
+			}
+			entry.Overrides = append(entry.Overrides, promptOverrideValue{
+				Harness: harness,
+				Scope:   string(rv.Scope),
+				Value:   rv.Value,
+			})
+		}
+		listing = append(listing, entry)
+	}
+	return listing
+}
+
+// formatPromptOverrideListing renders the canonical text view of the override
+// listing: one block per point and a single trailing pointer to ws:lead-tune.
+func formatPromptOverrideListing(listing []promptOverridePoint) string {
+	var b strings.Builder
+	for _, p := range listing {
+		fmt.Fprintf(&b, "%s\n", p.PointId)
+		if p.Desc != "" {
+			fmt.Fprintf(&b, "  %s\n", p.Desc)
+		}
+		if len(p.Overrides) == 0 {
+			b.WriteString("  (no overrides set)\n")
+		} else {
+			for _, o := range p.Overrides {
+				fmt.Fprintf(&b, "  harness=%s scope=%s\n", o.Harness, o.Scope)
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Tuning manual & how-to: run the ws:lead-tune skill.\n")
+	return b.String()
+}
+
+type tuningCatalog struct {
+	Knobs []tuningKnob `json:"knobs"`
+}
+
+type tuningKnob struct {
+	ID             string        `json:"id"`
+	Kind           string        `json:"kind"`
+	Description    string        `json:"description,omitempty"`
+	Writer         tuningWriter  `json:"writer"`
+	Reset          *tuningWriter `json:"reset,omitempty"`
+	SelectorFields []tuningField `json:"selector_fields,omitempty"`
+	ValueFields    []tuningField `json:"value_fields,omitempty"`
+	Current        any           `json:"current"`
+}
+
+type tuningWriter struct {
+	Tool           string            `json:"tool"`
+	FixedArguments map[string]string `json:"fixed_arguments,omitempty"`
+}
+
+type tuningField struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+}
+
+type tuningScopedValue struct {
+	Value string `json:"value"`
+	Scope string `json:"scope"`
+}
+
+type tuningAgentTierCurrent struct {
+	Tier    string `json:"tier"`
+	Harness string `json:"harness"`
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+}
+
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey string, noAgentMode bool) (tuningCatalog, error) {
+	points, err := scanOverridePoints(rsrcRoot)
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	promptListing := buildPromptOverrideListing(points, resolver, sessionKey)
+
+	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+3)}
+	for _, p := range promptListing {
+		catalog.Knobs = append(catalog.Knobs, tuningKnob{
+			ID:          "prompt." + p.PointId,
+			Kind:        "prompt_override",
+			Description: p.Desc,
+			Writer: tuningWriter{
+				Tool:           "config.prompt.set",
+				FixedArguments: map[string]string{"pointId": p.PointId},
+			},
+			Reset: &tuningWriter{
+				Tool:           "config.prompt.unset",
+				FixedArguments: map[string]string{"pointId": p.PointId},
+			},
+			SelectorFields: tuningFieldsFromSchema("config.prompt.set", "harness", "scope"),
+			ValueFields:    tuningFieldsFromSchema("config.prompt.set", "prompt"),
+			Current:        p.Overrides,
+		})
+	}
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "workflow.prefer_subagent",
+		Kind:        "workflow_preference",
+		Description: "Select whether the workflow manual loads strict subagent posture.",
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_subagent"},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+	})
+
+	if noAgentMode {
+		return catalog, nil
+	}
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "workflow.prefer_mercenary",
+		Kind:        "workflow_preference",
+		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_mercenary"},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_mercenary", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
+	})
+
+	agentTiers, err := currentAgentTierMappings()
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:             "agents.tier",
+		Kind:           "model_tier",
+		Description:    "Configure the backend/model mapping for a ws agent capability tier.",
+		Writer:         tuningWriter{Tool: "config.agents_tier"},
+		SelectorFields: tuningFieldsFromSchema("config.agents_tier", "tier", "harness"),
+		ValueFields:    tuningFieldsFromSchema("config.agents_tier", "backend", "model", "effort"),
+		Current:        agentTiers,
+	})
+
+	return catalog, nil
+}
+
+func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get("", itemKey)
+	value := rv.Value
+	if itemKey == wsconfig.ItemWorkflowPreferMercenary {
+		value = canonicalPreferMercenaryValue(value)
+	}
+	return tuningScopedValue{
+		Value: value,
+		Scope: string(rv.Scope),
+	}
+}
+
+func canonicalPreferMercenaryValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "on":
+		return "on"
+	case "false", "off":
+		return "off"
+	default:
+		return "hide"
+	}
+}
+
+func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
+	cfg, err := wsconfig.Load(wsconfig.Options{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tuningAgentTierCurrent, 0)
+	for _, tier := range sortedAgentModelAliasKeys(cfg.Agents.ModelAliases) {
+		byHarness := cfg.Agents.ModelAliases[tier]
+		for _, harness := range sortedAgentTierKeys(byHarness) {
+			value := byHarness[harness]
+			rows = append(rows, tuningAgentTierCurrent{
+				Tier:    tier,
+				Harness: harness,
+				Backend: value.Backend,
+				Model:   value.Model,
+				Effort:  value.Effort,
+			})
+		}
+	}
+	return rows, nil
+}
+
+func tuningFieldsFromSchema(toolName string, fieldNames ...string) []tuningField {
+	fields := make([]tuningField, 0, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		fields = append(fields, tuningFieldFromSchema(toolName, fieldName))
+	}
+	return fields
+}
+
+func tuningFieldFromSchema(toolName, fieldName string) tuningField {
+	field := tuningField{Name: fieldName}
+	properties, required := toolInputSchemaDetails(toolName)
+	field.Required = required[fieldName]
+	raw, ok := properties[fieldName]
+	if !ok {
+		return field
+	}
+	if description, ok := propertyString(raw, "description"); ok {
+		field.Description = description
+	}
+	if enum := propertyStringSlice(raw, "enum"); len(enum) > 0 {
+		field.Enum = enum
+	}
+	return field
+}
+
+func toolInputSchemaDetails(toolName string) (map[string]any, map[string]bool) {
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		if name != toolName {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		required := map[string]bool{}
+		switch values := schema["required"].(type) {
+		case []string:
+			for _, value := range values {
+				required[value] = true
+			}
+		case []any:
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					required[text] = true
+				}
+			}
+		}
+		return properties, required
+	}
+	return map[string]any{}, map[string]bool{}
+}
+
+func propertyString(raw any, key string) (string, bool) {
+	switch typed := raw.(type) {
+	case map[string]any:
+		value, ok := typed[key].(string)
+		return value, ok
+	case map[string]string:
+		value, ok := typed[key]
+		return value, ok
+	default:
+		return "", false
+	}
+}
+
+func propertyStringSlice(raw any, key string) []string {
+	switch typed := raw.(type) {
+	case map[string]any:
+		switch values := typed[key].(type) {
+		case []string:
+			return append([]string(nil), values...)
+		case []any:
+			out := make([]string, 0, len(values))
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					out = append(out, text)
+				}
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+func formatTuningCatalog(catalog tuningCatalog) string {
+	var b strings.Builder
+	for _, knob := range catalog.Knobs {
+		fmt.Fprintf(&b, "%s (%s)\n", knob.ID, knob.Kind)
+		if knob.Description != "" {
+			fmt.Fprintf(&b, "  %s\n", knob.Description)
+		}
+		fmt.Fprintf(&b, "  writer: %s\n", knob.Writer.Tool)
+		if len(knob.SelectorFields) > 0 {
+			fmt.Fprintf(&b, "  selectors: %s\n", strings.Join(tuningFieldLabels(knob.SelectorFields), ", "))
+		}
+		if len(knob.ValueFields) > 0 {
+			fmt.Fprintf(&b, "  values: %s\n", strings.Join(tuningFieldLabels(knob.ValueFields), ", "))
+		}
+		if current := formatTuningCurrent(knob.Current); current != "" {
+			fmt.Fprintf(&b, "  current: %s\n", current)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func tuningFieldLabels(fields []tuningField) []string {
+	labels := make([]string, 0, len(fields))
+	for _, field := range fields {
+		label := field.Name
+		if len(field.Enum) > 0 {
+			values := make([]string, 0, len(field.Enum))
+			for _, value := range field.Enum {
+				if value == "" {
+					values = append(values, "<empty>")
+				} else {
+					values = append(values, value)
+				}
+			}
+			label += "[" + strings.Join(values, "|") + "]"
+		}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func formatTuningCurrent(current any) string {
+	raw, err := json.Marshal(current)
+	if err != nil || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+func sortedAgentModelAliasKeys(values map[string]map[string]wsconfig.AgentTier) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func sortedAgentTierKeys(values map[string]wsconfig.AgentTier) []string {
@@ -1864,6 +2117,23 @@ func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 	return b.String()
 }
 
+func formatTicketCreate(res wsdoc.TicketCreateResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Created %s\n", res.Path)
+	fmt.Fprintf(&b, "Tip: %s\n", res.Tip)
+	return b.String()
+}
+
+func formatTicketMutate(verb string, result wsdoc.TicketMutateResult) string {
+	stem := strings.TrimSuffix(filepath.Base(result.NewPath), ".md")
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %s\n  %s -> %s\n", verb, stem, result.OldPath, result.NewPath)
+	if result.Tip != "" {
+		fmt.Fprintf(&b, "tip: %s\n", result.Tip)
+	}
+	return b.String()
+}
+
 func formatTickets(tickets []wsdoc.TicketInfo) string {
 	var b strings.Builder
 	for _, ticket := range tickets {
@@ -2011,43 +2281,18 @@ func isHexString(value string) bool {
 }
 
 func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) (string, error) {
-	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
-		return canonicalGitRoot(value)
-	}
-
-	s.rootMu.RLock()
-	sessionRoot := s.sessionRoot
-	s.rootMu.RUnlock()
-	if sessionRoot != "" {
-		return sessionRoot, nil
-	}
-
-	workspaces := codexWorkspaceRoots(meta)
-	if len(workspaces) == 1 {
-		return canonicalGitRoot(workspaces[0])
-	}
-	if len(workspaces) > 1 {
-		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call %s with root set to the current directory before using root-omitted %s tools", setupToolName(), RuntimeNamespace())
-	}
-
-	serverRoot := strings.TrimSpace(s.root)
-	if serverRoot != "" && serverRoot != "." {
-		root, err := canonicalGitRoot(serverRoot)
-		if err != nil {
-			return "", fmt.Errorf("could not resolve the MCP server root; pass root explicitly or call %s with root set to the current directory: %w", setupToolName(), err)
+	// Session-key branch: highest priority. When present, the key authoritatively
+	// resolves the root, bypassing every fallback in the chain below.
+	if key, ok := arguments["session_key"].(string); ok && strings.TrimSpace(key) != "" {
+		entry, found := s.sessions.lookup(key)
+		if !found {
+			return "", fmt.Errorf("unknown_session: session key not found; " +
+				"if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call")
 		}
-		return root, nil
+		return entry.root, nil
 	}
 
-	if envRoot := strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")); envRoot != "" {
-		return canonicalGitRoot(envRoot)
-	}
-
-	root, err := canonicalGitRoot(s.root)
-	if err != nil {
-		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call %s with root set to the current directory: %w", setupToolName(), err)
-	}
-	return root, nil
+	return "", fmt.Errorf("mandatory_session_key: root-aware ws tools require a session_key; if you are the lead, obtain one per ws:workflow-manual and pass it")
 }
 
 func canonicalGitRoot(root string) (string, error) {
@@ -2300,7 +2545,7 @@ func errorResponse(id json.RawMessage, code int, message string) response {
 }
 
 func tools() []map[string]any {
-	return []map[string]any{
+	toolList := []map[string]any{
 		{
 			"name":        "runtime.info",
 			"description": "Return ws-mcp runtime metadata for compatibility checks.",
@@ -2322,89 +2567,41 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.setup",
-			"description": "Configure ws MCP session state, including lead actor bootstrap and repository root recovery for this server process.",
+			"name":        "session.children",
+			"description": "Return the descendant session-key subtree under a lead session key. Defaults to immediate live children; use depth 0 for the full subtree.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"method": stringProperty(`Optional setup method. Use "lead-workflow-bootstrap" to create a recoverable lead actor.`),
-					"id":     stringProperty("Recover a previously returned actor_id and bind it to this MCP server process."),
-					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass the repository's absolute filesystem path.`),
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"session_key":  stringProperty("Caller's lead session key whose descendants should be enumerated."),
+					"depth":        integerProperty("Maximum descendant depth to return. Defaults to 1; 0 returns the full subtree."),
+					"include_dead": boolProperty("Include keys whose bound root path no longer exists. Defaults to false."),
+					"format":       stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        bootstrapToolName,
+			"description": "Reserved workflow primitive. See ws:workflow-manual before use.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":               stringProperty("Absolute Git worktree root to bind to the session key."),
+					"capability":         enumStringProperty(`Optional capability scope. Omit or pass "lead" for unrestricted access. Pass "delegate" or "leaf" to restrict the key to that role's allowed tools.`, []string{"lead", "delegate", "leaf"}),
+					"parent_session_key": stringProperty("Optional parent session key to record coordination lineage. See ws:workflow-manual."),
+					"format":             stringProperty(`Optional output format. Use "json" for structured output.`),
+				},
+				"required": []string{"root"},
 			},
 		},
 		{
 			"name":        "api.list",
-			"description": "Return sorted API documentation cache domain names under ai-docs/.deps.",
+			"description": "Return sorted local API documentation cache domain names under ai-docs/.deps.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
-			},
-		},
-		{
-			"name":        "api.ask",
-			"description": "Ask cached or fetchable third-party API documentation through per-domain manager sessions.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
-					"prompt":      stringProperty("API documentation question to answer."),
-					"domain_hint": stringProperty("Optional API documentation domain hint."),
-				},
-				"required": []string{"prompt"},
-			},
-		},
-		{
-			"name":        "api.ask_async",
-			"description": "Start a recoverable asynchronous API documentation lookup job and return an api_job_key immediately.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
-					"prompt":      stringProperty("API documentation question to answer asynchronously."),
-					"domain_hint": stringProperty("Optional API documentation domain hint."),
-				},
-				"required": []string{"prompt"},
-			},
-		},
-		{
-			"name":        "api.status",
-			"description": "Inspect a recoverable asynchronous API documentation job by api_job_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
-					"api_job_key": stringProperty("Recoverable async API documentation job key."),
-				},
-				"required": []string{"api_job_key"},
-			},
-		},
-		{
-			"name":        "api.result",
-			"description": "Return the final answer for a recoverable asynchronous API documentation job by api_job_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
-					"api_job_key": stringProperty("Recoverable async API documentation job key."),
-				},
-				"required": []string{"api_job_key"},
-			},
-		},
-		{
-			"name":        "api.cancel",
-			"description": "Best-effort cancel a recoverable asynchronous API documentation job by api_job_key.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
-					"api_job_key": stringProperty("Recoverable async API documentation job key."),
-				},
-				"required": []string{"api_job_key"},
 			},
 		},
 		{
@@ -2449,21 +2646,22 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.show",
-			"description": "Return the current ws user-local configuration and resolved config path without modifying it.",
+			"description": "Return the current ws user-local configuration and resolved config path without modifying it. When session_key is supplied, each config override is annotated with the scope it resolved from (session, project, global, or builtin).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+					"session_key": stringProperty("Optional session key. When supplied, resolved override scopes are included in the output."),
 				},
 			},
 		},
 		{
 			"name":        "config.agents_tier",
-			"description": "Compatibility surface for configuring the current or selected harness backend/model mapping for a ws agent model alias.",
+			"description": "Configure the backend/model mapping for a ws agent capability tier.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"tier":    enumStringProperty("Model alias to configure.", []string{"light", "core", "deep"}),
+					"tier":    enumStringProperty("Capability tier to configure.", []string{"small", "medium", "large", "xlarge"}),
 					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
 					"model":   stringProperty("Concrete model for this alias."),
 					"effort":  enumStringProperty("Optional portable reasoning effort for this alias. Empty, omitted, or none leaves backend effort unset.", []string{"", "none", "low", "medium", "high", "xhigh"}),
@@ -2473,12 +2671,86 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "config.workflow_prefer_subagent",
+			"description": "Set the global workflow preference for loading strict subagent posture with the workflow manual.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off.", []string{"on", "off"}),
+				},
+				"required": []string{"value"},
+			},
+		},
+		{
+			"name":        "config.workflow_prefer_mercenary",
+			"description": "Set the global mercenary delegation preference. 'on' prefers ws.mercenary guidance for implementer/reviewer renders. 'off' keeps native-subagent default guidance while leaving explicit mercenary use available. 'hide' is the builtin default and hides ws.mercenary.* from the public tool surface.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on, off, or hide.", []string{"on", "off", "hide"}),
+				},
+				"required": []string{"value"},
+			},
+		},
+		{
+			"name":        "config.prompt.set",
+			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate and to support session-scope writes."),
+					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket the override applies to. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"prompt":      stringProperty("Override text that replaces the seed block at render time. Must be non-empty."),
+					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
+				},
+				"required": []string{"session_key", "pointId", "harness", "prompt"},
+			},
+		},
+		{
+			"name":        "config.prompt.unset",
+			"description": "Remove a stored prompt override for a named override-point and harness bucket, restoring the inline seed default. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate."),
+					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket to clear. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). Session scope is not supported.", wsconfig.ScopeSchemaEnum()),
+				},
+				"required": []string{"session_key", "pointId", "harness"},
+			},
+		},
+		{
+			"name":        "config.prompt",
+			"description": "List every declared prompt override-point (id + description) found in the shipped playbook tree, with any current override values and the scope each resolved from. Read-only; lead-only via the config.* prefix gate. Points to the ws:lead-tune skill for the tuning how-to.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope overrides are included and annotated."),
+					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
+				},
+			},
+		},
+		{
+			"name":        "config.tuning",
+			"description": "Return a read-only catalog of supported ws workflow tuning knobs, including writer tools, schema-derived field options, and current values when available.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope prompt overrides and scoped config values are included."),
+					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
+				},
+			},
+		},
+		{
 			"name":        "git.status",
 			"description": "Return read-only Git branch and worktree status. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -2489,7 +2761,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"range":  stringProperty("Optional revision range."),
 					"paths":  stringArrayProperty("Optional path filters appended after --."),
 					"mode":   enumStringProperty("Diff mode. Defaults to stat.", []string{"full", "stat", "name_only"}),
@@ -2503,7 +2774,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":         stringProperty("Repository root. Defaults to the server root."),
 					"range":        stringProperty("Optional revision range."),
 					"limit":        integerProperty("Maximum commits to return. Defaults to 20 and is capped at 100."),
 					"include_body": boolProperty("Include commit body text."),
@@ -2517,7 +2787,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"base":   stringProperty("Base revision."),
 					"head":   stringProperty("Head revision."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
@@ -2531,7 +2800,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":                  stringProperty("Repository root. Defaults to the server root."),
 					"paths":                 stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
 					"title":                 stringProperty("Single-line commit title."),
 					"description":           stringProperty("Optional commit message body before AI Context."),
@@ -2549,13 +2817,8 @@ func tools() []map[string]any {
 			"name":        "project_tree",
 			"description": "Render the ws project document map, spec inventory, and active ticket inventory.",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
-				},
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -2596,10 +2859,6 @@ func tools() []map[string]any {
 						"type":        "string",
 						"description": "Descriptive slug seed.",
 					},
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
 				},
 				"required": []string{"slug"},
 			},
@@ -2608,13 +2867,8 @@ func tools() []map[string]any {
 			"name":        "spec_index.verify",
 			"description": "Verify basic spec anchor index health.",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
-				},
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -2623,7 +2877,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -2634,7 +2887,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"query":       stringProperty("Optional case-insensitive text query."),
 					"spec_stem":   stringProperty("Optional exact spec anchor stem."),
 					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
@@ -2648,7 +2900,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":      stringProperty("Repository root. Defaults to the server root."),
 					"spec_stem": stringProperty("Spec anchor stem to inspect."),
 					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
@@ -2659,13 +2910,8 @@ func tools() []map[string]any {
 			"name":        "mental_models.list",
 			"description": "List mental-model documents with domains, descriptions, and sources.",
 			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root": map[string]string{
-						"type":        "string",
-						"description": "Repository root. Defaults to the server root.",
-					},
-				},
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -2674,7 +2920,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":      stringProperty("Repository root. Defaults to the server root."),
 					"query":     stringProperty("Optional case-insensitive text query."),
 					"spec_stem": stringProperty("Optional spec anchor stem referenced by the mental model."),
 					"domain":    stringProperty("Optional mental-model domain."),
@@ -2688,7 +2933,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"domain": stringProperty("Optional mental-model domain."),
 					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
@@ -2701,7 +2945,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"ticket_stem": stringProperty("Optional ticket stem to trace."),
 					"spec_stem":   stringProperty("Optional spec anchor stem to trace."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
@@ -2719,7 +2962,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":                 stringProperty("Repository root. Defaults to the server root."),
 					"statuses":             stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
 					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
@@ -2736,7 +2978,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"ticket_stem":     stringProperty("Ticket stem to inspect."),
 					"include_done":    boolProperty("Allow lookup under ai-docs/tickets/.done when true."),
 					"include_dropped": boolProperty("Allow lookup under ai-docs/tickets/.dropped when true."),
@@ -2746,15 +2987,51 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "subquery",
-			"description": "Start an async scoped codebase or documentation query and return a subquery key.",
+			"name":        "tickets.close",
+			"description": "Close a ticket to .done/ (status=done) or .dropped/ (status=dropped), writing the dated frontmatter field and optionally appending a ## Resolution section. Stages the change set atomically (frontmatter write -> git add -> git mv); does not commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"question":      stringProperty("Scoped question to answer."),
-					"deep_research": boolProperty("Use deep model alias for broad tracing or research."),
+					"stem":       stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"status":     stringProperty("Close target: done or dropped."),
+					"resolution": stringProperty("Optional resolution text appended as a ## Resolution (today) section."),
 				},
-				"required": []string{"question"},
+				"required": []string{"stem", "status"},
+			},
+		},
+		{
+			"name":        "tickets.move",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves check the sage_review config and the ticket's sage-review frontmatter field. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem": stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"to":   stringProperty("Target status: idea, todo, or ready."),
+				},
+				"required": []string{"stem", "to"},
+			},
+		},
+		{
+			"name":        "tickets.create",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus sage-review: pending for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar)."),
+					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
+				},
+				"required": []string{"stem", "initial_state"},
+			},
+		},
+		{
+			"name":        "tickets.template",
+			"description": "Return the fill-in body skeleton for a given ticket type. Use at creation time instead of loading the full ticket-conventions document.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+				},
+				"required": []string{"type"},
 			},
 		},
 		{
@@ -2763,7 +3040,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":  stringProperty("Repository root. Defaults to the server root."),
 					"kind":  stringProperty("Generated path kind. Initially supports review."),
 					"stems": stringArrayProperty("Logical file stems to allocate in stable order."),
 				},
@@ -2771,37 +3047,48 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "prompt.render",
-			"description": namespaceText("Render a bundled delegate prompt by stem with namespace substitution and injected context; returns a tmp prompt file path (wsflow only)."),
+			"name":        "playbook.print",
+			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":    stringProperty("Repository root. Defaults to the server root."),
-					"stem":    stringProperty("Bundled prompt stem to render (e.g. code-reviewer, reference-discovery)."),
-					"context": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional string key-value pairs injected as a ## Render Context block at the end of the rendered prompt."},
-				},
-				"required": []string{"stem"},
-			},
-		},
-		{
-			"name":        "agents.register",
-			"description": "Register a durable ws agent session for the current worktree.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":               stringProperty("Agent name."),
-					"backend":            stringProperty("Optional backend name. Model aliases use the detected harness when omitted."),
-					"tier":               stringProperty("Deprecated compatibility alias selector: light, core, or deep."),
-					"model":              stringProperty("Optional model alias or concrete backend model. Aliases: light, core, deep."),
-					"prompts":            stringArrayProperty("Embedded prompt stems or absolute prompt paths."),
-					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
-					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
+					"name":        stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
+					"context":     map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter."},
+					"session_key": stringProperty("Optional caller's ws session key. When provided, prompt override-points resolve against the session's layered config; omit to render seed defaults."),
 				},
 				"required": []string{"name"},
 			},
 		},
 		{
-			"name":        "agents.call",
+			"name":        "playbook.render",
+			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return the path (harness-aware, includes resolved, declared variables substituted). Lead callers receive a render-minted child session key spliced into the rendered body. Available in both full and agentless product modes."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
+					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
+					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead."},
+					"root_override": stringProperty("Optional path to override both the auto-include resolution root and the child-key binding root. Use when the delegate runs in a different worktree."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "ws.mercenary.register",
+			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":               stringProperty("Agent name."),
+					"backend":            stringProperty("Optional backend name (codex or claude). Uses harness default when omitted."),
+					"system_prompt_text": stringProperty("Self-contained system prompt text (from playbook.render). Replaces the former prompts/model registration fields."),
+					"tier":               stringProperty("Optional first-class capability tier (small/medium/large/xlarge) to pass through from playbook.render's recommended-tier. Selects the mercenary's model via config.agents_tier; omit to use the default."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "ws.mercenary.call",
 			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2813,7 +3100,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.wait",
+			"name":        "ws.mercenary.wait",
 			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2825,7 +3112,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.result",
+			"name":        "ws.mercenary.result",
 			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2837,7 +3124,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.status",
+			"name":        "ws.mercenary.status",
 			"description": "Return current status for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2848,7 +3135,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.interrupt",
+			"name":        "ws.mercenary.interrupt",
 			"description": "Queue an interrupt or redirect message for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2860,7 +3147,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.tail",
+			"name":        "ws.mercenary.tail",
 			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2872,32 +3159,32 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.debug.tail",
+			"name":        "ws.mercenary.debug.tail",
 			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
 			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.stdout",
+			"name":        "ws.mercenary.debug.stdout",
 			"description": "Debug only: return recent raw stdout lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.stderr",
+			"name":        "ws.mercenary.debug.stderr",
 			"description": "Debug only: return recent raw stderr lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.runtime_log",
+			"name":        "ws.mercenary.debug.runtime_log",
 			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.debug.events",
+			"name":        "ws.mercenary.debug.events",
 			"description": "Debug only: return recent raw agent events log lines.",
 			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
 		},
 		{
-			"name":        "agents.cancel",
+			"name":        "ws.mercenary.cancel",
 			"description": "Best-effort cancel the current async call for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2908,7 +3195,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.print",
+			"name":        "ws.mercenary.print",
 			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2919,7 +3206,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.erase",
+			"name":        "ws.mercenary.erase",
 			"description": "Erase a registered ws agent directory for the current worktree.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2930,17 +3217,75 @@ func tools() []map[string]any {
 			},
 		},
 	}
+	return withSessionKeyToolSchemas(toolList)
+}
+
+func withSessionKeyToolSchemas(toolList []map[string]any) []map[string]any {
+	for _, tool := range toolList {
+		name, _ := tool["name"].(string)
+		if !toolSchemaRequiresSessionKey(name) {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		if schema == nil {
+			schema = map[string]any{"type": "object"}
+			tool["inputSchema"] = schema
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		if properties == nil {
+			properties = map[string]any{}
+			schema["properties"] = properties
+		}
+		properties["session_key"] = stringProperty("Caller's ws session key (see ws:workflow-manual).")
+		if name != "playbook.render" {
+			schema["required"] = appendRequiredString(schema["required"], "session_key")
+		}
+	}
+	return toolList
+}
+
+func toolSchemaRequiresSessionKey(name string) bool {
+	switch name {
+	case "api.list",
+		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
+		"git.status", "git.diff", "git.log", "git.merge_base", "git.commit",
+		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
+		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
+		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "path.generate", "playbook.render",
+		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
+		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
+		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
+		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase",
+		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+		return true
+	default:
+		return false
+	}
+}
+
+func appendRequiredString(raw any, value string) []string {
+	required, _ := raw.([]string)
+	for _, existing := range required {
+		if existing == value {
+			return required
+		}
+	}
+	return append(required, value)
 }
 
 func LeadToolNames() []string {
+	mercenaryHidden := mercenaryHiddenFromGlobalConfig()
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
+		if permanentlyHiddenTool(name) {
+			continue
+		}
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
-		if !NoAgentMode() && wsflowOnlyTool(name) {
+		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
 			continue
 		}
 		if name != "" {
@@ -2954,9 +3299,16 @@ func LeadToolNames() []string {
 func (s *Server) filteredTools() []map[string]any {
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
+	mercenaryHidden := s.mercenaryHiddenFromConfig()
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
+		if permanentlyHiddenTool(name) {
+			continue
+		}
+		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
+			continue
+		}
 		if s.toolAllowed(name) {
 			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
@@ -2979,7 +3331,7 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "agents.") && name != "ws.setup" {
+	if !strings.HasPrefix(name, "ws.mercenary.") {
 		return clone
 	}
 	schema, ok := clone["inputSchema"].(map[string]any)
@@ -2993,12 +3345,6 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		propertiesClone := make(map[string]any, len(properties))
 		for key, value := range properties {
-			if strings.HasPrefix(name, "agents.") && key == "root" {
-				continue
-			}
-			if name == "ws.setup" && key == "format" {
-				continue
-			}
 			propertiesClone[key] = value
 		}
 		schemaClone["properties"] = propertiesClone
@@ -3011,10 +3357,7 @@ func (s *Server) toolAllowed(name string) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}
-	if !NoAgentMode() && wsflowOnlyTool(name) {
-		return false
-	}
-	if !roleAllowsTool(s.role, name) {
+	if strings.HasPrefix(name, "ws.mercenary.") && s.mercenaryHiddenFromConfig() {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
@@ -3023,42 +3366,23 @@ func (s *Server) toolAllowed(name string) bool {
 	return true
 }
 
-func requestedToolRole() toolRole {
-	switch strings.TrimSpace(os.Getenv("WS_MCP_TOOL_PROFILE")) {
-	case "", "lead":
-		return roleLead
-	case "delegate":
-		return roleDelegate
-	case "leaf":
-		return roleLeaf
-	default:
-		return roleLead
-	}
-}
-
 func roleAllowsTool(role toolRole, name string) bool {
 	switch role {
 	case roleLead:
 		return true
 	case roleDelegate:
-		if strings.HasPrefix(name, "session.") || name == "ws.setup" || name == setupToolName() {
+		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		if isSubqueryAgentTool(name) {
-			return true
-		}
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
+		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != setupToolName() && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false
 	}
 }
 
 func advertisedToolName(name string) string {
-	if name == "ws.setup" {
-		return setupToolName()
-	}
 	return name
 }
 
@@ -3067,19 +3391,20 @@ func namespaceText(text string) string {
 	if namespace == "ws" {
 		return text
 	}
-	replacer := strings.NewReplacer(
-		"ws MCP", namespace+" MCP",
-		"ws/", namespace+"/",
-		"ws:", namespace+":",
-		"ws project", namespace+" project",
-		"ws runtime", namespace+" runtime",
-		"ws workflow", namespace+" workflow",
-		"ws user", namespace+" user",
-		"ws agent", namespace+" agent",
-		"ws agents", namespace+" agents",
-		"ws ", namespace+" ",
-	)
-	return replacer.Replace(text)
+	return namespaceTerms(text, namespace)
+}
+
+func namespaceTerms(text, namespace string) string {
+	text = wsNamespaceRef.ReplaceAllString(text, namespace+"$1")
+	for _, term := range []string{"MCP", "plugin", "project", "runtime", "tool", "tools", "workflow", "user", "agent", "agents"} {
+		pattern := regexp.MustCompile(`\bws ` + regexp.QuoteMeta(term) + `\b`)
+		text = pattern.ReplaceAllString(text, namespace+" "+term)
+	}
+	for _, term := range []string{"managed", "owned"} {
+		pattern := regexp.MustCompile(`\bws-` + regexp.QuoteMeta(term) + `\b`)
+		text = pattern.ReplaceAllString(text, namespace+"-"+term)
+	}
+	return text
 }
 
 func namespaceValue(value any) any {
@@ -3115,37 +3440,75 @@ func namespaceValue(value any) any {
 	}
 }
 
+// agentCallHandleText formats the ws.mercenary.call response. The handle is shaped as
+// agentId=<name> so the lead reuses one native-shaped continuation idiom across
+// the native-subagent and mercenary paths (Phase 2c interface parity).
+func agentCallHandleText(name, status string, pid int) string {
+	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", name, status, pid)
+}
+
+// permanentlyHiddenTool returns true for tools that must never appear on the
+// public MCP surface regardless of mode. exec.* tools are under active
+// development (epic 260524) and not yet documented in lead-workflow-manual;
+// they are hidden until the surface stabilizes.
+func permanentlyHiddenTool(name string) bool {
+	return strings.HasPrefix(name, "exec.")
+}
+
+// mercenaryHiddenFromConfig returns true when workflow.prefer_mercenary resolves
+// to "hide" from global/builtin state. The item is global-only because
+// filteredTools and toolAllowed are request-level, not session/root keyed.
+func (s *Server) mercenaryHiddenFromConfig() bool {
+	return mercenaryHiddenFromGlobalConfig()
+}
+
+func mercenaryHiddenFromGlobalConfig() bool {
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), nil, nil)
+	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
+	if err != nil {
+		return false
+	}
+	return canonicalPreferMercenaryValue(rv.Value) == "hide"
+}
+
+func (s *Server) requireLeadSessionKey(toolName string, arguments map[string]any) (string, error) {
+	key, _ := arguments["session_key"].(string)
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", fmt.Errorf("%s: session_key is required", toolName)
+	}
+	entry, found := s.sessions.lookup(key)
+	if !found {
+		return "", fmt.Errorf("%s: unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
+	}
+	if entry.scope != roleLead {
+		return "", fmt.Errorf("%s: session_key must belong to a lead session", toolName)
+	}
+	return key, nil
+}
+
 func noAgentHiddenTool(name string) bool {
-	if strings.HasPrefix(name, "exec.") {
+	if permanentlyHiddenTool(name) {
 		return true
 	}
-	if strings.HasPrefix(name, "agents.") {
+	if strings.HasPrefix(name, "ws.mercenary.") {
 		return true
 	}
 	switch name {
-	case "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel":
+	case "config.agents_tier":
+		return true
+	case "config.workflow_prefer_mercenary":
+		// Mercenary render-mode control is ws-only; the agentless wsflow surface
+		// has no mercenary path, so prefer_mercenary is hidden there. The
+		// bootstrap tool stays visible (wsflow still needs session-key bootstrap).
 		return true
 	default:
 		return false
 	}
 }
-
-func wsflowOnlyTool(name string) bool {
-	switch name {
-	case "prompt.render":
-		return true
-	default:
-		return false
-	}
-}
-
-// wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
-// a word boundary so that words containing "ws" as an interior substring (e.g.
-// "news/", "rows:", "workflows/") are never mangled.
-var wsNamespaceRef = regexp.MustCompile(`\bws([/:])`)
 
 // wsflowRenderEligibleStems is the exact set of prompt stems that are
-// render-eligible from wsflow per spec #260529-prompt-render-tool.
+// eligible for the wsflow playbook.render legacy context bridge.
 // Add entries here as the spec expands the set.
 var wsflowRenderEligibleStems = map[string]bool{
 	"reference-discovery":     true,
@@ -3155,69 +3518,25 @@ var wsflowRenderEligibleStems = map[string]bool{
 	"mental-model-updater":    true,
 }
 
-// renderPrompt loads a bundled prompt by stem, applies namespace substitution,
-// appends an optional injected context block, writes the result to a
-// worktree-scoped tmp file, and returns the path.
-func renderPrompt(root, stem string, context map[string]string) (string, error) {
-	if !wsflowRenderEligibleStems[stem] {
-		return "", fmt.Errorf("prompt stem %q is not render-eligible in wsflow", stem)
+func appendRenderContext(body string, context map[string]string) string {
+	if len(context) == 0 {
+		return body
 	}
-	body, err := wsprompt.RenderSource(stem)
-	if err != nil {
-		return "", fmt.Errorf("load prompt %q: %w", stem, err)
+	keys := make([]string, 0, len(context))
+	for k := range context {
+		keys = append(keys, k)
 	}
-	ns := RuntimeNamespace()
-	body = wsNamespaceRef.ReplaceAllString(body, ns+"$1")
-	if len(context) > 0 {
-		keys := make([]string, 0, len(context))
-		for k := range context {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		var sb strings.Builder
-		sb.WriteString("\n\n## Render Context\n")
-		for _, k := range keys {
-			sb.WriteString("- ")
-			sb.WriteString(k)
-			sb.WriteString(": ")
-			sb.WriteString(context[k])
-			sb.WriteString("\n")
-		}
-		body += sb.String()
+	sort.Strings(keys)
+	var sb strings.Builder
+	sb.WriteString("\n\n## Render Context\n")
+	for _, k := range keys {
+		sb.WriteString("- ")
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		sb.WriteString(context[k])
+		sb.WriteString("\n")
 	}
-	generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, "prompt", []string{stem})
-	if err != nil {
-		return "", fmt.Errorf("allocate prompt path: %w", err)
-	}
-	if err := os.WriteFile(generated[0].Path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("write prompt %s: %w", generated[0].Path, err)
-	}
-	return generated[0].Path, nil
-}
-
-func (s *Server) subqueryAgentAccessAllowed(toolName string, arguments map[string]any) bool {
-	if s.role == roleLead || !isSubqueryAgentTool(toolName) {
-		return true
-	}
-	name, _ := arguments["name"].(string)
-	if name != "" && !strings.HasPrefix(name, "subquery-") {
-		return false
-	}
-	for _, item := range stringList(arguments["names"]) {
-		if !strings.HasPrefix(item, "subquery-") {
-			return false
-		}
-	}
-	return name != "" || len(stringList(arguments["names"])) > 0
-}
-
-func isSubqueryAgentTool(name string) bool {
-	switch name {
-	case "agents.wait", "agents.result", "agents.status", "agents.tail", "agents.cancel", "agents.print":
-		return true
-	default:
-		return false
-	}
+	return body + sb.String()
 }
 
 func explicitAllowedTools() map[string]bool {
@@ -3307,7 +3626,6 @@ func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"root":            stringProperty("Repository root. Defaults to the server root."),
 			"statuses":        stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
 			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
@@ -3409,6 +3727,19 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"description": description,
 		"enum":        values,
 	}
+}
+
+// scopeSchemaProperty returns the shared MCP inputSchema fragment for the
+// scope argument consumed by every scope-aware config tool. Callers embed this
+// into their tool's properties map under the "scope" key. The fragment uses the
+// canonical scope enum from wsconfig so the definition stays in one place.
+func scopeSchemaProperty() map[string]any {
+	return enumStringProperty(
+		`Optional config scope to target. Omit to use the item's declared default scope (usually "project"). `+
+			`"session" stores in the current session only; "project" stores in the per-project config; `+
+			`"global" stores in the cross-project ~/.ws/config.json.`,
+		wsconfig.ScopeSchemaEnum(),
+	)
 }
 
 func numberProperty(description string) map[string]string {

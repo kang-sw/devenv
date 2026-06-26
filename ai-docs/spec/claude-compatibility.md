@@ -107,8 +107,10 @@ CLI contract and cross-platform release checks.
 
 ## Claude API Docs CLI Fallback {#260505-claude-api-docs-cli-fallback}
 
-The Codex-first API documentation surface is `ws/api.list`, `ws/api.ask`, and
-the async API job tools `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, and
+The Codex-first API documentation surface currently exposes only `ws/api.list`
+for deterministic local cache-domain discovery. Claude compatibility guidance
+must not advertise the retired agent-backed API documentation ask and async job
+tools: `ws/api.ask`, `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, or
 `ws/api.cancel`.
 
 ## Claude Plugin Manifest And Marketplace {#260505-claude-plugin-manifest-marketplace}

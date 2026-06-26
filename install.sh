@@ -467,7 +467,6 @@ settings_path, claude_json_path, repo_dir, plugin_cache = sys.argv[1], sys.argv[
 
 # ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "ENABLE_TOOL_SEARCH": "1"
 }
 

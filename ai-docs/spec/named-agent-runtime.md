@@ -1,6 +1,6 @@
 ---
 title: Named Agent Runtime
-summary: Durable ws named-agent sessions, asynchronous lifecycle control, subquery fan-out, diagnostics, and backend adapter behavior.
+summary: Durable ws named-agent sessions, asynchronous lifecycle control, diagnostics, and backend adapter behavior.
 ---
 
 # Named Agent Runtime
@@ -47,22 +47,24 @@ error instead of silently disappearing.
 
 ## Prompt Registration And Model Alias Resolution {#260505-agent-prompt-registration-tier-resolution}
 
-Agent registration accepts a prompt chain as logical prompt names or absolute
-prompt paths. Bare logical names resolve from the embedded runtime prompt bundle;
-ambiguous relative paths are rejected. Public delegate registrations prepend the
-embedded delegate-orientation prompt unless the caller explicitly suppresses it
-for an internal helper.
+Agent registration accepts a single self-contained system prompt text (the
+caller renders it via `playbook.render`); the former prompt-stem chain
+(logical names / absolute paths resolved from an embedded prompt bundle) was
+retired with the embedded bundle. Public delegate registrations prepend the
+`delegate-orientation` document — now loaded from the rsrc tree — unless the
+caller explicitly suppresses it for an internal helper.
 
-The runtime strips prompt frontmatter, concatenates prompt bodies in caller
-order, and writes the resolved text to the agent's `system.md`. `light`,
-`core`, and `deep` are portable model aliases. `model` may name one of those
-aliases or a concrete backend model; concrete model names override alias and
-harness defaults. Legacy `tier` inputs remain accepted as compatibility alias
-selectors when `model` is absent. Resolved agent metadata reports the alias in
-the compatibility `tier` field, plus the resolved backend, concrete model, and
-optional resolved effort from the selected harness-aware alias mapping.
-Registration does not accept a separate effort input; model aliases remain the
-single public selection route for named-agent effort.
+The runtime joins the orientation document and the system prompt text and
+writes the resolved text to the agent's `system.md`. The `model` field may name a
+portable alias (`light`/`core`/`deep`, read-compat synonyms for the
+`small`/`medium`/`large` capability tiers) or a concrete backend model; concrete
+model names override alias and harness defaults. The `tier` input takes the
+capability vocabulary (`small`/`medium`/`large`/`xlarge`; `light`/`core`/`deep`
+and `haiku`/`sonnet`/`opus` fold in as read-compat) and selects the mapping when
+`model` is absent. Resolved agent metadata reports the resolved tier, backend,
+concrete model, and optional resolved effort from the selected harness-aware
+mapping. Registration does not accept a separate effort input; the tier mapping
+remains the single public selection route for named-agent effort.
 {#260508-harness-aware-model-aliases}
 
 When registration supplies an explicit backend with only alias-based model
@@ -74,7 +76,7 @@ empty instead of producing a cross-backend mismatch.
 
 ## Async Single-Call Lifecycle {#260505-agent-async-single-call-lifecycle}
 
-`agents.call` starts one asynchronous current call for a registered agent and
+`ws.mercenary.call` starts one asynchronous current call for a registered agent and
 returns before backend completion. The call snapshot records the prompt path,
 execution id, worker pid, stream paths, status, timestamps, exit code, error,
 and session id when known.
@@ -96,51 +98,32 @@ state, and inbox as the parent MCP tool dispatch.
 
 ## Readiness And Result Split {#260505-agent-readiness-result-split}
 
-`agents.wait` waits for one or more named agents and returns readiness metadata
+`ws.mercenary.wait` waits for one or more named agents and returns readiness metadata
 when any requested call is terminal. It does not return final output. If the
 timeout expires, the response includes timeout and per-agent ready/pending
 metadata. The default wait timeout is 10 minutes.
 
-`agents.result` is the result-consumption surface for a single named agent. It
+`ws.mercenary.result` is the result-consumption surface for a single named agent. It
 can read an already completed result or wait up to an explicit timeout. Running,
 failed, cancelled, timed-out, and non-ready calls return status text rather than
 successful output. Successful result reads hide ephemeral role pointers, but the
 ephemeral instance payload remains subject to the normal retention cleanup path.
 
-## Async Subquery Ephemeral Agents {#260505-async-subquery-ephemeral-agent}
-
-`subquery` starts a scoped read-only query as an asynchronous named-agent call
-and returns immediately with a generated subquery key. Deep-research requests use
-the `deep` model alias; ordinary requests use the `light` model alias.
-
-Generated subquery agents are marked ephemeral and suppress delegate orientation
-because their system prompt is self-contained. Callers collect answers with
-`agents.result(name: <subquery-key>, timeout_seconds: 600)` and can use
-`agents.status`, `agents.tail`, or `agents.cancel` for diagnostics or recovery.
-The public `subquery` MCP schema omits `root`, matching the actor-owned
-`agents.*` schema invariant. When launched rootlessly from an actor-bound lead
-MCP session, each subquery runs in the current actor scope and receives its own
-reader child actor setup instruction without receiving the lead bootstrap
-method. Hidden explicit-root compatibility launches remain in the global
-compatibility namespace and do not receive reader child actor setup. Successful
-result consumption erases the ephemeral agent and marks the reader actor
-inactive.
-
 ## Diagnostics, Tail, And Debug Streams {#260505-agent-diagnostics-tail-debug}
 
-`agents.status` reports registry state and current-call state, including agent
+`ws.mercenary.status` reports registry state and current-call state, including agent
 status, backend, tier, model, session id, call status, execution id, pid,
 timestamps, exit code, error text, cleanup flags, diagnostic stream paths, and
 follow-up guidance.
 
-`agents.tail` reads recent event, runtime, stdout, stderr, and output lines
+`ws.mercenary.tail` reads recent event, runtime, stdout, stderr, and output lines
 without invoking the backend. Normal tail output is context-bounded: large JSON
 fields and long lines are truncated with an explicit `ws-tail truncated` marker.
-Raw inspection remains available through the `agents.debug.*` diagnostic tools.
+Raw inspection remains available through the `ws.mercenary.debug.*` diagnostic tools.
 
 ## Inbox Interrupt Delivery {#260505-agent-inbox-interrupt-delivery}
 
-`agents.interrupt` appends a durable pending message to the target agent's
+`ws.mercenary.interrupt` appends a durable pending message to the target agent's
 inbox. Pending messages are marked delivered when the runtime injects them into
 a backend input path; delivery does not claim model compliance.
 
@@ -152,15 +135,15 @@ messages to the next resumed backend call.
 
 ## Cancel And Disk-Backed Recovery {#260505-agent-cancel-recovery}
 
-`agents.cancel` performs best-effort local process cancellation for the stored
+`ws.mercenary.cancel` performs best-effort local process cancellation for the stored
 worker pid and marks the current call cancelled. Cancellation is the urgent
-termination path; normal redirects should use `agents.interrupt`. When
+termination path; normal redirects should use `ws.mercenary.interrupt`. When
 cancellation followed an agent no-response timeout and no result is available,
-cancelled status output tells callers to retry `agents.call` on the same
+cancelled status output tells callers to retry `ws.mercenary.call` on the same
 registered agent with a recovery prompt so stored-session backends can resume.
 
-After an MCP process restart, disk state remains sufficient for `agents.wait`,
-`agents.result`, `agents.status`, `agents.tail`, and compatibility output reads.
+After an MCP process restart, disk state remains sufficient for `ws.mercenary.wait`,
+`ws.mercenary.result`, `ws.mercenary.status`, `ws.mercenary.tail`, and compatibility output reads.
 If the stored worker pid for a running call is no longer alive, readiness and
 result paths reconcile the call to a failed terminal state with diagnostic
 information.
@@ -176,17 +159,17 @@ bounded check without moving payload bytes into SQLite.
 
 ## Recall Recovery {#260511-agent-recall-recovery}
 
-`agents.recall` is a recovery-only retry path for a registered agent after
-`agents.result(timeout_seconds: 600)` times out and `agents.tail` shows no useful
+`ws.mercenary.recall` is a recovery-only retry path for a registered agent after
+`ws.mercenary.result(timeout_seconds: 600)` times out and `ws.mercenary.tail` shows no useful
 activity. It is not the normal continuation or redirect surface.
 
 When the current call is active, recall first performs the same best-effort
-cancellation as `agents.cancel`. If cancellation reports `cleanup_needed`, recall
+cancellation as `ws.mercenary.cancel`. If cancellation reports `cleanup_needed`, recall
 does not start a replacement call and returns manual-cleanup guidance. Otherwise
-it starts a new resumed `agents.call` with either the caller's recovery prompt or
+it starts a new resumed `ws.mercenary.call` with either the caller's recovery prompt or
 a default prompt that identifies the retry as timeout-and-no-activity recovery.
 This compatibility implementation is not advertised as the normal model-visible
-MCP recovery surface; ordinary recovery guidance points callers to `agents.call`
+MCP recovery surface; ordinary recovery guidance points callers to `ws.mercenary.call`
 on the same registered agent.
 
 ## Codex Session And JSONL Handling {#260505-codex-agent-session-jsonl-handling}
@@ -219,8 +202,8 @@ prompt contents by default. {#260508-codex-prompt-delivery-diagnostics}
 
 Named-agent registrations with `backend: claude` execute through the same
 agent lifecycle as Codex-backed agents. Callers will use the existing
-`agents.register`, `agents.call`, `agents.wait`, `agents.result`,
-`agents.status`, `agents.tail`, `agents.interrupt`, and diagnostics tools
+`ws.mercenary.register`, `ws.mercenary.call`, `ws.mercenary.wait`, `ws.mercenary.result`,
+`ws.mercenary.status`, `ws.mercenary.tail`, `ws.mercenary.interrupt`, and diagnostics tools
 without switching to a Claude-specific registry or output surface.
 
 The Claude adapter starts first calls with a runtime-managed Claude session id,
@@ -236,42 +219,11 @@ Claude-backed calls with a resolved non-empty alias effort pass it through the
 Claude `--effort` option. Calls without resolved effort do not pass an effort
 option.
 
-Portable model aliases resolve through the detected MCP harness. A `core`
-registration from a Codex MCP session resolves through Codex alias defaults,
-while the same alias from a Claude MCP session resolves through Claude alias
-defaults. Unknown harnesses use a deterministic configured default.
-{#260508-mcp-harness-detection}
-
-## Gemini Agent Runner {#260512-gemini-agent-runner}
-
-Named-agent registrations with `backend: gemini` execute through the same agent
-lifecycle as Codex- and Claude-backed agents. Callers use
-`agents.register`, `agents.call`, `agents.wait`, `agents.result`,
-`agents.status`, `agents.tail`, `agents.interrupt`, and `agents.cancel` without
-switching to a Gemini-specific registry, queue, status, or result surface.
-
-The Gemini adapter invokes Gemini CLI in headless `stream-json` mode, delivers
-prompts through stdin, passes concrete models when configured, and resumes with
-the stored Gemini session id when available. If an agent has a resolved system
-prompt, the adapter includes it in the stdin prompt using a clear
-system-instruction boundary instead of relying on backend-specific persistent
-configuration.
-
-Gemini stream parsing tolerates non-JSON stdout notices before or between valid
-JSON events while preserving raw stdout and stderr in the existing diagnostic
-streams. Caller-facing result text is accumulated from assistant
-`message.content` chunks, terminal success requires a
-`result.status == "success"` event, and terminal error events or missing
-terminal/session/text data fail through the shared backend invocation
-diagnostics path.
-
-Gemini authentication remains external to ws. The runtime will not read, write,
-or probe Gemini credentials during registration, configuration, or calls; auth
-failures surface as backend invocation failures with the same diagnostic and
-reconfiguration hints as other local backends. Live hook-style interrupt delivery
-is not part of the Gemini contract: pending inbox messages may
-be prepended to the next resumed call until a stable Gemini live-delivery
-mechanism exists.
+Capability tiers (and their read-compat aliases) resolve through the detected MCP
+harness. A `medium` (or its `core` read-compat alias) registration from a Codex
+MCP session resolves through Codex defaults, while the same tier from a Claude MCP
+session resolves through Claude defaults. Unknown harnesses use a deterministic
+configured default. {#260508-mcp-harness-detection}
 
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 

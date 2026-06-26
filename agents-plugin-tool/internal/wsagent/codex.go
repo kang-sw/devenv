@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,6 @@ type RunnerRequest struct {
 	OnSessionID          func(string) error
 	Timeout              time.Duration
 	InheritProcessGroup  bool
-	ToolProfile          string
 }
 
 type RunnerResult struct {
@@ -48,8 +48,6 @@ func runnerForBackend(backend string) (Runner, error) {
 		return CodexRunner{}, nil
 	case "claude":
 		return ClaudeRunner{}, nil
-	case "gemini":
-		return GeminiRunner{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported agent backend %q", backend)
 	}
@@ -86,9 +84,6 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		configureRunnerCommand(cmd)
 	}
 	cmd.Dir = req.Root
-	if req.ToolProfile != "" {
-		cmd.Env = append(cmd.Environ(), "WS_MCP_TOOL_PROFILE="+req.ToolProfile)
-	}
 	if invocation.PromptDelivery == "stdin" {
 		cmd.Stdin = strings.NewReader(invocation.PromptStdin)
 	}
@@ -155,7 +150,10 @@ func buildCodexInvocation(req RunnerRequest) (codexInvocation, error) {
 		args = append(args, "-m", req.Model)
 	}
 	if req.SystemPromptPath != "" {
-		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
+		// Use forward slashes so Windows paths (C:\...) do not produce
+		// backslash-escape ambiguity when codex parses the -c config value.
+		// filepath.ToSlash is a no-op on Unix, so the Unix behavior is unchanged.
+		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", filepath.ToSlash(req.SystemPromptPath)))
 	}
 	if effort := strings.TrimSpace(req.Effort); effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+effort)

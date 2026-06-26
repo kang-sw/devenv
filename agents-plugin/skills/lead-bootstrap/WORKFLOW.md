@@ -116,9 +116,9 @@ When a maintainer approves `_index.md` cleanup:
    `ai-docs/ref/` or API-doc pointers, work history to Git or ticket archives,
    and duplicated maps to start-here pointers.
 7. Route deeper semantic work through the owning workflow: behavior to
-   `ws:lead-forge-spec` or `ws:lead-write-spec`, modification knowledge to
+   `ws:lead-forge-spec` or the lead-write-spec procedure, modification knowledge to
    `ws:lead-forge-mental-model`, Ticket Focus membership, ordering, and
-   readiness/status wording to `ws:lead-write-ticket`, and ambiguous direction
+   readiness/status wording to the lead-write-ticket procedure, and ambiguous direction
    to `ws:lead-discuss`.
 
 ## Commit Traceability

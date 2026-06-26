@@ -1,0 +1,1666 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
+)
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+// buildTestRsrcTree creates a minimal rsrc tree for testing playbook tools.
+// playbooks maps relative paths to file content.
+// Returns the root path with a freshly generated manifest.json.
+func buildTestRsrcTree(t *testing.T, playbooks map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for relPath, content := range playbooks {
+		full := filepath.Join(root, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", relPath, err)
+		}
+	}
+	m, err := wsrsrc.GenerateManifest(root)
+	if err != nil {
+		t.Fatalf("GenerateManifest: %v", err)
+	}
+	if err := wsrsrc.WriteManifest(root, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	return root
+}
+
+// newTestServerWithHarness creates a Server bound to a temp root with the given harness.
+func newTestServerWithHarness(t *testing.T, harness string) *Server {
+	t.Helper()
+	s := NewServer(t.TempDir(), "test")
+	if harness != "" {
+		s.observeHarness("test", harness)
+	}
+	return s
+}
+
+func isolatedPlaybookConfigOptions(t *testing.T) wsconfig.Options {
+	t.Helper()
+	return wsconfig.Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "config"),
+	}
+}
+
+// initGitRepo creates a git repository in a temp dir and returns its path.
+// Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init", dir},
+		{"git", "-C", dir, "config", "user.email", "test@test.com"},
+		{"git", "-C", dir, "config", "user.name", "Test"},
+	}
+	for _, c := range cmds {
+		out, err := exec.Command(c[0], c[1:]...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", c[1:], err, out)
+		}
+	}
+	return dir
+}
+
+// asPlaybookError reports whether err or any error in its chain matches type T.
+func asPlaybookError[T error](err error, target *T) bool {
+	if err == nil {
+		return false
+	}
+	return errors.As(err, target)
+}
+
+// writeTestFile writes content to root/relPath, creating parent dirs.
+func writeTestFile(t *testing.T, root, relPath, content string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", full, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fixture playbook content strings
+// ---------------------------------------------------------------------------
+
+const (
+	// plainPlaybookContent: non-delegate, one custom variable.
+	plainPlaybookContent = `---
+kind: print
+delegates: false
+variables:
+  - WorktreeID
+---
+# Plain Playbook
+
+Worktree: {{.WorktreeID}}
+`
+
+	// delegatePlaybookContent: delegates:true with all terminology vars.
+	// NOTE: kind:render is advisory metadata only — the loader does not restrict
+	// by kind, so this fixture is valid for use with printPlaybook too. kind is
+	// not a tool-routing gate; it is surfaced in PlaybookMeta for caller inspection.
+	delegatePlaybookContent = `---
+kind: render
+delegates: true
+variables:
+  - ExploreAgent
+  - SpawnIdiom
+  - ContinueIdiom
+---
+# Delegate Playbook
+
+Explore: {{.ExploreAgent}}
+Spawn: {{.SpawnIdiom}}
+Continue: {{.ContinueIdiom}}
+`
+
+	// modelAliasPlaybookContent: declares RoleModel, resolved from the playbook's tier.
+	// tier: medium is used so the derivation path is exercised in tests.
+	modelAliasPlaybookContent = `---
+kind: print
+delegates: false
+tier: medium
+variables:
+  - RoleModel
+---
+# Model Alias Playbook
+
+Model: {{.RoleModel}}
+`
+
+	// noVarsPlaybookContent: no variables, static content.
+	noVarsPlaybookContent = `---
+kind: print
+delegates: false
+---
+# No-Vars Playbook
+
+Static content only.
+`
+)
+
+// ---------------------------------------------------------------------------
+// playbook.print — golden harness rendering
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintUnknownHarness(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "") // no harness → host-neutral
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	neutral := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, neutral[varName]) {
+			t.Errorf("body %q: expected neutral %s %q", body, varName, neutral[varName])
+		}
+	}
+	// Placeholders must be substituted.
+	if strings.Contains(body, "{{.") {
+		t.Errorf("body %q: unsubstituted placeholder remains", body)
+	}
+}
+
+func TestPlaybookPrintClaudeHarness(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	claudeTerm := terminologyForHarness("claude")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, claudeTerm[varName]) {
+			t.Errorf("body %q: expected claude %s %q", body, varName, claudeTerm[varName])
+		}
+	}
+	// Codex terms must NOT appear for any var (proves harness selection on all vars).
+	codexTerm := terminologyForHarness("codex")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if claudeTerm[varName] != codexTerm[varName] {
+			if strings.Contains(body, codexTerm[varName]) {
+				t.Errorf("body %q: codex %s term %q must not appear in claude render", body, varName, codexTerm[varName])
+			}
+		}
+	}
+}
+
+func TestPlaybookPrintCodexHarness(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	codexTerm := terminologyForHarness("codex")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, codexTerm[varName]) {
+			t.Errorf("body %q: expected codex %s %q", body, varName, codexTerm[varName])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// playbook.print — delegation tip injection
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintDelegatesTipPresent(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+	// Tip must include the claude ContinueIdiom.
+	claudeTerm := terminologyForHarness("claude")
+	if !strings.Contains(body, claudeTerm["ContinueIdiom"]) {
+		t.Errorf("body %q: expected tip to include claude ContinueIdiom %q", body, claudeTerm["ContinueIdiom"])
+	}
+}
+
+func TestPlaybookPrintDelegatesTipAbsent(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"plain-pb/plain-pb.md": plainPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-123"}, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// playbook.print — caller context substitution
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintCallerContextSubstituted(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"plain-pb/plain-pb.md": plainPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-abc"}, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "wt-abc") {
+		t.Errorf("body %q: expected caller context value 'wt-abc' substituted", body)
+	}
+	if strings.Contains(body, "{{.WorktreeID}}") {
+		t.Errorf("body %q: placeholder should have been substituted", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// playbook.print — no-vars fast path
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintNoVarsPlaybook(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"novars/novars.md": noVarsPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "novars", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "Static content only") {
+		t.Errorf("body %q: expected static content", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// playbook.render — writes tmp file, returns path
+// ---------------------------------------------------------------------------
+
+func TestPlaybookRenderWritesTmpFile(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"delegate-pb/delegate-pb.md": delegatePlaybookContent,
+	})
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	s := newTestServerWithHarness(t, "claude")
+
+	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if path == "" {
+		t.Fatal("renderPlaybook returned empty path")
+	}
+
+	// File must exist and contain the rendered content.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered file: %v", err)
+	}
+	body := string(data)
+	claudeTerm := terminologyForHarness("claude")
+	if !strings.Contains(body, claudeTerm["ExploreAgent"]) {
+		t.Errorf("file body %q: expected claude ExploreAgent %q", body, claudeTerm["ExploreAgent"])
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("file body %q: expected delegation tip", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Model alias — config-sourced resolution (no baked model names)
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintModelAliasFromConfig(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	// Write a config with a unique, recognizable model name.
+	cacheHome := t.TempDir()
+	uniqueModel := "test-custom-model-xyz-9999"
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cacheHome}, "core", "custom-backend", uniqueModel, ""); err != nil {
+		t.Fatalf("SetAgentsTierForHarness: %v", err)
+	}
+
+	// Render using the custom config.
+	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	// The model name must come from config, not be baked in.
+	if !strings.Contains(body, uniqueModel) {
+		t.Errorf("body %q: expected config-sourced model name %q", body, uniqueModel)
+	}
+}
+
+// TestPlaybookPrintModelAliasVariesWithConfig verifies that changing the config
+// changes the model in the output — proving config-sourced resolution.
+func TestPlaybookPrintModelAliasVariesWithConfig(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"model-pb/model-pb.md": modelAliasPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	cacheA := t.TempDir()
+	modelA := "model-variant-aaa"
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cacheA}, "core", "", modelA, ""); err != nil {
+		t.Fatalf("config A: %v", err)
+	}
+
+	cacheB := t.TempDir()
+	modelB := "model-variant-bbb"
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cacheB}, "core", "", modelB, ""); err != nil {
+		t.Fatalf("config B: %v", err)
+	}
+
+	bodyA, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheA}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook A: %v", err)
+	}
+	bodyB, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheB}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook B: %v", err)
+	}
+
+	if !strings.Contains(bodyA, modelA) {
+		t.Errorf("bodyA %q: expected model %q from config A", bodyA, modelA)
+	}
+	if !strings.Contains(bodyB, modelB) {
+		t.Errorf("bodyB %q: expected model %q from config B", bodyB, modelB)
+	}
+	if bodyA == bodyB {
+		t.Error("different configs produced identical output — model alias resolution not config-driven")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Loud failure paths
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintMissingManifest(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "pb/pb.md", "---\nkind: print\n---\nbody\n")
+	// No manifest written.
+
+	s := newTestServerWithHarness(t, "")
+	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, "", nil)
+	if err == nil {
+		t.Fatal("expected error for missing manifest, got nil")
+	}
+	var missing wsrsrc.ErrManifestMissing
+	if !asPlaybookError(err, &missing) {
+		t.Errorf("expected ErrManifestMissing, got %T: %v", err, err)
+	}
+}
+
+func TestPlaybookPrintSchemaMismatch(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "pb/pb.md", "---\nkind: print\n---\nbody\n")
+	writeTestFile(t, root, "manifest.json", `{"schema_version":999,"files":{"pb/pb.md":"deadbeef"}}`)
+
+	s := newTestServerWithHarness(t, "")
+	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, "", nil)
+	if err == nil {
+		t.Fatal("expected error for schema mismatch, got nil")
+	}
+	var mismatch wsrsrc.ErrSchemaMismatch
+	if !asPlaybookError(err, &mismatch) {
+		t.Errorf("expected ErrSchemaMismatch, got %T: %v", err, err)
+	}
+}
+
+func TestPlaybookPrintUndeclaredCallerVar(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"plain-pb/plain-pb.md": plainPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb",
+		map[string]string{"WorktreeID": "wt", "Undeclared": "oops"},
+		wsconfig.Options{}, "", nil)
+	if err == nil {
+		t.Fatal("expected ErrUndeclaredVar for undeclared caller var, got nil")
+	}
+	var undecl wsrsrc.ErrUndeclaredVar
+	if !asPlaybookError(err, &undecl) {
+		t.Errorf("expected ErrUndeclaredVar, got %T: %v", err, err)
+	}
+	if undecl.Name != "Undeclared" {
+		t.Errorf("ErrUndeclaredVar.Name = %q, want Undeclared", undecl.Name)
+	}
+}
+
+func TestPlaybookPrintUnprovidedVar(t *testing.T) {
+	// WorktreeID is declared and used in body but neither caller nor tool provides it.
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"plain-pb/plain-pb.md": plainPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{}, wsconfig.Options{}, "", nil)
+	if err == nil {
+		t.Fatal("expected ErrUnprovidedVar for missing required var, got nil")
+	}
+	var unprov wsrsrc.ErrUnprovidedVar
+	if !asPlaybookError(err, &unprov) {
+		t.Errorf("expected ErrUnprovidedVar, got %T: %v", err, err)
+	}
+	if unprov.Name != "WorktreeID" {
+		t.Errorf("ErrUnprovidedVar.Name = %q, want WorktreeID", unprov.Name)
+	}
+}
+
+func TestPlaybookPrintDanglingInclude(t *testing.T) {
+	// Playbook declares includes: [dangling] but dangling.md is not in the tree.
+	// The include resolution should fail and propagate the error through printPlaybook.
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		// Only the playbook file; dangling.md is intentionally absent so the
+		// manifest will not list it, causing ErrFileMissing from resolveIncludes.
+		"dangle-pb/dangle-pb.md": "---\nkind: print\ndelegates: false\nincludes:\n  - dangling\n---\nbody\n",
+	})
+	s := newTestServerWithHarness(t, "")
+
+	_, _, err := printPlaybook(s, rsrcRoot, "dangle-pb", nil, wsconfig.Options{}, "", nil)
+	if err == nil {
+		t.Fatal("expected error for dangling include, got nil")
+	}
+	// The error message must contain the missing include stem name.
+	if !strings.Contains(err.Error(), "dangling") {
+		t.Errorf("error %q: expected include stem 'dangling' in message", err)
+	}
+	// The wrapped underlying error must be ErrFileMissing (the manifest does not
+	// list dangling.md since it was never written to the tree).
+	var fileMissing wsrsrc.ErrFileMissing
+	if !asPlaybookError(err, &fileMissing) {
+		t.Errorf("expected ErrFileMissing (via errors.As), got %T: %v", err, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MCP dispatch: tool surface (no wsflow gate, no no-agent gate)
+// ---------------------------------------------------------------------------
+
+func TestPlaybookToolsInLeadToolNames(t *testing.T) {
+	names := LeadToolNames()
+	has := func(name string) bool {
+		for _, n := range names {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("playbook.print") {
+		t.Error("playbook.print missing from LeadToolNames")
+	}
+	if !has("playbook.render") {
+		t.Error("playbook.render missing from LeadToolNames")
+	}
+}
+
+func TestPlaybookToolsNotNoAgentHidden(t *testing.T) {
+	if noAgentHiddenTool("playbook.print") {
+		t.Error("playbook.print is incorrectly hidden in no-agent mode")
+	}
+	if noAgentHiddenTool("playbook.render") {
+		t.Error("playbook.render is incorrectly hidden in no-agent mode")
+	}
+}
+
+func TestPlaybookToolsVisibleInToolsList(t *testing.T) {
+	listed := map[string]bool{}
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		listed[name] = true
+	}
+	for _, want := range []string{"playbook.print", "playbook.render"} {
+		if !listed[want] {
+			t.Errorf("tool %q missing from tools() list", want)
+		}
+	}
+}
+
+func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+	configOpts := isolatedPlaybookConfigOptions(t)
+
+	assertCleanWsflowManual := func(label, body string) {
+		t.Helper()
+		for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws", "ws:override:", "ws:/override:"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s: wsflow playbook output contains forbidden %q:\n%s", label, forbidden, body)
+			}
+		}
+		if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+			t.Fatalf("%s: wsflow playbook output contains bare ws namespace notation:\n%s", label, body)
+		}
+		if strings.Contains(body, "{{.") {
+			t.Fatalf("%s: wsflow playbook output contains unsubstituted placeholder:\n%s", label, body)
+		}
+		for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s: wsflow playbook output missing %q:\n%s", label, want, body)
+			}
+		}
+		if !strings.Contains(body, "ws.ferrule") {
+			t.Fatalf("%s: wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", label, body)
+		}
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	assertCleanWsflowManual("prefer-subagent off", body)
+	if strings.Contains(body, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+		t.Fatalf("wsflow workflow manual must not append lead-prefer-subagent while preference is off:\n%s", body)
+	}
+
+	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
+	if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, "on", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("enable workflow.prefer_subagent: %v", err)
+	}
+	bodyOn, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook on: %v", err)
+	}
+	assertCleanWsflowManual("prefer-subagent on", bodyOn)
+	for _, want := range []string{
+		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
+		"Maximum-delegation posture for this session",
+		"spawn_agent(fork_context:true, message:<prompt>)",
+	} {
+		if !strings.Contains(bodyOn, want) {
+			t.Fatalf("wsflow workflow manual with prefer-subagent on missing %q:\n%s", want, bodyOn)
+		}
+	}
+}
+
+func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook lead-tune: %v", err)
+	}
+	for _, want := range []string{
+		`ws/config.tuning(session_key: <lead key>)`,
+		`"workflow.prefer_subagent"`,
+		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		`"workflow.prefer_mercenary"`,
+		"catalog-provided writer for `\"workflow.prefer_mercenary\"`",
+		"prompt.UserPreferenceSection",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lead-tune render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"Call `config.workflow_prefer_subagent`",
+		"Call `config.workflow_prefer_mercenary`",
+		"prompt.DelegationSection",
+		"DelegationSection",
+		"delegation.prefer_mercenary",
+		"ws.lead.prefer_mercenary",
+		"session-scoped",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-tune render contains stale guidance %q:\n%s", forbidden, body)
+		}
+	}
+}
+
+func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
+	}
+	for _, want := range []string{
+		`wsflow/config.tuning(session_key: <lead key>)`,
+		"wsflow workflow",
+		`"workflow.prefer_subagent"`,
+		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		"prompt.UserPreferenceSection",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow lead-tune render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		`"workflow.prefer_mercenary"`,
+		"config.workflow_prefer_mercenary",
+		"delegation.prefer_mercenary",
+		"agents.tier",
+		"config.agents_tier",
+		"ws.mercenary.",
+		"Full ws",
+		"full ws",
+		"ws:override:",
+		"ws:/override:",
+		"{{.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow lead-tune render contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("wsflow lead-tune render contains bare ws namespace notation:\n%s", body)
+	}
+}
+
+func TestProductModeBlockSelection(t *testing.T) {
+	t.Setenv(envNamespace, "wsflow")
+	input := strings.Join([]string{
+		"shared text",
+		fullOnlyStart,
+		"full-only text",
+		fullOnlyEnd,
+		wsflowOnlyStart,
+		"wsflow-only text",
+		wsflowOnlyEnd,
+	}, "\n")
+
+	t.Setenv(envNoAgent, "1")
+	wsflow := renderProductModePlaybookBody(input, false)
+	for _, forbidden := range []string{"full-only text", fullOnlyStart, wsflowOnlyStart} {
+		if strings.Contains(wsflow, forbidden) {
+			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
+		}
+	}
+	for _, want := range []string{"shared text", "wsflow-only text"} {
+		if !strings.Contains(wsflow, want) {
+			t.Fatalf("wsflow render missing %q:\n%s", want, wsflow)
+		}
+	}
+
+	t.Setenv(envNoAgent, "")
+	full := renderProductModePlaybookBody(input, true)
+	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
+		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
+	}
+	if !strings.Contains(full, "full-only text") {
+		t.Fatalf("full render omitted full-only content:\n%s", full)
+	}
+}
+
+func TestReservedNamespaceVarsDoNotRequireFrontmatter(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"namespace-pb/namespace-pb.md": `---
+kind: print
+delegates: false
+---
+Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+Actual tool: ws.ferrule.
+`,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", map[string]string{
+		"McpNamespace":   "spoof",
+		"SkillNamespace": "spoof",
+	}, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.ferrule"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "spoof") {
+		t.Fatalf("caller context overrode reserved namespace vars:\n%s", body)
+	}
+}
+
+func TestPlaybookReservedNamespaceVarsFullWs(t *testing.T) {
+	t.Setenv(envNamespace, "")
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"namespace-pb/namespace-pb.md": `---
+kind: print
+delegates: false
+---
+Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
+`,
+	})
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, want := range []string{"ws/tickets.find", "ws:lead-discuss"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "Continuity tip") {
+		t.Fatalf("rendered delegate output missing continuity tip:\n%s", body)
+	}
+	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rendered wsflow delegate contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("rendered wsflow delegate contains bare ws namespace notation:\n%s", body)
+	}
+}
+
+func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+		"note": "see ws/specs.find for details",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
+	}
+	codeReviewerData, err := os.ReadFile(codeReviewerPath)
+	if err != nil {
+		t.Fatalf("read code-reviewer render: %v", err)
+	}
+	codeReviewerBody := string(codeReviewerData)
+	for _, want := range []string{"wsflow/", "## Render Context", "- note: see ws/specs.find for details"} {
+		if !strings.Contains(codeReviewerBody, want) {
+			t.Fatalf("code-reviewer render missing %q:\n%s", want, codeReviewerBody)
+		}
+	}
+
+	planPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", map[string]string{
+		"brief_path": "ai-docs/.plans/brief.md",
+		"plan_path":  "ai-docs/.plans/plan.md",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
+	}
+	planData, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("read plan-populator-survey render: %v", err)
+	}
+	planBody := string(planData)
+	for _, want := range []string{"## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+		if !strings.Contains(planBody, want) {
+			t.Fatalf("plan-populator-survey render missing %q:\n%s", want, planBody)
+		}
+	}
+	for _, forbidden := range []string{"Mercenary path", "ws.mercenary.", "exec."} {
+		if strings.Contains(planBody, forbidden) {
+			t.Fatalf("plan-populator-survey wsflow render contains forbidden %q:\n%s", forbidden, planBody)
+		}
+	}
+}
+
+func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+		"note": "ordinary full ws context remains template vars",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for code-reviewer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+}
+
+func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", map[string]string{
+		"note": "wsflow non-legacy stems still require declared template vars",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared context")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("wsflow non-legacy renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+}
+
+func TestPlaybookToolsSchemaNameRequired(t *testing.T) {
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		if name != "playbook.print" && name != "playbook.render" {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		required, _ := schema["required"].([]string)
+		found := false
+		for _, r := range required {
+			if r == "name" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("tool %q schema: 'name' not in required %v", name, required)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MCP dispatch: end-to-end via callTool
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintMCPDispatch(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"novars/novars.md": noVarsPlaybookContent,
+	})
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	srv := NewServer(t.TempDir(), "test")
+	// req.Params is the JSON for the tools/call params object:
+	// {"name": "<tool-name>", "arguments": {...}}
+	reqParams, _ := json.Marshal(map[string]any{
+		"name": "playbook.print",
+		"arguments": map[string]any{
+			"name": "novars",
+		},
+	})
+	req := request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "tools/call",
+		Params:  reqParams,
+	}
+	resp := srv.callTool(context.Background(), req)
+	if resp.Error != nil {
+		t.Fatalf("callTool error: %v", resp.Error.Message)
+	}
+	result, _ := resp.Result.(map[string]any)
+	if result["isError"] == true {
+		if content, ok := result["content"].([]map[string]string); ok && len(content) > 0 {
+			t.Fatalf("callTool isError: %s", content[0]["text"])
+		}
+		t.Fatal("callTool returned isError")
+	}
+	content, _ := result["content"].([]map[string]string)
+	if len(content) == 0 {
+		t.Fatal("callTool returned no content")
+	}
+	if !strings.Contains(content[0]["text"], "Static content only") {
+		t.Errorf("callTool result %q: expected playbook content", content[0]["text"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Golden render: real agents-plugin/rsrc tree
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintGoldenDelegateSampleClaudeHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Derived checks (broad coverage).
+	claudeTerm := terminologyForHarness("claude")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, claudeTerm[varName]) {
+			t.Errorf("golden body %q: expected claude %s %q", body, varName, claudeTerm[varName])
+		}
+	}
+	// Hardcoded expected strings to guard against a wrong terminology table
+	// (both sides of a derived assertion would agree even if the table were wrong).
+	if !strings.Contains(body, "the Explore agent") {
+		t.Errorf("golden body %q: expected hardcoded claude ExploreAgent 'the Explore agent'", body)
+	}
+	if !strings.Contains(body, "SendMessage(to: <agentId>)") {
+		t.Errorf("golden body %q: expected hardcoded claude ContinueIdiom 'SendMessage(to: <agentId>)'", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenDelegateSampleCodexHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Derived checks.
+	codexTerm := terminologyForHarness("codex")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, codexTerm[varName]) {
+			t.Errorf("golden body %q: expected codex %s %q", body, varName, codexTerm[varName])
+		}
+	}
+	// Hardcoded expected strings for the same anti-tautology reason.
+	if !strings.Contains(body, "an explorer subagent") {
+		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'an explorer subagent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its task id") {
+		t.Errorf("golden body %q: expected hardcoded codex ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenDelegateSampleUnknownHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "") // host-neutral
+
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	neutralTerm := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, neutralTerm[varName]) {
+			t.Errorf("golden body %q: expected neutral %s %q", body, varName, neutralTerm[varName])
+		}
+	}
+}
+
+func TestPlaybookPrintGoldenSamplePlaybookNoDelegation(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "sample-playbook",
+		map[string]string{"WorktreeID": "wt-golden"},
+		wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "wt-golden") {
+		t.Errorf("golden body %q: expected WorktreeID substituted", body)
+	}
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: delegation tip must not appear for delegates:false", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Golden render: fallback explore playbook (real rsrc tree)
+// ---------------------------------------------------------------------------
+
+func TestPlaybookPrintGoldenExploreClaudeHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Derived checks (broad coverage).
+	claudeTerm := terminologyForHarness("claude")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, claudeTerm[varName]) {
+			t.Errorf("golden body %q: expected claude %s %q", body, varName, claudeTerm[varName])
+		}
+	}
+	// Hardcoded expected strings to guard against a wrong terminology table.
+	if !strings.Contains(body, "the Explore agent") {
+		t.Errorf("golden body %q: expected hardcoded claude ExploreAgent 'the Explore agent'", body)
+	}
+	if !strings.Contains(body, "SendMessage(to: <agentId>)") {
+		t.Errorf("golden body %q: expected hardcoded claude ContinueIdiom 'SendMessage(to: <agentId>)'", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenExploreCodexHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Derived checks.
+	codexTerm := terminologyForHarness("codex")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, codexTerm[varName]) {
+			t.Errorf("golden body %q: expected codex %s %q", body, varName, codexTerm[varName])
+		}
+	}
+	// Hardcoded expected strings for the same anti-tautology reason.
+	if !strings.Contains(body, "an explorer subagent") {
+		t.Errorf("golden body %q: expected hardcoded codex ExploreAgent 'an explorer subagent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its task id") {
+		t.Errorf("golden body %q: expected hardcoded codex ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenExploreUnknownHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "") // host-neutral
+
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	neutralTerm := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, neutralTerm[varName]) {
+			t.Errorf("golden body %q: expected neutral %s %q", body, varName, neutralTerm[varName])
+		}
+	}
+	// Hardcoded expected strings.
+	if !strings.Contains(body, "an exploration agent") {
+		t.Errorf("golden body %q: expected hardcoded neutral ExploreAgent 'an exploration agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its returned id") {
+		t.Errorf("golden body %q: expected hardcoded neutral ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "junk-harness-xyz") // unrecognized → neutral
+
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	// Unrecognized harness falls back to host-neutral table.
+	neutralTerm := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if !strings.Contains(body, neutralTerm[varName]) {
+			t.Errorf("golden body %q: expected neutral %s %q for junk harness", body, varName, neutralTerm[varName])
+		}
+	}
+	// Hardcoded literals for anti-tautology: guards against a wrong neutral table
+	// producing a false-positive derived pass (same strings as Unknown harness test).
+	if !strings.Contains(body, "an exploration agent") {
+		t.Errorf("golden body %q: expected hardcoded neutral ExploreAgent 'an exploration agent'", body)
+	}
+	if !strings.Contains(body, "resuming the agent using its returned id") {
+		t.Errorf("golden body %q: expected hardcoded neutral ContinueIdiom", body)
+	}
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("golden body %q: expected delegation tip (delegates:true)", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Terminology table coverage assertions
+// ---------------------------------------------------------------------------
+
+func TestTerminologyTableCoverage(t *testing.T) {
+	for _, harness := range []string{"claude", "codex", ""} {
+		tbl, ok := playbookTerminologyTable[harness]
+		if !ok {
+			t.Errorf("terminology table missing harness entry %q", harness)
+			continue
+		}
+		for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+			v, ok := tbl[varName]
+			if !ok || v == "" {
+				t.Errorf("terminology[%q][%q] = %q, want non-empty", harness, varName, v)
+			}
+		}
+	}
+}
+
+// TestTermsDifferThreeWay asserts three-way distinctness (claude ≠ codex ≠ neutral)
+// for each terminology variable, so a copy-paste collapse in the neutral table
+// does not go undetected even when tautological golden tests pass.
+func TestTermsDifferThreeWay(t *testing.T) {
+	claude := terminologyForHarness("claude")
+	codex := terminologyForHarness("codex")
+	neutral := terminologyForHarness("")
+	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
+		if claude[varName] == codex[varName] {
+			t.Errorf("claude == codex for %q: %q — update terminology table", varName, claude[varName])
+		}
+		if neutral[varName] == claude[varName] {
+			t.Errorf("neutral == claude for %q: %q — update terminology table", varName, neutral[varName])
+		}
+		if neutral[varName] == codex[varName] {
+			t.Errorf("neutral == codex for %q: %q — update terminology table", varName, neutral[varName])
+		}
+	}
+}
+
+func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
+	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "RoleModel", "McpNamespace", "SkillNamespace"} {
+		if !reservedToolVarNames[name] {
+			t.Errorf("reservedToolVarNames missing %q", name)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Golden print: migrated internal procedure playbooks (real rsrc tree)
+// ---------------------------------------------------------------------------
+
+// TestPlaybookPrintGoldenLeadCheckBlockers verifies lead-check-blockers
+// resolves from the real rsrc tree and contains procedure body text.
+func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-check-blockers", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	// Verify non-trivial procedure text is present.
+	if !strings.Contains(body, "user-blocking design questions") {
+		t.Errorf("body %q: expected procedure text 'user-blocking design questions'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadVerifyDiscussion verifies lead-verify-discussion
+// resolves and is marked delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadVerifyDiscussion(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-discussion", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "Re-objectify the discussion") {
+		t.Errorf("body %q: expected procedure text 'Re-objectify the discussion'", body)
+	}
+	// delegates:true — continuity tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadUpdateSpec verifies lead-update-spec resolves
+// and contains the updated rsrc path reference.
+func TestPlaybookPrintGoldenLeadUpdateSpec(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-update-spec", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "spec coverage at commit boundaries") {
+		t.Errorf("body %q: expected doctrine text 'spec coverage at commit boundaries'", body)
+	}
+	// Verify the dead-path fix: updated rsrc path, not old SKILL.md path.
+	if !strings.Contains(body, "agents-plugin/rsrc/lead-write-spec/lead-write-spec.md") {
+		t.Errorf("body %q: expected updated rsrc path reference", body)
+	}
+	if strings.Contains(body, "agents-plugin/skills/lead-write-spec/SKILL.md") {
+		t.Errorf("body %q: must not contain stale SKILL.md path reference", body)
+	}
+	// delegates:false — no tip.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWorkflowManual verifies lead-workflow-manual resolves
+// and contains the updated self-reinvoke instruction.
+func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "WS Workflow Primitives") {
+		t.Errorf("body %q: expected heading 'WS Workflow Primitives'", body)
+	}
+	// Verify the dead-path fix: self-reinvoke uses playbook.print, not ws:lead-workflow-manual.
+	if !strings.Contains(body, `ws/playbook.print(name: "lead-workflow-manual")`) {
+		t.Errorf("body %q: expected updated self-reinvoke instruction using playbook.print", body)
+	}
+	if strings.Contains(body, "{{.") {
+		t.Errorf("body %q: unsubstituted placeholder remains", body)
+	}
+	// delegates:false — no tip.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWriteSpec verifies lead-write-spec resolves
+// and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadWriteSpec(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-spec", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "behavioral drift resistance") {
+		t.Errorf("body %q: expected doctrine text 'behavioral drift resistance'", body)
+	}
+	// delegates:true (conditional Explore accuracy check) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWriteTicket verifies lead-write-ticket resolves
+// and delegates:false (no tip).
+func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-ticket", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "recoverability of intent") {
+		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
+	}
+	// delegates:false — no tip.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadVerifyDesign verifies lead-verify-design resolves
+// and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadVerifyDesign(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-design", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "judgment isolation") {
+		t.Errorf("body %q: expected doctrine text 'judgment isolation'", body)
+	}
+	// delegates:true (design-reviewer agent) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadImplement verifies lead-implement resolves
+// and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "verified code reaching the target branch") {
+		t.Errorf("body %q: expected doctrine text 'verified code reaching the target branch'", body)
+	}
+	for _, want := range []string{
+		"Use the Mercenary dispatch item below instead of the Native item",
+		"Mercenary (when selected):",
+		`ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`,
+		`ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`,
+		`ws.mercenary.result(name: "<name>", timeout_seconds: 600)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
+		}
+	}
+	// delegates:true (spawns implementer/reviewer agents) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, forbidden := range []string{
+		"ws.mercenary.",
+		`"workflow.prefer_mercenary"`,
+		"Mercenary (when selected):",
+		fullOnlyStart,
+		fullOnlyEnd,
+		mercenaryOnlyStart,
+		mercenaryOnlyEnd,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow lead-implement render contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Golden print: Phase 3 entry-skill playbooks (real rsrc tree)
+// ---------------------------------------------------------------------------
+
+// TestPlaybookPrintGoldenLeadProceed verifies lead-proceed resolves from the
+// real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-proceed", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "full-pipeline routing accuracy") {
+		t.Errorf("body %q: expected doctrine text 'full-pipeline routing accuracy'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadShip verifies lead-ship resolves from the real
+// rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-ship", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "zero-surprise releases") {
+		t.Errorf("body %q: expected doctrine text 'zero-surprise releases'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadAddRule verifies lead-add-rule resolves from the
+// real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadAddRule(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-add-rule", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "classification accuracy at capture time") {
+		t.Errorf("body %q: expected doctrine text 'classification accuracy at capture time'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadSprint verifies lead-sprint resolves from the
+// real rsrc tree and is delegates:true (tip must appear).
+func TestPlaybookPrintGoldenLeadSprint(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-sprint", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "session continuity across exploratory workflow turns") {
+		t.Errorf("body %q: expected doctrine text 'session continuity across exploratory workflow turns'", body)
+	}
+	// delegates:true (native exploration-worker dispatch + ws.mercenary.register) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadDiscuss verifies lead-discuss resolves from the
+// real rsrc tree and is delegates:true (reference-discovery spawn — tip must appear).
+func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-discuss", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "decision quality per conversation turn") {
+		t.Errorf("body %q: expected doctrine text 'decision quality per conversation turn'", body)
+	}
+	// delegates:true (reference-discovery spawn in judge: needs-survey) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadReview verifies lead-review resolves from the
+// real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-review", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "maintainer decision quality with minimum friction") {
+		t.Errorf("body %q: expected doctrine text 'maintainer decision quality with minimum friction'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadSalvage verifies lead-salvage resolves from the
+// real rsrc tree and is delegates:true (native exploration-worker dispatch + ws.mercenary.register — tip must appear).
+func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-salvage", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "evidence-preserving loss containment") {
+		t.Errorf("body %q: expected doctrine text 'evidence-preserving loss containment'", body)
+	}
+	// delegates:true (native exploration-worker dispatch + named agent registration) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadSkillAuthoring verifies lead-skill-authoring resolves
+// from the real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "executability under pressure") {
+		t.Errorf("body %q: expected doctrine text 'executability under pressure'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadForgeSpec verifies lead-forge-spec resolves from the
+// real rsrc tree and is delegates:true (native exploration-worker spawns — tip must appear).
+func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-spec", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "confirmed spec entries per domain") {
+		t.Errorf("body %q: expected doctrine text 'confirmed spec entries per domain'", body)
+	}
+	// delegates:true (native exploration-worker spawns) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadForgeMentalModel verifies lead-forge-mental-model resolves
+// from the real rsrc tree and is delegates:true (native exploration-worker spawns — tip must appear).
+func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-mental-model", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "confirmed operational knowledge per domain") {
+		t.Errorf("body %q: expected doctrine text 'confirmed operational knowledge per domain'", body)
+	}
+	// delegates:true (native exploration-worker spawns) — tip must appear.
+	if !strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadBootstrap verifies lead-bootstrap resolves from the
+// real rsrc tree and contains procedure body text. delegates:false — no tip.
+func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-bootstrap", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	if !strings.Contains(body, "idempotent downstream migration") {
+		t.Errorf("body %q: expected doctrine text 'idempotent downstream migration'", body)
+	}
+	// delegates:false — continuity tip must NOT appear.
+	if strings.Contains(body, "Continuity tip") {
+		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
+	}
+}

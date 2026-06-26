@@ -48,7 +48,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         return {
             "plugin_version": "0.18.1",
             "mcp_protocol": "2025-03-26",
-            "prompt_bundle": {"content_sha256": "abc123"},
             "tools": {"runtime.info": ">=0.18.1-dev <0.19.0"},
             "commands": {"runtime.info": ">=0.18.1-dev <0.19.0"},
         }
@@ -58,7 +57,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             "version": "0.18.1",
             "source_commit": "dev",
             "mcp_protocol": "2025-03-26",
-            "prompt_bundle": {"content_sha256": "abc123", "prompts": ["delegate-orientation"]},
             "tools": ["runtime.info"],
             "commands": ["runtime.info"],
         }
@@ -99,7 +97,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             "version": lambda payload: payload.update({"version": "0.17.9"}),
             "patch_version": lambda payload: payload.update({"version": "0.18.0"}),
             "protocol": lambda payload: payload.update({"mcp_protocol": "2024-11-05"}),
-            "prompt_bundle": lambda payload: payload.update({"prompt_bundle": {"content_sha256": "wrong"}}),
             "tools": lambda payload: payload.update({"tools": []}),
             "commands": lambda payload: payload.update({"commands": []}),
         }
@@ -120,7 +117,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         contract["runtime_capabilities"] = {"match": "exact"}
 
         payload = self.capability_payload()
-        payload["tools"] = ["runtime.info", "agents.call"]
+        payload["tools"] = ["runtime.info", "ws.mercenary.call"]
         payload["commands"] = ["runtime.info"]
         launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
             [str(got_binary), *args], 0, stdout=json.dumps(payload), stderr=""
@@ -151,7 +148,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
             launcher.tools_compatible = forbidden_fallback
             launcher.commands_compatible = forbidden_fallback
-            launcher.prompt_bundle_compatible = forbidden_fallback
 
             self.assertFalse(launcher.runtime_fully_compatible(binary, contract, temp))
 
@@ -172,7 +168,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.run_binary = forbidden_fanout
             launcher.tools_compatible = forbidden_fanout
             launcher.commands_compatible = forbidden_fanout
-            launcher.prompt_bundle_compatible = forbidden_fanout
 
             self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
 
@@ -196,7 +191,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.run_binary = fake_run_binary
             launcher.tools_compatible = lambda got_binary, contract, runtime_dir: True
             launcher.commands_compatible = lambda got_binary, contract: True
-            launcher.prompt_bundle_compatible = lambda got_binary, contract: True
 
             self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
             self.assertEqual(calls, [("runtime", "capabilities"), ("version",)])
@@ -247,7 +241,38 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             self.assertTrue(got.endswith(".exe"))
             self.assertIn(hashlib.sha256(contract_path.read_bytes()).hexdigest()[:12], got)
 
+    def test_runtime_contract_waits_for_package_materialization(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+            sleeps = []
+
+            def materialize_contract(_interval):
+                sleeps.append(_interval)
+                contract_path.write_text('{"plugin_version":"0.18.1"}\n', encoding="utf-8")
+
+            launcher.time.sleep = materialize_contract
+
+            got = launcher.read_runtime_contract(contract_path)
+
+            self.assertEqual(got["plugin_version"], "0.18.1")
+            self.assertEqual(sleeps, [0.05])
+
+    def test_runtime_contract_missing_after_wait_names_package_materialization(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+
+            with self.assertRaises(SystemExit), mock.patch("sys.stderr") as stderr:
+                launcher.wait_for_runtime_contract(contract_path, timeout_seconds=0.0)
+
+            self.assertIn("plugin package not fully materialized", "".join(call.args[0] for call in stderr.write.call_args_list))
+
     def test_install_replace_failure_reuses_existing_compatible_runtime(self):
+        # Persistent OSError (all retry attempts fail) with a compatible existing
+        # binary: install_tmp_runtime should return False (reuse) without raising.
         launcher = load_launcher()
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -263,12 +288,16 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 raise PermissionError("target is busy")
 
             launcher.os.replace = fake_replace
+            # Disable the sleep so the retry loop runs fast in tests.
+            launcher.time.sleep = lambda _: None
             launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir: got_binary == binary
 
             installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 
             self.assertFalse(installed)
-            self.assertEqual(calls, [(tmp, binary)])
+            # All 5 retry attempts must have been made (_replace_attempts = 5).
+            self.assertEqual(len(calls), 5)
+            self.assertTrue(all(c == (tmp, binary) for c in calls))
 
     def test_bootstrap_or_local_devenv_marker_forces_runtime_install(self):
         launcher = load_launcher()
@@ -282,10 +311,108 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             with mock.patch.object(launcher.Path, "home", return_value=home):
                 self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
                 self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
-                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
+                # Windows now honors a valid local-devenv marker (gate lifted in
+                # 260622-feat-windows-local-devenv-autobuild).
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
 
             with mock.patch.dict(launcher.os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "/tmp/ws-mcp"}, clear=False):
                 self.assertTrue(launcher.runtime_install_forced(Path("/not/local/plugin"), "darwin"))
+
+    def test_install_sh_snapshot_layout_is_recognized_for_local_devenv(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            # install.sh directory-marketplace snapshot layout (the path Claude
+            # actually runs from), NOT the cache/kang-sw-devenv/<pkg>/<ver> layout.
+            plugin_dir = home / ".claude" / "plugins" / "ws-plugin" / "ws"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=home)
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+            # A non-plugin path must not activate local repair.
+            self.assertIsNone(launcher.local_devenv_cache_package(home / "somewhere" / "ws"))
+
+    def test_apply_rsrc_root_env_points_runtime_at_staged_rsrc_tree(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            rsrc_root = plugin_dir / "rsrc"
+            rsrc_root.mkdir()
+
+            # When the rsrc tree is staged and the caller did not set the seam,
+            # the launcher hands the runtime the real <plugin>/rsrc location
+            # (the runtime's own <dir(exe)>/../rsrc derivation would miss it
+            # because the binary lives under <plugin>/.runtime/<platform>/).
+            env = {}
+            launcher.apply_rsrc_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_RSRC_ROOT"], str(rsrc_root))
+
+            # A caller-provided WS_RSRC_ROOT is preserved.
+            env = {"WS_RSRC_ROOT": "/custom/rsrc"}
+            launcher.apply_rsrc_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_RSRC_ROOT"], "/custom/rsrc")
+
+            # No rsrc tree staged: leave resolution to the runtime default.
+            env = {}
+            launcher.apply_rsrc_root_env(plugin_dir / "nope", env)
+            self.assertNotIn("WS_RSRC_ROOT", env)
+
+    def test_local_devenv_build_env_recovers_home_when_absent(self):
+        launcher = load_launcher()
+
+        with mock.patch.object(launcher.Path, "home", return_value=Path("/home/recovered")):
+            with mock.patch.dict(launcher.os.environ, {}, clear=True):
+                env = launcher.local_devenv_build_env("linux")
+                self.assertEqual(env["HOME"], "/home/recovered")
+                # Non-Windows must not inject Windows cache vars.
+                self.assertNotIn("USERPROFILE", env)
+                self.assertNotIn("LOCALAPPDATA", env)
+            with mock.patch.dict(launcher.os.environ, {"HOME": "/home/real"}, clear=True):
+                env = launcher.local_devenv_build_env("linux")
+                self.assertEqual(env["HOME"], "/home/real")
+
+    def test_local_devenv_build_env_recovers_windows_profile_when_absent(self):
+        launcher = load_launcher()
+
+        recovered = Path("/home/winuser")
+        with mock.patch.object(launcher.Path, "home", return_value=recovered):
+            with mock.patch.dict(launcher.os.environ, {}, clear=True):
+                env = launcher.local_devenv_build_env("windows")
+                self.assertEqual(env["USERPROFILE"], str(recovered))
+                self.assertEqual(
+                    env["LOCALAPPDATA"], str(recovered / "AppData" / "Local")
+                )
+            # Existing USERPROFILE/LOCALAPPDATA are preserved untouched.
+            with mock.patch.dict(
+                launcher.os.environ,
+                {"USERPROFILE": "D:\\u", "LOCALAPPDATA": "D:\\u\\local"},
+                clear=True,
+            ):
+                env = launcher.local_devenv_build_env("windows")
+                self.assertEqual(env["USERPROFILE"], "D:\\u")
+                self.assertEqual(env["LOCALAPPDATA"], "D:\\u\\local")
+
+    def test_claude_cache_local_devenv_marker_forces_runtime_install(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            plugin_dir = home / ".claude" / "plugins" / "cache" / "kang-sw-devenv" / "ws" / "0.30.0"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=home)
+
+            with mock.patch.object(launcher.Path, "home", return_value=home):
+                self.assertEqual(launcher.local_devenv_cache_package(plugin_dir), "ws")
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "darwin"))
+                self.assertTrue(launcher.runtime_install_forced(plugin_dir, "darwin"))
+                # Windows now honors a valid local-devenv marker (gate lifted in
+                # 260622-feat-windows-local-devenv-autobuild).
+                self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "windows"))
 
     def test_invalid_local_devenv_contract_falls_back_to_release_path(self):
         launcher = load_launcher()
@@ -378,7 +505,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             (dist / asset).write_text("stale dist", encoding="utf-8")
             build_calls = []
 
-            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract):
+            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract, got_os_name):
                 build_calls.append((got_runtime_dir, got_binary, got_contract, got_local_contract))
                 return True
 
@@ -425,7 +552,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                     raise AssertionError("legacy fixed-name source runtime must not be copied")
                 destination.write_text("copied", encoding="utf-8")
 
-            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract):
+            def fake_build(got_runtime_dir, got_binary, got_contract, got_local_contract, got_os_name):
                 build_calls.append((got_runtime_dir, got_binary, got_contract, got_local_contract))
                 return True
 

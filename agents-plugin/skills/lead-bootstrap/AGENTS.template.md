@@ -7,7 +7,6 @@ Read at every session start, before other action:
 1. **Preamble** - read `ai-docs/_index.md`; keep only context a session must not re-derive.
 2. **Local** - read `ai-docs/_index.local.md` if present; it is .gitignored machine context.
 3. **Project arc** - run `git log --oneline --graph -50`.
-4. **Recent history** - run `git log -10` for `## AI Context` rationale.
 
 ## Response Discipline
 
@@ -150,7 +149,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0019: Replace per-file `ai-docs/*.local.md` ignores with `ai-docs/**/*.local.md`.
 - v0020: Convert ticket `related:` list format to map format across all ticket statuses.
 - v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then run mental-model-updater to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
-- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run `ws:lead-write-spec` to rebuild `features:` frontmatter.
+- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run the lead-write-spec procedure via `ws/playbook.print(name: "lead-write-spec")` to rebuild `features:` frontmatter.
 - v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
 - v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`; planned ticketed features -> `### 🚧 <Feature Name>`.
 - v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.
@@ -159,7 +158,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0028: Reclassify domain-scoped rules from `## Architecture Rules` or `_index.md` into `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
 - v0029: If `ai-docs/tickets/wip/` exists, `git mv` tickets to `todo/`, remove empty `wip/`, add `## Ticket Queue` if absent, then use `ws:lead-discuss` to agree order.
 - v0030: Rename archive dirs to dot-prefix via `git mv`: `tickets/done` -> `.done`, `tickets/dropped` -> `.dropped`, `ai-docs/plans` -> `.plans`; update references.
-- v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; it is superseded by `ws/api.ask` and `ai-docs/.deps/`.
+- v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; local API documentation cache data belongs under `ai-docs/.deps/`.
 - v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
@@ -185,6 +184,8 @@ Adapt structure to the project; this is a starting point, not a schema.
   wording, reorder, or promote ticket status. If any migrated entry still lacks
   clear status or readiness wording, report that a follow-up `lead-write-ticket`
   focus cleanup is needed.
+- v0042: Replace step 4 in `## Project Memory` from `git log -10` to `git log --oneline -20` with description "recent commit stems".
+- v0043: Remove step 4 (`git log --oneline -20`) from `## Project Memory`; it is a redundant subset of step 3 (`git log --oneline --graph -50`). Renumber former step 5 to step 4 when present.
 -->
 
-<!-- Template Version: v0041 -->
+<!-- Template Version: v0043 -->
