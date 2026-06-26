@@ -202,37 +202,41 @@ Target: user request
 ## On: Sage Review Gate
 
 1. If landing status is `idea/`, skip this gate.
-2. Call `{{.McpNamespace}}/config.show()` and extract the `sage_review` value.
-3. If `sage_review` is `off`, empty, or unset, skip this gate.
-4. If `sage_review` is `ask`: ask the user "Run sage review for this ticket?".
+2. Inspect the ticket frontmatter `sage-review:` posture.
+3. If posture is `skipped`, skip this gate.
+4. If posture is `completed`, skip this gate; the ticket already has a completed sage review.
+5. If posture is `blocked`, stop and report that the blocked sage review must be addressed before promotion.
+6. If posture is `recommended`, ask the user "Run sage review for this ticket?".
    - If user declines: add `sage-review: skipped` to ticket frontmatter, commit with
      `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "chore(sage): skip sage review", ai_context: ["user declined sage review in ask mode"])`,
      then skip the rest of this gate.
-5. Spawn both reviewers in parallel:
+7. If posture is `required`, run sage review without asking.
+8. If posture is missing or `pending`, treat it as legacy unresolved state: call `{{.McpNamespace}}/config.show()`, resolve `sage_review` as `skipped` for `off`/empty/unset, `recommended` for `ask`, or `required` for `auto`, write that posture to ticket frontmatter, then continue from the matching posture rule above.
+9. Spawn both reviewers in parallel:
    a. Render `ticket-reviewer-design`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")`;
       spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
       Capture design verdict result.
    b. Render `ticket-reviewer-completeness`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-completeness")`;
       spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
       Capture completeness verdict result.
-6. Parse `verdict:` from each result. Each reviewer result text contains a `verdict:` line
+10. Parse `verdict:` from each result. Each reviewer result text contains a `verdict:` line
    whose value is one of `pass`, `concern`, or `block` (exhaustive set).
-7. Apply aggregation:
+11. Apply aggregation:
    - Design `block` → final verdict is `block` regardless of completeness.
    - Design not-block and completeness `block` → final verdict is `block`.
    - Design `concern` and completeness `pass|concern` → default to `pass`; if ANY issue in
      either reviewer result has `resolution: missing`, elevate to `concern`. On `concern`,
-     proceed to step 9 (do not block by default); lead may escalate to `block` if the missing
+     proceed to the pass-resolution step (do not block by default); lead may escalate to `block` if the missing
      decision is judged critical.
    - All `pass` → final verdict is `pass`.
-8. If final verdict is `block`:
+12. If final verdict is `block`:
    a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the ticket body using the
       **Blocked Section Template**. If a `## Blocked` section already exists from a prior sage
       review cycle, replace it.
    b. Edit the ticket file directly to add or update `sage-review: blocked` in the frontmatter
       block; do not use a dedicated tool call.
    c. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on sage review", ai_context: ["sage review blocked: design and/or completeness issues"])`.
-9. If final verdict is `pass` or `concern` resolved to pass:
+13. If final verdict is `pass` or `concern` resolved to pass:
    a. Edit the ticket file directly to add or update `sage-review: completed` in the frontmatter
       block; do not use a dedicated tool call.
    b. Commit with `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark sage review completed", ai_context: ["sage review passed"])`.

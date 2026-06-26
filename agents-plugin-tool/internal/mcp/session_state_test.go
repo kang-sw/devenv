@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
 // keysOf extracts the ordered key sequence of a todo list for assertions.
@@ -438,6 +440,46 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		"need_review":  true,
 	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
 		t.Fatalf("invalid review_alloc error expected, got: %s", got)
+	}
+}
+
+func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+	if err := resolver.Set(wsconfig.ItemSageReview, "ask", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set sage_review: %v", err)
+	}
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902600, root, nil))
+
+	resp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-create",
+		"initial_state": "todo",
+	})
+	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "recommended") {
+		t.Fatalf("tickets.create response missing created path or posture: %s", resp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create.md"))
+	if err != nil {
+		t.Fatalf("glob created ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("created ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read created ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review: recommended") {
+		t.Fatalf("created ticket missing recommended posture:\n%s", body)
 	}
 }
 

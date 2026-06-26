@@ -1384,6 +1384,17 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	if !strings.Contains(body, "recoverability of intent") {
 		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
 	}
+	for _, want := range []string{
+		"If posture is `recommended`, ask the user",
+		"If posture is `required`, run sage review without asking",
+		"add `sage-review: skipped`",
+		"add or update `sage-review: completed`",
+		"add or update `sage-review: blocked`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing sage review gate language %q:\n%s", want, body)
+		}
+	}
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
@@ -1668,8 +1679,8 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	cases := []struct {
-		skill     string
-		wantAll   []string
+		skill   string
+		wantAll []string
 	}{
 		{
 			skill:   "lead-implement",
