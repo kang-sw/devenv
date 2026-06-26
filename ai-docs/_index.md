@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.30.10`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.10`).
+Active plugin package: `agents-plugin/` (`ws@0.30.11`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.11`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -384,76 +384,35 @@ dropped tickets live in hidden archive dirs and git history.
   (ws+wsflow), repointed the 4 skills that actually carried a manual self-load line
   — proceed/discuss/sprint/salvage, NOT the ticket's stated 6: lead-tune /
   lead-skill-authoring have no self-load line; plus `ws.workflow_manual` hardening:
-  required key, lead-only gate, sentinel-gated fresh, fail-loud minimal). All on
-  branch `implement/260625-forge-migration-audit-fix`, whole ticket unmerged
-  (nothing on main). Follow-up: idea
+  required key, lead-only gate, sentinel-gated fresh, fail-loud minimal).
+  Integrated to `feature/ferrule` by dev-merge `47aebbf9`; version bumped to
+  `ws@0.30.11` / `wsflow@0.30.11` on the same merge path. Follow-up: idea
   `260626-research-playbook-print-lead-surface-leak` (playbook.print bypasses the
-  workflow_manual gate). Version bump deferred to dev-merge.
+  workflow_manual gate).
 
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
 assignment remains deferred.
 
-### Resume: 260625 Phase 2 forge migration (260626 session, branch `feature/ferrule`)
+### Closeout: 260625 Phase 2 forge migration (260626)
 
 Dogfooding the ws session-state machine. Lead session key
-`thong-surfboard-container-easiness-26`. Todo: route/prep/capture-dogfood/edit
-done; **review = audit complete with unresolved findings**; doc-pre-pass,
-doc-commit-gate, doc-closeout, final-action-gate, merge still pending.
+`thong-surfboard-container-easiness-26`. The unresolved forge audit from WIP
+`14244ca6` was closed by `72503fd1`; commit-message heading normalization
+followed in `41b2163e`, and `2a4aaba7` recorded Phase 2 completion. Dev-merge
+`47aebbf9` integrated `implement/260625-forge-migration-audit-fix` into
+`feature/ferrule`, and the merge path bumped `ws`/`wsflow` to `0.30.11`.
 
-WIP commit `14244ca6` carries the forge migration (host task-list ->
-`{{.McpNamespace}}/todo.*` in lead-forge-spec + lead-forge-mental-model; new
-`## Session State Layers` in delegate-orientation). Dual tree regenerated, wsrsrc
-guards green. **Not review-clean — fix before doc steps / final / merge:**
-
-- **HIGH — `<lead key>` undefined inline.** Both forge files use
-  `session_key: <lead key>` in every `todo.*` call but never define it. Fix: add
-  the standard entry preamble the other lead-* playbooks use
-  (`workflow_manual(session_key: <your lead key>)` + obsidian-latch bootstrap +
-  lead-revive-after-compaction) and align the placeholder to `<your lead key>`.
-- **HIGH — status vocab mismatch.** Per-domain skip predicate still reads
-  `skipping tasks with status completed` while writes use `done` / marker `- [x]`
-  — resume would re-process finished domains. Unify to `done`/`- [x]`
-  (lead-forge-spec line ~113, lead-forge-mental-model line ~104; plus On:invoke
-  scan lines and step 7.3 wording).
-- **MED — `sources` line inaccurate** (lead-forge-mental-model: `sources`
-  "directory patterns from the todo item title") — should name the
-  `Source paths:` segment of the title; align with the "paths from the todo item
-  title" wording used elsewhere.
-- **MED — title-as-state not resume-safe.** spec-availability is recorded in
-  cold-start step 1 but resume skips cold-start; read it from the title's
-  `spec available:` segment instead. Also spell the title schema out once and
-  reference "the `Source paths:` segment" everywhere (extraction is implicit).
-- **MED — forge-spec "all matching done" resume dead-end** (On:invoke has no
-  exit when every domain is already done) — add "if all done -> On: wrap-up".
-- Low/nits: duplicated loop-control, `lead-write-spec` orphaned refs,
-  `spec-conventions.md` vs `convention.read` style. Defer or fold opportunistically.
-
-Downstream sweep (per audit teammate): bare-`ws/` clean in both forge files;
-wsflow mirror byte-identical. Fixes still need a re-regen
-(`WS_REGEN_MANIFEST` then `WS_REGEN_WSFLOW_RSRC`, `-count=1`) + re-audit before merge.
-
-Also pending in Phase 2 closeout: correct the "lead-sprint marker-resume
-rewrite" misstatement above (Phase 2 was additive, not a rewrite).
-
-Dogfood findings this session (all idea tickets under epic
-`260605-epic-ws-playbook-factory-pivot`): fork executor-narration bug
-`260626-bug-prefer-subagent-fork-executor-narration` — **natural
-direct-edit framing flips opus fork to execution; override-theatre backfires**
-(forge-edit fork succeeded live); hypothesis now instruction-hierarchy, needs
-sonnet-LEAD validation + clean opus repeat. Gap B
-(`260626-bug-ws-todo-enter-derive-surface-gaps`) bit again: `todo.list` hides
-keys, had to guess the `edit` slug to `todo.check`.
-
-### Closeout: 260625 Phase 2 forge migration audit-fix slice (260626)
-
-Branch `implement/260625-forge-migration-audit-fix` supersedes the unresolved
-review note above: `72503fd1` closes the forge playbook audit gaps, and the
-review set `f37c4743-*` is clean after commit-message heading normalization.
-Phase 2 is fully complete on this branch, not merely the audit-fix slice; the
-ticket remains unmerged and should not be moved to done until the branch is
-integrated through the normal gate. `python3 -m unittest discover
-agents-plugin-wsflow/tests` still fails only on pre-existing `lead-revive`
-inventory drift, captured as
+Phase 2 is fully complete on `feature/ferrule`: enter-call integration,
+forge/delegate migration, audit fixes, wsrsrc manifest regeneration, wsflow
+mirror regeneration, and the additive `lead-sprint` closeout are all recorded.
+The ticket remains open until the larger branch is integrated to its final
+target. `python3 -m unittest discover agents-plugin-wsflow/tests` still fails
+only on pre-existing `lead-revive` inventory drift, captured as
 `260626-bug-wsflow-lead-revive-skill-inventory-drift`.
+
+Dogfood findings from this session remain as idea tickets under epic
+`260605-epic-ws-playbook-factory-pivot`: fork executor-narration bug
+`260626-bug-prefer-subagent-fork-executor-narration`; todo key/list surface gap
+`260626-bug-ws-todo-enter-derive-surface-gaps`.
