@@ -4,7 +4,7 @@ kind: print
 
 # Workflow Tuning
 
-Topic: tune how the ws workflow runs to the user's stated preference.
+Topic: tune how the {{.SkillNamespace}} workflow runs to the user's stated preference.
 
 ## Invariants
 
@@ -20,6 +20,7 @@ Surface
 
 Storage
 - For prompt overrides, prefer the catalog's cross-harness selector unless the user names one harness.
+- For global-only workflow preferences, use the writer's lead `session_key` only as authority.
 - Confirm storage scope before any project or global write.
 
 ## On: invoke
@@ -40,17 +41,24 @@ Storage
 6. Report the stored knob/harness/scope; note it applies at the next playbook render, not retroactively.
 
 Examples:
-- Delegate less: map to `prompt.DelegationSection`, draft posture text, confirm the Tuning Proposal, write through the catalog writer, then report the knob and scope changed.
 - Standing communication preferences: map to `prompt.UserPreferenceSection`, draft preference text, confirm the Tuning Proposal, write through the catalog writer, then report the knob and scope changed.
+
+## On: tune subagent posture
+
+1. Map the request to the `"workflow.prefer_subagent"` catalog knob.
+2. Choose the new state from the catalog value field.
+3. Confirm the Tuning Proposal with the selected value.
+4. Call `config.workflow_prefer_subagent` with `session_key` and the selected value.
+5. Report the global state and that it applies to the next workflow-manual load.
 
 <!-- ws:full-only:start -->
 ## On: tune delegation mode
 
-1. Map the request to the `delegation.prefer_mercenary` catalog knob.
+1. Map the request to the `"workflow.prefer_mercenary"` catalog knob.
 2. Choose the new state from the catalog value field.
 3. Confirm the Tuning Proposal with the selected value.
-4. Call the catalog writer tool with `session_key` and the selected value.
-5. Report the new state and that it is session-scoped.
+4. Call `config.workflow_prefer_mercenary` with `session_key` and the selected value.
+5. Report the global state and that it controls both mercenary visibility and default render guidance.
 
 ## On: tune model tier
 
@@ -72,9 +80,9 @@ Examples:
 ### judge: tune-target
 - User standing preferences, communication style, language, terminology, or wording conventions -> prompt override (`UserPreferenceSection`).
 - Prompt wording or a named manual section -> prompt override for that named override point.
-- "delegate more/less" or delegation posture -> prompt override (`DelegationSection`).
+- "delegate more/less" or strict subagent posture -> workflow preference (`"workflow.prefer_subagent"`).
 <!-- ws:full-only:start -->
-- A preference for mercenary delegation mode, including persistent agents where supported -> delegation mode (`delegation.prefer_mercenary`).
+- A preference for mercenary delegation mode, including persistent agents where supported -> workflow preference (`"workflow.prefer_mercenary"`).
 - A model, tier, or "cheaper/stronger model" preference -> model tier (`agents.tier`).
 <!-- ws:full-only:end -->
 - Anything else -> unsupported axis.

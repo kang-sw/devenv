@@ -348,6 +348,27 @@ func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 	}
 }
 
+func TestPreferMercenaryRemovedLeadToolUnknownAndOmittedFromLeadToolNames(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_MCP_NO_AGENT", "")
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+
+	server := NewServer(root, "test")
+	resp := callToolOnce(t, server, 1, "ws.lead.prefer_mercenary", map[string]any{})
+	if !strings.Contains(resp, `"error"`) || !strings.Contains(resp, "unknown tool") {
+		t.Fatalf("removed ws.lead.prefer_mercenary explicit call must be unknown: %s", resp)
+	}
+	for _, name := range LeadToolNames() {
+		if name == "ws.lead.prefer_mercenary" {
+			t.Fatalf("removed ws.lead.prefer_mercenary must not appear in LeadToolNames: %v", LeadToolNames())
+		}
+	}
+}
+
 // TestWorkflowPreferenceWritersRequireLeadSessionKey verifies that global
 // workflow preference writers still require lead authority even though they
 // write global config.

@@ -241,10 +241,12 @@ Canonical render+spawn idiom for every bundled delegate (`reference-discovery`,
 spawn — there is no session continuation between calls; the lead owns loop
 continuity via commit `## AI Context`. Native is the default.
 <!-- ws:full-only:start -->
-Mercenary is available on user request or under `ws.lead.prefer_mercenary`;
-it provides host-neutral stateful continuation when the same mercenary name is
-reused across relay calls (replace step 1 Native with the Mercenary path below,
-reusing the registered name from the initial implementer dispatch).
+Mercenary is controlled by `"workflow.prefer_mercenary"`: `hide` suppresses the
+public surface, `off` exposes on-request use, and `on` makes mercenary the
+primary implementer/reviewer guidance. When exposed, it provides host-neutral
+stateful continuation by reusing the same mercenary name across relay calls
+(replace step 1 Native with the Mercenary path below, reusing the registered
+name from the initial implementer dispatch).
 <!-- ws:full-only:end -->
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.

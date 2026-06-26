@@ -627,6 +627,84 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	}
 }
 
+func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook lead-tune: %v", err)
+	}
+	for _, want := range []string{
+		`ws/config.tuning(session_key: <lead key>)`,
+		`"workflow.prefer_subagent"`,
+		"config.workflow_prefer_subagent",
+		`"workflow.prefer_mercenary"`,
+		"config.workflow_prefer_mercenary",
+		"prompt.UserPreferenceSection",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lead-tune render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"prompt.DelegationSection",
+		"DelegationSection",
+		"delegation.prefer_mercenary",
+		"ws.lead.prefer_mercenary",
+		"session-scoped",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-tune render contains stale guidance %q:\n%s", forbidden, body)
+		}
+	}
+}
+
+func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
+	}
+	for _, want := range []string{
+		`wsflow/config.tuning(session_key: <lead key>)`,
+		"wsflow workflow",
+		`"workflow.prefer_subagent"`,
+		"config.workflow_prefer_subagent",
+		"prompt.UserPreferenceSection",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow lead-tune render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		`"workflow.prefer_mercenary"`,
+		"config.workflow_prefer_mercenary",
+		"delegation.prefer_mercenary",
+		"agents.tier",
+		"config.agents_tier",
+		"ws.mercenary.",
+		"Full ws",
+		"full ws",
+		"ws:override:",
+		"ws:/override:",
+		"{{.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow lead-tune render contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+		t.Fatalf("wsflow lead-tune render contains bare ws namespace notation:\n%s", body)
+	}
+}
+
 func TestProductModeBlockSelection(t *testing.T) {
 	t.Setenv(envNamespace, "wsflow")
 	input := strings.Join([]string{
