@@ -658,9 +658,9 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	if !strings.Contains(resp, "Session State") {
 		t.Errorf("continue mode: Session State section absent:\n%s", resp)
 	}
-	// Agenda content present (the implement blob).
-	if !strings.Contains(resp, "implement") {
-		t.Errorf("continue mode: agenda key 'implement' absent:\n%s", resp)
+	// Agenda content present: renderSessionState emits "### agenda: <key>" headings.
+	if !strings.Contains(resp, "### agenda: implement") {
+		t.Errorf("continue mode: agenda heading '### agenda: implement' absent:\n%s", resp)
 	}
 	// Todo summary content present (Route and Prep are active).
 	if !strings.Contains(resp, "Route") {
@@ -688,17 +688,12 @@ func TestWorkflowManualUnknownKey(t *testing.T) {
 	if !strings.Contains(resp, "no restorable state for session key") {
 		t.Errorf("unknown key: no-restorable-state notice absent:\n%s", resp)
 	}
-	// Must NOT have minted a key file (check the keys dir).
+	// Must NOT have minted a key file. Use os.Stat on the specific record path so
+	// the check is meaningful even when the keys/ directory was never created.
 	keysDir := filepath.Join(cacheDir, "keys")
-	entries, err := filepath.Glob(filepath.Join(keysDir, "*.json"))
-	if err != nil {
-		t.Fatalf("glob keys dir: %v", err)
-	}
-	// No file should exist for the unknown key.
-	for _, entry := range entries {
-		if strings.Contains(entry, badKey) {
-			t.Errorf("unknown key: key file was minted: %s", entry)
-		}
+	_, statErr := os.Stat(filepath.Join(keysDir, badKey+".json"))
+	if !os.IsNotExist(statErr) {
+		t.Errorf("unknown key: key file was minted (stat: %v)", statErr)
 	}
 }
 

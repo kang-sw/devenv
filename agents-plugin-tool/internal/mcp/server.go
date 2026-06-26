@@ -710,7 +710,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// (text mode only). resolveToolRoot already required session_key, so it is
 		// available in params.Arguments.
 		commitText := formatGitCommit(result)
-		if commitKey := strings.TrimSpace(func() string { k, _ := params.Arguments["session_key"].(string); return k }()); commitKey != "" {
+		commitKey, _ := params.Arguments["session_key"].(string)
+		commitKey = strings.TrimSpace(commitKey)
+		if commitKey != "" {
 			if rec, ok := s.sessions.readState(commitKey); ok && len(rec.Todos) > 0 {
 				commitText += "\n## Todo (post-commit)\n" + renderTodos(rec.Todos, false) + "\n"
 			}

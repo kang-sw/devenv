@@ -127,14 +127,14 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	}
 
 	// Branch on session_key and record resolution.
+	rec, recOK := s.sessions.readState(key)
 	switch {
 	case key == "":
 		// FRESH: keep the gated bootstrap line; strip only the marker comment lines.
 		body = stripModeGatedRegion(body, true)
 
-	case func() bool { _, ok := s.sessions.readState(key); return ok }():
+	case recOK:
 		// CONTINUE: strip both markers and inner content; append Session State.
-		rec, _ := s.sessions.readState(key)
 		body = stripModeGatedRegion(body, false)
 		body += "\n\n" + renderSessionState(rec)
 
