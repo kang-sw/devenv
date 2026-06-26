@@ -425,6 +425,28 @@ Landed `ws.workflow_manual(session_key?)` and the `git.commit` todo re-injection
 > `lead-load-workflow-manual`, repoint the six manual-self-load skills to
 > `ws.workflow_manual`) depends on this tool.
 
+#### Edition (ea8c686b) - 2026-06-26
+
+Phase 3b hardened the `ws.workflow_manual` contract beyond this Result's design,
+to close a subagent escalation leak (a non-lead reaching the fresh/fail-loud
+render learns the `ws.ferrule` self-bootstrap call; `ws.ferrule` keyless mints a
+lead key):
+
+- `session_key` is now **required** (was optional `?`). Keyless calls hard-error
+  without naming the sentinel or `ws.ferrule`.
+- Fresh mode is triggered ONLY by a reserved non-descriptive sentinel
+  (`freshBootstrapKey`), taught only in lead skill prose — not by an omitted key.
+- The tool is **lead-only** (`isLeadOnlyTool`): a delegate/leaf-scoped key is
+  rejected at the keyed capability gate before the handler runs.
+- **fail-loud** now renders **no manual body** (supersedes "render primitives plus
+  notice"): only a minimal no-restore notice pointing to `lead-revive`. The
+  always-shown per-root rule names `ws.ferrule`, and an unregistered key bypasses
+  the gate via lookup-miss, so rendering it would leak to a non-lead caller.
+
+Residual (deferred): `playbook.print` of `lead-workflow-manual`/repointed skills is
+not role-gated and re-exposes the gated content + sentinel by stem (obscurity-only
+defense). Tracked in idea `260626-research-playbook-print-lead-surface-leak`.
+
 ### Phase 3b: Manual-entry skill restructure
 
 Depends on Phase 3a (the `ws.workflow_manual` tool must exist before skills call
@@ -442,3 +464,41 @@ it).
 Verify via: per-skill check that the manual self-load and revival call
 `ws.workflow_manual` with the correct `session_key` argument; confirm
 `lead-load-workflow-manual` is gone and `lead-revive` renders; drift guards green.
+
+### Result (ea8c686b) - 2026-06-26
+
+Landed the skill restructure plus the `ws.workflow_manual` security hardening (see
+the Phase 3a `#### Edition (ea8c686b)` note for the tool-contract changes).
+
+- Removed `agents-plugin/skills/lead-load-workflow-manual/` (skills-only launcher,
+  no rsrc/manifest entry; absent from wsflow already).
+- Added `lead-revive` as a skills-only inline launcher in BOTH trees
+  (`agents-plugin/skills/` with `ws/` literal, `agents-plugin-wsflow/skills/` with
+  `wsflow/` literal): recover the `session_key` from the compaction summary, call
+  `{{ns}}/workflow_manual(session_key: <it>)`; sentinel fallback for a genuine
+  fresh start. Added to wsflow too because the repointed wsflow rsrc bodies
+  reference it.
+- Repointed the manual self-load line in **4** skills — `lead-proceed`,
+  `lead-discuss`, `lead-sprint`, `lead-salvage` — to a unified instruction
+  (`{{.McpNamespace}}/workflow_manual` + `{{.SkillNamespace}}:lead-revive` recovery
+  + sentinel fresh-start hint). **Deviation from plan (6 → 4):** source inspection
+  showed `lead-tune` and `lead-skill-authoring` carry NO manual self-load line —
+  they only reference the surviving `lead-workflow-manual` playbook in prose (a
+  Doctrine contrast / exploration-worker dispatch), so there was nothing to repoint
+  and they were left untouched.
+- `ws.workflow_manual` hardening (commits `0ef7ce08` gate/handler/schema/tests,
+  `ea8c686b` fail-loud minimal + test strengthening): required key, sentinel-gated
+  fresh, lead-only via `isLeadOnlyTool`, fail-loud renders no manual body.
+- Regenerated both `manifest.json` files; drift guards green. Tests:
+  `TestWorkflowManual{FreshMode,KeylessRejected,DelegateKeyBlocked,UnknownKey}`,
+  `TestPhase3bSkillRepoint`; full `internal/mcp`+`internal/wsrsrc` green except the
+  3 pre-existing unrelated failures (`TestShippedDelegationSectionSeedAndOverride`,
+  `TestShippedUserPreferenceSectionEmptySlotAndOverride`, `TestConfigPromptSetEndToEnd`,
+  confirmed failing identically at parent `ae39f114`).
+- Partitioned review (correctness/fit/test): all clean; fit clean, correctness +
+  test each clean-with-2-minor. The correctness minor (fail-loud ferrule residual)
+  was promoted by the lead to a real fix (`ea8c686b`); the test minors folded in.
+
+> Forward: `playbook.print` of lead skill/manual bodies is not role-gated and
+> bypasses the workflow_manual gate (obscurity-only defense). Tracked in idea
+> `260626-research-playbook-print-lead-surface-leak`.

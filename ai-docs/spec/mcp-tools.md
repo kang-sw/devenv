@@ -250,29 +250,44 @@ does not auto-mark todos; status transitions are always explicit via
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
-`ws.workflow_manual(session_key?)` is the canonical workflow-manual entry tool. It
+`ws.workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
+valid `session_key` is **required**, and the tool is **lead-only**
+(`isLeadOnlyTool`): a `session_key` resolving to a delegate/leaf scope is rejected
+at the keyed capability gate before the handler runs (mirroring `ws.ferrule`). It
 renders the `lead-workflow-manual` playbook through the same variable substitution
 as `playbook.print` — the rsrc playbook stays the single prompt source of truth —
-and branches on `session_key` to surface mode-dependent restoration content:
+and branches on `session_key`:
 
-- **fresh** (`session_key` omitted or empty): the primitives reference plus the
-  always-shown per-root rule (call `ws.ferrule` once per working root and thread its
-  key) and the self-bootstrap line ("you have no key yet; mint one with
-  `ws.ferrule`").
-- **continue** (`session_key` present and its record resolves): the primitives plus
-  the per-root rule, with the self-bootstrap line omitted, followed by a restored
-  **Session State** section — agenda blobs as a remind list and the todo list in
-  summary mode, rendered server-side from the session record.
-- **fail-loud** (`session_key` present but no record resolves): the primitives plus
-  an explicit "no restorable state for this key" notice. The tool never mints a key
-  in this mode — a missing record is surfaced, not silently re-bootstrapped.
+- **fresh** (`session_key` equals the reserved fresh-bootstrap sentinel — a
+  deliberately non-descriptive token taught only in lead skill prose such as
+  `lead-revive`): the primitives reference plus the always-shown per-root rule
+  (call `ws.ferrule` once per working root and thread its key) and the
+  self-bootstrap line ("you have no key yet; mint one with `ws.ferrule`").
+- **continue** (`session_key` present and its record resolves to a lead scope): the
+  primitives plus the per-root rule, with the self-bootstrap line omitted, followed
+  by a restored **Session State** section — agenda blobs as a remind list and the
+  todo list in summary mode, rendered server-side from the session record.
+- **keyless** (`session_key` omitted or empty): a hard error requiring a valid
+  `session_key`. The error names neither the sentinel nor `ws.ferrule`, so a
+  keyless caller gets no bootstrap hint.
+- **fail-loud** (`session_key` present, non-sentinel, but no record resolves): a
+  minimal "no restorable state for this key" notice pointing to the `lead-revive`
+  skill for recovery. **No manual body is rendered** — the always-shown per-root
+  rule names `ws.ferrule`, and any unregistered key bypasses the lead-only gate via
+  lookup-miss, so rendering it would leak the lead self-bootstrap call to a non-lead
+  caller. The tool never mints a key in this mode.
 
 The fresh-only self-bootstrap line is delimited in the rsrc by a dedicated
 mode-gating marker that only this tool's handler consumes; it is independent of the
 prompt override-marker engine and the product-mode markers. The handler owns mode
 branching and the Session State scaffolding only; all manual prose lives in the
-rsrc. The pre-existing `playbook.print(name: "lead-workflow-manual")` path stays
-valid as the ungated fresh form for backward compatibility.
+rsrc.
+
+> Known residual: `playbook.print(name: "lead-workflow-manual")` — and printing the
+> repointed lead skills — is not role-gated and re-exposes the gated bootstrap line
+> and the fresh-bootstrap sentinel to any caller that knows the stem; the defense
+> there is obscurity. Tracked in idea ticket
+> `260626-research-playbook-print-lead-surface-leak`.
 
 ## Config Tools {#260505-config-tools}
 

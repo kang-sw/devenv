@@ -264,8 +264,12 @@ agent passes its surviving session key and receives the reloaded primitives plus
 restored agenda/todo Session State. Because `ws.ferrule` is non-idempotent (a second
 call on the same root mints a new key and orphans the prior record), restoration
 relies on threading the original key rather than re-minting; `ws.workflow_manual`
-never mints a key, so a stale or missing key fails loud instead of silently starting
-a fresh session.
+never mints a key, so a stale or missing key fails loud (a minimal no-restore
+notice, no manual body) instead of silently starting a fresh session. The tool is
+lead-only — a delegate/leaf-scoped key is rejected at the capability gate — and a
+valid key is required, with a reserved sentinel (taught only in lead skill prose)
+gating the fresh-bootstrap render. After compaction the `lead-revive` skill recovers
+the surviving key from the summary and threads it into `ws.workflow_manual`.
 
 ## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 

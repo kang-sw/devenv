@@ -381,13 +381,18 @@ dropped tickets live in hidden archive dirs and git history.
   `ws.workflow_manual` three-mode restoration entry + `git.commit` todo
   re-injection; spec/mental-model closeout in `633c42ff`/`2a086e30`). **Phase 2
   enter-call slice done** (`83d82077`: `ws.enter.*` wired into
-  lead-implement/proceed/sprint/salvage + salvage `agenda.set`). All on branch
-  `implement/260625-ws-session-state-machine-p1`, whole ticket unmerged (nothing on
-  main). **Remaining: Phase 2** forge-spec / forge-mental-model host-task→`ws.todo`
-  migration, `delegate-orientation.md` update, lead-sprint marker-resume rewrite;
-  **Phase 3b** skill restructure (add `lead-revive`, remove
-  `lead-load-workflow-manual`, repoint 6 manual-self-load skills). Version bump
-  deferred to dev-merge.
+  lead-implement/proceed/sprint/salvage + salvage `agenda.set`). **Phase 3b done**
+  (`1860534f`+`ea8c686b`: removed `lead-load-workflow-manual`, added `lead-revive`
+  (ws+wsflow), repointed the 4 skills that actually carried a manual self-load line
+  — proceed/discuss/sprint/salvage, NOT the ticket's stated 6: lead-tune /
+  lead-skill-authoring have no self-load line; plus `ws.workflow_manual` hardening:
+  required key, lead-only gate, sentinel-gated fresh, fail-loud minimal). All on
+  branch `implement/260625-ws-session-state-machine`, whole ticket unmerged (nothing
+  on main). **Remaining: Phase 2** forge-spec / forge-mental-model
+  host-task→`ws.todo` migration, `delegate-orientation.md` update, lead-sprint
+  marker-resume rewrite. Follow-up: idea
+  `260626-research-playbook-print-lead-surface-leak` (playbook.print bypasses the
+  workflow_manual gate). Version bump deferred to dev-merge.
 
 ## Session Notes
 
