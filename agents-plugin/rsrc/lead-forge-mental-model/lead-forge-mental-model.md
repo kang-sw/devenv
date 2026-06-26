@@ -13,15 +13,15 @@ Target: user request
 - All survey and verifier queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; require cited evidence, gaps, and follow-up needs.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
-- Domain task labels use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Keep labels stable for resume scanning.
+- Domain todo items use the key and title prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`); keep the prefix stable for resume scanning and derive the key from the domain name for status mutation.
 - All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
 
-1. Inspect the current visible task list, if present, for labels beginning with `forge-mental-model-`.
-2. If matching tasks exist -> skip to **On: per-domain** with the first task whose status is not `completed`.
-3. If no matching tasks exist -> proceed to **On: cold-start**.
+1. Call `{{.McpNamespace}}/todo.list(session_key: <lead key>, mode: "full")` and scan rendered item titles for the `forge-mental-model-` prefix.
+2. If matching todo items exist -> skip to **On: per-domain** with the first whose status marker is not done (`- [x]`).
+3. If no matching todo items exist -> proceed to **On: cold-start**.
 
 ## On: cold-start
 
@@ -88,12 +88,12 @@ Present the candidate domains to the user in a numbered list. Tell the user they
 
 Wait for user response. Apply any adjustments. Do not proceed until the user explicitly confirms the final list.
 
-### 5. Lock the task list
+### 5. Lock the todo list
 
-Create or refresh the visible Markdown task list with one entry per confirmed domain, in confirmed order:
+Call `{{.McpNamespace}}/todo.clear(session_key: <lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order:
 
-```markdown
-- [ ] forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>
+```text
+{{.McpNamespace}}/todo.append(session_key: <lead key>, key: "forge-mental-model-<domain>", title: "forge-mental-model-<domain> - Source paths: <paths>; spec available: <yes | no>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
@@ -104,7 +104,7 @@ For each domain task in order, skipping tasks with status `completed`:
 
 ### 1. Mark in-progress
 
-Update the visible task list entry for this domain to in-progress.
+Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-mental-model-<domain>", status: "wip")`.
 
 ### 2. Domain survey
 
@@ -112,7 +112,7 @@ Spawn a host-native broad-scope exploration worker with the task prompt below; c
 
 ```text
 Analyze domain: <domain>
-Source paths: <paths from task description>
+Source paths: <paths from the todo item title>
 
 Analyze this domain for a developer who needs to modify it.
 Focus on what would cause wrong outcomes if unknown:
@@ -130,7 +130,7 @@ Be concrete: cite paths, functions, and types. Do not list fields or paraphrase 
 
 1. Call `{{.McpNamespace}}/convention.read(name: "mental-model-conventions")`. Read the output; apply the inclusion test to every claim before writing it.
 2. Draft the domain file content for `ai-docs/mental-model/<domain>.md` following the document format in `mental-model-conventions.md`.
-3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from task description), `related` (other domains with coupling to this one).
+3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from the todo item title), `related` (other domains with coupling to this one).
 
 ### 4. Embed spec stems (conditional)
 
@@ -151,7 +151,7 @@ Verify the following mental-model domain document against the codebase.
 Domain file draft:
 <full draft content>
 
-Source paths to check: <paths from task description>
+Source paths to check: <paths from the todo item title>
 
 For each claim, assign a severity:
 - [HIGH] Factually wrong - misnames a function, inverts a dependency, states a constraint that is not enforced.
@@ -174,9 +174,9 @@ Write the verified draft to `ai-docs/mental-model/<domain>.md`. Commit with `(me
 
 ### 7. Complete domain
 
-1. Mark the domain task complete in the visible task list.
-2. If more domain tasks remain, continue with the next incomplete task.
-3. When all domain tasks are `completed`, proceed to **On: wrap-up**.
+1. Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-mental-model-<domain>", status: "done")`.
+2. If more domain todo items remain, continue with the next incomplete one.
+3. When every `forge-mental-model-` todo item is done, proceed to **On: wrap-up**.
 
 ## On: wrap-up
 

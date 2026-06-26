@@ -15,14 +15,14 @@ Target: user request
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `{{.McpNamespace}}/spec_index.verify()` after every spec file write or update.
-- Domain task labels use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
+- Domain todo items use the key and title prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`); the key is derivable from the domain name for status mutation.
 - All survey exploration workers for a phase are spawned in a single response turn when the host can issue parallel spawns; collect all results before synthesizing.
 
 ## On: invoke
 
-1. Inspect the current visible task list, if present, for labels beginning with `forge-spec-`.
-2. If matching tasks exist -> skip to **On: per-domain** with the first task whose status is not `completed`.
-3. If no matching tasks exist -> proceed to **On: cold-start**.
+1. Call `{{.McpNamespace}}/todo.list(session_key: <lead key>, mode: "full")` and scan rendered item titles for the `forge-spec-` prefix.
+2. If matching todo items exist -> skip to **On: per-domain** with the first whose status marker is not done (`- [x]`).
+3. If no matching todo items exist -> proceed to **On: cold-start**.
 
 ## On: cold-start
 
@@ -97,12 +97,12 @@ Present the candidate domains to the user in a numbered list. Tell the user they
 
 Wait for user response. Apply any adjustments. Do not proceed until the user explicitly confirms the final list.
 
-### 5. Lock the task list
+### 5. Lock the todo list
 
-Create or refresh the visible Markdown task list with one entry per confirmed domain, in confirmed order:
+Call `{{.McpNamespace}}/todo.clear(session_key: <lead key>)`, then one `{{.McpNamespace}}/todo.append` per confirmed domain, in confirmed order:
 
-```markdown
-- [ ] forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>
+```text
+{{.McpNamespace}}/todo.append(session_key: <lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <paths>; old spec files: <paths or none>")
 ```
 
 Proceed immediately to **On: per-domain** with the first domain.
@@ -113,7 +113,7 @@ For each domain task in order, skipping tasks with status `completed`:
 
 ### 1. Mark in-progress
 
-Update the visible task list entry for this domain to in-progress.
+Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-spec-<domain>", status: "wip")`.
 
 ### 2. Parallel domain survey
 
@@ -123,7 +123,7 @@ Query 1 — domain source code:
 
 ```text
 Survey source code for the <domain> domain.
-Module paths: <paths from task description>
+Module paths: <paths from the todo item title>
 
 Read listed source paths. Identify caller-visible public functions, CLI commands,
 HTTP endpoints, config options, output formats, events, and observable interfaces.
@@ -134,7 +134,7 @@ Query 2 — domain tickets:
 
 ```text
 Find tickets relevant to the <domain> domain.
-Module paths: <paths from task description>
+Module paths: <paths from the todo item title>
 
 Use `{{.McpNamespace}}/tickets.find(query: "<domain>")`; filter by module paths when needed.
 Return features -> ticket status. Only contract-first ready implementation items, plus epic/research/workset planned decomposition, investigation text, or operating context, are `🚧` candidates; todo items are ticket-intent evidence.
@@ -145,7 +145,7 @@ Query 3 — archived specs for this domain:
 ```text
 Survey the archived spec files for the <domain> domain.
 Archived location: ai-docs/.old/spec/ (most recent YYMMDD subdirectory)
-Old spec files for this domain: <files from task description, or scan all>
+Old spec files for this domain: <files from the todo item title, or scan all>
 
 Read relevant archived specs. For each `##` heading, note feature name,
 `🚧` status, and whether current source shows it.
@@ -156,7 +156,7 @@ Query 4 — domain commit history:
 
 ```text
 Survey commit history for the <domain> domain.
-Module paths: <paths from task description>
+Module paths: <paths from the todo item title>
 
 Use path-filtered native Git history until ws exposes path-history. Identify commits that added or changed
 caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
@@ -222,9 +222,9 @@ For each ticket:
 
 ### 7. Complete domain
 
-1. Mark the domain task complete in the visible task list.
-2. If more domain tasks remain, continue with the next incomplete task from step 1 of **On: per-domain**.
-3. When all domain tasks are `completed`, proceed to **On: wrap-up**.
+1. Call `{{.McpNamespace}}/todo.check(session_key: <lead key>, key: "forge-spec-<domain>", status: "done")`.
+2. If more domain todo items remain, continue with the next incomplete one from step 1 of **On: per-domain**.
+3. When every `forge-spec-` todo item is done, proceed to **On: wrap-up**.
 
 ## On: wrap-up
 
@@ -273,10 +273,10 @@ When uncertain, start flat. Re-evaluate after writing - if a split condition fir
 
 No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once after any spec write or update in this session.
 
-### Task list entry
+### Todo entry
 
-```markdown
-- [ ] forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>
+```text
+{{.McpNamespace}}/todo.append(session_key: <lead key>, key: "forge-spec-<domain>", title: "forge-spec-<domain> - Source paths: <comma-separated module paths>; old spec files: <comma-separated archived spec paths, or none>")
 ```
 
 ## Doctrine

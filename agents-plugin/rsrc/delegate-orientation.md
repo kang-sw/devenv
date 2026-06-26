@@ -24,6 +24,20 @@ lookup or a scoped native exploration worker when the caller assigned that work.
 Use `{{.McpNamespace}}/api.list` only when choosing among known local cache domains matters.
 Return cited evidence and call out version or staleness uncertainty.
 
+## Session State Layers
+
+The ws session record holds agenda and todo state, keyed by `session_key`. Touch
+it only when the caller's brief passes a `session_key`; with no key, do not read
+or mutate session state.
+
+- **agenda** (`{{.McpNamespace}}/agenda.*`) - freeform mode-context blobs; lead-owned. Do not set or clear them unless the brief assigns it.
+- **todo** (`{{.McpNamespace}}/todo.*`) - the shared ordered checklist. When the brief shares a `session_key` and assigns checklist work, mark progress with `{{.McpNamespace}}/todo.check`; never `clear` the list or call an `enter` tool.
+- **enter** (`{{.McpNamespace}}/enter.*`) - typed mode switches that replace the whole todo list; lead-only. A delegate never calls them.
+
+Restoration is a lead concern: agenda is reminded at workflow-manual load, todo
+is re-injected at checkpoints. As a delegate you only read or update what the
+brief scopes to you.
+
 ## Process
 
 Read the caller prompt and role prompt. Use repo docs and code only as needed.
