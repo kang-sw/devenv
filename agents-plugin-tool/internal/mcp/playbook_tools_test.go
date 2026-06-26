@@ -640,9 +640,9 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 	for _, want := range []string{
 		`ws/config.tuning(session_key: <lead key>)`,
 		`"workflow.prefer_subagent"`,
-		"config.workflow_prefer_subagent",
+		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
 		`"workflow.prefer_mercenary"`,
-		"config.workflow_prefer_mercenary",
+		"catalog-provided writer for `\"workflow.prefer_mercenary\"`",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {
@@ -650,6 +650,8 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"Call `config.workflow_prefer_subagent`",
+		"Call `config.workflow_prefer_mercenary`",
 		"prompt.DelegationSection",
 		"DelegationSection",
 		"delegation.prefer_mercenary",
@@ -676,7 +678,7 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 		`wsflow/config.tuning(session_key: <lead key>)`,
 		"wsflow workflow",
 		`"workflow.prefer_subagent"`,
-		"config.workflow_prefer_subagent",
+		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
 		"prompt.UserPreferenceSection",
 	} {
 		if !strings.Contains(body, want) {

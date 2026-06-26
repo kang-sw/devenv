@@ -245,14 +245,14 @@ Mercenary is controlled by `"workflow.prefer_mercenary"`: `hide` suppresses the
 public surface, `off` exposes on-request use, and `on` makes mercenary the
 primary implementer/reviewer guidance. When exposed, it provides host-neutral
 stateful continuation by reusing the same mercenary name across relay calls
-(replace step 1 Native with the Mercenary path below, reusing the registered
-name from the initial implementer dispatch).
+(replace the Native dispatch item with the Mercenary path below, reusing the
+registered name from that delegate role's initial dispatch).
 <!-- ws:full-only:end -->
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
 1. Native (default): spawn a **fresh** native subagent whose instruction is to read the rendered prompt as its full role, then act on the task-specific input below; treat `recommended-tier` as the model-selection guide. Every relay to a prior delegate role is also a fresh spawn with a self-contained prompt. If dispatching as a fork (subagent_type: fork), always end the prompt with: "**You are a forked agent. Execute all work directly — do not sub-delegate.**"
 <!-- ws:mercenary-on:start -->
-1. Mercenary (on request): `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`.
+1. Mercenary (when selected): `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`. If collection times out or returns no usable result, report the failure and continue with native dispatch or stop for lead judgment.
 <!-- ws:mercenary-on:end -->
 1. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus the target output path. File-writing delegates write to their caller-created output path or return content; free-response delegates return text the lead integrates.
 

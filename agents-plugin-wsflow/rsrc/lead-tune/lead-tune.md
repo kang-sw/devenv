@@ -19,7 +19,7 @@ Surface
 - State that any tuning request that does not map to one of this playbook's handlers is not yet supported.
 
 Storage
-- For prompt overrides, prefer the catalog's cross-harness selector unless the user names one harness.
+- For prompt overrides, choose the catalog option that applies across all harnesses unless the user names one harness.
 - For global-only workflow preferences, use the writer's lead `session_key` only as authority.
 - Confirm storage scope before any project or global write.
 
@@ -35,7 +35,7 @@ Storage
 
 1. Map the request to a `prompt.<pointId>` knob from the `config.tuning()` catalog; if no listed point matches, show prompt knobs and ask.
 2. Draft or restate the override text for user approval, proposing concise text when the user's desired wording is clear. State the model: a stored override replaces that point's seed block for the matching `(pointId, harness)`; a point shipped with an empty seed contributes new text at that point rather than replacing shipped guidance.
-3. Choose `harness` and `scope` from the catalog selector fields when present; use `n/a` for selectors the catalog does not expose.
+3. Choose all exposed selector fields, including `harness` or `scope` when present; use `n/a` for selector fields the catalog does not expose.
 4. Confirm `(knob, writer, harness, scope, text)` per the Tuning Proposal template.
 5. Call the catalog writer tool with the knob's fixed arguments, `session_key`, selected selector fields, and the override text in the catalog-specified prompt/text field.
 6. Report the stored knob/harness/scope; note it applies at the next playbook render, not retroactively.
@@ -48,7 +48,7 @@ Examples:
 1. Map the request to the `"workflow.prefer_subagent"` catalog knob.
 2. Choose the new state from the catalog value field.
 3. Confirm the Tuning Proposal with the selected value.
-4. Call `config.workflow_prefer_subagent` with `session_key` and the selected value.
+4. Call the catalog-provided writer for `"workflow.prefer_subagent"` with `session_key` and the selected value.
 5. Report the global state and that it applies to the next workflow-manual load.
 
 <!-- ws:full-only:start -->
@@ -57,7 +57,7 @@ Examples:
 1. Map the request to the `"workflow.prefer_mercenary"` catalog knob.
 2. Choose the new state from the catalog value field.
 3. Confirm the Tuning Proposal with the selected value.
-4. Call `config.workflow_prefer_mercenary` with `session_key` and the selected value.
+4. Call the catalog-provided writer for `"workflow.prefer_mercenary"` with `session_key` and the selected value.
 5. Report the global state and that it controls both mercenary visibility and default render guidance.
 
 ## On: tune model tier
