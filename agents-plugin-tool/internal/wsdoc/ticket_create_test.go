@@ -31,33 +31,67 @@ func TestTicketCreateIdea(t *testing.T) {
 	}
 }
 
-func TestTicketCreateTodo(t *testing.T) {
-	root := t.TempDir()
-	res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "todo", Today: "260101"})
-	if err != nil {
-		t.Fatalf("TicketCreate todo: %v", err)
-	}
-	body := readCreatedTicket(t, root, res)
-	if !strings.Contains(body, `title: ""`) {
-		t.Fatalf("todo stub missing title: %q", body)
-	}
-	if !strings.Contains(body, "sage-review: pending") {
-		t.Fatalf("todo stub missing sage-review: pending: %q", body)
+func TestTicketCreateTodoStampsResolvedSageReviewPosture(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		config     string
+		wantReview string
+	}{
+		{"empty", "", "skipped"},
+		{"off", "off", "skipped"},
+		{"ask", "ask", "recommended"},
+		{"auto", "auto", "required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "todo", SageReview: tc.config, Today: "260101"})
+			if err != nil {
+				t.Fatalf("TicketCreate todo: %v", err)
+			}
+			body := readCreatedTicket(t, root, res)
+			if !strings.Contains(body, `title: ""`) {
+				t.Fatalf("todo stub missing title: %q", body)
+			}
+			wantLine := "sage-review: " + tc.wantReview
+			if !strings.Contains(body, wantLine) {
+				t.Fatalf("todo stub missing %s: %q", wantLine, body)
+			}
+			if !strings.Contains(res.Tip, tc.wantReview) {
+				t.Fatalf("Tip = %q, want resolved posture %q", res.Tip, tc.wantReview)
+			}
+		})
 	}
 }
 
-func TestTicketCreateReady(t *testing.T) {
-	root := t.TempDir()
-	res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", Today: "260101"})
-	if err != nil {
-		t.Fatalf("TicketCreate ready: %v", err)
-	}
-	body := readCreatedTicket(t, root, res)
-	if !strings.Contains(body, `title: ""`) {
-		t.Fatalf("ready stub missing title: %q", body)
-	}
-	if !strings.Contains(body, "sage-review: pending") {
-		t.Fatalf("ready stub missing sage-review: pending: %q", body)
+func TestTicketCreateReadyStampsResolvedSageReviewPosture(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		config     string
+		wantReview string
+	}{
+		{"empty", "", "skipped"},
+		{"off", "off", "skipped"},
+		{"ask", "ask", "recommended"},
+		{"auto", "auto", "required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: "feat-foo", InitialState: "ready", SageReview: tc.config, Today: "260101"})
+			if err != nil {
+				t.Fatalf("TicketCreate ready: %v", err)
+			}
+			body := readCreatedTicket(t, root, res)
+			if !strings.Contains(body, `title: ""`) {
+				t.Fatalf("ready stub missing title: %q", body)
+			}
+			wantLine := "sage-review: " + tc.wantReview
+			if !strings.Contains(body, wantLine) {
+				t.Fatalf("ready stub missing %s: %q", wantLine, body)
+			}
+			if !strings.Contains(res.Tip, tc.wantReview) {
+				t.Fatalf("Tip = %q, want resolved posture %q", res.Tip, tc.wantReview)
+			}
+		})
 	}
 }
 

@@ -1038,9 +1038,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		stem, _ := params.Arguments["stem"].(string)
 		initialState, _ := params.Arguments["initial_state"].(string)
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
 			InitialState: initialState,
+			SageReview:   resolved.Value,
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -3251,7 +3256,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves check the sage_review config and the ticket's sage-review frontmatter field. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves stamp or validate a resolved sage-review posture from config. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3263,7 +3268,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus sage-review: pending for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

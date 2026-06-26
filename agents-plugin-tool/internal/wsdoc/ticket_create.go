@@ -11,6 +11,7 @@ import (
 type TicketCreateOptions struct {
 	Stem         string // semantic stem (no date prefix)
 	InitialState string // "idea" | "todo" | "ready"
+	SageReview   string // sage_review config value ("" | "off" | "auto" | "ask")
 	Today        string // YYMMDD; if empty, use time.Now().Format("060102")
 }
 
@@ -53,7 +54,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 
 	stub := "---\ntitle: \"\"\n"
 	if state == "todo" || state == "ready" {
-		stub += "sage-review: pending\n"
+		stub += "sage-review: " + ResolvedSageReviewPosture(opts.SageReview) + "\n"
 	}
 	stub += "---\n"
 
@@ -61,9 +62,9 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		return TicketCreateResult{}, err
 	}
 
-	tip := "run sage review before promoting further."
+	tip := "sage review posture: " + ResolvedSageReviewPosture(opts.SageReview) + "."
 	if state == "idea" {
-		tip = "promoting to 'todo/' will trigger sage review."
+		tip = "promoting to 'todo/' stamps the resolved sage-review posture."
 	}
 
 	return TicketCreateResult{Path: relPath, Tip: tip}, nil
