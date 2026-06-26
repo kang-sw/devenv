@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // session_state.go implements the session state machine layered onto the
@@ -70,8 +71,9 @@ func todoActive(status todoStatus) bool {
 
 // indexOfTodo returns the position of key in list, or -1 when absent.
 func indexOfTodo(list []todoItem, key string) int {
+	key = strings.ToLower(key)
 	for i, item := range list {
-		if item.Key == key {
+		if strings.ToLower(item.Key) == key {
 			return i
 		}
 	}
@@ -80,31 +82,55 @@ func indexOfTodo(list []todoItem, key string) int {
 
 // --- pure list mutations (no disk I/O) ---------------------------------------
 
+func normalizeTodoKey(raw string) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	if key == "" {
+		return "", fmt.Errorf("todo key must be non-empty")
+	}
+	for len(key) > 0 {
+		r, size := utf8.DecodeRuneInString(key)
+		if size == 0 || r == utf8.RuneError && size == 1 {
+			return "", fmt.Errorf("todo key %q contains invalid UTF-8", raw)
+		}
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-') {
+			return "", fmt.Errorf("todo key %q contains invalid character %q: want lowercase letters, digits, '.', '_', or '-'", raw, r)
+		}
+		key = key[size:]
+	}
+	return strings.ToLower(strings.TrimSpace(raw)), nil
+}
+
 // todoAppend adds a new item at the end. A duplicate key (still present in the
 // active list) is an error; erased keys are reusable because they are gone from
 // the slice.
 func todoAppend(list []todoItem, key, title string, status todoStatus) ([]todoItem, error) {
-	if strings.TrimSpace(key) == "" {
-		return nil, fmt.Errorf("todo key must be non-empty")
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return nil, err
 	}
-	if indexOfTodo(list, key) >= 0 {
-		return nil, fmt.Errorf("todo key %q already exists", key)
+	if indexOfTodo(list, normalizedKey) >= 0 {
+		return nil, fmt.Errorf("todo key %q already exists", normalizedKey)
 	}
-	return append(list, todoItem{Key: key, Title: title, Status: status}), nil
+	return append(list, todoItem{Key: normalizedKey, Title: title, Status: status}), nil
 }
 
 // todoInsert inserts a new item before or after refKey. after=false inserts
 // before refKey; after=true inserts after it.
 func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, after bool) ([]todoItem, error) {
-	if strings.TrimSpace(key) == "" {
-		return nil, fmt.Errorf("todo key must be non-empty")
+	normalizedRef, err := normalizeTodoKey(refKey)
+	if err != nil {
+		return nil, fmt.Errorf("ref_key: %w", err)
 	}
-	if indexOfTodo(list, key) >= 0 {
-		return nil, fmt.Errorf("todo key %q already exists", key)
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return nil, err
 	}
-	ref := indexOfTodo(list, refKey)
+	if indexOfTodo(list, normalizedKey) >= 0 {
+		return nil, fmt.Errorf("todo key %q already exists", normalizedKey)
+	}
+	ref := indexOfTodo(list, normalizedRef)
 	if ref < 0 {
-		return nil, fmt.Errorf("ref_key %q not found", refKey)
+		return nil, fmt.Errorf("ref_key %q not found", normalizedRef)
 	}
 	pos := ref
 	if after {
@@ -112,16 +138,20 @@ func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, a
 	}
 	out := make([]todoItem, 0, len(list)+1)
 	out = append(out, list[:pos]...)
-	out = append(out, todoItem{Key: key, Title: title, Status: status})
+	out = append(out, todoItem{Key: normalizedKey, Title: title, Status: status})
 	out = append(out, list[pos:]...)
 	return out, nil
 }
 
 // todoCheck sets the status of an existing item.
 func todoCheck(list []todoItem, key string, status todoStatus) ([]todoItem, error) {
-	idx := indexOfTodo(list, key)
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return nil, err
+	}
+	idx := indexOfTodo(list, normalizedKey)
 	if idx < 0 {
-		return nil, fmt.Errorf("todo key %q not found", key)
+		return nil, fmt.Errorf("todo key %q not found", normalizedKey)
 	}
 	list[idx].Status = status
 	return list, nil
@@ -129,9 +159,13 @@ func todoCheck(list []todoItem, key string, status todoStatus) ([]todoItem, erro
 
 // todoErase removes an item by key. The key becomes reusable.
 func todoErase(list []todoItem, key string) ([]todoItem, error) {
-	idx := indexOfTodo(list, key)
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return nil, err
+	}
+	idx := indexOfTodo(list, normalizedKey)
 	if idx < 0 {
-		return nil, fmt.Errorf("todo key %q not found", key)
+		return nil, fmt.Errorf("todo key %q not found", normalizedKey)
 	}
 	out := make([]todoItem, 0, len(list)-1)
 	out = append(out, list[:idx]...)
@@ -161,23 +195,35 @@ func todoClear(list []todoItem, doneOnly bool) []todoItem {
 // or after refKey. The span must be a valid forward range, and refKey must lie
 // outside the span.
 func todoReorder(list []todoItem, fromKey, toKey, refKey string, after bool) ([]todoItem, error) {
-	from := indexOfTodo(list, fromKey)
-	if from < 0 {
-		return nil, fmt.Errorf("from_key %q not found", fromKey)
+	normalizedFrom, err := normalizeTodoKey(fromKey)
+	if err != nil {
+		return nil, fmt.Errorf("from_key: %w", err)
 	}
-	to := indexOfTodo(list, toKey)
+	normalizedTo, err := normalizeTodoKey(toKey)
+	if err != nil {
+		return nil, fmt.Errorf("to_key: %w", err)
+	}
+	normalizedRef, err := normalizeTodoKey(refKey)
+	if err != nil {
+		return nil, fmt.Errorf("ref_key: %w", err)
+	}
+	from := indexOfTodo(list, normalizedFrom)
+	if from < 0 {
+		return nil, fmt.Errorf("from_key %q not found", normalizedFrom)
+	}
+	to := indexOfTodo(list, normalizedTo)
 	if to < 0 {
-		return nil, fmt.Errorf("to_key %q not found", toKey)
+		return nil, fmt.Errorf("to_key %q not found", normalizedTo)
 	}
 	if from > to {
-		return nil, fmt.Errorf("from_key %q must not come after to_key %q", fromKey, toKey)
+		return nil, fmt.Errorf("from_key %q must not come after to_key %q", normalizedFrom, normalizedTo)
 	}
-	ref := indexOfTodo(list, refKey)
+	ref := indexOfTodo(list, normalizedRef)
 	if ref < 0 {
-		return nil, fmt.Errorf("ref_key %q not found", refKey)
+		return nil, fmt.Errorf("ref_key %q not found", normalizedRef)
 	}
 	if ref >= from && ref <= to {
-		return nil, fmt.Errorf("ref_key %q is inside the moved span", refKey)
+		return nil, fmt.Errorf("ref_key %q is inside the moved span", normalizedRef)
 	}
 
 	span := append([]todoItem(nil), list[from:to+1]...)
@@ -187,7 +233,7 @@ func todoReorder(list []todoItem, fromKey, toKey, refKey string, after bool) ([]
 
 	// Locate refKey within rest (its index shifts once the span is removed) and
 	// splice the span back in relative to it.
-	refIdx := indexOfTodo(rest, refKey)
+	refIdx := indexOfTodo(rest, normalizedRef)
 	pos := refIdx
 	if after {
 		pos = refIdx + 1
@@ -210,7 +256,7 @@ func renderTodos(list []todoItem, full bool) string {
 	if full {
 		lines := make([]string, 0, len(list))
 		for _, item := range list {
-			lines = append(lines, fmt.Sprintf("%s %s", todoMarker(item.Status), item.Title))
+			lines = append(lines, renderTodoLine(item))
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -235,7 +281,7 @@ func renderTodos(list []todoItem, full bool) string {
 	collapsed := false
 	for i, item := range list {
 		if shown[i] {
-			lines = append(lines, fmt.Sprintf("%s %s", todoMarker(item.Status), item.Title))
+			lines = append(lines, renderTodoLine(item))
 			collapsed = false
 			continue
 		}
@@ -247,7 +293,19 @@ func renderTodos(list []todoItem, full bool) string {
 	return strings.Join(lines, "\n")
 }
 
+func renderTodoLine(item todoItem) string {
+	return fmt.Sprintf("%s {%s} %s", todoMarker(item.Status), item.Key, item.Title)
+}
+
 // --- enter-mode todo derivation ----------------------------------------------
+
+type implementTodoVerdict struct {
+	Delegation  string
+	PlanDepth   string
+	ReviewAlloc string
+	NeedReview  bool
+	NeedDoc     bool
+}
 
 // deriveImplementTodos builds the lead-implement checklist. Route, Prep, Edit,
 // Final action gate, and Merge are always present; Review is inserted after Edit
@@ -255,15 +313,19 @@ func renderTodos(list []todoItem, full bool) string {
 // mirrors the lead-implement pipeline (Route -> Prep -> Edit -> Review -> Doc ->
 // Final action gate -> Merge).
 func deriveImplementTodos(needReview, needDoc bool) []todoItem {
+	return deriveImplementTodosFromVerdict(implementTodoVerdict{NeedReview: needReview, NeedDoc: needDoc})
+}
+
+func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	items := []todoItem{
 		{Key: "route", Title: "Route"},
-		{Key: "prep", Title: "Prep (brief + survey plan)"},
-		{Key: "edit", Title: "Edit (delegated)"},
+		{Key: "prep", Title: implementPrepTitle(verdict.PlanDepth)},
+		{Key: "edit", Title: implementEditTitle(verdict.Delegation)},
 	}
-	if needReview {
-		items = append(items, todoItem{Key: "review", Title: "Review (partitioned)"})
+	if verdict.NeedReview {
+		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc)})
 	}
-	if needDoc {
+	if verdict.NeedDoc {
 		items = append(items,
 			todoItem{Key: "doc-pre-pass", Title: "Doc pre-pass"},
 			todoItem{Key: "doc-commit-gate", Title: "Doc commit gate"},
@@ -275,6 +337,49 @@ func deriveImplementTodos(needReview, needDoc bool) []todoItem {
 		todoItem{Key: "merge", Title: "Merge"},
 	)
 	return withPendingStatus(items)
+}
+
+func implementPrepTitle(planDepth string) string {
+	switch strings.ToLower(strings.TrimSpace(planDepth)) {
+	case "none", "":
+		return "Prep"
+	case "brief":
+		return "Prep (brief)"
+	case "survey":
+		return "Prep (brief + survey plan)"
+	case "research":
+		return "Prep (brief + research plan)"
+	default:
+		return fmt.Sprintf("Prep (%s)", strings.TrimSpace(planDepth))
+	}
+}
+
+func implementEditTitle(delegation string) string {
+	switch strings.ToLower(strings.TrimSpace(delegation)) {
+	case "delegated":
+		return "Edit (delegated)"
+	case "direct", "direct-edit", "inline", "lead-owned":
+		return "Edit (direct)"
+	case "":
+		return "Edit"
+	default:
+		return fmt.Sprintf("Edit (%s)", strings.TrimSpace(delegation))
+	}
+}
+
+func implementReviewTitle(reviewAlloc string) string {
+	switch strings.ToLower(strings.TrimSpace(reviewAlloc)) {
+	case "single", "single reviewer":
+		return "Review (single)"
+	case "partitioned", "partitioned: correctness, fit, test", "partitioned: correctness,fit,test":
+		return "Review (partitioned)"
+	case "lead-only", "lead only":
+		return "Review (lead-only)"
+	case "":
+		return "Review"
+	default:
+		return fmt.Sprintf("Review (%s)", strings.TrimSpace(reviewAlloc))
+	}
 }
 
 // deriveProceedTodos mirrors lead-proceed "On: invoke": build route context,
@@ -500,7 +605,17 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
 	needReview, _ := args["need_review"].(bool)
 	needDoc, _ := args["need_doc"].(bool)
-	return s.handleEnter(id, "ws.enter.implement", "implement", args, deriveImplementTodos(needReview, needDoc))
+	delegation, _ := args["delegation"].(string)
+	planDepth, _ := args["plan_depth"].(string)
+	reviewAlloc, _ := args["review_alloc"].(string)
+	todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  delegation,
+		PlanDepth:   planDepth,
+		ReviewAlloc: reviewAlloc,
+		NeedReview:  needReview,
+		NeedDoc:     needDoc,
+	})
+	return s.handleEnter(id, "ws.enter.implement", "implement", args, todos)
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
@@ -525,13 +640,17 @@ func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) respo
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
 	title, _ := args["title"].(string)
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoAppend(list, key, title, todoPending)
+		return todoAppend(list, normalizedKey, title, todoPending)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("todo appended: %s\n", key), nil)
+	return toolTextResponse(id, fmt.Sprintf("todo appended: %s\n", normalizedKey), nil)
 }
 
 func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after bool) response {
@@ -551,13 +670,17 @@ func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
 	title, _ := args["title"].(string)
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoInsert(list, refKey, key, title, todoPending, after)
+		return todoInsert(list, refKey, normalizedKey, title, todoPending, after)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("todo inserted: %s\n", key), nil)
+	return toolTextResponse(id, fmt.Sprintf("todo inserted: %s\n", normalizedKey), nil)
 }
 
 func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) response {
@@ -570,6 +693,10 @@ func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) respon
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
 	statusRaw, _ := args["status"].(string)
 	status, err := parseTodoStatus(strings.TrimSpace(statusRaw))
 	if err != nil {
@@ -579,11 +706,11 @@ func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) respon
 		return toolTextResponse(id, "", fmt.Errorf("%s: status is required", tool))
 	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoCheck(list, key, status)
+		return todoCheck(list, normalizedKey, status)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("todo %s: %s\n", status, key), nil)
+	return toolTextResponse(id, fmt.Sprintf("todo %s: %s\n", status, normalizedKey), nil)
 }
 
 func (s *Server) handleTodoErase(id json.RawMessage, args map[string]any) response {
@@ -596,12 +723,16 @@ func (s *Server) handleTodoErase(id json.RawMessage, args map[string]any) respon
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoErase(list, key)
+		return todoErase(list, normalizedKey)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("todo erased: %s\n", key), nil)
+	return toolTextResponse(id, fmt.Sprintf("todo erased: %s\n", normalizedKey), nil)
 }
 
 func (s *Server) handleTodoClear(id json.RawMessage, args map[string]any) response {
