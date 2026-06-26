@@ -1552,6 +1552,56 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	}
 }
 
+// TestPhase3bSkillRepoint verifies that the four repointed lead skills call
+// ws.workflow_manual and reference lead-revive instead of the removed
+// playbook.print(name: "lead-workflow-manual") self-load pattern, and that the
+// lead-revive skill exists while lead-load-workflow-manual does not.
+func TestPhase3bSkillRepoint(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
+	wsflowSkillsRoot := filepath.Join("..", "..", "..", "agents-plugin-wsflow", "skills")
+	s := newTestServerWithHarness(t, "claude")
+
+	// Verify the four repointed skills call workflow_manual and lead-revive,
+	// and no longer contain the removed playbook.print self-load call.
+	repointed := []string{"lead-proceed", "lead-discuss", "lead-sprint", "lead-salvage"}
+	for _, skill := range repointed {
+		t.Run(skill, func(t *testing.T) {
+			body, _, err := printPlaybook(s, rsrcRoot, skill, nil, wsconfig.Options{}, "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook(%q): %v", skill, err)
+			}
+			if !strings.Contains(body, "workflow_manual") {
+				t.Errorf("%s: rendered body must contain 'workflow_manual'", skill)
+			}
+			if !strings.Contains(body, "lead-revive") {
+				t.Errorf("%s: rendered body must contain 'lead-revive'", skill)
+			}
+			if strings.Contains(body, `playbook.print(name: "lead-workflow-manual")`) {
+				t.Errorf("%s: rendered body must not contain removed playbook.print self-load call", skill)
+			}
+		})
+	}
+
+	// lead-revive SKILL.md must exist in agents-plugin/skills/.
+	reviveSkillPath := filepath.Join(skillsRoot, "lead-revive", "SKILL.md")
+	if _, err := os.Stat(reviveSkillPath); err != nil {
+		t.Errorf("lead-revive SKILL.md missing from agents-plugin/skills/: %v", err)
+	}
+
+	// lead-revive SKILL.md must exist in agents-plugin-wsflow/skills/.
+	wsflowReviveSkillPath := filepath.Join(wsflowSkillsRoot, "lead-revive", "SKILL.md")
+	if _, err := os.Stat(wsflowReviveSkillPath); err != nil {
+		t.Errorf("lead-revive SKILL.md missing from agents-plugin-wsflow/skills/: %v", err)
+	}
+
+	// lead-load-workflow-manual must NOT exist in agents-plugin/skills/.
+	removedSkillPath := filepath.Join(skillsRoot, "lead-load-workflow-manual", "SKILL.md")
+	if _, err := os.Stat(removedSkillPath); !os.IsNotExist(err) {
+		t.Errorf("lead-load-workflow-manual SKILL.md should be removed but still present (stat: %v)", err)
+	}
+}
+
 // TestPlaybookPrintGoldenLeadBootstrap verifies lead-bootstrap resolves from the
 // real rsrc tree and contains procedure body text. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {

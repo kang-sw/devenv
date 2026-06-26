@@ -609,8 +609,8 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 
 	server := NewServer(root, "test")
 
-	// Fresh mode: no session_key supplied.
-	resp := callToolNoKey(t, server, 5001, "ws.workflow_manual", nil)
+	// Fresh mode: call with the reserved sentinel key (not keyless).
+	resp := callToolWithKey(t, server, 5001, freshBootstrapKey, "ws.workflow_manual", nil)
 
 	// Self-bootstrap fragment must be present (gated region is KEPT).
 	if !strings.Contains(resp, "mint your lead key") {
@@ -623,6 +623,57 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 	// No "Session State" section in fresh mode.
 	if strings.Contains(resp, "Session State") {
 		t.Errorf("fresh mode: unexpected Session State section in response:\n%s", resp)
+	}
+}
+
+func TestWorkflowManualKeylessRejected(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	// Keyless call must be rejected with a required session_key error.
+	resp := callToolNoKey(t, server, 5002, "ws.workflow_manual", nil)
+
+	if !strings.Contains(resp, "session_key") {
+		t.Errorf("keyless: response must mention session_key, got:\n%s", resp)
+	}
+	// The bootstrap fragment must NOT be present — no leak of ferrule guidance.
+	if strings.Contains(resp, "mint your lead key") {
+		t.Errorf("keyless: self-bootstrap fragment must be absent from error response:\n%s", resp)
+	}
+}
+
+func TestWorkflowManualDelegateKeyBlocked(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	// Mint a delegate-scoped key directly.
+	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatalf("mint delegate key: %v", err)
+	}
+
+	// ws.workflow_manual must be rejected for delegate keys at the keyed gate.
+	// The gate returns an RPC-level error (-32601), not a toolText response, so
+	// read the raw JSON line (same pattern as session_auth_test.go assertGateError).
+	rawResp := callToolOnce(t, server, 5003, "ws.workflow_manual", map[string]any{
+		"session_key": delegateKey,
+	})
+
+	// Must receive the lead-only profile rejection (JSON-RPC error -32601).
+	if !strings.Contains(rawResp, "tool not available in current") {
+		t.Errorf("delegate key: expected lead-only rejection, got:\n%s", rawResp)
+	}
+	// Must NOT contain a manual body.
+	if strings.Contains(rawResp, "mint your lead key") || strings.Contains(rawResp, "Session State") {
+		t.Errorf("delegate key: manual body must be absent from rejection response:\n%s", rawResp)
 	}
 }
 
@@ -687,6 +738,10 @@ func TestWorkflowManualUnknownKey(t *testing.T) {
 	// Must contain the no-restorable-state notice.
 	if !strings.Contains(resp, "no restorable state for session key") {
 		t.Errorf("unknown key: no-restorable-state notice absent:\n%s", resp)
+	}
+	// Bootstrap line must be ABSENT in fail-loud mode (Phase 3a: stripped, not kept).
+	if strings.Contains(resp, "mint your lead key") {
+		t.Errorf("unknown key: self-bootstrap fragment must be absent (fail-loud strips it):\n%s", resp)
 	}
 	// Must NOT have minted a key file. Use os.Stat on the specific record path so
 	// the check is meaningful even when the keys/ directory was never created.

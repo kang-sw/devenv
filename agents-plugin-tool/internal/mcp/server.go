@@ -55,9 +55,11 @@ const bootstrapToolName = "ws.ferrule"
 // keys. It is the authority for the keyed-gate escalation block. The bootstrap
 // tool must be listed explicitly because it no longer lives under the
 // `ws.lead.*` prefix (260617 obscurity rename) — a prefix-only check would
-// silently stop blocking it for non-lead keys.
+// silently stop blocking it for non-lead keys. ws.workflow_manual is likewise
+// listed explicitly: delegate/leaf callers must not reach the handler (Phase 3a
+// security hardening), mirroring the ws.ferrule guard.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || strings.HasPrefix(name, "ws.lead.")
+	return name == bootstrapToolName || name == "ws.workflow_manual" || strings.HasPrefix(name, "ws.lead.")
 }
 
 type request struct {
@@ -2959,13 +2961,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.workflow_manual",
-			"description": namespaceText("Render the ws workflow primitives manual. With no session_key: fresh mode (includes the session-bootstrap line). With a session_key that resolves: continue mode (omits the bootstrap line, appends restored agenda + todo Session State). With a session_key that does not resolve: fail-loud notice, no key minted."),
+			"description": namespaceText("Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"session_key": stringProperty("Optional ws session key. Omit for fresh bootstrap; provide a known key to restore agenda/todo Session State."),
+					"session_key": stringProperty("Required. Your lead session key."),
 				},
-				// no "required" — session_key is intentionally optional
+				"required": []string{"session_key"},
 			},
 		},
 		{

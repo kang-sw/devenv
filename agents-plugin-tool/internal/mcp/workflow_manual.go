@@ -22,6 +22,16 @@ const (
 	freshOnlyEnd   = "<!-- ws:fresh-only:end -->"
 )
 
+// freshBootstrapKey is the reserved sentinel that triggers fresh mode in
+// ws.workflow_manual when a caller does not yet have a lead session key.
+// It is an opaque, deliberately non-descriptive handshake token — no privilege
+// cue, no semantic hint — mirroring ws.ferrule's "no semantic cue" rationale
+// (260617 obscurity). It must NEVER appear in the advertised tool description,
+// the session_key schema property text, or any error string. It is taught only
+// in lead skill prose (lead-revive) so that subagents without that skill read
+// cannot discover the fresh-bootstrap path.
+const freshBootstrapKey = "obsidian-latch"
+
 // stripModeGatedRegion removes the ws:fresh-only marker comment lines from
 // body. When keepContent is true the inner lines between the marker pair are
 // kept (fresh and fail-loud modes); when keepContent is false they are also
@@ -102,10 +112,18 @@ func renderSessionState(rec sessionRecord) string {
 // handleWorkflowManual implements the ws.workflow_manual tool. It renders the
 // lead-workflow-manual playbook through the same pipeline as playbook.print,
 // then branches on the session_key to produce fresh, continue, or fail-loud
-// output. session_key is optional — an absent key is the fresh-bootstrap signal.
+// output. A valid session_key is required; keyless calls receive a hard error.
+// The reserved freshBootstrapKey sentinel triggers fresh mode for callers who
+// have not yet minted a lead key.
 func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) response {
 	key, _ := args["session_key"].(string)
 	key = strings.TrimSpace(key)
+
+	// 1. Key absent — reject with a required-key error. Do not name the sentinel
+	//    or ferrule in the error so no bootstrap hint leaks to keyless callers.
+	if key == "" {
+		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: a valid session_key is required"))
+	}
 
 	// Render the manual body through the same pipeline as playbook.print.
 	rsrcRoot, err := resolveRsrcRoot("")
@@ -126,22 +144,24 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: render playbook: %w", err))
 	}
 
-	// Branch on session_key and record resolution.
+	// Resolve the session record before branching; the sentinel branch precedes
+	// the recOK branch so a non-existent sentinel record never affects behaviour.
 	rec, recOK := s.sessions.readState(key)
 	switch {
-	case key == "":
-		// FRESH: keep the gated bootstrap line; strip only the marker comment lines.
+	case key == freshBootstrapKey:
+		// 2. FRESH (sentinel): keep the gated bootstrap line; strip only markers.
 		body = stripModeGatedRegion(body, true)
 
 	case recOK:
-		// CONTINUE: strip both markers and inner content; append Session State.
+		// 3. CONTINUE: strip both markers and inner content; append Session State.
 		body = stripModeGatedRegion(body, false)
 		body += "\n\n" + renderSessionState(rec)
 
 	default:
-		// FAIL-LOUD: key given but no record. Keep bootstrap line (caller may need
-		// to mint). Append an explicit no-restore notice. NEVER call s.sessions.mint.
-		body = stripModeGatedRegion(body, true)
+		// 4. FAIL-LOUD: syntactically valid key but no stored record. Strip the
+		//    bootstrap line (changed from keep in Phase 3a) — the caller should
+		//    revive via a surviving key, not re-bootstrap. Append notice. NEVER mint.
+		body = stripModeGatedRegion(body, false)
 		body += "\n\n## Session State\n" +
 			fmt.Sprintf("(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo.)", key)
 	}
