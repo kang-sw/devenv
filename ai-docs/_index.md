@@ -167,6 +167,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260626-bug-ws-todo-enter-derive-surface-gaps` | todo | Surface todo keys uniformly as `{key}` and make `enter.implement` checklist derivation reflect typed verdict inputs |
 | `260626-feat-surface-sage-review-posture` | todo | Stamp self-describing `sage-review:` posture from `sage_review` config so tickets show skipped/recommended/required without a config dive |
 | `260626-bug-sage-review-config-setter-missing` | idea | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
+| `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
+| `260626-bug-workflow-manual-bootstrap-sentinel-surface` | idea | Investigate the fresh workflow-manual sentinel guidance not matching the visible session-state tool surface during dogfooding |
 | `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | done | Collapsed wsflow onto product-mode playbook rendering and removed curated skill bodies |
