@@ -1049,12 +1049,18 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	}
 
 	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
+		t.Fatalf("workflow.prefer_subagent writer tool mismatch: %+v", subagentKnob.Writer)
+	}
 	assertFieldEnum(t, subagentKnob.ValueFields, "value", []string{"on", "off"})
 	if !strings.Contains(mustMarshalJSON(t, subagentKnob.Current), `"value":"off"`) {
 		t.Fatalf("workflow.prefer_subagent default should be cataloged as off: %+v", subagentKnob.Current)
 	}
 
 	mercenaryKnob := requireTuningKnob(t, catalog, "workflow.prefer_mercenary")
+	if mercenaryKnob.Writer.Tool != "config.workflow_prefer_mercenary" {
+		t.Fatalf("workflow.prefer_mercenary writer tool mismatch: %+v", mercenaryKnob.Writer)
+	}
 	assertFieldEnum(t, mercenaryKnob.ValueFields, "value", []string{"on", "off", "hide"})
 	if findTuningField(mercenaryKnob.ValueFields, "enabled") != nil {
 		t.Fatalf("workflow.prefer_mercenary catalog must not expose legacy enabled field: %+v", mercenaryKnob.ValueFields)
@@ -1091,7 +1097,10 @@ func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, resp)
 
 	requireTuningKnob(t, catalog, "prompt.SeedSection")
-	requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
+		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
+	}
 	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary", "agents.tier"} {
 		if knob := findTuningKnob(catalog, hidden); knob != nil {
 			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)

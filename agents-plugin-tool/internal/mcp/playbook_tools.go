@@ -551,7 +551,6 @@ const (
 // that apply to the current product mode and mercenary preference. The source
 // rsrc remains shared; the rendered playbook is the product-specific contract.
 // mercenaryEnabled=true preserves ws:mercenary-on blocks; false strips them.
-// printPlaybook passes mercenaryEnabled=true to expose the full source view.
 func selectProductModeBlocks(body string, mercenaryEnabled bool) string {
 	lines := strings.Split(body, "\n")
 	filtered := make([]string, 0, len(lines))

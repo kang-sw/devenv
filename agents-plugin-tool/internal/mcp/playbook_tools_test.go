@@ -1410,9 +1410,45 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	if !strings.Contains(body, "verified code reaching the target branch") {
 		t.Errorf("body %q: expected doctrine text 'verified code reaching the target branch'", body)
 	}
+	for _, want := range []string{
+		"Use the Mercenary dispatch item below instead of the Native item",
+		"Mercenary (when selected):",
+		`ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`,
+		`ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`,
+		`ws.mercenary.result(name: "<name>", timeout_seconds: 600)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
+		}
+	}
 	// delegates:true (spawns implementer/reviewer agents) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, forbidden := range []string{
+		"ws.mercenary.",
+		`"workflow.prefer_mercenary"`,
+		"Mercenary (when selected):",
+		fullOnlyStart,
+		fullOnlyEnd,
+		mercenaryOnlyStart,
+		mercenaryOnlyEnd,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow lead-implement render contains forbidden %q:\n%s", forbidden, body)
+		}
 	}
 }
 
