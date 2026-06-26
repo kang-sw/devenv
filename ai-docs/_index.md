@@ -392,3 +392,54 @@ dropped tickets live in hidden archive dirs and git history.
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
 assignment remains deferred.
+
+### Resume: 260625 Phase 2 forge migration (260626 session, branch `feature/ferrule`)
+
+Dogfooding the ws session-state machine. Lead session key
+`thong-surfboard-container-easiness-26`. Todo: route/prep/capture-dogfood/edit
+done; **review = audit complete with unresolved findings**; doc-pre-pass,
+doc-commit-gate, doc-closeout, final-action-gate, merge still pending.
+
+WIP commit `14244ca6` carries the forge migration (host task-list ->
+`{{.McpNamespace}}/todo.*` in lead-forge-spec + lead-forge-mental-model; new
+`## Session State Layers` in delegate-orientation). Dual tree regenerated, wsrsrc
+guards green. **Not review-clean — fix before doc steps / final / merge:**
+
+- **HIGH — `<lead key>` undefined inline.** Both forge files use
+  `session_key: <lead key>` in every `todo.*` call but never define it. Fix: add
+  the standard entry preamble the other lead-* playbooks use
+  (`workflow_manual(session_key: <your lead key>)` + obsidian-latch bootstrap +
+  lead-revive-after-compaction) and align the placeholder to `<your lead key>`.
+- **HIGH — status vocab mismatch.** Per-domain skip predicate still reads
+  `skipping tasks with status completed` while writes use `done` / marker `- [x]`
+  — resume would re-process finished domains. Unify to `done`/`- [x]`
+  (lead-forge-spec line ~113, lead-forge-mental-model line ~104; plus On:invoke
+  scan lines and step 7.3 wording).
+- **MED — `sources` line inaccurate** (lead-forge-mental-model: `sources`
+  "directory patterns from the todo item title") — should name the
+  `Source paths:` segment of the title; align with the "paths from the todo item
+  title" wording used elsewhere.
+- **MED — title-as-state not resume-safe.** spec-availability is recorded in
+  cold-start step 1 but resume skips cold-start; read it from the title's
+  `spec available:` segment instead. Also spell the title schema out once and
+  reference "the `Source paths:` segment" everywhere (extraction is implicit).
+- **MED — forge-spec "all matching done" resume dead-end** (On:invoke has no
+  exit when every domain is already done) — add "if all done -> On: wrap-up".
+- Low/nits: duplicated loop-control, `lead-write-spec` orphaned refs,
+  `spec-conventions.md` vs `convention.read` style. Defer or fold opportunistically.
+
+Downstream sweep (per audit teammate): bare-`ws/` clean in both forge files;
+wsflow mirror byte-identical. Fixes still need a re-regen
+(`WS_REGEN_MANIFEST` then `WS_REGEN_WSFLOW_RSRC`, `-count=1`) + re-audit before merge.
+
+Also pending in Phase 2 closeout: correct the "lead-sprint marker-resume
+rewrite" misstatement above (Phase 2 was additive, not a rewrite).
+
+Dogfood findings this session (all idea tickets under epic
+`260605-epic-ws-playbook-factory-pivot`): fork executor-narration bug
+`260626-bug-prefer-subagent-fork-executor-narration` — **natural
+direct-edit framing flips opus fork to execution; override-theatre backfires**
+(forge-edit fork succeeded live); hypothesis now instruction-hierarchy, needs
+sonnet-LEAD validation + clean opus repeat. Gap B
+(`260626-bug-ws-todo-enter-derive-surface-gaps`) bit again: `todo.list` hides
+keys, had to guess the `edit` slug to `todo.check`.
