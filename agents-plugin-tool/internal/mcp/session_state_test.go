@@ -609,7 +609,9 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 
 	server := NewServer(root, "test")
 
-	// Fresh mode: call with the reserved sentinel key (not keyless).
+	// Fresh mode: call with the reserved sentinel key (not keyless). The sentinel
+	// is never minted, so the keyed lead-only gate sees a lookup-miss and skips;
+	// the call reaches the handler, which maps the sentinel to fresh mode.
 	resp := callToolWithKey(t, server, 5001, freshBootstrapKey, "ws.workflow_manual", nil)
 
 	// Self-bootstrap fragment must be present (gated region is KEPT).
@@ -670,6 +672,11 @@ func TestWorkflowManualDelegateKeyBlocked(t *testing.T) {
 	// Must receive the lead-only profile rejection (JSON-RPC error -32601).
 	if !strings.Contains(rawResp, "tool not available in current") {
 		t.Errorf("delegate key: expected lead-only rejection, got:\n%s", rawResp)
+	}
+	// The rejection must carry the keyed-gate RPC error code (-32601), not a soft
+	// text response — confirm the code is present in the raw JSON-RPC error.
+	if !strings.Contains(rawResp, "-32601") {
+		t.Errorf("delegate key: expected JSON-RPC error code -32601, got:\n%s", rawResp)
 	}
 	// Must NOT contain a manual body.
 	if strings.Contains(rawResp, "mint your lead key") || strings.Contains(rawResp, "Session State") {
@@ -742,6 +749,16 @@ func TestWorkflowManualUnknownKey(t *testing.T) {
 	// Bootstrap line must be ABSENT in fail-loud mode (Phase 3a: stripped, not kept).
 	if strings.Contains(resp, "mint your lead key") {
 		t.Errorf("unknown key: self-bootstrap fragment must be absent (fail-loud strips it):\n%s", resp)
+	}
+	// Fail-loud renders NO manual body, so the always-shown per-root rule and the
+	// ws.ferrule mention it carries must be absent — a non-lead caller reaching
+	// fail-loud (any unregistered key) must not learn the lead self-bootstrap call.
+	if strings.Contains(resp, "once per working root") || strings.Contains(resp, "ferrule") {
+		t.Errorf("unknown key: manual body / ferrule mention must be absent in fail-loud:\n%s", resp)
+	}
+	// The recovery pointer names only the lead-revive skill (no ferrule/sentinel).
+	if !strings.Contains(resp, "lead-revive") {
+		t.Errorf("unknown key: fail-loud notice should point to lead-revive recovery:\n%s", resp)
 	}
 	// Must NOT have minted a key file. Use os.Stat on the specific record path so
 	// the check is meaningful even when the keys/ directory was never created.

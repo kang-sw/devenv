@@ -109,12 +109,12 @@ func renderSessionState(rec sessionRecord) string {
 	return sb.String()
 }
 
-// handleWorkflowManual implements the ws.workflow_manual tool. It renders the
-// lead-workflow-manual playbook through the same pipeline as playbook.print,
-// then branches on the session_key to produce fresh, continue, or fail-loud
-// output. A valid session_key is required; keyless calls receive a hard error.
-// The reserved freshBootstrapKey sentinel triggers fresh mode for callers who
-// have not yet minted a lead key.
+// handleWorkflowManual implements the ws.workflow_manual tool. A valid
+// session_key is required; keyless calls receive a hard error. Behaviour by key:
+//   - reserved freshBootstrapKey sentinel -> FRESH (manual + gated bootstrap line);
+//   - resolves to a record -> CONTINUE (manual, bootstrap stripped, + Session State);
+//   - syntactically valid but unresolvable, non-sentinel -> FAIL-LOUD: a minimal
+//     no-restore notice with NO manual body rendered (see below), never minting.
 func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) response {
 	key, _ := args["session_key"].(string)
 	key = strings.TrimSpace(key)
@@ -125,7 +125,21 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: a valid session_key is required"))
 	}
 
-	// Render the manual body through the same pipeline as playbook.print.
+	// 2. FAIL-LOUD up front, BEFORE rendering: a syntactically valid but
+	//    unresolvable, non-sentinel key must NOT receive the manual body at all.
+	//    The body's always-shown per-root rule names ws.ferrule (the lead
+	//    self-bootstrap call); any unregistered key bypasses the lead-only keyed
+	//    gate via lookup-miss, so a non-lead caller reaching this path could read
+	//    that mention to discover the escalation. Return only a no-restore notice
+	//    naming lead-revive (a skill, not the ferrule/sentinel surface). NEVER mint.
+	rec, recOK := s.sessions.readState(key)
+	if key != freshBootstrapKey && !recOK {
+		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
+		return toolTextResponse(id, notice+"\n", nil)
+	}
+
+	// Render the manual body (FRESH + CONTINUE only) through the same pipeline as
+	// playbook.print.
 	rsrcRoot, err := resolveRsrcRoot("")
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: resolve rsrc root: %w", err))
@@ -144,26 +158,15 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: render playbook: %w", err))
 	}
 
-	// Resolve the session record before branching; the sentinel branch precedes
-	// the recOK branch so a non-existent sentinel record never affects behaviour.
-	rec, recOK := s.sessions.readState(key)
-	switch {
-	case key == freshBootstrapKey:
-		// 2. FRESH (sentinel): keep the gated bootstrap line; strip only markers.
+	// Only FRESH (sentinel) and CONTINUE (recOK) remain; the sentinel branch is
+	// checked first so it never depends on a (non-existent) sentinel record.
+	if key == freshBootstrapKey {
+		// 3. FRESH (sentinel): keep the gated bootstrap line; strip only markers.
 		body = stripModeGatedRegion(body, true)
-
-	case recOK:
-		// 3. CONTINUE: strip both markers and inner content; append Session State.
+	} else {
+		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
 		body = stripModeGatedRegion(body, false)
 		body += "\n\n" + renderSessionState(rec)
-
-	default:
-		// 4. FAIL-LOUD: syntactically valid key but no stored record. Strip the
-		//    bootstrap line (changed from keep in Phase 3a) — the caller should
-		//    revive via a surviving key, not re-bootstrap. Append notice. NEVER mint.
-		body = stripModeGatedRegion(body, false)
-		body += "\n\n## Session State\n" +
-			fmt.Sprintf("(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo.)", key)
 	}
 
 	return toolTextResponse(id, body+"\n", nil)
