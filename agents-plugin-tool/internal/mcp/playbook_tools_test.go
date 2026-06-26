@@ -575,7 +575,19 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 			t.Fatalf("wsflow playbook output contains forbidden %q:\n%s", forbidden, body)
 		}
 	}
-	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
+	// Check for bare ws namespace notation, excluding HTML comment lines.
+	// HTML comment marker tokens (e.g. <!-- ws:fresh-only:start -->) are inert
+	// Markdown and are not namespace notation; filtering them avoids false positives.
+	bodyLinesWithoutComments := strings.Join(func() []string {
+		var out []string
+		for _, line := range strings.Split(body, "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "<!--") {
+				out = append(out, line)
+			}
+		}
+		return out
+	}(), "\n")
+	if regexp.MustCompile(`\bws[/:]`).MatchString(bodyLinesWithoutComments) {
 		t.Fatalf("wsflow playbook output contains bare ws namespace notation:\n%s", body)
 	}
 	if strings.Contains(body, "{{.") {

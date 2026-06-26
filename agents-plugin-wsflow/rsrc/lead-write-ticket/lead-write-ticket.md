@@ -9,7 +9,7 @@ Target: user request
 
 ## Invariants
 
-- Ticket conventions: call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
+- Ticket conventions: call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")` for structural rules (path format, status flow, phase rules, stem rules). For typed body skeletons, call `{{.McpNamespace}}/tickets.template(type: "<category>")` after classify.
 - Aside from required conventions, focus updates, and explicitly routed spec or mental-model checks, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
@@ -22,46 +22,43 @@ Target: user request
 
 ## On: invoke
 
-### 1. Resolve
+### 1. Route
 
 1. Call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")`.
-
-### 2. Route
-
-1. Classify category/status; mark **judge: spec-address-gate** for any non-`epic`, non-`research`, non-`workset` ticket entering `ready/`.
+2. Classify category/status; mark **judge: spec-address-gate** for any non-`epic`, non-`research`, non-`workset` ticket entering `ready/`.
 2. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
 3. For a proceed-routed actionable `todo/` ticket, set the requested change to ready promotion.
 
-### 3. Load
+### 2. Load
 
 1. If `user request` references an existing ticket, read it.
 2. For actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
 3. For workset creation or edits, verify each existing included ticket's path, current status directory, and stated role; convert missing tickets to planned references or stop on a blocker.
 
-### 4. Consent Gate
+### 3. Consent Gate
 
 1. Apply `judge: needs-open-decision-queue`; if it fires, run **Open Decision Queue** before editing ticket text.
 
-### 5. Write
+### 4. Write
 
 1. For a new ticket, run **Create Ticket**.
 2. For an existing ticket, run **Edit Ticket**.
 
-### 6. Verify
+### 5. Verify
 
 1. Run **Intent Review**.
 2. Run **Spec-address Check**.
 
-### 7. Commit
+### 6. Commit
 
 1. If no file changed because the requested move was refused, skip commit.
 2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
-### 8. Sage Review Gate
+### 7. Sage Review Gate
 
 1. Run **Sage Review Gate**.
 
-### 9. Handoff
+### 8. Handoff
 
 1. Run **Output Handoff**.
 
@@ -71,6 +68,7 @@ Target: user request
 
 1. Determine category through `judge: ticket-category`.
 2. Choose the initial status directory through `judge: initial-status`.
+3. Call `{{.McpNamespace}}/tickets.template(type: "<category>")` to load the typed body skeleton.
 
 ### 2. Draft
 
@@ -100,6 +98,7 @@ Target: user request
 ### 1. Load
 
 1. Read the ticket first when it was not already loaded.
+2. If the ticket type is known, call `{{.McpNamespace}}/tickets.template(type: "<type>")` for skeleton reference.
 
 ### 2. Apply Change
 

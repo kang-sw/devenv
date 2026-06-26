@@ -51,17 +51,20 @@ include only local arguments that affect the current step.
 
 `ws.ferrule`
 
-At the start of any lead workflow session, call
-`ws.ferrule(root: "<absolute-working-directory>")` to mint your session key.
-The name is deliberately non-descriptive and is taught only here: it is the lead
-session-bootstrap call, so subagents that share this MCP connection have no
-semantic cue to invoke it. Pass the repository's absolute filesystem path as
-`root`; the MCP server cannot infer the agent's current directory from
-placeholders or relative paths. Each key binds to one canonical repository
-root — the git top-level of the path you pass — and a git worktree resolves to
-its own top-level, so it counts as a distinct root. Call `ws.ferrule` once per
-working root, and thread the matching `session_key` through every subsequent
-root-aware {{.McpNamespace}} tool call that targets that root.
+<!-- ws:fresh-only:start -->
+You have no session key yet: call `ws.ferrule(root: "<absolute-working-directory>")`
+for this root to mint your lead key. The name is deliberately non-descriptive
+and is taught only here: it is the lead session-bootstrap call, so subagents
+that share this MCP connection have no semantic cue to invoke it. Pass the
+repository's absolute filesystem path as `root`; the MCP server cannot infer
+the agent's current directory from placeholders or relative paths.
+<!-- ws:fresh-only:end -->
+
+Each key binds to one canonical repository root — the git top-level of the path
+you pass — and a git worktree resolves to its own top-level, so it counts as a
+distinct root. Call `ws.ferrule` once per working root, and thread the matching
+`session_key` through every subsequent root-aware {{.McpNamespace}} tool call
+that targets that root.
 
 ### User preferences
 

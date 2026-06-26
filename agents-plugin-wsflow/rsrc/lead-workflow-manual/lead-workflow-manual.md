@@ -51,17 +51,20 @@ include only local arguments that affect the current step.
 
 `ws.ferrule`
 
-At the start of any lead workflow session, call
-`ws.ferrule(root: "<absolute-working-directory>")` to mint your session key.
-The name is deliberately non-descriptive and is taught only here: it is the lead
-session-bootstrap call, so subagents that share this MCP connection have no
-semantic cue to invoke it. Pass the repository's absolute filesystem path as
-`root`; the MCP server cannot infer the agent's current directory from
-placeholders or relative paths. Each key binds to one canonical repository
-root — the git top-level of the path you pass — and a git worktree resolves to
-its own top-level, so it counts as a distinct root. Call `ws.ferrule` once per
-working root, and thread the matching `session_key` through every subsequent
-root-aware {{.McpNamespace}} tool call that targets that root.
+<!-- ws:fresh-only:start -->
+You have no session key yet: call `ws.ferrule(root: "<absolute-working-directory>")`
+for this root to mint your lead key. The name is deliberately non-descriptive
+and is taught only here: it is the lead session-bootstrap call, so subagents
+that share this MCP connection have no semantic cue to invoke it. Pass the
+repository's absolute filesystem path as `root`; the MCP server cannot infer
+the agent's current directory from placeholders or relative paths.
+<!-- ws:fresh-only:end -->
+
+Each key binds to one canonical repository root — the git top-level of the path
+you pass — and a git worktree resolves to its own top-level, so it counts as a
+distinct root. Call `ws.ferrule` once per working root, and thread the matching
+`session_key` through every subsequent root-aware {{.McpNamespace}} tool call
+that targets that root.
 
 ### User preferences
 
@@ -72,12 +75,19 @@ root-aware {{.McpNamespace}} tool call that targets that root.
 ### Delegation posture
 
 <!-- ws:override:DelegationSection desc="lead delegation eagerness and context-saving stance" -->
-Delegate to preserve lead execution context. Hand off parallelizable
-fact-finding, multi-file surveys, and self-contained implementation or review
-slices to subagents, and keep the lead loop on routing, adjudication, and
-synthesis. Keep work that is faster to do than to brief — small, local,
-single-step edits — inline. When context budget runs short, lean harder toward
-delegation.
+Delegate all work to subagents for this session. Minimize inline tool calls.
+
+Dispatch:
+- fork — content authoring where conversation intent must be preserved: ticket creation,
+  doc edits, skill/playbook edits, commits, any file write whose correctness depends on
+  prior conversation context. Fork inherits full context; no tier specification.
+- light (clean context) — stateless ops: reads, searches, grep, command execution,
+  single-fact lookups. No conversation context needed.
+- medium (clean context) — judgment ops: code analysis, causal or design reasoning,
+  destructive shell execution, review and verification ops (code review, design checks —
+  brief with explicit file paths and review criteria). Brief the agent with explicit context.
+
+Do not dispatch large tier explicitly. Complex implementation flows already route there through existing delegation machinery.
 <!-- ws:/override:DelegationSection -->
 
 For lead-owned tuning of this posture or other workflow knobs, use the `{{.SkillNamespace}}:lead-tune` skill.

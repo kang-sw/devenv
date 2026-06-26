@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -499,5 +500,294 @@ func TestServeStdioTodoListRequiresSessionKey(t *testing.T) {
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	if !strings.Contains(byID["1"], "session_key is required") {
 		t.Fatalf("expected session_key-required error, got: %s", byID["1"])
+	}
+}
+
+// --- Phase 3a: stripModeGatedRegion pure-logic tests (TDD) -------------------
+
+func TestStripModeGatedRegion_NoMarker(t *testing.T) {
+	body := "line one\nline two\nline three"
+	// Without any marker, the body should be unchanged regardless of keepContent.
+	if got := stripModeGatedRegion(body, true); got != body {
+		t.Fatalf("keepContent=true mutated marker-free body:\n got: %q\nwant: %q", got, body)
+	}
+	if got := stripModeGatedRegion(body, false); got != body {
+		t.Fatalf("keepContent=false mutated marker-free body:\n got: %q\nwant: %q", got, body)
+	}
+}
+
+func TestStripModeGatedRegion_KeepContent(t *testing.T) {
+	// keepContent=true: marker lines removed, inner content kept.
+	body := "before\n<!-- ws:fresh-only:start -->\nbootstrap line\n<!-- ws:fresh-only:end -->\nafter"
+	want := "before\nbootstrap line\nafter"
+	if got := stripModeGatedRegion(body, true); got != want {
+		t.Fatalf("keepContent=true:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestStripModeGatedRegion_StripContent(t *testing.T) {
+	// keepContent=false: marker lines AND inner content removed.
+	body := "before\n<!-- ws:fresh-only:start -->\nbootstrap line\n<!-- ws:fresh-only:end -->\nafter"
+	want := "before\nafter"
+	if got := stripModeGatedRegion(body, false); got != want {
+		t.Fatalf("keepContent=false:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestStripModeGatedRegion_MultipleLines(t *testing.T) {
+	// Multiple inner lines in the gated region.
+	body := "before\n<!-- ws:fresh-only:start -->\nline A\nline B\nline C\n<!-- ws:fresh-only:end -->\nafter"
+	wantKeep := "before\nline A\nline B\nline C\nafter"
+	wantStrip := "before\nafter"
+	if got := stripModeGatedRegion(body, true); got != wantKeep {
+		t.Fatalf("multi-line keep:\n got: %q\nwant: %q", got, wantKeep)
+	}
+	if got := stripModeGatedRegion(body, false); got != wantStrip {
+		t.Fatalf("multi-line strip:\n got: %q\nwant: %q", got, wantStrip)
+	}
+}
+
+func TestStripModeGatedRegion_MultipleRegions(t *testing.T) {
+	// Multiple gated regions in one body.
+	body := "a\n<!-- ws:fresh-only:start -->\nR1\n<!-- ws:fresh-only:end -->\nb\n<!-- ws:fresh-only:start -->\nR2\n<!-- ws:fresh-only:end -->\nc"
+	wantKeep := "a\nR1\nb\nR2\nc"
+	wantStrip := "a\nb\nc"
+	if got := stripModeGatedRegion(body, true); got != wantKeep {
+		t.Fatalf("multi-region keep:\n got: %q\nwant: %q", got, wantKeep)
+	}
+	if got := stripModeGatedRegion(body, false); got != wantStrip {
+		t.Fatalf("multi-region strip:\n got: %q\nwant: %q", got, wantStrip)
+	}
+}
+
+func TestStripModeGatedRegion_UnclosedMarker(t *testing.T) {
+	// Unclosed start marker: trailing lines treated per keepContent.
+	body := "before\n<!-- ws:fresh-only:start -->\norphaned line\nno end marker"
+	wantKeep := "before\norphaned line\nno end marker"
+	wantStrip := "before"
+	if got := stripModeGatedRegion(body, true); got != wantKeep {
+		t.Fatalf("unclosed keep:\n got: %q\nwant: %q", got, wantKeep)
+	}
+	if got := stripModeGatedRegion(body, false); got != wantStrip {
+		t.Fatalf("unclosed strip:\n got: %q\nwant: %q", got, wantStrip)
+	}
+}
+
+// callToolNoKey issues a single tools/call MCP request WITHOUT injecting a
+// session_key — needed to test the fresh-mode path of ws.workflow_manual.
+func callToolNoKey(t *testing.T, server *Server, id int, name string, args map[string]any) string {
+	t.Helper()
+	if args == nil {
+		args = map[string]any{}
+	}
+	// Do NOT inject session_key (contrast with callToolWithKey).
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params":  map[string]any{"name": name, "arguments": args},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(string(raw)+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio(%s) error: %v", name, err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	return toolText(t, byID[fmt.Sprint(id)])
+}
+
+// --- Phase 3a: ws.workflow_manual integration tests --------------------------
+
+func TestWorkflowManualFreshMode(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	// Fresh mode: no session_key supplied.
+	resp := callToolNoKey(t, server, 5001, "ws.workflow_manual", nil)
+
+	// Self-bootstrap fragment must be present (gated region is KEPT).
+	if !strings.Contains(resp, "mint your lead key") {
+		t.Errorf("fresh mode: self-bootstrap fragment absent from response:\n%s", resp)
+	}
+	// Per-root rule fragment must be present (always shown).
+	if !strings.Contains(resp, "once per working root") {
+		t.Errorf("fresh mode: per-root rule fragment absent from response:\n%s", resp)
+	}
+	// No "Session State" section in fresh mode.
+	if strings.Contains(resp, "Session State") {
+		t.Errorf("fresh mode: unexpected Session State section in response:\n%s", resp)
+	}
+}
+
+func TestWorkflowManualContinueMode(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 5100, root, nil))
+
+	// Enter implement mode to populate agenda+todos.
+	enter := callToolWithKey(t, server, 5101, key, "ws.enter.implement", map[string]any{
+		"delegation": "delegated", "need_review": true, "need_doc": false,
+	})
+	if !strings.Contains(enter, "entered implement mode") {
+		t.Fatalf("enter.implement unexpected: %s", enter)
+	}
+
+	// Continue mode: key present and resolves.
+	resp := callToolWithKey(t, server, 5102, key, "ws.workflow_manual", nil)
+
+	// Self-bootstrap fragment must be ABSENT (stripped in continue mode).
+	if strings.Contains(resp, "mint your lead key") {
+		t.Errorf("continue mode: self-bootstrap fragment should be absent:\n%s", resp)
+	}
+	// Per-root rule fragment must be present (always shown).
+	if !strings.Contains(resp, "once per working root") {
+		t.Errorf("continue mode: per-root rule fragment absent:\n%s", resp)
+	}
+	// Session State section must be present.
+	if !strings.Contains(resp, "Session State") {
+		t.Errorf("continue mode: Session State section absent:\n%s", resp)
+	}
+	// Agenda content present (the implement blob).
+	if !strings.Contains(resp, "implement") {
+		t.Errorf("continue mode: agenda key 'implement' absent:\n%s", resp)
+	}
+	// Todo summary content present (Route and Prep are active).
+	if !strings.Contains(resp, "Route") {
+		t.Errorf("continue mode: todo 'Route' absent from summary:\n%s", resp)
+	}
+	if !strings.Contains(resp, "Prep") {
+		t.Errorf("continue mode: todo 'Prep' absent from summary:\n%s", resp)
+	}
+}
+
+func TestWorkflowManualUnknownKey(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheDir)
+
+	server := NewServer(root, "test")
+
+	// Use a syntactically valid but never-minted key.
+	badKey := "no-such-key-here"
+	resp := callToolWithKey(t, server, 5200, badKey, "ws.workflow_manual", nil)
+
+	// Must contain the no-restorable-state notice.
+	if !strings.Contains(resp, "no restorable state for session key") {
+		t.Errorf("unknown key: no-restorable-state notice absent:\n%s", resp)
+	}
+	// Must NOT have minted a key file (check the keys dir).
+	keysDir := filepath.Join(cacheDir, "keys")
+	entries, err := filepath.Glob(filepath.Join(keysDir, "*.json"))
+	if err != nil {
+		t.Fatalf("glob keys dir: %v", err)
+	}
+	// No file should exist for the unknown key.
+	for _, entry := range entries {
+		if strings.Contains(entry, badKey) {
+			t.Errorf("unknown key: key file was minted: %s", entry)
+		}
+	}
+}
+
+func TestWorkflowManualGitCommitReinjection(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 5300, root, nil))
+
+	// Enter implement mode to populate todos.
+	callToolWithKey(t, server, 5301, key, "ws.enter.implement", map[string]any{
+		"delegation": "delegated", "need_review": true, "need_doc": false,
+	})
+
+	// Stage a file and commit.
+	testFile := filepath.Join(root, "test-p3a.txt")
+	if err := os.WriteFile(testFile, []byte("p3a test\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	// git add
+	{
+		var out bytes.Buffer
+		payload := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      5302,
+			"method":  "tools/call",
+			"params": map[string]any{"name": "git.commit", "arguments": map[string]any{
+				"session_key": key,
+				"paths":       []any{"test-p3a.txt"},
+				"title":       "test(p3a): re-injection test",
+				"ai_context":  []any{"Phase 3a git.commit re-injection test"},
+			}},
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := server.ServeStdio(context.Background(), strings.NewReader(string(raw)+"\n"), &out); err != nil {
+			t.Fatalf("git.commit error: %v", err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		commitResp := toolText(t, byID["5302"])
+
+		// Assert that the commit response contains a todo summary fragment.
+		if !strings.Contains(commitResp, "Route") && !strings.Contains(commitResp, "- [") {
+			t.Errorf("git.commit re-injection: todo summary absent from response:\n%s", commitResp)
+		}
+	}
+
+	// Also assert: a commit with no todos appends nothing extra.
+	// Create a new session with no todos, commit, and check the output shape.
+	root2 := t.TempDir()
+	initGit(t, root2)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server2 := NewServer(root2, "test")
+	key2, _ := parseLoginResponse(t, callLogin(t, server2, 5400, root2, nil))
+
+	testFile2 := filepath.Join(root2, "test-p3a-notodo.txt")
+	if err := os.WriteFile(testFile2, []byte("no todo\n"), 0o644); err != nil {
+		t.Fatalf("write test file2: %v", err)
+	}
+	{
+		var out bytes.Buffer
+		payload := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      5401,
+			"method":  "tools/call",
+			"params": map[string]any{"name": "git.commit", "arguments": map[string]any{
+				"session_key": key2,
+				"paths":       []any{"test-p3a-notodo.txt"},
+				"title":       "test(p3a): no-todo commit",
+				"ai_context":  []any{"no-todo test"},
+			}},
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := server2.ServeStdio(context.Background(), strings.NewReader(string(raw)+"\n"), &out); err != nil {
+			t.Fatalf("git.commit(no-todo) error: %v", err)
+		}
+		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+		commitResp := toolText(t, byID["5401"])
+		// No todo summary section appended.
+		if strings.Contains(commitResp, "Todo (post-commit)") {
+			t.Errorf("git.commit(no-todo): unexpected Todo section:\n%s", commitResp)
+		}
 	}
 }

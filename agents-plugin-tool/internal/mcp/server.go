@@ -392,6 +392,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleTodoList(req.ID, params.Arguments)
 	case "ws.todo.reorder":
 		return s.handleTodoReorder(req.ID, params.Arguments)
+	case "ws.workflow_manual":
+		return s.handleWorkflowManual(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -704,7 +706,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
-		return toolTextResponse(req.ID, formatGitCommit(result), err)
+		// Re-inject the current session's todo summary after the commit output
+		// (text mode only). resolveToolRoot already required session_key, so it is
+		// available in params.Arguments.
+		commitText := formatGitCommit(result)
+		if commitKey := strings.TrimSpace(func() string { k, _ := params.Arguments["session_key"].(string); return k }()); commitKey != "" {
+			if rec, ok := s.sessions.readState(commitKey); ok && len(rec.Todos) > 0 {
+				commitText += "\n## Todo (post-commit)\n" + renderTodos(rec.Todos, false) + "\n"
+			}
+		}
+		return toolTextResponse(req.ID, commitText, err)
 	case "project_tree":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -2942,6 +2953,17 @@ func tools() []map[string]any {
 					"stems": stringArrayProperty("Logical file stems to allocate in stable order."),
 				},
 				"required": []string{"kind", "stems"},
+			},
+		},
+		{
+			"name":        "ws.workflow_manual",
+			"description": namespaceText("Render the ws workflow primitives manual. With no session_key: fresh mode (includes the session-bootstrap line). With a session_key that resolves: continue mode (omits the bootstrap line, appends restored agenda + todo Session State). With a session_key that does not resolve: fail-loud notice, no key minted."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Optional ws session key. Omit for fresh bootstrap; provide a known key to restore agenda/todo Session State."),
+				},
+				// no "required" — session_key is intentionally optional
 			},
 		},
 		{
