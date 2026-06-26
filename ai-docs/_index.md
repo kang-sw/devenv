@@ -375,17 +375,18 @@ dropped tickets live in hidden archive dirs and git history.
   14 MCP tools — 2 agenda + 4 enter + 8 todo). **Phase 3a done** (`a75b80c2`:
   `ws.workflow_manual` three-mode restoration entry + `git.commit` todo
   re-injection; spec/mental-model closeout in `633c42ff`/`2a086e30`). **Phase 2
-  enter-call slice done** (`83d82077`: `ws.enter.*` wired into
-  lead-implement/proceed/sprint/salvage + salvage `agenda.set`). **Phase 3b done**
+  done** (`83d82077` enter-call integration + `14244ca6` forge/delegate migration
+  + `72503fd1` audit fixes; review-clean on branch
+  `implement/260625-forge-migration-audit-fix`). `lead-sprint` closed additively:
+  `enter.sprint` records pre-first-commit recovery while `Sprint-Edit:` commit
+  markers remain for episode closure/backward recovery. **Phase 3b done**
   (`1860534f`+`ea8c686b`: removed `lead-load-workflow-manual`, added `lead-revive`
   (ws+wsflow), repointed the 4 skills that actually carried a manual self-load line
   — proceed/discuss/sprint/salvage, NOT the ticket's stated 6: lead-tune /
   lead-skill-authoring have no self-load line; plus `ws.workflow_manual` hardening:
   required key, lead-only gate, sentinel-gated fresh, fail-loud minimal). All on
-  branch `implement/260625-ws-session-state-machine`, whole ticket unmerged (nothing
-  on main). **Remaining: Phase 2** forge-spec / forge-mental-model
-  host-task→`ws.todo` migration, `delegate-orientation.md` update, lead-sprint
-  marker-resume rewrite. Follow-up: idea
+  branch `implement/260625-forge-migration-audit-fix`, whole ticket unmerged
+  (nothing on main). Follow-up: idea
   `260626-research-playbook-print-lead-surface-leak` (playbook.print bypasses the
   workflow_manual gate). Version bump deferred to dev-merge.
 
@@ -444,3 +445,15 @@ direct-edit framing flips opus fork to execution; override-theatre backfires**
 sonnet-LEAD validation + clean opus repeat. Gap B
 (`260626-bug-ws-todo-enter-derive-surface-gaps`) bit again: `todo.list` hides
 keys, had to guess the `edit` slug to `todo.check`.
+
+### Closeout: 260625 Phase 2 forge migration audit-fix slice (260626)
+
+Branch `implement/260625-forge-migration-audit-fix` supersedes the unresolved
+review note above: `72503fd1` closes the forge playbook audit gaps, and the
+review set `f37c4743-*` is clean after commit-message heading normalization.
+Phase 2 is fully complete on this branch, not merely the audit-fix slice; the
+ticket remains unmerged and should not be moved to done until the branch is
+integrated through the normal gate. `python3 -m unittest discover
+agents-plugin-wsflow/tests` still fails only on pre-existing `lead-revive`
+inventory drift, captured as
+`260626-bug-wsflow-lead-revive-skill-inventory-drift`.
