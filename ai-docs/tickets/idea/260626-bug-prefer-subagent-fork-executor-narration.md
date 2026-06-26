@@ -113,3 +113,20 @@ fork directive. Decisions:
   single dispatch, and the transcript momentum at dispatch was already
   substantive (not deferral narration), which may have helped — needs a clean
   repeat to separate framing effect from momentum effect.
+
+  **Reframe — instruction-hierarchy, not tier (260626 session 2).** A stronger
+  general hypothesis than "top-tier needs gentler": models are trained to treat
+  USER instructions as top priority and to discount tool-injected / role-play
+  noise. A `<fork>`-wrapped, all-caps, "FORGET YOUR POSTURE" block reads as
+  tool-injected role-play and gets discounted; a natural direct-edit instruction
+  in the user's own voice reads as a top-priority user instruction and gets
+  obeyed. If true, the natural framing is superior across ALL tiers (not just
+  opus) and the override-theatre is structurally self-defeating — so the playbook
+  guidance should change for everyone, not be branched by tier.
+  Validation needed:
+  - **Sonnet fork** with the natural framing. CONSTRAINT: forks inherit the
+    parent tier and ignore the model override, so a sonnet fork cannot be
+    dispatched from an opus lead — this must be run from a sonnet LEAD session.
+    A sonnet fresh-spawn with an injected deferral-narrative context is only a
+    weak proxy (it skips the real inheritance dynamic).
+  - **Clean opus repeat** (above) to rule out the momentum confound.
