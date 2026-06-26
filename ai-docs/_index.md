@@ -164,6 +164,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
+| `260626-bug-ws-todo-enter-derive-surface-gaps` | todo | Surface todo keys uniformly as `{key}` and make `enter.implement` checklist derivation reflect typed verdict inputs |
+| `260626-feat-surface-sage-review-posture` | todo | Stamp self-describing `sage-review:` posture from `sage_review` config so tickets show skipped/recommended/required without a config dive |
 | `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | done | Collapsed wsflow onto product-mode playbook rendering and removed curated skill bodies |
@@ -412,7 +414,9 @@ target. `python3 -m unittest discover agents-plugin-wsflow/tests` still fails
 only on pre-existing `lead-revive` inventory drift, captured as
 `260626-bug-wsflow-lead-revive-skill-inventory-drift`.
 
-Dogfood findings from this session remain as idea tickets under epic
+Dogfood findings from this session remain under epic
 `260605-epic-ws-playbook-factory-pivot`: fork executor-narration bug
-`260626-bug-prefer-subagent-fork-executor-narration`; todo key/list surface gap
-`260626-bug-ws-todo-enter-derive-surface-gaps`.
+`260626-bug-prefer-subagent-fork-executor-narration` remains idea-level; todo
+key/list surface gap `260626-bug-ws-todo-enter-derive-surface-gaps` and
+sage-review posture surface `260626-feat-surface-sage-review-posture` are
+accepted backlog in `todo/`.
