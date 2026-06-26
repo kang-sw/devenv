@@ -55,6 +55,19 @@ fork directive. Decisions:
   direct tool call'."
 - Cap the composed fork prompt body at <=300 words.
 
+## Confirmed (260626 session 2)
+
+- The failure is **model-tier-specific**: on opus the fork override is unusually
+  unreliable (narrates instead of executing); sonnet-level forks honor the same
+  override well. So this is not a universal fork defect — it is concentrated at
+  the top tier.
+- **Forks cannot change tier.** The harness fork mechanism inherits the parent
+  model and ignores any model override; only fresh spawns take a tier. So you
+  cannot run a cheap-tier fork to dodge the opus failure, and you cannot A/B the
+  override-compliance-by-tier question on forks (forks are opus-only here). The
+  failure mode (deferral-narrative inheritance) exists only on forks, but tier is
+  variable only on spawns — the two are orthogonal and can't be isolated together.
+
 ## Open questions / follow-up
 
 - Does the leading-XML-directive shape actually flip execution on this model, or
@@ -62,3 +75,22 @@ fork directive. Decisions:
   fallback)? Validate next session after reinstall.
 - If forks remain unreliable, strengthen the fresh-spawn fallback guidance and
   lower the bar for suspending the posture.
+- **Idea — fork-only "job-ready" playbook indirection.** Add a
+  `ws/playbook.print("<job-ready>")` whose body is a very strong fork-behavior
+  inducer. The lead NEVER reads it (so the forceful text never enters the lead's
+  context and can't be echoed); the lead's dispatch prompt only instructs the
+  fork to call it as its first action. The fork then hits the strong directive
+  fresh at execution time. This moves the forceful prompt out of inherited
+  context entirely — the root cause is inheritance, so removing it from
+  inheritance is the structurally clean lever. Idea-level only; lower priority
+  because sonnet forks already obey, so the practical gap is opus-only.
+- **Hypothesis — forceful directives may trip a guardrail reflex.** The
+  compliance drop is suspiciously large for a top-tier model. Escalating
+  all-caps "YOU ARE A FORKED AGENT / FORGET YOUR POSTURE" framing may read as an
+  adversarial role-override attempt and provoke a protective/refusal reflex that
+  manifests as narration-instead-of-action. Counter-experiment: try a MILD,
+  user-handoff framing instead — e.g. "from now on, start editing manually
+  instead of calling a fork", phrased as if the user handed the instruction
+  over. Test whether mild-and-natural beats forceful-and-aggressive for opus fork
+  override. If so, the playbook guidance (currently "maximally forceful") is
+  pointed the wrong way for top-tier models.
