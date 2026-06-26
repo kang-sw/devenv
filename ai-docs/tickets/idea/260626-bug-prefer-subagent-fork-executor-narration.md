@@ -94,3 +94,22 @@ fork directive. Decisions:
   over. Test whether mild-and-natural beats forceful-and-aggressive for opus fork
   override. If so, the playbook guidance (currently "maximally forceful") is
   pointed the wrong way for top-tier models.
+
+  **Early live confirmation (260626 session 2).** Dispatched the real forge
+  Phase 2 edit to an opus fork with a MILD, delimiter-free leading directive
+  ("from here on you're doing this editing work yourself, directly … don't
+  sub-delegate … start with a tool call") — no XML wrapper, no all-caps, no
+  role-override theatre. The fork executed immediately (made direct edits)
+  instead of narrating — same model, same task class that narrated three times
+  under forceful/delimited directives. Refined hypothesis: the discriminating
+  axis is NOT mild-vs-forceful intensity but **natural-instruction vs
+  override-theatre**. A delimiter-wrapped, all-caps, "FORGET YOUR POSTURE" block
+  reads as an adversarial role-override and provokes a contrarian/refusal reflex;
+  a plain direct-edit instruction in the user's own voice does not. This
+  contradicts the current playbook guidance (which mandates an `<fork>`-wrapped,
+  all-caps, "maximally forceful" directive). If a full run + a clean repeat
+  confirm, the playbook guidance should INVERT for top-tier models: drop the
+  delimiter and the theatre, prefer a short natural direct-edit handoff. Caveat:
+  single dispatch, and the transcript momentum at dispatch was already
+  substantive (not deferral narration), which may have helped — needs a clean
+  repeat to separate framing effect from momentum effect.
