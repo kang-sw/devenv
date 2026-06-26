@@ -26,7 +26,7 @@ Call `{{.McpNamespace}}/project_tree()`.
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
+1. Call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline; reload after session compaction (a duplicate load is safe). After compaction, recover your key via `{{.SkillNamespace}}:lead-revive` first. No lead key yet (fresh start)? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
 2. Call `{{.McpNamespace}}/git.status()`.
 3. Identify target kind: branch, sprint, commit range, ticket graph, worktree diff, agent run, or user-described failure.
 4. Enter **Containment**.

@@ -41,7 +41,7 @@ Response
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline. Reload after session compaction; a duplicate load is safe.
+1. Call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline; reload after session compaction (a duplicate load is safe). After compaction, recover your key via `{{.SkillNamespace}}:lead-revive` first. No lead key yet (fresh start)? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
 2. Call `{{.McpNamespace}}/project_tree()` to load the current project map.
 3. Call `{{.McpNamespace}}/git.status()`.
 4. If `user request` references a ticket, read it.
