@@ -305,3 +305,10 @@ installed plugin packaging changes.
   cache-local binary and compare it with `runtime.json`.
 - Windows startup reports Python alias problems: install Python 3 and refresh
   the plugin so Codex rematerializes the MCP entry.
+- Routing or implementation context lost after context compaction: expected — the
+  transcript is summarized, but session state persists in
+  `<cache-root>/keys/<session-key>.json`. Recover by calling
+  `ws.workflow_manual(session_key: <key preserved in the compaction summary>)`,
+  which reloads the manual primitives and restores the agenda/todo Session State.
+  Do not call `ws.ferrule` to "re-enter" — it is non-idempotent and mints a new key,
+  orphaning the prior state.

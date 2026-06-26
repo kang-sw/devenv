@@ -38,6 +38,7 @@ related:
 - Runtime install/repair has explicit override env vars: `WS_MCP_RUNTIME_DIR`, release repository/tag/base URL overrides, and bootstrap binary/URL/checksum overrides. Bootstrap binary/URL overrides are force-install inputs, not merely fallback repair sources.
 - The launcher exports `WS_MCP_RUNTIME_BINARY`; named-agent async workers use it to avoid spawning from stale plugin-cache executables after a plugin refresh.
 - `ai-docs/ref/ws-mcp.md` is a launcher and operations runbook, not the plugin runtime contract; update `spec/plugin-runtime.md`, `runtime.json`, and `runtime.capabilities` when caller-visible compatibility behavior changes. {#260524-reference-document-ownership}
+- Context compaction orphans in-flight routing context but the session record survives on disk. A continued agent recovers by passing its surviving session key to `ws.workflow_manual` — the tool reloads the primitives plus the restored agenda/todo block. `ws.ferrule` is non-idempotent; a second call mints a new key and orphans the prior record. See `mcp-runtime.md` for tool behavior and spec `{#260626-post-compaction-session-restoration}` for the full contract.
 
 ## Coupling
 

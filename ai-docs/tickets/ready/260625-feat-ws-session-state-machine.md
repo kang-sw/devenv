@@ -396,6 +396,35 @@ ferrule rule, and shows restored agenda (remind) + todo (summary); unknown-key
 render fails loud without minting; checkpoint probe confirms todo summary
 re-injects after `ws.commit`; drift guards green.
 
+### Result (a75b80c2) - 2026-06-26
+
+Landed `ws.workflow_manual(session_key?)` and the `git.commit` todo re-injection.
+
+- New `internal/mcp/workflow_manual.go`: `handleWorkflowManual` (three modes —
+  fresh / continue / fail-loud), the `stripModeGatedRegion` pure helper, and
+  `renderSessionState`. Fresh keeps the gated self-bootstrap line; continue strips
+  it and appends a restored `## Session State` (agenda remind + todo summary);
+  fail-loud appends a no-restore notice and never mints a key.
+- `lead-workflow-manual.md`: the self-bootstrap line is wrapped in a dedicated
+  `<!-- ws:fresh-only:start/end -->` mode-gating marker (distinct from product-mode
+  and override markers); the always-shown per-root ferrule rule stays outside it.
+- `server.go`: dispatch case + `tools()` schema (`session_key` optional) +
+  text-mode `git.commit` todo re-injection (`## Todo (post-commit)`), skipped for
+  JSON output and empty todos, never auto-marking.
+- Registered in both `runtime.json` files under fence `>=0.30.8-dev <0.31.0`.
+- Regenerated manifest + wsflow rsrc mirror; drift guards green. Tests:
+  `TestStripModeGatedRegion_*`,
+  `TestWorkflowManual{FreshMode,ContinueMode,UnknownKey,GitCommitReinjection}`
+  (commit 9595087b strengthened the agenda/no-mint assertions).
+- Spec + mental-model closeout was deferred to the Phase 2 doc pre-pass (commits
+  633c42ff, 2a086e30): mcp-tools.md + plugin-runtime.md spec stems, the
+  mcp-runtime/plugin-runtime/workflow-skills mental models, and the ws-mcp.md
+  runbook recovery note.
+
+> Forward: Phase 3b (skill restructure — add `lead-revive`, remove
+> `lead-load-workflow-manual`, repoint the six manual-self-load skills to
+> `ws.workflow_manual`) depends on this tool.
+
 ### Phase 3b: Manual-entry skill restructure
 
 Depends on Phase 3a (the `ws.workflow_manual` tool must exist before skills call

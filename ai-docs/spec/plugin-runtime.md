@@ -253,6 +253,20 @@ Old runtimes that do not provide the command are not silently trusted. During
 the transition, the launcher either falls back to the existing bounded full
 validation path or repairs the runtime before writing a compatibility stamp.
 
+## Post-Compaction Session Restoration {#260626-post-compaction-session-restoration}
+
+Context compaction discards in-flight routing and implementation context from the
+session transcript, but the runtime persists session state on disk in the
+per-session record (`<cache-root>/keys/<session-key>.json`), so the session key —
+preserved in the compaction summary — is the only anchor needed to recover. The
+`ws.workflow_manual` MCP tool is the runtime's restoration entry point: a continued
+agent passes its surviving session key and receives the reloaded primitives plus the
+restored agenda/todo Session State. Because `ws.ferrule` is non-idempotent (a second
+call on the same root mints a new key and orphans the prior record), restoration
+relies on threading the original key rather than re-minting; `ws.workflow_manual`
+never mints a key, so a stale or missing key fails loud instead of silently starting
+a fresh session.
+
 ## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 
 The runtime publishes Windows assets and verifies Windows executable startup in

@@ -376,12 +376,18 @@ dropped tickets live in hidden archive dirs and git history.
   machine: agenda/todo persistence across compaction. Storage extends the
   existing `sessionRecord` (`<cache-root>/keys/<session-key>.json`, written by
   `ws.ferrule`) with additive `agenda`/`todos` fields, reusing
-  `writeRecordAtomic`/`readRecord` — no new package. **Phase 1 done**
-  (`54f94a53`, branch `implement/260625-ws-session-state-machine-p1`, unmerged):
-  14 MCP tools (2 agenda + 4 enter + 8 todo), both `runtime.json` files, spec
-  section, 15 tests green. **Next: Phase 2** (existing-skill integration) — note
-  `ws.enter.implement` needs `need_review`/`need_doc` + every enter/todo tool
-  needs `session_key`, both absent from the ticket's Phase 2 param tuples.
+  `writeRecordAtomic`/`readRecord` — no new package. **Phase 1 done** (`54f94a53`:
+  14 MCP tools — 2 agenda + 4 enter + 8 todo). **Phase 3a done** (`a75b80c2`:
+  `ws.workflow_manual` three-mode restoration entry + `git.commit` todo
+  re-injection; spec/mental-model closeout in `633c42ff`/`2a086e30`). **Phase 2
+  enter-call slice done** (`83d82077`: `ws.enter.*` wired into
+  lead-implement/proceed/sprint/salvage + salvage `agenda.set`). All on branch
+  `implement/260625-ws-session-state-machine-p1`, whole ticket unmerged (nothing on
+  main). **Remaining: Phase 2** forge-spec / forge-mental-model host-task→`ws.todo`
+  migration, `delegate-orientation.md` update, lead-sprint marker-resume rewrite;
+  **Phase 3b** skill restructure (add `lead-revive`, remove
+  `lead-load-workflow-manual`, repoint 6 manual-self-load skills). Version bump
+  deferred to dev-merge.
 
 ## Session Notes
 

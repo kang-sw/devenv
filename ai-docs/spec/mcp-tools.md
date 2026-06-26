@@ -248,6 +248,32 @@ collapses the same as `done`. Full mode shows every item in order. `ws.commit`
 does not auto-mark todos; status transitions are always explicit via
 `ws.todo.check`.
 
+### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
+
+`ws.workflow_manual(session_key?)` is the canonical workflow-manual entry tool. It
+renders the `lead-workflow-manual` playbook through the same variable substitution
+as `playbook.print` — the rsrc playbook stays the single prompt source of truth —
+and branches on `session_key` to surface mode-dependent restoration content:
+
+- **fresh** (`session_key` omitted or empty): the primitives reference plus the
+  always-shown per-root rule (call `ws.ferrule` once per working root and thread its
+  key) and the self-bootstrap line ("you have no key yet; mint one with
+  `ws.ferrule`").
+- **continue** (`session_key` present and its record resolves): the primitives plus
+  the per-root rule, with the self-bootstrap line omitted, followed by a restored
+  **Session State** section — agenda blobs as a remind list and the todo list in
+  summary mode, rendered server-side from the session record.
+- **fail-loud** (`session_key` present but no record resolves): the primitives plus
+  an explicit "no restorable state for this key" notice. The tool never mints a key
+  in this mode — a missing record is surfaced, not silently re-bootstrapped.
+
+The fresh-only self-bootstrap line is delimited in the rsrc by a dedicated
+mode-gating marker that only this tool's handler consumes; it is independent of the
+prompt override-marker engine and the product-mode markers. The handler owns mode
+branching and the Session State scaffolding only; all manual prose lives in the
+rsrc. The pre-existing `playbook.print(name: "lead-workflow-manual")` path stays
+valid as the ungated fresh form for backward compatibility.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
@@ -598,6 +624,12 @@ same-stem ticket status move even when native Git reports the staged change as
 separate add/delete records instead of a rename. Ambiguous add/delete sets remain
 non-move ticket changes rather than inventing a destination status.
 {#260519-git-commit-add-delete-ticket-move-summary}
+After a successful commit, `git.commit` re-injects the calling session's todo list
+as a summary-mode block appended to the text-mode commit response, so a checkpoint
+commit doubles as a todo restoration point. The injection is text-mode only and is
+skipped when the session holds no todos or when structured JSON output is requested;
+it does not change todo status — `git.commit` never auto-marks items done.
+{#260626-git-commit-todo-reinjection}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
