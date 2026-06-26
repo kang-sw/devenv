@@ -1,6 +1,6 @@
 ---
 title: "Surface sage-review posture without a config/frontmatter dive"
-sage-review: skipped
+sage-review: recommended
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260622-feat-sage-review-ticket-gate: current-gate
@@ -91,11 +91,12 @@ Verification boundary:
 
 ## Spec Impact
 
-Target spec area: `ai-docs/spec/mcp-tools.md` ticket mutation tools and sage
-review gate.
+Addressed by planned callout in `ai-docs/spec/mcp-tools.md` under
+`260620-ticket-move-tool`, `260622-create-ticket-tool`, and
+`260624-sage-review-gate`.
 
 Expected caller-visible change: ticket mutation tools stamp self-describing
 `sage-review:` posture values, and the gate resolves `recommended` / `required`
 instead of relying on `pending`.
 
-Contract-first spec: yes, before promotion to `ready/`.
+Contract-first spec: yes, addressed before promotion to `ready/`.

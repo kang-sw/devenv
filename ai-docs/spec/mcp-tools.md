@@ -248,6 +248,15 @@ collapses the same as `done`. Full mode shows every item in order. `ws.commit`
 does not auto-mark todos; status transitions are always explicit via
 `ws.todo.check`.
 
+> [!note] Planned 🚧
+> Todo rendering will expose each item key as `{key}` after the checkbox marker
+> in every shared rendered checklist, while collapsed `...` elision lines remain
+> unchanged. Keys will normalize to lowercase and accept only lowercase letters,
+> digits, `.`, `_`, and `-`; duplicate detection will occur after normalization.
+> `ws.enter.implement` will derive checklist items from typed verdict values so
+> caller-visible labels and item counts reflect the supplied implementation
+> verdicts.
+
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
 `ws.workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
@@ -590,6 +599,15 @@ completed` or `sage-review: blocked` into the ticket frontmatter and commits. A
 ticket body. `concern` elevated from design reviewer resolves to `completed` by
 default unless the lead escalates to `block`. `idea/` tickets bypass the gate.
 {#260624-sage-review-gate}
+
+> [!note] Planned 🚧
+> `tickets.create` for `todo` or `ready` tickets and upward `tickets.move`
+> promotions will stamp a self-describing `sage-review:` posture from the
+> resolved `sage_review` setting: `skipped` for off, empty, or unset;
+> `recommended` for ask; and `required` for auto. The gate will treat
+> `recommended` as decision-required and `required` as review-required, then
+> resolve the ticket frontmatter to `completed`, `blocked`, or `skipped` instead
+> of leaving an unresolved `pending` state.
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 

@@ -1,6 +1,6 @@
 ---
 title: "ws session-state tool ergonomics: enter.* derive + todo key surface gaps"
-sage-review: skipped
+sage-review: recommended
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260625-feat-ws-session-state-machine: motivating-feature
@@ -90,11 +90,11 @@ Verification boundary:
 
 ## Spec Impact
 
-Target spec area: `ai-docs/spec/mcp-tools.md` session-state and todo tool
-contracts.
+Addressed by planned callout in `ai-docs/spec/mcp-tools.md` under
+`260625-session-state-tools`.
 
 Expected caller-visible change: todo list output exposes `{key}` tokens, todo
 key validation is specified, and `enter.implement` derivation is tied to typed
 verdict values.
 
-Contract-first spec: yes, before promotion to `ready/`.
+Contract-first spec: yes, addressed before promotion to `ready/`.
