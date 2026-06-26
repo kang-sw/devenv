@@ -11,7 +11,8 @@ variables:
 
 ## On: invoke
 
-Reading this file is the invocation; it loads the primitive reference.
+After reading this file, treat the listed primitives and usage patterns as the
+current workflow reference. No separate output is required.
 
 ---
 
@@ -72,25 +73,9 @@ that targets that root.
 {{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
 
-### Delegation posture
+### Workflow tuning
 
-<!-- ws:override:DelegationSection desc="lead delegation eagerness and context-saving stance" -->
-Delegate all work to subagents for this session. Minimize inline tool calls.
-
-Dispatch:
-- fork — content authoring where conversation intent must be preserved: ticket creation,
-  doc edits, skill/playbook edits, commits, any file write whose correctness depends on
-  prior conversation context. Fork inherits full context; no tier specification.
-- light (clean context) — stateless ops: reads, searches, grep, command execution,
-  single-fact lookups. No conversation context needed.
-- medium (clean context) — judgment ops: code analysis, causal or design reasoning,
-  destructive shell execution, review and verification ops (code review, design checks —
-  brief with explicit file paths and review criteria). Brief the agent with explicit context.
-
-Do not dispatch large tier explicitly. Complex implementation flows already route there through existing delegation machinery.
-<!-- ws:/override:DelegationSection -->
-
-For lead-owned tuning of this posture or other workflow knobs, use the `{{.SkillNamespace}}:lead-tune` skill.
+For lead-owned tuning of delegation posture or other workflow knobs, use the `{{.SkillNamespace}}:lead-tune` skill.
 
 ### Scoped Exploration (native Explore)
 
@@ -99,7 +84,8 @@ host-native exploration worker directly with an English prompt that includes
 the scoped question or purpose-specific query block; require cited evidence,
 gaps, and follow-up needs; collect the deferred result. For parallel dispatch, spawn
 multiple concurrent subagents in a single turn and collect all before
-synthesizing. Use a broad-tracing scope for wide structural surveys.
+synthesizing. For wide structural surveys, ask the worker to trace relevant
+directories, entry points, references, and gaps, then report cited evidence.
 
 <!-- ws:full-only:start -->
 ### Persistent agents
@@ -190,7 +176,7 @@ Prefer:
 Use `{{.McpNamespace}}/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves plus
 `### Result` and `#### Edition` headings, and avoids shell quoting drift.
-For ticket status moves, use `{{.McpNamespace}}/tickets.close(stem, status)` to close (done/dropped) or `{{.McpNamespace}}/tickets.move(stem, to)` to transition (idea/todo/ready); both stage atomically with convention guards. Fall back to native `git mv` when MCP tools are unavailable. Commit the staged change with `{{.McpNamespace}}/git.commit`. `ready/` is implementation-ready and `todo/` is accepted backlog.
+For ticket status moves, use `{{.McpNamespace}}/tickets.close(stem: "<stem>", status: "done")` to close or `{{.McpNamespace}}/tickets.move(stem: "<stem>", to: "ready")` to transition; both stage atomically with convention guards. Fall back to native `git mv` when MCP tools are unavailable. Commit the staged change with `{{.McpNamespace}}/git.commit`. `ready/` is implementation-ready and `todo/` is accepted backlog.
 
 Prefer:
 - `{{.McpNamespace}}/git.status()` for branch, staged state, and changed-file discovery.

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"sort"
@@ -206,7 +207,7 @@ func delegationTip(harness string) string {
 		// Unit 3: always-on mercenary tip — present in every full-ws delegates:true rendering.
 		sb.WriteString("\n\n**Mercenary path (always available):** A ws-managed external subprocess agent")
 		sb.WriteString(" (mercenary) is always reachable on request via `ws.mercenary.call`, even without")
-		sb.WriteString(" `ws.lead.prefer_mercenary`. Pass the session_key received with this prompt and")
+		sb.WriteString(" `config.workflow_prefer_mercenary`. Pass the session_key received with this prompt and")
 		sb.WriteString(" a self-contained prompt from `ws/playbook.render`; the returned handle is an")
 		sb.WriteString(" agent id you can resume with the same continuation idiom.")
 	}
@@ -346,6 +347,27 @@ type overridePointDecl struct {
 	Desc    string
 }
 
+const preferSubagentInvocationGuidancePointID = "PreferSubagentInvocationGuidance"
+
+const (
+	workflowManualPlaybookName  = "lead-workflow-manual"
+	preferSubagentPlaybookName  = "lead-prefer-subagent"
+	preferSubagentPlaybookTitle = "Prefer Subagent"
+	preferSubagentEnabledValue  = "on"
+)
+
+const preferSubagentCodexInvocationGuidancePrompt = "" +
+	"- Codex binding: call `spawn_agent(fork_context:true, message:<prompt>)`; " +
+	"omit `agent_type`, `model`, and `reasoning_effort` for full-history forks unless the host permits them.\n" +
+	"- If a typed fork is rejected, retry untyped with `fork_context:true`; " +
+	"do not satisfy this posture with `agent_type: explorer` or `agent_type: worker` unless `fork_context:true` is active."
+
+func builtinPromptOverrideDefaults() map[string]string {
+	return map[string]string{
+		"prompt." + preferSubagentInvocationGuidancePointID + ".codex": preferSubagentCodexInvocationGuidancePrompt,
+	}
+}
+
 // scanOverridePoints walks the rsrc tree rooted at rsrcRoot, scans every `.md`
 // file for override open markers, and returns the declared override-points
 // deduped by pointId (the first non-empty desc wins) sorted by PointId. It is a
@@ -386,10 +408,11 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 }
 
 // buildOverrideLookup returns an overrideLookupFn backed by the session-keyed
-// layered-config resolver, or nil when sessionKey is empty (no session → no
-// overrides → seeds render). It is the single construction site shared by the
+// layered-config resolver. When sessionKey is empty, only code-owned builtin
+// prompt defaults participate; user/project/global prompt overrides still require
+// a session-keyed render. It is the single construction site shared by the
 // playbook.print and playbook.render dispatch paths, reusing the same
-// sessionConfigAdapter + resolver shape as the prefer_mercenary read path.
+// sessionConfigAdapter + resolver shape as the workflow config read paths.
 //
 // Override values are stored under dynamic keys `prompt.<pointId>.<harness>`; the
 // resolver returns empty (not an error) for unset keys, so an absent override
@@ -397,10 +420,14 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 func buildOverrideLookup(s *Server, sessionKey string) overrideLookupFn {
 	capturedKey := strings.TrimSpace(sessionKey)
 	if capturedKey == "" {
-		return nil
+		builtins := builtinPromptOverrideDefaults()
+		return func(pointId, harness string) (string, bool) {
+			v := builtins["prompt."+pointId+"."+harness]
+			return v, v != ""
+		}
 	}
 	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinPromptOverrideDefaults(), adapter, adapter)
 	return func(pointId, harness string) (string, bool) {
 		rv, _ := resolver.Get(capturedKey, "prompt."+pointId+"."+harness)
 		return rv.Value, rv.Value != ""
@@ -524,7 +551,6 @@ const (
 // that apply to the current product mode and mercenary preference. The source
 // rsrc remains shared; the rendered playbook is the product-specific contract.
 // mercenaryEnabled=true preserves ws:mercenary-on blocks; false strips them.
-// printPlaybook passes mercenaryEnabled=true to expose the full source view.
 func selectProductModeBlocks(body string, mercenaryEnabled bool) string {
 	lines := strings.Split(body, "\n")
 	filtered := make([]string, 0, len(lines))
@@ -730,11 +756,32 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 	return result, nil
 }
 
+// wrapRenderedPlaybookForConcatenation wraps an already-rendered playbook body
+// for code-side pragmatic concatenation. It does not load or parse source text.
+func wrapRenderedPlaybookForConcatenation(name, title, body string) string {
+	trimmedBody := strings.TrimRight(body, "\n")
+	return fmt.Sprintf(
+		"<playbook name=\"%s\" title=\"%s\">\n%s\n</playbook>",
+		html.EscapeString(name),
+		html.EscapeString(title),
+		trimmedBody,
+	)
+}
+
+func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
+	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
+	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferSubagent)
+	if err != nil {
+		return false, err
+	}
+	return strings.ToLower(strings.TrimSpace(rv.Value)) == preferSubagentEnabledValue, nil
+}
+
 // printPlaybook loads a playbook and returns its rendered body text inline.
 //
-// Zero-logic wrapper over renderPlaybookBody: the indirection is intentional
-// forward-compat, where print and render may diverge (e.g., different
-// session-scoped output constraints or inline vs. path semantics).
+// The workflow manual has one code-side pragmatic concatenation hook: when the
+// global workflow.prefer_subagent preference is on, append the normally-rendered
+// lead-prefer-subagent playbook wrapped in a playbook boundary.
 // printPlaybook never mints child keys (mintRoot="") and ignores preferMercenary.
 //
 // rsrcRoot is a call-site-overridable seam for root_override support.
@@ -742,7 +789,26 @@ func substitutePlaybookVars(body string, declared []string, vars map[string]stri
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
-	return renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, workflowLang, overrideLookup)
+	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", false, workflowLang, overrideLookup)
+	if err != nil {
+		return "", "", err
+	}
+	if name != workflowManualPlaybookName {
+		return body, recommendedTier, nil
+	}
+	enabled, err := workflowPreferSubagentEnabled(configOpts)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
+	}
+	if !enabled {
+		return body, recommendedTier, nil
+	}
+	appendBody, _, err := renderPlaybookBody(s, rsrcRoot, preferSubagentPlaybookName, nil, configOpts, "", "", false, workflowLang, overrideLookup)
+	if err != nil {
+		return "", "", fmt.Errorf("render appended %s: %w", preferSubagentPlaybookName, err)
+	}
+	body += "\n\n" + wrapRenderedPlaybookForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
+	return body, recommendedTier, nil
 }
 
 // renderPlaybook loads a playbook, renders it (with optional child-key mint and

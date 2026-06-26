@@ -754,20 +754,21 @@ func callToolsList(t *testing.T, server *Server) string {
 	return strings.TrimSpace(out.String())
 }
 
-// mustEnableMercenary writes a project config file to WS_CACHE_HOME that sets
-// prefer_mercenary=true. Required for tests that call ws.mercenary.* tools,
-// since the default is now hide (tools hidden until explicitly enabled).
+// mustEnableMercenary writes the global WS_CONFIG_HOME/config.json override
+// {"workflow.prefer_mercenary":"on"}. Tests that call ws.mercenary.* tools need
+// this because the builtin default is hide.
 func mustEnableMercenary(t *testing.T) {
 	t.Helper()
-	cacheHome := os.Getenv("WS_CACHE_HOME")
-	if cacheHome == "" {
-		t.Fatal("mustEnableMercenary: WS_CACHE_HOME not set")
+	configHome := os.Getenv("WS_CONFIG_HOME")
+	if configHome == "" {
+		configHome = t.TempDir()
+		t.Setenv("WS_CONFIG_HOME", configHome)
 	}
-	if err := os.MkdirAll(cacheHome, 0755); err != nil {
+	if err := os.MkdirAll(configHome, 0755); err != nil {
 		t.Fatalf("mustEnableMercenary: mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cacheHome, "config.json"),
-		[]byte(`{"schema_version":1,"overrides":{"prefer_mercenary":"true"}}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(configHome, "config.json"),
+		[]byte(`{"schema_version":1,"overrides":{"workflow.prefer_mercenary":"on"}}`), 0644); err != nil {
 		t.Fatalf("mustEnableMercenary: write config: %v", err)
 	}
 }
@@ -1204,12 +1205,12 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	list := byID["1"]
-	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "config.agents_tier"} {
+	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "config.agents_tier", "config.workflow_prefer_mercenary"} {
 		if strings.Contains(list, hidden) {
 			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list", "playbook.print", "playbook.render"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "config.workflow_prefer_subagent", "tickets.list", "playbook.print", "playbook.render"} {
 		if !strings.Contains(list, visible) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
@@ -1965,15 +1966,16 @@ func execToolJSONPath(path string) string {
 }
 
 // TestMercenaryDefaultHideAndOnVisibility verifies that:
-// - ws.mercenary.* tools are hidden from tools/list by default (no config),
-// - ws.lead.prefer_mercenary remains visible so the lead can toggle back, and
-// - after writing prefer_mercenary=on to project config, ws.mercenary.* tools
-//   appear in tools/list.
+//   - ws.mercenary.* tools are hidden from tools/list by default (no config),
+//   - config.workflow_prefer_mercenary remains visible so the lead can toggle, and
+//   - after writing workflow.prefer_mercenary=on to global config, ws.mercenary.*
+//     tools appear in tools/list.
 func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 
@@ -1985,9 +1987,11 @@ func TestMercenaryDefaultHideAndOnVisibility(t *testing.T) {
 	if strings.Contains(listResp, `"name":"ws.mercenary.register"`) {
 		t.Fatalf("ws.mercenary.register must be hidden by default: %s", listResp)
 	}
-	// ws.lead.prefer_mercenary must remain visible (lead must be able to toggle on).
-	if !strings.Contains(listResp, `"name":"ws.lead.prefer_mercenary"`) {
-		t.Fatalf("ws.lead.prefer_mercenary must be visible even when mercenary hidden: %s", listResp)
+	if strings.Contains(listResp, `"name":"ws.lead.prefer_mercenary"`) {
+		t.Fatalf("removed ws.lead.prefer_mercenary must not be visible: %s", listResp)
+	}
+	if !strings.Contains(listResp, `"name":"config.workflow_prefer_mercenary"`) {
+		t.Fatalf("config.workflow_prefer_mercenary must be visible even when mercenary hidden: %s", listResp)
 	}
 
 	// After enabling: ws.mercenary.* must appear in tools/list.

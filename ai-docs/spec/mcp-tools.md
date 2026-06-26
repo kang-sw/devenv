@@ -308,7 +308,17 @@ when provided, otherwise the detected MCP session harness when available, and
 otherwise the default tier mapping. This makes `backend` mean the execution
 backend rather than the tier-table key. {#260513-harness-local-agent-tier-config}
 
-## 🚧 Tuning Catalog {#260625-tuning-catalog}
+`config.workflow_prefer_subagent(session_key, value: "on"|"off")` sets the
+global `"workflow.prefer_subagent"` item, whose builtin default is `off`.
+`config.workflow_prefer_mercenary(session_key, value: "on"|"off"|"hide")` sets
+the global `"workflow.prefer_mercenary"` item, whose builtin default is `hide`.
+Both writer tools require a lead session key for authority but always write the
+global config scope. The former unprefixed `"prefer_mercenary"` entry is not
+migrated; it remains orphaned local state unless a later ticket introduces
+migration. `prompt.DelegationSection.*` prompt override keys are likewise not
+migrated.
+
+## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
 by `ws:lead-tune`. It returns a compact catalog whose entries describe
@@ -321,20 +331,25 @@ small semantic knob id and derives field names, enum values, required fields, an
 descriptions from the existing MCP writer tool schema where possible. Prompt
 override entries derive their point ids from the same shipped override-marker
 scan used by `config.prompt`; model-tier entries derive their fields from
-`config.agents_tier`; delegation-mode entries derive their values from
-`ws.lead.prefer_mercenary`.
+`config.agents_tier`; workflow-preference entries derive their values from
+`config.workflow_prefer_subagent` and `config.workflow_prefer_mercenary`.
+The shipped `DelegationSection` override marker is removed, so
+`prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
+discovery; orphaned stored prompt keys remain ignored.
 
 Catalog output defaults to LLM-readable text. `format: "json"` returns a stable
 structured shape for callers that need to build a proposal or compare runtime
-support. Compatibility-only writer arguments may be omitted from the catalog
-even when they remain accepted by the writer tool; the catalog exposes the
-canonical tuning syntax, not every legacy call shape. Product mode is honored:
-agent-backed full-ws-only knobs are absent when the runtime is in wsflow/no-agent
-mode.
+support: `knobs[]` entries carry `id`, `kind`, `description`, `writer`,
+optional `reset`, `selector_fields`, `value_fields`, and `current`.
+Compatibility-only writer arguments may be omitted from the catalog even when
+they remain accepted by the writer tool; the catalog exposes the canonical
+tuning syntax, not every legacy call shape. Product mode is honored:
+full-ws-only knobs are absent when the runtime is in wsflow/no-agent mode.
 
 > [!note] Constraints
 > - `config.tuning` does not mutate config and does not replace
->   `config.prompt.set`, `ws.lead.prefer_mercenary`, or `config.agents_tier`.
+>   `config.prompt.set`, `config.workflow_prefer_mercenary`, or
+>   `config.agents_tier`.
 > - Adding a new lead-tune knob requires registering its semantic id and writer
 >   tool, but must not copy enum/property schema by hand when that schema already
 >   belongs to the writer tool.
@@ -384,10 +399,18 @@ native model hint is preserved.
 
 ### Layered Config Scope Model {#260619-layered-config-scope-model}
 
-Config items resolve across four ordered scopes, highest precedence first:
+Most config items resolve across four ordered scopes, highest precedence first:
 `session > project > global > builtin`. `builtin` is the code default (for
-example the `wsconfig` tier/alias defaults and `prefer_mercenary=false`). A read
-returns the value from the highest-precedence scope that holds one.
+example the `wsconfig` tier/alias defaults and
+`"workflow.prefer_mercenary"="hide"`). A read returns the value from the
+highest-precedence scope that holds one.
+
+Some config items are **global-only** because callers may need them before a
+session key, root, or project scope exists. `"workflow.prefer_subagent"` and
+`"workflow.prefer_mercenary"` skip session and project overlays, resolve only
+from `global > builtin`, and reject non-global writes. The old unprefixed
+`"prefer_mercenary"` key remains orphaned local state unless a later ticket
+introduces migration.
 
 Each config item declares a natural **default write scope** in code; items that
 declare nothing fall back to `project`. A write without an explicit scope lands
@@ -424,7 +447,7 @@ every scope-aware config tool consumes, rather than per-tool re-implementations.
 > - The substrate (resolver, default-scope registry, file-lock RMW, global store,
 >   shared `scope` schema fragment) and scope-reporting on `config.show` are the
 >   caller-visible surface today. Per-item scope-aware *set* surfaces arrive as
->   individual items adopt the model (`prefer_mercenary`
+>   individual items adopt the model (`"workflow.prefer_mercenary"`
 >   (`#260619-prefer-mercenary-session-scope-item`), prompt overrides); the set
 >   capability otherwise lives at the internal `wsconfig` API.
 
@@ -757,6 +780,15 @@ set is fixed at authoring time, not chosen by the caller per call. This does not
 replace `convention.read` / `infra.read`, which remain standalone discovery tools
 for raw access.
 
+Code-side pragmatic playbook concatenation is renderer-owned behavior, not a
+source-template syntax. When global `"workflow.prefer_subagent"` resolves to
+`on`, `playbook.print(name: "lead-workflow-manual")` renders
+`lead-prefer-subagent` through the same harness-aware renderer, prompt override
+resolver, and product-mode pass, then appends it to the manual. The appended
+body is wrapped as `<playbook name="lead-prefer-subagent" title="Prefer Subagent">...</playbook>`.
+Standalone `playbook.print` and `playbook.render` output remains Markdown, and
+no duplicate-insertion guard is applied.
+
 A playbook marked as delegating carries a compact continuation tip in its
 rendered output, reminding the caller to reuse the host-returned subagent agent
 id for continuation instead of respawning. The tip is the only continuity
@@ -811,9 +843,9 @@ the shipped resource tree. An override-point is a pair of single-line markers,
 each on its own line, wrapping inline seed text:
 
 ```
-<!-- ws:override:DelegationSection desc="how eagerly the lead delegates" -->
+<!-- ws:override:ExampleSection desc="human-readable summary" -->
 <seed default text — the shipped wording for this point>
-<!-- ws:/override:DelegationSection -->
+<!-- ws:/override:ExampleSection -->
 ```
 
 The identifier after `ws:override:` is the **point id**. The text between the
@@ -833,14 +865,14 @@ two orthogonal axes:
   the cross-harness / `*` setting).
 - **Where** the override is stored is selected by scope through the layered
   config scope model (`#260619-layered-config-scope-model`); resolution reads the
-  highest-precedence scope that holds a value.
+  highest-precedence scope that holds a value, including code-owned builtin
+  defaults when a shipped harness binding must stay out of the shared seed text.
 
 The resolved text replaces the block body and the marker lines themselves are
 stripped, so the rendered output contains only resolved content and never the
 marker syntax. An **empty seed body** is a pure extension slot: it renders the
-stored override if one exists, or nothing when none is set — so overriding
-existing text and appending new text are the same primitive (for example a
-`DelegationSection` override-point versus a `UserPreferenceSection` extension slot).
+stored override if one exists, or nothing when none is set. `UserPreferenceSection`
+uses this empty-slot shape for standing preferences.
 
 Override values resolve through the layered config scope model under the key
 `prompt.<point id>.<harness>`, so a write at any scope through the config layer
@@ -851,14 +883,18 @@ override surface tunable from inside the MCP without external docs; a
 self-documenting `config.prompt()` listing makes that surface discoverable from
 inside the MCP as well (`#260620-config-prompt-override-tuning-tools`).
 
-Shipped lead workflow-manual override-points include `DelegationSection`, seeded
-with the lead's default delegation posture, and `UserPreferenceSection`, an empty
-extension slot for standing communication, terminology, and workflow
-preferences. A user tunes delegation posture by storing an override under
-`prompt.DelegationSection.<harness>`; a user adds standing preferences by storing
-an override under `prompt.UserPreferenceSection.<harness>` without editing the
-shipped resource tree. The resolved override replaces or fills only its marked
-section; the surrounding primitive reference is untouched.
+Shipped lead workflow-manual override-points include `UserPreferenceSection`, an
+empty extension slot for standing communication, terminology, and workflow
+preferences. A user adds standing preferences by storing an override under
+`prompt.UserPreferenceSection.<harness>` without editing the shipped resource
+tree. Delegation posture is controlled by `"workflow.prefer_subagent"` rather
+than a freeform prompt override.
+
+Shipped lead-prefer-subagent uses the generic empty extension point
+`PreferSubagentInvocationGuidance` for harness invocation details. Codex receives
+a code-owned builtin default under `prompt.PreferSubagentInvocationGuidance.codex`
+for its `spawn_agent(fork_context:true, ...)` binding, while Claude uses the
+empty shared seed unless configured otherwise.
 {#260619-delegation-section-override-point}
 
 > [!note] Constraints
@@ -935,24 +971,21 @@ subprocess agent — a deliberately distinct term from a harness-native
 **subagent**, so callers never confuse the two delegation paths. This section is
 the caller-visible contract for the reshaped `ws.mercenary.*` family.
 
-**Default is native; mercenary is always available.** Default delegation is
-always to a host-native subagent. The mercenary path is always available to the
-lead — it is not a feature flag the user must enable. A mercenary is invoked only
-when (a) the user explicitly requests it, or (b) the lead has flipped its session
-key's render mode with `ws.lead.prefer_mercenary(session_key)` (lead-only), which
-changes only the *default delegation guidance* `playbook.render` emits for
-implementer/reviewer playbooks — never availability. Independently, every
-delegation-capable rendering carries a small always-on tip fragment noting the
-mercenary path is reachable on request, so the on-request path works without the
-toggle.
+**Default is hidden; native is the ordinary delegation path.** The global
+`"workflow.prefer_mercenary"` item controls whether the public mercenary surface
+is visible and whether implementer/reviewer playbook renders prefer mercenary
+guidance. Its builtin value is `hide`, which suppresses `ws.mercenary.*` from
+tool discovery, runtime capabilities, and explicit calls. `off` exposes the
+mercenary surface but keeps host-native subagents as the default guidance. `on`
+exposes the surface and makes implementer/reviewer renders prefer the
+mercenary-call path. The lead writes this item through
+`config.workflow_prefer_mercenary(session_key, value)`; the writer requires a
+lead session key for authority but writes the global config item because
+keyless tool visibility cannot read session or project state.
 
-> [!note]
-> `prefer_mercenary` is a `session`-default item in the layered config scope
-> model (`#260619-layered-config-scope-model`) with desired-state get/set: the
-> lead can both enable and disable it on the same session key, replacing the
-> former one-way flip. It stays lead-only — the scope-aware setter honors the
-> existing lead-only gating. Mercenary *availability* is unchanged; only the
-> default-guidance toggle gains a revert path. {#260619-prefer-mercenary-session-scope-item}
+`ws.lead.prefer_mercenary` is removed with no alias. The old unprefixed
+`"prefer_mercenary"` key remains orphaned local state and is not migrated.
+{#260619-prefer-mercenary-session-scope-item}
 
 **Scope: implementer and reviewer roles only.** Mercenaries cover implementer and
 reviewer delegation. Exploration, survey (reference-discovery, plan-populator),
@@ -992,8 +1025,9 @@ mercenary) is therefore unable to login or spawn, so spawn depth is strictly 1
 reduction only — they are not the enforcement boundary.
 
 > [!note] Constraints
-> - Mercenary availability is not user-gated; only the *default guidance* flips,
->   via `ws.lead.prefer_mercenary`. The on-request path is always reachable.
+> - `config.workflow_prefer_mercenary` controls both public mercenary surface
+>   visibility and default render guidance. The on-request path is reachable
+>   only when the value is `off` or `on`; `hide` suppresses the public surface.
 > - Mercenary scope is implementer/reviewer only. Exploration and mental-model
 >   work are native-subagent only and never mint a mercenary.
 > - Gemini is a preserved plug point, not a shipped backend.
