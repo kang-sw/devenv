@@ -1,72 +1,77 @@
-# Brief: 260627-feat-lead-implement-rendered-delegate-prompts Phase 1
+# Brief: 260627-feat-lead-implement-rendered-delegate-prompts Phase 2
 
 ## Intent
 
-Move initial delegated implementation dispatch to a file-first rendered
-`implementer` prompt so `lead-implement` no longer carries the long initial
-Implementer spawn prompt in its always-rendered body.
+Move delegated review-fix relay dispatch to a rendered, file-first
+`implementer-relay` prompt so `lead-implement` no longer carries the long relay
+prompt in its always-rendered body.
 
 ## Scope Boundary
 
-Implement only Phase 1: parameterize initial implementer dispatch.
+Implement only Phase 2: add the review-fix relay render surface.
 
 In scope:
-- Add declared render variables to `implementer` for small mechanical context:
-  brief path, optional plan path convention, verification hint, result
-  expectations, and commit-range/reporting metadata.
-- Move initial implementation task input into the rendered `implementer`
-  playbook; the brief is the primary contract, and the plan path is optional.
-- Replace the long `lead-implement` `Implementer spawn prompt` template with a
-  minimal dispatch that names the rendered prompt path and tells the worker to
-  execute it.
-- Preserve `implementer` frontmatter `tier: medium` and the resulting
-  `recommended-tier` behavior from `playbook.render`.
-- Regenerate the shipped rsrc manifest and byte-identical wsflow rsrc mirror
-  after canonical rsrc edits.
-- Update focused render tests for `lead-implement`, `implementer`, and wsflow
-  mirror/product-mode behavior.
+- Add an `implementer-relay` rsrc playbook when that keeps relay inputs clearer
+  than overloading `implementer`.
+- Render relay prompts from review findings paths, current commit range, lead
+  disposition notes, verification metadata, and cycle metadata.
+- Replace the long `lead-implement` Review relay prompt with a minimal rendered
+  prompt path dispatch.
+- Preserve stateless relay semantics and existing option to reuse an
+  implementer or reviewer only as a latency optimization.
+- Regenerate the shipped rsrc manifest and byte-identical wsflow rsrc mirror.
+- Update focused render tests for `lead-implement`, `implementer-relay`, and
+  wsflow mirrored rendering behavior.
 
 Out of scope:
-- Do not implement review-fix relay rendering or add `implementer-relay`.
-- Do not change reviewer prompt frames, relay prompts, or re-review prompts.
-- Do not change `ws.enter.implement` schema, resolver logic, or todo builders
-  unless an existing test fixture needs only a narrow expected-text update.
-- Do not change branch policy, review allocation, documentation closeout, merge
-  policy, or ticket status.
+- Do not change initial `implementer` dispatch from Phase 1 except to keep shared
+  wording consistent if needed.
+- Do not change `ws.enter.implement` schema, verdict logic, branch policy, or
+  todo builders.
+- Do not close Phase 3 documentation beyond minimum source-test support for this
+  phase.
+- Do not implement the older review-fix ownership ticket, except avoid
+  contradicting its settled intended contract.
 
 ## Caller-Visible Contract
 
-For delegated initial implementation, `lead-implement` prepares a brief and
-optionally a plan, renders `implementer` through `{{.McpNamespace}}/playbook.render`
-with declared variables only, captures the returned prompt path and
-`recommended-tier`, then gives the worker a short instruction to read and
-execute that rendered prompt.
+For delegated non-clean review, `lead-implement` renders an
+`implementer-relay` prompt with declared file-first inputs, captures the returned
+prompt path and `recommended-tier`, then gives a worker a short instruction to
+read and execute that rendered prompt. Reviewer findings remain in files and are
+passed by path. The lead supplies only disposition/adjudication notes and
+verification metadata.
 
-The implementer must not read the ticket directly. The brief owns the contract;
-the plan refines it when present. Render context carries only pointers and
-metadata, never the full ticket, acceptance contract, or design rationale.
+The implementation owner applies fixes:
+- Direct-edit mode: the lead applies fixes.
+- Delegated mode: the implementer receives non-clean review path files through
+  the rendered relay prompt.
+
+The lead still owns triage, rejected/deferred/won't-fix rationale, verification,
+re-review orchestration, and final clean judgment.
 
 ## Contract Instructions
 
-- Keep the file-first contract: brief path is required; plan path may be an
-  empty string or another documented no-plan sentinel.
-- Keep render context small and mechanical. Expected variable set should stay
-  close to `BriefPath`, `PlanPath`, `VerificationHint`,
-  `ResultExpectations`, and `CommitRangeHint`.
-- Use declared variables only. `implementer` is not a wsflow legacy freeform
-  Render Context stem, so undeclared context must continue to fail.
-- Keep `RoleModel` declared and rendered from `tier: medium`; do not hard-code
-  model names in prompt body text.
-- Keep namespace text product-safe with `{{.McpNamespace}}` and
-  `{{.SkillNamespace}}` where shared playbook text names ws MCP or skills.
-- Keep the lead spawn prompt minimal: rendered prompt path, recommended tier,
-  and "execute that rendered prompt" guidance. Do not copy the old acceptance
-  list back into `lead-implement`.
-- Do not make the worker read `ai-docs/tickets/ready/...` for this task. Any
-  ticket decision needed by the worker belongs in this brief or the plan.
-- Preserve same-source rsrc behavior: edit canonical `agents-plugin/rsrc/`
-  first, regenerate `agents-plugin/rsrc/manifest.json`, then regenerate the
-  byte-identical `agents-plugin-wsflow/rsrc/` copy.
+- Keep relay context small and mechanical: brief path, optional plan path,
+  review cycle, commit range, non-clean review paths, disposition notes,
+  verification hint, and result expectations.
+- Use declared variables only. `implementer-relay` is not a wsflow legacy
+  freeform Render Context stem.
+- Keep reviewer findings in files. Do not copy full findings into
+  `lead-implement`.
+- Keep the relay prompt self-contained. It must not rely on prior implementer
+  conversation or inherited lead context.
+- Preserve disposition vocabulary: `[fixed]`, `[won't fix: <reason>]`,
+  `[deferred: <reason>]`, and reviewer-side `[accepted]` or `[maintained:
+  <reason>]`.
+- State that won't-fix is allowed for style suggestions conflicting with local
+  patterns or scope expansion, and is not allowed for correctness, security, or
+  contract violations.
+- Preserve commit-log durability: fix commits must record dispositions in
+  `## AI Context`.
+- Use `{{.McpNamespace}}` and `{{.SkillNamespace}}` for shared namespace text.
+- Keep canonical edits under `agents-plugin/rsrc/`; regenerate
+  `agents-plugin/rsrc/manifest.json` and `agents-plugin-wsflow/rsrc/`.
 
 ## Integration Test Instructions
 
@@ -74,16 +79,15 @@ Extend existing Go tests under `agents-plugin-tool/internal/mcp/` and rsrc tests
 under `agents-plugin-tool/internal/wsrsrc/`.
 
 Required checks:
-- `implementer` renders successfully with representative declared context,
-  includes brief/plan/verification/result metadata, preserves `RoleModel`, and
-  returns the existing recommended tier.
-- Passing an undeclared context key to full ws `implementer` still returns
+- `implementer-relay` renders successfully with representative declared context.
+- Rendered relay output includes review paths, commit range, cycle, disposition
+  notes, verification hint, result expectations, and the role model hint.
+- Passing undeclared context to full ws `implementer-relay` returns
   `ErrUndeclaredVar`.
-- In wsflow/no-agent mode, `implementer` still rejects undeclared context
-  because it is not one of the five legacy freeform stems.
-- `lead-implement` rendered body no longer contains the old long initial
-  Implementer spawn prompt acceptance list, while still naming the minimal
-  rendered-prompt dispatch contract.
+- In wsflow/no-agent mode, `implementer-relay` still rejects undeclared context
+  because it is not a legacy freeform stem.
+- `lead-implement` rendered body no longer carries the old long Review relay
+  prompt body while still naming the rendered relay dispatch contract.
 - The wsflow rsrc mirror is byte-identical after regeneration.
 
 Run:
@@ -97,103 +101,114 @@ Run:
 
 ## Implementation Strategy Decisions
 
-- Treat the brief as the contract source of truth. The rendered implementer
-  prompt tells the worker which files to read and how to report, not what the
-  whole ticket says.
-- Use explicit declared variables rather than a generic freeform context block.
-- Keep initial implementation and review-fix relay as separate surfaces. Phase 1
-  changes only `implementer`; Phase 2 can add `implementer-relay`.
-- Prefer one compact "initial dispatch" template in `lead-implement` over
-  duplicating acceptance and verification instructions there.
-- Preserve current render mechanics. This phase should be mostly rsrc text,
-  manifest/mirror regeneration, and focused render-test expectation updates.
+- Prefer a separate `implementer-relay` playbook over adding relay mode flags to
+  `implementer`; relay input differs materially from initial implementation.
+- Keep lead-owned relay text to a short rendered-prompt dispatch.
+- Treat review findings paths and disposition notes as the relay contract.
+- Preserve the existing partitioned review loop and cycle caps; this phase only
+  changes prompt materialization.
+- Keep same-agent reuse optional and non-normative; correctness comes from files,
+  commit ranges, and self-contained prompt inputs.
 
 ## Rejected Alternatives
 
-- Passing the full brief text through `playbook.render` context is rejected
-  because large prose contracts belong in files.
-- Keeping the old long Implementer spawn prompt in `lead-implement` is rejected
-  because it keeps unreachable or already-file-backed task input in the lead's
-  always-rendered context.
-- Using wsflow's legacy `## Render Context` bridge for `implementer` is rejected
-  because that bridge intentionally applies only to five legacy stems.
-- Combining initial dispatch and review-fix relay behind mode flags is deferred;
-  split surfaces are safer when variable sets differ.
+- Passing full review findings through `playbook.render` context is rejected
+  because findings belong in files.
+- Keeping the long Review relay prompt in `lead-implement` is rejected because it
+  keeps fix-loop branch detail in the always-rendered lead playbook.
+- Combining initial and relay dispatch behind a mode variable is rejected for
+  this phase because it would create optional-variable noise.
+- Making relay correctness depend on host conversation continuation is rejected;
+  retained agents are a latency optimization only.
 
 ## Approach
 
-- Inspect the current `implementer` frontmatter/body and add only variables used
-  by the body.
-- Rewrite `implementer` input instructions around file-first Mode A: read the
-  brief, read the plan only when the rendered plan path is non-empty, and do not
-  read the ticket.
-- Replace `lead-implement`'s `Implementer spawn prompt` template with a short
-  rendered-prompt dispatch block.
-- Update tests to cover declared context rendering, undeclared-context rejection,
-  recommended-tier preservation, and removal of the old long spawn template.
-- Regenerate manifest and wsflow rsrc mirror after rsrc edits.
+- Inspect current `lead-implement`, `implementer`, render tests, and rsrc
+  manifest/mirror tests.
+- Add `agents-plugin/rsrc/implementer-relay/implementer-relay.md` with declared
+  variables and direct-execution delegate metadata.
+- Replace the `lead-implement` relay template with a compact rendered relay
+  handoff.
+- Update render tests and negative undeclared-context tests.
+- Regenerate manifest and wsflow rsrc mirror.
+- Run focused, package, full, and diff checks.
+- Run a fresh-reader audit on edited prompt/playbook text and apply accepted
+  fixes.
 
 ## Constraints
 
 - AI-authored text stays English.
-- Skill/playbook edits follow the skill-authoring checklist: concise,
-  falsifiable, actionable, context-free rules before rationale.
-- Fresh-reader audit is required after editing `agents-plugin/rsrc/lead-*` or
-  delegate prompt text; if no subagent is allowed in the execution context, stop
-  and report that blocker instead of pretending the audit happened.
+- Skill/playbook edits follow the skill-authoring checklist.
+- Fresh-reader audit is required after editing prompt/playbook text.
 - Do not hand-edit `agents-plugin-wsflow/rsrc/`; regenerate it from canonical
   rsrc.
 - Do not update `runtime.json`; rsrc text changes require manifest and mirror
   regeneration only.
 
+## Out of scope
+
+- Phase 3 documentation closeout beyond source-facing tests.
+- Review owner wording cleanup outside the relay surface.
+- Changes to reviewer partition prompts unless a test fixture requires a narrow
+  expected-text update.
+
 ## Details
 
-Likely target prompt shape:
+Likely lead relay handoff shape:
 
 ```text
-Rendered implementer prompt: <prompt-path>
+Rendered review relay prompt: <prompt-path>
 Recommended tier: <recommended-tier>
 
-Read that prompt file and execute it. It contains the brief path, optional plan
-path, verification expectations, and reporting requirements.
+Read that prompt file and execute it. It contains the review findings paths,
+disposition notes, verification expectations, and reporting requirements.
 ```
 
-Likely `implementer` render variables:
+Likely `implementer-relay` render variables:
 
 | variable | purpose |
 | --- | --- |
-| `RoleModel` | existing tier-derived model hint |
+| `RoleModel` | tier-derived model hint |
 | `BriefPath` | required implementation contract path |
 | `PlanPath` | optional plan path or empty/no-plan sentinel |
+| `ReviewCycle` | current review-fix cycle |
+| `CommitRange` | implemented or updated diff range |
+| `ReviewPaths` | non-clean review findings paths |
+| `DispositionNotes` | lead triage and prior accepted/deferred dispositions |
 | `VerificationHint` | concise command or test hint |
-| `ResultExpectations` | concise output/commit reporting expectation |
-| `CommitRangeHint` | expected commit-range reporting metadata |
+| `ResultExpectations` | concise output/commit/disposition reporting expectation |
 
 ## Verification Contract
 
 Acceptance requires:
-- Source render tests prove `implementer` uses declared context and preserves
-  recommended tier.
-- Negative render tests prove undeclared context still fails in full ws and
-  wsflow for non-legacy `implementer`.
-- Lead playbook render tests prove the old long initial Implementer spawn prompt
-  is gone from always-rendered `lead-implement`.
+- Source render tests prove `implementer-relay` uses declared context, rejects
+  undeclared context, and preserves recommended tier.
+- Lead playbook render tests prove the long Review relay prompt is gone from
+  always-rendered `lead-implement`.
 - Manifest and wsflow mirror tests pass after regeneration.
 - wsflow package tests pass after the shared rsrc edit.
+- Full Go tests pass unless an unrelated stale test is documented with evidence.
 
 ## References
 
-Ticket decisions have been incorporated into this brief. The implementer should
-not read the ticket directly.
-
-- [Must] `ai-docs/spec/workflow-skills.md` - lead-implement delegated mode, brief/plan contract, and verdict/todo boundary.
-- [Must] `ai-docs/spec/mcp-tools.md` - `playbook.render`, declared context, recommended-tier, and wsflow legacy-context bridge.
-- [Must] `ai-docs/mental-model/workflow-skills.md` - workflow playbook ownership and delegated implementation boundaries.
-- [Must] `ai-docs/mental-model/prompt-bundle.md` - rsrc playbook variables, role/tier frontmatter, manifest, and wsflow mirror coupling.
-- [Must] `ai-docs/mental-model/mcp-runtime.md` - product-mode rendering, session key, and enter-tool ownership constraints.
-- [Must] `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` - native-subagent pivot, playbook.print/render split, and rsrc prompt-factory direction.
-- [Must] `ai-docs/ref/wsflow-mirroring.md` - wsflow rsrc mirror regeneration and product-boundary checks.
-- [Must] `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md` - skill/playbook authoring and fresh-reader audit rules.
-- [Maybe] `ai-docs/spec/named-agent-runtime.md` - rendered prompt registration and tier pass-through context.
-- [Maybe] `ai-docs/mental-model/named-agent-runtime.md` - mercenary registration behavior if tests touch the full-ws mercenary path.
-- [Maybe] `ai-docs/mental-model/plugin-runtime.md` - package-level runtime/mirror context if wsflow package checks fail.
+- [Must] `ai-docs/spec/workflow-skills.md` - lead-implement delegated mode,
+  stateless review-fix relay, review allocation, and documentation gates.
+- [Must] `ai-docs/spec/mcp-tools.md` - `playbook.render`, declared context,
+  recommended-tier, product-mode rendering, and wsflow legacy-context bridge.
+- [Must] `ai-docs/mental-model/workflow-skills.md` - workflow playbook ownership,
+  review relay, and file-path relay mistake guidance.
+- [Must] `ai-docs/mental-model/prompt-bundle.md` - rsrc playbook variables,
+  role/tier frontmatter, manifest, and wsflow mirror coupling.
+- [Must] `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md` -
+  native-subagent pivot, playbook.print/render split, and prompt-factory
+  direction.
+- [Must] `ai-docs/ref/wsflow-mirroring.md` - wsflow rsrc mirror regeneration and
+  product-boundary checks.
+- [Must] `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md` -
+  skill/playbook authoring and fresh-reader audit rules.
+- [Must] `ai-docs/tickets/todo/260525-bug-implement-review-fix-owner.md` -
+  implementation-owner contract for delegated review fixes.
+- [Maybe] `ai-docs/mental-model/mcp-runtime.md` - keyed capability and
+  enter-tool ownership constraints.
+- [Maybe] `ai-docs/mental-model/named-agent-runtime.md` - mercenary registration
+  behavior if tests touch full-ws mercenary relay.
