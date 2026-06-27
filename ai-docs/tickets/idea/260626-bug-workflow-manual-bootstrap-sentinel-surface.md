@@ -33,3 +33,19 @@ bootstrap prose, or an intended sentinel-only path that needs clearer lead
 guidance. The fix should preserve the current security invariant that unknown
 session keys do not render the full workflow manual body or leak bootstrap
 details to non-lead callers.
+
+## Additional Evidence - 2026-06-27
+
+During a `lead-proceed` dogfood relay, tool discovery exposed
+`mcp__ws.ws_workflow_manual`, but calling it with a valid lead session key failed
+with:
+
+```text
+tool not available in current ws MCP profile: ws.workflow_manual
+```
+
+The same session could call `ws.enter.proceed` and `ws.enter.implement`, so this
+is not just a missing MCP connection. Investigate whether discovery is surfacing
+profile-hidden tools, whether the active profile should expose
+`ws.workflow_manual`, or whether the playbook should name a visible fallback
+when profile filtering hides the manual.
