@@ -1,6 +1,6 @@
 ---
 kind: render
-delegates: true
+delegates: false
 role: implementer
 tier: medium
 variables:
@@ -53,7 +53,7 @@ Alias model for this role: {{.RoleModel}}.
 
 ## Output
 
-**On initial completion:**
+**Normal completion report:**
 - What was implemented (1-3 sentences).
 - Files changed.
 - Test results (pass/fail/skipped).
@@ -61,7 +61,7 @@ Alias model for this role: {{.RoleModel}}.
 - Commit range, or `none` with reason.
 - Any deviations from the plan, with rationale.
 - Any additional items required by `ResultExpectations`.
-- If `ResultExpectations` names an output file, its path plus a short completion summary.
+- If `ResultExpectations` names an output file, also include its path plus a short completion summary.
 
 **On fix cycle (review findings relayed):**
 

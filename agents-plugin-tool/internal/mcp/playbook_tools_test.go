@@ -839,8 +839,8 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 		t.Fatalf("read rendered playbook: %v", err)
 	}
 	body := string(data)
-	if !strings.Contains(body, "Continuity tip") {
-		t.Fatalf("rendered delegate output missing continuity tip:\n%s", body)
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("rendered implementer output must not include delegation continuity tip:\n%s", body)
 	}
 	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
 		if strings.Contains(body, forbidden) {
@@ -882,6 +882,8 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
 		"Do not read ticket files directly, even when a ticket path appears in the brief, plan, or references",
 		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
+		"Normal completion report:",
+		"If `ResultExpectations` names an output file, also include its path plus a short completion summary.",
 		"Always include final commit hash and commit range, or `none` with reason.",
 	} {
 		if !strings.Contains(body, want) {
@@ -1503,7 +1505,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Rendered implementer prompt: <prompt-path>",
 		"contains the brief path, optional plan",
 		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
-		"Collect a textual completion report unless `ResultExpectations` names an output file",
+		"Collect the normal completion report",
 		"Reviewer prompt frame",
 		"Review relay prompt",
 		"Mercenary path:",
