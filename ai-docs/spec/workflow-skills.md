@@ -491,7 +491,7 @@ playbook follows that instruction instead of recomputing deterministic labels,
 then treats the replaced todo list as the authoritative executable runbook for
 post-verdict branch, prep, edit, review, documentation, final-action, and merge
 steps. The always-rendered playbook keeps fact gathering, verdict handoff,
-ambiguous execution judgments, and delegate templates, while verdict-specific
+ambiguous execution judgments, and delegate render handoffs, while verdict-specific
 direct/delegated, review-allocation, and documentation-skip instructions live in
 the focused todo instruction payloads. wsflow mirrors this checkpoint through
 the shared product-mode playbook text. See
