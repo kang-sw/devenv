@@ -1,6 +1,6 @@
 ---
 title: Todo item instruction field and focused runbook rendering
-sage-review: recommended
+sage-review: completed
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260625-feat-ws-session-state-machine: owns persisted session todo state and enter-tool todo replacement
