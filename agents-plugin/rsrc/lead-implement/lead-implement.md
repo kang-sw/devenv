@@ -135,9 +135,9 @@ Run `{merge}` only after user approval. Merge to the verdict or caller-approved 
 ### Delegate dispatch
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier` as dispatch metadata.
-2. For `implementer`, pass only declared file-first context: `BriefPath`, `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`.
+2. For `implementer`, pass only caller-supplied file-first context: `BriefPath`, `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`; `RoleModel` is declared in the prompt and tool-injected from tier metadata.
 3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text.
-4. Collect a textual completion report unless `ResultExpectations` names an output file; when an output file is named, require that file and a short completion summary.
+4. Collect a textual completion report unless `ResultExpectations` names an output file; when an output file is named, require writing it and returning its path plus a short completion summary.
 <!-- ws:full-only:start -->
 5. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->

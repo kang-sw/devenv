@@ -34,20 +34,21 @@ Alias model for this role: {{.RoleModel}}.
 - Do not modify files outside the task scope without escalating.
 - Follow root instructions and project conventions already provided by the host, brief, plan, or listed references.
 - Do not read ticket files directly, even when a ticket path appears in the brief, plan, or references, unless the caller explicitly overrides this rule.
-- Do not load extra docs unless the brief or plan explicitly authorizes escalation.
+- Read unlisted docs and conventions only when the brief or plan explicitly authorizes escalation.
 - Satisfy `ResultExpectations`; it is binding output scope, not advisory text.
+- When `ResultExpectations` names an output file, write it and return its path plus a short completion summary.
 - Claim "pass" only after reading full test output — never "should pass."
 - All output in English regardless of input language.
 
 ## Process
 
-1. **Load context**: Read the brief path above, the plan path above when non-empty, and all `[Must]` References listed in the brief except ticket files.
-2. **Escalate gaps**: If the brief or plan needs an unlisted doc, ticket file, or missing convention, stop and ask the caller unless the brief or plan authorizes escalation.
+1. **Load context**: Read the brief path above, the plan path above when non-empty, and all `[Must]` References listed in the brief or plan except ticket files.
+2. **Escalate gaps**: For ticket-file gaps, stop and ask the caller for explicit override; for unlisted docs or conventions, read only when the brief or plan authorizes escalation.
 3. **Target reads**: Read target files and tests named by the brief or plan; use focused search for local call sites when needed.
 4. **Implement**: Follow plan or outline contracts exactly. Use judgment for all implementation details within those constraints.
 5. **Explore when needed**: Use focused search and reads for local queries. For a broad codebase question that exceeds your scope, escalate to the caller or request a scoped exploration rather than widening your own task.
 6. **Test and verify**: Run the VerificationHint instructions above and any verification required by the brief or plan. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.
-7. **Mechanical edits**: When repetitive edits span 3+ locations, follow playbook mechanical-edit criteria. Use native regex replacement for regex-expressible changes.
+7. **Mechanical edits**: Use native regex replacement only for regex-expressible repetitive edits; otherwise make scoped edits and verify each touched location.
 8. **Commit**: Commit at logical checkpoints on the current branch. In each commit `## AI Context`, capture what the diff cannot show — intent, rejected alternatives, cross-module implications, and related mental-model/spec references — not mechanical "what changed" narration. On a fix cycle, record each finding's disposition (`fixed`, `won't fix`, or `deferred`, with a reason for the latter two) in the fix commit's `## AI Context` — the same per-finding list you return to the caller (see Output) — so the judgment survives to the commit log.
 
 ## Output
@@ -60,6 +61,7 @@ Alias model for this role: {{.RoleModel}}.
 - Commit range, or `none` with reason.
 - Any deviations from the plan, with rationale.
 - Any additional items required by `ResultExpectations`.
+- If `ResultExpectations` names an output file, its path plus a short completion summary.
 
 **On fix cycle (review findings relayed):**
 
