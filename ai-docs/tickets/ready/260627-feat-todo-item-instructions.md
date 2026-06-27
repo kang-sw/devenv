@@ -123,6 +123,28 @@ Verification:
 - Unit-test status/order mutations preserve existing `instruction` values.
 - Unit-test `ws.todo.read(key)` success and missing-key errors.
 
+### Result (1aaae7b4) - 2026-06-27
+
+Implemented Phase 1 only.
+
+- Added optional nullable `instruction` storage to persisted session todo items.
+- Updated `ws.todo.append`, `ws.todo.insert_before`, and
+  `ws.todo.insert_after` to accept string or null `instruction` values.
+- Added `ws.todo.read(key)` returning full JSON payload with `key`, `title`,
+  `status`, and nullable `instruction`.
+- Preserved instruction payloads through status/order mutations by retaining
+  full todo item structs.
+- Kept rendering and enter-tool instruction producers out of scope for later
+  phases.
+
+Verification:
+
+- `go test ./internal/mcp -count=1 -run 'TestTodo|TestServeStdioTodo|TestRenderTodos|TestStoreConcurrentTodoWrites|TestEnterModeReplacesTodos'`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `spec_index.verify`
+- `git diff --check`
+
 ### Phase 2: Todo instruction rendering
 
 Render instruction text consistently across todo surfaces.
