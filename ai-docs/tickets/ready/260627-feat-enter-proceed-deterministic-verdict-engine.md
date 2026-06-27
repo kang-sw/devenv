@@ -299,6 +299,37 @@ Verification boundary:
   require them.
 - `git diff --check` passes.
 
+### Result (75e1adee)
+
+Phase 1 is review-clean on branch
+`implement/260627-enter-proceed-verdict-engine`.
+
+Implemented:
+
+- `ws.enter.proceed` now accepts a `target` object, grouped optional/nullable
+  `facts`, and `format`, then resolves deterministic proceed routing through a
+  private MCP resolver.
+- The resolver preserves the existing verdict-facing route vocabulary, emits
+  canonical raw verdict text plus JSON output, records the proceed agenda, and
+  replaces proceed todos atomically.
+- `lead-proceed` now gathers route facts, calls `ws.enter.proceed`, follows the
+  returned `NEXT`, and explicitly dispatches implementation routes through
+  `ws/playbook.print(name: "lead-implement")`.
+- Runtime docs, workflow docs, mental models, rsrc manifests, and the wsflow
+  rsrc mirror were updated for the new boundary.
+
+Verification:
+
+- `go test ./internal/mcp -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
+Review:
+
+- Partitioned correctness, fit, and test review completed clean after one
+  fix/re-review cycle.
+
 ## Spec Impact
 
 - **Target spec areas:** `workflow-skills.md` (`lead-proceed` route boundary,
