@@ -84,9 +84,14 @@ Target spec areas:
 - `ai-docs/spec/workflow-skills.md`: enter-tool todo replacement as the single
   source for focused reachable runbook steps.
 
-This ticket is currently `todo/` because it changes a shared MCP/session-state
-contract. Promotion to `ready/` should pin the exact setter surfaces affected and
-the backward-compatibility tests.
+Ready-addressing note:
+
+- Phase 1 changes the shared MCP/session-state contract but does not need a
+  contract-first `🚧` spec entry before implementation; implementation can update
+  the existing session-state and workflow-skill spec sections with the exact
+  landed behavior.
+- The setter/read surfaces and backward-compatibility verification are pinned in
+  the phase requirements below.
 
 ## Phases
 
@@ -97,16 +102,25 @@ Add `instruction` to session todo items and expose full-instruction reads.
 Required behavior:
 
 - Extend persisted todo item records with optional nullable `instruction`.
-- Update todo setter paths to accept optional nullable `instruction`.
-- Update todo getter/list paths to preserve and return `instruction`.
-- Add `ws.todo.read(key)` for reading a single todo's full payload.
+- Update todo creation setters that write item payloads to accept optional
+  nullable `instruction`: `ws.todo.append`, `ws.todo.insert_before`, and
+  `ws.todo.insert_after`.
+- Keep non-payload status/order setters (`ws.todo.check`, `ws.todo.erase`,
+  `ws.todo.clear`, and `ws.todo.reorder`) behaviorally unchanged except that
+  they must preserve any existing `instruction` value on untouched items.
+- Update todo getter/list paths to preserve and return `instruction` in
+  structured payloads.
+- Add `ws.todo.read(key)` for reading a single todo's full payload, including
+  `key`, `title`, `status`, and nullable `instruction`.
 - Keep absent/null `instruction` backward-compatible for old session files.
 - Reject non-string non-null `instruction` inputs with a clear validation error.
 
 Verification:
 
 - Unit-test old todo records without `instruction`.
-- Unit-test append/insert/update flows with and without `instruction`.
+- Unit-test append, insert-before, and insert-after flows with and without
+  `instruction`.
+- Unit-test status/order mutations preserve existing `instruction` values.
 - Unit-test `ws.todo.read(key)` success and missing-key errors.
 
 ### Phase 2: Todo instruction rendering
