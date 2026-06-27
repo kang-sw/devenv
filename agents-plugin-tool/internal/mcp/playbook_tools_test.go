@@ -1697,8 +1697,8 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 // TestSkillsCallEnterTools verifies that the four skills modified in Phase 2
 // contain the expected enter.* and agenda.set call tokens after rendering.
 // Tokens are chosen to be non-incidental: enter.<mode> appears only from the
-// inserted calls, and need_review / agenda.set are argument-level signals that
-// cannot appear from surrounding prose alone.
+// inserted calls, and target/facts/policy or agenda.set are argument-level
+// signals that cannot appear from surrounding prose alone.
 func TestSkillsCallEnterTools(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -1710,7 +1710,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	}{
 		{
 			skill:   "lead-implement",
-			wantAll: []string{"enter.implement", "need_review"},
+			wantAll: []string{"enter.implement", `"target"`, `"facts"`, `"policy"`},
 		},
 		{
 			skill:    "lead-proceed",

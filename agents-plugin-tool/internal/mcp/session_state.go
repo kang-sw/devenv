@@ -424,6 +424,9 @@ func implementReviewTitle(reviewAlloc string) string {
 	case "":
 		return "Review"
 	default:
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reviewAlloc)), "partitioned:") {
+			return "Review (partitioned)"
+		}
 		return "Review"
 	}
 }
@@ -655,6 +658,48 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 }
 
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
+	if _, hasNewTarget := args["target"]; hasNewTarget {
+		const tool = "ws.enter.implement"
+		sessionKey, err := sessionStateKey(tool, args)
+		if err != nil {
+			return toolTextResponse(id, "", err)
+		}
+		record, ok := s.sessions.readState(sessionKey)
+		if !ok {
+			return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
+		}
+		input, err := parseImplementInput(args)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		}
+		normalized, _ := normalizeImplementFacts(input)
+		targetBranch := "implement/" + normalized.ScopeSlug
+		obs, err := observeImplementBranch(record.Root, targetBranch)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
+		}
+		result := resolveImplement(input, obs)
+		rawAgenda, err := json.Marshal(result.Agenda)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
+		}
+		todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
+			Delegation:  result.Verdict.Delegation,
+			PlanDepth:   result.Verdict.PlanDepth,
+			ReviewAlloc: result.Verdict.ReviewAlloc,
+			NeedReview:  result.Verdict.NeedReview,
+			NeedDoc:     result.Verdict.DocMode == "standard",
+		})
+		if err := s.sessions.enterMode(sessionKey, "implement", rawAgenda, todos); err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		}
+		if input.Format == "json" {
+			text, err := implementResultJSON(result)
+			return toolTextResponse(id, text, err)
+		}
+		return toolTextResponse(id, result.Raw, nil)
+	}
+
 	needReview, _ := args["need_review"].(bool)
 	needDoc, _ := args["need_doc"].(bool)
 	delegation, err := parseImplementDelegation(stringValue(args["delegation"]))

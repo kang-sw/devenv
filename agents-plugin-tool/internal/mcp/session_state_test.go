@@ -721,6 +721,45 @@ func TestEnterProceedSchemaAdvertisesNullableFacts(t *testing.T) {
 	}
 }
 
+func TestEnterImplementSchemaRequiresTargetAndAdvertisesNullableFacts(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	var listResp map[string]any
+	if err := json.Unmarshal([]byte(callToolsList(t, server)), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := listResp["result"].(map[string]any)
+	listedTools, _ := result["tools"].([]any)
+	var schema map[string]any
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		if tool["name"] == "ws.enter.implement" {
+			schema, _ = tool["inputSchema"].(map[string]any)
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("ws.enter.implement schema not found")
+	}
+	required, _ := schema["required"].([]any)
+	if !containsAnyString(required, "target") {
+		t.Fatalf("required = %#v, want target", required)
+	}
+
+	properties, _ := schema["properties"].(map[string]any)
+	target := objectProperties(t, properties["target"])
+	assertNullableSchema(t, target["ticket_path"])
+	assertNullableSchema(t, target["kind"])
+
+	facts := objectProperties(t, properties["facts"])
+	scope := objectProperties(t, facts["scope"])
+	assertNullableSchema(t, scope["span"])
+	assertNullableSchema(t, scope["surface"])
+	policy := objectProperties(t, properties["policy"])
+	docs := objectProperties(t, policy["docs"])
+	assertNullableSchema(t, docs["mode"])
+}
+
 func objectProperties(t *testing.T, raw any) map[string]any {
 	t.Helper()
 	obj, _ := raw.(map[string]any)
@@ -885,6 +924,52 @@ func proceedReadyArgs(format string) map[string]any {
 	return args
 }
 
+func implementReadyArgs(format string) map[string]any {
+	args := map[string]any{
+		"target": map[string]any{
+			"kind":        "ticket",
+			"label":       "260627-feat-enter-implement-deterministic-verdict-engine",
+			"ticket_stem": "260627-feat-enter-implement-deterministic-verdict-engine",
+			"ticket_path": "ai-docs/tickets/ready/260627-feat-enter-implement-deterministic-verdict-engine.md",
+			"scope_label": "Phase 1: MCP-owned implement strategy verdict",
+			"scope_slug":  "enter-implement-deterministic-verdict-engine",
+		},
+		"facts": map[string]any{
+			"scope": map[string]any{
+				"span":                        "multi-file",
+				"surface":                     "public-interface",
+				"new_public_symbol":           "no",
+				"new_type_contract":           "yes",
+				"test_surface":                "existing",
+				"explicit_delegation_request": "no",
+			},
+			"complexity": map[string]any{
+				"change_points":    "partially-known",
+				"reuse_points":     "unconfirmed",
+				"strategy_shape":   "single-obvious",
+				"side_effect_risk": "moderate",
+				"cold_context":     "no",
+			},
+			"risk": map[string]any{
+				"correctness":          "high",
+				"fit":                  "moderate",
+				"test":                 "moderate",
+				"security_or_contract": "moderate",
+			},
+		},
+		"policy": map[string]any{
+			"branch": map[string]any{
+				"merge_target": "feature/ferrule",
+				"allow_rename": "no",
+			},
+			"review": map[string]any{"override": "auto"},
+			"docs":   map[string]any{"mode": "standard"},
+		},
+	}
+	args["format"] = format
+	return args
+}
+
 func proceedArgs(kind, label string, targetExtra, facts map[string]any) map[string]any {
 	target := map[string]any{"kind": kind, "label": label}
 	for k, v := range targetExtra {
@@ -922,6 +1007,15 @@ func callToolLineWithKey(t *testing.T, server *Server, id int, key, name string,
 }
 
 func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyString(values []any, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true
@@ -1037,6 +1131,82 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 		"need_review":  true,
 	}); !strings.Contains(got, `invalid review_alloc "singel"`) {
 		t.Fatalf("invalid review_alloc error expected, got: %s", got)
+	}
+}
+
+func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	text := callToolWithKey(t, server, 2, key, "ws.enter.implement", implementReadyArgs("text"))
+	for _, want := range []string{
+		"Implementation Verdict",
+		"Mode: delegated",
+		"Branch Action: create implement/enter-implement-deterministic-verdict-engine",
+		"Plan Depth: survey",
+		"Review Allocation: partitioned: correctness, fit, test",
+		"Next: Create implement/enter-implement-deterministic-verdict-engine",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("enter.implement verdict missing %q:\n%s", want, text)
+		}
+	}
+
+	jsonText := callToolWithKey(t, server, 3, key, "ws.enter.implement", implementReadyArgs("json"))
+	var result implementResult
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
+	}
+	if result.Raw == "" || !strings.Contains(result.Raw, "Implementation Verdict") {
+		t.Fatalf("json result missing raw verdict: %+v", result)
+	}
+	if result.Verdict.BranchPlan.Action != "create" || result.Verdict.Delegation != "delegated" {
+		t.Fatalf("unexpected verdict: %+v", result.Verdict)
+	}
+
+	record, ok := server.sessions.readState(key)
+	if !ok {
+		t.Fatal("session record not found")
+	}
+	var agenda implementAgenda
+	if err := json.Unmarshal(record.Agenda["implement"], &agenda); err != nil {
+		t.Fatalf("agenda did not store implement verdict subset: %v", err)
+	}
+	if agenda.BranchPlan.Action != "create" || agenda.ReviewAlloc != "partitioned: correctness, fit, test" {
+		t.Fatalf("unexpected agenda: %+v", agenda)
+	}
+	if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge") {
+		t.Fatalf("enter.implement did not replace todo list: %v", keysOf(record.Todos))
+	}
+}
+
+func TestEnterImplementStopsOnImplementBranchWithoutMergeTarget(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	runGit(t, root, "switch", "-c", "implement/old-scope")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	args := implementReadyArgs("json")
+	delete(args["policy"].(map[string]any)["branch"].(map[string]any), "merge_target")
+	text := callToolWithKey(t, server, 2, key, "ws.enter.implement", args)
+	var result implementResult
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
+	}
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("expected stop branch action, got %+v", result.Verdict.BranchPlan)
+	}
+	if !strings.Contains(result.Raw, "Branch Action: stop - merge target required") || !strings.Contains(result.NextInstruction, "Stop before source edits") {
+		t.Fatalf("stop verdict missing blocker guidance:\n%s", result.Raw)
 	}
 }
 

@@ -450,36 +450,40 @@ workflow routing does not create new skeleton artifacts. {#260512-skeleton-draft
 
 Implementation skills execute code changes and close the documentation loop.
 
-`lead-implement` is the implementation harness. It routes to direct editing or
-delegated code writing, then runs the shared post-implementation documentation
-pipeline before reporting completion. Existing `implement/*` branches continue
-on the current branch; every other invocation creates an `implement/<scope>`
-branch before source edits. After verification, `lead-implement` records the
-phase result commit, closes spec, mental-model, ticket, and index updates, then
-asks the user to merge, continue, or stop. Follow-up changes after this gate
-route to another implementation slice or sprint and are captured in tickets as
-append-only Result editions for already completed phases.
+`lead-implement` is the implementation harness. It gathers normalized target,
+scope, complexity, risk, and policy facts, calls `ws.enter.implement`, follows
+the MCP-authored Implementation Verdict, then runs the shared
+post-implementation documentation pipeline before reporting completion. The MCP
+verdict owns deterministic implementation labels and branch preflight: it chooses
+direct-edit or delegated mode, branch action, plan depth, review allocation,
+review need, and documentation mode from facts, policy, and observed Git state.
+`Branch Action: stop` blocks source edits until the missing merge target, unsafe
+rename, existing target branch, or tracking ambiguity is resolved. After
+verification, `lead-implement` records the phase result commit, closes spec,
+mental-model, ticket, and index updates, then asks the user to merge, continue,
+or stop. Follow-up changes after this gate route to another implementation slice
+or sprint and are captured in tickets as append-only Result editions for already
+completed phases.
 
 `lead-implement` is a unified implementation spine with two edit modes.
 Direct-edit mode: the lead edits and verifies inline on the scoped
 implementation branch, suitable for single-file internal-only changes.
 Delegated mode: the lead writes a brief, optionally populates a plan, spawns an
-implementer agent, and captures the resulting commit range. `judge:
-needs-delegation` selects the edit mode at Route time; branch isolation is
-independent of edit mode, and direct-edit escalates to delegated when scope
-grows beyond single-file internal-only.
+implementer agent, and captures the resulting commit range. The MCP verdict
+selects edit mode; branch isolation is independent of edit mode, and direct-edit
+is derived only for single-file internal-only work with no public symbol,
+contract, new test-file, or explicit delegation signal.
 
-After route judgments and before preparation or source inspection,
-`lead-implement` emits a non-blocking Implementation Verdict. The verdict
-summarizes target, selected scope, branch mode, edit mode, plan depth, review
-allocation, and decisive route facts, then continues immediately. It does not
-use `NEXT:` because `lead-proceed` owns next-skill routing. wsflow mirrors this
-checkpoint with its own verdict spanning branch mode, plan depth, and review
-allocation, because the converged `wsflow:lead-implement` spine owns
-implementation strategy directly rather than deferring it to a separate edit
-skill. See `#260529-wsflow-converged-implement-spine`.
+After fact gathering and before preparation or source inspection,
+`lead-implement` reads the raw Implementation Verdict returned by
+`ws.enter.implement`. The verdict summarizes target, selected scope, branch
+action, edit mode, plan depth, review allocation, documentation mode, normalized
+conditions, warnings, agenda values, and a concrete `Next:` instruction. The
+playbook follows that instruction instead of recomputing deterministic labels.
+wsflow mirrors this checkpoint through the shared product-mode playbook text.
+See `#260529-wsflow-converged-implement-spine`.
 
-Review is a single stage for both modes. `judge: review-allocation` picks depth
+Review is a single stage for both modes. MCP `review_alloc` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
 test) when partitioned. Each partition carries a default reviewer tier in the
 first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
@@ -667,10 +671,9 @@ that playbook before source inspection, planning, editing, or
 implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
 judges, compute direct/delegated execution mode, compute branch mode, or inspect
 source.
-`lead-implement` owns those decisions when the handoff executes. The same
-deterministic-verdict optimization is intended for `lead-implement` later, but
-the current shipped boundary changes only `lead-proceed`. wsflow mirrors the
-same route-only boundary without pre-applying `wsflow:lead-implement` branch or
+`lead-implement` owns those decisions when the handoff executes by calling
+`ws.enter.implement` after fact gathering. wsflow mirrors the same route-only
+proceed boundary without pre-applying `wsflow:lead-implement` branch or
 execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 

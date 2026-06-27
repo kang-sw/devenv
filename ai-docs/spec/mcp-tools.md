@@ -223,12 +223,23 @@ list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
 `ws.todo.append` loop is needed for a covered mode:
 
-- `implement`: always Route, Prep, Edit, Final action gate, Merge; `need_review`
-  inserts Review after Edit; `need_doc` inserts Doc pre-pass, Doc commit gate, and
-  Doc closeout (mirroring the lead-implement pipeline order). The derived Prep,
-  Edit, and Review labels reflect validated typed verdict values (`plan_depth`,
-  `delegation`, and `review_alloc`) instead of using one hardcoded
-  delegated/partitioned label or copying unknown strings into checklist titles.
+- `implement`: `ws.enter.implement` is the public mode-switch call for the
+  implementation-facts-complete boundary. It accepts `session_key`, a required
+  `target` object, optional grouped `facts.scope` / `facts.complexity` /
+  `facts.risk` objects, a small `policy` object, and optional `format:
+  text|json`. MCP observes Git branch state from the session root, including the
+  current branch, HEAD/start commit, target branch existence, and
+  upstream/tracking ambiguity; callers provide only policy that cannot be
+  observed mechanically, such as a merge target while already on `implement/*`
+  and whether safe branch rename is allowed. The resolver derives
+  `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
+  `doc_mode`, stores the implement agenda, and replaces the todo list with the
+  derived lead-implement checklist. Text output is the canonical raw verdict
+  beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
+  `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
+  output returns the structured result plus `next_instruction` and the identical
+  `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
+  what policy or branch condition needs correction before source edits continue.
 - `proceed`: `ws.enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
