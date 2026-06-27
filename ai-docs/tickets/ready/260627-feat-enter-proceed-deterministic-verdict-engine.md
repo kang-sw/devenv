@@ -234,6 +234,14 @@ Implement deterministic route/verdict resolution inside `ws.enter.proceed`.
 
 Required behavior:
 
+- Before the larger resolver/schema work, hotfix the existing `lead-proceed`
+  handoff for implementation routes: when `NEXT` is `lead-implement`, the
+  playbook must explicitly direct the lead to call
+  `ws/playbook.print(name: "lead-implement")` and execute the returned playbook
+  inline, rather than treating `lead-implement` as a direct tool or calling
+  `ws.enter.implement` itself. This prevents proceed routing from skipping the
+  implement playbook while the current `enter.implement` schema still accepts
+  final verdict labels.
 - Replace the current freeform `ticket`, `phase`, `next_skill`, and `conditions`
   schema with the `target` + grouped optional/nullable `facts` shape, preserving
   `session_key`.
