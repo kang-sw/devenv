@@ -164,6 +164,29 @@ review paths and disposition notes, run playbook-render tests, run wsflow packag
 tests when mirrored resources change, and run a focused text audit that confirms
 `lead-implement` no longer carries long relay prose.
 
+### Result (089a0e0) - 2026-06-27
+
+Implemented Phase 2. Delegated review-fix relay now renders a dedicated
+`implementer-relay` playbook with declared file-first inputs for brief path,
+optional plan path, review cycle, current commit range, non-clean review paths,
+lead disposition notes, verification instructions, and result expectations.
+`lead-implement` now keeps a short rendered-prompt dispatch for review relay
+instead of carrying the long relay prompt body in its always-rendered text.
+
+The relay prompt is a direct-execution implementer surface with
+`delegates:false`, `role: implementer`, and `tier: medium`, preserving
+render-minted delegate credentials and recommended-tier metadata without adding
+a nested-delegation continuation cue. Reviewer findings remain file inputs; the
+lead supplies disposition notes and owns triage, verification, re-review
+orchestration, and final clean judgment.
+
+Verification passed for focused MCP playbook-render tests, manifest
+regeneration, wsflow rsrc mirror regeneration, `go test ./internal/wsrsrc
+-count=1`, `python3 -m unittest discover agents-plugin-wsflow/tests`, `go test
+./...` in `agents-plugin-tool`, and `git diff --check`. Fresh-reader audit
+findings accepted for this phase were fixed in `089a0e0`. Partitioned review
+completed with correctness `clean`, fit `clean`, and test `clean`.
+
 ### Phase 3: Update workflow documentation
 
 Update spec and mental-model documentation after the implementation shape is

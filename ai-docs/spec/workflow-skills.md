@@ -527,6 +527,12 @@ enforces convergence by dedup against the durable disposition record — a settl
 finding is not re-relayed, only genuinely new Critical/Important findings are —
 layered over the relay cap as the backstop for the pathological case of a
 reviewer inventing new findings each cycle.
+Delegated review-fix relay is file-first: the lead renders the
+`implementer-relay` playbook with declared inputs for brief path, optional plan
+path, review cycle, current commit range, non-clean review paths, disposition
+notes, verification hint, and result expectations. The lead then sends only the
+rendered prompt path plus a short execute instruction to the implementation
+owner. Reviewer findings remain file inputs, not copied prompt prose.
 {#260619-stateless-implement-review-continuity}
 
 Plan population is an either/or depth choice for delegated mode. When plan depth
@@ -823,7 +829,8 @@ workflow-stage routing, and final documentation ownership for the lead unless a
 delegate is explicitly assigned those responsibilities. Delegates return their
 assigned output through named-agent result surfaces rather than invoking lead
 skills on their own.
-The `implementer` render playbook is a direct-execution delegate surface, not a
-nested-delegation surface: its `delegates` metadata is false, so rendering it
-does not add the generic continuation tip. It still carries `role: implementer`
-for render-minted child credentials and tier-derived model guidance.
+The `implementer` and `implementer-relay` render playbooks are
+direct-execution delegate surfaces, not nested-delegation surfaces: their
+`delegates` metadata is false, so rendering them does not add the generic
+continuation tip. They still carry `role: implementer` for render-minted child
+credentials and tier-derived model guidance.
