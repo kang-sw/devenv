@@ -529,18 +529,21 @@ func TestRenderTodosCheckpointAdjacentActionableInstructions(t *testing.T) {
 		{Key: "e", Title: "E", Status: todoPending, Instruction: stringPtr("Echo non-adjacent instruction")},
 	}
 	want := strings.Join([]string{
-		"- [x] {a} A (instruction omitted)",
+		"- [x] {a} A",
+		"      ...+",
 		"- [ ] {b} B",
 		"      Bravo full instruction",
-		"- [x] {c} C (instruction omitted)",
+		"- [x] {c} C",
+		"      ...+",
 		"- [~] {d} D",
 		"      Delta full instruction",
-		"- [ ] {e} E (instruction omitted)",
+		"- [ ] {e} E",
+		"      ...+",
 	}, "\n")
 	if got := renderTodosCheckpoint(list, "c"); got != want {
 		t.Fatalf("checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, want)
 	}
-	if got := renderTodosCheckpoint(list, "c"); strings.Contains(got, "...") {
+	if got := renderTodosCheckpoint(list, "c"); strings.Contains(got, "\n...") {
 		t.Fatalf("checkpoint render collapsed ordered context:\n%s", got)
 	}
 	if got := renderTodosCheckpoint(list, "c"); strings.Contains(got, "Charlie checked instruction") || strings.Contains(got, "Echo non-adjacent instruction") {
@@ -555,20 +558,24 @@ func TestRenderTodosCheckpointFirstAndLastAdjacency(t *testing.T) {
 		{Key: "c", Title: "C", Status: todoPending, Instruction: stringPtr("Charlie non-adjacent instruction")},
 	}
 	wantFirst := strings.Join([]string{
-		"- [x] {a} A (instruction omitted)",
+		"- [x] {a} A",
+		"      ...+",
 		"- [ ] {b} B",
 		"      Bravo next instruction",
-		"- [ ] {c} C (instruction omitted)",
+		"- [ ] {c} C",
+		"      ...+",
 	}, "\n")
 	if got := renderTodosCheckpoint(list, "a"); got != wantFirst {
 		t.Fatalf("first checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, wantFirst)
 	}
 
 	wantLast := strings.Join([]string{
-		"- [x] {a} A (instruction omitted)",
+		"- [x] {a} A",
+		"      ...+",
 		"- [ ] {b} B",
 		"      Bravo next instruction",
-		"- [ ] {c} C (instruction omitted)",
+		"- [ ] {c} C",
+		"      ...+",
 	}, "\n")
 	if got := renderTodosCheckpoint(list, "c"); got != wantLast {
 		t.Fatalf("last checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, wantLast)
@@ -583,9 +590,11 @@ func TestRenderTodosCheckpointKeepsDoneDeferAndInstructionlessAdjacentCompact(t 
 		{Key: "defer", Title: "Defer", Status: todoDefer, Instruction: stringPtr("Defer instruction")},
 	}
 	want := strings.Join([]string{
-		"- [x] {done} Done (instruction omitted)",
+		"- [x] {done} Done",
+		"      ...+",
 		"- [x] {target} Target",
-		"- [>] {defer} Defer (instruction omitted)",
+		"- [>] {defer} Defer",
+		"      ...+",
 	}, "\n")
 	if got := renderTodosCheckpoint(list, "target"); got != want {
 		t.Fatalf("done/defer checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, want)
@@ -1917,10 +1926,12 @@ func TestServeStdioTodoCheckCheckpointRendering(t *testing.T) {
 			fmt.Sprintf("todo %s: b", status),
 			"- [ ] {a} A",
 			"      Alpha adjacent instruction",
-			fmt.Sprintf("%s {b} B (instruction omitted)", markers[string(status)]),
+			fmt.Sprintf("%s {b} B", markers[string(status)]),
+			"      ...+",
 			"- [ ] {c} C",
 			"      Charlie adjacent instruction",
-			"- [ ] {d} D (instruction omitted)",
+			"- [ ] {d} D",
+			"      ...+",
 			"",
 		}, "\n")
 		if got != want {

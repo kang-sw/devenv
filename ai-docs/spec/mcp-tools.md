@@ -301,7 +301,7 @@ for the checked item's immediate previous and next items when those items are
 actionable (`pending` or `wip`) and have non-empty instructions; the checked item,
 non-adjacent items, `done` items, `defer` items, and instruction-less items stay
 compact. Compact checkpoint rows with a non-empty instruction that is not rendered
-append ` (instruction omitted)` to distinguish hidden instruction payloads from
+add an indented `...+` marker line to distinguish hidden instruction payloads from
 instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
 are always explicit via `ws.todo.check`.
 
