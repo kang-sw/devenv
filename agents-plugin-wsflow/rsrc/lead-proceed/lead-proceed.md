@@ -30,7 +30,7 @@ Execution
 Route Context
 - `has-ticket` is artifact state; do not treat it as a judgment.
 - Normalize ticket status to `idea`, `todo`, `ready`, `done`, `dropped`, `unknown`, or `n/a`; set `n/a` when `has-ticket=no`.
-- `discussion-needed` blocks every implementation route.
+- `discussion-needed` blocks every ticket-writing and implementation route; terminal and container stops still report through earlier blocks.
 - Set `needs-ticket=n/a` unless `target-kind=inline`, `actionable=yes`, and `has-ticket=no`.
 - Freshness is lead-owned: compare active conversation decisions against the ticket, not source.
 - `freshness=missing-settled-decisions` means the ticket needs a lead-write-ticket procedure run.
@@ -40,7 +40,7 @@ Route Context
 - If the migration anchor conflicts with the requested route, set `discussion-needed=yes`.
 
 Routing
-- Use the first matching route row.
+- Use the first matching route block, then the first matching row inside it.
 - Captured `Ticket:` paths follow the post-write re-route rules in Execute Verdict.
 - Honor one explicit phase name exactly.
 - Stop when one proceed request names multiple phases.
@@ -54,7 +54,7 @@ Routing
 
 #### Derivation Order
 
-1. Parse target; resolve ticket stems to ticket paths when possible; set `target-kind`.
+1. Parse target; resolve ticket stems to ticket paths when possible. If a user-provided ticket stem cannot resolve, set `target-kind=ticket-path`, `ticket-missing=yes`, and `has-ticket=no`.
 2. Resolve `has-ticket`, `ticket-missing`, and `status` from ticket artifacts.
 3. Read ticket artifacts only when `has-ticket=yes`; extract category, scope, phases, phase results, open questions, `plans:`, and workset included-ticket labels.
 4. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs or tests.
@@ -100,30 +100,64 @@ Routing
 
 ### 2. Select Route
 
-Use the first matching route row. Blank cells mean any value. Extra conditions in `When` must also hold.
+Use the first matching block, then the first matching row inside that block.
 
-| Priority | target-kind | has-ticket | status | category | freshness | discussion-needed | scope-blocked | When | NEXT / Route |
-|----------|-------------|------------|--------|----------|-----------|-------------------|---------------|------|--------------|
-| 1 | `inline` |  |  |  |  |  |  | `actionable=no` | Continue through `{{.SkillNamespace}}:lead-discuss`; stop. |
-| 2 |  |  |  |  |  |  |  | `ticket-missing=yes` | Stop; report that the ticket path does not exist and ask for a valid ticket path or inline implementation target. |
-| 3 |  | `yes` | `done` |  |  |  |  |  | Stop; report that the ticket is already done. |
-| 4 |  | `yes` | `dropped` |  |  |  |  |  | Stop; report that the ticket was dropped and needs explicit revival or replacement. |
-| 5 |  | `yes` | `unknown` |  |  |  |  |  | Stop; report that ticket status could not be determined from its path. |
-| 6 |  | `yes` |  | `epic` |  |  |  |  | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
-| 7 |  | `yes` |  | `workset` |  |  |  |  | Stop; report that worksets are containers, list included actionable ticket paths grouped as `ready`, `not-ready`, and `unknown` from explicit path/status labels or already-loaded artifacts, and suggest one safe next request. |
-| 8 |  |  |  |  |  |  |  | `migration-anchor=missing` | Stop; report that the required migration anchor could not be read and do not continue to ticket writing or implementation. |
-| 9 |  |  |  |  |  | `yes` |  |  | Continue through `{{.SkillNamespace}}:lead-discuss`; stop. If `migration-anchor=conflict`, name the conflict in Reason. |
-| 10 |  | `yes` | `idea` |  |  |  |  |  | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| 11 |  |  |  |  |  |  | `multiple-explicit-phases` |  | Stop; ask the user to choose one phase or create/slice tickets. |
-| 12 |  |  |  |  |  |  | `too-broad` |  | Stop; ask for phase or ticket slicing before implementation. |
-| 13 |  |  |  |  |  |  | `no-unfinished-phase` |  | Stop; report that all ticket phases appear complete and ask whether to close, reopen, or name a follow-up target. |
-| 14 |  |  |  |  |  |  | `phase-already-complete` |  | Stop; report that the named phase already has a result and ask for explicit redo/revision confirmation or a different phase. |
-| 15 |  | `yes` | `todo` |  |  |  |  |  | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| 16 |  | `yes` |  |  | `missing-settled-decisions` |  |  |  | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| 17 |  | `yes` | `ready` |  | `current` | `no` | `none` |  | Call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
-| 18 |  | `no` |  |  |  |  |  | `needs-ticket=yes` | Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned procedure inline; capture `Ticket:` and re-route. |
-| 19 |  | `no` |  |  |  |  |  | `needs-ticket=no` | Call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute the returned procedure inline. |
-| 20 |  |  |  |  |  |  |  | route facts are insufficient or inconsistent | Stop; report the missing or inconsistent route facts required to continue. |
+#### Terminal Artifact States
+
+| Match | NEXT | Report |
+|-------|------|--------|
+| `target-kind=inline` and `actionable=no` | `{{.SkillNamespace}}:lead-discuss` | Target is not actionable. |
+| `ticket-missing=yes` | `stop` | Ask for a valid ticket path or inline implementation target. |
+| `status in {done, dropped, unknown}` | `stop` | Use Terminal Status Reports. |
+
+Terminal Status Reports:
+- `done`: report already done.
+- `dropped`: report dropped; require explicit revival or replacement.
+- `unknown`: report status could not be determined from path.
+
+#### Container Tickets
+
+| Match | NEXT | Report |
+|-------|------|--------|
+| `category=epic` | `stop` | Suggest child ticket creation, child promotion, or proceed on a ready child. |
+| `category=workset` | `stop` | List included actionable tickets grouped as `ready`, `not-ready`, and `unknown`; suggest one safe next request. |
+
+#### Anchor And Discussion Gates
+
+| Match | NEXT | Report |
+|-------|------|--------|
+| `migration-anchor=missing` | `stop` | Report that the required migration anchor could not be read; do not write tickets or implement. |
+| `migration-anchor=conflict` | `{{.SkillNamespace}}:lead-discuss` | Name the conflict in Reason. |
+| `discussion-needed=yes` | `{{.SkillNamespace}}:lead-discuss` | Name the blocker. |
+
+#### Ticket Readiness
+
+| Match | NEXT | After |
+|-------|------|-------|
+| `status in {idea, todo}` | `lead-write-ticket` | Require a ready `Ticket:` path, then re-route. |
+| `freshness=missing-settled-decisions` | `lead-write-ticket` | Require a ready `Ticket:` path, then re-route. |
+
+#### Scope Gates
+
+| Match | NEXT | Report |
+|-------|------|--------|
+| `scope-blocked != none` | `stop` | Use Scope Blocker Reports. |
+
+Scope Blocker Reports:
+- `container-ticket`: use Container Tickets reports.
+- `multiple-explicit-phases`: ask the user to choose one phase or create/slice tickets.
+- `too-broad`: ask for phase or ticket slicing before implementation.
+- `no-unfinished-phase`: report all phases appear complete; ask whether to close, reopen, or name a follow-up target.
+- `phase-already-complete`: ask for explicit redo/revision confirmation or a different phase.
+
+#### Implementation Dispatch
+
+| Match | NEXT | Scope |
+|-------|------|-------|
+| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` | Selected slice. |
+| `has-ticket=no` and `needs-ticket=yes` | `lead-write-ticket` | Require a ready `Ticket:` path, then re-route. |
+| `has-ticket=no` and `needs-ticket=no` | `lead-implement` | Whole target. |
+| Route facts are insufficient or inconsistent | `stop` | Report the missing or inconsistent route facts required to continue. |
 
 ### 3. Emit Routing Verdict
 
@@ -133,7 +167,7 @@ Use the first matching route row. Blank cells mean any value. Extra conditions i
 NEXT: <{{.SkillNamespace}}:lead-discuss | lead-write-ticket | lead-implement | stop>
 
 - **Target**: <ticket path or brief summary>
-- **Route**: <first matching route row>
+- **Route**: <first matching route block and row>
 - **Reason**: <decisive facts only>
 - **Ticket Status**: <absent | idea | todo | ready | done | dropped | unknown | n/a>
 - **Ticket Category**: <epic | workset | other | n/a>
@@ -158,7 +192,7 @@ Do not ask for confirmation before invoking a non-stop route; when `NEXT: stop`,
 ### 4. Execute Verdict
 
 1. Read the emitted `NEXT:` line.
-2. If `NEXT:` names a downstream skill (`{{.SkillNamespace}}:lead-discuss`, `lead-write-ticket`, or `lead-implement`), call `{{.McpNamespace}}/enter.proceed(session_key: <lead key>, ticket: <Target ticket path or stem>, phase: <Slice>, next_skill: <NEXT value>, conditions: [<notable route-context flags, e.g. "freshness=<value>", "discussion=<value>", "scope-blocker=<value>">])` to record routing context before invoking the route.
+2. If `NEXT:` names a downstream route (`{{.SkillNamespace}}:lead-discuss`, `lead-write-ticket`, or `lead-implement`), call `{{.McpNamespace}}/enter.proceed(session_key: <lead key>, ticket: <Target ticket path/stem, or "n/a" for inline targets>, phase: <Slice>, next_skill: <NEXT value>, conditions: [<notable route-context flags, e.g. "freshness=<value>", "discussion=<value>", "scope-blocker=<value>">])` to record routing context before invoking the route.
 3. If `NEXT:` names an entry skill (`{{.SkillNamespace}}:lead-discuss`), invoke that skill. If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute it inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, or editing. If `NEXT:` names another procedure, call `{{.McpNamespace}}/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
 4. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
 5. Do not call implementation tools from `lead-proceed`.
