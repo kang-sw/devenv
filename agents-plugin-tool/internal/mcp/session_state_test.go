@@ -218,12 +218,12 @@ func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
 		DocMode:     "standard",
 		NeedDoc:     true,
 	})
-	for _, key := range []string{"route", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge"} {
+	for _, key := range []string{"route", "prep", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge"} {
 		instruction := requireInstruction(t, todoByKey(t, got, key))
 		if !strings.Contains(instruction, "merge target required") {
 			t.Fatalf("%s stop instruction did not include blocker: %q", key, instruction)
 		}
-		for _, forbidden := range []string{"Dispatch the delegated implementer", "Apply the source edits", "Verify source, tests"} {
+		for _, forbidden := range []string{"Dispatch the delegated implementer", "Apply the source edits", "Prepare the implementation brief", "Verify source, tests"} {
 			if strings.Contains(instruction, forbidden) {
 				t.Fatalf("%s stop instruction implies unreachable work via %q: %q", key, forbidden, instruction)
 			}
