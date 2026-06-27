@@ -1430,20 +1430,17 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "verified code reaching an implementation branch") {
-		t.Errorf("body %q: expected doctrine text 'verified code reaching an implementation branch'", body)
+	if !strings.Contains(body, "execution attention") {
+		t.Errorf("body %q: expected doctrine text 'execution attention'", body)
 	}
 	for _, want := range []string{
-		"Gather normalized `target`, `facts`, and `policy` for `ws/enter.implement`",
-		"Treat the todo list replaced by `ws/enter.implement` as authoritative",
+		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
+		"Treat the installed todo list as the ordered runbook",
 		"Delegate dispatch",
 		"Implementer spawn prompt",
 		"Reviewer prompt frame",
 		"Review relay prompt",
-		"Use the Mercenary dispatch item below instead of the Native item",
-		"Mercenary (when selected):",
-		`ws/mercenary.register(name: "<name>", system_prompt_text: <rendered prompt file contents>, tier: <recommended-tier>)`,
-		`ws/mercenary.call(name: "<name>", prompt: <task-specific input>)`,
+		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
 	} {
 		if !strings.Contains(body, want) {
