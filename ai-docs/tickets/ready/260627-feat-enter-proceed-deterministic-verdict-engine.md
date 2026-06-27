@@ -1,6 +1,6 @@
 ---
 title: Deterministic enter.proceed route and verdict resolution
-sage-review: recommended
+sage-review: completed
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260625-feat-ws-session-state-machine: introduced typed enter tools and session agenda/todo persistence
