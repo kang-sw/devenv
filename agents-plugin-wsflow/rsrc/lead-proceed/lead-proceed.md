@@ -22,30 +22,26 @@ Pipeline
 - Proceed assumes implementation intent; stop when routing cannot safely reach implementation.
 
 Execution
-- Emit a Routing Verdict before execution; invoke only the route named by `NEXT:`, or invoke nothing when `NEXT: stop`.
-- After the lead-write-ticket procedure returns with a ready `Ticket:` path, rebuild route context and emit a new Routing Verdict; otherwise stop and report the readiness blocker.
+- Read MCP's `Next:` line as the executable handoff instruction.
+- Do not add route-specific execution prose outside MCP's `Next:` instruction.
 
 ## Route Rules
 
-Route Context
-- `has-ticket` is artifact state; do not treat it as a judgment.
-- Normalize ticket status to `idea`, `todo`, `ready`, `done`, `dropped`, `unknown`, or `n/a`; set `n/a` when `has-ticket=no`.
-- `discussion-needed` blocks every ticket-writing and implementation route; terminal and container stops still report through earlier blocks.
-- Set `needs-ticket=n/a` unless `target-kind=inline`, `actionable=yes`, and `has-ticket=no`.
-- Freshness is lead-owned: compare active conversation decisions against the ticket, not source.
-- `freshness=missing-settled-decisions` means the ticket needs a lead-write-ticket procedure run.
-- Unconfirmed mechanisms or future-scope hints are not settled decisions; set `freshness=uncertain` and return to discussion instead of writing them.
-- `migration-anchor=loaded|n/a|missing|conflict`; checks are artifact-only and never permit source inspection.
-- If the migration anchor has binding decisions absent from the ticket, set `freshness=missing-settled-decisions`.
-- If the migration anchor conflicts with the requested route, set `discussion-needed=yes`.
+Fact Ownership
+- Build route facts from conversation state and workflow artifacts only.
+- Let `{{.McpNamespace}}/enter.proceed` select the deterministic route from normalized facts.
+- Keep uncertain judgments lead-owned; pass only the final fact value you can defend.
+- Treat MCP warnings as normalization notes, not as permission to re-solve the route.
+- Captured `Ticket:` paths follow the post-write re-route rules in MCP's `Next:` instruction.
 
-Routing
-- Use the first matching route block, then the first matching row inside it.
-- Captured `Ticket:` paths follow the post-write re-route rules in Execute Verdict.
+Scope Resolution
 - Honor one explicit phase name exactly.
-- Stop when one proceed request names multiple phases.
+- Stop facts with `scope_blocked=multiple-explicit-phases` when one proceed request names multiple phases.
+- Stop facts with `scope_blocked=phase-already-complete` when one explicit phase has a `Result` section unless the user explicitly asked to revise or redo it.
 - When the user does not name a phase, select the first unfinished phase.
-- Stop when the next phase is too broad for one complete implementation unit.
+- Stop facts with `scope_blocked=no-unfinished-phase` when no unfinished phase remains.
+- Set `slice=whole target` and `scope_blocked=none` for ready tickets without phase sections.
+- Stop facts with `scope_blocked=too-broad` when the next phase is too broad for one complete implementation unit.
 - Treat `--auto-slice`, `auto-slice`, and equivalent phrasing as permission to select the first unfinished phase automatically; do not edit ticket phase structure.
 
 ## On: invoke
@@ -61,6 +57,7 @@ Routing
 5. Resolve migration-anchor facts when the target, ticket, or active conversation touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries.
 6. Apply actionability, discussion, ticket-need, freshness, and category facts from the Route Facts table.
 7. Resolve implementation scope only after container-ticket checks.
+8. Call `{{.McpNamespace}}/enter.proceed` with the final target and fact groups.
 
 #### Route Facts
 
@@ -79,128 +76,68 @@ Routing
 | `slice` | `Phase N[: title]`, `whole target`, `blocked`, `n/a` | Scope resolution | Set `n/a` until an implementation slice or blocker is known. |
 | `scope-blocked` | `none`, `container-ticket`, `multiple-explicit-phases`, `too-broad`, `no-unfinished-phase`, `phase-already-complete` | Scope resolution | Default `none`; stops before implementation whenever not `none`. |
 
-#### Fact Rules
+#### Fact Guidance
 
-- If `migration-anchor=missing`, do not continue to ticket writing or implementation.
+- `has-ticket` is artifact state; do not treat it as a judgment.
+- Normalize ticket status to `idea`, `todo`, `ready`, `done`, `dropped`, `unknown`, or `n/a`; set `n/a` when `has-ticket=no`.
+- Set `needs-ticket=n/a` unless `target-kind=inline`, `actionable=yes`, and `has-ticket=no`.
+- Freshness is lead-owned: compare active conversation decisions against the ticket, not source.
+- `freshness=missing-settled-decisions` means the ticket needs a lead-write-ticket procedure run.
+- Unconfirmed mechanisms or future-scope hints are not settled decisions; set `freshness=uncertain` and `discussion-needed=yes`.
+- `migration-anchor=loaded|n/a|missing|conflict`; checks are artifact-only and never permit source inspection.
 - If the migration anchor has binding decisions absent from the ticket, set `freshness=missing-settled-decisions`.
-- For `has-ticket=yes`, set `freshness=current` after anchor and conversation checks find no missing settled decisions or uncertainty.
-- If freshness may be unsettled, unconfirmed, future-scoped, or missing, set `freshness=uncertain` and `discussion-needed=yes`.
-- Set `category=workset` only when the ticket itself is declared as a workset by filename/stem category, frontmatter `category`/`type`, title/heading, or a top-level workset membership section.
-- Set `category=epic` when the filename/stem category, frontmatter `category`/`type`, title, heading, or explicit epic section labels it as an epic.
-- Set `category=other` for ticket artifacts that are neither epic nor workset; set `category=n/a` when `has-ticket=no`.
-- If `category=epic` or `category=workset`, set `slice=blocked` and `scope-blocked=container-ticket`.
-- For actionable inline targets with `has-ticket=no` and `needs-ticket=no`, set `slice=whole target` and `scope-blocked=none`.
-- For ready tickets with no phase sections, set `slice=whole target` and `scope-blocked=none`.
-- For one request that explicitly names multiple phases, set `scope-blocked=multiple-explicit-phases`.
-- For one explicit phase with a `Result` section, set `scope-blocked=phase-already-complete` unless the user explicitly asked to revise or redo that phase.
-- For one explicit phase without a `Result` section, set `slice` to that phase and `scope-blocked=none`.
-- For no explicit phase and no unfinished phases, set `scope-blocked=no-unfinished-phase`.
-- For no explicit phase and unfinished phases, set `slice` to the first unfinished phase and `scope-blocked=none`.
-- If the selected scope is plainly too broad from ticket text, set `scope-blocked=too-broad`.
+- If the migration anchor conflicts with the requested route, set `migration_anchor=conflict` and `discussion_needed=yes`.
+- Set container tickets with `category=epic|workset`, `slice=blocked`, and `scope_blocked=container-ticket`.
+- Use exact blocker values: `multiple-explicit-phases`, `too-broad`, `no-unfinished-phase`, or `phase-already-complete`.
 
-### 2. Select Route
+### 2. Resolve Verdict
 
-Use the first matching block, then the first matching row inside that block.
+Call `{{.McpNamespace}}/enter.proceed`:
 
-#### Terminal Artifact States
-
-| Match | NEXT | Report |
-|-------|------|--------|
-| `target-kind=inline` and `actionable=no` | `{{.SkillNamespace}}:lead-discuss` | Target is not actionable. |
-| `ticket-missing=yes` | `stop` | Ask for a valid ticket path or inline implementation target. |
-| `status in {done, dropped, unknown}` | `stop` | Use Terminal Status Reports. |
-
-Terminal Status Reports:
-- `done`: report already done.
-- `dropped`: report dropped; require explicit revival or replacement.
-- `unknown`: report status could not be determined from path.
-
-#### Container Tickets
-
-| Match | NEXT | Report |
-|-------|------|--------|
-| `category=epic` | `stop` | Suggest child ticket creation, child promotion, or proceed on a ready child. |
-| `category=workset` | `stop` | List included actionable tickets grouped as `ready`, `not-ready`, and `unknown`; suggest one safe next request. |
-
-#### Anchor And Discussion Gates
-
-| Match | NEXT | Report |
-|-------|------|--------|
-| `migration-anchor=missing` | `stop` | Report that the required migration anchor could not be read; do not write tickets or implement. |
-| `migration-anchor=conflict` | `{{.SkillNamespace}}:lead-discuss` | Name the conflict in Reason. |
-| `discussion-needed=yes` | `{{.SkillNamespace}}:lead-discuss` | Name the blocker. |
-
-#### Ticket Readiness
-
-| Match | NEXT | After |
-|-------|------|-------|
-| `status in {idea, todo}` | `lead-write-ticket` | Require a ready `Ticket:` path, then re-route. |
-| `freshness=missing-settled-decisions` | `lead-write-ticket` | Require a ready `Ticket:` path, then re-route. |
-
-#### Scope Gates
-
-| Match | NEXT | Report |
-|-------|------|--------|
-| `scope-blocked != none` | `stop` | Use Scope Blocker Reports. |
-
-Scope Blocker Reports:
-- `container-ticket`: use Container Tickets reports.
-- `multiple-explicit-phases`: ask the user to choose one phase or create/slice tickets.
-- `too-broad`: ask for phase or ticket slicing before implementation.
-- `no-unfinished-phase`: report all phases appear complete; ask whether to close, reopen, or name a follow-up target.
-- `phase-already-complete`: ask for explicit redo/revision confirmation or a different phase.
-
-#### Implementation Dispatch
-
-| Match | NEXT | Scope |
-|-------|------|-------|
-| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` | Selected slice. |
-| `has-ticket=no` and `needs-ticket=yes` | `lead-write-ticket` | Require a ready `Ticket:` path, then re-route. |
-| `has-ticket=no` and `needs-ticket=no` | `lead-implement` | Whole target. |
-| Route facts are insufficient or inconsistent | `stop` | Report the missing or inconsistent route facts required to continue. |
-
-### 3. Emit Routing Verdict
-
-```text
-## Routing Verdict
-
-NEXT: <{{.SkillNamespace}}:lead-discuss | lead-write-ticket | lead-implement | stop>
-
-- **Target**: <ticket path or brief summary>
-- **Route**: <first matching route block and row>
-- **Reason**: <decisive facts only>
-- **Ticket Status**: <absent | idea | todo | ready | done | dropped | unknown | n/a>
-- **Ticket Category**: <epic | workset | other | n/a>
-- **Freshness**: <current | missing-settled-decisions | uncertain | n/a>
-- **Migration Anchor**: <loaded | n/a | missing | conflict>
-- **Discussion**: <not needed | needed - blocker>
-- **Slice**: <Phase N[: title] | whole target | blocked | n/a>
-- **Scope Blocker**: <none | container-ticket | multiple-explicit-phases | too-broad | no-unfinished-phase | phase-already-complete>
-- **Included Tickets**: <ready | not-ready | unknown groups, or none found>
-- **Safe Next Request**: <Proceed on one ready included ticket path | required user action | n/a>
-
-Proceed is routing-only. It must not inspect source, edit files, plan implementation, or substitute for `NEXT`.
-If `NEXT` names a route: `Proceeding through <NEXT>.`
-If `NEXT: stop`: `Stopping here: <blocking condition>.`
-For workset stops, the safe next request must be `Proceed on <single ready included ticket path>` or a user action to create/promote one included actionable ticket; do not invoke implementation or continue automatically.
+```json
+{
+  "session_key": "<lead key>",
+  "target": {
+    "kind": "<ticket-path | inline | unknown>",
+    "label": "<ticket path, ticket stem, or brief inline summary>",
+    "ticket_stem": "<ticket stem or null>",
+    "ticket_path": "<ticket path or null>"
+  },
+  "facts": {
+    "ticket": {
+      "ticket_missing": "<yes | no | unknown | null>",
+      "has_ticket": "<yes | no | unknown | null>",
+      "status": "<idea | todo | ready | done | dropped | unknown | n/a | null>",
+      "category": "<epic | workset | other | n/a | unknown | null>",
+      "actionable": "<yes | no | unknown | null>",
+      "freshness": "<current | missing-settled-decisions | uncertain | n/a | unknown | null>",
+      "phase": "<selected phase or null>"
+    },
+    "gates": {
+      "discussion_needed": "<yes | no | unknown>",
+      "needs_ticket": "<yes | no | n/a | unknown>",
+      "scope_blocked": "<none | container-ticket | multiple-explicit-phases | too-broad | no-unfinished-phase | phase-already-complete | unknown>",
+      "migration_anchor": "<loaded | n/a | missing | conflict | unknown>"
+    },
+    "work": {
+      "category": "<implementation | ticket_write | discussion | status_report | unknown>",
+      "slice": "<Phase N[: title] | whole target | blocked | n/a | unknown>"
+    }
+  }
+}
 ```
 
-Emit exactly one `NEXT:` value: one allowed route name, or `stop`.
-Use `NEXT: stop` when the selected route stops instead of invoking another skill.
-Do not ask for confirmation before invoking a non-stop route; when `NEXT: stop`, ask only for the blocking user action required by the selected route.
+Read the returned raw verdict. Its first non-empty lines are:
 
-### 4. Execute Verdict
+```text
+Proceed Verdict
+Route: <route>
+NEXT: <lead-discuss | lead-write-ticket | lead-implement | status-report | stop>
 
-1. Read the emitted `NEXT:` line.
-2. If `NEXT:` names a downstream route (`{{.SkillNamespace}}:lead-discuss`, `lead-write-ticket`, or `lead-implement`), call `{{.McpNamespace}}/enter.proceed(session_key: <lead key>, ticket: <Target ticket path/stem, or "n/a" for inline targets>, phase: <Slice>, next_skill: <NEXT value>, conditions: [<notable route-context flags, e.g. "freshness=<value>", "discussion=<value>", "scope-blocker=<value>">])` to record routing context before invoking the route.
-3. If `NEXT:` names an entry skill (`{{.SkillNamespace}}:lead-discuss`), invoke that skill. If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute it inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, or editing. If `NEXT:` names another procedure, call `{{.McpNamespace}}/playbook.print(name: "<name>")` and execute the returned procedure inline. Stop when `NEXT: stop`.
-4. When `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
-5. Do not call implementation tools from `lead-proceed`.
-6. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
-7. Stop on failure or user interruption.
-8. If the lead-write-ticket procedure ran, capture its `Ticket:` path before downstream routing.
-9. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
-10. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
+Next: <concrete next-action instruction>
+```
+
+Follow `Next:` exactly; do not restate the verdict in a separate Routing Verdict block.
 
 ## Judgments
 

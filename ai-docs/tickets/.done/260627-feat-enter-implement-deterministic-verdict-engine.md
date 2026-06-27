@@ -3,6 +3,7 @@ title: Deterministic enter.implement strategy and branch verdict resolution
 sage-review: recommended
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
+  260627-feat-todo-item-instructions: prerequisite substrate for carrying focused reachable runbook prose on todo items
   260627-feat-enter-proceed-deterministic-verdict-engine: predecessor optimization pattern for moving deterministic verdict resolution into typed enter tools
   260625-feat-ws-session-state-machine: introduced typed enter tools and session agenda/todo persistence
   260523-bug-implement-merge-target-discovery: branch preflight must avoid unsafe merge-target inference on nested implementation branches
@@ -10,6 +11,7 @@ related-mental-model:
   - workflow-skills
   - mcp-runtime
   - git-workflow-tools
+completed: 2026-06-27
 ---
 
 # Deterministic enter.implement strategy and branch verdict resolution
@@ -66,6 +68,11 @@ whether a safe pre-edit rename is allowed.
   `enter.implement` call.
 - Emit final MCP output that lets the LLM clearly know the implementation
   direction to proceed next, without recomputing the strategy.
+- After routing facts and policy are known, move every remaining deterministic
+  non-routing execution instruction that can safely be generated into MCP verdict
+  output. The optimization should not stop at route labels; raw and JSON output
+  should tell the lead exactly how to continue when the next step is
+  deterministic.
 - Preserve the existing enter-tool mode-switch semantics: the call stores the
   `implement` agenda and replaces the todo list with the derived implement
   checklist.
@@ -307,11 +314,20 @@ Required behavior:
   `need_review`, and documentation mode deterministically.
 - Emit canonical JSON and raw Implementation Verdict output that makes the next
   execution direction clear to the LLM.
+- Include MCP-authored next-instruction prose for deterministic execution rails
+  after the verdict. For example, branch creation/rename/continue, planning
+  depth, delegated-vs-direct ownership, review allocation, documentation gates,
+  and stop/blocker handling should be expressed by the verdict wherever the
+  rules can be derived from facts, policy, and observed Git state.
 - Store the normalized implement agenda and replace the todo list using the
   derived verdict labels.
 - Update `lead-implement` so Route gathers normalized facts and policy, calls
   `ws.enter.implement`, and follows the returned verdict instead of carrying the
   extracted deterministic tables in prose.
+- Remove duplicated common follow rails from `lead-implement` once MCP owns
+  equivalent `Next:` / `next_instruction` guidance. The playbook should retain
+  fact gathering, ambiguous judgments, and minimal safety guards, not repeated
+  if/then execution prose for deterministic cases.
 - Keep branch creation, branch rename, source edits, delegate dispatch, review,
   documentation, and merge as `lead-implement` execution steps after the verdict.
 - Do not call `ws.enter.implement` a second time after branch execution; use
@@ -340,3 +356,110 @@ Verification:
 - Verify `lead-implement` playbook output no longer carries duplicated
   deterministic strategy tables after the MCP resolver owns them.
 - Run the relevant MCP and rsrc/wsflow mirror tests after source/playbook edits.
+
+### Result (3ab81a53) - 2026-06-27
+
+Implemented a broad first pass for MCP-owned `ws.enter.implement` verdict
+resolution.
+
+Completed:
+
+- Added private Go resolver logic behind `ws.enter.implement` for normalized
+  `target + facts + policy` input.
+- Derived delegation mode, branch plan, plan depth, review allocation,
+  documentation mode, agenda payload, and todo replacement from facts plus
+  observed Git state.
+- Added raw and JSON Implementation Verdict output with MCP-authored
+  `next_instruction` guidance.
+- Updated `lead-implement` and the wsflow mirror so Route gathers facts, calls
+  `ws.enter.implement`, and follows the returned verdict instead of carrying
+  duplicated deterministic judgment tables.
+- Updated `mcp-tools` and `workflow-skills` specs for the shipped contract.
+
+Verification:
+
+- `gofmt -w internal/mcp/implement_resolver.go internal/mcp/implement_resolver_test.go internal/mcp/session_state.go internal/mcp/server.go internal/mcp/session_state_test.go internal/mcp/playbook_tools_test.go`
+- `WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest`
+- `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`
+- `go test ./... -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `ws/spec_index_verify`
+
+### Phase 2: Focus lead-implement on reachable todo instructions
+
+Prerequisite:
+
+- Complete `260627-feat-todo-item-instructions` through the phase that lets
+  `ws.enter.implement` populate todo instructions.
+
+Reduce `lead-implement` so its always-rendered body does not carry execution
+prose for paths that are impossible after the current `ws.enter.implement`
+verdict.
+
+Required behavior:
+
+- Make `ws.enter.implement` produce focused todo instructions for the reachable
+  branch, prep, edit, review, documentation, final-action, and merge steps.
+- Keep the todo list as the single source for the current run's executable
+  runbook; do not add a separate `execution_steps` list.
+- Keep `lead-implement` responsible for gathering routing facts, calling
+  `ws.enter.implement`, and executing the installed todos.
+- Remove unreachable-path prose from the always-rendered `lead-implement` body
+  once equivalent focused instructions are emitted by todos.
+- Preserve lead-owned judgment for evidence that appears only during execution,
+  such as test failures, reviewer findings, blocker classification, and merge
+  approval.
+
+Verification:
+
+- Verify direct-edit runs do not render delegated implementer instructions in
+  the always-rendered lead-implement body.
+- Verify lead-only review runs do not render reviewer relay loops in the
+  always-rendered lead-implement body.
+- Verify skipped-doc runs do not render doc pipeline steps in the always-rendered
+  lead-implement body.
+- Verify `ws.todo.read(key)` or `ws.todo.list(mode: "full")` exposes the full
+  focused instruction for each reachable todo.
+
+### Result (29bdfd69) - 2026-06-27
+
+Completed Phase 2 by focusing `lead-implement` on the todo instruction runbook
+installed by `ws.enter.implement`.
+
+Completed:
+
+- Reduced always-rendered `lead-implement` post-verdict prose so branch, edit,
+  review, documentation, final-action, and merge execution guidance is driven by
+  focused todo instructions instead of unreachable conditional branches in the
+  playbook body.
+- Preserved Route fact gathering, Implementation Verdict handoff, lead-owned
+  execution judgments, delegate dispatch, and prompt templates in the shared
+  `lead-implement` playbook.
+- Strengthened `ws.enter.implement` todo instruction prose for direct-edit,
+  delegated implementation, lead-only review, partitioned review, skipped docs,
+  branch-stop blockers, documentation gates, final action, and merge.
+- Fixed review-cycle findings so the playbook uses the current lead key
+  established through `workflow_manual`, and non-stop prep todo instructions
+  carry mental-model lookup, ancestor reads, conditional migration-anchor
+  loading, and `infra.read("impl-playbook")` before edits or dispatch.
+- Regenerated the canonical rsrc manifest and byte-identical wsflow rsrc mirror.
+
+Verification:
+
+- `go test ./internal/mcp -count=1 -run 'TestDeriveImplementTodoInstructions|TestEnterImplement|TestPlaybookPrintGoldenLeadImplement|TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands'`
+- `WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest`
+- `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./... -count=1`
+- `git diff --check`
+- `ws/spec_index_verify`
+- Partitioned review: Correctness and Fit were non-clean once, fixed in
+  `29bdfd69`, and clean on re-review; Test was clean.
+
+
+## Resolution (2026-06-27)
+
+Phases 1 and 2 completed. Phase 1 moved deterministic implementation strategy, branch preflight, JSON/raw verdict output, agenda storage, and todo replacement into `ws.enter.implement`. Phase 2 made the verdict-derived todo list the authoritative post-verdict runbook, reduced unreachable always-rendered `lead-implement` prose, preserved lead-owned execution judgments and delegate templates, updated specs and mental models, and passed partitioned review after one fix cycle.

@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.30.13`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.13`).
+Active plugin package: `agents-plugin/` (`ws@0.30.14`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.14`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -154,7 +154,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
-| `260627-feat-enter-implement-deterministic-verdict-engine` | ready | Move deterministic `lead-implement` strategy, branch preflight, and raw verdict resolution into `ws.enter.implement` |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -167,6 +166,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
 | `260626-bug-sage-review-config-setter-missing` | idea | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
 | `260627-bug-write-ticket-bypasses-tickets-create` | idea | Capture dogfood failure where ticket authoring manually created a file instead of invoking `ws.tickets.create` |
+| `260627-bug-enter-implement-direct-edit-policy-gap` | idea | Investigate `ws.enter.implement` lacking a direct-edit/no-delegation policy override for narrow multi-file text changes |
+| `260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood` | idea | Investigate branch-local playbook render or cache-refresh guidance for source rsrc dogfood |
+| `260627-feat-todo-check-adjacent-instruction-rendering` | idea | Investigate focused post-check todo rendering that expands only unfinished adjacent instructions |
 | `260627-research-lead-proceed-route-matrix-authoring` | idea | Research whether Route Facts and Route Matrix tables would make `lead-proceed` routing clearer without semantic drift |
 | `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
 | `260626-bug-workflow-manual-bootstrap-sentinel-surface` | idea | Investigate the fresh workflow-manual sentinel guidance not matching the visible session-state tool surface during dogfooding |
@@ -231,19 +233,15 @@ dropped tickets live in hidden archive dirs and git history.
   of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
   at the routing-facts-complete boundary. The playbook keeps fact gathering and
   ambiguous judgments, while MCP owns normalized precedence, warnings, JSON
-  result shape, canonical raw verdict text, agenda storage, and proceed todo
-  replacement. Spec addressing via `## Spec Impact` (Contract-first: no —
-  ticket pins the implementation slice; closeout updates `workflow-skills` and
-  `mcp-tools`). Sage review posture: recommended, not yet completed.
-- `260627-feat-enter-implement-deterministic-verdict-engine` (ready, feat, child
-  of 260605) - follow the proceed verdict-engine pattern for `lead-implement`.
-  `ws.enter.implement` should accept `target + facts + policy`, derive
-  delegation, branch plan, plan depth, review allocation, review need, and doc
-  mode deterministically, and observe branch preflight from Git instead of
-  asking the LLM to mirror branch state. Spec addressing via `## Spec Impact`
+  result shape, canonical raw verdict text, `next_instruction`, agenda storage,
+  and proceed todo replacement. Spec addressing via `## Spec Impact`
   (Contract-first: no — ticket pins the implementation slice; closeout updates
-  `workflow-skills` and `mcp-tools`). Sage review posture: recommended, not yet
-  completed.
+  `workflow-skills` and `mcp-tools`). Sage review completed. **Phases 1-3 done**
+  on branch `implement/260627-enter-proceed-verdict-engine` (latest
+  `cc930648`), unmerged: deterministic `ws.enter.proceed` resolver, canonical
+  raw/JSON verdict output, concrete raw/JSON next-action directives with common
+  follow rails, two-item proceed todo replacement, lead-proceed MCP handoff,
+  docs, manifests, wsflow mirror, and partitioned review clean for Phase 1.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):

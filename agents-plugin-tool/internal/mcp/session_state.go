@@ -26,14 +26,26 @@ const (
 	todoWip     todoStatus = "wip"
 	todoDone    todoStatus = "done"
 	todoDefer   todoStatus = "defer"
+
+	todoInstructionPreviewRunes = 60
 )
 
 // todoItem is one ordered checklist entry. Identity is the caller-provided key,
-// unique within the active list; the title is human-facing text.
+// unique within the active list; the title is human-facing text. Instruction is
+// optional focused runbook prose for the item; old records without it unmarshal
+// with nil and remain compatible.
 type todoItem struct {
-	Key    string     `json:"key"`
-	Title  string     `json:"title"`
-	Status todoStatus `json:"status"`
+	Key         string     `json:"key"`
+	Title       string     `json:"title"`
+	Status      todoStatus `json:"status"`
+	Instruction *string    `json:"instruction,omitempty"`
+}
+
+type todoReadPayload struct {
+	Key         string     `json:"key"`
+	Title       string     `json:"title"`
+	Status      todoStatus `json:"status"`
+	Instruction *string    `json:"instruction"`
 }
 
 // parseTodoStatus validates a caller-supplied status string. An empty string
@@ -106,7 +118,7 @@ func normalizeTodoKey(raw string) (string, error) {
 // todoAppend adds a new item at the end. A duplicate key (still present in the
 // active list) is an error; erased keys are reusable because they are gone from
 // the slice.
-func todoAppend(list []todoItem, key, title string, status todoStatus) ([]todoItem, error) {
+func todoAppend(list []todoItem, key, title string, status todoStatus, instruction *string) ([]todoItem, error) {
 	normalizedKey, err := normalizeTodoKey(key)
 	if err != nil {
 		return nil, err
@@ -114,12 +126,12 @@ func todoAppend(list []todoItem, key, title string, status todoStatus) ([]todoIt
 	if indexOfTodo(list, normalizedKey) >= 0 {
 		return nil, fmt.Errorf("todo key %q already exists", normalizedKey)
 	}
-	return append(list, todoItem{Key: normalizedKey, Title: title, Status: status}), nil
+	return append(list, todoItem{Key: normalizedKey, Title: title, Status: status, Instruction: instruction}), nil
 }
 
 // todoInsert inserts a new item before or after refKey. after=false inserts
 // before refKey; after=true inserts after it.
-func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, after bool) ([]todoItem, error) {
+func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, instruction *string, after bool) ([]todoItem, error) {
 	normalizedRef, err := normalizeTodoKey(refKey)
 	if err != nil {
 		return nil, fmt.Errorf("ref_key: %w", err)
@@ -141,9 +153,27 @@ func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, a
 	}
 	out := make([]todoItem, 0, len(list)+1)
 	out = append(out, list[:pos]...)
-	out = append(out, todoItem{Key: normalizedKey, Title: title, Status: status})
+	out = append(out, todoItem{Key: normalizedKey, Title: title, Status: status, Instruction: instruction})
 	out = append(out, list[pos:]...)
 	return out, nil
+}
+
+func todoRead(list []todoItem, key string) (todoReadPayload, error) {
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return todoReadPayload{}, err
+	}
+	idx := indexOfTodo(list, normalizedKey)
+	if idx < 0 {
+		return todoReadPayload{}, fmt.Errorf("todo key %q not found", normalizedKey)
+	}
+	item := list[idx]
+	return todoReadPayload{
+		Key:         item.Key,
+		Title:       item.Title,
+		Status:      item.Status,
+		Instruction: item.Instruction,
+	}, nil
 }
 
 // todoCheck sets the status of an existing item.
@@ -257,9 +287,9 @@ func renderTodos(list []todoItem, full bool) string {
 		return "(no todos)"
 	}
 	if full {
-		lines := make([]string, 0, len(list))
+		lines := make([]string, 0, len(list)*2)
 		for _, item := range list {
-			lines = append(lines, renderTodoLine(item))
+			lines = append(lines, renderTodoLines(item, full)...)
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -284,7 +314,7 @@ func renderTodos(list []todoItem, full bool) string {
 	collapsed := false
 	for i, item := range list {
 		if shown[i] {
-			lines = append(lines, renderTodoLine(item))
+			lines = append(lines, renderTodoLines(item, full)...)
 			collapsed = false
 			continue
 		}
@@ -300,13 +330,37 @@ func renderTodoLine(item todoItem) string {
 	return fmt.Sprintf("%s {%s} %s", todoMarker(item.Status), item.Key, item.Title)
 }
 
+func renderTodoLines(item todoItem, full bool) []string {
+	lines := []string{renderTodoLine(item)}
+	if item.Instruction == nil || *item.Instruction == "" {
+		return lines
+	}
+	instruction := *item.Instruction
+	if !full {
+		instruction = todoInstructionPreview(instruction)
+	}
+	lines = append(lines, "      "+instruction)
+	return lines
+}
+
+func todoInstructionPreview(instruction string) string {
+	runes := []rune(instruction)
+	if len(runes) <= todoInstructionPreviewRunes {
+		return instruction
+	}
+	return string(runes[:todoInstructionPreviewRunes])
+}
+
 // --- enter-mode todo derivation ----------------------------------------------
 
 type implementTodoVerdict struct {
 	Delegation  string
+	BranchPlan  implementBranchPlan
 	PlanDepth   string
 	ReviewAlloc string
 	NeedReview  bool
+	DocMode     string
+	DocReason   string
 	NeedDoc     bool
 }
 
@@ -327,25 +381,29 @@ func deriveImplementTodos(needReview, needDoc bool) []todoItem {
 
 func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	items := []todoItem{
-		{Key: "route", Title: "Route"},
-		{Key: "prep", Title: implementPrepTitle(verdict.PlanDepth)},
-		{Key: "edit", Title: implementEditTitle(verdict.Delegation)},
+		{Key: "route", Title: "Route", Instruction: implementInstructionPtr(implementRouteInstruction(verdict))},
+		{Key: "prep", Title: implementPrepTitle(verdict.PlanDepth), Instruction: implementInstructionPtr(implementPrepInstruction(verdict))},
+		{Key: "edit", Title: implementEditTitle(verdict.Delegation), Instruction: implementInstructionPtr(implementEditInstruction(verdict))},
 	}
-	if verdict.NeedReview {
-		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc)})
+	if verdict.NeedReview || isLeadOnlyReview(verdict.ReviewAlloc) {
+		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc), Instruction: implementInstructionPtr(implementReviewInstruction(verdict))})
 	}
 	if verdict.NeedDoc {
 		items = append(items,
-			todoItem{Key: "doc-pre-pass", Title: "Doc pre-pass"},
-			todoItem{Key: "doc-commit-gate", Title: "Doc commit gate"},
-			todoItem{Key: "doc-closeout", Title: "Doc closeout"},
+			todoItem{Key: "doc-pre-pass", Title: "Doc pre-pass", Instruction: implementInstructionPtr(implementDocPrePassInstruction(verdict))},
+			todoItem{Key: "doc-commit-gate", Title: "Doc commit gate", Instruction: implementInstructionPtr(implementDocCommitGateInstruction(verdict))},
+			todoItem{Key: "doc-closeout", Title: "Doc closeout", Instruction: implementInstructionPtr(implementDocCloseoutInstruction(verdict))},
 		)
 	}
 	items = append(items,
-		todoItem{Key: "final-action-gate", Title: "Final action gate"},
-		todoItem{Key: "merge", Title: "Merge"},
+		todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
+		todoItem{Key: "merge", Title: "Merge", Instruction: implementInstructionPtr(implementMergeInstruction(verdict))},
 	)
 	return withPendingStatus(items)
+}
+
+func implementInstructionPtr(instruction string) *string {
+	return &instruction
 }
 
 func parseImplementDelegation(raw string) (string, error) {
@@ -424,18 +482,171 @@ func implementReviewTitle(reviewAlloc string) string {
 	case "":
 		return "Review"
 	default:
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reviewAlloc)), "partitioned:") {
+			return "Review (partitioned)"
+		}
 		return "Review"
 	}
 }
 
+func implementRouteInstruction(verdict implementTodoVerdict) string {
+	plan := verdict.BranchPlan
+	switch plan.Action {
+	case "stop":
+		return fmt.Sprintf("Stop before source edits: %s. Resolve the branch policy or branch state before continuing.", firstNonEmpty(plan.Reason, "branch action is blocked"))
+	case "create":
+		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+	case "rename":
+		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+	case "continue":
+		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
+	default:
+		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
+	}
+}
+
+func implementPrepInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not prepare further implementation work until the branch blocker is resolved: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	const guardrails = `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, read the 260605 migration anchor when target touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, and read infra.read("impl-playbook"). `
+	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
+	case "none", "":
+		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
+	case "brief":
+		return guardrails + "Prepare and commit the implementation brief with the Brief template before edits; include only selected-scope references and contract instructions."
+	case "survey":
+		return guardrails + "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch."
+	case "research":
+		return guardrails + "Prepare and commit the implementation brief, then run the research plan path with Delegate dispatch and Plan prompts before implementer dispatch."
+	default:
+		return guardrails + "Prepare the implementation context required by the selected verdict before edits."
+	}
+}
+
+func implementEditInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not start source edits while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	switch strings.ToLower(strings.TrimSpace(verdict.Delegation)) {
+	case "direct-edit":
+		return "Apply the source edits directly in this lead context, run focused verification, commit the logical checkpoint, and capture the resulting commit range."
+	case "delegated":
+		switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
+		case "survey":
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and survey plan; capture the implemented commit range for review and relays."
+		case "research":
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and research plan; capture the implemented commit range for review and relays."
+		case "brief":
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief; capture the implemented commit range for review and relays."
+		default:
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the resolved implementation context; capture the implemented commit range for review and relays."
+		}
+	default:
+		return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
+	}
+}
+
+func implementReviewInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	if isLeadOnlyReview(verdict.ReviewAlloc) {
+		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
+		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings.", formatReviewPartitions(verdict.ReviewAlloc))
+	}
+	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
+		return "Dispatch one reviewer with the Reviewer prompt frame and a generated review path. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
+	}
+	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
+}
+
+func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not start documentation work before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "Run the standard documentation pre-pass: update specs first, then dispatch mental-model-updater with the implemented commit range."
+}
+
+func implementDocCommitGateInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not open the documentation commit gate before source edits can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "Run the documentation commit gate: read executor-wrapup, update ticket result or project memory when reachable, and commit documentation changes before the final action gate."
+}
+
+func implementDocCloseoutInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not close documentation before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "Run documentation closeout compaction only for a safe documentation-only branch-tip suffix; otherwise record the skipped compaction status."
+}
+
+func implementFinalActionInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
+		return fmt.Sprintf("Verify source, tests, review disposition, and skipped documentation policy before asking for final action approval: %s.", firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
+	}
+	return "Verify source, tests, review disposition, and standard documentation closeout before asking for final action approval."
+}
+
+func implementMergeInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not merge while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "After user approval, perform the selected final action against the verdict merge target and preserve the workflow-owned merge record."
+}
+
+func isBranchStop(verdict implementTodoVerdict) bool {
+	return strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.Action), "stop")
+}
+
+func isLeadOnlyReview(reviewAlloc string) bool {
+	return strings.EqualFold(strings.TrimSpace(reviewAlloc), "lead-only") || strings.EqualFold(strings.TrimSpace(reviewAlloc), "lead only")
+}
+
+func formatReviewPartitions(reviewAlloc string) string {
+	raw := strings.TrimSpace(reviewAlloc)
+	_, partsRaw, ok := strings.Cut(raw, ":")
+	if !ok {
+		return "partitioned"
+	}
+	parts := []string{}
+	for _, part := range strings.Split(partsRaw, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "partitioned"
+	}
+	return joinHumanList(parts)
+}
+
+func joinHumanList(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
+	}
+}
+
 // deriveProceedTodos mirrors lead-proceed "On: invoke": build route context,
-// select route, emit routing verdict, execute verdict.
+// then resolve the MCP verdict with an executable Next instruction.
 func deriveProceedTodos() []todoItem {
 	return withPendingStatus([]todoItem{
 		{Key: "route-context", Title: "Build route context"},
-		{Key: "select-route", Title: "Select route"},
-		{Key: "routing-verdict", Title: "Emit routing verdict"},
-		{Key: "execute-verdict", Title: "Execute verdict"},
+		{Key: "resolve-verdict", Title: "Resolve MCP verdict"},
 	})
 }
 
@@ -591,6 +802,18 @@ func rawStringArg(toolName, name string, args map[string]any) (string, error) {
 	return v, nil
 }
 
+func todoInstructionArg(toolName string, args map[string]any) (*string, error) {
+	raw, ok := args["instruction"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	instruction, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("%s: instruction must be a string or null", toolName)
+	}
+	return &instruction, nil
+}
+
 func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) response {
 	const tool = "ws.agenda.set"
 	sessionKey, err := sessionStateKey(tool, args)
@@ -657,6 +880,51 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 }
 
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
+	if _, hasNewTarget := args["target"]; hasNewTarget {
+		const tool = "ws.enter.implement"
+		sessionKey, err := sessionStateKey(tool, args)
+		if err != nil {
+			return toolTextResponse(id, "", err)
+		}
+		record, ok := s.sessions.readState(sessionKey)
+		if !ok {
+			return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
+		}
+		input, err := parseImplementInput(args)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		}
+		normalized, _ := normalizeImplementFacts(input)
+		targetBranch := "implement/" + normalized.ScopeSlug
+		obs, err := observeImplementBranch(record.Root, targetBranch)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
+		}
+		result := resolveImplement(input, obs)
+		rawAgenda, err := json.Marshal(result.Agenda)
+		if err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
+		}
+		todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
+			Delegation:  result.Verdict.Delegation,
+			BranchPlan:  result.Verdict.BranchPlan,
+			PlanDepth:   result.Verdict.PlanDepth,
+			ReviewAlloc: result.Verdict.ReviewAlloc,
+			NeedReview:  result.Verdict.NeedReview,
+			DocMode:     result.Verdict.DocMode,
+			DocReason:   result.Agenda.DocReason,
+			NeedDoc:     result.Verdict.DocMode == "standard",
+		})
+		if err := s.sessions.enterMode(sessionKey, "implement", rawAgenda, todos); err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		}
+		if input.Format == "json" {
+			text, err := implementResultJSON(result)
+			return toolTextResponse(id, text, err)
+		}
+		return toolTextResponse(id, result.Raw, nil)
+	}
+
 	needReview, _ := args["need_review"].(bool)
 	needDoc, _ := args["need_doc"].(bool)
 	delegation, err := parseImplementDelegation(stringValue(args["delegation"]))
@@ -690,7 +958,29 @@ func stringValue(v any) string {
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "ws.enter.proceed", "proceed", args, deriveProceedTodos())
+	const tool = "ws.enter.proceed"
+	sessionKey, err := sessionStateKey(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	input, err := parseProceedInput(args)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	result := resolveProceed(input)
+	rawAgenda, err := json.Marshal(result.Agenda)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
+	}
+	todos := deriveProceedTodos()
+	if err := s.sessions.enterMode(sessionKey, "proceed", rawAgenda, todos); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	if input.Format == "json" {
+		text, err := proceedResultJSON(result)
+		return toolTextResponse(id, text, err)
+	}
+	return toolTextResponse(id, result.Raw, nil)
 }
 
 func (s *Server) handleEnterSprint(id json.RawMessage, args map[string]any) response {
@@ -716,8 +1006,12 @@ func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) respo
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	title, _ := args["title"].(string)
+	instruction, err := todoInstructionArg(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoAppend(list, normalizedKey, title, todoPending)
+		return todoAppend(list, normalizedKey, title, todoPending, instruction)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
@@ -746,8 +1040,12 @@ func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	title, _ := args["title"].(string)
+	instruction, err := todoInstructionArg(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoInsert(list, refKey, normalizedKey, title, todoPending, after)
+		return todoInsert(list, refKey, normalizedKey, title, todoPending, instruction, after)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
@@ -836,6 +1134,27 @@ func (s *Server) handleTodoList(id json.RawMessage, args map[string]any) respons
 	}
 	full := strings.TrimSpace(strings.ToLower(fmt.Sprint(args["mode"]))) == "full"
 	return toolTextResponse(id, renderTodos(record.Todos, full)+"\n", nil)
+}
+
+func (s *Server) handleTodoRead(id json.RawMessage, args map[string]any) response {
+	const tool = "ws.todo.read"
+	sessionKey, err := sessionStateKey(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	key, err := rawStringArg(tool, "key", args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	record, ok := s.sessions.readState(sessionKey)
+	if !ok {
+		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
+	}
+	item, err := todoRead(record.Todos, key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	return toolJSONResponse(id, item, nil)
 }
 
 func (s *Server) handleTodoReorder(id json.RawMessage, args map[string]any) response {

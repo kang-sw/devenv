@@ -461,7 +461,11 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 	for _, name := range []string{"implementer", "reviewer"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
+			var ctx map[string]string
+			if name == "implementer" {
+				ctx = shippedImplementerContext()
+			}
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -496,7 +500,11 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	render := func(t *testing.T, name, harness string) string {
 		t.Helper()
 		s := newTestServerWithHarness(t, harness)
-		body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
+		var ctx map[string]string
+		if name == "implementer" {
+			ctx = shippedImplementerContext()
+		}
+		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
@@ -626,7 +634,11 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	}
 	for name, wantTier := range want {
 		s := newTestServerWithHarness(t, "claude")
-		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
+		var ctx map[string]string
+		if name == "implementer" {
+			ctx = shippedImplementerContext()
+		}
+		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 		}

@@ -62,6 +62,29 @@ func isolatedPlaybookConfigOptions(t *testing.T) wsconfig.Options {
 	}
 }
 
+func shippedImplementerContext() map[string]string {
+	return map[string]string{
+		"BriefPath":          "ai-docs/.plans/brief.md",
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"ResultExpectations": "Report outcome, files changed, commits, verification, and blockers.",
+		"CommitRangeHint":    "Report <first-commit>..<last-commit> after committing logical checkpoints.",
+	}
+}
+
+func shippedImplementerRelayContext() map[string]string {
+	return map[string]string{
+		"BriefPath":          "ai-docs/.plans/brief.md",
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"ReviewCycle":        "2",
+		"CommitRange":        "abc123..def456",
+		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"DispositionNotes":   "Fix correctness finding C1; defer test fixture rename until Phase 3.",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
+		"ResultExpectations": "Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
+	}
+}
+
 // initGitRepo creates a git repository in a temp dir and returns its path.
 // Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
@@ -817,17 +840,20 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer recommended tier = %q, want medium", tier)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read rendered playbook: %v", err)
 	}
 	body := string(data)
-	if !strings.Contains(body, "Continuity tip") {
-		t.Fatalf("rendered delegate output missing continuity tip:\n%s", body)
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("rendered implementer output must not include delegation continuity tip:\n%s", body)
 	}
 	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
 		if strings.Contains(body, forbidden) {
@@ -836,6 +862,94 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	}
 	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
 		t.Fatalf("rendered wsflow delegate contains bare ws namespace notation:\n%s", body)
+	}
+}
+
+func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer recommended tier = %q, want medium", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Alias model for this role: gpt-5.5.",
+		"Brief path: `ai-docs/.plans/brief.md`",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
+		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
+		"Do not read ticket files directly, even when a ticket path appears in the brief, plan, or references",
+		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
+		"Normal completion report:",
+		"If `ResultExpectations` names an output file, also include its path plus a short completion summary.",
+		"Always include final commit hash and commit range, or `none` with reason.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer render missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", shippedImplementerRelayContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer-relay recommended tier = %q, want medium", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Alias model for this role: gpt-5.5.",
+		"Brief path: `ai-docs/.plans/brief.md`",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Review cycle: 2",
+		"Current commit range: abc123..def456",
+		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"Lead disposition notes: Fix correctness finding C1; defer test fixture rename until Phase 3.",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
+		"Result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
+		"Rely only on this prompt and named paths; do not depend on prior conversation.",
+		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the brief, or findings disproven by specific evidence.",
+		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
+		"records the relevant per-finding dispositions known at that checkpoint",
+		"`[fixed]`",
+		"`[won't fix: <reason>]`",
+		"`[deferred: <reason>]`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("implementer-relay render must not include delegation continuity tip:\n%s", body)
 	}
 }
 
@@ -908,6 +1022,28 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 			t.Fatalf("full ws renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
+
+	ctx := shippedImplementerContext()
+	ctx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	relayCtx := shippedImplementerRelayContext()
+	relayCtx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer-relay")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
 }
 
 func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T) {
@@ -927,6 +1063,17 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("wsflow non-legacy renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", map[string]string{
+		"note": "implementer-relay is not a wsflow legacy freeform stem",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared implementer-relay context")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("wsflow implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -1430,18 +1577,60 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "verified code reaching the target branch") {
-		t.Errorf("body %q: expected doctrine text 'verified code reaching the target branch'", body)
+	if !strings.Contains(body, "execution attention") {
+		t.Errorf("body %q: expected doctrine text 'execution attention'", body)
 	}
 	for _, want := range []string{
-		"Use the Mercenary dispatch item below instead of the Native item",
-		"Mercenary (when selected):",
-		`ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`,
-		`ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`,
-		`ws.mercenary.result(name: "<name>", timeout_seconds: 600)`,
+		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
+		"Treat the installed todo list as the ordered runbook",
+		"Delegate dispatch",
+		"Implementer spawn prompt",
+		"Rendered implementer prompt: <prompt-path>",
+		"contains the brief path, optional plan",
+		"implementer-relay` gets **Review relay dispatch**",
+		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
+		"Collect the normal completion report",
+		"Reviewer prompt frame",
+		"Review relay dispatch",
+		"Render `implementer-relay` with declared inputs",
+		"Rendered review relay prompt: <prompt-path>",
+		"Mercenary path:",
+		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
+		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
+	}
+	for _, forbidden := range []string{
+		"Review cycle <N>. Rely only on this prompt and named paths.",
+		"Non-clean review paths: <paths>. Read each file directly.",
+		"Commit fixes, run verification, and report commit hashes plus test results.",
+		"Won't-fix allowed: style conflicts with codebase patterns; scope expansion beyond brief.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render still embeds old review relay prompt body %q:\n%s", forbidden, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"If `Branch Action: create`",
+		"If `Branch Action: rename`",
+		"If `Branch Action: continue`",
+		"If direct-edit:",
+		"If delegated:",
+		"If lead-only:",
+		"If single:",
+		"If partitioned:",
+		"If `doc_mode` is `skipped`",
+		"Acceptance:",
+		"Implement or escalate Brief `## Contract Instructions`",
+		"Satisfy Brief `## Integration Test Instructions`",
+		"Test files: <paths, or None with reason>",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render still contains unreachable-path prose %q:\n%s", forbidden, body)
 		}
 	}
 	// delegates:true (spawns implementer/reviewer agents) — tip must appear.
@@ -1461,6 +1650,7 @@ func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	for _, forbidden := range []string{
+		"ws/mercenary.",
 		"ws.mercenary.",
 		`"workflow.prefer_mercenary"`,
 		"Mercenary (when selected):",
@@ -1491,6 +1681,31 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	}
 	if !strings.Contains(body, "full-pipeline routing accuracy") {
 		t.Errorf("body %q: expected doctrine text 'full-pipeline routing accuracy'", body)
+	}
+	for _, want := range []string{
+		`enter.proceed`,
+		`Next: <concrete next-action instruction>`,
+		"Follow `Next:` exactly",
+		"select the deterministic route from normalized facts",
+		"scope_blocked=phase-already-complete",
+		"scope_blocked=no-unfinished-phase",
+		"slice=whole target",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
+		}
+	}
+	for _, old := range []string{
+		"Use the first matching route block",
+		"#### Implementation Dispatch",
+		"| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` |",
+		"### 3. Report Routing Verdict",
+		"## Routing Verdict",
+		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
+	} {
+		if strings.Contains(body, old) {
+			t.Errorf("body %q: old deterministic route matrix text still present: %q", body, old)
+		}
 	}
 	// delegates:false — continuity tip must NOT appear.
 	if strings.Contains(body, "Continuity tip") {
@@ -1672,23 +1887,25 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 // TestSkillsCallEnterTools verifies that the four skills modified in Phase 2
 // contain the expected enter.* and agenda.set call tokens after rendering.
 // Tokens are chosen to be non-incidental: enter.<mode> appears only from the
-// inserted calls, and need_review / agenda.set are argument-level signals that
-// cannot appear from surrounding prose alone.
+// inserted calls, and target/facts/policy or agenda.set are argument-level
+// signals that cannot appear from surrounding prose alone.
 func TestSkillsCallEnterTools(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
 	cases := []struct {
-		skill   string
-		wantAll []string
+		skill    string
+		wantAll  []string
+		wantNone []string
 	}{
 		{
 			skill:   "lead-implement",
-			wantAll: []string{"enter.implement", "need_review"},
+			wantAll: []string{"enter.implement", `"target"`, `"facts"`, `"policy"`},
 		},
 		{
-			skill:   "lead-proceed",
-			wantAll: []string{"enter.proceed"},
+			skill:    "lead-proceed",
+			wantAll:  []string{"enter.proceed", `Next: <concrete next-action instruction>`, "Follow `Next:` exactly"},
+			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 		{
 			skill:   "lead-sprint",
@@ -1709,6 +1926,11 @@ func TestSkillsCallEnterTools(t *testing.T) {
 			for _, token := range tc.wantAll {
 				if !strings.Contains(body, token) {
 					t.Errorf("printPlaybook(%q): rendered body does not contain %q", tc.skill, token)
+				}
+			}
+			for _, token := range tc.wantNone {
+				if strings.Contains(body, token) {
+					t.Errorf("printPlaybook(%q): rendered body should not contain %q", tc.skill, token)
 				}
 			}
 		})

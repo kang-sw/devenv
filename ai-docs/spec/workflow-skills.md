@@ -450,36 +450,54 @@ workflow routing does not create new skeleton artifacts. {#260512-skeleton-draft
 
 Implementation skills execute code changes and close the documentation loop.
 
-`lead-implement` is the implementation harness. It routes to direct editing or
-delegated code writing, then runs the shared post-implementation documentation
-pipeline before reporting completion. Existing `implement/*` branches continue
-on the current branch; every other invocation creates an `implement/<scope>`
-branch before source edits. After verification, `lead-implement` records the
-phase result commit, closes spec, mental-model, ticket, and index updates, then
-asks the user to merge, continue, or stop. Follow-up changes after this gate
-route to another implementation slice or sprint and are captured in tickets as
-append-only Result editions for already completed phases.
+`lead-implement` is the implementation harness. It gathers normalized target,
+scope, complexity, risk, and policy facts, calls `ws.enter.implement`, follows
+the MCP-authored Implementation Verdict, then runs the shared
+post-implementation documentation pipeline before reporting completion. The MCP
+verdict owns deterministic implementation labels and branch preflight: it chooses
+direct-edit or delegated mode, branch action, plan depth, review allocation,
+review need, and documentation mode from facts, policy, and observed Git state.
+`Branch Action: stop` blocks source edits until the missing merge target, unsafe
+rename, existing target branch, or tracking ambiguity is resolved. After
+verification, `lead-implement` records the phase result commit, closes spec,
+mental-model, ticket, and index updates, then asks the user to merge, continue,
+or stop. Follow-up changes after this gate route to another implementation slice
+or sprint and are captured in tickets as append-only Result editions for already
+completed phases.
 
 `lead-implement` is a unified implementation spine with two edit modes.
 Direct-edit mode: the lead edits and verifies inline on the scoped
 implementation branch, suitable for single-file internal-only changes.
 Delegated mode: the lead writes a brief, optionally populates a plan, spawns an
-implementer agent, and captures the resulting commit range. `judge:
-needs-delegation` selects the edit mode at Route time; branch isolation is
-independent of edit mode, and direct-edit escalates to delegated when scope
-grows beyond single-file internal-only.
+implementer agent, and captures the resulting commit range. The MCP verdict
+selects edit mode; branch isolation is independent of edit mode, and direct-edit
+is derived only for single-file internal-only work with no public symbol,
+contract, new test-file, or explicit delegation signal.
+Initial implementer dispatch is file-first: the lead renders the `implementer`
+playbook with brief path, optional plan path, verification hint, result
+expectations, and commit-range hint as declared render inputs, then sends the
+worker only the rendered prompt path plus the instruction to execute it. The
+rendered implementer prompt reads the brief, optional plan, and listed
+references as the task contract; it does not read the ticket directly unless the
+caller explicitly overrides that rule. Recommended tier remains dispatch
+metadata for the lead or transport, not worker-facing task input.
 
-After route judgments and before preparation or source inspection,
-`lead-implement` emits a non-blocking Implementation Verdict. The verdict
-summarizes target, selected scope, branch mode, edit mode, plan depth, review
-allocation, and decisive route facts, then continues immediately. It does not
-use `NEXT:` because `lead-proceed` owns next-skill routing. wsflow mirrors this
-checkpoint with its own verdict spanning branch mode, plan depth, and review
-allocation, because the converged `wsflow:lead-implement` spine owns
-implementation strategy directly rather than deferring it to a separate edit
-skill. See `#260529-wsflow-converged-implement-spine`.
+After fact gathering and before preparation or source inspection,
+`lead-implement` reads the raw Implementation Verdict returned by
+`ws.enter.implement`. The verdict summarizes target, selected scope, branch
+action, edit mode, plan depth, review allocation, documentation mode, normalized
+conditions, warnings, agenda values, and a concrete `Next:` instruction. The
+playbook follows that instruction instead of recomputing deterministic labels,
+then treats the replaced todo list as the authoritative executable runbook for
+post-verdict branch, prep, edit, review, documentation, final-action, and merge
+steps. The always-rendered playbook keeps fact gathering, verdict handoff,
+ambiguous execution judgments, and delegate render handoffs, while verdict-specific
+direct/delegated, review-allocation, and documentation-skip instructions live in
+the focused todo instruction payloads. wsflow mirrors this checkpoint through
+the shared product-mode playbook text. See
+`#260529-wsflow-converged-implement-spine`.
 
-Review is a single stage for both modes. `judge: review-allocation` picks depth
+Review is a single stage for both modes. MCP `review_alloc` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
 test) when partitioned. Each partition carries a default reviewer tier in the
 first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
@@ -490,22 +508,32 @@ the allocation default. Relay cap is 2 cycles for single-reviewer, 3 cycles for
 partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
 {#260612-reviewer-allocation-tier-default}
 
-Delegates in the review fix-loop are stateless: each implementer and reviewer
-dispatch is fed entirely by its relay prompt plus the self-contained artifact set
-(brief, plan, review findings, committed diff), and the loop stays correct when
-every cycle is a fresh spawn. Loop continuity is lead-owned — reconstructed from
-commit `## AI Context`, not from same-agent resume, which is only a latency
-optimization. The implementer records each fix-cycle disposition (won't-fix or
-deferred, with reason) inline in the fix commit `## AI Context`. The reviewer
-returns a severity-explicit verdict (`clean`, `clean with N minor remaining`, or
-`non-clean: M critical/important`); the lead, not a machine gate, decides clean.
-The re-review relay carries the prior findings, their dispositions, and the
-updated diff; the reviewer reviews the current diff per its charter and is not
-asked to classify regression-vs-preexisting. The lead enforces convergence by
-dedup against the durable disposition record — a settled finding is not
-re-relayed, only genuinely new Critical/Important findings are — layered over the
-relay cap as the backstop for the pathological case of a reviewer inventing new
-findings each cycle. {#260619-stateless-implement-review-continuity}
+Delegates in the review fix-loop are stateless by contract: each implementer and
+reviewer dispatch is fed entirely by its relay prompt plus the self-contained
+artifact set (brief, plan, review findings, committed diff), and the loop stays
+correct when every cycle is a fresh spawn. When the host supports same-agent
+resume, `lead-implement` may reuse the prior implementer or reviewer for fix and
+re-review loops to reduce latency, but resume never carries required state. Loop
+continuity is lead-owned — reconstructed from commit `## AI Context`, not from
+agent conversation memory. The implementer records each fix-cycle disposition
+(won't-fix or deferred, with reason) inline in the fix commit `## AI Context`.
+The reviewer returns a severity-explicit verdict (`clean`, `clean with N minor
+remaining`, or `non-clean: M critical/important`); the lead, not a machine gate,
+decides clean. The re-review relay carries the prior findings, their
+dispositions, a findings output path, and the updated diff; the reviewer writes
+full findings, reports the severity verdict, reviews the current diff per its
+charter, and is not asked to classify regression-vs-preexisting. The lead
+enforces convergence by dedup against the durable disposition record — a settled
+finding is not re-relayed, only genuinely new Critical/Important findings are —
+layered over the relay cap as the backstop for the pathological case of a
+reviewer inventing new findings each cycle.
+Delegated review-fix relay is file-first: the lead renders the
+`implementer-relay` playbook with declared inputs for brief path, optional plan
+path, review cycle, current commit range, non-clean review paths, disposition
+notes, verification hint, and result expectations. The lead then sends only the
+rendered prompt path plus a short execute instruction to the implementation
+owner. Reviewer findings remain file inputs, not copied prompt prose.
+{#260619-stateless-implement-review-continuity}
 
 Plan population is an either/or depth choice for delegated mode. When plan depth
 is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
@@ -648,17 +676,29 @@ plan population or implementer dispatch. Delegated implementers receive only the
 brief and optional plan as task input, may read additional documents listed in
 brief References, and must not read the ticket directly.
 
-Before any handoff, `lead-proceed` emits a Routing Verdict with exactly one
-`NEXT:` skill or `stop`. It does not print a full route chain as the active
-execution instruction. After `lead-write-ticket` refresh or promotion returns,
-`lead-proceed` rebuilds route context and emits a new verdict instead of
-continuing from an old chain. When `NEXT:` is `lead-implement`,
-`lead-proceed` invokes that skill before source inspection, planning, editing,
-or implementation-tool use. It does not apply sibling `lead-implement` judges,
-compute direct/delegated execution mode, compute branch mode, or inspect source.
-`lead-implement` owns those decisions when the handoff executes. wsflow mirrors
-the same route-only boundary without pre-applying `wsflow:lead-implement`
-branch or execution judgments.
+Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
+fact gathering and receives a deterministic raw verdict with exactly one
+`NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
+deterministic route-row precedence, normalization warnings, raw verdict text,
+the JSON `next_instruction`, proceed agenda storage, and proceed todo
+replacement; the playbook owns artifact reads, uncertain judgments,
+conversation freshness, migration-anchor checks, and user-facing discussion.
+`lead-proceed` does not restate a separate Routing Verdict or print a full route
+chain as the active execution instruction. It follows MCP's `Next:` instruction,
+which includes the route announcement, downstream invocation, verification,
+failure, stop, and post-write reroute rails. After `lead-write-ticket` refresh or
+promotion returns, the `Next:` instruction requires `lead-proceed` to rebuild
+route context and enter `ws.enter.proceed` again instead of continuing from an
+old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
+`lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
+that playbook before source inspection, planning, editing, or
+implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
+judges, compute direct/delegated execution mode, compute branch mode, or inspect
+source.
+`lead-implement` owns those decisions when the handoff executes by calling
+`ws.enter.implement` after fact gathering. wsflow mirrors the same route-only
+proceed boundary without pre-applying `wsflow:lead-implement` branch or
+execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Shell {#260505-sprint-session-container}
@@ -789,3 +829,8 @@ workflow-stage routing, and final documentation ownership for the lead unless a
 delegate is explicitly assigned those responsibilities. Delegates return their
 assigned output through named-agent result surfaces rather than invoking lead
 skills on their own.
+The `implementer` and `implementer-relay` render playbooks are
+direct-execution delegate surfaces, not nested-delegation surfaces: their
+`delegates` metadata is false, so rendering them does not add the generic
+continuation tip. They still carry `role: implementer` for render-minted child
+credentials and tier-derived model guidance.

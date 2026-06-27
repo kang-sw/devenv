@@ -299,6 +299,200 @@ Verification boundary:
   require them.
 - `git diff --check` passes.
 
+### Result (75e1adee)
+
+Phase 1 is review-clean on branch
+`implement/260627-enter-proceed-verdict-engine`.
+
+Implemented:
+
+- `ws.enter.proceed` now accepts a `target` object, grouped optional/nullable
+  `facts`, and `format`, then resolves deterministic proceed routing through a
+  private MCP resolver.
+- The resolver preserves the existing verdict-facing route vocabulary, emits
+  canonical raw verdict text plus JSON output, records the proceed agenda, and
+  replaces proceed todos atomically.
+- `lead-proceed` now gathers route facts, calls `ws.enter.proceed`, follows the
+  returned `NEXT`, and explicitly dispatches implementation routes through
+  `ws/playbook.print(name: "lead-implement")`.
+- Runtime docs, workflow docs, mental models, rsrc manifests, and the wsflow
+  rsrc mirror were updated for the new boundary.
+
+Verification:
+
+- `go test ./internal/mcp -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
+Review:
+
+- Partitioned correctness, fit, and test review completed clean after one
+  fix/re-review cycle.
+
+### Phase 2: MCP-authored next action directive
+
+Add a concrete next-action directive to the `ws.enter.proceed` result and use it
+to shrink `lead-proceed` execution text.
+
+Required behavior:
+
+- Keep `format: "json"` as a first-class output path because agents tend to
+  prefer structured tool results.
+- Add a top-level `next_instruction` string to the JSON result. It is prose, not
+  a nested action enum/object, but it must be concrete enough to execute without
+  reinterpreting the route.
+- Render the same instruction in raw output as a `Next:` line immediately after
+  the `NEXT:` line block.
+- For `lead-implement`, the instruction must explicitly name
+  `{{namespace}}/playbook.print(name: "lead-implement")`, then say to execute the
+  returned playbook inline for the current target and phase before inspecting
+  source, planning, editing, or calling implementation tools.
+- For `lead-write-ticket`, the instruction must explicitly name
+  `{{namespace}}/playbook.print(name: "lead-write-ticket")`, then say to execute
+  the returned playbook inline and rerun `ws.enter.proceed` only after a ready
+  `Ticket:` path is returned.
+- For `lead-discuss`, the instruction must explicitly route through the current
+  skill namespace's `lead-discuss` skill with the blocker in `Reason`.
+- For `status-report` and `stop`, the instruction must explicitly say to stop,
+  report the blocker and safe next request from the verdict, and wait for the
+  user.
+- Remove the separate `Report Routing Verdict` template from `lead-proceed`; MCP
+  output is the canonical verdict.
+- Replace the `Execute Verdict` route-specific if-spam with a smaller rule:
+  read `NEXT:` and `Next:` from MCP output, briefly state
+  `Routing to next action: <NEXT>.`, then follow `Next:` exactly while preserving
+  the stop and post-write reroute safety rails.
+- Preserve existing mode-switch semantics: `ws.enter.proceed` still records the
+  proceed agenda and replaces proceed todos.
+
+Completion boundary:
+
+- A fresh `lead-proceed` run can follow the `next_instruction`/`Next:` directive
+  without restating a separate routing verdict or reconstructing route-specific
+  execution prose.
+- JSON and raw outputs carry equivalent next-action instructions.
+- The lead-proceed playbook keeps only minimal execution safety rails.
+
+Deferred scope:
+
+- Modeling next action as a nested structured object.
+- Executing downstream playbooks from inside MCP.
+- Applying the same directive pattern to `lead-implement`.
+
+Verification boundary:
+
+- Focused Go tests cover `next_instruction` in JSON and `Next:` in raw output for
+  implementation, ticket-writing, discussion, status/stop, and reroute cases.
+- Playbook content tests verify the separate `Report Routing Verdict` template
+  is gone and execution guidance follows `Next:`.
+- Manifest and wsflow mirror are regenerated if shared rsrc changes.
+- `git diff --check` passes.
+
+### Result (f41f7d52)
+
+Phase 2 is implemented on branch
+`implement/260627-enter-proceed-verdict-engine`.
+
+Implemented:
+
+- `ws.enter.proceed` JSON output now includes a top-level `next_instruction`
+  string.
+- Raw verdict output now renders the same directive as a `Next:` line after
+  `NEXT:`.
+- The directive names concrete next calls such as
+  `ws/playbook.print(name: "lead-implement")` or
+  `ws/playbook.print(name: "lead-write-ticket")` where applicable.
+- `lead-proceed` no longer emits a separate Routing Verdict block; it reads MCP's
+  `NEXT:` and `Next:` lines, states `Routing to next action: <NEXT>.`, and
+  follows the MCP directive with only minimal safety rails.
+- Proceed session todos now track Build route context, Resolve MCP verdict, and
+  Follow next instruction.
+
+Verification:
+
+- `go test ./internal/mcp -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
+### Phase 3: MCP-authored common follow rails
+
+Move the remaining common `Follow Next Instruction` rails into MCP-authored
+`Next:` / `next_instruction` text so `lead-proceed` no longer needs a separate
+follow-next execution step.
+
+Required behavior:
+
+- Expand resolver-authored `next_instruction` text so it includes the shared
+  follow rails that are still deterministic after route facts are known.
+- Keep the guidance concrete and execution-oriented. The instruction should name
+  the exact `{{namespace}}/...` MCP call or skill path when the next action has a
+  fixed invocation shape.
+- Remove the `follow-next` proceed todo. The proceed todo list should contain
+  only `Build route context` and `Resolve MCP verdict`; following MCP output is
+  the natural continuation after reading the verdict, not a separate tracked
+  proceed task.
+- Shrink `lead-proceed` to fact gathering, calling `ws.enter.proceed`, reading
+  the returned MCP output, and following that output. It should not retain
+  common if/then rails that MCP can safely generate into `Next:`.
+- Preserve hard safety behavior for malformed tool output, explicit stop
+  verdicts, and user interruption. If any safety rail cannot be expressed
+  clearly in `Next:`, keep only that minimal guard in the playbook.
+- Keep JSON and raw output equivalent: `next_instruction` and the raw `Next:`
+  line must carry the same execution guidance.
+
+Completion boundary:
+
+- A fresh `lead-proceed` run has only two proceed todos after enter:
+  `Build route context` and `Resolve MCP verdict`.
+- The lead-proceed playbook contains no separate `Follow Next Instruction`
+  section or route-specific common follow rails that duplicate MCP output.
+- The MCP-authored `Next:` / `next_instruction` text is sufficient for the lead
+  to continue without reconstructing execution guidance.
+
+Deferred scope:
+
+- Executing downstream playbooks from inside MCP.
+- Modeling next actions as nested structured action objects.
+- Applying the same common-rail extraction to `lead-implement`; that direction
+  is recorded in
+  `260627-feat-enter-implement-deterministic-verdict-engine`.
+
+Verification boundary:
+
+- Focused Go tests cover the updated proceed todo replacement.
+- Playbook content tests verify `Follow Next Instruction` and duplicated common
+  follow rails are absent from `lead-proceed`.
+- Raw and JSON output tests verify the expanded `Next:` / `next_instruction`
+  text remains equivalent.
+- Manifest and wsflow mirror are regenerated if shared rsrc changes.
+- `git diff --check` passes.
+
+### Result (cc930648)
+
+Phase 3 is implemented on branch
+`implement/260627-enter-proceed-verdict-engine`.
+
+Implemented:
+
+- MCP-authored `next_instruction` / raw `Next:` text now includes the route
+  announcement, downstream invocation, verification, failure/user-interruption
+  handling, stop behavior, and post-write reroute rails where applicable.
+- `lead-proceed` no longer has a separate `Follow Next Instruction` section or
+  route-specific common follow rails.
+- Proceed todo replacement now contains only `Build route context` and
+  `Resolve MCP verdict`.
+- The shared `lead-proceed` rsrc, canonical manifest, and wsflow rsrc mirror were
+  regenerated.
+
+Verification:
+
+- `go test ./internal/mcp -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
 ## Spec Impact
 
 - **Target spec areas:** `workflow-skills.md` (`lead-proceed` route boundary,
@@ -308,7 +502,8 @@ Verification boundary:
 - **Expected caller-visible change:** `lead-proceed` becomes lighter after facts
   are gathered, while `ws.enter.proceed` becomes the deterministic route/verdict
   resolver. Callers see a canonical raw verdict that clearly names the next
-  direction and warnings for ignored or normalized facts.
+  direction, a concrete next-action instruction, and warnings for ignored or
+  normalized facts.
 - **Contract-first spec: no.** The ticket itself pins the intended contract for
   this implementation slice, and `ws.enter.proceed` is a new, not-yet-shipped
   concept. The implementation should update `workflow-skills.md` and

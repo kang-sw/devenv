@@ -223,14 +223,44 @@ list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
 `ws.todo.append` loop is needed for a covered mode:
 
-- `implement`: always Route, Prep, Edit, Final action gate, Merge; `need_review`
-  inserts Review after Edit; `need_doc` inserts Doc pre-pass, Doc commit gate, and
-  Doc closeout (mirroring the lead-implement pipeline order). The derived Prep,
-  Edit, and Review labels reflect validated typed verdict values (`plan_depth`,
-  `delegation`, and `review_alloc`) instead of using one hardcoded
-  delegated/partitioned label or copying unknown strings into checklist titles.
-- `proceed`: Build route context, Select route, Emit routing verdict, Execute
-  verdict.
+- `implement`: `ws.enter.implement` is the public mode-switch call for the
+  implementation-facts-complete boundary. It accepts `session_key`, a required
+  `target` object, optional grouped `facts.scope` / `facts.complexity` /
+  `facts.risk` objects, a small `policy` object, and optional `format:
+  text|json`. MCP observes Git branch state from the session root, including the
+  current branch, HEAD/start commit, target branch existence, and
+  upstream/tracking ambiguity; callers provide only policy that cannot be
+  observed mechanically, such as a merge target while already on `implement/*`
+  and whether safe branch rename is allowed. The resolver derives
+  `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
+  `doc_mode`, stores the implement agenda, and replaces the todo list with the
+  derived lead-implement checklist. The derived todos carry focused
+  `instruction` prose from those resolved verdict labels, so branch, prep, edit,
+  review, doc, final-gate, and merge todos describe only the path reachable
+  under the current verdict; branch-stop todos describe the blocker instead of
+  telling the caller to continue source edits. Non-stop prep instructions carry
+  required runbook-loading guardrails, including mental-model lookup, ancestor
+  reads, conditional migration-anchor loading, and implementation-runbook loading
+  before edits or delegate dispatch. Text output is the canonical raw verdict
+  beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
+  `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
+  output returns the structured result plus `next_instruction` and the identical
+  `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
+  what policy or branch condition needs correction before source edits continue.
+- `proceed`: `ws.enter.proceed` is the public mode-switch call for the
+  routing-facts-complete boundary. It accepts `session_key`, a required
+  `target` object, optional grouped `facts.ticket` / `facts.gates` /
+  `facts.work` objects, and optional `format: text|json`. It normalizes the
+  current proceed route vocabulary (`target-kind`, `ticket-missing`,
+  `has-ticket`, `status`, `migration-anchor`, `actionable`,
+  `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
+  `scope-blocked`), resolves one deterministic route, emits non-blocking
+  warnings for contradictory or inapplicable facts, stores the selected route
+  agenda, and replaces the todo list with Build route context and Resolve MCP
+  verdict. Text output is the canonical raw verdict
+  beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`, and `Next: ...`; JSON
+  output returns the structured result plus `next_instruction` and the identical
+  `raw` string.
 - `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
 - `salvage`: Containment, Survey fanout, Premise interview, Classification,
   Capture.
@@ -238,22 +268,34 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
 **Todo.** Item identity is a caller-provided `key`, unique within the active
 list after normalization; keys are lowercased, may contain only lowercase
 letters, digits, `.`, `_`, and `-`, and are rejected when they include leading or
-trailing whitespace. A duplicate key is rejected after normalization, and an
-erased key is reusable. Mutations (`ws.todo.append`, `insert_before`,
-`insert_after`, `check`, `erase`, `clear`, `reorder`) return a compact
-confirmation; `ws.todo.list` returns rendered text. `clear(done_only=false)`
-removes all items; `done_only=true` removes only `done` items.
-`reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
-contiguous span as a block; the ref_key must lie outside the span.
+trailing whitespace. Todo items persist `key`, `title`, `status`, and an
+optional nullable `instruction` field for full execution prose. Existing session
+records without `instruction` remain valid and read as `null`. A duplicate key is
+rejected after normalization, and an erased key is reusable. Creation mutations
+(`ws.todo.append`, `insert_before`, and `insert_after`) accept optional
+nullable `instruction` and reject non-string non-null values. Status and order
+mutations (`check`, `erase`, `clear`, `reorder`) return a compact confirmation;
+they do not rewrite untouched item payloads, so existing `instruction` values are
+preserved through status and order changes. `ws.todo.read(key)` returns one
+item's full JSON payload, including `instruction`. `ws.todo.list` returns
+rendered text. `clear(done_only=false)` removes all items; `done_only=true`
+removes only `done` items. `reorder(span:{from_key,to_key}, position:{before|after:
+ref_key})` moves a contiguous span as a block; the ref_key must lie outside the
+span.
 
 Rendering lines include the visible key after the marker: `- [ ] {key} Title`,
 `- [~] {key} Title`, `- [x] {key} Title`, or `- [>] {key} Title`. Summary mode
 (the default and the checkpoint-injection mode) shows every pending/wip item plus
 one adjacent context item on each side of each contiguous active block,
 collapsing every other run to a single `...` line with no synthetic key or
-checkbox marker; `defer` collapses the same as `done`. Full mode shows every item
-in order. `ws.commit` does not auto-mark todos; status transitions are always
-explicit via `ws.todo.check`.
+checkbox marker; `defer` collapses the same as `done`. When an item has a
+non-empty instruction, summary rendering adds an indented second line containing
+at most the first 60 runes of that instruction; absent, null, or empty
+instructions render no second line. Full mode shows every item in order and
+renders each non-empty instruction in full on the indented second line. Workflow
+manual restoration uses the same summary rendering, so restored todos show the
+same 60-rune instruction previews. `ws.commit` does not auto-mark todos; status
+transitions are always explicit via `ws.todo.check`.
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
@@ -808,6 +850,11 @@ rendered output, reminding the caller to reuse the host-returned subagent agent
 id for continuation instead of respawning. The tip is the only continuity
 mechanism: the playbook surface keeps no agent registry and mandates no
 continuity-recording file.
+Delegate-eligible `role:` metadata is independent of the `delegates` tip flag.
+A rendered playbook can mint a role-scoped child key and expose its recommended
+tier while setting `delegates: false` to suppress the generic continuation tip
+when the prompt is meant for direct execution, such as the initial implementer
+prompt or review-fix relay implementer prompt.
 
 > [!note] Constraints
 > - Gemini is out of scope; only Claude and Codex have terminology tables. Any

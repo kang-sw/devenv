@@ -416,6 +416,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleTodoClear(req.ID, params.Arguments)
 	case "ws.todo.list":
 		return s.handleTodoList(req.ID, params.Arguments)
+	case "ws.todo.read":
+		return s.handleTodoRead(req.ID, params.Arguments)
 	case "ws.todo.reorder":
 		return s.handleTodoReorder(req.ID, params.Arguments)
 	case "ws.workflow_manual":
@@ -2669,38 +2671,144 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.enter.implement",
-			"description": "Enter implement mode: store the typed payload as the 'implement' agenda blob AND replace the todo list with the derived implement checklist (Route, Prep, Edit, [Review], [Doc pre-pass/commit-gate/closeout], Final action gate, Merge). Calling any ws.enter.* tool is a mode switch; the prior todo list is discarded.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":    stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"delegation":     enumStringProperty("Delegation posture for this implementation.", []string{"delegated", "direct-edit"}),
-					"plan_depth":     enumStringProperty("Planning depth.", []string{"none", "brief", "survey", "research"}),
-					"branch_mode":    stringProperty("Branch strategy (e.g. worktree, in-place)."),
-					"review_alloc":   enumStringProperty("Review allocation used to label the derived Review item.", []string{"lead-only", "single", "partitioned", "partitioned: correctness", "partitioned: fit", "partitioned: test", "partitioned: correctness, fit", "partitioned: correctness, test", "partitioned: fit, test", "partitioned: correctness, fit, test"}),
-					"current_branch": stringProperty("Current implementation branch name."),
-					"merge_target":   stringProperty("Intended merge target branch."),
-					"start_commit":   stringProperty("Implementation-start commit hash."),
-					"active_agents":  objectArrayProperty("Active delegate agents as {name, role, started} objects, to preserve agent-name context across compaction."),
-					"need_review":    boolProperty("When true, include the Review step in the derived todo list."),
-					"need_doc":       boolProperty("When true, include Doc pre-pass, Doc commit gate, and Doc closeout steps."),
-				},
-				"required": []string{"session_key"},
-			},
-		},
-		{
-			"name":        "ws.enter.proceed",
-			"description": "Enter routing mode: store the typed payload as the 'proceed' agenda blob AND replace the todo list with the lead-proceed checklist (Build route context, Select route, Emit routing verdict, Execute verdict).",
+			"description": "Enter implement mode: resolve normalized implementation facts and observed Git branch state into one deterministic implementation verdict, store the 'implement' agenda blob, and replace the todo list with the derived implement checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"ticket":      stringProperty("Target ticket stem or path being routed."),
-					"phase":       stringProperty("Selected phase, when one is named."),
-					"next_skill":  stringProperty("Routed next skill (e.g. lead-implement, lead-write-ticket)."),
-					"conditions":  stringArrayProperty("Routing conditions or blockers captured during route context."),
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Implementation target after lead-owned route fact gathering.",
+						"properties": map[string]any{
+							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket", "inline", "unknown"}),
+							"label":       nullableStringProperty("Short target label or summary."),
+							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
+							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
+							"scope_label": nullableStringProperty("Selected implementation scope label."),
+							"scope_slug":  nullableStringProperty("Kebab-case implementation branch suffix."),
+						},
+					},
+					"facts": map[string]any{
+						"type":        "object",
+						"description": "Grouped normalized implementation facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
+						"properties": map[string]any{
+							"scope": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"span":                        nullableEnumStringProperty("Implementation span.", []string{"single-file", "multi-file", "unknown"}),
+									"surface":                     nullableEnumStringProperty("Touched surface.", []string{"internal", "public-interface", "cross-module", "unknown"}),
+									"new_public_symbol":           nullableEnumStringProperty("Whether work introduces a public symbol.", []string{"yes", "no", "unknown"}),
+									"new_type_contract":           nullableEnumStringProperty("Whether work introduces or changes a type/schema contract.", []string{"yes", "no", "unknown"}),
+									"test_surface":                nullableEnumStringProperty("Test surface affected by the work.", []string{"none", "existing", "new-files", "unknown"}),
+									"explicit_delegation_request": nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
+								},
+							},
+							"complexity": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"change_points":    nullableEnumStringProperty("Known change-point clarity.", []string{"clear", "partially-known", "unknown"}),
+									"reuse_points":     nullableEnumStringProperty("Known reuse point status.", []string{"confirmed", "unconfirmed", "not-applicable", "unknown"}),
+									"strategy_shape":   nullableEnumStringProperty("Implementation strategy shape.", []string{"single-obvious", "multiple-viable", "unknown"}),
+									"side_effect_risk": nullableEnumStringProperty("Side-effect risk.", []string{"low", "moderate", "high", "unknown"}),
+									"cold_context":     nullableEnumStringProperty("Whether the code area is cold for the lead.", []string{"yes", "no", "unknown"}),
+								},
+							},
+							"risk": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"correctness":          nullableEnumStringProperty("Correctness risk.", []string{"low", "moderate", "high", "unknown"}),
+									"fit":                  nullableEnumStringProperty("Fit/contract-preservation risk.", []string{"low", "moderate", "high", "unknown"}),
+									"test":                 nullableEnumStringProperty("Test risk.", []string{"low", "moderate", "high", "unknown"}),
+									"security_or_contract": nullableEnumStringProperty("Security or external contract risk.", []string{"low", "moderate", "high", "unknown"}),
+								},
+							},
+						},
+					},
+					"policy": map[string]any{
+						"type":        "object",
+						"description": "Small explicit caller policy set. Observable Git state is read by MCP.",
+						"properties": map[string]any{
+							"branch": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"merge_target": nullableStringProperty("Required when already on an implementation branch."),
+									"allow_rename": nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict.", []string{"yes", "no", "unknown"}),
+								},
+							},
+							"review": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"override": nullableEnumStringProperty("Review override. auto or null lets MCP derive allocation.", []string{"auto", "lead-only", "single", "partitioned"}),
+								},
+							},
+							"docs": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"mode":   nullableEnumStringProperty("Documentation mode.", []string{"standard", "skip-with-reason", "unknown"}),
+									"reason": nullableStringProperty("Required reason when mode=skip-with-reason."),
+								},
+							},
+						},
+					},
+					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
 				},
-				"required": []string{"session_key"},
+				"required": []string{"session_key", "target"},
+			},
+		},
+		{
+			"name":        "ws.enter.proceed",
+			"description": "Enter routing mode: resolve deterministic proceed facts into one route verdict, store the 'proceed' agenda blob, and replace the todo list with the lead-proceed checklist.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Proceed target after lead-owned artifact reading.",
+						"properties": map[string]any{
+							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket-path", "inline", "unknown"}),
+							"label":       nullableStringProperty("Short target label or summary."),
+							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
+							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
+						},
+					},
+					"facts": map[string]any{
+						"type":        "object",
+						"description": "Grouped normalized route facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
+						"properties": map[string]any{
+							"ticket": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"ticket_missing": nullableEnumStringProperty("Whether a ticket-path target is missing.", []string{"yes", "no", "unknown"}),
+									"has_ticket":     nullableEnumStringProperty("Whether the target has a ticket artifact.", []string{"yes", "no", "unknown"}),
+									"status":         nullableEnumStringProperty("Ticket status.", []string{"idea", "todo", "ready", "done", "dropped", "unknown", "n/a"}),
+									"category":       nullableEnumStringProperty("Ticket category.", []string{"epic", "workset", "other", "n/a", "unknown"}),
+									"actionable":     nullableEnumStringProperty("Actionability judgment.", []string{"yes", "no", "unknown"}),
+									"freshness":      nullableEnumStringProperty("Ticket freshness against active conversation decisions.", []string{"current", "missing-settled-decisions", "uncertain", "n/a", "unknown"}),
+									"phase":          nullableStringProperty("Selected phase label when one is named."),
+								},
+							},
+							"gates": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"discussion_needed": nullableEnumStringProperty("Whether user-blocking discussion is needed.", []string{"yes", "no", "unknown"}),
+									"needs_ticket":      nullableEnumStringProperty("Whether an inline target needs a ticket first.", []string{"yes", "no", "n/a", "unknown"}),
+									"scope_blocked":     nullableEnumStringProperty("Scope blocker.", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}),
+									"migration_anchor":  nullableEnumStringProperty("Migration-anchor check result.", []string{"loaded", "n/a", "missing", "conflict", "unknown"}),
+								},
+							},
+							"work": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"category": nullableEnumStringProperty("Current work category hint.", []string{"implementation", "ticket_write", "discussion", "status_report", "unknown"}),
+									"slice":    nullableStringProperty("Resolved implementation slice, whole target, blocked, n/a, or unknown."),
+								},
+							},
+						},
+					},
+					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
+				},
+				"required": []string{"session_key", "target"},
 			},
 		},
 		{
@@ -2740,6 +2848,7 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
 				},
 				"required": []string{"session_key", "key", "title"},
 			},
@@ -2754,6 +2863,7 @@ func tools() []map[string]any {
 					"ref_key":     stringProperty("Existing item key to insert before."),
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
 				},
 				"required": []string{"session_key", "ref_key", "key", "title"},
 			},
@@ -2768,6 +2878,7 @@ func tools() []map[string]any {
 					"ref_key":     stringProperty("Existing item key to insert after."),
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
 				},
 				"required": []string{"session_key", "ref_key", "key", "title"},
 			},
@@ -2819,6 +2930,18 @@ func tools() []map[string]any {
 					"mode":        enumStringProperty("Rendering mode. Defaults to summary.", []string{"summary", "full"}),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.todo.read",
+			"description": "Return one todo item's full JSON payload, including nullable instruction.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to read."),
+				},
+				"required": []string{"session_key", "key"},
 			},
 		},
 		{
@@ -3977,6 +4100,13 @@ func stringProperty(description string) map[string]string {
 	}
 }
 
+func nullableStringProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        []string{"string", "null"},
+		"description": description,
+	}
+}
+
 func stringArrayProperty(description string) map[string]any {
 	return map[string]any{
 		"type":        "array",
@@ -3992,6 +4122,19 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"type":        "string",
 		"description": description,
 		"enum":        values,
+	}
+}
+
+func nullableEnumStringProperty(description string, values []string) map[string]any {
+	enumValues := make([]any, 0, len(values)+1)
+	for _, value := range values {
+		enumValues = append(enumValues, value)
+	}
+	enumValues = append(enumValues, nil)
+	return map[string]any{
+		"type":        []string{"string", "null"},
+		"description": description,
+		"enum":        enumValues,
 	}
 }
 
