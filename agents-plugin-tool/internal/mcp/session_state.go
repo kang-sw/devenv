@@ -29,11 +29,21 @@ const (
 )
 
 // todoItem is one ordered checklist entry. Identity is the caller-provided key,
-// unique within the active list; the title is human-facing text.
+// unique within the active list; the title is human-facing text. Instruction is
+// optional focused runbook prose for the item; old records without it unmarshal
+// with nil and remain compatible.
 type todoItem struct {
-	Key    string     `json:"key"`
-	Title  string     `json:"title"`
-	Status todoStatus `json:"status"`
+	Key         string     `json:"key"`
+	Title       string     `json:"title"`
+	Status      todoStatus `json:"status"`
+	Instruction *string    `json:"instruction,omitempty"`
+}
+
+type todoReadPayload struct {
+	Key         string     `json:"key"`
+	Title       string     `json:"title"`
+	Status      todoStatus `json:"status"`
+	Instruction *string    `json:"instruction"`
 }
 
 // parseTodoStatus validates a caller-supplied status string. An empty string
@@ -106,7 +116,7 @@ func normalizeTodoKey(raw string) (string, error) {
 // todoAppend adds a new item at the end. A duplicate key (still present in the
 // active list) is an error; erased keys are reusable because they are gone from
 // the slice.
-func todoAppend(list []todoItem, key, title string, status todoStatus) ([]todoItem, error) {
+func todoAppend(list []todoItem, key, title string, status todoStatus, instruction *string) ([]todoItem, error) {
 	normalizedKey, err := normalizeTodoKey(key)
 	if err != nil {
 		return nil, err
@@ -114,12 +124,12 @@ func todoAppend(list []todoItem, key, title string, status todoStatus) ([]todoIt
 	if indexOfTodo(list, normalizedKey) >= 0 {
 		return nil, fmt.Errorf("todo key %q already exists", normalizedKey)
 	}
-	return append(list, todoItem{Key: normalizedKey, Title: title, Status: status}), nil
+	return append(list, todoItem{Key: normalizedKey, Title: title, Status: status, Instruction: instruction}), nil
 }
 
 // todoInsert inserts a new item before or after refKey. after=false inserts
 // before refKey; after=true inserts after it.
-func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, after bool) ([]todoItem, error) {
+func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, instruction *string, after bool) ([]todoItem, error) {
 	normalizedRef, err := normalizeTodoKey(refKey)
 	if err != nil {
 		return nil, fmt.Errorf("ref_key: %w", err)
@@ -141,9 +151,27 @@ func todoInsert(list []todoItem, refKey, key, title string, status todoStatus, a
 	}
 	out := make([]todoItem, 0, len(list)+1)
 	out = append(out, list[:pos]...)
-	out = append(out, todoItem{Key: normalizedKey, Title: title, Status: status})
+	out = append(out, todoItem{Key: normalizedKey, Title: title, Status: status, Instruction: instruction})
 	out = append(out, list[pos:]...)
 	return out, nil
+}
+
+func todoRead(list []todoItem, key string) (todoReadPayload, error) {
+	normalizedKey, err := normalizeTodoKey(key)
+	if err != nil {
+		return todoReadPayload{}, err
+	}
+	idx := indexOfTodo(list, normalizedKey)
+	if idx < 0 {
+		return todoReadPayload{}, fmt.Errorf("todo key %q not found", normalizedKey)
+	}
+	item := list[idx]
+	return todoReadPayload{
+		Key:         item.Key,
+		Title:       item.Title,
+		Status:      item.Status,
+		Instruction: item.Instruction,
+	}, nil
 }
 
 // todoCheck sets the status of an existing item.
@@ -592,6 +620,18 @@ func rawStringArg(toolName, name string, args map[string]any) (string, error) {
 	return v, nil
 }
 
+func todoInstructionArg(toolName string, args map[string]any) (*string, error) {
+	raw, ok := args["instruction"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	instruction, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("%s: instruction must be a string or null", toolName)
+	}
+	return &instruction, nil
+}
+
 func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) response {
 	const tool = "ws.agenda.set"
 	sessionKey, err := sessionStateKey(tool, args)
@@ -781,8 +821,12 @@ func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) respo
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	title, _ := args["title"].(string)
+	instruction, err := todoInstructionArg(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoAppend(list, normalizedKey, title, todoPending)
+		return todoAppend(list, normalizedKey, title, todoPending, instruction)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
@@ -811,8 +855,12 @@ func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	title, _ := args["title"].(string)
+	instruction, err := todoInstructionArg(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
-		return todoInsert(list, refKey, normalizedKey, title, todoPending, after)
+		return todoInsert(list, refKey, normalizedKey, title, todoPending, instruction, after)
 	}); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
@@ -901,6 +949,27 @@ func (s *Server) handleTodoList(id json.RawMessage, args map[string]any) respons
 	}
 	full := strings.TrimSpace(strings.ToLower(fmt.Sprint(args["mode"]))) == "full"
 	return toolTextResponse(id, renderTodos(record.Todos, full)+"\n", nil)
+}
+
+func (s *Server) handleTodoRead(id json.RawMessage, args map[string]any) response {
+	const tool = "ws.todo.read"
+	sessionKey, err := sessionStateKey(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	key, err := rawStringArg(tool, "key", args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	record, ok := s.sessions.readState(sessionKey)
+	if !ok {
+		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
+	}
+	item, err := todoRead(record.Todos, key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	return toolJSONResponse(id, item, nil)
 }
 
 func (s *Server) handleTodoReorder(id json.RawMessage, args map[string]any) response {

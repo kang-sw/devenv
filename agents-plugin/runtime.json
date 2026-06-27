@@ -23,6 +23,7 @@
     "ws.todo.erase": ">=0.30.13-dev <0.31.0",
     "ws.todo.clear": ">=0.30.13-dev <0.31.0",
     "ws.todo.list": ">=0.30.13-dev <0.31.0",
+    "ws.todo.read": ">=0.30.13-dev <0.31.0",
     "ws.todo.reorder": ">=0.30.13-dev <0.31.0",
     "config.show": ">=0.30.13-dev <0.31.0",
     "config.agents_tier": ">=0.30.13-dev <0.31.0",

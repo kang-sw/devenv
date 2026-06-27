@@ -261,13 +261,20 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
 **Todo.** Item identity is a caller-provided `key`, unique within the active
 list after normalization; keys are lowercased, may contain only lowercase
 letters, digits, `.`, `_`, and `-`, and are rejected when they include leading or
-trailing whitespace. A duplicate key is rejected after normalization, and an
-erased key is reusable. Mutations (`ws.todo.append`, `insert_before`,
-`insert_after`, `check`, `erase`, `clear`, `reorder`) return a compact
-confirmation; `ws.todo.list` returns rendered text. `clear(done_only=false)`
-removes all items; `done_only=true` removes only `done` items.
-`reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
-contiguous span as a block; the ref_key must lie outside the span.
+trailing whitespace. Todo items persist `key`, `title`, `status`, and an
+optional nullable `instruction` field for full execution prose. Existing session
+records without `instruction` remain valid and read as `null`. A duplicate key is
+rejected after normalization, and an erased key is reusable. Creation mutations
+(`ws.todo.append`, `insert_before`, and `insert_after`) accept optional
+nullable `instruction` and reject non-string non-null values. Status and order
+mutations (`check`, `erase`, `clear`, `reorder`) return a compact confirmation;
+they do not rewrite untouched item payloads, so existing `instruction` values are
+preserved through status and order changes. `ws.todo.read(key)` returns one
+item's full JSON payload, including `instruction`. `ws.todo.list` returns
+rendered text. `clear(done_only=false)` removes all items; `done_only=true`
+removes only `done` items. `reorder(span:{from_key,to_key}, position:{before|after:
+ref_key})` moves a contiguous span as a block; the ref_key must lie outside the
+span.
 
 Rendering lines include the visible key after the marker: `- [ ] {key} Title`,
 `- [~] {key} Title`, `- [x] {key} Title`, or `- [>] {key} Title`. Summary mode

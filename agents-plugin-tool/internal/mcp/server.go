@@ -416,6 +416,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleTodoClear(req.ID, params.Arguments)
 	case "ws.todo.list":
 		return s.handleTodoList(req.ID, params.Arguments)
+	case "ws.todo.read":
+		return s.handleTodoRead(req.ID, params.Arguments)
 	case "ws.todo.reorder":
 		return s.handleTodoReorder(req.ID, params.Arguments)
 	case "ws.workflow_manual":
@@ -2846,6 +2848,7 @@ func tools() []map[string]any {
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
 				},
 				"required": []string{"session_key", "key", "title"},
 			},
@@ -2860,6 +2863,7 @@ func tools() []map[string]any {
 					"ref_key":     stringProperty("Existing item key to insert before."),
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
 				},
 				"required": []string{"session_key", "ref_key", "key", "title"},
 			},
@@ -2874,6 +2878,7 @@ func tools() []map[string]any {
 					"ref_key":     stringProperty("Existing item key to insert after."),
 					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
 					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
 				},
 				"required": []string{"session_key", "ref_key", "key", "title"},
 			},
@@ -2925,6 +2930,18 @@ func tools() []map[string]any {
 					"mode":        enumStringProperty("Rendering mode. Defaults to summary.", []string{"summary", "full"}),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "ws.todo.read",
+			"description": "Return one todo item's full JSON payload, including nullable instruction.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to read."),
+				},
+				"required": []string{"session_key", "key"},
 			},
 		},
 		{

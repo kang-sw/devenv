@@ -35,6 +35,10 @@ func eqKeys(a []string, b ...string) bool {
 	return true
 }
 
+func stringPtr(s string) *string {
+	return &s
+}
+
 func TestDeriveImplementTodos(t *testing.T) {
 	cases := []struct {
 		needReview, needDoc bool
@@ -90,14 +94,14 @@ func TestDeriveOtherEnterTodos(t *testing.T) {
 }
 
 func TestTodoKeyUniquenessAndReuse(t *testing.T) {
-	list, err := todoAppend(nil, "A", "A", todoPending)
+	list, err := todoAppend(nil, "A", "A", todoPending, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if list[0].Key != "a" {
 		t.Fatalf("key was not normalized: %q", list[0].Key)
 	}
-	if _, err := todoAppend(list, "a", "dup", todoPending); err == nil {
+	if _, err := todoAppend(list, "a", "dup", todoPending, nil); err == nil {
 		t.Fatal("expected duplicate key error")
 	}
 	// erase then re-append the same key must succeed (keys are reusable).
@@ -105,7 +109,7 @@ func TestTodoKeyUniquenessAndReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := todoAppend(list, "a", "A again", todoPending); err != nil {
+	if _, err := todoAppend(list, "a", "A again", todoPending, nil); err != nil {
 		t.Fatalf("re-append after erase failed: %v", err)
 	}
 }
@@ -126,23 +130,23 @@ func TestTodoKeyValidation(t *testing.T) {
 }
 
 func TestTodoInsertAndCheck(t *testing.T) {
-	list, _ := todoAppend(nil, "a", "A", todoPending)
-	list, _ = todoAppend(list, "c", "C", todoPending)
-	list, err := todoInsert(list, "c", "b", "B", todoPending, false) // before c
+	list, _ := todoAppend(nil, "a", "A", todoPending, nil)
+	list, _ = todoAppend(list, "c", "C", todoPending, nil)
+	list, err := todoInsert(list, "c", "b", "B", todoPending, nil, false) // before c
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !eqKeys(keysOf(list), "a", "b", "c") {
 		t.Fatalf("insert_before mismatch: %v", keysOf(list))
 	}
-	list, err = todoInsert(list, "a", "a2", "A2", todoPending, true) // after a
+	list, err = todoInsert(list, "a", "a2", "A2", todoPending, nil, true) // after a
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !eqKeys(keysOf(list), "a", "a2", "b", "c") {
 		t.Fatalf("insert_after mismatch: %v", keysOf(list))
 	}
-	if _, err := todoInsert(list, "missing", "x", "X", todoPending, true); err == nil {
+	if _, err := todoInsert(list, "missing", "x", "X", todoPending, nil, true); err == nil {
 		t.Fatal("expected ref_key-not-found error")
 	}
 	list, err = todoCheck(list, "b", todoDone)
@@ -157,11 +161,65 @@ func TestTodoInsertAndCheck(t *testing.T) {
 	}
 }
 
+func TestTodoInstructionPreservedThroughStatusAndOrderMutations(t *testing.T) {
+	list, _ := todoAppend(nil, "a", "A", todoPending, stringPtr("Alpha instruction"))
+	list, _ = todoAppend(list, "c", "C", todoPending, stringPtr("Charlie instruction"))
+	list, err := todoInsert(list, "c", "b", "B", todoPending, stringPtr("Bravo instruction"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err = todoCheck(list, "b", todoDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := list[indexOfTodo(list, "b")].Instruction; got == nil || *got != "Bravo instruction" {
+		t.Fatalf("check did not preserve instruction: %#v", got)
+	}
+
+	list, err = todoReorder(list, "b", "c", "a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eqKeys(keysOf(list), "b", "c", "a") {
+		t.Fatalf("reorder keys = %v", keysOf(list))
+	}
+	for _, item := range list {
+		if item.Instruction == nil || *item.Instruction == "" {
+			t.Fatalf("reorder lost instruction for %s: %#v", item.Key, item.Instruction)
+		}
+	}
+
+	list = todoClear(list, true)
+	if !eqKeys(keysOf(list), "c", "a") {
+		t.Fatalf("clear(done_only) keys = %v", keysOf(list))
+	}
+	if got := list[indexOfTodo(list, "a")].Instruction; got == nil || *got != "Alpha instruction" {
+		t.Fatalf("clear(done_only) did not preserve untouched instruction: %#v", got)
+	}
+}
+
+func TestTodoReadOldRecordWithoutInstruction(t *testing.T) {
+	item, err := todoRead([]todoItem{{Key: "old", Title: "Old", Status: todoPending}}, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Key != "old" || item.Title != "Old" || item.Status != todoPending {
+		t.Fatalf("unexpected old-record payload: %+v", item)
+	}
+	if item.Instruction != nil {
+		t.Fatalf("old record instruction = %#v, want nil", item.Instruction)
+	}
+	if _, err := todoRead([]todoItem{{Key: "old", Title: "Old", Status: todoPending}}, "missing"); err == nil {
+		t.Fatal("expected missing-key read error")
+	}
+}
+
 func TestTodoClear(t *testing.T) {
-	list, _ := todoAppend(nil, "a", "A", todoDone)
-	list, _ = todoAppend(list, "b", "B", todoPending)
-	list, _ = todoAppend(list, "c", "C", todoDone)
-	list, _ = todoAppend(list, "d", "D", todoWip)
+	list, _ := todoAppend(nil, "a", "A", todoDone, nil)
+	list, _ = todoAppend(list, "b", "B", todoPending, nil)
+	list, _ = todoAppend(list, "c", "C", todoDone, nil)
+	list, _ = todoAppend(list, "d", "D", todoWip, nil)
 	if doneCleared := todoClear(list, true); !eqKeys(keysOf(doneCleared), "b", "d") {
 		t.Fatalf("clear(done_only) mismatch: %v", keysOf(doneCleared))
 	}
@@ -174,7 +232,7 @@ func TestTodoReorder(t *testing.T) {
 	build := func() []todoItem {
 		var l []todoItem
 		for _, k := range []string{"a", "b", "c", "d", "e"} {
-			l, _ = todoAppend(l, k, strings.ToUpper(k), todoPending)
+			l, _ = todoAppend(l, k, strings.ToUpper(k), todoPending, nil)
 		}
 		return l
 	}
@@ -276,7 +334,7 @@ func TestStoreConcurrentTodoWrites(t *testing.T) {
 			defer wg.Done()
 			itemKey := fmt.Sprintf("k%02d", i)
 			if err := store.mutateTodos(key, func(list []todoItem) ([]todoItem, error) {
-				return todoAppend(list, itemKey, itemKey, todoPending)
+				return todoAppend(list, itemKey, itemKey, todoPending, nil)
 			}); err != nil {
 				t.Errorf("append %s: %v", itemKey, err)
 			}
@@ -329,7 +387,7 @@ func TestEnterModeReplacesTodos(t *testing.T) {
 	store, key := newSandboxStore(t)
 	// seed a prior list
 	_ = store.mutateTodos(key, func(list []todoItem) ([]todoItem, error) {
-		return todoAppend(list, "stale", "stale", todoPending)
+		return todoAppend(list, "stale", "stale", todoPending, nil)
 	})
 	if err := store.enterMode(key, "implement", json.RawMessage(`{"x":1}`), deriveImplementTodos(true, false)); err != nil {
 		t.Fatal(err)
@@ -1286,6 +1344,81 @@ func TestServeStdioTodoKeyNormalization(t *testing.T) {
 		"key": " Review ", "title": "bad",
 	}); !strings.Contains(got, "leading or trailing whitespace") {
 		t.Fatalf("whitespace key error expected, got: %s", got)
+	}
+}
+
+func TestServeStdioTodoInstructionReadSurface(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903100, root, nil))
+
+	if got := callToolWithKey(t, server, 1, key, "ws.todo.append", map[string]any{
+		"key":         "a",
+		"title":       "A",
+		"instruction": "Alpha full instruction",
+	}); !strings.Contains(got, "todo appended: a") {
+		t.Fatalf("append with instruction unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 2, key, "ws.todo.insert_before", map[string]any{
+		"ref_key":     "a",
+		"key":         "b",
+		"title":       "B",
+		"instruction": nil,
+	}); !strings.Contains(got, "todo inserted: b") {
+		t.Fatalf("insert_before null instruction unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 3, key, "ws.todo.insert_after", map[string]any{
+		"ref_key":     "a",
+		"key":         "c",
+		"title":       "C",
+		"instruction": "Charlie full instruction",
+	}); !strings.Contains(got, "todo inserted: c") {
+		t.Fatalf("insert_after with instruction unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 4, key, "ws.todo.check", map[string]any{
+		"key": "a", "status": "done",
+	}); !strings.Contains(got, "todo done: a") {
+		t.Fatalf("check unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 5, key, "ws.todo.reorder", map[string]any{
+		"span":     map[string]any{"from_key": "a", "to_key": "c"},
+		"position": map[string]any{"before": "b"},
+	}); !strings.Contains(got, "todo span reordered") {
+		t.Fatalf("reorder unexpected: %s", got)
+	}
+
+	readA := callToolWithKey(t, server, 6, key, "ws.todo.read", map[string]any{"key": "A"})
+	var payload todoReadPayload
+	if err := json.Unmarshal([]byte(readA), &payload); err != nil {
+		t.Fatalf("read payload did not parse: %v\n%s", err, readA)
+	}
+	if payload.Key != "a" || payload.Title != "A" || payload.Status != todoDone {
+		t.Fatalf("unexpected read payload: %+v", payload)
+	}
+	if payload.Instruction == nil || *payload.Instruction != "Alpha full instruction" {
+		t.Fatalf("read did not return full instruction: %+v", payload)
+	}
+
+	readB := callToolWithKey(t, server, 7, key, "ws.todo.read", map[string]any{"key": "b"})
+	var nullPayload todoReadPayload
+	if err := json.Unmarshal([]byte(readB), &nullPayload); err != nil {
+		t.Fatalf("null read payload did not parse: %v\n%s", err, readB)
+	}
+	if nullPayload.Instruction != nil {
+		t.Fatalf("null instruction = %#v, want nil", nullPayload.Instruction)
+	}
+
+	if got := callToolWithKey(t, server, 8, key, "ws.todo.append", map[string]any{
+		"key": "bad", "title": "Bad", "instruction": []any{"not", "string"},
+	}); !strings.Contains(got, "instruction must be a string or null") {
+		t.Fatalf("invalid instruction error expected, got: %s", got)
+	}
+	if got := callToolWithKey(t, server, 9, key, "ws.todo.read", map[string]any{"key": "missing"}); !strings.Contains(got, `todo key "missing" not found`) {
+		t.Fatalf("missing read error expected, got: %s", got)
 	}
 }
 
