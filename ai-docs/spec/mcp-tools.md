@@ -274,28 +274,36 @@ records without `instruction` remain valid and read as `null`. A duplicate key i
 rejected after normalization, and an erased key is reusable. Creation mutations
 (`ws.todo.append`, `insert_before`, and `insert_after`) accept optional
 nullable `instruction` and reject non-string non-null values. Status and order
-mutations (`check`, `erase`, `clear`, `reorder`) return a compact confirmation;
-they do not rewrite untouched item payloads, so existing `instruction` values are
-preserved through status and order changes. `ws.todo.read(key)` returns one
-item's full JSON payload, including `instruction`. `ws.todo.list` returns
-rendered text. `clear(done_only=false)` removes all items; `done_only=true`
-removes only `done` items. `reorder(span:{from_key,to_key}, position:{before|after:
-ref_key})` moves a contiguous span as a block; the ref_key must lie outside the
-span.
+mutations do not rewrite untouched item payloads, so existing `instruction`
+values are preserved through status and order changes. `ws.todo.check` returns a
+compact confirmation followed by a checkpoint todo rendering. Other status/order
+mutations (`erase`, `clear`, `reorder`) return a compact confirmation.
+`ws.todo.read(key)` returns one item's full JSON payload, including
+`instruction`. `ws.todo.list` returns rendered text. `clear(done_only=false)`
+removes all items; `done_only=true` removes only `done` items.
+`reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
+contiguous span as a block; the ref_key must lie outside the span.
 
 Rendering lines include the visible key after the marker: `- [ ] {key} Title`,
 `- [~] {key} Title`, `- [x] {key} Title`, or `- [>] {key} Title`. Summary mode
-(the default and the checkpoint-injection mode) shows every pending/wip item plus
-one adjacent context item on each side of each contiguous active block,
-collapsing every other run to a single `...` line with no synthetic key or
-checkbox marker; `defer` collapses the same as `done`. When an item has a
-non-empty instruction, summary rendering adds an indented second line containing
-at most the first 60 runes of that instruction; absent, null, or empty
-instructions render no second line. Full mode shows every item in order and
-renders each non-empty instruction in full on the indented second line. Workflow
-manual restoration uses the same summary rendering, so restored todos show the
-same 60-rune instruction previews. `ws.commit` does not auto-mark todos; status
-transitions are always explicit via `ws.todo.check`.
+(the default list mode) shows every pending/wip item plus one adjacent context
+item on each side of each contiguous active block, collapsing every other run to
+a single `...` line with no synthetic key or checkbox marker; `defer` collapses
+the same as `done`. When an item has a non-empty instruction, summary rendering
+adds an indented second line containing at most the first 60 runes of that
+instruction; absent, null, or empty instructions render no second line. Full
+mode shows every item in order and renders each non-empty instruction in full on
+the indented second line. Workflow manual restoration uses the same summary
+rendering, so restored todos show the same 60-rune instruction previews.
+Checkpoint rendering from `ws.todo.check` shows the full ordered list without
+ellipsis collapse after the status update. It renders full instruction lines only
+for the checked item's immediate previous and next items when those items are
+actionable (`pending` or `wip`) and have non-empty instructions; the checked item,
+non-adjacent items, `done` items, `defer` items, and instruction-less items stay
+compact. Compact checkpoint rows with a non-empty instruction that is not rendered
+add an indented `...+` marker line to distinguish hidden instruction payloads from
+instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
+are always explicit via `ws.todo.check`.
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
