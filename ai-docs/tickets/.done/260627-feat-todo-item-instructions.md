@@ -8,6 +8,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - workflow-skills
+completed: 2026-06-27
 ---
 
 # Todo item instruction field and focused runbook rendering
@@ -209,3 +210,30 @@ Verification:
   lead-only review, partitioned review, standard docs, and skipped docs cases.
 - Verify lead-implement rendered text no longer needs duplicated unreachable
   execution branches after it depends on todo instructions.
+
+### Result (c29ec02a) - 2026-06-27
+
+Implemented Phase 3 for `ws.enter.implement`.
+
+- Populated enter-implement-derived todos with focused instruction prose from
+  resolved verdict labels.
+- Kept todo titles short and placed executable prose in `instruction`.
+- Covered branch, prep, edit, review, doc, final-gate, and merge instruction
+  paths.
+- Kept branch-stop instructions blocker-focused so they do not imply source
+  edits can continue before the stop condition is resolved.
+- Left `ws.enter.proceed` instruction producers and lead-implement body
+  reduction out of scope for follow-up work.
+
+Verification:
+
+- `go test ./internal/mcp -count=1 -run 'TestEnterModeReplacesTodos|TestTodo|TestRenderTodos|TestWorkflowManual|TestServeStdioTodo'`
+- `go test ./... -count=1`
+- `git diff --check`
+- Partitioned review: correctness clean, fit clean, test clean after one
+  test-only fix cycle (`28a8a5ea`).
+
+
+## Resolution (2026-06-27)
+
+Completed all three phases: instruction storage/read surface, instruction rendering, and ws.enter.implement-derived focused todo instruction production. `ws.enter.proceed` instruction production and lead-implement body reduction remain separate follow-up scope.
