@@ -300,8 +300,10 @@ ellipsis collapse after the status update. It renders full instruction lines onl
 for the checked item's immediate previous and next items when those items are
 actionable (`pending` or `wip`) and have non-empty instructions; the checked item,
 non-adjacent items, `done` items, `defer` items, and instruction-less items stay
-compact. `ws.commit` does not auto-mark todos; status transitions are always
-explicit via `ws.todo.check`.
+compact. Compact checkpoint rows with a non-empty instruction that is not rendered
+append ` (instruction omitted)` to distinguish hidden instruction payloads from
+instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
+are always explicit via `ws.todo.check`.
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 

@@ -339,7 +339,11 @@ func renderTodosCheckpoint(list []todoItem, checkedKey string) string {
 			lines = append(lines, renderTodoLines(item, true)...)
 			continue
 		}
-		lines = append(lines, renderTodoLine(item))
+		line := renderTodoLine(item)
+		if item.Instruction != nil && *item.Instruction != "" {
+			line += " (instruction omitted)"
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }

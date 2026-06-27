@@ -2885,7 +2885,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.todo.check",
-			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items.",
+			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions are marked.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
