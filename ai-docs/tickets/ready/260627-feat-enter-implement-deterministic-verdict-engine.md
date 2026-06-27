@@ -354,3 +354,33 @@ Verification:
 - Verify `lead-implement` playbook output no longer carries duplicated
   deterministic strategy tables after the MCP resolver owns them.
 - Run the relevant MCP and rsrc/wsflow mirror tests after source/playbook edits.
+
+### Result (3ab81a53) - 2026-06-27
+
+Implemented a broad first pass for MCP-owned `ws.enter.implement` verdict
+resolution.
+
+Completed:
+
+- Added private Go resolver logic behind `ws.enter.implement` for normalized
+  `target + facts + policy` input.
+- Derived delegation mode, branch plan, plan depth, review allocation,
+  documentation mode, agenda payload, and todo replacement from facts plus
+  observed Git state.
+- Added raw and JSON Implementation Verdict output with MCP-authored
+  `next_instruction` guidance.
+- Updated `lead-implement` and the wsflow mirror so Route gathers facts, calls
+  `ws.enter.implement`, and follows the returned verdict instead of carrying
+  duplicated deterministic judgment tables.
+- Updated `mcp-tools` and `workflow-skills` specs for the shipped contract.
+
+Verification:
+
+- `gofmt -w internal/mcp/implement_resolver.go internal/mcp/implement_resolver_test.go internal/mcp/session_state.go internal/mcp/server.go internal/mcp/session_state_test.go internal/mcp/playbook_tools_test.go`
+- `WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest`
+- `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`
+- `go test ./... -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `ws/spec_index_verify`
