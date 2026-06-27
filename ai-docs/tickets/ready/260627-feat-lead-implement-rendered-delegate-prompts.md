@@ -121,6 +121,29 @@ with representative context, run Go tests covering playbook rendering, run
 wsflow package tests when mirrored resources change, and verify no always-rendered
 lead text still embeds the old long initial implementer prompt.
 
+### Result (af1cebf) - 2026-06-27
+
+Implemented Phase 1. Initial delegated implementation dispatch now renders the
+`implementer` playbook with declared file-first inputs for the brief path,
+optional plan path, verification hint, result expectations, and commit-range
+hint. `lead-implement` now keeps only the rendered prompt path handoff for the
+initial implementer path instead of embedding the long worker prompt in the
+always-rendered lead playbook.
+
+The `implementer` playbook now treats the brief, optional plan, and listed
+references as the task contract, blocks direct ticket-file reads unless the
+caller explicitly overrides the rule, and reports final commit/hash range as
+part of normal completion. `delegates:false` suppresses the generic continuation
+tip for this direct-execution prompt while preserving `role: implementer` and
+`tier: medium` behavior.
+
+Verification passed for focused MCP playbook-render tests, manifest
+regeneration, wsflow rsrc mirror regeneration, `go test ./internal/wsrsrc
+-count=1`, `python3 -m unittest discover agents-plugin-wsflow/tests`, `go test
+./...` in `agents-plugin-tool`, and `git diff --check`. Partitioned review
+completed: correctness `clean`, test `clean`, fit `clean` after the
+fresh-reader audit findings were fixed.
+
 ### Phase 2: Add review-fix relay render surface
 
 Introduce a review-fix relay surface, expected to be `implementer-relay`, when it

@@ -850,6 +850,11 @@ rendered output, reminding the caller to reuse the host-returned subagent agent
 id for continuation instead of respawning. The tip is the only continuity
 mechanism: the playbook surface keeps no agent registry and mandates no
 continuity-recording file.
+Delegate-eligible `role:` metadata is independent of the `delegates` tip flag.
+A rendered playbook can mint a role-scoped child key and expose its recommended
+tier while setting `delegates: false` to suppress the generic continuation tip
+when the prompt is meant for direct execution, such as the initial implementer
+prompt.
 
 > [!note] Constraints
 > - Gemini is out of scope; only Claude and Codex have terminology tables. Any

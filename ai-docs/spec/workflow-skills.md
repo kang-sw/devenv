@@ -473,6 +473,14 @@ implementer agent, and captures the resulting commit range. The MCP verdict
 selects edit mode; branch isolation is independent of edit mode, and direct-edit
 is derived only for single-file internal-only work with no public symbol,
 contract, new test-file, or explicit delegation signal.
+Initial implementer dispatch is file-first: the lead renders the `implementer`
+playbook with brief path, optional plan path, verification hint, result
+expectations, and commit-range hint as declared render inputs, then sends the
+worker only the rendered prompt path plus the instruction to execute it. The
+rendered implementer prompt reads the brief, optional plan, and listed
+references as the task contract; it does not read the ticket directly unless the
+caller explicitly overrides that rule. Recommended tier remains dispatch
+metadata for the lead or transport, not worker-facing task input.
 
 After fact gathering and before preparation or source inspection,
 `lead-implement` reads the raw Implementation Verdict returned by
@@ -815,3 +823,7 @@ workflow-stage routing, and final documentation ownership for the lead unless a
 delegate is explicitly assigned those responsibilities. Delegates return their
 assigned output through named-agent result surfaces rather than invoking lead
 skills on their own.
+The `implementer` render playbook is a direct-execution delegate surface, not a
+nested-delegation surface: its `delegates` metadata is false, so rendering it
+does not add the generic continuation tip. It still carries `role: implementer`
+for render-minted child credentials and tier-derived model guidance.
