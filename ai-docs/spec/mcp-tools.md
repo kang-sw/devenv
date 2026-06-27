@@ -234,7 +234,11 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   and whether safe branch rename is allowed. The resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
-  derived lead-implement checklist. Text output is the canonical raw verdict
+  derived lead-implement checklist. The derived todos carry focused
+  `instruction` prose from those resolved verdict labels, so branch, prep, edit,
+  review, doc, final-gate, and merge todos describe only the path reachable
+  under the current verdict; branch-stop todos describe the blocker instead of
+  telling the caller to continue source edits. Text output is the canonical raw verdict
   beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
   `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
   output returns the structured result plus `next_instruction` and the identical
