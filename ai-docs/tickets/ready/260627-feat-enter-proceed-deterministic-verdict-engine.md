@@ -330,6 +330,65 @@ Review:
 - Partitioned correctness, fit, and test review completed clean after one
   fix/re-review cycle.
 
+### Phase 2: MCP-authored next action directive
+
+Add a concrete next-action directive to the `ws.enter.proceed` result and use it
+to shrink `lead-proceed` execution text.
+
+Required behavior:
+
+- Keep `format: "json"` as a first-class output path because agents tend to
+  prefer structured tool results.
+- Add a top-level `next_instruction` string to the JSON result. It is prose, not
+  a nested action enum/object, but it must be concrete enough to execute without
+  reinterpreting the route.
+- Render the same instruction in raw output as a `Next:` line immediately after
+  the `NEXT:` line block.
+- For `lead-implement`, the instruction must explicitly name
+  `{{namespace}}/playbook.print(name: "lead-implement")`, then say to execute the
+  returned playbook inline for the current target and phase before inspecting
+  source, planning, editing, or calling implementation tools.
+- For `lead-write-ticket`, the instruction must explicitly name
+  `{{namespace}}/playbook.print(name: "lead-write-ticket")`, then say to execute
+  the returned playbook inline and rerun `ws.enter.proceed` only after a ready
+  `Ticket:` path is returned.
+- For `lead-discuss`, the instruction must explicitly route through the current
+  skill namespace's `lead-discuss` skill with the blocker in `Reason`.
+- For `status-report` and `stop`, the instruction must explicitly say to stop,
+  report the blocker and safe next request from the verdict, and wait for the
+  user.
+- Remove the separate `Report Routing Verdict` template from `lead-proceed`; MCP
+  output is the canonical verdict.
+- Replace the `Execute Verdict` route-specific if-spam with a smaller rule:
+  read `NEXT:` and `Next:` from MCP output, briefly state
+  `Routing to next action: <NEXT>.`, then follow `Next:` exactly while preserving
+  the stop and post-write reroute safety rails.
+- Preserve existing mode-switch semantics: `ws.enter.proceed` still records the
+  proceed agenda and replaces proceed todos.
+
+Completion boundary:
+
+- A fresh `lead-proceed` run can follow the `next_instruction`/`Next:` directive
+  without restating a separate routing verdict or reconstructing route-specific
+  execution prose.
+- JSON and raw outputs carry equivalent next-action instructions.
+- The lead-proceed playbook keeps only minimal execution safety rails.
+
+Deferred scope:
+
+- Modeling next action as a nested structured object.
+- Executing downstream playbooks from inside MCP.
+- Applying the same directive pattern to `lead-implement`.
+
+Verification boundary:
+
+- Focused Go tests cover `next_instruction` in JSON and `Next:` in raw output for
+  implementation, ticket-writing, discussion, status/stop, and reroute cases.
+- Playbook content tests verify the separate `Report Routing Verdict` template
+  is gone and execution guidance follows `Next:`.
+- Manifest and wsflow mirror are regenerated if shared rsrc changes.
+- `git diff --check` passes.
+
 ## Spec Impact
 
 - **Target spec areas:** `workflow-skills.md` (`lead-proceed` route boundary,
@@ -339,7 +398,8 @@ Review:
 - **Expected caller-visible change:** `lead-proceed` becomes lighter after facts
   are gathered, while `ws.enter.proceed` becomes the deterministic route/verdict
   resolver. Callers see a canonical raw verdict that clearly names the next
-  direction and warnings for ignored or normalized facts.
+  direction, a concrete next-action instruction, and warnings for ignored or
+  normalized facts.
 - **Contract-first spec: no.** The ticket itself pins the intended contract for
   this implementation slice, and `ws.enter.proceed` is a new, not-yet-shipped
   concept. The implementation should update `workflow-skills.md` and
