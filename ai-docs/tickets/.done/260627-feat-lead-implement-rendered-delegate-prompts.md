@@ -12,6 +12,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - mcp-runtime
+completed: 2026-06-27
 ---
 
 # Render implementer delegate prompts from file-first context
@@ -223,3 +224,8 @@ diff, and disposition files.
 Verification passed for `ws/spec_index.verify`, `git diff --check`, and the
 source-build `ws-mcp smoke --root /Users/kang-sw/devenv` check. No source or
 resource files were changed for this phase.
+
+
+## Resolution (2026-06-27)
+
+Completed all three phases: rendered implementer dispatch, review-fix relay render surface, and workflow documentation closeout. Verification passed for spec index, prompt render/print tests, ws-mcp smoke, and diff hygiene during the final phase.
