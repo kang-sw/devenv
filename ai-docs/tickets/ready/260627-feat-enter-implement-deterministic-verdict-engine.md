@@ -66,6 +66,11 @@ whether a safe pre-edit rename is allowed.
   `enter.implement` call.
 - Emit final MCP output that lets the LLM clearly know the implementation
   direction to proceed next, without recomputing the strategy.
+- After routing facts and policy are known, move every remaining deterministic
+  non-routing execution instruction that can safely be generated into MCP verdict
+  output. The optimization should not stop at route labels; raw and JSON output
+  should tell the lead exactly how to continue when the next step is
+  deterministic.
 - Preserve the existing enter-tool mode-switch semantics: the call stores the
   `implement` agenda and replaces the todo list with the derived implement
   checklist.
@@ -307,11 +312,20 @@ Required behavior:
   `need_review`, and documentation mode deterministically.
 - Emit canonical JSON and raw Implementation Verdict output that makes the next
   execution direction clear to the LLM.
+- Include MCP-authored next-instruction prose for deterministic execution rails
+  after the verdict. For example, branch creation/rename/continue, planning
+  depth, delegated-vs-direct ownership, review allocation, documentation gates,
+  and stop/blocker handling should be expressed by the verdict wherever the
+  rules can be derived from facts, policy, and observed Git state.
 - Store the normalized implement agenda and replace the todo list using the
   derived verdict labels.
 - Update `lead-implement` so Route gathers normalized facts and policy, calls
   `ws.enter.implement`, and follows the returned verdict instead of carrying the
   extracted deterministic tables in prose.
+- Remove duplicated common follow rails from `lead-implement` once MCP owns
+  equivalent `Next:` / `next_instruction` guidance. The playbook should retain
+  fact gathering, ambiguous judgments, and minimal safety guards, not repeated
+  if/then execution prose for deterministic cases.
 - Keep branch creation, branch rename, source edits, delegate dispatch, review,
   documentation, and merge as `lead-implement` execution steps after the verdict.
 - Do not call `ws.enter.implement` a second time after branch execution; use

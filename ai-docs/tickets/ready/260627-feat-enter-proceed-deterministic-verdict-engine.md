@@ -416,6 +416,59 @@ Verification:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check`
 
+### Phase 3: MCP-authored common follow rails
+
+Move the remaining common `Follow Next Instruction` rails into MCP-authored
+`Next:` / `next_instruction` text so `lead-proceed` no longer needs a separate
+follow-next execution step.
+
+Required behavior:
+
+- Expand resolver-authored `next_instruction` text so it includes the shared
+  follow rails that are still deterministic after route facts are known.
+- Keep the guidance concrete and execution-oriented. The instruction should name
+  the exact `{{namespace}}/...` MCP call or skill path when the next action has a
+  fixed invocation shape.
+- Remove the `follow-next` proceed todo. The proceed todo list should contain
+  only `Build route context` and `Resolve MCP verdict`; following MCP output is
+  the natural continuation after reading the verdict, not a separate tracked
+  proceed task.
+- Shrink `lead-proceed` to fact gathering, calling `ws.enter.proceed`, reading
+  the returned MCP output, and following that output. It should not retain
+  common if/then rails that MCP can safely generate into `Next:`.
+- Preserve hard safety behavior for malformed tool output, explicit stop
+  verdicts, and user interruption. If any safety rail cannot be expressed
+  clearly in `Next:`, keep only that minimal guard in the playbook.
+- Keep JSON and raw output equivalent: `next_instruction` and the raw `Next:`
+  line must carry the same execution guidance.
+
+Completion boundary:
+
+- A fresh `lead-proceed` run has only two proceed todos after enter:
+  `Build route context` and `Resolve MCP verdict`.
+- The lead-proceed playbook contains no separate `Follow Next Instruction`
+  section or route-specific common follow rails that duplicate MCP output.
+- The MCP-authored `Next:` / `next_instruction` text is sufficient for the lead
+  to continue without reconstructing execution guidance.
+
+Deferred scope:
+
+- Executing downstream playbooks from inside MCP.
+- Modeling next actions as nested structured action objects.
+- Applying the same common-rail extraction to `lead-implement`; that direction
+  is recorded in
+  `260627-feat-enter-implement-deterministic-verdict-engine`.
+
+Verification boundary:
+
+- Focused Go tests cover the updated proceed todo replacement.
+- Playbook content tests verify `Follow Next Instruction` and duplicated common
+  follow rails are absent from `lead-proceed`.
+- Raw and JSON output tests verify the expanded `Next:` / `next_instruction`
+  text remains equivalent.
+- Manifest and wsflow mirror are regenerated if shared rsrc changes.
+- `git diff --check` passes.
+
 ## Spec Impact
 
 - **Target spec areas:** `workflow-skills.md` (`lead-proceed` route boundary,
