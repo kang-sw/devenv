@@ -355,9 +355,12 @@ func todoInstructionPreview(instruction string) string {
 
 type implementTodoVerdict struct {
 	Delegation  string
+	BranchPlan  implementBranchPlan
 	PlanDepth   string
 	ReviewAlloc string
 	NeedReview  bool
+	DocMode     string
+	DocReason   string
 	NeedDoc     bool
 }
 
@@ -378,25 +381,29 @@ func deriveImplementTodos(needReview, needDoc bool) []todoItem {
 
 func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 	items := []todoItem{
-		{Key: "route", Title: "Route"},
-		{Key: "prep", Title: implementPrepTitle(verdict.PlanDepth)},
-		{Key: "edit", Title: implementEditTitle(verdict.Delegation)},
+		{Key: "route", Title: "Route", Instruction: implementInstructionPtr(implementRouteInstruction(verdict))},
+		{Key: "prep", Title: implementPrepTitle(verdict.PlanDepth), Instruction: implementInstructionPtr(implementPrepInstruction(verdict))},
+		{Key: "edit", Title: implementEditTitle(verdict.Delegation), Instruction: implementInstructionPtr(implementEditInstruction(verdict))},
 	}
-	if verdict.NeedReview {
-		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc)})
+	if verdict.NeedReview || isLeadOnlyReview(verdict.ReviewAlloc) {
+		items = append(items, todoItem{Key: "review", Title: implementReviewTitle(verdict.ReviewAlloc), Instruction: implementInstructionPtr(implementReviewInstruction(verdict))})
 	}
 	if verdict.NeedDoc {
 		items = append(items,
-			todoItem{Key: "doc-pre-pass", Title: "Doc pre-pass"},
-			todoItem{Key: "doc-commit-gate", Title: "Doc commit gate"},
-			todoItem{Key: "doc-closeout", Title: "Doc closeout"},
+			todoItem{Key: "doc-pre-pass", Title: "Doc pre-pass", Instruction: implementInstructionPtr(implementDocPrePassInstruction(verdict))},
+			todoItem{Key: "doc-commit-gate", Title: "Doc commit gate", Instruction: implementInstructionPtr(implementDocCommitGateInstruction(verdict))},
+			todoItem{Key: "doc-closeout", Title: "Doc closeout", Instruction: implementInstructionPtr(implementDocCloseoutInstruction(verdict))},
 		)
 	}
 	items = append(items,
-		todoItem{Key: "final-action-gate", Title: "Final action gate"},
-		todoItem{Key: "merge", Title: "Merge"},
+		todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
+		todoItem{Key: "merge", Title: "Merge", Instruction: implementInstructionPtr(implementMergeInstruction(verdict))},
 	)
 	return withPendingStatus(items)
+}
+
+func implementInstructionPtr(instruction string) *string {
+	return &instruction
 }
 
 func parseImplementDelegation(raw string) (string, error) {
@@ -479,6 +486,157 @@ func implementReviewTitle(reviewAlloc string) string {
 			return "Review (partitioned)"
 		}
 		return "Review"
+	}
+}
+
+func implementRouteInstruction(verdict implementTodoVerdict) string {
+	plan := verdict.BranchPlan
+	switch plan.Action {
+	case "stop":
+		return fmt.Sprintf("Stop before source edits: %s. Resolve the branch policy or branch state before continuing.", firstNonEmpty(plan.Reason, "branch action is blocked"))
+	case "create":
+		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+	case "rename":
+		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+	case "continue":
+		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
+	default:
+		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
+	}
+}
+
+func implementPrepInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not prepare further implementation work until the branch blocker is resolved: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
+	case "none", "":
+		return "Confirm the direct-edit facts are still accurate; no separate brief, survey, or research plan is required before editing."
+	case "brief":
+		return "Prepare the implementation brief for the selected delegated path before edits."
+	case "survey":
+		return "Prepare the implementation brief and survey plan for the selected delegated path before dispatch."
+	case "research":
+		return "Prepare the implementation brief and research plan for the selected delegated path before dispatch."
+	default:
+		return "Prepare the implementation context required by the selected verdict before edits."
+	}
+}
+
+func implementEditInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not start source edits while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	switch strings.ToLower(strings.TrimSpace(verdict.Delegation)) {
+	case "direct-edit":
+		return "Apply the source edits directly in this lead context, then run focused verification before review or documentation closeout."
+	case "delegated":
+		switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
+		case "survey":
+			return "Dispatch the delegated implementer with the brief and survey plan, then relay fixes through the implemented commit range."
+		case "research":
+			return "Dispatch the delegated implementer with the brief and research plan, then relay fixes through the implemented commit range."
+		case "brief":
+			return "Dispatch the delegated implementer with the brief, then relay fixes through the implemented commit range."
+		default:
+			return "Dispatch the delegated implementer with the resolved implementation context, then relay fixes through the implemented commit range."
+		}
+	default:
+		return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
+	}
+}
+
+func implementReviewInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	if isLeadOnlyReview(verdict.ReviewAlloc) {
+		return "Perform lead-owned review and record why external reviewers are unnecessary for this verdict."
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
+		return fmt.Sprintf("Dispatch %s reviewers with the implemented commit range. Relay only non-clean Critical/Important findings back through the implementer.", formatReviewPartitions(verdict.ReviewAlloc))
+	}
+	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
+		return "Dispatch one reviewer with the implemented commit range. Relay only non-clean Critical/Important findings back through the implementer."
+	}
+	return "Dispatch the selected reviewers with the implemented commit range. Relay only non-clean Critical/Important findings back through the implementer."
+}
+
+func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not start documentation work before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "Check whether specs or mental models touched by this change need updates before final verification."
+}
+
+func implementDocCommitGateInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not open the documentation commit gate before source edits can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "Commit required spec and mental-model updates before the final action gate."
+}
+
+func implementDocCloseoutInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not close documentation before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "Close ticket results and project-memory updates that are reachable for this implementation."
+}
+
+func implementFinalActionInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
+		return fmt.Sprintf("Verify source, tests, review disposition, and skipped documentation policy before asking for final action approval: %s.", firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
+	}
+	return "Verify source, tests, review disposition, and standard documentation closeout before asking for final action approval."
+}
+
+func implementMergeInstruction(verdict implementTodoVerdict) string {
+	if isBranchStop(verdict) {
+		return fmt.Sprintf("Do not merge while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	return "After user approval, perform the selected final action and preserve the workflow-owned merge record."
+}
+
+func isBranchStop(verdict implementTodoVerdict) bool {
+	return strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.Action), "stop")
+}
+
+func isLeadOnlyReview(reviewAlloc string) bool {
+	return strings.EqualFold(strings.TrimSpace(reviewAlloc), "lead-only") || strings.EqualFold(strings.TrimSpace(reviewAlloc), "lead only")
+}
+
+func formatReviewPartitions(reviewAlloc string) string {
+	raw := strings.TrimSpace(reviewAlloc)
+	_, partsRaw, ok := strings.Cut(raw, ":")
+	if !ok {
+		return "partitioned"
+	}
+	parts := []string{}
+	for _, part := range strings.Split(partsRaw, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "partitioned"
+	}
+	return joinHumanList(parts)
+}
+
+func joinHumanList(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
 	}
 }
 
@@ -748,9 +906,12 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		}
 		todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
 			Delegation:  result.Verdict.Delegation,
+			BranchPlan:  result.Verdict.BranchPlan,
 			PlanDepth:   result.Verdict.PlanDepth,
 			ReviewAlloc: result.Verdict.ReviewAlloc,
 			NeedReview:  result.Verdict.NeedReview,
+			DocMode:     result.Verdict.DocMode,
+			DocReason:   result.Agenda.DocReason,
 			NeedDoc:     result.Verdict.DocMode == "standard",
 		})
 		if err := s.sessions.enterMode(sessionKey, "implement", rawAgenda, todos); err != nil {

@@ -39,6 +39,25 @@ func stringPtr(s string) *string {
 	return &s
 }
 
+func todoByKey(t *testing.T, list []todoItem, key string) todoItem {
+	t.Helper()
+	for _, item := range list {
+		if item.Key == key {
+			return item
+		}
+	}
+	t.Fatalf("todo key %q not found in %v", key, keysOf(list))
+	return todoItem{}
+}
+
+func requireInstruction(t *testing.T, item todoItem) string {
+	t.Helper()
+	if item.Instruction == nil || *item.Instruction == "" {
+		t.Fatalf("todo %q has no instruction: %+v", item.Key, item)
+	}
+	return *item.Instruction
+}
+
 func TestDeriveImplementTodos(t *testing.T) {
 	cases := []struct {
 		needReview, needDoc bool
@@ -77,6 +96,137 @@ func TestDeriveImplementTodosFromVerdictTitles(t *testing.T) {
 	for _, item := range got {
 		if want, ok := wantTitles[item.Key]; ok && item.Title != want {
 			t.Fatalf("%s title = %q, want %q", item.Key, item.Title, want)
+		}
+	}
+}
+
+func TestDeriveImplementTodoInstructionsDirectEditLeadOnly(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "direct-edit",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/tiny-edit"},
+		PlanDepth:   "none",
+		ReviewAlloc: "lead-only",
+		NeedReview:  false,
+		DocMode:     "skipped",
+		DocReason:   "docs not touched",
+		NeedDoc:     false,
+	})
+	if !eqKeys(keysOf(got), "route", "prep", "edit", "review", "final-action-gate", "merge") {
+		t.Fatalf("lead-only review todo shape = %v", keysOf(got))
+	}
+	edit := requireInstruction(t, todoByKey(t, got, "edit"))
+	if !strings.Contains(edit, "Apply the source edits directly in this lead context") {
+		t.Fatalf("edit instruction missing direct-edit guidance: %q", edit)
+	}
+	if strings.Contains(edit, "delegated implementer") {
+		t.Fatalf("direct-edit instruction mentioned delegated dispatch: %q", edit)
+	}
+	review := requireInstruction(t, todoByKey(t, got, "review"))
+	if review != "Perform lead-owned review and record why external reviewers are unnecessary for this verdict." {
+		t.Fatalf("lead-only review instruction = %q", review)
+	}
+}
+
+func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "create", CurrentBranch: "feature/base", TargetBranch: "implement/demo", MergeTarget: "feature/base"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "partitioned: correctness, fit, test",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	prep := requireInstruction(t, todoByKey(t, got, "prep"))
+	if prep != "Prepare the implementation brief and survey plan for the selected delegated path before dispatch." {
+		t.Fatalf("prep instruction = %q", prep)
+	}
+	edit := requireInstruction(t, todoByKey(t, got, "edit"))
+	if edit != "Dispatch the delegated implementer with the brief and survey plan, then relay fixes through the implemented commit range." {
+		t.Fatalf("edit instruction = %q", edit)
+	}
+}
+
+func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "brief",
+		ReviewAlloc: "partitioned: correctness, test",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     false,
+	})
+	review := requireInstruction(t, todoByKey(t, got, "review"))
+	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
+		t.Fatalf("review instruction missing selected partitions: %q", review)
+	}
+	if strings.Contains(review, "fit") {
+		t.Fatalf("review instruction mentioned unselected fit partition: %q", review)
+	}
+}
+
+func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
+	standard := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "brief",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	for key, want := range map[string]string{
+		"doc-pre-pass":    "specs or mental models",
+		"doc-commit-gate": "spec and mental-model updates",
+		"doc-closeout":    "Close ticket results",
+	} {
+		instruction := requireInstruction(t, todoByKey(t, standard, key))
+		if !strings.Contains(instruction, want) {
+			t.Fatalf("%s instruction = %q, want containing %q", key, instruction, want)
+		}
+	}
+
+	skipped := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "brief",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "skipped",
+		DocReason:   "documentation tracked in follow-up",
+		NeedDoc:     false,
+	})
+	for _, key := range []string{"doc-pre-pass", "doc-commit-gate", "doc-closeout"} {
+		if idx := indexOfTodo(skipped, key); idx >= 0 {
+			t.Fatalf("skipped doc mode should omit %s: %v", key, keysOf(skipped))
+		}
+	}
+	final := requireInstruction(t, todoByKey(t, skipped, "final-action-gate"))
+	if !strings.Contains(final, "documentation tracked in follow-up") {
+		t.Fatalf("skipped doc reason not carried to final gate: %q", final)
+	}
+}
+
+func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "stop", Reason: "merge target required while already on an implementation branch"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "partitioned: correctness, fit, test",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	for _, key := range []string{"route", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge"} {
+		instruction := requireInstruction(t, todoByKey(t, got, key))
+		if !strings.Contains(instruction, "merge target required") {
+			t.Fatalf("%s stop instruction did not include blocker: %q", key, instruction)
+		}
+		for _, forbidden := range []string{"Dispatch the delegated implementer", "Apply the source edits", "Verify source, tests"} {
+			if strings.Contains(instruction, forbidden) {
+				t.Fatalf("%s stop instruction implies unreachable work via %q: %q", key, forbidden, instruction)
+			}
 		}
 	}
 }
@@ -1260,6 +1410,18 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	}
 	if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "doc-pre-pass", "doc-commit-gate", "doc-closeout", "final-action-gate", "merge") {
 		t.Fatalf("enter.implement did not replace todo list: %v", keysOf(record.Todos))
+	}
+	readPrep := callToolWithKey(t, server, 4, key, "ws.todo.read", map[string]any{"key": "prep"})
+	var prepPayload todoReadPayload
+	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
+		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
+	}
+	if prepPayload.Instruction == nil || *prepPayload.Instruction != "Prepare the implementation brief and survey plan for the selected delegated path before dispatch." {
+		t.Fatalf("prep instruction = %#v", prepPayload.Instruction)
+	}
+	full := callToolWithKey(t, server, 5, key, "ws.todo.list", map[string]any{"mode": "full"})
+	if !strings.Contains(full, "- [ ] {prep} Prep (brief + survey plan)\n      Prepare the implementation brief and survey plan for the selected delegated path before dispatch.") {
+		t.Fatalf("full todo list missing enter-derived instruction:\n%s", full)
 	}
 }
 
