@@ -3,6 +3,7 @@ title: Deterministic enter.implement strategy and branch verdict resolution
 sage-review: recommended
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
+  260627-feat-todo-item-instructions: prerequisite substrate for carrying focused reachable runbook prose on todo items
   260627-feat-enter-proceed-deterministic-verdict-engine: predecessor optimization pattern for moving deterministic verdict resolution into typed enter tools
   260625-feat-ws-session-state-machine: introduced typed enter tools and session agenda/todo persistence
   260523-bug-implement-merge-target-discovery: branch preflight must avoid unsafe merge-target inference on nested implementation branches
@@ -384,3 +385,39 @@ Verification:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check`
 - `ws/spec_index_verify`
+
+### Phase 2: Focus lead-implement on reachable todo instructions
+
+Prerequisite:
+
+- Complete `260627-feat-todo-item-instructions` through the phase that lets
+  `ws.enter.implement` populate todo instructions.
+
+Reduce `lead-implement` so its always-rendered body does not carry execution
+prose for paths that are impossible after the current `ws.enter.implement`
+verdict.
+
+Required behavior:
+
+- Make `ws.enter.implement` produce focused todo instructions for the reachable
+  branch, prep, edit, review, documentation, final-action, and merge steps.
+- Keep the todo list as the single source for the current run's executable
+  runbook; do not add a separate `execution_steps` list.
+- Keep `lead-implement` responsible for gathering routing facts, calling
+  `ws.enter.implement`, and executing the installed todos.
+- Remove unreachable-path prose from the always-rendered `lead-implement` body
+  once equivalent focused instructions are emitted by todos.
+- Preserve lead-owned judgment for evidence that appears only during execution,
+  such as test failures, reviewer findings, blocker classification, and merge
+  approval.
+
+Verification:
+
+- Verify direct-edit runs do not render delegated implementer instructions in
+  the always-rendered lead-implement body.
+- Verify lead-only review runs do not render reviewer relay loops in the
+  always-rendered lead-implement body.
+- Verify skipped-doc runs do not render doc pipeline steps in the always-rendered
+  lead-implement body.
+- Verify `ws.todo.read(key)` or `ws.todo.list(mode: "full")` exposes the full
+  focused instruction for each reachable todo.
