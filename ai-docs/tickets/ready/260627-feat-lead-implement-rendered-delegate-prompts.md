@@ -204,3 +204,22 @@ proven:
 
 Verification boundary: run spec index verification, documentation diff checks,
 and the implementation test suite relevant to any source/resource changes.
+
+### Result (9a188b2f) - 2026-06-27
+
+Completed Phase 3 as documentation validation and closeout. The Phase 2
+closeout commit already recorded the file-first delegate prompt contract in
+`workflow-skills`, recorded the `playbook.render` direct-execution delegate
+surface in `mcp-tools`, and updated the workflow-skills plus prompt-bundle
+mental models for `implementer` and `implementer-relay`.
+
+Validation found two residual documentation gaps, both closed in `9a188b2f`:
+the `workflow-skills` spec no longer describes always-rendered
+`lead-implement` text as carrying delegate templates, and the `mcp-runtime`
+mental model now records that implementer render context stays
+pointer-and-metadata shaped while task contracts live in brief, plan, review,
+diff, and disposition files.
+
+Verification passed for `ws/spec_index.verify`, `git diff --check`, and the
+source-build `ws-mcp smoke --root /Users/kang-sw/devenv` check. No source or
+resource files were changed for this phase.
