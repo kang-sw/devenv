@@ -520,6 +520,87 @@ func TestRenderTodosEmptyInstructionsOmitted(t *testing.T) {
 	}
 }
 
+func TestRenderTodosCheckpointAdjacentActionableInstructions(t *testing.T) {
+	list := []todoItem{
+		{Key: "a", Title: "A", Status: todoDone, Instruction: stringPtr("Alpha full instruction")},
+		{Key: "b", Title: "B", Status: todoPending, Instruction: stringPtr("Bravo full instruction")},
+		{Key: "c", Title: "C", Status: todoDone, Instruction: stringPtr("Charlie checked instruction")},
+		{Key: "d", Title: "D", Status: todoWip, Instruction: stringPtr("Delta full instruction")},
+		{Key: "e", Title: "E", Status: todoPending, Instruction: stringPtr("Echo non-adjacent instruction")},
+	}
+	want := strings.Join([]string{
+		"- [x] {a} A",
+		"- [ ] {b} B",
+		"      Bravo full instruction",
+		"- [x] {c} C",
+		"- [~] {d} D",
+		"      Delta full instruction",
+		"- [ ] {e} E",
+	}, "\n")
+	if got := renderTodosCheckpoint(list, "c"); got != want {
+		t.Fatalf("checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, want)
+	}
+	if got := renderTodosCheckpoint(list, "c"); strings.Contains(got, "...") {
+		t.Fatalf("checkpoint render collapsed ordered context:\n%s", got)
+	}
+	if got := renderTodosCheckpoint(list, "c"); strings.Contains(got, "Charlie checked instruction") || strings.Contains(got, "Echo non-adjacent instruction") {
+		t.Fatalf("checkpoint render expanded checked or non-adjacent instructions:\n%s", got)
+	}
+}
+
+func TestRenderTodosCheckpointFirstAndLastAdjacency(t *testing.T) {
+	list := []todoItem{
+		{Key: "a", Title: "A", Status: todoDone, Instruction: stringPtr("Alpha checked instruction")},
+		{Key: "b", Title: "B", Status: todoPending, Instruction: stringPtr("Bravo next instruction")},
+		{Key: "c", Title: "C", Status: todoPending, Instruction: stringPtr("Charlie non-adjacent instruction")},
+	}
+	wantFirst := strings.Join([]string{
+		"- [x] {a} A",
+		"- [ ] {b} B",
+		"      Bravo next instruction",
+		"- [ ] {c} C",
+	}, "\n")
+	if got := renderTodosCheckpoint(list, "a"); got != wantFirst {
+		t.Fatalf("first checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, wantFirst)
+	}
+
+	wantLast := strings.Join([]string{
+		"- [x] {a} A",
+		"- [ ] {b} B",
+		"      Bravo next instruction",
+		"- [ ] {c} C",
+	}, "\n")
+	if got := renderTodosCheckpoint(list, "c"); got != wantLast {
+		t.Fatalf("last checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, wantLast)
+	}
+}
+
+func TestRenderTodosCheckpointKeepsDoneDeferAndInstructionlessAdjacentCompact(t *testing.T) {
+	empty := ""
+	list := []todoItem{
+		{Key: "done", Title: "Done", Status: todoDone, Instruction: stringPtr("Done instruction")},
+		{Key: "target", Title: "Target", Status: todoDone},
+		{Key: "defer", Title: "Defer", Status: todoDefer, Instruction: stringPtr("Defer instruction")},
+	}
+	want := strings.Join([]string{
+		"- [x] {done} Done",
+		"- [x] {target} Target",
+		"- [>] {defer} Defer",
+	}, "\n")
+	if got := renderTodosCheckpoint(list, "target"); got != want {
+		t.Fatalf("done/defer checkpoint render mismatch:\n got:\n%s\nwant:\n%s", got, want)
+	}
+
+	instructionless := []todoItem{
+		{Key: "nil", Title: "Nil", Status: todoPending},
+		{Key: "target", Title: "Target", Status: todoDone},
+		{Key: "empty", Title: "Empty", Status: todoWip, Instruction: &empty},
+	}
+	if got := renderTodosCheckpoint(instructionless, "target"); strings.Contains(got, "\n      ") {
+		t.Fatalf("checkpoint rendered nil/empty adjacent instruction:\n%s", got)
+	}
+}
+
 func TestParseTodoStatus(t *testing.T) {
 	for _, ok := range []string{"pending", "wip", "done", "defer", ""} {
 		if _, err := parseTodoStatus(ok); err != nil {
@@ -1795,6 +1876,86 @@ func TestServeStdioTodoListInstructionRendering(t *testing.T) {
 	full := callToolWithKey(t, server, 3, key, "ws.todo.list", map[string]any{"mode": "full"})
 	if !strings.Contains(full, "- [ ] {render} Render instruction\n      "+longInstruction) {
 		t.Fatalf("full list missing full instruction:\n%s", full)
+	}
+}
+
+func TestServeStdioTodoCheckCheckpointRendering(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903175, root, nil))
+
+	for i, item := range []struct {
+		key, title, instruction string
+	}{
+		{"a", "A", "Alpha adjacent instruction"},
+		{"b", "B", "Bravo checked instruction"},
+		{"c", "C", "Charlie adjacent instruction"},
+		{"d", "D", "Delta non-adjacent instruction"},
+	} {
+		if got := callToolWithKey(t, server, i+1, key, "ws.todo.append", map[string]any{
+			"key": item.key, "title": item.title, "instruction": item.instruction,
+		}); !strings.Contains(got, "todo appended: "+item.key) {
+			t.Fatalf("append %s unexpected: %s", item.key, got)
+		}
+	}
+
+	markers := map[string]string{
+		string(todoPending): "- [ ]",
+		string(todoWip):     "- [~]",
+		string(todoDone):    "- [x]",
+		string(todoDefer):   "- [>]",
+	}
+	for i, status := range []todoStatus{todoPending, todoWip, todoDone, todoDefer} {
+		got := callToolWithKey(t, server, 10+i, key, "ws.todo.check", map[string]any{
+			"key": "b", "status": string(status),
+		})
+		want := strings.Join([]string{
+			fmt.Sprintf("todo %s: b", status),
+			"- [ ] {a} A",
+			"      Alpha adjacent instruction",
+			fmt.Sprintf("%s {b} B", markers[string(status)]),
+			"- [ ] {c} C",
+			"      Charlie adjacent instruction",
+			"- [ ] {d} D",
+			"",
+		}, "\n")
+		if got != want {
+			t.Fatalf("todo.check(%s) checkpoint mismatch:\n got:\n%s\nwant:\n%s", status, got, want)
+		}
+		if strings.Contains(got, "Bravo checked instruction") || strings.Contains(got, "Delta non-adjacent instruction") {
+			t.Fatalf("checkpoint expanded checked or non-adjacent instruction:\n%s", got)
+		}
+	}
+}
+
+func TestTodoCheckToolSchemaHasNoFormat(t *testing.T) {
+	var checkTool map[string]any
+	for _, tool := range tools() {
+		if tool["name"] == "ws.todo.check" {
+			checkTool = tool
+			break
+		}
+	}
+	if checkTool == nil {
+		t.Fatal("ws.todo.check missing from tools()")
+	}
+	if desc, _ := checkTool["description"].(string); !strings.Contains(desc, "checkpoint todo rendering") {
+		t.Fatalf("ws.todo.check description missing checkpoint contract: %q", desc)
+	}
+	schema, ok := checkTool["inputSchema"].(map[string]any)
+	if !ok {
+		t.Fatalf("ws.todo.check schema has unexpected type: %#v", checkTool["inputSchema"])
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("ws.todo.check properties have unexpected type: %#v", schema["properties"])
+	}
+	if _, ok := properties["format"]; ok {
+		t.Fatalf("ws.todo.check schema advertised forbidden format property: %#v", properties["format"])
 	}
 }
 

@@ -326,6 +326,24 @@ func renderTodos(list []todoItem, full bool) string {
 	return strings.Join(lines, "\n")
 }
 
+func renderTodosCheckpoint(list []todoItem, checkedKey string) string {
+	if len(list) == 0 {
+		return "(no todos)"
+	}
+	checkedIdx := indexOfTodo(list, checkedKey)
+	lines := make([]string, 0, len(list)*2)
+	for i, item := range list {
+		adjacent := checkedIdx >= 0 && (i == checkedIdx-1 || i == checkedIdx+1)
+		fullInstruction := adjacent && todoActive(item.Status) && item.Instruction != nil && *item.Instruction != ""
+		if fullInstruction {
+			lines = append(lines, renderTodoLines(item, true)...)
+			continue
+		}
+		lines = append(lines, renderTodoLine(item))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func renderTodoLine(item todoItem) string {
 	return fmt.Sprintf("%s {%s} %s", todoMarker(item.Status), item.Key, item.Title)
 }
@@ -766,6 +784,22 @@ func (s *sessionStore) mutateTodos(sessionKey string, fn func([]todoItem) ([]tod
 	})
 }
 
+func (s *sessionStore) mutateTodosResult(sessionKey string, fn func([]todoItem) ([]todoItem, error)) ([]todoItem, error) {
+	var updated []todoItem
+	if err := s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+		next, err := fn(r.Todos)
+		if err != nil {
+			return err
+		}
+		r.Todos = next
+		updated = append([]todoItem(nil), next...)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 // --- MCP handlers ------------------------------------------------------------
 //
 // These parse arguments, drive the store, and format the compact text response.
@@ -1074,12 +1108,13 @@ func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) respon
 	if strings.TrimSpace(statusRaw) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("%s: status is required", tool))
 	}
-	if err := s.sessions.mutateTodos(sessionKey, func(list []todoItem) ([]todoItem, error) {
+	updated, err := s.sessions.mutateTodosResult(sessionKey, func(list []todoItem) ([]todoItem, error) {
 		return todoCheck(list, normalizedKey, status)
-	}); err != nil {
+	})
+	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	return toolTextResponse(id, fmt.Sprintf("todo %s: %s\n", status, normalizedKey), nil)
+	return toolTextResponse(id, fmt.Sprintf("todo %s: %s\n%s\n", status, normalizedKey, renderTodosCheckpoint(updated, normalizedKey)), nil)
 }
 
 func (s *Server) handleTodoErase(id json.RawMessage, args map[string]any) response {
