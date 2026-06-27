@@ -1,6 +1,6 @@
 ---
 title: Render implementer delegate prompts from file-first context
-sage-review: recommended
+sage-review: completed
 related:
   260627-feat-enter-implement-deterministic-verdict-engine: follows the completed lead-implement compression work by moving long delegate prompt templates out of the always-rendered playbook body
   260627-feat-todo-item-instructions: prerequisite for keeping post-verdict execution guidance in focused todo instructions
@@ -92,13 +92,9 @@ Relevant current constraints:
 
 ## Sage Review
 
-Status: recommended, not executed during ticket authoring.
+Status: completed.
 
-Reason: the active user directive forbids forking, spawning subagents, starting
-another agent process, or delegating again. No direct MCP sage-review execution
-surface is available in the current tool inventory. The implementation run
-should perform a fresh sage review before closing this ticket, or explicitly
-record the same blocker if the directive still prevents reviewer execution.
+Result: design reviewer `pass`; completeness reviewer `pass`.
 
 ## Phases
 
