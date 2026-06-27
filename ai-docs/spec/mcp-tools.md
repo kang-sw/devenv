@@ -238,7 +238,10 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   `instruction` prose from those resolved verdict labels, so branch, prep, edit,
   review, doc, final-gate, and merge todos describe only the path reachable
   under the current verdict; branch-stop todos describe the blocker instead of
-  telling the caller to continue source edits. Text output is the canonical raw verdict
+  telling the caller to continue source edits. Non-stop prep instructions carry
+  required runbook-loading guardrails, including mental-model lookup, ancestor
+  reads, conditional migration-anchor loading, and implementation-runbook loading
+  before edits or delegate dispatch. Text output is the canonical raw verdict
   beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
   `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
   output returns the structured result plus `next_instruction` and the identical

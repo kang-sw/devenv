@@ -479,9 +479,15 @@ After fact gathering and before preparation or source inspection,
 `ws.enter.implement`. The verdict summarizes target, selected scope, branch
 action, edit mode, plan depth, review allocation, documentation mode, normalized
 conditions, warnings, agenda values, and a concrete `Next:` instruction. The
-playbook follows that instruction instead of recomputing deterministic labels.
-wsflow mirrors this checkpoint through the shared product-mode playbook text.
-See `#260529-wsflow-converged-implement-spine`.
+playbook follows that instruction instead of recomputing deterministic labels,
+then treats the replaced todo list as the authoritative executable runbook for
+post-verdict branch, prep, edit, review, documentation, final-action, and merge
+steps. The always-rendered playbook keeps fact gathering, verdict handoff,
+ambiguous execution judgments, and delegate templates, while verdict-specific
+direct/delegated, review-allocation, and documentation-skip instructions live in
+the focused todo instruction payloads. wsflow mirrors this checkpoint through
+the shared product-mode playbook text. See
+`#260529-wsflow-converged-implement-spine`.
 
 Review is a single stage for both modes. MCP `review_alloc` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
