@@ -154,6 +154,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
+| `260627-feat-enter-implement-deterministic-verdict-engine` | ready | Move deterministic `lead-implement` strategy, branch preflight, and raw verdict resolution into `ws.enter.implement` |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -234,6 +235,15 @@ dropped tickets live in hidden archive dirs and git history.
   replacement. Spec addressing via `## Spec Impact` (Contract-first: no —
   ticket pins the implementation slice; closeout updates `workflow-skills` and
   `mcp-tools`). Sage review posture: recommended, not yet completed.
+- `260627-feat-enter-implement-deterministic-verdict-engine` (ready, feat, child
+  of 260605) - follow the proceed verdict-engine pattern for `lead-implement`.
+  `ws.enter.implement` should accept `target + facts + policy`, derive
+  delegation, branch plan, plan depth, review allocation, review need, and doc
+  mode deterministically, and observe branch preflight from Git instead of
+  asking the LLM to mirror branch state. Spec addressing via `## Spec Impact`
+  (Contract-first: no — ticket pins the implementation slice; closeout updates
+  `workflow-skills` and `mcp-tools`). Sage review posture: recommended, not yet
+  completed.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
