@@ -127,7 +127,7 @@ Review
 4. Call reviewer(s) with **Reviewer prompt frame**.
 5. The lead decides clean from each reviewer's severity verdict (see Review invariants); when the run is clean, proceed to step 8 (review cleanup).
 6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call the reviewer with the **Re-review prompt**, populating its prior-findings-and-dispositions from these fix/reject classifications. Repeat until clean or 2 cycles. If still non-clean after cycle 2, stop before documentation stages and report unresolved Critical/Important findings for caller decision.
-7. If non-clean and partitioned: relay to implementer with **Review relay prompt**; extract the disposition list; re-review non-clean partitions with the **Re-review prompt**; keep clean partitions accepted unless a fix touched their surface. Repeat until clean or 3 cycles; lead adjudicates at cycle 2. At cycle 3, stop before documentation stages and report unresolved findings, dispositions, and lead adjudication for caller decision.
+7. If non-clean and partitioned after delegated implementation: relay to the implementer with **Review relay prompt**; if there is no prior implementer, the lead applies fixes directly; extract the disposition list; re-review non-clean partitions with the **Re-review prompt**; keep clean partitions accepted unless a fix touched their surface. Repeat until clean or 3 cycles; lead adjudicates at cycle 2. At cycle 3, stop before documentation stages and report unresolved findings, dispositions, and lead adjudication for caller decision.
 8. Summarize review outcomes and disputes for the final report, then delete all review path files.
 
 ### 6. Doc Pre-Pass
@@ -211,9 +211,10 @@ Mercenary delegation passes the recommended capability tier to `ws.mercenary.reg
 
 Canonical render+spawn idiom for every bundled delegate (`reference-discovery`,
 `implementer`, `reviewer` / review partitions, `mental-model-updater`,
-`plan-populator-survey`/`plan-populator-research`). Native dispatch is always a
-fresh spawn — there is no native session continuation between calls; the lead
-owns loop continuity via commit `## AI Context`. Native is the default.
+`plan-populator-survey`/`plan-populator-research`). Native initial dispatch is
+a fresh spawn. The lead owns loop continuity via commit `## AI Context`;
+same-agent resume is a latency optimization, not a correctness dependency.
+Native is the default.
 <!-- ws:full-only:start -->
 Mercenary is controlled by `"workflow.prefer_mercenary"`: `hide` suppresses the
 public surface, `off` exposes on-request use, and `on` makes mercenary the
@@ -231,7 +232,7 @@ capabilities.
 <!-- ws:full-only:end -->
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
-1. Native (default): spawn a **fresh** native subagent with only the rendered prompt path plus the task-specific input below; provide no prior conversation transcript, loaded document excerpts, ticket body, or lead-only notes unless the task-specific input includes them or names them by path. Do not use inherited conversation context for delegated implementation or review relays. Instruct it to read the rendered prompt as its full role, then act on the task-specific input; treat `recommended-tier` as the model-selection guide. Wait for completion, capture the returned summary or output, and treat missing or unusable output as a lead judgment blocker unless the delegate wrote the required output file. Every relay for the same delegate role is also a fresh spawn; the relay prompt must be self-contained.
+1. Native (default): spawn a **fresh** native subagent with only the rendered prompt path plus the task-specific input below; provide no prior conversation transcript, loaded document excerpts, ticket body, or lead-only notes unless the task-specific input includes them or names them by path. Do not use inherited conversation context for delegated implementation or review relays. Instruct it to read the rendered prompt as its full role, then act on the task-specific input; treat `recommended-tier` as the model-selection guide. Wait for completion, capture the returned summary or output, and treat missing or unusable output as a lead judgment blocker unless the delegate wrote the required output file. For fix or re-review relays, prefer resuming the prior implementer or reviewer when the host supports it; otherwise use a fresh spawn. Every relay prompt must be self-contained.
 <!-- ws:full-only:start -->
 1. Mercenary (when selected): on the first dispatch for a delegate role, call `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; on relay calls, reuse the registered name and call/result only, but keep the relay prompt self-contained. Collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`. If collection times out or returns no usable result, report the failure and continue with native dispatch or stop for lead judgment.
 <!-- ws:full-only:end -->
@@ -365,13 +366,16 @@ Instructions:
 
 ### Review relay prompt
 
-Send to a **fresh implementer spawn** (not a continuation of the prior implementer session).
+Send to the prior implementer when host resume is available. Otherwise dispatch
+a fresh implementer using the rendered implementer playbook plus this
+self-contained relay prompt; provide no prior transcript.
 
 ```text
 Review cycle <N> (self-contained — rely only on this prompt and the paths it names, not on prior conversation).
 Brief path: <brief-path>; implemented range: <commit-range>.
 Non-clean review paths: <paths>. Read each file directly.
-For each finding: [fixed], [won't fix: <reason>], or [deferred: <reason>].
+For each finding, return a disposition list: [fixed: <commit>], [won't fix: <reason>], or [deferred: <reason>].
+Commit fixes, run the brief's verification command after fixes, and report commit hashes plus test results.
 Won't-fix allowed: style suggestions conflicting with codebase patterns; scope expansion beyond brief.
 Won't-fix not allowed: correctness, security, or contract violations.
 ```
@@ -382,8 +386,11 @@ Won't-fix not allowed: correctness, security, or contract violations.
 Re-review (self-contained — rely only on this prompt and the paths it names, not on prior conversation).
 Updated diff: <diff>
 Prior findings and dispositions: <each finding with [fixed] / [won't fix: <reason>] / [deferred: <reason>]>
+Findings path: <partition-output-path>
 Verify whether each [fixed] item was actually addressed, and report any new issue the updated diff introduced, with severity. Do not classify findings as regression-vs-preexisting.
-For each [won't fix] item: respond [accepted] or [maintained: <brief reason>]. [deferred] items need no response.
+For each [won't fix] item: respond [accepted] or [maintained: <brief reason>]. A [maintained] response keeps that finding non-clean unless the lead adjudicates it as accepted. Preserve maintained items as unresolved disputes for the next relay or final report. [deferred] items need no response.
+Write full findings to the findings path.
+Return only the severity verdict: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
 
 ## Doctrine
