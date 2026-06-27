@@ -495,11 +495,11 @@ func implementRouteInstruction(verdict implementTodoVerdict) string {
 	case "stop":
 		return fmt.Sprintf("Stop before source edits: %s. Resolve the branch policy or branch state before continuing.", firstNonEmpty(plan.Reason, "branch action is blocked"))
 	case "create":
-		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+		return fmt.Sprintf("Create %s from %s before source edits, then keep %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the implementation branch"), firstNonEmpty(plan.MergeTarget, plan.CurrentBranch, "the current branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "rename":
-		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
+		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "continue":
-		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
+		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
 	default:
 		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
 	}
@@ -511,13 +511,13 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	}
 	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 	case "none", "":
-		return "Confirm the direct-edit facts are still accurate; no separate brief, survey, or research plan is required before editing."
+		return "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
 	case "brief":
-		return "Prepare the implementation brief for the selected delegated path before edits."
+		return "Prepare and commit the implementation brief with the Brief template before edits; include only selected-scope references and contract instructions."
 	case "survey":
-		return "Prepare the implementation brief and survey plan for the selected delegated path before dispatch."
+		return "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch."
 	case "research":
-		return "Prepare the implementation brief and research plan for the selected delegated path before dispatch."
+		return "Prepare and commit the implementation brief, then run the research plan path with Delegate dispatch and Plan prompts before implementer dispatch."
 	default:
 		return "Prepare the implementation context required by the selected verdict before edits."
 	}
@@ -529,17 +529,17 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	}
 	switch strings.ToLower(strings.TrimSpace(verdict.Delegation)) {
 	case "direct-edit":
-		return "Apply the source edits directly in this lead context, then run focused verification before review or documentation closeout."
+		return "Apply the source edits directly in this lead context, run focused verification, commit the logical checkpoint, and capture the resulting commit range."
 	case "delegated":
 		switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 		case "survey":
-			return "Dispatch the delegated implementer with the brief and survey plan, then relay fixes through the implemented commit range."
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and survey plan; capture the implemented commit range for review and relays."
 		case "research":
-			return "Dispatch the delegated implementer with the brief and research plan, then relay fixes through the implemented commit range."
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and research plan; capture the implemented commit range for review and relays."
 		case "brief":
-			return "Dispatch the delegated implementer with the brief, then relay fixes through the implemented commit range."
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief; capture the implemented commit range for review and relays."
 		default:
-			return "Dispatch the delegated implementer with the resolved implementation context, then relay fixes through the implemented commit range."
+			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the resolved implementation context; capture the implemented commit range for review and relays."
 		}
 	default:
 		return "Execute the selected implementation path and verify the changed behavior before review or documentation closeout."
@@ -551,36 +551,36 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not start review before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	if isLeadOnlyReview(verdict.ReviewAlloc) {
-		return "Perform lead-owned review and record why external reviewers are unnecessary for this verdict."
+		return "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report."
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(verdict.ReviewAlloc)), "partitioned:") {
-		return fmt.Sprintf("Dispatch %s reviewers with the implemented commit range. Relay only non-clean Critical/Important findings back through the implementer.", formatReviewPartitions(verdict.ReviewAlloc))
+		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings.", formatReviewPartitions(verdict.ReviewAlloc))
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
-		return "Dispatch one reviewer with the implemented commit range. Relay only non-clean Critical/Important findings back through the implementer."
+		return "Dispatch one reviewer with the Reviewer prompt frame and a generated review path. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
 	}
-	return "Dispatch the selected reviewers with the implemented commit range. Relay only non-clean Critical/Important findings back through the implementer."
+	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
 }
 
 func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start documentation work before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "Check whether specs or mental models touched by this change need updates before final verification."
+	return "Run the standard documentation pre-pass: update specs first, then dispatch mental-model-updater with the implemented commit range."
 }
 
 func implementDocCommitGateInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not open the documentation commit gate before source edits can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "Commit required spec and mental-model updates before the final action gate."
+	return "Run the documentation commit gate: read executor-wrapup, update ticket result or project memory when reachable, and commit documentation changes before the final action gate."
 }
 
 func implementDocCloseoutInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not close documentation before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "Close ticket results and project-memory updates that are reachable for this implementation."
+	return "Run documentation closeout compaction only for a safe documentation-only branch-tip suffix; otherwise record the skipped compaction status."
 }
 
 func implementFinalActionInstruction(verdict implementTodoVerdict) string {
@@ -597,7 +597,7 @@ func implementMergeInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not merge while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "After user approval, perform the selected final action and preserve the workflow-owned merge record."
+	return "After user approval, perform the selected final action against the verdict merge target and preserve the workflow-owned merge record."
 }
 
 func isBranchStop(verdict implementTodoVerdict) bool {

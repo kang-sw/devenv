@@ -122,7 +122,7 @@ func TestDeriveImplementTodoInstructionsDirectEditLeadOnly(t *testing.T) {
 		t.Fatalf("direct-edit instruction mentioned delegated dispatch: %q", edit)
 	}
 	review := requireInstruction(t, todoByKey(t, got, "review"))
-	if review != "Perform lead-owned review and record why external reviewers are unnecessary for this verdict." {
+	if review != "Perform lead-owned review only; record why external reviewers are unnecessary for this verdict, then preserve the rationale for the final report." {
 		t.Fatalf("lead-only review instruction = %q", review)
 	}
 }
@@ -138,11 +138,11 @@ func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
 		NeedDoc:     true,
 	})
 	prep := requireInstruction(t, todoByKey(t, got, "prep"))
-	if prep != "Prepare the implementation brief and survey plan for the selected delegated path before dispatch." {
+	if prep != "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch." {
 		t.Fatalf("prep instruction = %q", prep)
 	}
 	edit := requireInstruction(t, todoByKey(t, got, "edit"))
-	if edit != "Dispatch the delegated implementer with the brief and survey plan, then relay fixes through the implemented commit range." {
+	if edit != "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and survey plan; capture the implemented commit range for review and relays." {
 		t.Fatalf("edit instruction = %q", edit)
 	}
 }
@@ -161,6 +161,9 @@ func TestDeriveImplementTodoInstructionsPartitionedReview(t *testing.T) {
 	if !strings.Contains(review, "Dispatch correctness and test reviewers") {
 		t.Fatalf("review instruction missing selected partitions: %q", review)
 	}
+	if !strings.Contains(review, "Reviewer prompt frame") || !strings.Contains(review, "Review relay and Re-review prompts") {
+		t.Fatalf("review instruction missing named template guidance: %q", review)
+	}
 	if strings.Contains(review, "fit") {
 		t.Fatalf("review instruction mentioned unselected fit partition: %q", review)
 	}
@@ -177,9 +180,9 @@ func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
 		NeedDoc:     true,
 	})
 	for key, want := range map[string]string{
-		"doc-pre-pass":    "specs or mental models",
-		"doc-commit-gate": "spec and mental-model updates",
-		"doc-closeout":    "Close ticket results",
+		"doc-pre-pass":    "mental-model-updater",
+		"doc-commit-gate": "executor-wrapup",
+		"doc-closeout":    "documentation-only branch-tip suffix",
 	} {
 		instruction := requireInstruction(t, todoByKey(t, standard, key))
 		if !strings.Contains(instruction, want) {
@@ -1198,6 +1201,52 @@ func implementReadyArgs(format string) map[string]any {
 	return args
 }
 
+func implementDirectSkipDocsArgs(format string) map[string]any {
+	args := map[string]any{
+		"target": map[string]any{
+			"kind":        "inline",
+			"label":       "Tiny direct edit",
+			"scope_label": "whole target",
+			"scope_slug":  "tiny-direct-edit",
+		},
+		"facts": map[string]any{
+			"scope": map[string]any{
+				"span":                        "single-file",
+				"surface":                     "internal",
+				"new_public_symbol":           "no",
+				"new_type_contract":           "no",
+				"test_surface":                "none",
+				"explicit_delegation_request": "no",
+			},
+			"complexity": map[string]any{
+				"change_points":    "clear",
+				"reuse_points":     "not-applicable",
+				"strategy_shape":   "single-obvious",
+				"side_effect_risk": "low",
+				"cold_context":     "no",
+			},
+			"risk": map[string]any{
+				"correctness":          "low",
+				"fit":                  "low",
+				"test":                 "low",
+				"security_or_contract": "low",
+			},
+		},
+		"policy": map[string]any{
+			"branch": map[string]any{
+				"allow_rename": "no",
+			},
+			"review": map[string]any{"override": "auto"},
+			"docs": map[string]any{
+				"mode":   "skip-with-reason",
+				"reason": "documentation not touched",
+			},
+		},
+	}
+	args["format"] = format
+	return args
+}
+
 func proceedArgs(kind, label string, targetExtra, facts map[string]any) map[string]any {
 	target := map[string]any{"kind": kind, "label": label}
 	for k, v := range targetExtra {
@@ -1289,6 +1338,19 @@ func callToolWithKey(t *testing.T, server *Server, id int, key, name string, arg
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	return toolText(t, byID[fmt.Sprint(id)])
+}
+
+func readTodoInstruction(t *testing.T, server *Server, id int, key, todoKey string) string {
+	t.Helper()
+	raw := callToolWithKey(t, server, id, key, "ws.todo.read", map[string]any{"key": todoKey})
+	var payload todoReadPayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("todo.read(%s) did not parse: %v\n%s", todoKey, err, raw)
+	}
+	if payload.Instruction == nil || strings.TrimSpace(*payload.Instruction) == "" {
+		t.Fatalf("todo.read(%s) missing instruction: %+v", todoKey, payload)
+	}
+	return *payload.Instruction
 }
 
 func TestServeStdioSessionStateFlow(t *testing.T) {
@@ -1416,12 +1478,50 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
 		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
 	}
-	if prepPayload.Instruction == nil || *prepPayload.Instruction != "Prepare the implementation brief and survey plan for the selected delegated path before dispatch." {
+	if prepPayload.Instruction == nil || *prepPayload.Instruction != "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch." {
 		t.Fatalf("prep instruction = %#v", prepPayload.Instruction)
 	}
 	full := callToolWithKey(t, server, 5, key, "ws.todo.list", map[string]any{"mode": "full"})
-	if !strings.Contains(full, "- [ ] {prep} Prep (brief + survey plan)\n      Prepare the implementation brief and survey plan for the selected delegated path before dispatch.") {
+	if !strings.Contains(full, "- [ ] {prep} Prep (brief + survey plan)\n      Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch.") {
 		t.Fatalf("full todo list missing enter-derived instruction:\n%s", full)
+	}
+}
+
+func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	jsonText := callToolWithKey(t, server, 2, key, "ws.enter.implement", implementDirectSkipDocsArgs("json"))
+	var result implementResult
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
+	}
+	if result.Verdict.Delegation != "direct-edit" || result.Verdict.ReviewAlloc != "lead-only" || result.Verdict.DocMode != "skipped" {
+		t.Fatalf("unexpected focused verdict: %+v", result.Verdict)
+	}
+
+	edit := readTodoInstruction(t, server, 3, key, "edit")
+	if !strings.Contains(edit, "Apply the source edits directly") || strings.Contains(edit, "delegated implementer") {
+		t.Fatalf("direct-edit todo instruction not focused: %q", edit)
+	}
+	review := readTodoInstruction(t, server, 4, key, "review")
+	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
+		t.Fatalf("lead-only review todo instruction not focused: %q", review)
+	}
+	final := readTodoInstruction(t, server, 5, key, "final-action-gate")
+	if !strings.Contains(final, "documentation not touched") {
+		t.Fatalf("skipped-doc reason missing from final action todo: %q", final)
+	}
+	full := callToolWithKey(t, server, 6, key, "ws.todo.list", map[string]any{"mode": "full"})
+	for _, forbidden := range []string{"{doc-pre-pass}", "{doc-commit-gate}", "{doc-closeout}", "Dispatch the delegated implementer"} {
+		if strings.Contains(full, forbidden) {
+			t.Fatalf("focused direct/skipped-doc todo list contains forbidden %q:\n%s", forbidden, full)
+		}
 	}
 }
 
@@ -1447,6 +1547,19 @@ func TestEnterImplementStopsOnImplementBranchWithoutMergeTarget(t *testing.T) {
 	}
 	if !strings.Contains(result.Raw, "Branch Action: stop - merge target required") || !strings.Contains(result.NextInstruction, "Stop before source edits") {
 		t.Fatalf("stop verdict missing blocker guidance:\n%s", result.Raw)
+	}
+	edit := readTodoInstruction(t, server, 3, key, "edit")
+	if !strings.Contains(edit, "merge target required") {
+		t.Fatalf("branch-stop edit todo missing blocker: %q", edit)
+	}
+	for _, forbidden := range []string{"Dispatch the delegated implementer", "Apply the source edits directly", "Run the standard documentation pre-pass"} {
+		if strings.Contains(edit, forbidden) {
+			t.Fatalf("branch-stop edit todo implies unreachable work via %q: %q", forbidden, edit)
+		}
+	}
+	full := callToolWithKey(t, server, 4, key, "ws.todo.list", map[string]any{"mode": "full"})
+	if !strings.Contains(full, "merge target required while already on an implementation branch") || strings.Contains(full, "Dispatch the delegated implementer with Delegate dispatch") {
+		t.Fatalf("branch-stop full todo list not focused:\n%s", full)
 	}
 }
 

@@ -10,7 +10,7 @@ Target: user request
 
 Scope
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
-- Direct-edit escalates to delegated when scope becomes multi-file with new public API or cross-module new pattern.
+- If direct editing discovers multi-file public API or cross-module pattern work, stop and report that the slice must be re-routed or delegated.
 
 Branch
 - After Final Action Gate, wait for user approval before merging or starting another implementation slice.
@@ -18,8 +18,8 @@ Branch
 
 Execution
 - Read the MCP-authored Implementation Verdict after Route and follow its `Next:` instruction.
-- Create the task list during Prep; every task is mandatory and ordered.
-- Delegated: implementer receives only the brief and optional plan as task input; extra docs must be listed in brief References; never read the ticket directly.
+- Treat the todo list installed by `{{.McpNamespace}}/enter.implement` as the single runbook; every installed todo is mandatory and ordered.
+- Delegated: implementer receives only the rendered implementer playbook, brief path, optional plan path, and task-specific prompt fields below.
 - Brief preserves every selected-scope binding decision; audit before commit.
 - Treat every delegate dispatch as stateless; loop continuity is lead-owned via commit `## AI Context`, and same-agent resume is only a latency optimization, never a correctness dependency.
 
@@ -27,8 +27,9 @@ Review
 - Single Review stage for all paths; reviewer count and partitions come from the MCP verdict's `review_alloc`.
 - Lead fixes correctness, security, contract, and regression findings; may reject style-only or scope-expanding findings with reasons.
 - The lead owns the clean decision from each reviewer's severity verdict (`clean` / `clean with N minor remaining` / `non-clean: M critical/important`, M = count of Critical/Important issues); `clean with N minor remaining` is clean unless the lead elects another cycle for a minor item.
+- If `review_alloc` names a partition outside the Reviewer partition table, stop and report an unsupported review allocation.
 - Do not re-relay a finding already settled (won't-fix/accepted) or deferred in a prior cycle — recognize it from the disposition record (the accumulated `[fixed]`/`[won't fix]`/`[deferred]`/`[accepted]` markers from prior cycles, also kept in fix-commit `## AI Context`); relay only genuinely new Critical/Important findings, let minors flow to the final report, with the per-path cycle cap as backstop.
-- After capturing review result and disputes, delete review path files before Final Action Gate.
+- After review completes, capture verdicts, unresolved disputes, and accepted or rejected findings, then delete temporary review path files before Final Action Gate.
 
 ## On: invoke
 
@@ -37,9 +38,10 @@ Review
 1. Parse target: ticket path or inline description.
 2. If ticket-driven: read ticket; extract scope, stem, artifacts, and caller-provided slice.
 3. Gather normalized `target`, `facts`, and `policy` for `{{.McpNamespace}}/enter.implement`; do not choose final labels such as delegation, branch mode, plan depth, review allocation, review need, or documentation need.
-4. Keep ambiguous judgments lead-owned, but pass only the final fact value you can defend.
+4. Use `unknown` for facts that cannot be defended from the ticket, conversation, or loaded docs.
 5. Put only explicit caller/user policy in `policy`; do not mirror observable Git state.
-6. Call `{{.McpNamespace}}/enter.implement`:
+6. Use the lead `session_key` supplied by the rendered credential block; if absent, stop before `{{.McpNamespace}}/enter.implement` and report that routing cannot start.
+7. Call `{{.McpNamespace}}/enter.implement`:
 
 ```json
 {
@@ -90,86 +92,62 @@ Review
 ### 2. Follow Implementation Verdict
 
 1. Read the returned `raw` Implementation Verdict and `next_instruction`.
-2. Treat MCP warnings as normalization notes, not permission to re-solve final labels.
+2. Treat MCP warnings as explanatory only; do not override the verdict's delegation, branch, review, plan, or documentation decisions.
 3. Treat the todo list replaced by `{{.McpNamespace}}/enter.implement` as authoritative; do not recreate a separate manual task list.
-4. If `Branch Action: stop`, stop before source edits and report the blocker.
-5. If `Branch Action: create`, create the target implementation branch before source edits.
-6. If `Branch Action: rename`, rename the current branch before source edits.
-7. If `Branch Action: continue`, continue on the current implementation branch.
-8. Continue immediately to Prep after the branch action succeeds.
+4. Use `{{.McpNamespace}}/todo.read(key)` or `{{.McpNamespace}}/todo.list(mode: "full")` when the focused instruction is not already visible.
+5. Execute todos in order; their instructions carry the verdict-reachable branch, prep, edit, review, doc, final-action, and merge runbook.
+6. If `Branch Action: stop`, stop before source edits and report the blocker.
+7. Do not call `{{.McpNamespace}}/enter.implement` again for this implementation instance.
 
 ### 3. Prep
 
-1. Use the MCP verdict's `plan_depth`, `delegation`, `review_alloc`, and `doc_mode` labels as the final execution labels. Treat `plan_depth` as ordered: `none < brief < survey < research`.
-2. Call `{{.McpNamespace}}/mental_models.find(query: <target or domain>)` or `{{.McpNamespace}}/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
-3. If the target or ticket touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, read `ai-docs/tickets/idea/260605-research-ws-native-subagent-pivot.md`.
-4. Call `{{.McpNamespace}}/infra.read(name: "impl-playbook")`.
-5. If an implementation choice depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint absent from the target or loaded docs, search the ticket/spec/mental-model cascade before editing and report a blocker instead of inferring.
-6. Identify integration test paths and their run command.
-7. If `plan_depth` is `survey` or `research`: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in the plan-populator step.
-8. If delegated or `plan_depth` is `brief`, `survey`, or `research`: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; if the migration anchor was read, copy every binding implementation constraint into the brief and add the anchor as a `[Must]` reference; audit against target before committing or running plan population; commit.
-9. If `plan_depth` is `survey` or `research`: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
+1. Execute the `{prep}` todo; it names the verdict-reachable preparation path.
+2. Load required mental models, migration anchor, and implementation runbook before source edits when the todo calls for them.
+3. If the todo calls for brief or plan work, use **Brief template**, **Delegate dispatch**, and **Plan prompts** as named.
+4. If prep surfaces an unresolved binding decision, stop before source edits, report the specific decision needed, and update the brief/plan or return to Route after the decision.
+5. Commit prepared brief or plan artifacts before moving to Edit when prep created or changed them.
 
 ### 4. Edit
 
-1. If direct-edit: edit directly per target and impl-playbook; commit logical checkpoints.
-2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
-3. If delegated and referenced tests exist: run baseline verification.
-4. If delegated: spawn the implementer per **Delegate dispatch** with the **Implementer spawn prompt** as the task-specific input.
-5. If delegated: read the implementer result only if the async result lacks a usable summary; capture `<first-commit>..<last-commit>`.
-6. Capture `<commit-range>` and `<result-commit>`.
+1. Execute the `{edit}` todo.
+2. Use direct editing or delegated implementation exactly as the todo says.
+3. When delegated, use **Delegate dispatch** with **Implementer spawn prompt**.
+4. Verify before reporting success; on failure, diagnose blame before fixing and re-run until pass or real blocker.
+5. Commit logical checkpoints and capture `<commit-range>` plus `<result-commit>`.
 
 ### 5. Review
 
-1. If lead-only: record rationale; skip to step 8.
-2. If single: dispatch the `reviewer` playbook per **Delegate dispatch** (the general reviewer; its shared base covers correctness, standards, contract, and security); generate path via `{{.McpNamespace}}/path.generate(kind: "review", stems: ["direct"])`.
-3. If partitioned: choose the partition subset from MCP `review_alloc`; for each, dispatch its partition playbook from the **Reviewer partition table** per **Delegate dispatch**; generate paths via `{{.McpNamespace}}/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
-4. Call reviewer(s) with **Reviewer prompt frame**.
-5. The lead decides clean from each reviewer's severity verdict (see Review invariants); when the run is clean, proceed to step 8 (review cleanup).
-6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call the reviewer with the **Re-review prompt**, populating its prior-findings-and-dispositions from these fix/reject classifications. Repeat until clean or 2 cycles. If still non-clean after cycle 2, stop before documentation stages and report unresolved Critical/Important findings for caller decision.
-7. If non-clean and partitioned after delegated implementation: relay to the implementer with **Review relay prompt**; if there is no prior implementer, the lead applies fixes directly; extract the disposition list; re-review non-clean partitions with the **Re-review prompt**; keep clean partitions accepted unless a fix touched their surface. Repeat until clean or 3 cycles; lead adjudicates at cycle 2. At cycle 3, stop before documentation stages and report unresolved findings, dispositions, and lead adjudication for caller decision.
-8. Summarize review outcomes and disputes for the final report, then delete all review path files.
+1. Execute the `{review}` todo when present; lead-only review records the same severity verdict format with a short findings/disposition summary.
+2. For reviewer dispatch, use **Reviewer partition table**, **Reviewer prompt frame**, and generated review paths.
+3. For non-clean results, classify findings, fix or reject by Review invariants, and use **Review relay prompt** plus **Re-review prompt** when a relay is needed.
+4. The lead decides clean from severity verdicts, deduplicates settled findings, enforces cycle caps, and escalates unresolved Critical/Important findings.
+5. Summarize review outcomes and disputes for the final report before deleting review path files.
 
 ### 6. Doc Pre-Pass
 
-1. If `doc_mode` is `skipped`, skip Doc Pre-Pass, Doc Commit Gate, and Doc Closeout Compaction; preserve the MCP verdict's doc skip reason for Final Action Gate.
-2. Call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<commit-range>`.
-3. Determine the mental-model output path from the target domain or updater instructions; if no target path can be defended, dispatch with `Commit range: <commit-range>` only and require the updater to report whether no file changed.
-4. Dispatch `mental-model-updater` per **Delegate dispatch**.
-5. Wait for completion; commit update-spec changes and mental-model-updater changes separately when both produce changes, otherwise commit the single changed set.
-
-Run mental-model-updater after update-spec so it sees implemented-marker changes.
+1. Execute `{doc-pre-pass}` when the todo exists; absent doc todos mean the verdict skipped documentation.
+2. For standard documentation, call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute the printed update-spec instructions directly; then run `mental-model-updater` per **Delegate dispatch** when mental-model updates are required or defensible.
+3. Commit update-spec and mental-model changes separately when both produce changes, otherwise commit the single changed set.
 
 ### 7. Doc Commit Gate
 
-1. Call `{{.McpNamespace}}/infra.read(name: "executor-wrapup")`.
-2. If `doc_mode` is `skipped`, skip this gate and preserve the skip reason for Final Action Gate.
-3. Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
-4. If ticket-driven, update the ticket result section with `<result-commit>` according to the repository ticket convention; if that convention is unavailable, stop and report the missing procedure.
-5. Commit doc changes per executor-wrapup. Do not re-run Doc Pipeline.
+1. Execute `{doc-commit-gate}` when the todo exists.
+2. Call `{{.McpNamespace}}/infra.read(name: "executor-wrapup")` for standard documentation closeout.
+3. Refresh `ai-docs/_index.md` only for new skills, agents, or major patterns.
+4. If ticket-driven, update the ticket result section according to the repository ticket convention.
+5. Commit doc changes per executor-wrapup; do not re-run Doc Pipeline.
 
 ### 8. Doc Closeout Compaction
 
-1. Run this gate for every supported branch mode; implementation runs are always on scoped implementation branches.
-2. If `doc_mode` is `skipped`, skip this gate and report the skip reason at Final Action Gate.
-3. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
-4. An eligible commit is non-merge, workflow-owned, and changes only `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/tickets/`, `ai-docs/_index.md`, or narrowly relevant `ai-docs/ref/` workflow docs.
-5. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, review-fix, merge, or ambiguous-authorship commits.
-6. If the suffix has fewer than two eligible commits, set `<doc-compaction-status>` to `skipped - fewer than two eligible closeout commits` and continue.
-7. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
-8. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report `<doc-compaction-status>` as skipped with the blocker.
+1. Execute `{doc-closeout}` when the todo exists.
+2. Compact only a contiguous branch-tip suffix of safe documentation-only closeout commits.
+3. Skip compaction when fewer than two eligible commits exist or metadata synthesis is ambiguous.
+4. Verify tree equivalence after compaction; restore and report skipped status when equivalence cannot be proven.
 
 ### 9. Final Action Gate
 
-Report:
-
-- implemented changes from direct-edit or implementer output;
-- documentation updates or `doc_mode` skip reason, and ticket Result hash;
-- doc closeout compaction status;
-- review result;
-- test status;
-- deviations or open items;
-- unresolved disputes from review relay, if any.
+1. Execute `{final-action-gate}`.
+2. Report implemented changes, implementation branch, merge target if known, documentation updates or skip reason, ticket Result hash when applicable, doc closeout status, review result, test status, deviations, and unresolved disputes.
 
 Stop after reporting and wait for the user to choose merge, continue with a new
 slice, or stop. If the user wants more changes, route to a new
@@ -179,16 +157,12 @@ implementation branch unmerged and report the branch name plus merge target.
 
 ### 10. Merge
 
-Merge only when the user approves. Merge the current implementation branch to
-the MCP verdict's merge target, or to the caller-approved merge target when the
-verdict leaves it unset, with the repository merge helper or equivalent
-non-interactive git sequence.
-
-Use fast-forward for a single workflow-owned, message-clean commit. For multiple
-commits, use `--no-ff` by default; fast-forward only when each commit is an
-independent deployable and independently revertible target-history unit. Use
-squash when the branch is one logical change with noisy or dependent commits.
+Execute `{merge}` only after user approval. Merge to the MCP verdict's merge
+target, or to the caller-approved merge target when the verdict leaves it unset,
+using the repository merge helper or equivalent non-interactive git sequence.
 For squash or `--no-ff`, write the merge commit per repository commit rules.
+After merge, report merge target, merge commit hash, verification status, branch
+status, and skipped cleanup or unresolved follow-up.
 
 ## Fact Guidance
 
@@ -199,10 +173,11 @@ For squash or `--no-ff`, write the merge commit per repository commit rules.
 - Omit `policy.review.override` or set it to `null` unless caller/user review policy is explicit.
 - Use `policy.docs.mode=skip-with-reason` only with an explicit reason.
 - Treat `review_alloc` partitions returned by MCP as the review dispatch plan.
-Default reviewer tier per partition remains first-class vocabulary (`small`/`medium`/`large`/`xlarge`); raise a partition's tier only for unusually subtle risk. When a delegate playbook declares its own `tier:`, the `recommended-tier` returned by `{{.McpNamespace}}/playbook.render` is the source of truth for that delegate.
-Native delegation treats the tier as a model-selection guide.
+- Default reviewer tiers are `small`, `medium`, `large`, and `xlarge`; raise a partition's tier only for unusually subtle risk.
+- When a delegate playbook declares its own `tier:`, the `recommended-tier` returned by `{{.McpNamespace}}/playbook.render` is the source of truth for that delegate.
+- Native delegation treats the tier as a model-selection guide.
 <!-- ws:mercenary-on:start -->
-Mercenary delegation passes the recommended capability tier to `ws.mercenary.register`, which resolves it directly to a concrete per-harness model via capability-keyed config.
+Mercenary delegation passes the recommended capability tier to `{{.McpNamespace}}/mercenary.register`, which resolves it directly to a concrete per-harness model via capability-keyed config.
 <!-- ws:mercenary-on:end -->
 
 ## Templates
@@ -234,7 +209,7 @@ capabilities.
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture the rendered prompt path and the returned `recommended-tier`. Pass no `context` — these delegates declare only model-alias vars, which the tool auto-injects; caller-supplied undeclared keys error. For a lead `session_key` the rendered prompt already carries the minted child-key credential block, so the delegate's ws calls are pre-keyed.
 1. Native (default): spawn a **fresh** native subagent with only the rendered prompt path plus the task-specific input below; provide no prior conversation transcript, loaded document excerpts, ticket body, or lead-only notes unless the task-specific input includes them or names them by path. Do not use inherited conversation context for delegated implementation or review relays. Instruct it to read the rendered prompt as its full role, then act on the task-specific input; treat `recommended-tier` as the model-selection guide. Wait for completion, capture the returned summary or output, and treat missing or unusable output as a lead judgment blocker unless the delegate wrote the required output file. For fix or re-review relays, prefer resuming the prior implementer or reviewer when the host supports it; otherwise use a fresh spawn. Every relay prompt must be self-contained.
 <!-- ws:full-only:start -->
-1. Mercenary (when selected): on the first dispatch for a delegate role, call `ws.mercenary.register(name: "<name>", system_prompt_text: <rendered prompt>, tier: <recommended-tier>)`, then `ws.mercenary.call(name: "<name>", prompt: <task-specific input>)`; on relay calls, reuse the registered name and call/result only, but keep the relay prompt self-contained. Collect with `ws.mercenary.result(name: "<name>", timeout_seconds: 600)`. If collection times out or returns no usable result, report the failure and continue with native dispatch or stop for lead judgment.
+1. Mercenary (when selected): on the first dispatch for a delegate role, read the rendered prompt file, call `{{.McpNamespace}}/mercenary.register(name: "<name>", system_prompt_text: <rendered prompt file contents>, tier: <recommended-tier>)`, then `{{.McpNamespace}}/mercenary.call(name: "<name>", prompt: <task-specific input>)`; on relay calls, reuse the registered name and call/result only, but keep the relay prompt self-contained. Collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`. If collection times out or returns no usable result, report the failure and continue with native dispatch or stop for lead judgment.
 <!-- ws:full-only:end -->
 1. Task-specific input is handed to the worker, never to the render call: `reference-discovery` ← target or domain; `implementer` ← the **Implementer spawn prompt**; `reviewer` / partitions ← the **Reviewer prompt frame**; `plan-populator-*` ← the **Plan prompts**; `mental-model-updater` ← `Commit range: <commit-range>` plus an output path only when one is defensible. If the task-specific input includes an output path, the delegate writes that file and returns a short completion summary naming it. If no output path is provided, the delegate returns the requested content in its final response.
 
@@ -317,8 +292,8 @@ Implement only the brief's scope boundary; leave later ticket phases untouched.
 Acceptance criteria:
 - Brief `## Contract Instructions` must be implemented or explicitly escalated.
 - Brief `## Integration Test Instructions` must be satisfied.
-- Test files: <integration test paths>
-- Run: <command to execute them>
+- Test files: <integration test paths, or None with reason>
+- Run: <verification command, or None with reason>
 
 Ancestor loading: when you read `ai-docs/mental-model/<domain>/<sub>.md`,
 read `ai-docs/mental-model/<domain>/index.md` first.
@@ -344,7 +319,7 @@ Instructions:
 
 ```text
 Review partition: <Correctness|Fit|Test>
-Diff range: <first-commit>..<last-commit>
+Diff range: <parent-of-first-commit>..<last-commit>
 <if Fit:> Brief path: <brief-path>
 <if plan exists:> Plan path: <plan-path>
 <if Fit and ticket-driven:> Ticket path: <ticket-path>
@@ -374,7 +349,7 @@ self-contained relay prompt; provide no prior transcript.
 Review cycle <N> (self-contained — rely only on this prompt and the paths it names, not on prior conversation).
 Brief path: <brief-path>; implemented range: <commit-range>.
 Non-clean review paths: <paths>. Read each file directly.
-For each finding, return a disposition list: [fixed: <commit>], [won't fix: <reason>], or [deferred: <reason>].
+For each finding, return a disposition list with exact markers: [fixed], [won't fix: <reason>], or [deferred: <reason>].
 Commit fixes, run the brief's verification command after fixes, and report commit hashes plus test results.
 Won't-fix allowed: style suggestions conflicting with codebase patterns; scope expansion beyond brief.
 Won't-fix not allowed: correctness, security, or contract violations.
@@ -395,7 +370,8 @@ Return only the severity verdict: `clean`, `clean with N minor remaining`, or `n
 
 ## Doctrine
 
-Implement optimizes for **verified code reaching the target branch**. Route
+Implement optimizes for **verified code reaching an implementation branch, then
+the target branch after approved merge**. Route
 decides delegation, plan depth, and branch mode upfront; subsequent stages
 execute per those decisions without re-routing. Code quality lives in the Edit
 stage (direct or implementer); review quality lives in the unified Review stage.
