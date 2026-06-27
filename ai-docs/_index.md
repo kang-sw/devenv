@@ -231,14 +231,15 @@ dropped tickets live in hidden archive dirs and git history.
   of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
   at the routing-facts-complete boundary. The playbook keeps fact gathering and
   ambiguous judgments, while MCP owns normalized precedence, warnings, JSON
-  result shape, canonical raw verdict text, agenda storage, and proceed todo
-  replacement. Spec addressing via `## Spec Impact` (Contract-first: no —
-  ticket pins the implementation slice; closeout updates `workflow-skills` and
-  `mcp-tools`). Sage review completed. **Phase 1 done** on branch
-  `implement/260627-enter-proceed-verdict-engine` (`75e1adee`), unmerged:
-  deterministic `ws.enter.proceed` resolver, canonical raw/JSON verdict output,
+  result shape, canonical raw verdict text, `next_instruction`, agenda storage,
+  and proceed todo replacement. Spec addressing via `## Spec Impact`
+  (Contract-first: no — ticket pins the implementation slice; closeout updates
+  `workflow-skills` and `mcp-tools`). Sage review completed. **Phases 1+2 done**
+  on branch `implement/260627-enter-proceed-verdict-engine` (latest
+  `f41f7d52`), unmerged: deterministic `ws.enter.proceed` resolver, canonical
+  raw/JSON verdict output, concrete raw/JSON next-action directives,
   agenda/todo replacement, lead-proceed MCP handoff, docs, manifests, wsflow
-  mirror, and partitioned review clean.
+  mirror, and partitioned review clean for Phase 1.
 - `260627-feat-enter-implement-deterministic-verdict-engine` (ready, feat, child
   of 260605) - follow the proceed verdict-engine pattern for `lead-implement`.
   `ws.enter.implement` should accept `target + facts + policy`, derive
