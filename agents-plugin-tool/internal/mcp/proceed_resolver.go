@@ -54,16 +54,17 @@ type factString struct {
 }
 
 type proceedResult struct {
-	Route        string              `json:"route"`
-	Next         string              `json:"next"`
-	Target       proceedResultTarget `json:"target"`
-	Phase        string              `json:"phase"`
-	Reason       string              `json:"reason"`
-	Conditions   []string            `json:"conditions"`
-	Warnings     []string            `json:"warnings"`
-	Agenda       proceedAgenda       `json:"agenda"`
-	TodoReplaced bool                `json:"todo_replaced"`
-	Raw          string              `json:"raw"`
+	Route           string              `json:"route"`
+	Next            string              `json:"next"`
+	NextInstruction string              `json:"next_instruction"`
+	Target          proceedResultTarget `json:"target"`
+	Phase           string              `json:"phase"`
+	Reason          string              `json:"reason"`
+	Conditions      []string            `json:"conditions"`
+	Warnings        []string            `json:"warnings"`
+	Agenda          proceedAgenda       `json:"agenda"`
+	TodoReplaced    bool                `json:"todo_replaced"`
+	Raw             string              `json:"raw"`
 }
 
 type proceedResultTarget struct {
@@ -330,18 +331,37 @@ func resolveProceed(input proceedInput) proceedResult {
 		Warnings:   warnings,
 	}
 	result := proceedResult{
-		Route:        route,
-		Next:         next,
-		Target:       target,
-		Phase:        n.Slice,
-		Reason:       reason,
-		Conditions:   conditions,
-		Warnings:     warnings,
-		Agenda:       agenda,
-		TodoReplaced: true,
+		Route:           route,
+		Next:            next,
+		NextInstruction: proceedNextInstruction(next),
+		Target:          target,
+		Phase:           n.Slice,
+		Reason:          reason,
+		Conditions:      conditions,
+		Warnings:        warnings,
+		Agenda:          agenda,
+		TodoReplaced:    true,
 	}
 	result.Raw = renderProceedRaw(result)
 	return result
+}
+
+func proceedNextInstruction(next string) string {
+	namespace := RuntimeNamespace()
+	switch next {
+	case "lead-implement":
+		return fmt.Sprintf(`Call %s/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source, planning, editing, or calling implementation tools.`, namespace)
+	case "lead-write-ticket":
+		return fmt.Sprintf(`Call %s/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns a ready Ticket path, rerun %s/enter.proceed for that ticket.`, namespace, namespace)
+	case "lead-discuss":
+		return fmt.Sprintf("Continue through %s:lead-discuss with the blocker in Reason.", namespace)
+	case "status-report":
+		return "Stop. Report the status in Reason and the safe next request from this verdict, then wait for the user."
+	case "stop":
+		return "Stop. Report the blocker in Reason and the safe next request from this verdict, then wait for the user."
+	default:
+		return "Stop. Report that the next route is unrecognized, then wait for the user."
+	}
 }
 
 func normalizeProceedFacts(input proceedInput) (normalizedProceedFacts, []string) {
@@ -518,6 +538,7 @@ func renderProceedRaw(result proceedResult) string {
 	fmt.Fprintf(&b, "Proceed Verdict\n")
 	fmt.Fprintf(&b, "Route: %s\n", result.Route)
 	fmt.Fprintf(&b, "NEXT: %s\n\n", result.Next)
+	fmt.Fprintf(&b, "Next: %s\n\n", result.NextInstruction)
 	fmt.Fprintf(&b, "Target: %s\n", firstNonEmpty(result.Target.Label, result.Target.TicketPath, result.Target.TicketStem, "n/a"))
 	fmt.Fprintf(&b, "Phase: %s\n", result.Phase)
 	fmt.Fprintf(&b, "Reason: %s\n\n", result.Reason)

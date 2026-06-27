@@ -1494,9 +1494,9 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	}
 	for _, want := range []string{
 		`enter.proceed`,
-		`playbook.print(name: "lead-implement")`,
-		`playbook.print(name: "lead-write-ticket")`,
-		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
+		`Next: <concrete next-action instruction>`,
+		"Routing to next action: <NEXT>.",
+		"Follow `Next:` exactly",
 		"select the deterministic route from normalized facts",
 		"scope_blocked=phase-already-complete",
 		"scope_blocked=no-unfinished-phase",
@@ -1510,6 +1510,9 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		"Use the first matching route block",
 		"#### Implementation Dispatch",
 		"| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` |",
+		"### 3. Report Routing Verdict",
+		"## Routing Verdict",
+		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
 	} {
 		if strings.Contains(body, old) {
 			t.Errorf("body %q: old deterministic route matrix text still present: %q", body, old)
@@ -1702,16 +1705,18 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	cases := []struct {
-		skill   string
-		wantAll []string
+		skill    string
+		wantAll  []string
+		wantNone []string
 	}{
 		{
 			skill:   "lead-implement",
 			wantAll: []string{"enter.implement", "need_review"},
 		},
 		{
-			skill:   "lead-proceed",
-			wantAll: []string{"enter.proceed", `playbook.print(name: "lead-implement")`},
+			skill:    "lead-proceed",
+			wantAll:  []string{"enter.proceed", `Next: <concrete next-action instruction>`, "Routing to next action: <NEXT>."},
+			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 		{
 			skill:   "lead-sprint",
@@ -1732,6 +1737,11 @@ func TestSkillsCallEnterTools(t *testing.T) {
 			for _, token := range tc.wantAll {
 				if !strings.Contains(body, token) {
 					t.Errorf("printPlaybook(%q): rendered body does not contain %q", tc.skill, token)
+				}
+			}
+			for _, token := range tc.wantNone {
+				if strings.Contains(body, token) {
+					t.Errorf("printPlaybook(%q): rendered body should not contain %q", tc.skill, token)
 				}
 			}
 		})

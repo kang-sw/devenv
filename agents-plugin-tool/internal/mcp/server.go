@@ -2739,7 +2739,7 @@ func tools() []map[string]any {
 							},
 						},
 					},
-					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict plus raw text.`, []string{"text", "json"}),
+					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
 				},
 				"required": []string{"session_key", "target"},
 			},

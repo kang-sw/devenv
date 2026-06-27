@@ -650,18 +650,22 @@ brief References, and must not read the ticket directly.
 
 Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one
-`NEXT:` value. The MCP resolver owns deterministic route-row precedence,
-normalization warnings, raw verdict text, proceed agenda storage, and proceed
-todo replacement; the playbook owns artifact reads, uncertain judgments,
+`NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
+deterministic route-row precedence, normalization warnings, raw verdict text,
+the JSON `next_instruction`, proceed agenda storage, and proceed todo
+replacement; the playbook owns artifact reads, uncertain judgments,
 conversation freshness, migration-anchor checks, and user-facing discussion.
-`lead-proceed` does not print a full route chain as the active execution
-instruction. After `lead-write-ticket` refresh or promotion returns,
-`lead-proceed` rebuilds route context and enters `ws.enter.proceed` again
-instead of continuing from an old verdict. When `NEXT:` is `lead-implement`,
-`lead-proceed` calls `ws/playbook.print(name: "lead-implement")` and executes
+`lead-proceed` does not restate a separate Routing Verdict or print a full route
+chain as the active execution instruction. It briefly reports
+`Routing to next action: <NEXT>.` and follows MCP's `Next:` instruction. After
+`lead-write-ticket` refresh or promotion returns, `lead-proceed` rebuilds route
+context and enters `ws.enter.proceed` again instead of continuing from an old
+verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
+`lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
-implementation-tool use. It does not apply sibling `lead-implement` judges,
-compute direct/delegated execution mode, compute branch mode, or inspect source.
+implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
+judges, compute direct/delegated execution mode, compute branch mode, or inspect
+source.
 `lead-implement` owns those decisions when the handoff executes. The same
 deterministic-verdict optimization is intended for `lead-implement` later, but
 the current shipped boundary changes only `lead-proceed`. wsflow mirrors the

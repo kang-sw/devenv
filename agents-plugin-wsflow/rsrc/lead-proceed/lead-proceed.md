@@ -22,8 +22,8 @@ Pipeline
 - Proceed assumes implementation intent; stop when routing cannot safely reach implementation.
 
 Execution
-- Emit a Routing Verdict before execution; invoke only the route named by `NEXT:`, or invoke nothing when `NEXT: stop`.
-- After the lead-write-ticket procedure returns with a ready `Ticket:` path, rebuild route context and emit a new Routing Verdict; otherwise stop and report the readiness blocker.
+- Read MCP's `NEXT:` and `Next:` lines before execution; follow only that next-action instruction.
+- After the lead-write-ticket procedure returns with a ready `Ticket:` path, rebuild route context and resolve a new MCP verdict; otherwise stop and report the readiness blocker.
 
 ## Route Rules
 
@@ -32,7 +32,7 @@ Fact Ownership
 - Let `{{.McpNamespace}}/enter.proceed` select the deterministic route from normalized facts.
 - Keep uncertain judgments lead-owned; pass only the final fact value you can defend.
 - Treat MCP warnings as normalization notes, not as permission to re-solve the route.
-- Captured `Ticket:` paths follow the post-write re-route rules in Execute Verdict.
+- Captured `Ticket:` paths follow the post-write re-route rules in Follow Next Instruction.
 
 Scope Resolution
 - Honor one explicit phase name exactly.
@@ -133,50 +133,22 @@ Read the returned raw verdict. Its first non-empty lines are:
 Proceed Verdict
 Route: <route>
 NEXT: <lead-discuss | lead-write-ticket | lead-implement | status-report | stop>
+
+Next: <concrete next-action instruction>
 ```
 
-### 3. Report Routing Verdict
+### 3. Follow Next Instruction
 
-```text
-## Routing Verdict
-
-NEXT: <lead-discuss | lead-write-ticket | lead-implement | status-report | stop>
-
-- **Target**: <ticket path or brief summary>
-- **Route**: <Route from MCP verdict>
-- **Reason**: <decisive facts only>
-- **Ticket Status**: <absent | idea | todo | ready | done | dropped | unknown | n/a>
-- **Ticket Category**: <epic | workset | other | n/a>
-- **Freshness**: <current | missing-settled-decisions | uncertain | n/a>
-- **Migration Anchor**: <loaded | n/a | missing | conflict>
-- **Discussion**: <not needed | needed - blocker>
-- **Slice**: <Phase N[: title] | whole target | blocked | n/a>
-- **Scope Blocker**: <none | container-ticket | multiple-explicit-phases | too-broad | no-unfinished-phase | phase-already-complete>
-- **Included Tickets**: <ready | not-ready | unknown groups, or none found>
-- **Safe Next Request**: <Proceed on one ready included ticket path | required user action | n/a>
-
-Proceed is routing-only. It must not inspect source, edit files, plan implementation, or substitute for `NEXT`.
-If `NEXT` names a route: `Proceeding through <NEXT>.`
-If `NEXT: stop`: `Stopping here: <blocking condition>.`
-For workset stops, the safe next request must be `Proceed on <single ready included ticket path>` or a user action to create/promote one included actionable ticket; do not invoke implementation or continue automatically.
-```
-
-Emit exactly one `NEXT:` value copied from MCP.
-Do not ask for confirmation before invoking a non-stop route; when `NEXT: stop`, ask only for the blocking user action required by the verdict.
-
-### 4. Execute Verdict
-
-1. Read the emitted `NEXT:` line.
-2. If `NEXT: lead-discuss`, continue through `{{.SkillNamespace}}:lead-discuss`.
-3. If `NEXT: lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")` and execute the returned playbook inline with the current target plus Routing Verdict fields, especially Slice and Reason, as caller-provided scope before any source inspection, planning, editing, or implementation-tool use.
-4. If `NEXT: lead-write-ticket`, call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` and execute the returned playbook inline.
-5. If `NEXT: status-report` or `NEXT: stop`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
-6. Do not call implementation tools from `lead-proceed`.
-7. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
-8. Stop on failure or user interruption.
-9. If the lead-write-ticket procedure ran, capture its `Ticket:` path before downstream routing.
-10. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
-11. If a ticket path was captured, rebuild route context from that path and re-enter Resolve Verdict.
+1. Read the MCP verdict's `NEXT:` and `Next:` lines.
+2. Briefly state `Routing to next action: <NEXT>.`
+3. Follow `Next:` exactly; do not restate the verdict in a separate Routing Verdict block.
+4. Proceed is routing-only: do not inspect source, edit files, plan implementation, or call implementation tools before the `lead-implement` playbook takes over.
+5. If `NEXT: stop` or `NEXT: status-report`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
+6. If `NEXT: lead-write-ticket`, capture its `Ticket:` path before downstream routing.
+7. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
+8. If a ready ticket path was captured, rebuild route context from that path and re-enter Resolve Verdict.
+9. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
+10. Stop on failure or user interruption.
 
 ## Judgments
 

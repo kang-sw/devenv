@@ -238,10 +238,11 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
   `scope-blocked`), resolves one deterministic route, emits non-blocking
   warnings for contradictory or inapplicable facts, stores the selected route
-  agenda, and replaces the todo list with Build route context, Select route,
-  Emit routing verdict, Execute verdict. Text output is the canonical raw
-  verdict beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`; JSON output
-  returns the structured result plus the identical `raw` string.
+  agenda, and replaces the todo list with Build route context, Resolve MCP
+  verdict, Follow next instruction. Text output is the canonical raw verdict
+  beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`, and `Next: ...`; JSON
+  output returns the structured result plus `next_instruction` and the identical
+  `raw` string.
 - `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
 - `salvage`: Containment, Survey fanout, Premise interview, Classification,
   Capture.

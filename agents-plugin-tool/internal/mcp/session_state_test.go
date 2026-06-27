@@ -78,7 +78,7 @@ func TestDeriveImplementTodosFromVerdictTitles(t *testing.T) {
 }
 
 func TestDeriveOtherEnterTodos(t *testing.T) {
-	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "select-route", "routing-verdict", "execute-verdict") {
+	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "resolve-verdict", "follow-next") {
 		t.Fatalf("proceed derivation mismatch: %v", keysOf(deriveProceedTodos()))
 	}
 	if !eqKeys(keysOf(deriveSprintTodos()), "edit", "verify", "commit", "post-edit", "wrap") {
@@ -602,7 +602,88 @@ func TestResolveProceedRoutes(t *testing.T) {
 			if !containsString(got.Conditions, tc.wantCond) {
 				t.Fatalf("conditions %v do not contain %q", got.Conditions, tc.wantCond)
 			}
+			if got.NextInstruction == "" {
+				t.Fatal("next instruction is empty")
+			}
+			if !strings.Contains(got.Raw, "\nNext: "+got.NextInstruction+"\n\n") {
+				t.Fatalf("raw verdict missing matching Next line:\n%s", got.Raw)
+			}
 		})
+	}
+}
+
+func TestProceedNextInstructions(t *testing.T) {
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	cases := []struct {
+		name       string
+		args       map[string]any
+		wantNext   string
+		wantText   string
+		wantNoText string
+	}{
+		{
+			name:     "implement instruction names playbook and pre-source boundary",
+			args:     proceedReadyArgs("text"),
+			wantNext: "lead-implement",
+			wantText: `Call wsflow/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
+		},
+		{
+			name: "write ticket instruction names playbook and reroute",
+			args: proceedArgs("ticket-path", "todo ticket", map[string]any{"ticket_path": "ai-docs/tickets/todo/260101-feat-demo.md"}, map[string]any{
+				"ticket": map[string]any{"status": "todo", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantNext: "lead-write-ticket",
+			wantText: `Call wsflow/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns a ready Ticket path, rerun wsflow/enter.proceed`,
+		},
+		{
+			name: "discussion instruction names skill namespace",
+			args: proceedArgs("ticket-path", "needs discussion", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "yes"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantNext: "lead-discuss",
+			wantText: `Continue through wsflow:lead-discuss with the blocker in Reason.`,
+		},
+		{
+			name: "stop instruction does not invoke playbooks",
+			args: proceedArgs("ticket-path", "done ticket", nil, map[string]any{
+				"ticket": map[string]any{"status": "done", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "whole target"},
+			}),
+			wantNext:   "stop",
+			wantText:   "Stop. Report the blocker in Reason",
+			wantNoText: "playbook.print",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input, err := parseProceedInput(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := resolveProceed(input)
+			if got.Next != tc.wantNext {
+				t.Fatalf("next = %q, want %q", got.Next, tc.wantNext)
+			}
+			if !strings.Contains(got.NextInstruction, tc.wantText) {
+				t.Fatalf("instruction = %q, want containing %q", got.NextInstruction, tc.wantText)
+			}
+			if tc.wantNoText != "" && strings.Contains(got.NextInstruction, tc.wantNoText) {
+				t.Fatalf("instruction = %q, should not contain %q", got.NextInstruction, tc.wantNoText)
+			}
+			if !strings.Contains(got.Raw, "Next: "+got.NextInstruction) {
+				t.Fatalf("raw missing Next instruction:\n%s", got.Raw)
+			}
+		})
+	}
+
+	if got := proceedNextInstruction("status-report"); !strings.Contains(got, "Report the status in Reason") {
+		t.Fatalf("status-report instruction = %q", got)
 	}
 }
 
@@ -705,7 +786,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	if !ok {
 		t.Fatal("session record not found")
 	}
-	if !eqKeys(keysOf(record.Todos), "route-context", "select-route", "routing-verdict", "execute-verdict") {
+	if !eqKeys(keysOf(record.Todos), "route-context", "resolve-verdict", "follow-next") {
 		t.Fatalf("enter.proceed did not replace todo list: %v", keysOf(record.Todos))
 	}
 	var agenda proceedAgenda
@@ -736,6 +817,9 @@ func TestEnterProceedJSONIncludesRawVerdict(t *testing.T) {
 	}
 	if !result.TodoReplaced {
 		t.Fatal("json result did not report todo replacement")
+	}
+	if result.NextInstruction == "" || !strings.Contains(result.Raw, "Next: "+result.NextInstruction) {
+		t.Fatalf("json result missing next instruction/raw line: %+v", result)
 	}
 }
 
