@@ -1492,6 +1492,24 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	if !strings.Contains(body, "full-pipeline routing accuracy") {
 		t.Errorf("body %q: expected doctrine text 'full-pipeline routing accuracy'", body)
 	}
+	for _, want := range []string{
+		`enter.proceed`,
+		`playbook.print(name: "lead-implement")`,
+		"select the deterministic route from normalized facts",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
+		}
+	}
+	for _, old := range []string{
+		"Use the first matching route block",
+		"#### Implementation Dispatch",
+		"| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` |",
+	} {
+		if strings.Contains(body, old) {
+			t.Errorf("body %q: old deterministic route matrix text still present: %q", body, old)
+		}
+	}
 	// delegates:false — continuity tip must NOT appear.
 	if strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: delegation tip must not appear for delegates:false playbook", body)
@@ -1688,7 +1706,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 		},
 		{
 			skill:   "lead-proceed",
-			wantAll: []string{"enter.proceed"},
+			wantAll: []string{"enter.proceed", `playbook.print(name: "lead-implement")`},
 		},
 		{
 			skill:   "lead-sprint",

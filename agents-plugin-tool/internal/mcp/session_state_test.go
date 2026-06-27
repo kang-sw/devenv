@@ -343,6 +343,313 @@ func TestEnterModeReplacesTodos(t *testing.T) {
 	}
 }
 
+func TestResolveProceedRoutes(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       map[string]any
+		wantRoute  string
+		wantNext   string
+		wantReason string
+		wantCond   string
+	}{
+		{
+			name:       "ready ticket routes to implement",
+			args:       proceedReadyArgs("text"),
+			wantRoute:  "implementation-dispatch.ready-actionable",
+			wantNext:   "lead-implement",
+			wantReason: "status=ready",
+			wantCond:   "scope-blocked=none",
+		},
+		{
+			name: "inline direct implementation",
+			args: proceedArgs("inline", "inline cleanup", nil, map[string]any{
+				"ticket": map[string]any{"actionable": "yes"},
+				"gates":  map[string]any{"needs_ticket": "no", "scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "whole target"},
+			}),
+			wantRoute:  "implementation-dispatch.inline-direct",
+			wantNext:   "lead-implement",
+			wantReason: "needs-ticket=no",
+			wantCond:   "status=n/a",
+		},
+		{
+			name: "todo ticket routes to ticket writing",
+			args: proceedArgs("ticket-path", "todo ticket", map[string]any{"ticket_path": "ai-docs/tickets/todo/260101-feat-demo.md"}, map[string]any{
+				"ticket": map[string]any{"status": "todo", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "ticket-readiness.status-refresh",
+			wantNext:   "lead-write-ticket",
+			wantReason: "status=todo",
+			wantCond:   "status=todo",
+		},
+		{
+			name: "done ticket stops",
+			args: proceedArgs("ticket-path", "done ticket", nil, map[string]any{
+				"ticket": map[string]any{"status": "done", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "whole target"},
+			}),
+			wantRoute:  "terminal-artifact.done",
+			wantNext:   "stop",
+			wantReason: "status=done",
+			wantCond:   "status=done",
+		},
+		{
+			name: "missing ticket stops",
+			args: proceedArgs("ticket-path", "missing ticket", nil, map[string]any{
+				"ticket": map[string]any{"ticket_missing": "yes", "status": "ready", "category": "other"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+			}),
+			wantRoute:  "terminal-artifact.missing-ticket",
+			wantNext:   "stop",
+			wantReason: "ticket-missing=yes",
+			wantCond:   "ticket-missing=yes",
+		},
+		{
+			name: "unknown status stops",
+			args: proceedArgs("ticket-path", "unknown status", nil, map[string]any{
+				"ticket": map[string]any{"status": "unknown", "category": "other"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+			}),
+			wantRoute:  "terminal-artifact.unknown-status",
+			wantNext:   "stop",
+			wantReason: "status=unknown",
+			wantCond:   "status=unknown",
+		},
+		{
+			name: "container blocker preserved",
+			args: proceedArgs("ticket-path", "epic", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "epic", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Board"},
+			}),
+			wantRoute:  "container-ticket.epic",
+			wantNext:   "stop",
+			wantReason: "category=epic",
+			wantCond:   "scope-blocked=container-ticket",
+		},
+		{
+			name: "specific scope blocker preserved",
+			args: proceedArgs("ticket-path", "multi phase", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "multiple-explicit-phases", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "blocked"},
+			}),
+			wantRoute:  "scope-gate.multiple-explicit-phases",
+			wantNext:   "stop",
+			wantReason: "scope-blocked=multiple-explicit-phases",
+			wantCond:   "scope-blocked=multiple-explicit-phases",
+		},
+		{
+			name: "partial route stops conservatively",
+			args: proceedArgs("inline", "partial", nil, map[string]any{
+				"ticket": map[string]any{"actionable": "yes"},
+			}),
+			wantRoute:  "fallback.insufficient-route-facts",
+			wantNext:   "stop",
+			wantReason: "insufficient",
+			wantCond:   "needs-ticket=unknown",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input, err := parseProceedInput(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := resolveProceed(input)
+			if got.Route != tc.wantRoute || got.Next != tc.wantNext {
+				t.Fatalf("route/next = %s/%s, want %s/%s\nraw:\n%s", got.Route, got.Next, tc.wantRoute, tc.wantNext, got.Raw)
+			}
+			if !strings.Contains(got.Reason, tc.wantReason) {
+				t.Fatalf("reason = %q, want containing %q", got.Reason, tc.wantReason)
+			}
+			if !containsString(got.Conditions, tc.wantCond) {
+				t.Fatalf("conditions %v do not contain %q", got.Conditions, tc.wantCond)
+			}
+		})
+	}
+}
+
+func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903500, root, nil))
+
+	_ = callToolWithKey(t, server, 1, key, "ws.todo.append", map[string]any{"key": "stale", "title": "stale"})
+	text := callToolWithKey(t, server, 2, key, "ws.enter.proceed", proceedReadyArgs("text"))
+	nonEmpty := nonEmptyLines(text)
+	if len(nonEmpty) < 3 {
+		t.Fatalf("raw verdict too short:\n%s", text)
+	}
+	if nonEmpty[0] != "Proceed Verdict" || nonEmpty[1] != "Route: implementation-dispatch.ready-actionable" || nonEmpty[2] != "NEXT: lead-implement" {
+		t.Fatalf("unexpected first verdict lines: %v\nfull:\n%s", nonEmpty[:3], text)
+	}
+	if !strings.Contains(text, "Agenda:") || !strings.Contains(text, "- next_skill: lead-implement") {
+		t.Fatalf("raw verdict missing clear agenda/next direction:\n%s", text)
+	}
+
+	record, ok := server.sessions.readState(key)
+	if !ok {
+		t.Fatal("session record not found")
+	}
+	if !eqKeys(keysOf(record.Todos), "route-context", "select-route", "routing-verdict", "execute-verdict") {
+		t.Fatalf("enter.proceed did not replace todo list: %v", keysOf(record.Todos))
+	}
+	var agenda proceedAgenda
+	if err := json.Unmarshal(record.Agenda["proceed"], &agenda); err != nil {
+		t.Fatalf("agenda did not store proceed verdict subset: %v", err)
+	}
+	if agenda.NextSkill != "lead-implement" || agenda.Route != "implementation-dispatch.ready-actionable" || !containsString(agenda.Conditions, "freshness=current") {
+		t.Fatalf("unexpected agenda: %+v", agenda)
+	}
+}
+
+func TestEnterProceedJSONIncludesRawVerdict(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903600, root, nil))
+
+	raw := callToolWithKey(t, server, 1, key, "ws.enter.proceed", proceedReadyArgs("text"))
+	jsonText := callToolWithKey(t, server, 2, key, "ws.enter.proceed", proceedReadyArgs("json"))
+	var result proceedResult
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
+	}
+	if result.Raw != raw {
+		t.Fatalf("json raw field mismatch\njson raw:\n%s\ntext raw:\n%s", result.Raw, raw)
+	}
+	if !result.TodoReplaced {
+		t.Fatal("json result did not report todo replacement")
+	}
+}
+
+func TestEnterProceedWarningsAndErrors(t *testing.T) {
+	input, err := parseProceedInput(proceedArgs("inline", "inline", map[string]any{
+		"ticket_path": "ai-docs/tickets/ready/260101-feat-demo.md",
+	}, map[string]any{
+		"ticket": map[string]any{"status": "ready", "actionable": "yes"},
+		"gates":  map[string]any{"needs_ticket": "no", "scope_blocked": "none", "discussion_needed": "no"},
+		"work":   map[string]any{"slice": "whole target"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := resolveProceed(input)
+	if result.Next != "lead-implement" {
+		t.Fatalf("contradictory inline facts should still route conservatively, got %s", result.Next)
+	}
+	if len(result.Warnings) == 0 || !strings.Contains(strings.Join(result.Warnings, "\n"), "ignored for inline target") {
+		t.Fatalf("expected inline contradiction warnings, got %v", result.Warnings)
+	}
+
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903700, root, nil))
+	respLine := callToolLineWithKey(t, server, 1, key, "ws.enter.proceed", proceedArgs("ticket-path", "bad enum", nil, map[string]any{
+		"ticket": map[string]any{"status": "blocked"},
+	}))
+	if !toolIsError(t, respLine) || !strings.Contains(toolText(t, respLine), "invalid status") {
+		t.Fatalf("invalid enum did not return tool error: %s", respLine)
+	}
+}
+
+func proceedReadyArgs(format string) map[string]any {
+	args := proceedArgs("ticket-path", "260101-feat-demo", map[string]any{
+		"ticket_stem": "260101-feat-demo",
+		"ticket_path": "ai-docs/tickets/ready/260101-feat-demo.md",
+	}, map[string]any{
+		"ticket": map[string]any{
+			"ticket_missing": "no",
+			"has_ticket":     "yes",
+			"status":         "ready",
+			"category":       "other",
+			"actionable":     "yes",
+			"freshness":      "current",
+			"phase":          "Phase 1: Demo",
+		},
+		"gates": map[string]any{
+			"discussion_needed": "no",
+			"needs_ticket":      "n/a",
+			"scope_blocked":     "none",
+			"migration_anchor":  "n/a",
+		},
+		"work": map[string]any{
+			"category": "implementation",
+			"slice":    "Phase 1: Demo",
+		},
+	})
+	args["format"] = format
+	return args
+}
+
+func proceedArgs(kind, label string, targetExtra, facts map[string]any) map[string]any {
+	target := map[string]any{"kind": kind, "label": label}
+	for k, v := range targetExtra {
+		target[k] = v
+	}
+	args := map[string]any{"target": target}
+	if facts != nil {
+		args["facts"] = facts
+	}
+	return args
+}
+
+func callToolLineWithKey(t *testing.T, server *Server, id int, key, name string, args map[string]any) string {
+	t.Helper()
+	if args == nil {
+		args = map[string]any{}
+	}
+	args["session_key"] = key
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params":  map[string]any{"name": name, "arguments": args},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(string(raw)+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio(%s) error: %v", name, err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	return byID[fmt.Sprint(id)]
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func nonEmptyLines(text string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return out
+}
+
 // --- MCP integration ---------------------------------------------------------
 
 // callToolWithKey runs a single tools/call line through its own ServeStdio,

@@ -229,8 +229,19 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   Edit, and Review labels reflect validated typed verdict values (`plan_depth`,
   `delegation`, and `review_alloc`) instead of using one hardcoded
   delegated/partitioned label or copying unknown strings into checklist titles.
-- `proceed`: Build route context, Select route, Emit routing verdict, Execute
-  verdict.
+- `proceed`: `ws.enter.proceed` is the public mode-switch call for the
+  routing-facts-complete boundary. It accepts `session_key`, a required
+  `target` object, optional grouped `facts.ticket` / `facts.gates` /
+  `facts.work` objects, and optional `format: text|json`. It normalizes the
+  current proceed route vocabulary (`target-kind`, `ticket-missing`,
+  `has-ticket`, `status`, `migration-anchor`, `actionable`,
+  `discussion-needed`, `needs-ticket`, `freshness`, `category`, `slice`, and
+  `scope-blocked`), resolves one deterministic route, emits non-blocking
+  warnings for contradictory or inapplicable facts, stores the selected route
+  agenda, and replaces the todo list with Build route context, Select route,
+  Emit routing verdict, Execute verdict. Text output is the canonical raw
+  verdict beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`; JSON output
+  returns the structured result plus the identical `raw` string.
 - `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
 - `salvage`: Containment, Survey fanout, Premise interview, Classification,
   Capture.

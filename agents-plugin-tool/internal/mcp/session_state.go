@@ -690,7 +690,29 @@ func stringValue(v any) string {
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "ws.enter.proceed", "proceed", args, deriveProceedTodos())
+	const tool = "ws.enter.proceed"
+	sessionKey, err := sessionStateKey(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	input, err := parseProceedInput(args)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	result := resolveProceed(input)
+	rawAgenda, err := json.Marshal(result.Agenda)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
+	}
+	todos := deriveProceedTodos()
+	if err := s.sessions.enterMode(sessionKey, "proceed", rawAgenda, todos); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	if input.Format == "json" {
+		text, err := proceedResultJSON(result)
+		return toolTextResponse(id, text, err)
+	}
+	return toolTextResponse(id, result.Raw, nil)
 }
 
 func (s *Server) handleEnterSprint(id json.RawMessage, args map[string]any) response {

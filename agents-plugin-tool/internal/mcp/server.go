@@ -2690,17 +2690,58 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.enter.proceed",
-			"description": "Enter routing mode: store the typed payload as the 'proceed' agenda blob AND replace the todo list with the lead-proceed checklist (Build route context, Select route, Emit routing verdict, Execute verdict).",
+			"description": "Enter routing mode: resolve deterministic proceed facts into one route verdict, store the 'proceed' agenda blob, and replace the todo list with the lead-proceed checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"ticket":      stringProperty("Target ticket stem or path being routed."),
-					"phase":       stringProperty("Selected phase, when one is named."),
-					"next_skill":  stringProperty("Routed next skill (e.g. lead-implement, lead-write-ticket)."),
-					"conditions":  stringArrayProperty("Routing conditions or blockers captured during route context."),
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Proceed target after lead-owned artifact reading.",
+						"properties": map[string]any{
+							"kind":        enumStringProperty("Target kind.", []string{"ticket-path", "inline", "unknown"}),
+							"label":       stringProperty("Short target label or summary."),
+							"ticket_stem": stringProperty("Ticket stem when applicable; null or omit when inapplicable."),
+							"ticket_path": stringProperty("Ticket path when applicable; null or omit when inapplicable."),
+						},
+					},
+					"facts": map[string]any{
+						"type":        "object",
+						"description": "Grouped normalized route facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
+						"properties": map[string]any{
+							"ticket": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"ticket_missing": enumStringProperty("Whether a ticket-path target is missing.", []string{"yes", "no", "unknown"}),
+									"has_ticket":     enumStringProperty("Whether the target has a ticket artifact.", []string{"yes", "no", "unknown"}),
+									"status":         enumStringProperty("Ticket status.", []string{"idea", "todo", "ready", "done", "dropped", "unknown", "n/a"}),
+									"category":       enumStringProperty("Ticket category.", []string{"epic", "workset", "other", "n/a", "unknown"}),
+									"actionable":     enumStringProperty("Actionability judgment.", []string{"yes", "no", "unknown"}),
+									"freshness":      enumStringProperty("Ticket freshness against active conversation decisions.", []string{"current", "missing-settled-decisions", "uncertain", "n/a", "unknown"}),
+									"phase":          stringProperty("Selected phase label when one is named."),
+								},
+							},
+							"gates": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"discussion_needed": enumStringProperty("Whether user-blocking discussion is needed.", []string{"yes", "no", "unknown"}),
+									"needs_ticket":      enumStringProperty("Whether an inline target needs a ticket first.", []string{"yes", "no", "n/a", "unknown"}),
+									"scope_blocked":     enumStringProperty("Scope blocker.", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}),
+									"migration_anchor":  enumStringProperty("Migration-anchor check result.", []string{"loaded", "n/a", "missing", "conflict", "unknown"}),
+								},
+							},
+							"work": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"category": enumStringProperty("Current work category hint.", []string{"implementation", "ticket_write", "discussion", "status_report", "unknown"}),
+									"slice":    stringProperty("Resolved implementation slice, whole target, blocked, n/a, or unknown."),
+								},
+							},
+						},
+					},
+					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict plus raw text.`, []string{"text", "json"}),
 				},
-				"required": []string{"session_key"},
+				"required": []string{"session_key", "target"},
 			},
 		},
 		{

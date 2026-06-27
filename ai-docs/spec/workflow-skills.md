@@ -648,17 +648,25 @@ plan population or implementer dispatch. Delegated implementers receive only the
 brief and optional plan as task input, may read additional documents listed in
 brief References, and must not read the ticket directly.
 
-Before any handoff, `lead-proceed` emits a Routing Verdict with exactly one
-`NEXT:` skill or `stop`. It does not print a full route chain as the active
-execution instruction. After `lead-write-ticket` refresh or promotion returns,
-`lead-proceed` rebuilds route context and emits a new verdict instead of
-continuing from an old chain. When `NEXT:` is `lead-implement`,
-`lead-proceed` invokes that skill before source inspection, planning, editing,
-or implementation-tool use. It does not apply sibling `lead-implement` judges,
+Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
+fact gathering and receives a deterministic raw verdict with exactly one
+`NEXT:` value. The MCP resolver owns deterministic route-row precedence,
+normalization warnings, raw verdict text, proceed agenda storage, and proceed
+todo replacement; the playbook owns artifact reads, uncertain judgments,
+conversation freshness, migration-anchor checks, and user-facing discussion.
+`lead-proceed` does not print a full route chain as the active execution
+instruction. After `lead-write-ticket` refresh or promotion returns,
+`lead-proceed` rebuilds route context and enters `ws.enter.proceed` again
+instead of continuing from an old verdict. When `NEXT:` is `lead-implement`,
+`lead-proceed` calls `ws/playbook.print(name: "lead-implement")` and executes
+that playbook before source inspection, planning, editing, or
+implementation-tool use. It does not apply sibling `lead-implement` judges,
 compute direct/delegated execution mode, compute branch mode, or inspect source.
-`lead-implement` owns those decisions when the handoff executes. wsflow mirrors
-the same route-only boundary without pre-applying `wsflow:lead-implement`
-branch or execution judgments.
+`lead-implement` owns those decisions when the handoff executes. The same
+deterministic-verdict optimization is intended for `lead-implement` later, but
+the current shipped boundary changes only `lead-proceed`. wsflow mirrors the
+same route-only boundary without pre-applying `wsflow:lead-implement` branch or
+execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Shell {#260505-sprint-session-container}
