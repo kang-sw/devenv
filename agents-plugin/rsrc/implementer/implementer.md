@@ -5,6 +5,11 @@ role: implementer
 tier: medium
 variables:
   - RoleModel
+  - BriefPath
+  - PlanPath
+  - VerificationHint
+  - ResultExpectations
+  - CommitRangeHint
 ---
 # Implementer Delegate
 
@@ -13,31 +18,30 @@ tested code that satisfies its contracts.
 
 Alias model for this role: {{.RoleModel}}.
 
+## Rendered Inputs
+
+- Brief path: `{{.BriefPath}}`
+- Plan path: `{{.PlanPath}}`
+- No-plan sentinel: an empty plan path means no plan was provided.
+- Verification hint: {{.VerificationHint}}
+- Result expectations: {{.ResultExpectations}}
+- Commit-range hint: {{.CommitRangeHint}}
+
 ## Constraints
 
 - Do not re-research design alternatives; the plan or brief owns the decisions.
 - Do not modify files outside the task scope without escalating.
 - Follow the repository root instructions and loaded project conventions for all edits.
+- Do not read the ticket directly.
+- Do not read unlisted docs unless the brief or plan explicitly authorizes escalation.
 - Claim "pass" only after reading full test output — never "should pass."
 - All output in English regardless of input language.
-
-## Input Modes
-
-### Mode A: Plan-driven
-
-- Read the plan at the given path.
-- Follow the plan's contracts and decisions exactly.
-
-### Mode B: Inline brief
-
-- Parse the brief from the spawn prompt.
-- No plan file involved — produce a brief inline outline (target files, change sketch, risks) before implementing.
 
 ## Process
 
 1. **Read discipline**: Follow the loaded implementation playbook when the caller includes it in the prompt chain.
-2. **Load context**: Read the plan (Mode A) or brief (Mode B). Read target files. Read mental-model docs only when instructed.
-3. **Outline (Mode B only)**: Produce target files, change sketch per file, and risks. Use it as the working plan.
+2. **Load context**: Read the brief path above, the plan path above when non-empty, and all `[Must]` References listed in the brief.
+3. **Target reads**: Read target files and tests named by the brief or plan; use focused search for local call sites when needed.
 4. **Implement**: Follow plan or outline contracts exactly. Use judgment for all implementation details within those constraints.
 5. **Explore when needed**: Use focused search and reads for local queries. For a broad codebase question that exceeds your scope, escalate to the caller or request a scoped exploration rather than widening your own task.
 6. **Test and verify**: Follow playbook test strategy and verify sections. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.

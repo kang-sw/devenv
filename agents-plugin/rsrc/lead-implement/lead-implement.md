@@ -135,11 +135,12 @@ Run `{merge}` only after user approval. Merge to the verdict or caller-approved 
 ### Delegate dispatch
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier`.
-2. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; collect summary or required output file.
+2. For `implementer`, pass only declared file-first context: `BriefPath`, `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`.
+3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; collect summary or required output file.
 <!-- ws:full-only:start -->
-3. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
+4. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->
-4. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
+5. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
 ### Brief template
 
@@ -209,27 +210,12 @@ Read the survey output, then replace the file with a research plan.
 ### Implementer spawn prompt
 
 ```text
-Brief path: <brief-path>
-<if plan exists:> Plan path: <plan-path>
+Rendered implementer prompt: <prompt-path>
+Recommended tier: <recommended-tier>
 
-Read the brief, provided plan, and all `[Must]` References.
-Do not read the ticket directly. Do not read unlisted docs unless authorized.
-Implement only the brief's scope boundary.
-
-Acceptance:
-- Implement or escalate Brief `## Contract Instructions`.
-- Satisfy Brief `## Integration Test Instructions`.
-- Test files: <paths, or None with reason>
-- Run: <command, or None with reason>
-
-Ancestor loading: read `ai-docs/mental-model/<domain>/index.md` before any nested domain page.
-
-Instructions:
-- Verify before reporting completion and after each fix.
-- Do not use temporary, fallback, or mock-data behavior for brief contracts.
-- Escalate known wrong contracts or failed plan guardrails.
-- Commit logical checkpoints on the current branch.
-- Report commits and test results.
+Read that prompt file and execute it. It contains the brief path, optional plan
+path, verification expectations, commit-range guidance, and reporting
+requirements.
 ```
 
 ### Reviewer table

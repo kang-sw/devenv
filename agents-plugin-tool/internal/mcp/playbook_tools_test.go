@@ -62,6 +62,16 @@ func isolatedPlaybookConfigOptions(t *testing.T) wsconfig.Options {
 	}
 }
 
+func shippedImplementerContext() map[string]string {
+	return map[string]string{
+		"BriefPath":          "ai-docs/.plans/brief.md",
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"ResultExpectations": "Report outcome, files changed, commits, verification, and blockers.",
+		"CommitRangeHint":    "Report <first-commit>..<last-commit> after committing logical checkpoints.",
+	}
+}
+
 // initGitRepo creates a git repository in a temp dir and returns its path.
 // Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
@@ -817,9 +827,12 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer recommended tier = %q, want medium", tier)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -836,6 +849,41 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	}
 	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
 		t.Fatalf("rendered wsflow delegate contains bare ws namespace notation:\n%s", body)
+	}
+}
+
+func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer recommended tier = %q, want medium", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Alias model for this role: gpt-5.5.",
+		"Brief path: `ai-docs/.plans/brief.md`",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Verification hint: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"Result expectations: Report outcome, files changed, commits, verification, and blockers.",
+		"Commit-range hint: Report <first-commit>..<last-commit> after committing logical checkpoints.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer render missing %q:\n%s", want, body)
+		}
 	}
 }
 
@@ -906,6 +954,17 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("full ws renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	ctx := shippedImplementerContext()
+	ctx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -1438,6 +1497,9 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Treat the installed todo list as the ordered runbook",
 		"Delegate dispatch",
 		"Implementer spawn prompt",
+		"Rendered implementer prompt: <prompt-path>",
+		"Recommended tier: <recommended-tier>",
+		"contains the brief path, optional plan",
 		"Reviewer prompt frame",
 		"Review relay prompt",
 		"Mercenary path:",
@@ -1457,6 +1519,10 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"If single:",
 		"If partitioned:",
 		"If `doc_mode` is `skipped`",
+		"Acceptance:",
+		"Implement or escalate Brief `## Contract Instructions`",
+		"Satisfy Brief `## Integration Test Instructions`",
+		"Test files: <paths, or None with reason>",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("lead-implement full ws render still contains unreachable-path prose %q:\n%s", forbidden, body)
