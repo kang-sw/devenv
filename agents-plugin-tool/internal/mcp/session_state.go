@@ -26,6 +26,8 @@ const (
 	todoWip     todoStatus = "wip"
 	todoDone    todoStatus = "done"
 	todoDefer   todoStatus = "defer"
+
+	todoInstructionPreviewRunes = 60
 )
 
 // todoItem is one ordered checklist entry. Identity is the caller-provided key,
@@ -285,9 +287,9 @@ func renderTodos(list []todoItem, full bool) string {
 		return "(no todos)"
 	}
 	if full {
-		lines := make([]string, 0, len(list))
+		lines := make([]string, 0, len(list)*2)
 		for _, item := range list {
-			lines = append(lines, renderTodoLine(item))
+			lines = append(lines, renderTodoLines(item, full)...)
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -312,7 +314,7 @@ func renderTodos(list []todoItem, full bool) string {
 	collapsed := false
 	for i, item := range list {
 		if shown[i] {
-			lines = append(lines, renderTodoLine(item))
+			lines = append(lines, renderTodoLines(item, full)...)
 			collapsed = false
 			continue
 		}
@@ -326,6 +328,27 @@ func renderTodos(list []todoItem, full bool) string {
 
 func renderTodoLine(item todoItem) string {
 	return fmt.Sprintf("%s {%s} %s", todoMarker(item.Status), item.Key, item.Title)
+}
+
+func renderTodoLines(item todoItem, full bool) []string {
+	lines := []string{renderTodoLine(item)}
+	if item.Instruction == nil || *item.Instruction == "" {
+		return lines
+	}
+	instruction := *item.Instruction
+	if !full {
+		instruction = todoInstructionPreview(instruction)
+	}
+	lines = append(lines, "      "+instruction)
+	return lines
+}
+
+func todoInstructionPreview(instruction string) string {
+	runes := []rune(instruction)
+	if len(runes) <= todoInstructionPreviewRunes {
+		return instruction
+	}
+	return string(runes[:todoInstructionPreviewRunes])
 }
 
 // --- enter-mode todo derivation ----------------------------------------------

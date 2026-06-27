@@ -267,10 +267,15 @@ func TestTodoReorder(t *testing.T) {
 }
 
 func TestRenderTodosSummaryAndFull(t *testing.T) {
+	longInstruction := "012345678901234567890123456789012345678901234567890123456789EXTRA"
+	preview := todoInstructionPreview(longInstruction)
+	if len([]rune(preview)) > todoInstructionPreviewRunes {
+		t.Fatalf("preview length = %d, want <= %d", len([]rune(preview)), todoInstructionPreviewRunes)
+	}
 	list := []todoItem{
 		{Key: "a", Title: "A", Status: todoDone},
 		{Key: "b", Title: "B", Status: todoDone},
-		{Key: "c", Title: "C", Status: todoPending},
+		{Key: "c", Title: "C", Status: todoPending, Instruction: &longInstruction},
 		{Key: "d", Title: "D", Status: todoWip},
 		{Key: "e", Title: "E", Status: todoDone},
 		{Key: "f", Title: "F", Status: todoDefer},
@@ -282,6 +287,7 @@ func TestRenderTodosSummaryAndFull(t *testing.T) {
 		"...",
 		"- [x] {b} B",
 		"- [ ] {c} C",
+		"      " + preview,
 		"- [~] {d} D",
 		"- [x] {e} E",
 		"...",
@@ -290,13 +296,27 @@ func TestRenderTodosSummaryAndFull(t *testing.T) {
 		t.Fatalf("summary render mismatch:\n got:\n%s\nwant:\n%s", got, wantSummary)
 	}
 	wantFull := strings.Join([]string{
-		"- [x] {a} A", "- [x] {b} B", "- [ ] {c} C", "- [~] {d} D", "- [x] {e} E", "- [>] {f} F", "- [x] {g} G",
+		"- [x] {a} A", "- [x] {b} B", "- [ ] {c} C", "      " + longInstruction, "- [~] {d} D", "- [x] {e} E", "- [>] {f} F", "- [x] {g} G",
 	}, "\n")
 	if got := renderTodos(list, true); got != wantFull {
 		t.Fatalf("full render mismatch:\n got:\n%s\nwant:\n%s", got, wantFull)
 	}
 	if got := renderTodos(nil, false); got != "(no todos)" {
 		t.Fatalf("empty render = %q", got)
+	}
+}
+
+func TestRenderTodosEmptyInstructionsOmitted(t *testing.T) {
+	empty := ""
+	list := []todoItem{
+		{Key: "nil", Title: "Nil", Status: todoPending},
+		{Key: "empty", Title: "Empty", Status: todoPending, Instruction: &empty},
+	}
+	for _, full := range []bool{false, true} {
+		got := renderTodos(list, full)
+		if strings.Contains(got, "\n      ") {
+			t.Fatalf("renderTodos(full=%v) rendered an instruction line for nil/empty instructions:\n%s", full, got)
+		}
 	}
 }
 
@@ -1422,6 +1442,39 @@ func TestServeStdioTodoInstructionReadSurface(t *testing.T) {
 	}
 }
 
+func TestServeStdioTodoListInstructionRendering(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903150, root, nil))
+	longInstruction := "Render this instruction preview through summary mode while preserving full mode details beyond sixty characters."
+	preview := todoInstructionPreview(longInstruction)
+
+	if got := callToolWithKey(t, server, 1, key, "ws.todo.append", map[string]any{
+		"key":         "render",
+		"title":       "Render instruction",
+		"instruction": longInstruction,
+	}); !strings.Contains(got, "todo appended: render") {
+		t.Fatalf("append unexpected: %s", got)
+	}
+
+	summary := callToolWithKey(t, server, 2, key, "ws.todo.list", nil)
+	if !strings.Contains(summary, "- [ ] {render} Render instruction\n      "+preview) {
+		t.Fatalf("summary list missing instruction preview:\n%s", summary)
+	}
+	if strings.Contains(summary, longInstruction) {
+		t.Fatalf("summary list rendered full instruction, want preview only:\n%s", summary)
+	}
+
+	full := callToolWithKey(t, server, 3, key, "ws.todo.list", map[string]any{"mode": "full"})
+	if !strings.Contains(full, "- [ ] {render} Render instruction\n      "+longInstruction) {
+		t.Fatalf("full list missing full instruction:\n%s", full)
+	}
+}
+
 func TestServeStdioTodoReorderHandler(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -1777,6 +1830,37 @@ func TestWorkflowManualContinueMode(t *testing.T) {
 	}
 	if !strings.Contains(resp, "Prep") {
 		t.Errorf("continue mode: todo 'Prep' absent from summary:\n%s", resp)
+	}
+}
+
+func TestWorkflowManualTodoInstructionPreview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 5110, root, nil))
+	longInstruction := "Restore this todo instruction through the workflow manual summary path without showing the extra full detail."
+	preview := todoInstructionPreview(longInstruction)
+
+	if got := callToolWithKey(t, server, 5111, key, "ws.todo.append", map[string]any{
+		"key":         "restore",
+		"title":       "Restore instruction",
+		"instruction": longInstruction,
+	}); !strings.Contains(got, "todo appended: restore") {
+		t.Fatalf("append unexpected: %s", got)
+	}
+
+	resp := callToolWithKey(t, server, 5112, key, "ws.workflow_manual", nil)
+	if !strings.Contains(resp, "### Todos") {
+		t.Fatalf("workflow manual response missing todo summary:\n%s", resp)
+	}
+	if !strings.Contains(resp, "- [ ] {restore} Restore instruction\n      "+preview) {
+		t.Fatalf("workflow manual missing instruction preview:\n%s", resp)
+	}
+	if strings.Contains(resp, longInstruction) {
+		t.Fatalf("workflow manual rendered full instruction, want preview only:\n%s", resp)
 	}
 }
 
