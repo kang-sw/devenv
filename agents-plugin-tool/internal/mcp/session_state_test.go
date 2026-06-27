@@ -78,7 +78,7 @@ func TestDeriveImplementTodosFromVerdictTitles(t *testing.T) {
 }
 
 func TestDeriveOtherEnterTodos(t *testing.T) {
-	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "resolve-verdict", "follow-next") {
+	if !eqKeys(keysOf(deriveProceedTodos()), "route-context", "resolve-verdict") {
 		t.Fatalf("proceed derivation mismatch: %v", keysOf(deriveProceedTodos()))
 	}
 	if !eqKeys(keysOf(deriveSprintTodos()), "edit", "verify", "commit", "post-edit", "wrap") {
@@ -625,7 +625,7 @@ func TestProceedNextInstructions(t *testing.T) {
 			name:     "implement instruction names playbook and pre-source boundary",
 			args:     proceedReadyArgs("text"),
 			wantNext: "lead-implement",
-			wantText: `Call wsflow/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
+			wantText: `Routing to next action: lead-implement. Call wsflow/playbook.print(name: "lead-implement"), then execute the returned playbook inline for this target and phase before inspecting source`,
 		},
 		{
 			name: "write ticket instruction names playbook and reroute",
@@ -635,7 +635,7 @@ func TestProceedNextInstructions(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantNext: "lead-write-ticket",
-			wantText: `Call wsflow/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns a ready Ticket path, rerun wsflow/enter.proceed`,
+			wantText: `Routing to next action: lead-write-ticket. Call wsflow/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun wsflow/enter.proceed`,
 		},
 		{
 			name: "discussion instruction names skill namespace",
@@ -645,7 +645,7 @@ func TestProceedNextInstructions(t *testing.T) {
 				"work":   map[string]any{"slice": "Phase 1: Demo"},
 			}),
 			wantNext: "lead-discuss",
-			wantText: `Continue through wsflow:lead-discuss with the blocker in Reason.`,
+			wantText: `Routing to next action: lead-discuss. Continue through wsflow:lead-discuss with the blocker in Reason.`,
 		},
 		{
 			name: "stop instruction does not invoke playbooks",
@@ -655,7 +655,7 @@ func TestProceedNextInstructions(t *testing.T) {
 				"work":   map[string]any{"slice": "whole target"},
 			}),
 			wantNext:   "stop",
-			wantText:   "Stop. Report the blocker in Reason",
+			wantText:   "Routing to next action: stop. Stop. Report the blocker in Reason",
 			wantNoText: "playbook.print",
 		},
 	}
@@ -682,7 +682,7 @@ func TestProceedNextInstructions(t *testing.T) {
 		})
 	}
 
-	if got := proceedNextInstruction("status-report"); !strings.Contains(got, "Report the status in Reason") {
+	if got := proceedNextInstruction("status-report"); !strings.Contains(got, "Routing to next action: status-report. Stop. Report the status in Reason") {
 		t.Fatalf("status-report instruction = %q", got)
 	}
 }
@@ -786,7 +786,7 @@ func TestEnterProceedStoresVerdictAgendaAndTodos(t *testing.T) {
 	if !ok {
 		t.Fatal("session record not found")
 	}
-	if !eqKeys(keysOf(record.Todos), "route-context", "resolve-verdict", "follow-next") {
+	if !eqKeys(keysOf(record.Todos), "route-context", "resolve-verdict") {
 		t.Fatalf("enter.proceed did not replace todo list: %v", keysOf(record.Todos))
 	}
 	var agenda proceedAgenda

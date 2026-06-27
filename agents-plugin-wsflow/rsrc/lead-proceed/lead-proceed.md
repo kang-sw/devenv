@@ -22,8 +22,8 @@ Pipeline
 - Proceed assumes implementation intent; stop when routing cannot safely reach implementation.
 
 Execution
-- Read MCP's `NEXT:` and `Next:` lines before execution; follow only that next-action instruction.
-- After the lead-write-ticket procedure returns with a ready `Ticket:` path, rebuild route context and resolve a new MCP verdict; otherwise stop and report the readiness blocker.
+- Read MCP's `Next:` line as the executable handoff instruction.
+- Do not add route-specific execution prose outside MCP's `Next:` instruction.
 
 ## Route Rules
 
@@ -32,7 +32,7 @@ Fact Ownership
 - Let `{{.McpNamespace}}/enter.proceed` select the deterministic route from normalized facts.
 - Keep uncertain judgments lead-owned; pass only the final fact value you can defend.
 - Treat MCP warnings as normalization notes, not as permission to re-solve the route.
-- Captured `Ticket:` paths follow the post-write re-route rules in Follow Next Instruction.
+- Captured `Ticket:` paths follow the post-write re-route rules in MCP's `Next:` instruction.
 
 Scope Resolution
 - Honor one explicit phase name exactly.
@@ -137,18 +137,7 @@ NEXT: <lead-discuss | lead-write-ticket | lead-implement | status-report | stop>
 Next: <concrete next-action instruction>
 ```
 
-### 3. Follow Next Instruction
-
-1. Read the MCP verdict's `NEXT:` and `Next:` lines.
-2. Briefly state `Routing to next action: <NEXT>.`
-3. Follow `Next:` exactly; do not restate the verdict in a separate Routing Verdict block.
-4. Proceed is routing-only: do not inspect source, edit files, plan implementation, or call implementation tools before the `lead-implement` playbook takes over.
-5. If `NEXT: stop` or `NEXT: status-report`, report the blocking condition, required user or workflow action, and any safe next request; do not invoke another skill.
-6. If `NEXT: lead-write-ticket`, capture its `Ticket:` path before downstream routing.
-7. If the captured path is not under `ai-docs/tickets/ready/`, stop and report the remaining readiness blocker.
-8. If a ready ticket path was captured, rebuild route context from that path and re-enter Resolve Verdict.
-9. After each invoked stage, verify its result from stage output and, when applicable, committed artifacts.
-10. Stop on failure or user interruption.
+Follow `Next:` exactly; do not restate the verdict in a separate Routing Verdict block.
 
 ## Judgments
 

@@ -429,12 +429,11 @@ func implementReviewTitle(reviewAlloc string) string {
 }
 
 // deriveProceedTodos mirrors lead-proceed "On: invoke": build route context,
-// resolve the MCP verdict, then follow the returned next-action instruction.
+// then resolve the MCP verdict with an executable Next instruction.
 func deriveProceedTodos() []todoItem {
 	return withPendingStatus([]todoItem{
 		{Key: "route-context", Title: "Build route context"},
 		{Key: "resolve-verdict", Title: "Resolve MCP verdict"},
-		{Key: "follow-next", Title: "Follow next instruction"},
 	})
 }
 

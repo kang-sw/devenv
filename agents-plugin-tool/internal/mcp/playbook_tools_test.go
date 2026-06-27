@@ -1495,7 +1495,6 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	for _, want := range []string{
 		`enter.proceed`,
 		`Next: <concrete next-action instruction>`,
-		"Routing to next action: <NEXT>.",
 		"Follow `Next:` exactly",
 		"select the deterministic route from normalized facts",
 		"scope_blocked=phase-already-complete",
@@ -1715,7 +1714,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 		},
 		{
 			skill:    "lead-proceed",
-			wantAll:  []string{"enter.proceed", `Next: <concrete next-action instruction>`, "Routing to next action: <NEXT>."},
+			wantAll:  []string{"enter.proceed", `Next: <concrete next-action instruction>`, "Follow `Next:` exactly"},
 			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 		{

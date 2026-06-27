@@ -656,11 +656,12 @@ the JSON `next_instruction`, proceed agenda storage, and proceed todo
 replacement; the playbook owns artifact reads, uncertain judgments,
 conversation freshness, migration-anchor checks, and user-facing discussion.
 `lead-proceed` does not restate a separate Routing Verdict or print a full route
-chain as the active execution instruction. It briefly reports
-`Routing to next action: <NEXT>.` and follows MCP's `Next:` instruction. After
-`lead-write-ticket` refresh or promotion returns, `lead-proceed` rebuilds route
-context and enters `ws.enter.proceed` again instead of continuing from an old
-verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
+chain as the active execution instruction. It follows MCP's `Next:` instruction,
+which includes the route announcement, downstream invocation, verification,
+failure, stop, and post-write reroute rails. After `lead-write-ticket` refresh or
+promotion returns, the `Next:` instruction requires `lead-proceed` to rebuild
+route context and enter `ws.enter.proceed` again instead of continuing from an
+old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
 `lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
 that playbook before source inspection, planning, editing, or
 implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
