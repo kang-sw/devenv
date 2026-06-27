@@ -281,9 +281,14 @@ Rendering lines include the visible key after the marker: `- [ ] {key} Title`,
 (the default and the checkpoint-injection mode) shows every pending/wip item plus
 one adjacent context item on each side of each contiguous active block,
 collapsing every other run to a single `...` line with no synthetic key or
-checkbox marker; `defer` collapses the same as `done`. Full mode shows every item
-in order. `ws.commit` does not auto-mark todos; status transitions are always
-explicit via `ws.todo.check`.
+checkbox marker; `defer` collapses the same as `done`. When an item has a
+non-empty instruction, summary rendering adds an indented second line containing
+at most the first 60 runes of that instruction; absent, null, or empty
+instructions render no second line. Full mode shows every item in order and
+renders each non-empty instruction in full on the indented second line. Workflow
+manual restoration uses the same summary rendering, so restored todos show the
+same 60-rune instruction previews. `ws.commit` does not auto-mark todos; status
+transitions are always explicit via `ws.todo.check`.
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 

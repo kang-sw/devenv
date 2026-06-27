@@ -494,22 +494,26 @@ the allocation default. Relay cap is 2 cycles for single-reviewer, 3 cycles for
 partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
 {#260612-reviewer-allocation-tier-default}
 
-Delegates in the review fix-loop are stateless: each implementer and reviewer
-dispatch is fed entirely by its relay prompt plus the self-contained artifact set
-(brief, plan, review findings, committed diff), and the loop stays correct when
-every cycle is a fresh spawn. Loop continuity is lead-owned — reconstructed from
-commit `## AI Context`, not from same-agent resume, which is only a latency
-optimization. The implementer records each fix-cycle disposition (won't-fix or
-deferred, with reason) inline in the fix commit `## AI Context`. The reviewer
-returns a severity-explicit verdict (`clean`, `clean with N minor remaining`, or
-`non-clean: M critical/important`); the lead, not a machine gate, decides clean.
-The re-review relay carries the prior findings, their dispositions, and the
-updated diff; the reviewer reviews the current diff per its charter and is not
-asked to classify regression-vs-preexisting. The lead enforces convergence by
-dedup against the durable disposition record — a settled finding is not
-re-relayed, only genuinely new Critical/Important findings are — layered over the
-relay cap as the backstop for the pathological case of a reviewer inventing new
-findings each cycle. {#260619-stateless-implement-review-continuity}
+Delegates in the review fix-loop are stateless by contract: each implementer and
+reviewer dispatch is fed entirely by its relay prompt plus the self-contained
+artifact set (brief, plan, review findings, committed diff), and the loop stays
+correct when every cycle is a fresh spawn. When the host supports same-agent
+resume, `lead-implement` may reuse the prior implementer or reviewer for fix and
+re-review loops to reduce latency, but resume never carries required state. Loop
+continuity is lead-owned — reconstructed from commit `## AI Context`, not from
+agent conversation memory. The implementer records each fix-cycle disposition
+(won't-fix or deferred, with reason) inline in the fix commit `## AI Context`.
+The reviewer returns a severity-explicit verdict (`clean`, `clean with N minor
+remaining`, or `non-clean: M critical/important`); the lead, not a machine gate,
+decides clean. The re-review relay carries the prior findings, their
+dispositions, a findings output path, and the updated diff; the reviewer writes
+full findings, reports the severity verdict, reviews the current diff per its
+charter, and is not asked to classify regression-vs-preexisting. The lead
+enforces convergence by dedup against the durable disposition record — a settled
+finding is not re-relayed, only genuinely new Critical/Important findings are —
+layered over the relay cap as the backstop for the pathological case of a
+reviewer inventing new findings each cycle.
+{#260619-stateless-implement-review-continuity}
 
 Plan population is an either/or depth choice for delegated mode. When plan depth
 is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
