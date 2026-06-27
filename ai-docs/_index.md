@@ -153,7 +153,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260624-feat-workflow-lead-language-config` | ready | Add `workflow.lang` config key so lead agent responds in user's preferred language while keeping CoT and subagent prompts in English |
+| `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -225,6 +225,14 @@ dropped tickets live in hidden archive dirs and git history.
   Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
   Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
   — gates the epic merge to `main`.
+- `260627-feat-enter-proceed-deterministic-verdict-engine` (ready, feat, child
+  of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
+  at the routing-facts-complete boundary. The playbook keeps fact gathering and
+  ambiguous judgments, while MCP owns normalized precedence, warnings, JSON
+  result shape, canonical raw verdict text, agenda storage, and proceed todo
+  replacement. Spec addressing via `## Spec Impact` (Contract-first: no —
+  ticket pins the implementation slice; closeout updates `workflow-skills` and
+  `mcp-tools`). Sage review posture: recommended, not yet completed.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
@@ -354,11 +362,6 @@ dropped tickets live in hidden archive dirs and git history.
   constraint:** tree-kills scoped
   to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
   because the dogfooding WSL2 host runs a live `claude.exe`.
-- `260624-feat-workflow-lead-language-config` (ready, feat) - add `workflow.lang`
-  config key; when set, `lead-workflow-manual` injects a language binding so the
-  lead agent responds in the user's preferred language while keeping CoT and all
-  subagent prompts in English. Phase 1: Go config schema + render var injection +
-  workflow-manual template.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
