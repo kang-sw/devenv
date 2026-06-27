@@ -2699,10 +2699,10 @@ func tools() []map[string]any {
 						"type":        "object",
 						"description": "Proceed target after lead-owned artifact reading.",
 						"properties": map[string]any{
-							"kind":        enumStringProperty("Target kind.", []string{"ticket-path", "inline", "unknown"}),
-							"label":       stringProperty("Short target label or summary."),
-							"ticket_stem": stringProperty("Ticket stem when applicable; null or omit when inapplicable."),
-							"ticket_path": stringProperty("Ticket path when applicable; null or omit when inapplicable."),
+							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket-path", "inline", "unknown"}),
+							"label":       nullableStringProperty("Short target label or summary."),
+							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
+							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
 						},
 					},
 					"facts": map[string]any{
@@ -2712,29 +2712,29 @@ func tools() []map[string]any {
 							"ticket": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"ticket_missing": enumStringProperty("Whether a ticket-path target is missing.", []string{"yes", "no", "unknown"}),
-									"has_ticket":     enumStringProperty("Whether the target has a ticket artifact.", []string{"yes", "no", "unknown"}),
-									"status":         enumStringProperty("Ticket status.", []string{"idea", "todo", "ready", "done", "dropped", "unknown", "n/a"}),
-									"category":       enumStringProperty("Ticket category.", []string{"epic", "workset", "other", "n/a", "unknown"}),
-									"actionable":     enumStringProperty("Actionability judgment.", []string{"yes", "no", "unknown"}),
-									"freshness":      enumStringProperty("Ticket freshness against active conversation decisions.", []string{"current", "missing-settled-decisions", "uncertain", "n/a", "unknown"}),
-									"phase":          stringProperty("Selected phase label when one is named."),
+									"ticket_missing": nullableEnumStringProperty("Whether a ticket-path target is missing.", []string{"yes", "no", "unknown"}),
+									"has_ticket":     nullableEnumStringProperty("Whether the target has a ticket artifact.", []string{"yes", "no", "unknown"}),
+									"status":         nullableEnumStringProperty("Ticket status.", []string{"idea", "todo", "ready", "done", "dropped", "unknown", "n/a"}),
+									"category":       nullableEnumStringProperty("Ticket category.", []string{"epic", "workset", "other", "n/a", "unknown"}),
+									"actionable":     nullableEnumStringProperty("Actionability judgment.", []string{"yes", "no", "unknown"}),
+									"freshness":      nullableEnumStringProperty("Ticket freshness against active conversation decisions.", []string{"current", "missing-settled-decisions", "uncertain", "n/a", "unknown"}),
+									"phase":          nullableStringProperty("Selected phase label when one is named."),
 								},
 							},
 							"gates": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"discussion_needed": enumStringProperty("Whether user-blocking discussion is needed.", []string{"yes", "no", "unknown"}),
-									"needs_ticket":      enumStringProperty("Whether an inline target needs a ticket first.", []string{"yes", "no", "n/a", "unknown"}),
-									"scope_blocked":     enumStringProperty("Scope blocker.", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}),
-									"migration_anchor":  enumStringProperty("Migration-anchor check result.", []string{"loaded", "n/a", "missing", "conflict", "unknown"}),
+									"discussion_needed": nullableEnumStringProperty("Whether user-blocking discussion is needed.", []string{"yes", "no", "unknown"}),
+									"needs_ticket":      nullableEnumStringProperty("Whether an inline target needs a ticket first.", []string{"yes", "no", "n/a", "unknown"}),
+									"scope_blocked":     nullableEnumStringProperty("Scope blocker.", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}),
+									"migration_anchor":  nullableEnumStringProperty("Migration-anchor check result.", []string{"loaded", "n/a", "missing", "conflict", "unknown"}),
 								},
 							},
 							"work": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"category": enumStringProperty("Current work category hint.", []string{"implementation", "ticket_write", "discussion", "status_report", "unknown"}),
-									"slice":    stringProperty("Resolved implementation slice, whole target, blocked, n/a, or unknown."),
+									"category": nullableEnumStringProperty("Current work category hint.", []string{"implementation", "ticket_write", "discussion", "status_report", "unknown"}),
+									"slice":    nullableStringProperty("Resolved implementation slice, whole target, blocked, n/a, or unknown."),
 								},
 							},
 						},
@@ -4018,6 +4018,13 @@ func stringProperty(description string) map[string]string {
 	}
 }
 
+func nullableStringProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        []string{"string", "null"},
+		"description": description,
+	}
+}
+
 func stringArrayProperty(description string) map[string]any {
 	return map[string]any{
 		"type":        "array",
@@ -4033,6 +4040,19 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"type":        "string",
 		"description": description,
 		"enum":        values,
+	}
+}
+
+func nullableEnumStringProperty(description string, values []string) map[string]any {
+	enumValues := make([]any, 0, len(values)+1)
+	for _, value := range values {
+		enumValues = append(enumValues, value)
+	}
+	enumValues = append(enumValues, nil)
+	return map[string]any{
+		"type":        []string{"string", "null"},
+		"description": description,
+		"enum":        enumValues,
 	}
 }
 

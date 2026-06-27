@@ -373,6 +373,18 @@ func TestResolveProceedRoutes(t *testing.T) {
 			wantCond:   "status=n/a",
 		},
 		{
+			name: "idea ticket routes to ticket writing",
+			args: proceedArgs("ticket-path", "idea ticket", nil, map[string]any{
+				"ticket": map[string]any{"status": "idea", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "ticket-readiness.status-refresh",
+			wantNext:   "lead-write-ticket",
+			wantReason: "status=idea",
+			wantCond:   "status=idea",
+		},
+		{
 			name: "todo ticket routes to ticket writing",
 			args: proceedArgs("ticket-path", "todo ticket", map[string]any{"ticket_path": "ai-docs/tickets/todo/260101-feat-demo.md"}, map[string]any{
 				"ticket": map[string]any{"status": "todo", "category": "other", "freshness": "current"},
@@ -395,6 +407,18 @@ func TestResolveProceedRoutes(t *testing.T) {
 			wantNext:   "stop",
 			wantReason: "status=done",
 			wantCond:   "status=done",
+		},
+		{
+			name: "dropped ticket stops",
+			args: proceedArgs("ticket-path", "dropped ticket", nil, map[string]any{
+				"ticket": map[string]any{"status": "dropped", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "whole target"},
+			}),
+			wantRoute:  "terminal-artifact.dropped",
+			wantNext:   "stop",
+			wantReason: "status=dropped",
+			wantCond:   "status=dropped",
 		},
 		{
 			name: "missing ticket stops",
@@ -431,7 +455,79 @@ func TestResolveProceedRoutes(t *testing.T) {
 			wantCond:   "scope-blocked=container-ticket",
 		},
 		{
-			name: "specific scope blocker preserved",
+			name: "workset container blocker preserved",
+			args: proceedArgs("ticket-path", "workset", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "workset", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "whole target"},
+			}),
+			wantRoute:  "container-ticket.workset",
+			wantNext:   "stop",
+			wantReason: "category=workset",
+			wantCond:   "scope-blocked=container-ticket",
+		},
+		{
+			name: "migration anchor missing stops",
+			args: proceedArgs("ticket-path", "anchor missing", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"migration_anchor": "missing", "scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "anchor-discussion.migration-anchor-missing",
+			wantNext:   "stop",
+			wantReason: "migration-anchor=missing",
+			wantCond:   "migration-anchor=missing",
+		},
+		{
+			name: "migration anchor conflict routes to discussion",
+			args: proceedArgs("ticket-path", "anchor conflict", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"migration_anchor": "conflict", "scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "anchor-discussion.migration-anchor-conflict",
+			wantNext:   "lead-discuss",
+			wantReason: "migration-anchor=conflict",
+			wantCond:   "discussion-needed=yes",
+		},
+		{
+			name: "discussion needed routes to discussion",
+			args: proceedArgs("ticket-path", "needs discussion", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"migration_anchor": "n/a", "scope_blocked": "none", "discussion_needed": "yes"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "anchor-discussion.discussion-needed",
+			wantNext:   "lead-discuss",
+			wantReason: "discussion-needed=yes",
+			wantCond:   "discussion-needed=yes",
+		},
+		{
+			name: "freshness refresh routes to ticket writing",
+			args: proceedArgs("ticket-path", "stale ticket", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "missing-settled-decisions"},
+				"gates":  map[string]any{"scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "Phase 1: Demo"},
+			}),
+			wantRoute:  "ticket-readiness.freshness-refresh",
+			wantNext:   "lead-write-ticket",
+			wantReason: "freshness=missing-settled-decisions",
+			wantCond:   "freshness=missing-settled-decisions",
+		},
+		{
+			name: "inline target needing ticket routes to ticket writing",
+			args: proceedArgs("inline", "public behavior change", nil, map[string]any{
+				"ticket": map[string]any{"actionable": "yes"},
+				"gates":  map[string]any{"needs_ticket": "yes", "scope_blocked": "none", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "whole target"},
+			}),
+			wantRoute:  "ticket-readiness.inline-needs-ticket",
+			wantNext:   "lead-write-ticket",
+			wantReason: "needs-ticket=yes",
+			wantCond:   "needs-ticket=yes",
+		},
+		{
+			name: "multiple explicit phases blocker preserved",
 			args: proceedArgs("ticket-path", "multi phase", nil, map[string]any{
 				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
 				"gates":  map[string]any{"scope_blocked": "multiple-explicit-phases", "discussion_needed": "no"},
@@ -441,6 +537,42 @@ func TestResolveProceedRoutes(t *testing.T) {
 			wantNext:   "stop",
 			wantReason: "scope-blocked=multiple-explicit-phases",
 			wantCond:   "scope-blocked=multiple-explicit-phases",
+		},
+		{
+			name: "too broad blocker preserved",
+			args: proceedArgs("ticket-path", "too broad", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "too-broad", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "blocked"},
+			}),
+			wantRoute:  "scope-gate.too-broad",
+			wantNext:   "stop",
+			wantReason: "scope-blocked=too-broad",
+			wantCond:   "scope-blocked=too-broad",
+		},
+		{
+			name: "no unfinished phase blocker preserved",
+			args: proceedArgs("ticket-path", "complete ticket", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "no-unfinished-phase", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "blocked"},
+			}),
+			wantRoute:  "scope-gate.no-unfinished-phase",
+			wantNext:   "stop",
+			wantReason: "scope-blocked=no-unfinished-phase",
+			wantCond:   "scope-blocked=no-unfinished-phase",
+		},
+		{
+			name: "phase already complete blocker preserved",
+			args: proceedArgs("ticket-path", "completed phase", nil, map[string]any{
+				"ticket": map[string]any{"status": "ready", "category": "other", "freshness": "current"},
+				"gates":  map[string]any{"scope_blocked": "phase-already-complete", "discussion_needed": "no"},
+				"work":   map[string]any{"slice": "blocked"},
+			}),
+			wantRoute:  "scope-gate.phase-already-complete",
+			wantNext:   "stop",
+			wantReason: "scope-blocked=phase-already-complete",
+			wantCond:   "scope-blocked=phase-already-complete",
 		},
 		{
 			name: "partial route stops conservatively",
@@ -471,6 +603,80 @@ func TestResolveProceedRoutes(t *testing.T) {
 				t.Fatalf("conditions %v do not contain %q", got.Conditions, tc.wantCond)
 			}
 		})
+	}
+}
+
+func TestProceedInputRejectsNonStringFactTypes(t *testing.T) {
+	_, err := parseProceedInput(proceedArgs("ticket-path", "bad type", nil, map[string]any{
+		"ticket": map[string]any{"status": 123},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "status must be a string or null") {
+		t.Fatalf("non-string fact error = %v, want status type error", err)
+	}
+}
+
+func TestEnterProceedSchemaAdvertisesNullableFacts(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	properties := toolPropertiesByName(t, callToolsList(t, server), "ws.enter.proceed")
+	target := objectProperties(t, properties["target"])
+	assertNullableSchema(t, target["ticket_path"])
+	assertNullableSchema(t, target["kind"])
+
+	facts := objectProperties(t, properties["facts"])
+	ticketFacts := objectProperties(t, facts["ticket"])
+	gateFacts := objectProperties(t, facts["gates"])
+	workFacts := objectProperties(t, facts["work"])
+	for name, schema := range map[string]any{
+		"ticket.status":          ticketFacts["status"],
+		"ticket.phase":           ticketFacts["phase"],
+		"gates.scope_blocked":    gateFacts["scope_blocked"],
+		"gates.migration_anchor": gateFacts["migration_anchor"],
+		"work.slice":             workFacts["slice"],
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertNullableSchema(t, schema)
+		})
+	}
+}
+
+func objectProperties(t *testing.T, raw any) map[string]any {
+	t.Helper()
+	obj, _ := raw.(map[string]any)
+	props, _ := obj["properties"].(map[string]any)
+	if props == nil {
+		t.Fatalf("schema missing object properties: %#v", raw)
+	}
+	return props
+}
+
+func assertNullableSchema(t *testing.T, raw any) {
+	t.Helper()
+	schema, _ := raw.(map[string]any)
+	types, _ := schema["type"].([]any)
+	hasString, hasNull := false, false
+	for _, typ := range types {
+		switch typ {
+		case "string":
+			hasString = true
+		case "null":
+			hasNull = true
+		}
+	}
+	if !hasString || !hasNull {
+		t.Fatalf("schema type = %#v, want string+null in %#v", schema["type"], schema)
+	}
+	if enumValues, ok := schema["enum"].([]any); ok {
+		hasNullEnum := false
+		for _, value := range enumValues {
+			if value == nil {
+				hasNullEnum = true
+				break
+			}
+		}
+		if !hasNullEnum {
+			t.Fatalf("nullable enum missing null value: %#v", enumValues)
+		}
 	}
 }
 

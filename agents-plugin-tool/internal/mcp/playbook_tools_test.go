@@ -1495,7 +1495,12 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	for _, want := range []string{
 		`enter.proceed`,
 		`playbook.print(name: "lead-implement")`,
+		`playbook.print(name: "lead-write-ticket")`,
+		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
 		"select the deterministic route from normalized facts",
+		"scope_blocked=phase-already-complete",
+		"scope_blocked=no-unfinished-phase",
+		"slice=whole target",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
