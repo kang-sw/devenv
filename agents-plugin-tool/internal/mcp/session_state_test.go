@@ -14,6 +14,8 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
+const implementPrepGuardrails = `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, read the 260605 migration anchor when target touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, and read infra.read("impl-playbook"). `
+
 // keysOf extracts the ordered key sequence of a todo list for assertions.
 func keysOf(list []todoItem) []string {
 	out := make([]string, len(list))
@@ -138,12 +140,57 @@ func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
 		NeedDoc:     true,
 	})
 	prep := requireInstruction(t, todoByKey(t, got, "prep"))
-	if prep != "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch." {
+	if prep != implementPrepGuardrails+"Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch." {
 		t.Fatalf("prep instruction = %q", prep)
 	}
 	edit := requireInstruction(t, todoByKey(t, got, "edit"))
 	if edit != "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and survey plan; capture the implemented commit range for review and relays." {
 		t.Fatalf("edit instruction = %q", edit)
+	}
+}
+
+func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		depth    string
+		wantTail string
+	}{
+		{
+			name:     "none",
+			depth:    "none",
+			wantTail: "Confirm the direct-edit facts are still accurate",
+		},
+		{
+			name:     "brief",
+			depth:    "brief",
+			wantTail: "Prepare and commit the implementation brief with the Brief template",
+		},
+		{
+			name:     "survey",
+			depth:    "survey",
+			wantTail: "run the survey plan path with Delegate dispatch and Plan prompts",
+		},
+		{
+			name:     "research",
+			depth:    "research",
+			wantTail: "run the research plan path with Delegate dispatch and Plan prompts",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+				Delegation:  "delegated",
+				BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+				PlanDepth:   tc.depth,
+				ReviewAlloc: "lead-only",
+				DocMode:     "skipped",
+			})
+			prep := requireInstruction(t, todoByKey(t, got, "prep"))
+			for _, want := range []string{"mental-model lookup", "260605 migration anchor", `infra.read("impl-playbook")`, tc.wantTail} {
+				if !strings.Contains(prep, want) {
+					t.Fatalf("prep instruction for %s missing %q: %q", tc.name, want, prep)
+				}
+			}
+		})
 	}
 }
 
@@ -1478,11 +1525,11 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
 		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
 	}
-	if prepPayload.Instruction == nil || *prepPayload.Instruction != "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch." {
+	if prepPayload.Instruction == nil || *prepPayload.Instruction != implementPrepGuardrails+"Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch." {
 		t.Fatalf("prep instruction = %#v", prepPayload.Instruction)
 	}
 	full := callToolWithKey(t, server, 5, key, "ws.todo.list", map[string]any{"mode": "full"})
-	if !strings.Contains(full, "- [ ] {prep} Prep (brief + survey plan)\n      Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch.") {
+	if !strings.Contains(full, "- [ ] {prep} Prep (brief + survey plan)\n      "+implementPrepGuardrails+"Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch.") {
 		t.Fatalf("full todo list missing enter-derived instruction:\n%s", full)
 	}
 }

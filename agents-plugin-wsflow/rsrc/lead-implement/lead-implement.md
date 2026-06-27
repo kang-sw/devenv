@@ -40,7 +40,7 @@ Review
 3. Gather normalized `target`, `facts`, and `policy` for `{{.McpNamespace}}/enter.implement`; do not choose final labels such as delegation, branch mode, plan depth, review allocation, review need, or documentation need.
 4. Use `unknown` for facts that cannot be defended from the ticket, conversation, or loaded docs.
 5. Put only explicit caller/user policy in `policy`; do not mirror observable Git state.
-6. Use the lead `session_key` supplied by the rendered credential block; if absent, stop before `{{.McpNamespace}}/enter.implement` and report that routing cannot start.
+6. Use the current lead `session_key` established through `{{.McpNamespace}}/workflow_manual`; if no lead key is available, stop before `{{.McpNamespace}}/enter.implement` and report that routing cannot start.
 7. Call `{{.McpNamespace}}/enter.implement`:
 
 ```json

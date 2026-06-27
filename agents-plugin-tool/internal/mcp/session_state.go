@@ -509,17 +509,18 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not prepare further implementation work until the branch blocker is resolved: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
+	const guardrails = `Before edits or dispatch, run mental-model lookup, read returned docs ancestors first, read the 260605 migration anchor when target touches plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries, and read infra.read("impl-playbook"). `
 	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 	case "none", "":
-		return "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
+		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
 	case "brief":
-		return "Prepare and commit the implementation brief with the Brief template before edits; include only selected-scope references and contract instructions."
+		return guardrails + "Prepare and commit the implementation brief with the Brief template before edits; include only selected-scope references and contract instructions."
 	case "survey":
-		return "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch."
+		return guardrails + "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch."
 	case "research":
-		return "Prepare and commit the implementation brief, then run the research plan path with Delegate dispatch and Plan prompts before implementer dispatch."
+		return guardrails + "Prepare and commit the implementation brief, then run the research plan path with Delegate dispatch and Plan prompts before implementer dispatch."
 	default:
-		return "Prepare the implementation context required by the selected verdict before edits."
+		return guardrails + "Prepare the implementation context required by the selected verdict before edits."
 	}
 }
 
