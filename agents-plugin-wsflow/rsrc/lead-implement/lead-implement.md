@@ -26,9 +26,9 @@ Execution
 
 Review
 - Reviewer count and partitions come from `review_alloc`.
-- Lead owns the clean decision from severity verdicts.
+- Lead aggregates reviewer severity verdicts and records final review status.
 - Fix correctness, security, contract, and regression findings; reject style-only or scope-expanding findings with reasons.
-- Relay only new Critical/Important findings; record minor findings in the review summary.
+- Relay only unresolved Critical/Important findings; record minor findings in the review summary.
 - Preserve settled or deferred dispositions.
 - Summarize review evidence before deleting temporary review files.
 
@@ -110,7 +110,7 @@ Policy rules:
 1. Run `{review}` when installed.
 2. Dispatch reviewers with **Reviewer table** and **Reviewer prompt frame**.
 3. If `review_alloc=lead-only`, review directly and record the verdict; if `single`, dispatch `reviewer`; if `partitioned`, dispatch selected table rows.
-4. For non-clean Critical/Important findings, classify, fix or reject, then use **Review relay dispatch** and **Re-review prompt** for affected partitions.
+4. For non-clean Critical/Important findings, classify accepted, rejected, and deferred dispositions; dispatch **Review relay dispatch** for accepted fixes, then use **Re-review prompt** for affected partitions.
 5. Record verdicts, minor findings, unresolved disputes, accepted/rejected findings, and review-clean status.
 
 ### 6. Documentation
@@ -247,8 +247,8 @@ Required checks:
 
 Instructions:
 - Ignore outside this partition unless directly broken by the diff.
-- Write full findings to the findings path.
-- Return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
+- Write detailed findings to the findings path.
+- In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
 
 ### Review relay dispatch
@@ -268,13 +268,13 @@ disposition notes, verification expectations, and reporting requirements.
 
 ```text
 Re-review. Rely only on this prompt and named paths.
-Updated diff: <diff>
-Prior findings and dispositions: <findings with [fixed] / [won't fix: <reason>] / [deferred: <reason>]>
+Updated diff range or patch path: <range-or-path>
+Prior findings and dispositions path: <path>
 Findings path: <partition-output-path>
 Verify [fixed] items and report new issues introduced by the updated diff.
 For each [won't fix], respond [accepted] or [maintained: <brief reason>].
-Write full findings to the findings path.
-Return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
+Write detailed findings to the findings path.
+In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
 
 ## Doctrine
