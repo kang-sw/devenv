@@ -45,6 +45,10 @@ resolution plus agenda/todo update.
   MCP verdict, and proceed according to the returned `NEXT`.
 - The final MCP output must include raw verdict text that lets the LLM clearly
   know which direction to proceed next without re-solving the route matrix.
+- The schema and rendered conditions must preserve the current `lead-proceed`
+  route vocabulary wherever it is already load-bearing. Renaming or collapsing
+  facts into broad buckets is not acceptable when the current playbook has a
+  specific deterministic input or stop reason.
 - Conflicting or inapplicable facts should not usually block workflow progress.
   Normalize deterministically, emit non-blocking warnings, and choose the
   conservative route.
@@ -64,29 +68,30 @@ grouped optional/nullable `facts` object:
 {
   "session_key": "<lead-session-key>",
   "target": {
-    "kind": "ticket | inline | unknown",
+    "kind": "ticket-path | inline | unknown",
     "label": "string",
     "ticket_stem": "string | null",
     "ticket_path": "string | null"
   },
   "facts": {
     "ticket": {
-      "resolution": "found | missing | not_applicable | unknown",
-      "status": "ready | todo | idea | done | dropped | unknown | null",
-      "category": "feat | bug | refactor | chore | epic | research | workset | unknown | null",
+      "ticket_missing": "yes | no | unknown | null",
+      "has_ticket": "yes | no | unknown | null",
+      "status": "idea | todo | ready | done | dropped | unknown | n/a | null",
+      "category": "epic | workset | other | n/a | unknown | null",
       "actionable": "yes | no | unknown | null",
-      "freshness": "current | stale | uncertain | unknown | null",
+      "freshness": "current | missing-settled-decisions | uncertain | n/a | unknown | null",
       "phase": "string | null"
     },
     "gates": {
       "discussion_needed": "yes | no | unknown",
-      "needs_ticket": "yes | no | unknown",
-      "scope_blocker": "none | container_ticket | completed | dropped | missing_ticket | missing_anchor | ambiguous_target | broad_scope | dirty_worktree | user_decision | other | unknown",
-      "migration_anchor": "none | current | missing | conflict | unknown"
+      "needs_ticket": "yes | no | n/a | unknown",
+      "scope_blocked": "none | container-ticket | multiple-explicit-phases | too-broad | no-unfinished-phase | phase-already-complete | unknown",
+      "migration_anchor": "loaded | n/a | missing | conflict | unknown"
     },
     "work": {
       "category": "implementation | ticket_write | discussion | status_report | unknown",
-      "slice": "single | multi | whole_target | unknown"
+      "slice": "Phase N[: title] | whole target | blocked | n/a | unknown"
     }
   },
   "format": "text | json"
@@ -98,13 +103,39 @@ Schema direction:
 - `target` is required; individual nested fields may be nullable when inapplicable
   or unavailable.
 - `facts` groups are optional so partial callers can still enter proceed mode.
-  Missing fields normalize to `unknown` or `not_applicable` according to the
+  Missing fields normalize to `unknown` or verdict-facing `n/a` according to the
   deterministic precedence table.
 - `null` means the axis is inapplicable or intentionally not observed.
 - `unknown` means the axis applies but the caller could not determine it.
 - Contradictions are resolved by precedence, not by LLM judgment. For example,
-  `target.kind=inline` makes ticket status inapplicable, and
-  `ticket.resolution=missing` wins over any supplied ready status.
+  `target.kind=inline` makes ticket status `n/a`, and `ticket-missing=yes` wins
+  over any supplied ready status.
+- JSON property names may use Go/JSON-friendly snake_case, but normalized
+  conditions, raw verdict lines, warnings, agenda `conditions`, and tests must
+  preserve the current hyphenated route vocabulary.
+
+Current route vocabulary that must be preserved:
+
+| Fact | Required values |
+|------|-----------------|
+| `target-kind` | `ticket-path`, `inline` |
+| `ticket-missing` | `yes`, `no` |
+| `has-ticket` | `yes`, `no` |
+| `status` | `idea`, `todo`, `ready`, `done`, `dropped`, `unknown`, `n/a` |
+| `migration-anchor` | `loaded`, `n/a`, `missing`, `conflict` |
+| `actionable` | `yes`, `no` |
+| `discussion-needed` | `yes`, `no` |
+| `needs-ticket` | `yes`, `no`, `n/a` |
+| `freshness` | `current`, `missing-settled-decisions`, `uncertain`, `n/a` |
+| `category` | `epic`, `workset`, `other`, `n/a` |
+| `slice` | `Phase N[: title]`, `whole target`, `blocked`, `n/a` |
+| `scope-blocked` | `none`, `container-ticket`, `multiple-explicit-phases`, `too-broad`, `no-unfinished-phase`, `phase-already-complete` |
+
+The resolver may add internal enum values only when they normalize to one of
+these verdict-facing values or are explicitly documented as new route vocabulary
+in the implementation closeout. It must not collapse specific current blockers
+such as `multiple-explicit-phases`, `too-broad`, `no-unfinished-phase`, or
+`phase-already-complete` into `other`.
 
 The internal resolver should produce a stable result object:
 
@@ -120,12 +151,13 @@ The internal resolver should produce a stable result object:
   "phase": "Phase 1: Example",
   "reason": "status=ready and actionable=yes",
   "conditions": [
-    "target=ticket",
-    "ticket=found",
+    "target-kind=ticket-path",
+    "ticket-missing=no",
+    "has-ticket=yes",
     "status=ready",
     "actionable=yes",
     "discussion-needed=no",
-    "scope-blocker=none"
+    "scope-blocked=none"
   ],
   "warnings": [],
   "agenda": {
@@ -135,7 +167,7 @@ The internal resolver should produce a stable result object:
     "conditions": [
       "status=ready",
       "actionable=yes",
-      "scope-blocker=none"
+      "scope-blocked=none"
     ]
   },
   "todo_replaced": true,
@@ -161,12 +193,13 @@ Phase: Phase 1: Example
 Reason: status=ready and actionable=yes
 
 Conditions:
-- target=ticket
-- ticket=found
+- target-kind=ticket-path
+- ticket-missing=no
+- has-ticket=yes
 - status=ready
 - actionable=yes
 - discussion-needed=no
-- scope-blocker=none
+- scope-blocked=none
 
 Warnings:
 - none
@@ -209,6 +242,10 @@ Required behavior:
   raw verdict text.
 - Extract all deterministic route rules that can be moved from the
   `lead-proceed` playbook into that resolver.
+- Preserve current verdict-facing route vocabulary exactly for the existing
+  facts and blockers: `ticket-missing`, `has-ticket`, `status`, `migration-anchor`,
+  `actionable`, `discussion-needed`, `needs-ticket`, `freshness`, `category`,
+  `slice`, and `scope-blocked`.
 - Keep ambiguous judgments in the playbook. The LLM still owns reading artifacts,
   deciding uncertain facts, and asking the user when a fact cannot safely be
   resolved.
