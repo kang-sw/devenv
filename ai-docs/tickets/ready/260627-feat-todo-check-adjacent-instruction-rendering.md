@@ -81,3 +81,22 @@ Verification boundary: focused MCP/session-state tests cover checkpoint
 rendering, existing summary/full rendering tests still pass, `go test
 ./internal/mcp -count=1` passes, `spec_index.verify` passes, and `git diff
 --check` passes.
+
+### Result (79709776) - 2026-06-27
+
+Implemented `ws.todo.check` checkpoint rendering as raw text after successful
+status changes. The response now includes the compact status confirmation plus
+the full ordered todo list, expanding full `instruction` text only for immediate
+previous or next actionable items in the post-update order. Adjacent `done`,
+`defer`, missing-instruction, empty-instruction, checked, and non-adjacent items
+stay compact.
+
+Updated the public tool schema description, `ai-docs/spec/mcp-tools.md`, and
+`ai-docs/mental-model/mcp-runtime.md` to document the checkpoint output and the
+intentional absence of a `format: json` path.
+
+Verification passed for focused MCP/session-state tests, `go test
+./internal/mcp -count=1`, `go test ./... -count=1`, `git diff --check`, and
+`spec_index.verify`. Correctness, fit, and test review partitions were clean;
+review artifacts are under
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/5c17b5cc-*`.
