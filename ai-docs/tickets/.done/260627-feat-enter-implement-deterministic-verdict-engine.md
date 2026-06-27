@@ -11,6 +11,7 @@ related-mental-model:
   - workflow-skills
   - mcp-runtime
   - git-workflow-tools
+completed: 2026-06-27
 ---
 
 # Deterministic enter.implement strategy and branch verdict resolution
@@ -421,3 +422,44 @@ Verification:
   lead-implement body.
 - Verify `ws.todo.read(key)` or `ws.todo.list(mode: "full")` exposes the full
   focused instruction for each reachable todo.
+
+### Result (29bdfd69) - 2026-06-27
+
+Completed Phase 2 by focusing `lead-implement` on the todo instruction runbook
+installed by `ws.enter.implement`.
+
+Completed:
+
+- Reduced always-rendered `lead-implement` post-verdict prose so branch, edit,
+  review, documentation, final-action, and merge execution guidance is driven by
+  focused todo instructions instead of unreachable conditional branches in the
+  playbook body.
+- Preserved Route fact gathering, Implementation Verdict handoff, lead-owned
+  execution judgments, delegate dispatch, and prompt templates in the shared
+  `lead-implement` playbook.
+- Strengthened `ws.enter.implement` todo instruction prose for direct-edit,
+  delegated implementation, lead-only review, partitioned review, skipped docs,
+  branch-stop blockers, documentation gates, final action, and merge.
+- Fixed review-cycle findings so the playbook uses the current lead key
+  established through `workflow_manual`, and non-stop prep todo instructions
+  carry mental-model lookup, ancestor reads, conditional migration-anchor
+  loading, and `infra.read("impl-playbook")` before edits or dispatch.
+- Regenerated the canonical rsrc manifest and byte-identical wsflow rsrc mirror.
+
+Verification:
+
+- `go test ./internal/mcp -count=1 -run 'TestDeriveImplementTodoInstructions|TestEnterImplement|TestPlaybookPrintGoldenLeadImplement|TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands'`
+- `WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateShippedManifest`
+- `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./... -count=1`
+- `git diff --check`
+- `ws/spec_index_verify`
+- Partitioned review: Correctness and Fit were non-clean once, fixed in
+  `29bdfd69`, and clean on re-review; Test was clean.
+
+
+## Resolution (2026-06-27)
+
+Phases 1 and 2 completed. Phase 1 moved deterministic implementation strategy, branch preflight, JSON/raw verdict output, agenda storage, and todo replacement into `ws.enter.implement`. Phase 2 made the verdict-derived todo list the authoritative post-verdict runbook, reduced unreachable always-rendered `lead-implement` prose, preserved lead-owned execution judgments and delegate templates, updated specs and mental models, and passed partitioned review after one fix cycle.
