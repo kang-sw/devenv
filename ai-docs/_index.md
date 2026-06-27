@@ -234,12 +234,12 @@ dropped tickets live in hidden archive dirs and git history.
   result shape, canonical raw verdict text, `next_instruction`, agenda storage,
   and proceed todo replacement. Spec addressing via `## Spec Impact`
   (Contract-first: no — ticket pins the implementation slice; closeout updates
-  `workflow-skills` and `mcp-tools`). Sage review completed. **Phases 1+2 done**
+  `workflow-skills` and `mcp-tools`). Sage review completed. **Phases 1-3 done**
   on branch `implement/260627-enter-proceed-verdict-engine` (latest
-  `f41f7d52`), unmerged: deterministic `ws.enter.proceed` resolver, canonical
-  raw/JSON verdict output, concrete raw/JSON next-action directives,
-  agenda/todo replacement, lead-proceed MCP handoff, docs, manifests, wsflow
-  mirror, and partitioned review clean for Phase 1.
+  `cc930648`), unmerged: deterministic `ws.enter.proceed` resolver, canonical
+  raw/JSON verdict output, concrete raw/JSON next-action directives with common
+  follow rails, two-item proceed todo replacement, lead-proceed MCP handoff,
+  docs, manifests, wsflow mirror, and partitioned review clean for Phase 1.
 - `260627-feat-enter-implement-deterministic-verdict-engine` (ready, feat, child
   of 260605) - follow the proceed verdict-engine pattern for `lead-implement`.
   `ws.enter.implement` should accept `target + facts + policy`, derive

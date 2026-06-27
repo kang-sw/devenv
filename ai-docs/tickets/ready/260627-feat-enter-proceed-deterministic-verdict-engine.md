@@ -469,6 +469,30 @@ Verification boundary:
 - Manifest and wsflow mirror are regenerated if shared rsrc changes.
 - `git diff --check` passes.
 
+### Result (cc930648)
+
+Phase 3 is implemented on branch
+`implement/260627-enter-proceed-verdict-engine`.
+
+Implemented:
+
+- MCP-authored `next_instruction` / raw `Next:` text now includes the route
+  announcement, downstream invocation, verification, failure/user-interruption
+  handling, stop behavior, and post-write reroute rails where applicable.
+- `lead-proceed` no longer has a separate `Follow Next Instruction` section or
+  route-specific common follow rails.
+- Proceed todo replacement now contains only `Build route context` and
+  `Resolve MCP verdict`.
+- The shared `lead-proceed` rsrc, canonical manifest, and wsflow rsrc mirror were
+  regenerated.
+
+Verification:
+
+- `go test ./internal/mcp -count=1`
+- `go test ./internal/wsrsrc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
 ## Spec Impact
 
 - **Target spec areas:** `workflow-skills.md` (`lead-proceed` route boundary,
