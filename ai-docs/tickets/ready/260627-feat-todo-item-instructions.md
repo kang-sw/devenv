@@ -163,6 +163,27 @@ Verification:
 - Unit-test full rendering with untruncated instruction text.
 - Unit-test `ws.workflow_manual(session_key: ...)` todo rendering uses previews.
 
+### Result (07ce9354) - 2026-06-27
+
+Implemented Phase 2 rendering behavior.
+
+- Rendered non-empty todo instructions as indented second lines under todo
+  titles.
+- Used a 60-rune preview for summary/default rendering, including workflow
+  manual restored todo reminders.
+- Rendered full instruction text in `ws.todo.list(mode: "full")`.
+- Kept absent, null, and empty instructions from rendering a second line.
+- Strengthened tests after review so preview expectations are independent from
+  the production preview helper.
+
+Verification:
+
+- `go test ./internal/mcp -count=1 -run 'TestTodo|TestRenderTodos|TestWorkflowManual|TestServeStdioTodo'`
+- `go test ./... -count=1`
+- `git diff --check`
+- Partitioned review: correctness clean, fit clean, test clean after one fix
+  cycle (`d95c310e`).
+
 ### Phase 3: Enter-tool instruction producers
 
 Make enter tools populate focused instructions where deterministic routing facts
