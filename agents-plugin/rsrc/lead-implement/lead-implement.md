@@ -91,11 +91,12 @@ Review
 
 1. Read the returned `raw` Implementation Verdict and `next_instruction`.
 2. Treat MCP warnings as normalization notes, not permission to re-solve final labels.
-3. If `Branch Action: stop`, stop before source edits and report the blocker.
-4. If `Branch Action: create`, create the target implementation branch before source edits.
-5. If `Branch Action: rename`, rename the current branch before source edits.
-6. If `Branch Action: continue`, continue on the current implementation branch.
-7. Continue immediately to Prep after the branch action succeeds.
+3. Treat the todo list replaced by `{{.McpNamespace}}/enter.implement` as authoritative; do not recreate a separate manual task list.
+4. If `Branch Action: stop`, stop before source edits and report the blocker.
+5. If `Branch Action: create`, create the target implementation branch before source edits.
+6. If `Branch Action: rename`, rename the current branch before source edits.
+7. If `Branch Action: continue`, continue on the current implementation branch.
+8. Continue immediately to Prep after the branch action succeeds.
 
 ### 3. Prep
 
@@ -108,19 +109,6 @@ Review
 7. If `plan_depth` is `survey` or `research`: discover reference docs by dispatching `reference-discovery` per **Delegate dispatch** (task input: target or domain); capture `[Must|Maybe]` doc references. This delegate reads docs only; source-level reference mapping happens in the plan-populator step.
 8. If delegated or `plan_depth` is `brief`, `survey`, or `research`: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; if the migration anchor was read, copy every binding implementation constraint into the brief and add the anchor as a `[Must]` reference; audit against target before committing or running plan population; commit.
 9. If `plan_depth` is `survey` or `research`: run the plan populator by dispatching `plan-populator-survey` per **Delegate dispatch** with **Plan prompts** as the task input; if survey returns `[escalate-to-research]`, re-dispatch `plan-populator-research`; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
-10. Create and maintain task list:
-
-```text
-[ ] Route - facts, policy, and MCP implementation verdict
-[ ] Prep - branch, context, brief/plan (per plan-depth)
-[ ] Edit - direct-edit or spawn implementer; capture commit range
-[ ] Review - run reviewer relay according to MCP `review_alloc`
-[ ] Doc pre-pass - call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute inline, then `mental-model-updater`; commit each
-[ ] Doc commit gate - refresh _index.md, ticket status, then commit docs
-[ ] Doc closeout compaction - compact safe documentation-only branch-tip suffix
-[ ] Final action gate - wait for merge, continue, or stop
-[ ] Merge - only when approved
-```
 
 ### 4. Edit
 
