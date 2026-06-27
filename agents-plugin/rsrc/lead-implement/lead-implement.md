@@ -134,13 +134,14 @@ Run `{merge}` only after user approval. Merge to the verdict or caller-approved 
 
 ### Delegate dispatch
 
-1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier`.
+1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier` as dispatch metadata.
 2. For `implementer`, pass only declared file-first context: `BriefPath`, `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`.
-3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; collect summary or required output file.
+3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text.
+4. Collect a textual completion report unless `ResultExpectations` names an output file; when an output file is named, require that file and a short completion summary.
 <!-- ws:full-only:start -->
-4. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
+5. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->
-5. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
+6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
 ### Brief template
 
@@ -211,7 +212,6 @@ Read the survey output, then replace the file with a research plan.
 
 ```text
 Rendered implementer prompt: <prompt-path>
-Recommended tier: <recommended-tier>
 
 Read that prompt file and execute it. It contains the brief path, optional plan
 path, verification expectations, commit-range guidance, and reporting

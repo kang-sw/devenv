@@ -877,9 +877,12 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 		"Alias model for this role: gpt-5.5.",
 		"Brief path: `ai-docs/.plans/brief.md`",
 		"Plan path: `ai-docs/.plans/plan.md`",
-		"Verification hint: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
-		"Result expectations: Report outcome, files changed, commits, verification, and blockers.",
-		"Commit-range hint: Report <first-commit>..<last-commit> after committing logical checkpoints.",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
+		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
+		"Do not read ticket files directly, even when a ticket path appears in the brief, plan, or references",
+		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
+		"Always include final commit hash and commit range, or `none` with reason.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer render missing %q:\n%s", want, body)
@@ -1498,8 +1501,9 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Delegate dispatch",
 		"Implementer spawn prompt",
 		"Rendered implementer prompt: <prompt-path>",
-		"Recommended tier: <recommended-tier>",
 		"contains the brief path, optional plan",
+		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
+		"Collect a textual completion report unless `ResultExpectations` names an output file",
 		"Reviewer prompt frame",
 		"Review relay prompt",
 		"Mercenary path:",
@@ -1508,6 +1512,9 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
+		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
 	}
 	for _, forbidden := range []string{
 		"If `Branch Action: create`",
