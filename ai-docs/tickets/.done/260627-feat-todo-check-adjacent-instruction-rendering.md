@@ -3,6 +3,7 @@ title: Todo check adjacent instruction rendering
 sage-review: skipped
 spec:
   - 260625-session-state-tools
+completed: 2026-06-27
 ---
 
 # Todo check adjacent instruction rendering
@@ -100,3 +101,8 @@ Verification passed for focused MCP/session-state tests, `go test
 `spec_index.verify`. Correctness, fit, and test review partitions were clean;
 review artifacts are under
 `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/5c17b5cc-*`.
+
+
+## Resolution (2026-06-27)
+
+Phase 1 shipped on branch `implement/260627-todo-check-adjacent-instruction-rendering`. `ws.todo.check` now returns raw/text confirmation plus a post-update focused checkpoint todo rendering. Verification passed: `go test ./internal/mcp -count=1`, `go test ./... -count=1`, `git diff --check`, and `ws/spec_index.verify`. Partitioned correctness, fit, and test reviews were clean.
