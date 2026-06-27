@@ -964,6 +964,9 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		commitResp := toolText(t, byID["5302"])
 
 		// Assert that the commit response contains a todo summary fragment.
+		if !strings.Contains(commitResp, "## TODO(ws reminder: update this if stale)") {
+			t.Errorf("git.commit re-injection: reminder heading absent from response:\n%s", commitResp)
+		}
 		if !strings.Contains(commitResp, "Route") && !strings.Contains(commitResp, "- [") {
 			t.Errorf("git.commit re-injection: todo summary absent from response:\n%s", commitResp)
 		}
@@ -1004,7 +1007,7 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 		commitResp := toolText(t, byID["5401"])
 		// No todo summary section appended.
-		if strings.Contains(commitResp, "Todo (post-commit)") {
+		if strings.Contains(commitResp, "Todo (post-commit)") || strings.Contains(commitResp, "TODO(ws reminder: update this if stale)") {
 			t.Errorf("git.commit(no-todo): unexpected Todo section:\n%s", commitResp)
 		}
 	}

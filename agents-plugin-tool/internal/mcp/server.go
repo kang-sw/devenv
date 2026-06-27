@@ -790,7 +790,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		commitKey = strings.TrimSpace(commitKey)
 		if commitKey != "" {
 			if rec, ok := s.sessions.readState(commitKey); ok && len(rec.Todos) > 0 {
-				commitText += "\n## Todo (post-commit)\n" + renderTodos(rec.Todos, false) + "\n"
+				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
 			}
 		}
 		return toolTextResponse(req.ID, commitText, err)
