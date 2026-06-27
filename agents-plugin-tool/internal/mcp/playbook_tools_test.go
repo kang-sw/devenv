@@ -72,6 +72,19 @@ func shippedImplementerContext() map[string]string {
 	}
 }
 
+func shippedImplementerRelayContext() map[string]string {
+	return map[string]string{
+		"BriefPath":          "ai-docs/.plans/brief.md",
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"ReviewCycle":        "2",
+		"CommitRange":        "abc123..def456",
+		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"DispositionNotes":   "Fix correctness finding C1; defer test fixture rename until Phase 3.",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
+		"ResultExpectations": "Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
+	}
+}
+
 // initGitRepo creates a git repository in a temp dir and returns its path.
 // Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
@@ -892,6 +905,54 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	}
 }
 
+func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", shippedImplementerRelayContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer-relay recommended tier = %q, want medium", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Alias model for this role: gpt-5.5.",
+		"Brief path: `ai-docs/.plans/brief.md`",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Review cycle: 2",
+		"Current commit range: abc123..def456",
+		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"Lead disposition notes: Fix correctness finding C1; defer test fixture rename until Phase 3.",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
+		"Binding result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
+		"Rely only on this prompt and named paths; do not depend on prior conversation.",
+		"Won't-fix is allowed only for style suggestions conflicting with local patterns or scope expansion beyond the brief.",
+		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
+		"record dispositions in each fix commit's `## AI Context`",
+		"`[fixed]`",
+		"`[won't fix: <reason>]`",
+		"`[deferred: <reason>]`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("implementer-relay render must not include delegation continuity tip:\n%s", body)
+	}
+}
+
 func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envNamespace, "wsflow")
@@ -972,6 +1033,17 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 			t.Fatalf("full ws implementer renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
+
+	relayCtx := shippedImplementerRelayContext()
+	relayCtx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer-relay")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
 }
 
 func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T) {
@@ -991,6 +1063,17 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("wsflow non-legacy renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", map[string]string{
+		"note": "implementer-relay is not a wsflow legacy freeform stem",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared implementer-relay context")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("wsflow implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -1504,10 +1587,13 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Implementer spawn prompt",
 		"Rendered implementer prompt: <prompt-path>",
 		"contains the brief path, optional plan",
+		"implementer-relay` gets **Review relay dispatch**",
 		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
 		"Collect the normal completion report",
 		"Reviewer prompt frame",
-		"Review relay prompt",
+		"Review relay dispatch",
+		"Render `implementer-relay` with declared inputs",
+		"Rendered review relay prompt: <prompt-path>",
 		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
 	} {
@@ -1517,6 +1603,16 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	}
 	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
 		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
+	}
+	for _, forbidden := range []string{
+		"Review cycle <N>. Rely only on this prompt and named paths.",
+		"Non-clean review paths: <paths>. Read each file directly.",
+		"Commit fixes, run verification, and report commit hashes plus test results.",
+		"Won't-fix allowed: style conflicts with codebase patterns; scope expansion beyond brief.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render still embeds old review relay prompt body %q:\n%s", forbidden, body)
+		}
 	}
 	for _, forbidden := range []string{
 		"If `Branch Action: create`",

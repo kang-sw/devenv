@@ -18,6 +18,7 @@ Branch
 
 Execution
 - Call `{{.McpNamespace}}/enter.implement` once after facts are complete.
+- Name workflow skill handoffs with `{{.SkillNamespace}}:<skill>` notation.
 - Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.
 - Treat the installed todo list as the ordered runbook; do not create a parallel task list.
 - Briefs preserve selected-scope decisions about files, public interfaces, tests, exclusions, and accepted or rejected approaches.
@@ -109,7 +110,7 @@ Policy rules:
 1. Run `{review}` when installed.
 2. Dispatch reviewers with **Reviewer table** and **Reviewer prompt frame**.
 3. If `review_alloc=lead-only`, review directly and record the verdict; if `single`, dispatch `reviewer`; if `partitioned`, dispatch selected table rows.
-4. For non-clean Critical/Important findings, classify, fix or reject, then use **Review relay prompt** and **Re-review prompt** for affected partitions.
+4. For non-clean Critical/Important findings, classify, fix or reject, then use **Review relay dispatch** and **Re-review prompt** for affected partitions.
 5. Record verdicts, minor findings, unresolved disputes, accepted/rejected findings, and review-clean status.
 
 ### 6. Documentation
@@ -141,7 +142,7 @@ Run `{merge}` only after user approval. Merge to the verdict or caller-approved 
 <!-- ws:full-only:start -->
 5. Mercenary path: register once with the rendered prompt file and `recommended-tier`, call with task-specific input, collect with `{{.McpNamespace}}/mercenary.result(name: "<name>", timeout_seconds: 600)`, and keep relay prompts self-contained.
 <!-- ws:full-only:end -->
-6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
+6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
 ### Brief template
 
@@ -250,16 +251,17 @@ Instructions:
 - Return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
 
-### Review relay prompt
+### Review relay dispatch
 
 ```text
-Review cycle <N>. Rely only on this prompt and named paths.
-Brief path: <brief-path>; implemented range: <commit-range>.
-Non-clean review paths: <paths>. Read each file directly.
-For each finding, return [fixed], [won't fix: <reason>], or [deferred: <reason>].
-Commit fixes, run verification, and report commit hashes plus test results.
-Won't-fix allowed: style conflicts with codebase patterns; scope expansion beyond brief.
-Won't-fix not allowed: correctness, security, contract, regression, or required-test violations.
+Render `implementer-relay` with declared inputs: BriefPath, PlanPath,
+ReviewCycle, CommitRange, ReviewPaths, DispositionNotes, VerificationHint, and
+ResultExpectations. Capture prompt path and recommended-tier.
+
+Rendered review relay prompt: <prompt-path>
+
+Read that prompt file and execute it. It contains the review findings paths,
+disposition notes, verification expectations, and reporting requirements.
 ```
 
 ### Re-review prompt
