@@ -826,11 +826,13 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 	var renderContext map[string]string
 	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
 		// Phase 2 of wsflow convergence: legacy wsflow delegate callers pass
-		// arbitrary context as prompt data, not template variables. Preserve that
-		// behavior only for the legacy wsflow stem set so ordinary playbook.render
-		// still fails loudly on undeclared template variables.
-		templateContext = nil
-		renderContext = callerContext
+		// arbitrary context as prompt data. Preserve that behavior for undeclared
+		// keys while allowing declared variables to render normally.
+		declared, err := declaredPlaybookVariables(s, rsrcRoot, name)
+		if err != nil {
+			return "", "", err
+		}
+		templateContext, renderContext = splitDeclaredRenderContext(callerContext, declared)
 	}
 	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, preferMercenary, workflowLang, overrideLookup)
 	if err != nil {
@@ -845,4 +847,35 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 		return "", "", fmt.Errorf("write playbook %s: %w", generated[0].Path, err)
 	}
 	return generated[0].Path, recommendedTier, nil
+}
+
+func declaredPlaybookVariables(s *Server, rsrcRoot, name string) (map[string]bool, error) {
+	pb, err := wsrsrc.Load(rsrcRoot, name, s.currentHarness(), nil)
+	if err != nil {
+		return nil, err
+	}
+	declared := make(map[string]bool, len(pb.Meta.Variables))
+	for _, variable := range pb.Meta.Variables {
+		declared[variable] = true
+	}
+	return declared, nil
+}
+
+func splitDeclaredRenderContext(callerContext map[string]string, declared map[string]bool) (map[string]string, map[string]string) {
+	templateContext := map[string]string{}
+	renderContext := map[string]string{}
+	for key, value := range callerContext {
+		if declared[key] {
+			templateContext[key] = value
+			continue
+		}
+		renderContext[key] = value
+	}
+	if len(templateContext) == 0 {
+		templateContext = nil
+	}
+	if len(renderContext) == 0 {
+		renderContext = nil
+	}
+	return templateContext, renderContext
 }

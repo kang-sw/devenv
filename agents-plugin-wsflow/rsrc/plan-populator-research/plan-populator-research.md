@@ -5,15 +5,22 @@ role: delegate
 tier: large
 variables:
   - RoleModel
+  - ticket_path
+  - selected_phase
+  - plan_path
 ---
 # Plan Populator — Research Delegate
 
 You are drafting a deeper implementation plan from a ticket phase.
-The spawn prompt or render context provides the ticket path, selected phase, and
-plan output path. The plan path may contain survey output that requested
-research.
+The plan path may contain survey output that requested research.
 
 Alias model for this role: {{.RoleModel}}.
+
+## Render Inputs
+
+- Ticket path: `{{.ticket_path}}`
+- Selected phase: `{{.selected_phase}}`
+- Plan path: `{{.plan_path}}`
 
 ## Rules
 
@@ -37,10 +44,10 @@ Alias model for this role: {{.RoleModel}}.
 
 ### 1. Understand
 
-1. Read the ticket at the path given in the spawn prompt or render context.
-2. Read the selected phase and prior phase results only as needed to understand
-   the requested slice.
-3. If the plan path already contains survey output, read it before replacing or
+1. Read the ticket at `{{.ticket_path}}`.
+2. Read `{{.selected_phase}}` and prior phase results only as needed to
+   understand the requested slice.
+3. If `{{.plan_path}}` already contains survey output, read it before replacing or
    refining it.
 4. Clip the relevant contract: requirements, non-goals, verification boundary,
    spec impact, and settled decisions that govern this phase.
@@ -71,7 +78,7 @@ Identify:
 
 ### 3. Draft
 
-1. Write the plan to the path given in the spawn prompt using the format below.
+1. Write the plan to `{{.plan_path}}` using the format below.
 2. Preserve selected-phase contract and verification boundaries as plan
    guardrails instead of redefining them.
 3. Flag cross-module data contracts absent from the ticket in Codebase Findings:

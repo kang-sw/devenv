@@ -85,6 +85,14 @@ func shippedImplementerRelayContext() map[string]string {
 	}
 }
 
+func shippedPlanPopulatorContext() map[string]string {
+	return map[string]string{
+		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
+		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
+		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
+	}
+}
+
 // initGitRepo creates a git repository in a temp dir and returns its path.
 // Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
@@ -979,13 +987,14 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 		}
 	}
 
-	planPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", map[string]string{
-		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
-		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
-		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	planContext := shippedPlanPopulatorContext()
+	planContext["note"] = "legacy extra context"
+	planPath, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", planContext, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("plan-populator-survey tier = %q, want medium", tier)
 	}
 	planData, err := os.ReadFile(planPath)
 	if err != nil {
@@ -994,9 +1003,10 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	planBody := string(planData)
 	for _, want := range []string{
 		"## Render Context",
-		"- ticket_path: ai-docs/tickets/ready/260628-feat-demo.md",
-		"- selected_phase: Phase 2: Rework planner playbooks around ticket-to-plan",
-		"- plan_path: ai-docs/.plans/2026-06/28-1200-demo.md",
+		"- note: legacy extra context",
+		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
 		"## Relevant Ticket Contract",
 		"## Out of Scope",
 		"## Codebase Findings",
@@ -1016,13 +1026,14 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 		}
 	}
 
-	researchPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-research", map[string]string{
-		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
-		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
-		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	researchContext := shippedPlanPopulatorContext()
+	researchContext["note"] = "legacy extra context"
+	researchPath, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-research", researchContext, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook plan-populator-research with legacy context: %v", err)
+	}
+	if tier != "large" {
+		t.Fatalf("plan-populator-research tier = %q, want large", tier)
 	}
 	researchData, err := os.ReadFile(researchPath)
 	if err != nil {
@@ -1031,10 +1042,11 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	researchBody := string(researchData)
 	for _, want := range []string{
 		"## Render Context",
-		"- ticket_path: ai-docs/tickets/ready/260628-feat-demo.md",
-		"- selected_phase: Phase 2: Rework planner playbooks around ticket-to-plan",
-		"- plan_path: ai-docs/.plans/2026-06/28-1200-demo.md",
-		"If the plan path already contains survey output, read it before replacing or",
+		"- note: legacy extra context",
+		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
+		"If `ai-docs/.plans/2026-06/28-1200-demo.md` already contains survey output, read it before replacing or",
 		"## Relevant Ticket Contract",
 		"## Out of Scope",
 		"## Codebase Findings",
@@ -1049,6 +1061,76 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path"} {
 		if strings.Contains(researchBody, forbidden) {
 			t.Fatalf("plan-populator-research wsflow render contains forbidden %q:\n%s", forbidden, researchBody)
+		}
+	}
+}
+
+func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	assertPlanner := func(name, wantTier string, wants []string) {
+		t.Helper()
+		path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, shippedPlanPopulatorContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+		if err != nil {
+			t.Fatalf("renderPlaybook %s with declared planner context: %v", name, err)
+		}
+		if tier != wantTier {
+			t.Fatalf("%s tier = %q, want %s", name, tier, wantTier)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s render: %v", name, err)
+		}
+		body := string(data)
+		commonWants := []string{
+			"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+			"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+			"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
+			"## Relevant Ticket Contract",
+			"## Out of Scope",
+			"## Codebase Findings",
+			"## Implementation Plan",
+			"## Verification Plan",
+			"## Escalations",
+		}
+		for _, want := range append(commonWants, wants...) {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s full ws render missing %q:\n%s", name, want, body)
+			}
+		}
+		for _, forbidden := range []string{"brief_path", "BriefPath", "brief path", "Brief path"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s full ws render retained brief dependency %q:\n%s", name, forbidden, body)
+			}
+		}
+	}
+
+	assertPlanner("plan-populator-survey", "medium", []string{
+		"[ok]` or `[escalate-to-research]`",
+		"Confidence: `<high|medium|low>`",
+		"Escalation rationale when returning `[escalate-to-research]`",
+	})
+	assertPlanner("plan-populator-research", "large", []string{
+		"[ok]` or `[escalate-to-lead]`",
+		"Include `None` when no blocker remains. Otherwise include the blocker,",
+	})
+
+	ctx := shippedPlanPopulatorContext()
+	ctx["brief_path"] = "ai-docs/.plans/legacy-brief.md"
+	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
+		if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+			t.Fatalf("full ws renderPlaybook accepted brief_path for %s", name)
+		} else {
+			var undeclared wsrsrc.ErrUndeclaredVar
+			if !errors.As(err, &undeclared) || undeclared.Name != "brief_path" {
+				t.Fatalf("%s brief_path error = %T %v, want ErrUndeclaredVar brief_path", name, err, err)
+			}
 		}
 	}
 }

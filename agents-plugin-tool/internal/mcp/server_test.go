@@ -368,9 +368,13 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 		"plan-populator-research", "code-reviewer", "mental-model-updater",
 	} {
 		t.Run(stem, func(t *testing.T) {
-			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, map[string]string{
-				"bridge_probe": "context for " + stem,
-			}, wsconfig.Options{}, "", "", false, "", nil)
+			context := map[string]string{"bridge_probe": "context for " + stem}
+			if stem == "plan-populator-survey" || stem == "plan-populator-research" {
+				for key, value := range shippedPlanPopulatorContext() {
+					context[key] = value
+				}
+			}
+			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, context, wsconfig.Options{}, "", "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}
@@ -1288,7 +1292,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1333,9 +1337,10 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	for _, want := range []string{
 		"recommended-tier: medium",
 		"## Render Context",
-		"- ticket_path: ai-docs/tickets/ready/260628-feat-demo.md",
-		"- selected_phase: Phase 2: Rework planner playbooks around ticket-to-plan",
-		"- plan_path: ai-docs/.plans/2026-06/28-1200-demo.md",
+		"- note: legacy extra context",
+		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
 		"## Relevant Ticket Contract",
 		"## Implementation Plan",
 		"[escalate-to-research]",
