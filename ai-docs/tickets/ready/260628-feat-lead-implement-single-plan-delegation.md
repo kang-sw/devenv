@@ -162,6 +162,33 @@ Verification boundary:
   research remains large.
 - Tests or golden checks cover the required plan sections and escalation output.
 
+### Result (6443e8e9) - 2026-06-28
+
+`plan-populator-survey` and `plan-populator-research` now use a ticket-to-plan
+contract: the caller provides ticket path, selected phase, and plan path. The
+survey planner writes the required six-section light plan (`Relevant Ticket
+Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
+`Verification Plan`, `Escalations`) and reports `[ok]` or
+`[escalate-to-research]` with confidence and escalation rationale. The research
+planner reads any existing survey output at the same plan path, then refines or
+replaces it with a deeper plan.
+
+The brief-path dependency was removed from the planner prompt contract while
+preserving existing tier frontmatter: survey remains `medium`, research remains
+`large`. Render tests now cover the new context variables, absence of
+`brief_path`, required plan sections, and escalation output. The wsflow rsrc
+mirror and shipped rsrc manifests were regenerated.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookWsflowLegacyPromptStemsAppendContext|TestWsflowModePlaybookRenderAbsorbsPromptRenderContext' -count=1`
+- `go test ./internal/wsrsrc -run 'TestValidateRealTree|TestShippedManifestMatchesGenerated|TestWsflowRsrcMirrorUpToDate' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
 ### Phase 3: Route lead-implement delegated prep through single-plan flow
 
 Update `lead-implement` and related rendered implementer/review relay prompts so
