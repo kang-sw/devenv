@@ -234,6 +234,39 @@ Verification boundary:
   escalation authorizes reading the ticket.
 - Reviewer prompt tests assert review against ticket, plan, and diff.
 
+### Result (eb878d4d) - 2026-06-28
+
+`lead-implement` delegated prep now routes through a single implementation plan:
+the lead reads the ticket and selected scope, generates a `plan` path, dispatches
+the survey planner to write the plan, optionally escalates to research on the
+same path, then sends the implementer only the rendered prompt with `PlanPath`.
+Direct edit remains lead-owned from the ticket and does not create a planner
+artifact unless the route escalates.
+
+The rendered `implementer` and `implementer-relay` prompts no longer declare or
+render `BriefPath`. They treat the plan and listed references as the execution
+contract and block direct ticket-file reads unless the plan, findings,
+disposition notes, or caller explicitly authorize ticket access. Reviewer
+guidance now checks ticket, plan, and diff together, and the workflow-skills spec
+plus workflow mental model reflect the single-plan delegated contract.
+
+Focused render tests now assert plan-only implementer execution, rejection of
+legacy `BriefPath` context, and ticket+plan+diff review framing. The wsflow rsrc
+mirror and shipped manifests were regenerated.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookShippedImplementerDeclaredContext|TestRenderPlaybookShippedImplementerRelayDeclaredContext|TestRenderPlaybookFullWsStillRejectsUndeclaredContext|TestPlaybookPrintGoldenLeadImplement|TestRenderGoldenShippedDelegateChildKey|TestRenderGoldenShippedDelegateModelVarsPerHarness|TestRenderGoldenShippedPhase4Delegates|TestRenderGoldenShippedReviewPartitionIncludesBase|TestRenderPlaybookWsflowProductModeUsesShippedDelegate' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./internal/wsdoc -count=1`
+- `git diff --check`
+
+`spec_index.verify` could not run through MCP in this session because the exposed
+tool rejected the unavailable bootstrap key with `unknown_session`; the local
+`internal/wsdoc` package check covering the verifier code passed.
+
 ### Phase 4: Update enter.implement resolver and todo instructions
 
 Update `ws.enter.implement` resolver labels and derived todo instructions so
