@@ -189,6 +189,7 @@ expectations, commit-range guidance, and reporting requirements.
 
 ### Reviewer prompt frame
 
+**Delegated or escalated route with generated plan:**
 ```text
 Review partition: <Correctness|Fit|Test>
 Diff range: <parent-of-first-commit>..<last-commit>
@@ -206,6 +207,28 @@ Required checks:
 - Binding ticket decisions were not omitted or violated.
 
 Instructions:
+- Ignore outside this partition unless directly broken by the diff.
+- Write detailed findings to the findings path.
+- In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
+```
+
+**Direct edit with no generated plan:**
+```text
+Review partition: <Correctness|Fit|Test>
+Diff range: <parent-of-first-commit>..<last-commit>
+Ticket path: <ticket-path>
+Findings path: <partition-output-path>
+
+Review focus:
+- <2-4 partition-specific risks>
+
+Required checks:
+- <required check from Reviewer table>
+- Review the ticket contract and diff together.
+- Binding ticket decisions were not omitted or violated.
+
+Instructions:
+- Do not require a plan artifact for direct-edit review.
 - Ignore outside this partition unless directly broken by the diff.
 - Write detailed findings to the findings path.
 - In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.

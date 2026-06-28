@@ -40,7 +40,7 @@ Alias model for this role: {{.RoleModel}}.
 - Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the plan, or findings disproven by specific evidence.
 - Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.
 - Preserve prior accepted, deferred, and won't-fix dispositions unless new evidence makes them unsafe.
-- Do not read ticket files directly unless the plan, findings, or disposition notes explicitly authorize ticket-file reading.
+- Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.
 - Commit fix work at logical checkpoints and record dispositions in each fix commit's `## AI Context`.
 - Claim "pass" only after reading verification output.
 - All output in English regardless of input language.
@@ -49,7 +49,7 @@ Alias model for this role: {{.RoleModel}}.
 
 1. Load context: read the plan path and each review findings path.
 2. Classify each Critical or Important finding against the lead disposition notes.
-3. Apply fixes for accepted findings within scope; escalate if a required fix needs a plan deviation.
+3. Apply fixes for accepted findings within scope; escalate for a plan update if a required fix needs ticket material or a plan deviation.
 4. For every relayed Critical or Important finding, decide `[fixed]`, `[won't fix: <reason>]`, or `[deferred: <reason>]`.
 5. Run the verification instructions and any tests required by the plan or findings.
 6. Commit logical checkpoints; each fix commit `## AI Context` records the relevant per-finding dispositions known at that checkpoint.

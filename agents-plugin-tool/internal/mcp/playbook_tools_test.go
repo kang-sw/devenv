@@ -900,7 +900,8 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
 		"The plan and its listed references are the task contract.",
 		"Read the plan path above and all `[Must]` References listed in the plan except ticket files.",
-		"Do not read ticket files directly unless the plan's `Escalations` section or caller explicitly authorizes ticket-file reading.",
+		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
+		"ask the caller to update the plan's `Escalations` section unless that section already authorizes ticket-file reading",
 		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
 		"Normal completion report:",
 		"If `ResultExpectations` names an output file, also include its path plus a short completion summary.",
@@ -917,6 +918,7 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 		"brief or plan",
 		"plan or brief",
 		"Do not read ticket files directly, even when a ticket path appears",
+		"caller explicitly authorizes ticket-file reading",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("implementer render retained old brief/implicit-ticket contract %q:\n%s", forbidden, body)
@@ -957,7 +959,8 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"Rely only on this prompt and named paths; do not depend on prior conversation.",
 		"Read the plan and every non-clean review path directly.",
 		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the plan, or findings disproven by specific evidence.",
-		"Do not read ticket files directly unless the plan, findings, or disposition notes explicitly authorize ticket-file reading.",
+		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
+		"escalate for a plan update if a required fix needs ticket material or a plan deviation.",
 		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
 		"records the relevant per-finding dispositions known at that checkpoint",
 		"`[fixed]`",
@@ -974,6 +977,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"No-plan sentinel",
 		"Read the brief",
 		"scope expansion beyond the brief",
+		"findings, or disposition notes explicitly authorize ticket-file reading",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("implementer-relay render retained old brief contract %q:\n%s", forbidden, body)
@@ -1774,8 +1778,11 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Ticket path: <ticket-path>",
 		"Selected phase: <selected-phase>",
 		"Plan path: <plan-path>",
+		"Direct edit with no generated plan:",
 		"Reviewer prompt frame",
 		"Review the ticket contract, plan contract, and diff together.",
+		"Review the ticket contract and diff together.",
+		"Do not require a plan artifact for direct-edit review.",
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
 		"Rendered review relay prompt: <prompt-path>",

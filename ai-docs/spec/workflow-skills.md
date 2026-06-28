@@ -475,8 +475,9 @@ playbook with plan path, verification hint, result expectations, and
 commit-range hint as declared render inputs, then sends the worker only the
 rendered prompt path plus the instruction to execute it. The rendered
 implementer prompt reads the plan and listed references as the task contract; it
-does not read the ticket directly unless the plan's escalation section or caller
-explicitly authorizes ticket-file reading. Recommended tier remains dispatch
+does not read the ticket directly unless the plan's `Escalations` section
+explicitly authorizes ticket-file reading. Otherwise the lead updates the plan
+before ticket material is needed. Recommended tier remains dispatch
 metadata for the lead or transport, not worker-facing task input.
 
 After fact gathering and before preparation or source inspection,
@@ -674,8 +675,8 @@ when the migration anchor is read, binding implementation constraints from the
 anchor are copied into the plan and the anchor is listed as a `[Must]` reference before
 plan population or implementer dispatch. Delegated implementers receive only the
 plan as task input, may read additional documents listed in the plan, and must
-not read the ticket directly unless the plan or caller explicitly authorizes
-ticket-file reading.
+not read the ticket directly unless the plan's `Escalations` section explicitly
+authorizes ticket-file reading.
 
 Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one

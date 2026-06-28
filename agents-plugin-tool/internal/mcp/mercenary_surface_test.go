@@ -605,6 +605,15 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 			if !strings.Contains(body, "Partition scope") {
 				t.Errorf("%s missing partition-specific scope section:\n%s", name, body)
 			}
+			for _, want := range []string{
+				"When the prompt frame names ticket and plan paths, review against ticket, plan, and diff together.",
+				"When the prompt frame names only ticket and diff, review the direct-edit change without requiring a plan.",
+				"Read ticket and plan paths named by the prompt frame; if no plan path is named, continue with ticket and diff.",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing reviewer base contract %q:\n%s", name, want, body)
+				}
+			}
 		})
 	}
 }
