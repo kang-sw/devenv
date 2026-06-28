@@ -267,6 +267,25 @@ Verification passed:
 tool rejected the unavailable bootstrap key with `unknown_session`; the local
 `internal/wsdoc` package check covering the verifier code passed.
 
+#### Edition (1b61537a) - 2026-06-28
+
+Phase 3 review found three prompt-contract gaps. The review frame now separates
+generated-plan reviews from direct-edit reviews: delegated or escalated work
+reviews ticket, plan, and diff together, while direct-edit reviews use ticket
+and diff without requiring a nonexistent plan. The implementer and review relay
+prompts now allow direct ticket reads only when the plan's `Escalations` section
+explicitly authorizes ticket-file reading; caller prompts, findings, and
+disposition notes no longer bypass the plan-only executor contract. Reviewer
+partition render tests now assert the shared reviewer base includes the
+ticket/plan/diff contract and the no-plan direct-edit fallback.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookShippedImplementerDeclaredContext|TestRenderPlaybookShippedImplementerRelayDeclaredContext|TestRenderPlaybookFullWsStillRejectsUndeclaredContext|TestPlaybookPrintGoldenLeadImplement|TestRenderGoldenShippedReviewPartitionIncludesBase' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc ./internal/wsdoc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
 ### Phase 4: Update enter.implement resolver and todo instructions
 
 Update `ws.enter.implement` resolver labels and derived todo instructions so
