@@ -84,8 +84,9 @@ product-mode playbook rendering, writes the result to a tmp file, and returns
 the path. The lead hands that path to a native subagent.
 
 For the legacy render-eligible stem set, wsflow-mode `playbook.render` appends
-caller `context` as a free-text Render Context block. Other playbooks still
-treat `context` as declared template variables.
+only undeclared caller `context` extras as a free-text Render Context block;
+declared context keys are templated normally. Other playbooks still treat
+`context` as declared template variables only.
 
 - Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare

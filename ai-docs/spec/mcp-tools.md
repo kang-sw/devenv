@@ -808,10 +808,10 @@ and mercenary delegates receive a prompt with their key already embedded
 
 In no-agent/wsflow mode only, `playbook.render` has a compatibility bridge for
 the five legacy render-eligible stems. When `name` is one of those stems,
-caller-supplied `context` is appended as prompt data in a `## Render Context`
-block after normal playbook rendering rather than being interpreted as template
-variables. The bridge does not apply to `implementer`, to arbitrary playbooks, or
-to full ws mode.
+declared caller `context` keys are rendered as normal template variables and any
+remaining undeclared keys are appended as prompt data in a `## Render Context`
+block after normal playbook rendering. The bridge does not apply to
+`implementer`, to arbitrary playbooks, or to full ws mode.
 
 A playbook is selected by `name`; the tool does not decide which playbook to use.
 A load or render failure for a requested `name` is a loud error, not a silent

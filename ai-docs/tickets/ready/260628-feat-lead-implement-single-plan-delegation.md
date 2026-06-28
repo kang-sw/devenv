@@ -189,6 +189,27 @@ Verification passed:
 - `git diff --check`
 - `spec_index.verify`
 
+#### Edition (1d18df9e) - 2026-06-28
+
+Phase 2 review found that the initial planner prompt rewrite covered wsflow
+legacy rendering but still rejected the required planner context in full `ws`
+rendering. The fix declares and renders `ticket_path`, `selected_phase`, and
+`plan_path` for both planner playbooks, keeps `brief_path` rejected, and adds
+full `ws` render tests for survey and research. The correctness and test review
+partitions are clean after the fix. The fit re-review is clean with one minor
+documentation drift: wsflow legacy-context docs needed to clarify that declared
+keys are templated and only undeclared extras are appended in the compatibility
+block.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookFullWsPlannerContext|TestRenderPlaybookFullWsStillRejectsUndeclaredContext|TestRenderPlaybookWsflowLegacyPromptStemsAppendContext|TestWsflowModePlaybookRenderAbsorbsPromptRenderContext|TestWsflowPlaybookRenderAllLegacyStemsFromRsrc|TestRenderGoldenShippedPhase4Delegates' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
 ### Phase 3: Route lead-implement delegated prep through single-plan flow
 
 Update `lead-implement` and related rendered implementer/review relay prompts so
