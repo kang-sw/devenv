@@ -1557,6 +1557,41 @@ func TestServeStdioEnterImplementVerdictLabels(t *testing.T) {
 	}
 
 	if got := callToolWithKey(t, server, 3, key, "ws.enter.implement", map[string]any{
+		"delegation":   "direct-edit",
+		"review_alloc": "single",
+		"need_review":  true,
+	}); !strings.Contains(got, "- [ ] {prep} Prep") || !strings.Contains(got, "- [ ] {edit} Edit (direct)") {
+		t.Fatalf("direct-edit omitted plan_depth should default to no planner, got: %s", got)
+	} else if strings.Contains(got, "Prep (survey plan)") || strings.Contains(got, "plan-populator-survey") {
+		t.Fatalf("direct-edit omitted plan_depth exposed planner path: %s", got)
+	}
+
+	if got := callToolWithKey(t, server, 4, key, "ws.enter.implement", map[string]any{
+		"delegation":   "delegated",
+		"plan_depth":   "research",
+		"review_alloc": "single",
+		"need_review":  true,
+	}); !strings.Contains(got, `invalid plan_depth "research" for delegated legacy enter`) || !strings.Contains(got, `[escalate-to-research]`) {
+		t.Fatalf("legacy research plan_depth should be rejected with survey escalation guidance, got: %s", got)
+	}
+
+	if got := callToolWithKey(t, server, 5, key, "ws.enter.implement", map[string]any{
+		"delegation":   "direct-edit",
+		"plan_depth":   "research",
+		"review_alloc": "single",
+		"need_review":  true,
+	}); !strings.Contains(got, `invalid plan_depth "research" for direct-edit`) {
+		t.Fatalf("direct-edit research plan_depth should be rejected, got: %s", got)
+	}
+
+	if got := callToolWithKey(t, server, 6, key, "ws.enter.implement", map[string]any{
+		"review_alloc": "single",
+		"need_review":  true,
+	}); !strings.Contains(got, "- [ ] {prep} Prep (survey plan)") || !strings.Contains(got, "- [ ] {edit} Edit (delegated)") {
+		t.Fatalf("legacy omitted delegation/plan_depth should default to delegated survey, got: %s", got)
+	}
+
+	if got := callToolWithKey(t, server, 7, key, "ws.enter.implement", map[string]any{
 		"review_alloc": "singel",
 		"need_review":  true,
 	}); !strings.Contains(got, `invalid review_alloc "singel"`) {

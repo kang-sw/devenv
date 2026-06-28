@@ -438,17 +438,6 @@ func parseImplementDelegation(raw string) (string, error) {
 	}
 }
 
-func parseImplementPlanDepth(raw string) (string, error) {
-	switch strings.ToLower(raw) {
-	case "":
-		return "survey", nil
-	case "none", "survey", "research":
-		return strings.ToLower(raw), nil
-	default:
-		return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey, research", raw)
-	}
-}
-
 func parseImplementReviewAlloc(raw string) (string, error) {
 	switch strings.ToLower(raw) {
 	case "":
@@ -962,7 +951,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
 	}
-	planDepth, err := parseImplementPlanDepth(stringValue(args["plan_depth"]))
+	planDepth, err := parseLegacyImplementPlanDepth(delegation, stringValue(args["plan_depth"]))
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
 	}
@@ -981,6 +970,34 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		NeedDoc:     needDoc,
 	})
 	return s.handleEnter(id, "ws.enter.implement", "implement", args, todos)
+}
+
+func parseLegacyImplementPlanDepth(delegation string, raw string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch delegation {
+	case "direct-edit":
+		switch normalized {
+		case "", "none":
+			return "none", nil
+		case "survey", "research":
+			return "", fmt.Errorf("invalid plan_depth %q for direct-edit: want none", raw)
+		default:
+			return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey", raw)
+		}
+	case "delegated":
+		switch normalized {
+		case "", "survey":
+			return "survey", nil
+		case "research":
+			return "", fmt.Errorf("invalid plan_depth %q for delegated legacy enter: start with survey and escalate to research only after survey returns [escalate-to-research]", raw)
+		case "none":
+			return "", fmt.Errorf("invalid plan_depth %q for delegated: want survey", raw)
+		default:
+			return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey", raw)
+		}
+	default:
+		return "", fmt.Errorf("invalid delegation %q: want one of delegated, direct-edit", delegation)
+	}
 }
 
 func stringValue(v any) string {
