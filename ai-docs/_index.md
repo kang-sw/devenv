@@ -245,14 +245,17 @@ dropped tickets live in hidden archive dirs and git history.
 - `260628-feat-lead-implement-single-plan-delegation` (ready, feat, child of
   260605) - collapse delegated `lead-implement` prep from lead-authored brief
   plus survey/research artifacts into a single generated implementation plan.
-  **Phases 1-2 done** on branch
+  **Phases 1-3 done** on branch
   `implement/lead-implement-single-plan-delegation`: Phase 1 added
   `ws.path.generate(kind: "plan")` for repo-local
   `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md` artifacts while `review` and
   `prompt` remain cache-backed. Phase 2 reworked survey/research planner
   playbooks around ticket path, selected phase, and shared plan path; the full
-  `ws` planner render-context fix landed in `1d18df9e` after review. Next
-  target: **Phase 3** routes `lead-implement` delegated prep through the
+  `ws` planner render-context fix landed in `1d18df9e` after review. Phase 3
+  routed `lead-implement` delegated prep through the single-plan flow
+  (`eb878d4d`) and the review-fix pass (`1b61537a`) tightened direct-edit
+  review framing plus plan-only executor ticket reads. Next target: **Phase 4**
+  updates `ws.enter.implement` resolver and todo instructions for the
   single-plan flow.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
