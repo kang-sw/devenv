@@ -980,8 +980,9 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	}
 
 	planPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", map[string]string{
-		"brief_path": "ai-docs/.plans/brief.md",
-		"plan_path":  "ai-docs/.plans/plan.md",
+		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
+		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
+		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
 	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
@@ -991,14 +992,63 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 		t.Fatalf("read plan-populator-survey render: %v", err)
 	}
 	planBody := string(planData)
-	for _, want := range []string{"## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+	for _, want := range []string{
+		"## Render Context",
+		"- ticket_path: ai-docs/tickets/ready/260628-feat-demo.md",
+		"- selected_phase: Phase 2: Rework planner playbooks around ticket-to-plan",
+		"- plan_path: ai-docs/.plans/2026-06/28-1200-demo.md",
+		"## Relevant Ticket Contract",
+		"## Out of Scope",
+		"## Codebase Findings",
+		"## Implementation Plan",
+		"## Verification Plan",
+		"## Escalations",
+		"[escalate-to-research]",
+		"Confidence: `<high|medium|low>`",
+	} {
 		if !strings.Contains(planBody, want) {
 			t.Fatalf("plan-populator-survey render missing %q:\n%s", want, planBody)
 		}
 	}
-	for _, forbidden := range []string{"Mercenary path", "ws.mercenary.", "exec."} {
+	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path", "Mercenary path", "ws.mercenary.", "exec."} {
 		if strings.Contains(planBody, forbidden) {
 			t.Fatalf("plan-populator-survey wsflow render contains forbidden %q:\n%s", forbidden, planBody)
+		}
+	}
+
+	researchPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-research", map[string]string{
+		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
+		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
+		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook plan-populator-research with legacy context: %v", err)
+	}
+	researchData, err := os.ReadFile(researchPath)
+	if err != nil {
+		t.Fatalf("read plan-populator-research render: %v", err)
+	}
+	researchBody := string(researchData)
+	for _, want := range []string{
+		"## Render Context",
+		"- ticket_path: ai-docs/tickets/ready/260628-feat-demo.md",
+		"- selected_phase: Phase 2: Rework planner playbooks around ticket-to-plan",
+		"- plan_path: ai-docs/.plans/2026-06/28-1200-demo.md",
+		"If the plan path already contains survey output, read it before replacing or",
+		"## Relevant Ticket Contract",
+		"## Out of Scope",
+		"## Codebase Findings",
+		"## Implementation Plan",
+		"## Verification Plan",
+		"## Escalations",
+	} {
+		if !strings.Contains(researchBody, want) {
+			t.Fatalf("plan-populator-research render missing %q:\n%s", want, researchBody)
+		}
+	}
+	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path"} {
+		if strings.Contains(researchBody, forbidden) {
+			t.Fatalf("plan-populator-research wsflow render contains forbidden %q:\n%s", forbidden, researchBody)
 		}
 	}
 }

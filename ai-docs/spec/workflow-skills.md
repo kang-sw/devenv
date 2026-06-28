@@ -535,21 +535,25 @@ rendered prompt path plus a short execute instruction to the implementation
 owner. Reviewer findings remain file inputs, not copied prompt prose.
 {#260619-stateless-implement-review-continuity}
 
-Plan population is an either/or depth choice for delegated mode. When plan depth
-is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
-and possible risk signals without deciding that the implementation direction is
-wrong. If survey cannot safely support implementation without strategy, contract,
-or reuse judgment, it returns `[escalate-to-research]` instead of forcing a
-survey plan. `lead-implement` then routes to `plan-populator-research` before
+Plan population is an either/or depth choice for delegated mode. The
+plan-populator render contract is ticket-to-plan shaped: ticket path, selected
+phase, and plan path. When plan depth is `survey`, `plan-populator-survey` clips
+the relevant ticket contract, explores source, writes a light implementation
+plan with `Relevant Ticket Contract`, `Out of Scope`, `Codebase Findings`,
+`Implementation Plan`, `Verification Plan`, and `Escalations`, then returns
+`[ok]` or `[escalate-to-research]` with confidence and rationale. If survey
+cannot safely support implementation without strategy, contract, or reuse
+judgment, `lead-implement` then routes to `plan-populator-research` before
 spawning the implementer.
 
 When plan depth is `research`, `plan-populator-research` makes planner
-judgments: it chooses clean existing mechanisms when they fit the brief,
-preserves contract and integration-test guardrails in the plan, rejects
-temporary, fallback, mock-data, and duplicated-glue paths, and escalates when no
-clean plan can satisfy the brief. A survey-to-research route replaces the same
-plan artifact path with the research plan; it does not create a research-suffixed
-plan filename or append research to a survey plan.
+judgments: it reads any existing survey output at the same plan path, chooses
+clean existing mechanisms when they fit the ticket phase, preserves selected
+contract and verification guardrails in the plan, rejects temporary, fallback,
+mock-data, and duplicated-glue paths, and escalates when no clean plan can
+satisfy the ticket phase. A survey-to-research route replaces or refines the
+same plan artifact path with the research plan; it does not create a
+research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
 signals. It stops and escalates when implementation would likely pursue a wrong

@@ -1288,7 +1288,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"brief_path":"ai-docs/.plans/brief.md","plan_path":"ai-docs/.plans/plan.md"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -1330,7 +1330,16 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 		t.Fatalf("read plan-populator-survey render: %v", err)
 	}
 	planText := string(planData)
-	for _, want := range []string{"recommended-tier: medium", "## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+	for _, want := range []string{
+		"recommended-tier: medium",
+		"## Render Context",
+		"- ticket_path: ai-docs/tickets/ready/260628-feat-demo.md",
+		"- selected_phase: Phase 2: Rework planner playbooks around ticket-to-plan",
+		"- plan_path: ai-docs/.plans/2026-06/28-1200-demo.md",
+		"## Relevant Ticket Contract",
+		"## Implementation Plan",
+		"[escalate-to-research]",
+	} {
 		if want == "recommended-tier: medium" {
 			if !strings.Contains(toolText(t, byID["3"]), want) {
 				t.Fatalf("playbook.render response missing %q: %s", want, toolText(t, byID["3"]))
@@ -1340,6 +1349,9 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 		if !strings.Contains(planText, want) {
 			t.Fatalf("plan-populator-survey playbook render missing %q:\n%s", want, planText)
 		}
+	}
+	if strings.Contains(planText, "- brief_path:") || strings.Contains(planText, "brief path") {
+		t.Fatalf("plan-populator-survey playbook render retained brief-path dependency:\n%s", planText)
 	}
 }
 
