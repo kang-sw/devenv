@@ -442,10 +442,10 @@ func parseImplementPlanDepth(raw string) (string, error) {
 	switch strings.ToLower(raw) {
 	case "":
 		return "survey", nil
-	case "none", "brief", "survey", "research":
+	case "none", "survey", "research":
 		return strings.ToLower(raw), nil
 	default:
-		return "", fmt.Errorf("invalid plan_depth %q: want one of none, brief, survey, research", raw)
+		return "", fmt.Errorf("invalid plan_depth %q: want one of none, survey, research", raw)
 	}
 }
 
@@ -468,12 +468,10 @@ func implementPrepTitle(planDepth string) string {
 	switch strings.ToLower(strings.TrimSpace(planDepth)) {
 	case "none", "":
 		return "Prep"
-	case "brief":
-		return "Prep (brief)"
 	case "survey":
-		return "Prep (brief + survey plan)"
+		return "Prep (survey plan)"
 	case "research":
-		return "Prep (brief + research plan)"
+		return "Prep (research plan)"
 	default:
 		return "Prep"
 	}
@@ -534,12 +532,10 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 	case "none", "":
 		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
-	case "brief":
-		return guardrails + "Prepare and commit the implementation brief with the Brief template before edits; include only selected-scope references and contract instructions."
 	case "survey":
-		return guardrails + "Prepare and commit the implementation brief, then run the survey plan path with Delegate dispatch and Plan prompts before implementer dispatch."
+		return guardrails + "Call ws.path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with ticket_path, selected_phase, and plan_path, and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same plan path before implementer dispatch. Do not create a separate brief."
 	case "research":
-		return guardrails + "Prepare and commit the implementation brief, then run the research plan path with Delegate dispatch and Plan prompts before implementer dispatch."
+		return guardrails + "Render plan-populator-research with ticket_path, selected_phase, and an existing plan_path, then dispatch it to refine or replace the same implementation plan before implementer dispatch. Do not create a separate brief."
 	default:
 		return guardrails + "Prepare the implementation context required by the selected verdict before edits."
 	}
@@ -555,11 +551,9 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	case "delegated":
 		switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
 		case "survey":
-			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and survey plan; capture the implemented commit range for review and relays."
+			return "After the survey plan is ready and any [escalate-to-research] signal is resolved on the same plan path, render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
 		case "research":
-			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief and research plan; capture the implemented commit range for review and relays."
-		case "brief":
-			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the brief; capture the implemented commit range for review and relays."
+			return "After the research plan is ready on the same plan path, render implementer with PlanPath and dispatch the delegated implementer; capture the implemented commit range for review and relays."
 		default:
 			return "Dispatch the delegated implementer with Delegate dispatch and the Implementer spawn prompt, using the resolved implementation context; capture the implemented commit range for review and relays."
 		}

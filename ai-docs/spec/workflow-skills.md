@@ -451,8 +451,9 @@ scope, complexity, risk, and policy facts, calls `ws.enter.implement`, follows
 the MCP-authored Implementation Verdict, then runs the shared
 post-implementation documentation pipeline before reporting completion. The MCP
 verdict owns deterministic implementation labels and branch preflight: it chooses
-direct-edit or delegated mode, branch action, plan depth, review allocation,
-review need, and documentation mode from facts, policy, and observed Git state.
+direct-edit or delegated mode, branch action, delegated survey planning,
+review allocation, review need, and documentation mode from facts, policy, and
+observed Git state.
 `Branch Action: stop` blocks source edits until the missing merge target, unsafe
 rename, existing target branch, or tracking ambiguity is resolved. After
 verification, `lead-implement` records the phase result commit, closes spec,
@@ -533,23 +534,23 @@ plus a short execute instruction to the implementation owner. Reviewer findings
 remain file inputs, not copied prompt prose.
 {#260619-stateless-implement-review-continuity}
 
-Plan population is an either/or depth choice for delegated mode. The
+Plan population defaults to the survey planner for delegated mode. The
 plan-populator render contract is ticket-to-plan shaped: ticket path, selected
-phase, and plan path. When plan depth is `survey`, `plan-populator-survey` clips
-the relevant ticket contract, explores source, writes a light implementation
-plan with `Relevant Ticket Contract`, `Out of Scope`, `Codebase Findings`,
-`Implementation Plan`, `Verification Plan`, and `Escalations`, then returns
-`[ok]` or `[escalate-to-research]` with confidence and rationale. If survey
-cannot safely support implementation without strategy, contract, or reuse
-judgment, `lead-implement` then routes to `plan-populator-research` before
-spawning the implementer.
+phase, and plan path. `plan-populator-survey` clips the relevant ticket
+contract, explores source, writes a light implementation plan with `Relevant
+Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
+`Verification Plan`, and `Escalations`, then returns `[ok]` or
+`[escalate-to-research]` with confidence and rationale. If survey cannot safely
+support implementation without strategy, contract, or reuse judgment,
+`lead-implement` routes to `plan-populator-research` on the same plan path
+before spawning the implementer.
 
-When plan depth is `research`, `plan-populator-research` makes planner
-judgments: it reads any existing survey output at the same plan path, chooses
-clean existing mechanisms when they fit the ticket phase, preserves selected
-contract and verification guardrails in the plan, rejects temporary, fallback,
-mock-data, and duplicated-glue paths, and escalates when no clean plan can
-satisfy the ticket phase. A survey-to-research route replaces or refines the
+`plan-populator-research` is reached from the survey escalation signal and makes
+planner judgments: it reads any existing survey output at the same plan path,
+chooses clean existing mechanisms when they fit the ticket phase, preserves
+selected contract and verification guardrails in the plan, rejects temporary,
+fallback, mock-data, and duplicated-glue paths, and escalates when no clean plan
+can satisfy the ticket phase. A survey-to-research route replaces or refines the
 same plan artifact path with the research plan; it does not create a
 research-suffixed plan filename or append research to a survey plan.
 

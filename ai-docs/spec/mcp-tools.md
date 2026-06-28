@@ -234,19 +234,25 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   and whether safe branch rename is allowed. The resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
-  derived lead-implement checklist. The derived todos carry focused
-  `instruction` prose from those resolved verdict labels, so branch, prep, edit,
-  review, doc, final-gate, and merge todos describe only the path reachable
-  under the current verdict; branch-stop todos describe the blocker instead of
-  telling the caller to continue source edits. Non-stop prep instructions carry
-  required runbook-loading guardrails, including mental-model lookup, ancestor
-  reads, conditional migration-anchor loading, and implementation-runbook loading
+  derived lead-implement checklist. `plan_depth` is `none` for direct edit and
+  `survey` for reachable delegated preparation; delegated preparation creates a
+  plan path, renders `plan-populator-survey` to write the light implementation
+  plan, and renders `plan-populator-research` on the same plan path only when
+  the survey returns `[escalate-to-research]` for low confidence or strategic
+  uncertainty. The derived todos carry focused `instruction` prose from those
+  resolved verdict labels, so branch, prep, edit, review, doc, final-gate, and
+  merge todos describe only the path reachable under the current verdict;
+  branch-stop todos describe the blocker instead of telling the caller to
+  continue source edits. Non-stop prep instructions carry required
+  runbook-loading guardrails, including mental-model lookup, ancestor reads,
+  conditional migration-anchor loading, and implementation-runbook loading
   before edits or delegate dispatch. Text output is the canonical raw verdict
   beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
   `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
   output returns the structured result plus `next_instruction` and the identical
   `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
-  what policy or branch condition needs correction before source edits continue.
+  what policy or branch condition needs correction before source edits continue
+  without naming unreachable planner or implementer actions.
 - `proceed`: `ws.enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /

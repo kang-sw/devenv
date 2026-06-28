@@ -42,6 +42,113 @@ func TestResolveImplementStrategyRules(t *testing.T) {
 	if result.Verdict.ReviewAlloc != "lead-only" || result.Verdict.NeedReview {
 		t.Fatalf("review = %q need=%v, want lead-only false", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
 	}
+	if strings.Contains(result.NextInstruction, "plan-populator") || strings.Contains(result.NextInstruction, "ws.path.generate") {
+		t.Fatalf("direct-edit next instruction mentioned planner actions: %q", result.NextInstruction)
+	}
+	if strings.Contains(result.Raw, "Plan Depth: brief") {
+		t.Fatalf("direct-edit raw exposed brief plan depth:\n%s", result.Raw)
+	}
+}
+
+func TestResolveImplementDelegatedDefaultsToSurveyPlan(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", TicketPath: "ai-docs/tickets/ready/feature.md", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				NewPublicSymbol:           factString{Value: "no", Present: true},
+				NewTypeContract:           factString{Value: "no", Present: true},
+				TestSurface:               factString{Value: "existing", Present: true},
+				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+			},
+			Complexity: implementComplexityFactsInput{
+				ChangePoints:   factString{Value: "clear", Present: true},
+				ReusePoints:    factString{Value: "confirmed", Present: true},
+				StrategyShape:  factString{Value: "single-obvious", Present: true},
+				SideEffectRisk: factString{Value: "moderate", Present: true},
+				ColdContext:    factString{Value: "no", Present: true},
+			},
+			Risk: implementRiskFactsInput{
+				Correctness:        factString{Value: "moderate", Present: true},
+				Fit:                factString{Value: "moderate", Present: true},
+				Test:               factString{Value: "moderate", Present: true},
+				SecurityOrContract: factString{Value: "moderate", Present: true},
+			},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	if result.Verdict.Delegation != "delegated" {
+		t.Fatalf("delegation = %q, want delegated", result.Verdict.Delegation)
+	}
+	if result.Verdict.PlanDepth != "survey" {
+		t.Fatalf("plan depth = %q, want survey", result.Verdict.PlanDepth)
+	}
+	for _, want := range []string{"ws.path.generate", "plan-populator-survey", "light plan", "PlanPath"} {
+		if !strings.Contains(result.NextInstruction, want) {
+			t.Fatalf("delegated next instruction missing %q: %q", want, result.NextInstruction)
+		}
+	}
+	if strings.Contains(result.Raw, "brief") {
+		t.Fatalf("delegated raw exposed old brief path:\n%s", result.Raw)
+	}
+}
+
+func TestResolveImplementSurveyEscalatesResearchFromSurveySignal(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "risky feature", ScopeLabel: "Phase 2", ScopeSlug: "risky-feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "cross-module", Present: true},
+				TestSurface:               factString{Value: "new-files", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+			Complexity: implementComplexityFactsInput{
+				StrategyShape:  factString{Value: "multiple-viable", Present: true},
+				SideEffectRisk: factString{Value: "high", Present: true},
+				ReusePoints:    factString{Value: "unconfirmed", Present: true},
+				ColdContext:    factString{Value: "yes", Present: true},
+			},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"})
+	if result.Verdict.PlanDepth != "survey" {
+		t.Fatalf("plan depth = %q, want survey even for risky delegated prep", result.Verdict.PlanDepth)
+	}
+	for _, want := range []string{"[escalate-to-research]", "low confidence", "strategic uncertainty", "plan-populator-research"} {
+		if !strings.Contains(result.NextInstruction, want) {
+			t.Fatalf("survey escalation next instruction missing %q: %q", want, result.NextInstruction)
+		}
+	}
+	if strings.Contains(result.Raw, "Plan Depth: research") {
+		t.Fatalf("resolver preselected research instead of survey escalation:\n%s", result.Raw)
+	}
+}
+
+func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}, AllowRename: factString{Value: "no", Present: true}},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("branch action = %q, want stop", result.Verdict.BranchPlan.Action)
+	}
+	for _, forbidden := range []string{"ws.path.generate", "plan-populator-survey", "plan-populator-research", "render implementer"} {
+		if strings.Contains(result.NextInstruction, forbidden) {
+			t.Fatalf("branch-stop next instruction includes unreachable %q: %q", forbidden, result.NextInstruction)
+		}
+	}
 }
 
 func TestResolveImplementBranchPlanRules(t *testing.T) {
