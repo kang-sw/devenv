@@ -429,17 +429,13 @@ skill file remains available for compatibility, but `lead-implement` no longer
 invokes it and absence of ticket `skeletons:` frontmatter does not create a
 skeleton obligation. {#260510-skeleton-contract-populator-flow}
 
-`lead-implement` delegated mode absorbs the useful skeleton role through brief authoring.
+`lead-implement` delegated mode absorbs the useful skeleton role through plan authoring.
 For public interface, cross-module boundary, or new type contract changes, the
-brief includes concrete `Contract Instructions`: expected files or modules,
-public types/functions/handlers/tools, visibility, call shape, input/output
-shape, lifecycle boundaries, existing mechanisms to reuse, and forbidden
-temporary, fallback, or mock-data wiring. It also includes concrete
-`Integration Test Instructions`: the required boundary type such as parser,
-CLI, MCP tool, doc convention, skill routing, runtime lifecycle, or agent
-relay; whether to extend existing tests or create new integration tests; and
-observable pass criteria. Implementers treat both sections as acceptance
-criteria, and fit/test reviewers compare the implementation against them.
+generated plan carries the relevant ticket contract, expected files or modules,
+public types/functions/handlers/tools when applicable, reusable mechanisms,
+forbidden temporary/fallback/mock-data wiring, implementation steps, and
+verification expectations. Implementers treat the plan as the execution
+contract, and reviewers compare the ticket, plan, and diff together.
 {#260512-skeleton-inside-implement-branch}
 
 Ticket `skeletons:` frontmatter is a backward-compatible legacy artifact map.
@@ -455,8 +451,9 @@ scope, complexity, risk, and policy facts, calls `ws.enter.implement`, follows
 the MCP-authored Implementation Verdict, then runs the shared
 post-implementation documentation pipeline before reporting completion. The MCP
 verdict owns deterministic implementation labels and branch preflight: it chooses
-direct-edit or delegated mode, branch action, plan depth, review allocation,
-review need, and documentation mode from facts, policy, and observed Git state.
+direct-edit or delegated mode, branch action, delegated survey planning,
+review allocation, review need, and documentation mode from facts, policy, and
+observed Git state.
 `Branch Action: stop` blocks source edits until the missing merge target, unsafe
 rename, existing target branch, or tracking ambiguity is resolved. After
 verification, `lead-implement` records the phase result commit, closes spec,
@@ -468,18 +465,20 @@ completed phases.
 `lead-implement` is a unified implementation spine with two edit modes.
 Direct-edit mode: the lead edits and verifies inline on the scoped
 implementation branch, suitable for single-file internal-only changes.
-Delegated mode: the lead writes a brief, optionally populates a plan, spawns an
-implementer agent, and captures the resulting commit range. The MCP verdict
-selects edit mode; branch isolation is independent of edit mode, and direct-edit
-is derived only for single-file internal-only work with no public symbol,
-contract, new test-file, or explicit delegation signal.
+Delegated mode: the lead reads the ticket and selected scope, generates a plan
+path, dispatches a planner to write or refine that single implementation plan,
+spawns an implementer agent with the plan, and captures the resulting commit
+range. The MCP verdict selects edit mode; branch isolation is independent of
+edit mode, and direct-edit is derived only for single-file internal-only work
+with no public symbol, contract, new test-file, or explicit delegation signal.
 Initial implementer dispatch is file-first: the lead renders the `implementer`
-playbook with brief path, optional plan path, verification hint, result
-expectations, and commit-range hint as declared render inputs, then sends the
-worker only the rendered prompt path plus the instruction to execute it. The
-rendered implementer prompt reads the brief, optional plan, and listed
-references as the task contract; it does not read the ticket directly unless the
-caller explicitly overrides that rule. Recommended tier remains dispatch
+playbook with plan path, verification hint, result expectations, and
+commit-range hint as declared render inputs, then sends the worker only the
+rendered prompt path plus the instruction to execute it. The rendered
+implementer prompt reads the plan and listed references as the task contract; it
+does not read the ticket directly unless the plan's `Escalations` section
+explicitly authorizes ticket-file reading. Otherwise the lead updates the plan
+before ticket material is needed. Recommended tier remains dispatch
 metadata for the lead or transport, not worker-facing task input.
 
 After fact gathering and before preparation or source inspection,
@@ -510,7 +509,7 @@ partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
 
 Delegates in the review fix-loop are stateless by contract: each implementer and
 reviewer dispatch is fed entirely by its relay prompt plus the self-contained
-artifact set (brief, plan, review findings, committed diff), and the loop stays
+artifact set (plan, review findings, committed diff), and the loop stays
 correct when every cycle is a fresh spawn. When the host supports same-agent
 resume, `lead-implement` may reuse the prior implementer or reviewer for fix and
 re-review loops to reduce latency, but resume never carries required state. Loop
@@ -528,46 +527,49 @@ finding is not re-relayed, only genuinely new Critical/Important findings are â€
 layered over the relay cap as the backstop for the pathological case of a
 reviewer inventing new findings each cycle.
 Delegated review-fix relay is file-first: the lead renders the
-`implementer-relay` playbook with declared inputs for brief path, optional plan
-path, review cycle, current commit range, non-clean review paths, disposition
-notes, verification hint, and result expectations. The lead then sends only the
-rendered prompt path plus a short execute instruction to the implementation
-owner. Reviewer findings remain file inputs, not copied prompt prose.
+`implementer-relay` playbook with declared inputs for plan path, review cycle,
+current commit range, non-clean review paths, disposition notes, verification
+hint, and result expectations. The lead then sends only the rendered prompt path
+plus a short execute instruction to the implementation owner. Reviewer findings
+remain file inputs, not copied prompt prose.
 {#260619-stateless-implement-review-continuity}
 
-Plan population is an either/or depth choice for delegated mode. When plan depth
-is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
-and possible risk signals without deciding that the implementation direction is
-wrong. If survey cannot safely support implementation without strategy, contract,
-or reuse judgment, it returns `[escalate-to-research]` instead of forcing a
-survey plan. `lead-implement` then routes to `plan-populator-research` before
-spawning the implementer.
+Plan population defaults to the survey planner for delegated mode. The
+plan-populator render contract is ticket-to-plan shaped: ticket path, selected
+phase, and plan path. `plan-populator-survey` clips the relevant ticket
+contract, explores source, writes a light implementation plan with `Relevant
+Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
+`Verification Plan`, and `Escalations`, then returns `[ok]` or
+`[escalate-to-research]` with confidence and rationale. If survey cannot safely
+support implementation without strategy, contract, or reuse judgment,
+`lead-implement` routes to `plan-populator-research` on the same plan path
+before spawning the implementer.
 
-When plan depth is `research`, `plan-populator-research` makes planner
-judgments: it chooses clean existing mechanisms when they fit the brief,
-preserves contract and integration-test guardrails in the plan, rejects
-temporary, fallback, mock-data, and duplicated-glue paths, and escalates when no
-clean plan can satisfy the brief. A survey-to-research route replaces the same
-plan artifact path with the research plan; it does not create a research-suffixed
-plan filename or append research to a survey plan.
+`plan-populator-research` is reached from the survey escalation signal and makes
+planner judgments: it reads any existing survey output at the same plan path,
+chooses clean existing mechanisms when they fit the ticket phase, preserves
+selected contract and verification guardrails in the plan, rejects temporary,
+fallback, mock-data, and duplicated-glue paths, and escalates when no clean plan
+can satisfy the ticket phase. A survey-to-research route replaces or refines the
+same plan artifact path with the research plan; it does not create a
+research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
 signals. It stops and escalates when implementation would likely pursue a wrong
 contract, bypass existing project mechanisms, or rely on a shortcut path. Review
-remains an enforcement step: reviewers compare the implementation against brief
-and plan guardrails and catch implementation-time shortcut drift, but known
+remains an enforcement step: reviewers compare the implementation against the
+ticket, plan, and diff to catch implementation-time shortcut drift, but known
 plan-time risks are handled before source work begins.
 
-The implementation brief is the implementer's sole context source, but it is
-not a lossy ticket summary. For the selected implementation scope, the brief
-records every settled caller-visible contract, implementation strategy decision,
-rejected alternative, and verification expectation from the target, or marks it
-explicitly deferred or out of scope. Ticket noise such as background discussion,
-unsettled options, and unrelated future phases is stripped. In ticket-driven
-runs, the fit reviewer reads the ticket and treats selected-scope binding
-decisions omitted from the brief or violated by the implementation as blocking
-findings. Correctness and test reviewers remain scoped to the diff and their
-assigned partitions.
+The implementation plan is the implementer's sole context source, but it is not
+a lossy ticket summary. For the selected implementation scope, the plan clips the
+relevant ticket contract and records implementation strategy, codebase findings,
+verification expectations, escalations, and explicit out-of-scope boundaries.
+Ticket noise such as background discussion, unsettled options, and unrelated
+future phases is stripped. In ticket-driven runs, reviewers read the ticket and
+plan, then treat selected-scope binding decisions omitted from the plan or
+violated by the implementation as blocking findings within their assigned
+partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
 stages complete. `lead-sprint` runs documentation closure only for marked
@@ -661,20 +663,21 @@ decisions as missing settled decisions.
 
 Implementation always routes through `lead-implement` with the selected scope as
 a hard scope boundary. `lead-proceed` does not rejudge general ticket quality,
-mutate ticket structure, decide contract-brief depth, or invoke implementation
+mutate ticket structure, decide delegated plan depth, or invoke implementation
 primitives before `lead-implement`; it requests phase or ticket slicing only
 when scope resolution blocks safe implementation. Public or cross-module
-contract checkpoints are expressed as `lead-implement` brief contract and
-integration-test instructions.
+contract checkpoints are expressed through the delegated `lead-implement`
+implementation plan.
 
 `lead-implement` also loads the native-subagent pivot anchor before editing when
 the target touches plugin architecture, host-neutral migration, spawn-removal,
-or adapter boundaries. Delegated implementation has minimum brief depth; when
-the migration anchor is read, binding implementation constraints from the anchor
-are copied into the brief and the anchor is listed as a `[Must]` reference before
+or adapter boundaries. Delegated implementation has a required plan artifact;
+when the migration anchor is read, binding implementation constraints from the
+anchor are copied into the plan and the anchor is listed as a `[Must]` reference before
 plan population or implementer dispatch. Delegated implementers receive only the
-brief and optional plan as task input, may read additional documents listed in
-brief References, and must not read the ticket directly.
+plan as task input, may read additional documents listed in the plan, and must
+not read the ticket directly unless the plan's `Escalations` section explicitly
+authorizes ticket-file reading.
 
 Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
 fact gathering and receives a deterministic raw verdict with exactly one

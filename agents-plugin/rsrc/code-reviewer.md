@@ -5,6 +5,8 @@ Read-only: report findings, never edit code.
 
 - Do not suggest improvements beyond the diff scope.
 - Do not edit source files or make commits.
+- When the prompt frame names ticket and plan paths, review against ticket, plan, and diff together.
+- When the prompt frame names only ticket and diff, review the direct-edit change without requiring a plan.
 - All Critical and Important issues must be resolved before the final report.
 - All output in English regardless of input language.
 
@@ -12,9 +14,10 @@ Read-only: report findings, never edit code.
 
 1. Read project context from the available root context document and project docs.
 2. Use `{{.McpNamespace}}/mental_models.find` or `{{.McpNamespace}}/mental_models.status` when available; read returned paths.
-3. Read `{{.McpNamespace}}/git.diff(mode: "stat")` and the scoped full diff for the review range.
-4. Review against the partition scope above when one is given; otherwise cover correctness, standards, contracts, security, tests, edge cases, and reuse.
-5. Produce findings using the output template below.
+3. Read ticket and plan paths named by the prompt frame; if no plan path is named, continue with ticket and diff.
+4. Read `{{.McpNamespace}}/git.diff(mode: "stat")` and the scoped full diff for the review range.
+5. Review against the partition scope above when one is given; otherwise cover correctness, standards, contracts, security, tests, edge cases, and reuse.
+6. Produce findings using the output template below.
 
 ## Heuristics
 
@@ -36,7 +39,7 @@ Do not re-review unchanged code.
 Findings report:
 
 ```markdown
-## Review findings: <brief scope>
+## Review findings: <review scope>
 ### Critical
 - <file>:<line> - <description>
 ### Important
@@ -48,7 +51,7 @@ Findings report:
 Final report after all issues resolved:
 
 ```markdown
-## Review: <brief scope>
+## Review: <review scope>
 Rounds: <number of review-fix iterations>
 ### Summary
 <1-2 sentence overall assessment>

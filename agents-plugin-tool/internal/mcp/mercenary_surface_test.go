@@ -557,7 +557,11 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
+			var context map[string]string
+			if name == "plan-populator-survey" || name == "plan-populator-research" {
+				context = shippedPlanPopulatorContext()
+			}
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, context, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -600,6 +604,15 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 			}
 			if !strings.Contains(body, "Partition scope") {
 				t.Errorf("%s missing partition-specific scope section:\n%s", name, body)
+			}
+			for _, want := range []string{
+				"When the prompt frame names ticket and plan paths, review against ticket, plan, and diff together.",
+				"When the prompt frame names only ticket and diff, review the direct-edit change without requiring a plan.",
+				"Read ticket and plan paths named by the prompt frame; if no plan path is named, continue with ticket and diff.",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing reviewer base contract %q:\n%s", name, want, body)
+				}
 			}
 		})
 	}

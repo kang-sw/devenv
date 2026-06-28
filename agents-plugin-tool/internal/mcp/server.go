@@ -3418,7 +3418,7 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"kind":  stringProperty("Generated path kind. Initially supports review."),
+					"kind":  enumStringProperty(`Generated path kind. "review" and "prompt" allocate cache artifacts; "plan" allocates a repo-local implementation plan under ai-docs/.plans/.`, []string{"review", "prompt", "plan"}),
 					"stems": stringArrayProperty("Logical file stems to allocate in stable order."),
 				},
 				"required": []string{"kind", "stems"},

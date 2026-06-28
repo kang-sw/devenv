@@ -528,19 +528,13 @@ func deriveImplementDelegation(n normalizedImplementFacts) string {
 }
 
 func deriveImplementPlanDepth(n normalizedImplementFacts, delegation string) string {
-	if n.StrategyShape == "multiple-viable" || n.SideEffectRisk == "high" {
-		return "research"
-	}
-	if n.Span == "multi-file" || n.ReusePoints == "unconfirmed" || n.ColdContext == "yes" || n.Surface == "cross-module" || n.Surface == "public-interface" {
-		return "survey"
-	}
 	if delegation == "delegated" {
-		return "brief"
+		return "survey"
 	}
 	if n.ChangePoints == "clear" && n.SideEffectRisk == "low" {
 		return "none"
 	}
-	return "brief"
+	return "none"
 }
 
 func deriveImplementReviewAlloc(n normalizedImplementFacts, delegation string) string {
@@ -634,18 +628,26 @@ func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchOb
 }
 
 func implementNextInstruction(verdict implementVerdict) string {
+	nextAfterBranch := implementNextAfterBranch(verdict)
 	switch verdict.BranchPlan.Action {
 	case "stop":
 		return "Stop before source edits. Report the branch safety blocker in Branch Action and ask for the missing policy or branch cleanup."
 	case "create":
-		return fmt.Sprintf("Create %s from %s before source edits, then proceed with %s planning, %s implementation, %s review, and %s documentation gates.", verdict.BranchPlan.TargetBranch, verdict.BranchPlan.MergeTarget, verdict.PlanDepth, verdict.Delegation, verdict.ReviewAlloc, verdict.DocMode)
+		return fmt.Sprintf("Create %s from %s before source edits, then %s", verdict.BranchPlan.TargetBranch, verdict.BranchPlan.MergeTarget, nextAfterBranch)
 	case "rename":
-		return fmt.Sprintf("Rename the current branch to %s before source edits, then proceed with %s planning, %s implementation, %s review, and %s documentation gates.", verdict.BranchPlan.TargetBranch, verdict.PlanDepth, verdict.Delegation, verdict.ReviewAlloc, verdict.DocMode)
+		return fmt.Sprintf("Rename the current branch to %s before source edits, then %s", verdict.BranchPlan.TargetBranch, nextAfterBranch)
 	case "continue":
-		return fmt.Sprintf("Continue on %s, then proceed with %s planning, %s implementation, %s review, and %s documentation gates.", verdict.BranchPlan.CurrentBranch, verdict.PlanDepth, verdict.Delegation, verdict.ReviewAlloc, verdict.DocMode)
+		return fmt.Sprintf("Continue on %s, then %s", verdict.BranchPlan.CurrentBranch, nextAfterBranch)
 	default:
 		return "Stop before source edits. Report that the branch action is unrecognized."
 	}
+}
+
+func implementNextAfterBranch(verdict implementVerdict) string {
+	if verdict.Delegation == "direct-edit" {
+		return fmt.Sprintf("run prep guardrails, apply direct edits in the lead context, run %s review, and complete %s documentation gates.", verdict.ReviewAlloc, verdict.DocMode)
+	}
+	return fmt.Sprintf("call ws.path.generate(kind: \"plan\"), render plan-populator-survey with ticket_path, selected_phase, and plan_path, dispatch it to write the light plan, render plan-populator-research on the same plan path only if survey returns [escalate-to-research] for low confidence or strategic uncertainty, then render implementer with PlanPath before %s review and %s documentation gates.", verdict.ReviewAlloc, verdict.DocMode)
 }
 
 func implementConditions(n normalizedImplementFacts) []string {

@@ -16,7 +16,7 @@ related:
 ## Entry Points
 
 - `wsagent.Manager` owns role registration, current-instance resolution, async calls, wait/result/status/tail/cancel/recall compatibility, inbox delivery, and role erasure. {#260505-named-agent-registry-state-layout} {#260511-agent-recall-recovery}
-- `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
+- `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths; `GeneratePaths` is the workflow artifact allocator with both cache-backed and repo-local path kinds.
 - `wsstore` is the write authority for named-agent role pointers, instance rows, cleanup fences, and retention metadata; `wsstate` still derives the worktree-local payload directory root for prompts, inboxes, current-call state, diagnostic streams, event logs, and outputs. {#260525-named-agent-runtime-metadata-inventory}
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
 - `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
@@ -48,7 +48,7 @@ related:
 - MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces and worktree-scoped same-name collision tests.
 - Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced; worker state is rooted by the worktree store, not a hidden actor id.
 - `WS_MCP_TOOL_PROFILE` subprocess-env propagation is removed (Phase 3): the `RegisterOptions`/`RunnerRequest` `ToolProfile` field and the codex/claude env append are gone. The env profile was verified non-functional as a containment barrier (it never restricted the spawned child's exposed tool surface). Delegate capability now travels in-band: render-minted child keys (Phase 2c) inject a scoped delegate key, and the keyed `callTool` capability gate (see `mcp-runtime`) enforces it as the sole server-side authority.
-- Worktree scoping is shared by agents, generated review paths, orchestrator locks, and dashboard Activity Console projection; changing cache layout, `agent.json` metadata semantics, or Codex `session_id` persistence affects dashboard feed/transcript behavior as well as agent tools.
+- Worktree scoping is shared by agents, generated cache artifacts, repo-local plan artifacts, orchestrator locks, and dashboard Activity Console projection; changing cache layout, `agent.json` metadata semantics, or Codex `session_id` persistence affects dashboard feed/transcript behavior as well as agent tools.
 - The SQLite state-store is authoritative for role pointers, instance metadata, path indexes, and retention fences, but not for `current/state.json`, `events.jsonl`, or payload bodies. Preserve file-backed diagnostics and result consumption semantics: path fields such as `state_path`, `system_prompt_path`, and `last_output_path` are SQLite metadata indexes, while prompt/stdout/stderr/runtime-log/event/final-output bytes remain file-backed payloads. {#260525-named-agent-runtime-metadata-inventory}
 - Agent-instance cleanup participates in prune-run diagnostics but keeps retry metadata on `agent_instances`, not artifact tombstones; instance cleanup deletes directories and must not imply artifact payload ownership or retry semantics.
 - MCP `ws.mercenary.*` lifecycle tools require the caller's mandatory `session_key`; `mcp.resolveToolRoot` converts that key to the worktree root passed into `wsagent.Manager`. There is no actor binding, hidden explicit-root namespace, or actor-scoped dispatch path. {#260610-ephemeral-session-auth-model}
@@ -63,7 +63,7 @@ related:
 - **Add a diagnostic stream**: update stream path mapping, MCP debug tools, CLI debug tools, tail output, and tests. Keep path metadata and payload body ownership distinct when updating the migration inventory. {#260505-agent-diagnostics-tail-debug}
 - **Change registry metadata**: update `wsstore.AgentDefinition`, `agentDefinitionFromAgent`, legacy import, role-pointer/instance-history tests, same-name cross-worktree collision tests, and MCP session-key lifecycle tests together. `wsstore` tests should use local fixtures or source-level inventories rather than importing runtime consumers.
 - **Change named-agent cleanup**: keep role deletion as pointer removal, preserve the seven-day retention policy, and update both SQLite candidate selection and `current/state.json` active-state guards; cleanup retry/backoff metadata belongs on the agent-instance row.
-- **Add generated path kinds**: update `generatedPathTarget`, MCP schema, callers, and cleanup rules.
+- **Add generated path kinds**: decide cache-backed vs repo-local ownership first, then update `GeneratePaths`/`generatedPathTarget`, MCP schema, callers, and cleanup rules. Repo-local plan paths deliberately bypass cache cleanup and use the worktree `ai-docs/.plans/` tree. {#260505-workflow-state-delegation-tools}
 
 ## Common Mistakes
 

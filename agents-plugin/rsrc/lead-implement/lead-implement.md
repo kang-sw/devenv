@@ -21,7 +21,7 @@ Execution
 - Name workflow skill handoffs with `{{.SkillNamespace}}:<skill>` notation.
 - Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.
 - Treat the installed todo list as the ordered runbook; do not create a parallel task list.
-- Briefs preserve selected-scope decisions about files, public interfaces, tests, exclusions, and accepted or rejected approaches.
+- Plans preserve selected-scope decisions about files, public interfaces, tests, exclusions, and accepted or rejected approaches.
 - Delegate prompts are self-contained; resume is optional latency optimization.
 
 Review
@@ -81,7 +81,7 @@ Policy rules:
 4. If the verdict says `Branch Action: stop`, report the blocker before source edits.
 5. Execute todos in order:
    - `{route}` / branch setup
-   - `{prep}` / brief or plan
+   - `{prep}` / direct confirmation or delegated plan
    - `{edit}` / direct edit or implementer dispatch
    - `{review}` / lead, single, or partitioned review
    - `{doc-pre-pass}` / spec and mental-model updates
@@ -94,9 +94,12 @@ Policy rules:
 
 1. Run the `{prep}` instruction.
 2. Load required mental models, migration anchor, and `{{.McpNamespace}}/infra.read(name: "impl-playbook")` when instructed.
-3. For delegated work, write the **Brief template** and optional plan before implementation.
-4. Stop for unresolved binding decisions before source edits.
-5. If brief or plan artifacts were created, commit them before Edit.
+3. For direct edit, keep implementation lead-owned from the ticket and do not create a planner artifact unless the route escalates.
+4. For delegated work, call `{{.McpNamespace}}/path.generate(kind: "plan", stems: ["<ticket-stem-or-task>"])`; capture `<plan-path>`.
+5. Render `plan-populator-survey` with `ticket_path`, `selected_phase`, and `plan_path`; dispatch it through **Delegate dispatch** and **Plan prompts**.
+6. If survey returns `[escalate-to-research]`, render `plan-populator-research` with the same `ticket_path`, `selected_phase`, and `plan_path`; dispatch it through **Delegate dispatch** and **Plan prompts**.
+7. Stop for unresolved binding decisions before source edits.
+8. If a plan artifact was created, commit it before Edit.
 
 ### 4. Edit And Verify
 
@@ -136,7 +139,7 @@ Run `{merge}` only after user approval. Merge to the verdict or caller-approved 
 ### Delegate dispatch
 
 1. Render the delegate playbook: `{{.McpNamespace}}/playbook.render(name: "<playbook>")`; capture prompt path and `recommended-tier` as dispatch metadata.
-2. For `implementer`, pass only file-first render inputs: `BriefPath`, `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`; `RoleModel` is declared in the prompt and tool-injected from tier metadata.
+2. For `implementer`, pass only file-first render inputs: `PlanPath`, `VerificationHint`, `ResultExpectations`, and `CommitRangeHint`; `RoleModel` is declared in the prompt and tool-injected from tier metadata.
 3. Native default: spawn a fresh subagent with only the rendered prompt path and task-specific input; choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text.
 4. Collect the normal completion report. If `ResultExpectations` names an output file, additionally require the output-file path plus a short summary.
 <!-- ws:full-only:start -->
@@ -144,69 +147,27 @@ Run `{merge}` only after user approval. Merge to the verdict or caller-approved 
 <!-- ws:full-only:end -->
 6. Task input mapping: `reference-discovery` gets target/domain when `{prep}` requests discovery; `implementer` gets **Implementer spawn prompt**; `implementer-relay` gets **Review relay dispatch**; reviewers get **Reviewer prompt frame**; plan populators get **Plan prompts** when `{prep}` requests a plan; `mental-model-updater` gets commit range plus output path.
 
-### Brief template
+### Plan contract
 
-Path: `ai-docs/.plans/YYYY-MM/DD-<stem-or-short-slug>.brief.md`
+Path: `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem-or-short-slug>.md`
 
-```markdown
-# Brief: <stem>
-
-## Intent
-<one paragraph>
-
-## Scope Boundary
-<selected scope and explicit exclusions>
-
-## Caller-Visible Contract
-<observable behavior, public API/protocol/UI/doc output/lifecycle contract>
-
-## Contract Instructions
-<files/modules; public types/functions/handlers/tools; visibility; call shape>
-<existing mechanisms to reuse before adding new paths>
-<temporary, fallback, or mock-data wiring that is forbidden>
-
-## Integration Test Instructions
-<boundary type; test files; pass criteria>
-
-## Implementation Strategy Decisions
-<settled approach the implementer must not reopen>
-
-## Rejected Alternatives
-<approaches ruled out and why>
-
-## Approach
-<macro-level bullets>
-
-## Constraints
-<must-hold conditions>
-
-## Out of scope
-<explicitly excluded>
-
-## Details
-<interface specs, data types, public contracts>
-
-## Verification Contract
-<tests, probes, command outputs required>
-
-## References
-<!-- [Must] read before starting. [Maybe] consult if uncertain. -->
-- `ai-docs/mental-model/<path>` - <relevance>
-```
+Required sections: `Relevant Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`, `Verification Plan`, and `Escalations`.
 
 ### Plan prompts
 
 **Survey:**
 ```text
-Brief path: <brief-path>
-Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+Ticket path: <ticket-path>
+Selected phase: <selected-phase>
+Plan path: <plan-path>
 ```
 
 **Research route:**
 ```text
-Brief path: <brief-path>
-Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
-Read the survey output, then replace the file with a research plan.
+Ticket path: <ticket-path>
+Selected phase: <selected-phase>
+Plan path: <plan-path>
+Read the survey output at the same plan path, then refine or replace it.
 ```
 
 ### Implementer spawn prompt
@@ -214,27 +175,26 @@ Read the survey output, then replace the file with a research plan.
 ```text
 Rendered implementer prompt: <prompt-path>
 
-Read that prompt file and execute it. It contains the brief path, optional plan
-path, verification expectations, commit-range guidance, and reporting
-requirements.
+Read that prompt file and execute it. It contains the plan path, verification
+expectations, commit-range guidance, and reporting requirements.
 ```
 
 ### Reviewer table
 
 | Partition | Reviewer name | Render playbook | Required check |
 |-----------|---------------|-----------------|----------------|
-| Correctness | `reviewer-correctness` | `code-review-correctness` | Correctness invariants |
-| Fit | `reviewer-fit` | `code-review-fit` | Brief contract, future-phase fit, ticket decisions |
-| Test | `reviewer-test` | `code-review-test` | Coverage, assertions, integration instructions |
+| Correctness | `reviewer-correctness` | `code-review-correctness` | Ticket, plan, and correctness invariants |
+| Fit | `reviewer-fit` | `code-review-fit` | Ticket decisions, plan guardrails, and future-phase fit |
+| Test | `reviewer-test` | `code-review-test` | Ticket and plan verification coverage |
 
 ### Reviewer prompt frame
 
+**Delegated or escalated route with generated plan:**
 ```text
 Review partition: <Correctness|Fit|Test>
 Diff range: <parent-of-first-commit>..<last-commit>
-<if Fit:> Brief path: <brief-path>
-<if plan exists:> Plan path: <plan-path>
-<if Fit and ticket-driven:> Ticket path: <ticket-path>
+Ticket path: <ticket-path>
+Plan path: <plan-path>
 Findings path: <partition-output-path>
 
 Review focus:
@@ -242,10 +202,33 @@ Review focus:
 
 Required checks:
 - <required check from Reviewer table>
-- <if plan exists:> Plan guardrails were not bypassed.
-- <if Fit and ticket-driven:> Binding decisions were not omitted or violated.
+- Review the ticket contract, plan contract, and diff together.
+- Plan guardrails were not bypassed.
+- Binding ticket decisions were not omitted or violated.
 
 Instructions:
+- Ignore outside this partition unless directly broken by the diff.
+- Write detailed findings to the findings path.
+- In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
+```
+
+**Direct edit with no generated plan:**
+```text
+Review partition: <Correctness|Fit|Test>
+Diff range: <parent-of-first-commit>..<last-commit>
+Ticket path: <ticket-path>
+Findings path: <partition-output-path>
+
+Review focus:
+- <2-4 partition-specific risks>
+
+Required checks:
+- <required check from Reviewer table>
+- Review the ticket contract and diff together.
+- Binding ticket decisions were not omitted or violated.
+
+Instructions:
+- Do not require a plan artifact for direct-edit review.
 - Ignore outside this partition unless directly broken by the diff.
 - Write detailed findings to the findings path.
 - In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
@@ -254,8 +237,8 @@ Instructions:
 ### Review relay dispatch
 
 ```text
-Render `implementer-relay` with declared inputs: BriefPath, PlanPath,
-ReviewCycle, CommitRange, ReviewPaths, DispositionNotes, VerificationHint, and
+Render `implementer-relay` with declared inputs: PlanPath, ReviewCycle,
+CommitRange, ReviewPaths, DispositionNotes, VerificationHint, and
 ResultExpectations. Capture prompt path and recommended-tier.
 
 Rendered review relay prompt: <prompt-path>
@@ -272,7 +255,7 @@ Updated diff range or patch path: <range-or-path>
 Prior findings and dispositions path: <path>
 Findings path: <partition-output-path>
 Verify [fixed] items and report new issues introduced by the updated diff.
-For each [won't fix], respond [accepted] or [maintained: <brief reason>].
+For each [won't fix], respond [accepted] or [maintained: <short reason>].
 Write detailed findings to the findings path.
 In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```

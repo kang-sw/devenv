@@ -234,19 +234,25 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   and whether safe branch rename is allowed. The resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
-  derived lead-implement checklist. The derived todos carry focused
-  `instruction` prose from those resolved verdict labels, so branch, prep, edit,
-  review, doc, final-gate, and merge todos describe only the path reachable
-  under the current verdict; branch-stop todos describe the blocker instead of
-  telling the caller to continue source edits. Non-stop prep instructions carry
-  required runbook-loading guardrails, including mental-model lookup, ancestor
-  reads, conditional migration-anchor loading, and implementation-runbook loading
+  derived lead-implement checklist. `plan_depth` is `none` for direct edit and
+  `survey` for reachable delegated preparation; delegated preparation creates a
+  plan path, renders `plan-populator-survey` to write the light implementation
+  plan, and renders `plan-populator-research` on the same plan path only when
+  the survey returns `[escalate-to-research]` for low confidence or strategic
+  uncertainty. The derived todos carry focused `instruction` prose from those
+  resolved verdict labels, so branch, prep, edit, review, doc, final-gate, and
+  merge todos describe only the path reachable under the current verdict;
+  branch-stop todos describe the blocker instead of telling the caller to
+  continue source edits. Non-stop prep instructions carry required
+  runbook-loading guardrails, including mental-model lookup, ancestor reads,
+  conditional migration-anchor loading, and implementation-runbook loading
   before edits or delegate dispatch. Text output is the canonical raw verdict
   beginning `Implementation Verdict`, with `Mode`, `Branch Action`, `Plan Depth`,
   `Review Allocation`, `Doc Mode`, and a concrete `Next:` instruction; JSON
   output returns the structured result plus `next_instruction` and the identical
   `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
-  what policy or branch condition needs correction before source edits continue.
+  what policy or branch condition needs correction before source edits continue
+  without naming unreachable planner or implementer actions.
 - `proceed`: `ws.enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
@@ -735,9 +741,12 @@ it does not change todo status — `git.commit` never auto-marks items done.
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
-`path.generate` allocates worktree-scoped writable artifact paths, such as review
-files, so workflow agents can exchange file paths without inventing cache
-locations.
+`path.generate` allocates writable workflow artifact paths so workflow agents can
+exchange file paths without inventing cache locations. `kind: "review"` and
+`kind: "prompt"` allocate worktree-scoped cache artifacts. `kind: "plan"`
+allocates repo-local implementation plan files under
+`ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`; collisions append a numeric suffix
+while preserving the sanitized logical stem.
 
 ## wsflow Agentless Runtime Mode {#260513-wsflow-agentless-runtime-mode}
 
@@ -805,10 +814,10 @@ and mercenary delegates receive a prompt with their key already embedded
 
 In no-agent/wsflow mode only, `playbook.render` has a compatibility bridge for
 the five legacy render-eligible stems. When `name` is one of those stems,
-caller-supplied `context` is appended as prompt data in a `## Render Context`
-block after normal playbook rendering rather than being interpreted as template
-variables. The bridge does not apply to `implementer`, to arbitrary playbooks, or
-to full ws mode.
+declared caller `context` keys are rendered as normal template variables and any
+remaining undeclared keys are appended as prompt data in a `## Render Context`
+block after normal playbook rendering. The bridge does not apply to
+`implementer`, to arbitrary playbooks, or to full ws mode.
 
 A playbook is selected by `name`; the tool does not decide which playbook to use.
 A load or render failure for a requested `name` is a loud error, not a silent

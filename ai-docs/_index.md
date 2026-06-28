@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.30.15`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.15`).
+Active plugin package: `agents-plugin/` (`ws@0.30.16`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.16`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -168,7 +168,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260627-bug-write-ticket-bypasses-tickets-create` | idea | Capture dogfood failure where ticket authoring manually created a file instead of invoking `ws.tickets.create` |
 | `260627-bug-enter-implement-direct-edit-policy-gap` | idea | Investigate `ws.enter.implement` lacking a direct-edit/no-delegation policy override for narrow multi-file text changes |
 | `260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood` | idea | Investigate branch-local playbook render or cache-refresh guidance for source rsrc dogfood |
-| `260627-feat-todo-check-adjacent-instruction-rendering` | ready | Return focused checkpoint todo rendering from `ws.todo.check` so adjacent actionable instructions are visible without a follow-up tool call |
 | `260627-research-lead-proceed-route-matrix-authoring` | idea | Research whether Route Facts and Route Matrix tables would make `lead-proceed` routing clearer without semantic drift |
 | `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
 | `260626-bug-workflow-manual-bootstrap-sentinel-surface` | idea | Investigate the fresh workflow-manual sentinel guidance not matching the visible session-state tool surface during dogfooding |

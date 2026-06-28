@@ -39,10 +39,11 @@ related:
 - wsflow `playbook.render` has a legacy prompt-render bridge: in no-agent mode,
   when `name` is one of `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, or `mental-model-updater`,
-  caller `context` is appended as a sorted free-text `## Render Context` block
-  instead of being treated as template variables. The bridge does not apply to
-  `implementer`, arbitrary playbooks, or full ws mode, where undeclared
-  `context` keys still raise `ErrUndeclaredVar`. {#260609-playbook-tools}
+  declared caller `context` keys render as template variables and only
+  undeclared extras are appended as a sorted free-text `## Render Context`
+  block. The bridge does not apply to `implementer`, arbitrary playbooks, or
+  full ws mode, where undeclared `context` keys still raise `ErrUndeclaredVar`.
+  {#260609-playbook-tools}
 - rsrc includes are bare stems that resolve in order: `<root>/<playbook>/<include>.<harness>.md`, `<root>/<playbook>/<include>.md`, then `<root>/<include>.md`. Include fragments are appended to the parent playbook body before variable substitution and are not standalone playbook variants.
 - rsrc playbooks resolve to `<root>/<name>/<name>.md` (subdir); when that base file is absent, `Load` falls back to a flat `<root>/<name>.md` (260611 Phase 6, `resolvePlaybookPath`), so a var-free flat dep like `code-reviewer` (which also serves as a flat include target) is loadable as a playbook in its own right. Subdir always wins; the fallback only fires when the subdir base is absent.
 - Agent registration takes one self-contained `SystemPromptText` (the caller renders it via `playbook.render`); the runtime joins the orientation doc and that text with a `\n\n---\n\n` separator and writes the result to `system.md`. There is no multi-prompt chain or per-prompt frontmatter concatenation any more.
@@ -58,16 +59,17 @@ related:
 - wsflow distributed lead skills are now thin `wsflow/playbook.print` shims over the same rsrc lead playbooks; adding, removing, or renaming a shipped wsflow skill requires both the package-local shim and a matching shared playbook stem.
 - The rsrc delegate playbooks are the canonical bundled-delegate surface: full-ws workflow skills render them via `ws/playbook.print`/`ws/playbook.render` to hand a worker a self-contained prompt (Phase 5, 260611, migrated every delegate off `register(prompts:[stems])`). The `implementer`/`reviewer`/`reference-discovery`/`mental-model-updater`/`plan-populator-*` playbooks are rendered, not registered by stem. `explore` (`agents-plugin/rsrc/explore/explore.md`, `kind:render`, `delegates:true`) remains in the rsrc tree as a compatibility/fallback playbook for unknown or unsupported harness contexts; shipped skill guidance now dispatches host-native exploration workers directly, so changing `explore` should be treated as fallback-surface work rather than the normal scoped-fact-finding path.
 - The legacy `skeleton-populator`/`skeleton-reviewer`/`sprint-survey` stems were confirmed dead and deleted with the `wsprompt` package (260611 Phase 6b); they are no longer bundled or registrable.
-- `reference-discovery` (renamed from `project-survey`) and `plan-populator-survey` cover different axes and are frequently conflated by callers: `reference-discovery` is a `small`-tier, docs-only agent that returns a `[Must|Maybe]` list of spec/mental-model/ticket docs and never reads source; `plan-populator-survey` is a `medium`-tier agent that reads source and writes a file-backed source reference map. The discriminator is docs-vs-source, not the shared `survey` word; pick by what the caller needs (doc list for the brief vs source map for the plan). Because `tools:` and prose constraints are not runtime-enforced, a caller's free-form spawn prompt can override either agent's scope — match the spawn prompt to the agent's role.
-- `plan-populator-survey` and `plan-populator-research` are stable prompt stems with different responsibilities: survey collects evidence-only risk signals or exits to research, research makes planner judgments and escalation calls.
+- `reference-discovery` (renamed from `project-survey`) and `plan-populator-survey` cover different axes and are frequently conflated by callers: `reference-discovery` is a `small`-tier, docs-only agent that returns a `[Must|Maybe]` list of spec/mental-model/ticket docs and never reads source; `plan-populator-survey` is a `medium`-tier agent that reads a ticket path plus selected phase, explores source, and writes a light implementation plan to the provided plan path. The discriminator is docs-vs-source, not the shared `survey` word; pick by what the caller needs (doc list vs ticket-to-plan source planning). Because `tools:` and prose constraints are not runtime-enforced, a caller's free-form spawn prompt can override either agent's scope — match the spawn prompt to the agent's role.
+- `plan-populator-survey` and `plan-populator-research` are stable prompt stems with different responsibilities: survey clips the relevant ticket contract, writes the six-section light plan, and exits with `[escalate-to-research]` plus confidence rationale when needed; research reads any existing survey output at the same plan path, then refines or replaces it with a deeper implementation plan or escalates to lead.
 - The three `code-review-{correctness,fit,test}` partition playbooks share the reviewer base through `includes: [code-reviewer]` — a root-level flat dep (`agents-plugin/rsrc/code-reviewer.md`) with no frontmatter and no model-var placeholder. Editing that file changes all three partitions; it must stay var-free so partitions with different tiers (`large` vs `medium`) do not collide on an undeclared model var. Playbook-local includes are for fragments owned by that playbook, such as `lead-write-ticket/task-list.codex.md`; they should not replace shared root-level deps used by multiple playbooks.
 - wsflow delegate context materialization now lives only in `playbook.render`:
-  in wsflow mode the five legacy render-eligible stems append caller context as
-  a free-text Render Context block, while arbitrary playbooks and full ws still
-  use declared template variables. `playbook.print` and `playbook.render` no
-  longer rely on broad namespace string substitution: their wsflow-safe output
-  comes from product markers plus explicit namespace variables. The wsflow
-  package ships a generated byte-identical rsrc copy
+  in wsflow mode the five legacy render-eligible stems render declared caller
+  context normally and append only undeclared extras as a free-text Render
+  Context block, while arbitrary playbooks and full ws still use declared
+  template variables only. `playbook.print` and `playbook.render` no longer rely
+  on broad namespace string substitution: their wsflow-safe output comes from
+  product markers plus explicit namespace variables. The wsflow package ships a
+  generated byte-identical rsrc copy
   (`agents-plugin-wsflow/rsrc/`), drift-guarded by
   `TestWsflowRsrcMirrorUpToDate` and regenerated with `WS_REGEN_WSFLOW_RSRC=1`
   (see `ai-docs/ref/wsflow-mirroring.md`). Its distributed skill bodies are
