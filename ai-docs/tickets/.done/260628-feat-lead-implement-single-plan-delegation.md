@@ -9,6 +9,7 @@ related-mental-model:
   - mcp-runtime
   - prompt-bundle
   - workflow-skills
+completed: 2026-06-28
 ---
 
 # Lead implement single-plan delegation
@@ -335,3 +336,32 @@ Verification passed:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check`
 - `spec_index.verify`
+
+#### Edition (6ff4eb38) - 2026-06-28
+
+Phase 4 review found a legacy compatibility-path gap after the result commit:
+the no-target `ws.enter.implement` path could still compose direct research prep
+and could default direct-edit calls to survey planning. The fix makes legacy
+plan-depth parsing delegation-aware: direct edit defaults to `none` and rejects
+planner depths, delegated mode defaults to `survey`, and direct `research` is
+rejected so research remains reachable only through survey escalation.
+
+Review disposition after the fix is clean. The re-review confirmed the Phase 4
+resolver/todo behavior and compatibility path now preserve the single-plan
+delegated invariant without reopening source, spec, or mental-model findings.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestResolveImplement|TestDeriveImplementTodo|TestServeStdioEnterImplementVerdictLabels|TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda|TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs|TestEnterImplementStopsOnImplementBranchWithoutMergeTarget' -count=1`
+- `go test ./internal/mcp ./internal/wsdoc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
+## Resolution (2026-06-28)
+
+Completed all four phases of the single-plan delegated lead-implement flow.
+Phase 4 includes implementation commit 4e351867 and compatibility-path fix
+6ff4eb38; post-fix re-review is clean. Documentation closeout refreshed the
+ticket, active index, and stale implementation-plan wording.

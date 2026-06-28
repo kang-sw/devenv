@@ -154,7 +154,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
-| `260628-feat-lead-implement-single-plan-delegation` | ready | Collapse delegated `lead-implement` prep into one generated implementation plan written by survey/research planners and consumed by the executor |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
@@ -242,21 +241,6 @@ dropped tickets live in hidden archive dirs and git history.
   raw/JSON verdict output, concrete raw/JSON next-action directives with common
   follow rails, two-item proceed todo replacement, lead-proceed MCP handoff,
   docs, manifests, wsflow mirror, and partitioned review clean for Phase 1.
-- `260628-feat-lead-implement-single-plan-delegation` (ready, feat, child of
-  260605) - collapse delegated `lead-implement` prep from lead-authored brief
-  plus survey/research artifacts into a single generated implementation plan.
-  **Phases 1-3 done** on branch
-  `implement/lead-implement-single-plan-delegation`: Phase 1 added
-  `ws.path.generate(kind: "plan")` for repo-local
-  `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md` artifacts while `review` and
-  `prompt` remain cache-backed. Phase 2 reworked survey/research planner
-  playbooks around ticket path, selected phase, and shared plan path; the full
-  `ws` planner render-context fix landed in `1d18df9e` after review. Phase 3
-  routed `lead-implement` delegated prep through the single-plan flow
-  (`eb878d4d`) and the review-fix pass (`1b61537a`) tightened direct-edit
-  review framing plus plan-only executor ticket reads. Next target: **Phase 4**
-  updates `ws.enter.implement` resolver and todo instructions for the
-  single-plan flow.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
