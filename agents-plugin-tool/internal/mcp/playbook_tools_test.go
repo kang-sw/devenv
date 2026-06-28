@@ -64,7 +64,6 @@ func isolatedPlaybookConfigOptions(t *testing.T) wsconfig.Options {
 
 func shippedImplementerContext() map[string]string {
 	return map[string]string{
-		"BriefPath":          "ai-docs/.plans/brief.md",
 		"PlanPath":           "ai-docs/.plans/plan.md",
 		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"ResultExpectations": "Report outcome, files changed, commits, verification, and blockers.",
@@ -74,7 +73,6 @@ func shippedImplementerContext() map[string]string {
 
 func shippedImplementerRelayContext() map[string]string {
 	return map[string]string{
-		"BriefPath":          "ai-docs/.plans/brief.md",
 		"PlanPath":           "ai-docs/.plans/plan.md",
 		"ReviewCycle":        "2",
 		"CommitRange":        "abc123..def456",
@@ -896,12 +894,13 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	body := string(data)
 	for _, want := range []string{
 		"Alias model for this role: gpt-5.5.",
-		"Brief path: `ai-docs/.plans/brief.md`",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
 		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
-		"Do not read ticket files directly, even when a ticket path appears in the brief, plan, or references",
+		"The plan and its listed references are the task contract.",
+		"Read the plan path above and all `[Must]` References listed in the plan except ticket files.",
+		"Do not read ticket files directly unless the plan's `Escalations` section or caller explicitly authorizes ticket-file reading.",
 		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
 		"Normal completion report:",
 		"If `ResultExpectations` names an output file, also include its path plus a short completion summary.",
@@ -909,6 +908,18 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"BriefPath",
+		"Brief path:",
+		"No-plan sentinel",
+		"brief or plan",
+		"plan or brief",
+		"Do not read ticket files directly, even when a ticket path appears",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("implementer render retained old brief/implicit-ticket contract %q:\n%s", forbidden, body)
 		}
 	}
 }
@@ -936,7 +947,6 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	body := string(data)
 	for _, want := range []string{
 		"Alias model for this role: gpt-5.5.",
-		"Brief path: `ai-docs/.plans/brief.md`",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",
@@ -945,7 +955,9 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
 		"Result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
 		"Rely only on this prompt and named paths; do not depend on prior conversation.",
-		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the brief, or findings disproven by specific evidence.",
+		"Read the plan and every non-clean review path directly.",
+		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the plan, or findings disproven by specific evidence.",
+		"Do not read ticket files directly unless the plan, findings, or disposition notes explicitly authorize ticket-file reading.",
 		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
 		"records the relevant per-finding dispositions known at that checkpoint",
 		"`[fixed]`",
@@ -954,6 +966,17 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"BriefPath",
+		"Brief path:",
+		"No-plan sentinel",
+		"Read the brief",
+		"scope expansion beyond the brief",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("implementer-relay render retained old brief contract %q:\n%s", forbidden, body)
 		}
 	}
 	if strings.Contains(body, "Continuity tip") {
@@ -1163,6 +1186,28 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("full ws implementer renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	implCtx := shippedImplementerContext()
+	implCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", implCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) || undeclared.Name != "BriefPath" {
+			t.Fatalf("full ws implementer BriefPath error = %T %v, want ErrUndeclaredVar BriefPath", err, err)
+		}
+	}
+
+	relayBriefCtx := shippedImplementerRelayContext()
+	relayBriefCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayBriefCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer-relay")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) || undeclared.Name != "BriefPath" {
+			t.Fatalf("full ws implementer-relay BriefPath error = %T %v, want ErrUndeclaredVar BriefPath", err, err)
 		}
 	}
 
@@ -1715,14 +1760,22 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	for _, want := range []string{
 		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
 		"Treat the installed todo list as the ordered runbook",
+		"For direct edit, keep implementation lead-owned from the ticket and do not create a planner artifact unless the route escalates.",
+		`ws/path.generate(kind: "plan", stems: ["<ticket-stem-or-task>"])`,
+		"Render `plan-populator-survey` with `ticket_path`, `selected_phase`, and `plan_path`",
+		"If survey returns `[escalate-to-research]`, render `plan-populator-research` with the same `ticket_path`, `selected_phase`, and `plan_path`",
 		"Delegate dispatch",
 		"Implementer spawn prompt",
 		"Rendered implementer prompt: <prompt-path>",
-		"contains the brief path, optional plan",
+		"contains the plan path, verification",
 		"implementer-relay` gets **Review relay dispatch**",
 		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
 		"Collect the normal completion report",
+		"Ticket path: <ticket-path>",
+		"Selected phase: <selected-phase>",
+		"Plan path: <plan-path>",
 		"Reviewer prompt frame",
+		"Review the ticket contract, plan contract, and diff together.",
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
 		"Rendered review relay prompt: <prompt-path>",
@@ -1735,6 +1788,19 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	}
 	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
 		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
+	}
+	for _, forbidden := range []string{
+		"Brief template",
+		"BriefPath",
+		"Brief path:",
+		"implementation brief",
+		"lead-authored brief",
+		"contains the brief path",
+		"using the brief",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render retained old brief contract %q:\n%s", forbidden, body)
+		}
 	}
 	for _, forbidden := range []string{
 		"Review cycle <N>. Rely only on this prompt and named paths.",
