@@ -120,6 +120,29 @@ Verification boundary:
   unchanged behavior for existing kinds.
 - The MCP schema and docs mention `plan` as an accepted path kind.
 
+### Result (058f0a51) - 2026-06-28
+
+`ws.path.generate(kind: "plan")` now allocates repo-local implementation plan
+artifacts under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`. Plan stems reuse the
+existing safe stem normalization, create parent directories on demand, reserve a
+writable markdown file, and append numeric suffixes for same-minute/stem
+collisions. Existing `review` and `prompt` path allocation remains
+cache-backed and unchanged.
+
+The MCP schema now advertises `review`, `prompt`, and `plan` as accepted
+`path.generate` kinds. `mcp-tools` and `ws-agent-runtime` document the new plan
+path behavior.
+
+Verification passed:
+
+- `go test ./internal/wsstate -run 'TestGeneratePaths' -count=1`
+- `go test ./internal/mcp -run 'TestPathGenerateAdvertisesAndAllocatesPlanPaths|TestServeStdioToolsListAndCall' -count=1`
+- `go test ./internal/wsstate ./internal/mcp -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
 ### Phase 2: Rework planner playbooks around ticket-to-plan
 
 Update `plan-populator-survey` and `plan-populator-research` so their render
