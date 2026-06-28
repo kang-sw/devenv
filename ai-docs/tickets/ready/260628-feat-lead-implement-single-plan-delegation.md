@@ -304,3 +304,34 @@ Verification boundary:
 - Todo rendering tests show plan-generation and planner/executor steps in the
   reachable delegated path.
 - Existing review/fix loop tests continue to pass.
+
+### Result (4e351867) - 2026-06-28
+
+`ws.enter.implement` no longer emits `brief` as a reachable plan depth. The
+new-schema resolver now returns `plan_depth=survey` for delegated work and
+`plan_depth=none` for direct edit. High-risk or multi-strategy delegated work
+still starts with the survey planner; research is reached only when survey
+returns `[escalate-to-research]` for low confidence or strategic uncertainty.
+
+Raw verdict `Next:` text and derived todo instructions now name the concrete
+actions: generate a plan path through `ws.path.generate(kind: "plan")`, render
+and dispatch `plan-populator-survey`, optionally render
+`plan-populator-research` on the same plan path, then render `implementer` with
+`PlanPath`. Branch-stop verdicts and todos stay blocker-only and do not include
+unreachable planner or implementer instructions. Legacy manual
+`plan_depth="brief"` input is rejected.
+
+Focused resolver and todo tests cover delegated default, survey escalation
+language, direct edit behavior, branch-stop behavior, and full todo rendering
+with plan-generation/planner/executor steps. The `mcp-tools` and
+`workflow-skills` specs plus related mental models were updated to reflect the
+survey-default delegated contract.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestResolveImplement|TestDeriveImplementTodo|TestServeStdioEnterImplementVerdictLabels|TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda|TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs|TestEnterImplementStopsOnImplementBranchWithoutMergeTarget' -count=1`
+- `go test ./internal/mcp ./internal/wsdoc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
