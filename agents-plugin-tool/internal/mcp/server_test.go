@@ -754,6 +754,52 @@ func callToolsList(t *testing.T, server *Server) string {
 	return strings.TrimSpace(out.String())
 }
 
+func TestPathGenerateAdvertisesAndAllocatesPlanPaths(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "# Test\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	listResp := callToolsList(t, server)
+	kindProperty, _ := toolPropertiesByName(t, listResp, "path.generate")["kind"].(map[string]any)
+	enumValues, _ := kindProperty["enum"].([]any)
+	for _, want := range []string{"review", "prompt", "plan"} {
+		found := false
+		for _, raw := range enumValues {
+			if raw == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("path.generate kind enum missing %q: %s", want, listResp)
+		}
+	}
+
+	key, err := server.sessions.mint(canonicalRootForTest(t, root), roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callResp := callToolOnce(t, server, 2, "path.generate", map[string]any{
+		"kind":        "plan",
+		"stems":       []string{"../bad stem"},
+		"session_key": key,
+	})
+	text := strings.TrimSpace(toolText(t, callResp))
+	canonicalText := canonicalTestPath(t, text)
+	wantDir := canonicalTestPath(t, filepath.Join(root, "ai-docs", ".plans"))
+	if !strings.HasPrefix(canonicalText, wantDir+string(os.PathSeparator)) {
+		t.Fatalf("plan path %q is not under %q", text, wantDir)
+	}
+	if !regexp.MustCompile(`[0-9]{4}-[0-9]{2}` + regexp.QuoteMeta(string(os.PathSeparator)) + `[0-9]{2}-[0-9]{4}-bad-stem\.md$`).MatchString(canonicalText) {
+		t.Fatalf("plan path %q does not match expected timestamped shape", text)
+	}
+	if info, err := os.Stat(text); err != nil || info.IsDir() {
+		t.Fatalf("reserved plan path %q stat=%v err=%v", text, info, err)
+	}
+}
+
 // mustEnableMercenary writes the global WS_CONFIG_HOME/config.json override
 // {"workflow.prefer_mercenary":"on"}. Tests that call ws.mercenary.* tools need
 // this because the builtin default is hide.

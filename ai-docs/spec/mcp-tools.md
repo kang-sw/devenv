@@ -735,9 +735,12 @@ it does not change todo status — `git.commit` never auto-marks items done.
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
-`path.generate` allocates worktree-scoped writable artifact paths, such as review
-files, so workflow agents can exchange file paths without inventing cache
-locations.
+`path.generate` allocates writable workflow artifact paths so workflow agents can
+exchange file paths without inventing cache locations. `kind: "review"` and
+`kind: "prompt"` allocate worktree-scoped cache artifacts. `kind: "plan"`
+allocates repo-local implementation plan files under
+`ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`; collisions append a numeric suffix
+while preserving the sanitized logical stem.
 
 ## wsflow Agentless Runtime Mode {#260513-wsflow-agentless-runtime-mode}
 
