@@ -1,6 +1,7 @@
 ---
 title: "Pre-merge idea-backlog sweep (ferrule)"
 sage-review: required
+completed: 2026-06-29
 ---
 
 # Pre-merge idea-backlog sweep (ferrule)
@@ -65,3 +66,8 @@ Pre-merge triage of the `idea/` backlog for `feature/ferrule`: every idea ticket
 
 - Done: every policy-character idea ticket has a pinned decision in its own body; tweaks implemented or promoted; research parked; epic/infra-owned tickets attributed. Closes when no undecided policy item remains in the pre-merge backlog.
 - Deferred: research-class and epic-owned tickets exit to their own tracks; post-merge follow-ups leave the workset.
+
+
+## Resolution (2026-06-29)
+
+All exit criteria met: every policy-character ticket has a pinned decision; tweaks implemented; research parked; epic/infra-owned tickets attributed. Policy implementation follow-up tracked in 260629-workset-policy-sweep-implementation. Track 2 design session (260525, 260627) completed in same session.
