@@ -1,5 +1,6 @@
 ---
 title: bump-ws-version.sh edits the legacy shell launcher, not the live .py launcher
+sage-review: skipped
 related:
   260605-epic-ws-playbook-factory-pivot: surfaced during this epic's pre-shipping Windows-surface discussion
 ---
@@ -46,3 +47,24 @@ launchers side by side.
    and are referenced by a shipped manifest.
 
 Out of scope for the Windows shipping-hardening ticket; pure cleanup/debt.
+
+## Spec Impact
+
+Target spec area: none — dead-code removal with no caller-visible behavior change.
+Contract-first spec: no
+
+## Phases
+
+### Phase 1: Remove legacy shell launchers; verify bump script is clean
+
+Pre-implementation status: the bump script glob-rewrite block was already removed in a prior pass
+(current bump script lines 79–86 now update `main.go`, not the shell launcher).
+Remaining work: delete `agents-plugin/bin/ws-mcp-launcher` and
+`agents-plugin-wsflow/bin/ws-mcp-launcher` (legacy POSIX shell wrappers, ~11.8 KB each,
+no `.py` extension). Verify no manifest or script reference to the extensionless file
+remains before deletion.
+
+Completion boundary: both legacy shell launcher files deleted; no `.codex-plugin` /
+`.claude-plugin` manifest or bump script references remain.
+Deferred: guard/test asserting bump script only edits referenced files (noted in ticket as optional).
+Verification: `grep -r "ws-mcp-launcher[^.]"` across plugin dirs and scripts returns no hits; `go build ./...` clean.

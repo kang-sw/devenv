@@ -1,5 +1,6 @@
 ---
 title: wsflow launcher diverges from canonical — missing cold-load hardening
+sage-review: skipped
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260622-chore-windows-shipping-hardening: surfaced this divergence; Phase B hardened the canonical launcher only
@@ -52,3 +53,25 @@ the same logical change.
 - Canonical Phase B reference commits: `ab1460d4`, `da1047fb`.
 - No caller-visible contract change is involved; these are robustness/conformance
   fixes.
+
+## Spec Impact
+
+Target spec area: none — robustness fixes with no caller-visible behavior change.
+Contract-first spec: no
+
+## Phases
+
+### Phase 1: Verify wsflow launcher parity and close
+
+Port the `260524` `wait_for_runtime_contract` materialization wait and the four
+`260622` Phase B cold-load hardening fixes (`wait_for_rsrc_tree`, OS-aware
+contract-read timeout, `read_runtime_contract (OSError, ValueError)` retry,
+`install_tmp_runtime os.replace` bounded retry) into the wsflow launcher if not
+already present. Verify byte-level parity is not required — the launchers are
+curated — but functional parity for the listed fixes is the target.
+
+Completion boundary: wsflow launcher has all five robustness fixes; diff against
+canonical is zero for the named functions.
+Deferred: launcher unification behind a shared module (open question); wsflow test
+coverage extension (open question).
+Verification: `diff agents-plugin/bin/ws-mcp-launcher.py agents-plugin-wsflow/bin/ws-mcp-launcher.py` exits 0.
