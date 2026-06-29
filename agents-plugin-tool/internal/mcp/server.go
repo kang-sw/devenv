@@ -348,7 +348,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
 	}
-	if !s.toolAllowed(params.Name) {
+	if !s.toolAllowed(params.Name, s.mercenaryHiddenFromConfig()) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
@@ -3061,7 +3061,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.workflow_prefer_mercenary",
-			"description": "Set the global mercenary delegation preference. 'on' prefers ws.mercenary guidance for implementer/reviewer renders. 'off' keeps native-subagent default guidance while leaving explicit mercenary use available. 'hide' is the builtin default and hides ws.mercenary.* from the public tool surface.",
+			"description": "Set the global mercenary delegation preference. 'on' prefers ws.mercenary guidance for implementer/reviewer renders. 'off' keeps native-subagent default guidance while leaving explicit mercenary use available. 'hide' is the builtin default and hides ws.mercenary.* from the public tool surface. Note: tool-list suppression ('hide') requires project or global scope; a session-scope 'hide' suppresses mercenary playbook blocks but does not remove ws.mercenary.* from the tools list.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -3698,7 +3698,7 @@ func (s *Server) filteredTools() []map[string]any {
 		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
 			continue
 		}
-		if s.toolAllowed(name) {
+		if s.toolAllowed(name, mercenaryHidden) {
 			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
 	}
@@ -3742,11 +3742,11 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	return clone
 }
 
-func (s *Server) toolAllowed(name string) bool {
+func (s *Server) toolAllowed(name string, mercenaryHidden bool) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}
-	if strings.HasPrefix(name, "ws.mercenary.") && s.mercenaryHiddenFromConfig() {
+	if strings.HasPrefix(name, "ws.mercenary.") && mercenaryHidden {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
