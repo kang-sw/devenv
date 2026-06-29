@@ -6,6 +6,7 @@ related:
   260625-research-fork-posture-leak-system-guarantee: inherited-posture-risk
 sage-review: skipped
 completed: 2026-06-29
+dropped: 2026-06-29
 ---
 
 # prefer-subagent fork executor recursively delegates despite handoff boundary
@@ -51,3 +52,8 @@ Verification:
 ## Resolution (2026-06-29)
 
 Extended failed-fork definition to cover secondary-executor escape. Updated fork prompt template opening to forbid AI-backed execution harnesses and name missing-tool as a blocker, not a delegation trigger. wsflow mirror regenerated.
+
+
+## Resolution (2026-06-29)
+
+Reverted implementation (511af6f~) — wording was too broad and had been through multiple polishing passes without a fresh explicit design. Dropped; reopen if the recursive-escape issue re-surfaces with a clear reproduction case.
