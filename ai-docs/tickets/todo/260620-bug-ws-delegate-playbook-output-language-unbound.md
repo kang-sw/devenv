@@ -4,6 +4,7 @@ related-mental-model:
   - prompt-bundle
   - named-agent-runtime
   - workflow-skills
+sage-review: required
 ---
 
 # delegate playbooks do not bind subagent output language to English
@@ -67,3 +68,7 @@ every render regardless of host language:
 
 Relates to `prompt-bundle` (delegate-orientation injection) and the broader
 playbook-factory render path under epic `260605-epic-ws-playbook-factory-pivot`.
+
+## Decision (260629 sweep)
+
+Inject an explicit English-only output binding into the shared `delegate-orientation` fragment that `playbook.render` applies to every delegate (DRY: one injection covers implementer, reviewer, plan-populator-*, mental-model-updater, reference-discovery). The binding instructs the delegate to produce all output — narration, reports, commit messages, and file contents — in English, regardless of host session language. English stays hardcoded per the repo English-artifact invariant; this is not made config-driven.

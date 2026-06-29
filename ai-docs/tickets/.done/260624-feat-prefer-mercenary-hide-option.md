@@ -3,6 +3,7 @@ title: Add `hide` value to prefer_mercenary config — suppress mercenary surfac
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260620-bug-mercenary-path-visible-when-prefer-off: related surface visibility issue
+completed: 2026-06-29
 ---
 
 # Add `hide` value to prefer_mercenary config — suppress mercenary surface in full ws mode
@@ -54,3 +55,8 @@ tools hidden from discovery AND from call-gate.
   `ScopeGlobal` as the natural scope (a deployment-level policy). Evaluate at
   implementation time.
 - This is an idea ticket; promote to ready after design review.
+
+
+## Resolution (2026-06-29)
+
+The `hide` value is already implemented: prefer_mercenary validates against on|off|hide and the builtin default is `hide` (agents-plugin-tool/internal/mcp/server.go), surfaced in config.tuning with a working setter, and covered by the prefer_mercenary phase-2 tests (PASS confirmed 260629). No further work; closing as already-delivered.

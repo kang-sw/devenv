@@ -4,6 +4,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260622-feat-sage-review-ticket-gate: introduced sage_review config substrate
   260626-feat-surface-sage-review-posture: depends on clear sage_review posture control
+sage-review: required
 ---
 
 # sage_review config has no lead-facing setter or tuning catalog knob
@@ -51,3 +52,7 @@ that directly affects ticket promotion and sage-review routing.
   workflow preferences?
 - Should `lead-tune` treat sage review as its own handler, or should the generic
   config catalog be rich enough that no playbook-specific handler is needed?
+
+## Decision (260629 sweep)
+
+Add a lead-facing `sage_review` setter accepting `off|ask|auto`, surfaced through `config.tuning` so `lead-tune` can route it without manual JSON edits. Keep the current `ScopeProject` default while permitting an explicit global override (expose supported scope choices; reject unsupported ones). Defer the adjacent `sage_review_design_tier`, `sage_review_completeness`, and `sage_review_completeness_tier` keys to a follow-up unless they fall out trivially during implementation.

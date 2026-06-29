@@ -7,6 +7,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - workflow-skills
+sage-review: required
 ---
 
 # mercenary path is too visible when prefer_mercenary is off
@@ -58,4 +59,8 @@ mercenary-primary guidance block and concrete `ws.mercenary.*` dispatch steps.
 - Should this be implemented as conditional render filtering, a separate
   advanced playbook reference, or a prompt override point around the delegation
   dispatch block?
+
+## Decision (260629 sweep)
+
+Render the mercenary dispatch recipe in implementer/reviewer playbooks only when `prefer_mercenary == "on"`. When `off`, steer to native subagents and keep at most a one-line "mercenary available via toggle" reference. When `hide`, omit all mercenary mention entirely (the tools are absent from the list, so any reference would dangle). Suppress the always-on mercenary continuity tip as well whenever `prefer_mercenary != "on"`, not only the concrete register+call recipe. Implement as conditional render filtering at playbook-render time keyed on the resolved `prefer_mercenary` value.
 
