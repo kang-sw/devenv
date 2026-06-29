@@ -94,20 +94,22 @@ Test: invariants should re-derive from the named resource.
 
 Audit targets: `agents-plugin/rsrc/lead-*/lead-*.md` (migrated procedure playbooks) and `agents-plugin/skills/*/SKILL.md` (entry skills).
 
+The audit bar is a good-faith reader: one who applies the text's stated purpose and does not hunt for loopholes. The text passes when such a reader reaches the intended end-state. A finding reachable only by reading the text in a way a good-faith reader would not is `out of scope`, not `fix`.
+
 1. Run a separate fresh reviewer (agent or subagent) for the audit.
 2. Give the reviewer only the target file or excerpt; do not include prior conversation, project docs, skill docs, specs, rationale, or host-generated metadata.
 3. Tell the reviewer to read only the provided target and not to read any other files, skills, docs, or context.
 4. Ask the reviewer to flag awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing end-state/output wording.
 5. Require each finding to include a quote, the issue, severity (`low`/`medium`/`high`), and either a suggested rewrite or a suggested deletion.
-6. Classify each reviewer finding as `fix`, `intentional difference`, or `out of scope` before editing.
-7. Edit only findings classified as `fix`; record or ignore the rest without revising for them.
-8. Run at most three audit/revision cycles.
+6. Classify each reviewer finding as `fix`, `risk accepted`, `intentional difference`, or `out of scope` before editing. `risk accepted`: a valid finding whose fix's concrete cost exceeds its residual risk under the bar — record that cost and risk, not a bare assertion. `intentional difference`: wording that diverges from a sibling file on purpose. `out of scope`: the finding targets text outside the audit target, or is reachable only outside the good-faith bar.
+7. Edit only findings classified as `fix`. Record the cost and risk for `risk accepted`; record or ignore `intentional difference` and `out of scope`.
+8. Run at most three audit/revision cycles; stop once no finding is still classified `fix` — all have been edited or are `risk accepted`, `intentional difference`, or `out of scope`. If `fix` findings remain after the third cycle, stop and report them as unresolved rather than starting a fourth cycle.
 
 ## On: Downstream Consistency Sweep
 
 1. Select affected rsrc playbook sources (`agents-plugin/rsrc/lead-*/lead-*.md`), entry skill files (`agents-plugin/skills/*/SKILL.md`), agent prompts, specs, mental-models, tests, and mirrored-package surfaces from the edited doctrine, terminology, route, layout, or audit gate.
 2. Use a conservative finding-only first pass for broad skill-surface scans.
-3. Classify each finding as `fix`, `intentional difference`, or `out of scope`.
+3. Classify each finding as `fix`, `risk accepted`, `intentional difference`, or `out of scope`.
 4. Edit only accepted `fix` findings; record intentional differences when drift would otherwise look stale.
 
 ## Skill Layout
