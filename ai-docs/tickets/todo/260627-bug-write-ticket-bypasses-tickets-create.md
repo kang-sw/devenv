@@ -5,6 +5,7 @@ related:
 related-mental-model:
   - workflow-skills
   - mcp-runtime
+sage-review: required
 ---
 
 # lead-write-ticket dogfood bypassed tickets.create
@@ -33,3 +34,7 @@ future creation-time policy.
   before falling back to manual file creation.
 - The fallback path should remain available only when the MCP create tool is
   unavailable or fails with a blocker.
+
+## Decision (260629 sweep)
+
+Fix (A+B combined): A — In lead-write-ticket's `On: Create Ticket` procedure, call `ws/tickets.create` before manual body drafting; fall back to manual only when the tool is unavailable or errors. B — In lead-discuss and lead-sprint, add an explicit constraint that ticket creation must route through lead-write-ticket, not through convention.read + Write directly. Both changes are prose-only playbook edits.

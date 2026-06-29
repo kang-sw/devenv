@@ -6,6 +6,7 @@ spec:
   - 260505-implementation-workflow-skills
 related-mental-model:
   - workflow-skills
+sage-review: required
 ---
 
 # lead-implement delegated pre-edit guard
@@ -61,3 +62,7 @@ Implementation Verdict step
 here — a short explicit per-predicate proof gated *before any source mutation* — is
 still absent, so the ticket remains valid. Read the Background's "current skill"
 description against this updated baseline when implementing.
+
+## Decision (260629 sweep)
+
+Deferred — design session needed: The requirement (explicit predicate verification before source mutation in lead-implement) is clear, but the verdict form (checklist block vs. inline table vs. dedicated Pre-edit Verdict section) and playbook insertion point are open design decisions. Design together with 260627-bug-enter-implement-direct-edit-policy-gap in a dedicated session.

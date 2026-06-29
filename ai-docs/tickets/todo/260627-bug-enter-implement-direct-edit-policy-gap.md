@@ -1,5 +1,6 @@
 ---
 title: Enter implement lacks direct-edit policy override
+sage-review: required
 ---
 
 # Enter implement lacks direct-edit policy override
@@ -23,3 +24,7 @@ implementer handoff.
 
 Research whether `ws/enter.implement` needs an explicit direct-edit policy input,
 a narrower multi-file heuristic, or both.
+
+## Decision (260629 sweep)
+
+Deferred — design session needed: Schema direction for enter.implement (add explicit_direct_edit field vs. improve needs-delegation heuristic vs. both) is an open design decision. Design together with 260525-bug-lead-implement-delegation-pre-edit-guard in a dedicated session.

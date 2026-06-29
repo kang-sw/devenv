@@ -2,6 +2,7 @@
 title: prompt override surface gaps — no unset path, and required harness
 related-mental-model:
   - prompt-bundle
+sage-review: required
 ---
 
 # prompt override surface gaps — no unset path, and required harness
@@ -89,3 +90,7 @@ path alongside set. The skill/convention edits run under `lead-skill-authoring`.
 Relates to `260611-research-ws-per-role-delegation-tuning-config` (the broader
 per-role tuning-config surface) but is narrower: these are the missing inverse
 and a default correction for an already-shipped write, not new tuning axes.
+
+## Decision (260629 sweep)
+
+Fix: Make the `harness` parameter optional in `config.prompt.set` and `config.prompt.unset` MCP tool schemas. When omitted, default to the current session's detected harness — matching the existing behavior of `config.agents_tier`. Requires Go source change in agents-plugin-tool/internal/mcp/server.go (schema `required` field update + default-harness resolution at call site).
