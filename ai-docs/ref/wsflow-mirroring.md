@@ -48,6 +48,7 @@ Included:
 - `lead-forge-mental-model`
 - `lead-review`
 - `lead-prefer-subagent`
+- `lead-revive` (inline-body exception; see below)
 
 Excluded:
 
@@ -63,6 +64,13 @@ Excluded:
 - Keep shipped `agents-plugin-wsflow/skills/lead-*` `SKILL.md` files as thin
   `wsflow/playbook.print(name: "<lead-name>")` entry shims; do not place
   procedure bodies there.
+- Exception: `lead-revive` ships an inline procedure body, not a
+  `playbook.print` shim. Revive bootstraps the workflow primitives after
+  compaction, so it cannot depend on the same playbook-print path it restores.
+  It therefore has no shared rsrc playbook and no full-ws skill counterpart. The
+  package test encodes this through `EXPECTED_INLINE_SKILLS`, which exempts it
+  from the thin-shim, shared-stem, and full-counterpart checks. Any future
+  inline wsflow skill must be added to that set and documented here.
 - Do not mention `ws/`, `ws:`, `ws.`, `subquery`, or `agents.*` in
   distributed wsflow skill text.
 - Do not describe wsflow as ws-lite, a ws mode, or a ws-compatible product.

@@ -2,6 +2,7 @@
 title: wsflow lead-revive skill inventory drift
 related:
   - 260625-feat-ws-session-state-machine
+completed: 2026-06-29
 ---
 
 # wsflow lead-revive skill inventory drift
@@ -37,3 +38,21 @@ Decide whether `lead-revive` should be:
   then added to the wsflow expected inventory and mirroring reference; or
 - treated as a deliberate wsflow-local exception with tests and documentation
   updated to encode that exception.
+
+## Resolution
+
+Resolved via the second option: `lead-revive` is a deliberate inline-body wsflow
+skill, not a thin `playbook.print` shim, because revive bootstraps the workflow
+primitives after compaction and cannot depend on the playbook-print path it
+restores.
+
+- Code/test half (remote update, commit `74ffb966`): `lead-revive` added to
+  `EXPECTED_SKILLS` and to a new `EXPECTED_INLINE_SKILLS = {"lead-revive"}` set
+  that exempts it from the thin-shim, shared-stem, and full-counterpart checks.
+  `python3 -m unittest discover agents-plugin-wsflow/tests` is green (8 tests).
+- Doc half: `ai-docs/ref/wsflow-mirroring.md` now lists `lead-revive` under
+  shipped Included skills and documents the inline-body exception under wsflow
+  Skill Rules.
+
+The original red-suite claim no longer reproduces; the inventory drift is
+encoded as an intentional, documented exception.
