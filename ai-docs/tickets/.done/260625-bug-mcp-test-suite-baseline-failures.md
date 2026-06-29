@@ -4,6 +4,7 @@ related-mental-model:
   - prompt-bundle
   - plugin-runtime
 sage-review: skipped
+completed: 2026-06-29
 ---
 
 # internal/mcp test-suite baseline failures — prompt-seed drift and wsflow rsrc mirror drift
@@ -49,3 +50,8 @@ Completion: all four previously failing tests pass; no new failures introduced.
 
 Internal test hygiene only — no caller-visible contract change.
 Contract-first spec: no.
+
+
+## Resolution (2026-06-29)
+
+Baseline was restored by prior sweep work on feature/ferrule (Groups A and B). All four originally failing tests pass on current tip: TestShippedDelegationSectionSeedAndOverride, TestShippedUserPreferenceSectionEmptySlotAndOverride, TestConfigPromptSetEndToEnd, TestWsflowRsrcMirrorUpToDate.

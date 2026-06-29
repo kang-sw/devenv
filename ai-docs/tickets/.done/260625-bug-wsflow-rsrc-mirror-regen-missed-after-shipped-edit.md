@@ -1,6 +1,7 @@
 ---
 title: wsflow rsrc mirror regen missed after shipped rsrc edits
 sage-review: skipped
+completed: 2026-06-29
 ---
 
 # wsflow rsrc mirror regen missed after shipped rsrc edits
@@ -38,3 +39,8 @@ commands include `-count=1`.
 
 Documentation-only change to `ai-docs/ref/wsflow-mirroring.md`.
 No caller-visible behavior change. Contract-first spec: no.
+
+
+## Resolution (2026-06-29)
+
+Added after-edit checklist to ai-docs/ref/wsflow-mirroring.md Rsrc Tree Provisioning section naming both required regen steps in order (manifest.json, then wsflow mirror), both with mandatory -count=1 flag explanation.
