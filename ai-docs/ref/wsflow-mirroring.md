@@ -128,6 +128,16 @@ identical to canonical — including `manifest.json`.
   cache returns a green `ok` without running the write side effect — omitting it
   silently leaves the artifact stale. git content-dedupes the copy, so storage
   cost is ~0.
+
+- **After-edit checklist — run both in order after any canonical rsrc change:**
+  1. `WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealManifest`
+     — regenerates `agents-plugin/rsrc/manifest.json`
+  2. `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`
+     — syncs `agents-plugin-wsflow/rsrc/` byte-for-byte from canonical
+
+  Both `-count=1` flags are mandatory; without them, go's test cache silently
+  skips the write side effect. Omitting step 2 is the process gap that caused
+  `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`.
 - **Runtime:** the wsflow launcher's `apply_rsrc_root_env` sets `WS_RSRC_ROOT` to
   the sibling `rsrc/` when present, so the committed copy is resolved with no
   launcher change.

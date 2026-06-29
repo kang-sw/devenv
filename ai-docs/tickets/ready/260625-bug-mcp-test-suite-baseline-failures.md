@@ -3,6 +3,7 @@ title: internal/mcp test-suite baseline failures — prompt-seed drift and wsflo
 related-mental-model:
   - prompt-bundle
   - plugin-runtime
+sage-review: skipped
 ---
 
 # internal/mcp test-suite baseline failures — prompt-seed drift and wsflow rsrc mirror drift
@@ -32,16 +33,19 @@ mirror across several files (`delegate-orientation.md`, `lead-implement`,
 `manifest.json`), meaning canonical `agents-plugin/rsrc/` was edited without
 regenerating `agents-plugin-wsflow/rsrc/`.
 
-## Possible Follow-Ups
+## Phases
 
-- For the wsflow mirror failure: regenerate with
-  `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMirror`
-  and confirm the drift was purely a missed regen, not a semantic divergence.
-  This overlaps `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`
-  (the process gap that lets a shipped rsrc edit skip the mirror).
-- For the three prompt-seed assertions: determine whether they need a regolden
-  against the current shipped seed text (drift is intended, test stale) or
-  whether they caught a real seed regression (text changed unintentionally).
-  Bisect to the commit that moved the seed text.
-- Restore a green baseline so future reviews can make an unqualified green-bar
-  claim instead of carrying a "4 known-unrelated failures" caveat every run.
+### Phase 1: Restore green baseline
+
+Verify the four previously failing tests now pass on the current branch tip.
+Run `go test ./internal/mcp/... ./internal/wsrsrc/...` and confirm all tests
+pass. If still failing: regolden prompt-seed fixtures with `-update` flag; for
+the wsflow mirror, regenerate with
+`WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`.
+
+Completion: all four previously failing tests pass; no new failures introduced.
+
+## Spec Impact
+
+Internal test hygiene only — no caller-visible contract change.
+Contract-first spec: no.
