@@ -1,6 +1,7 @@
 ---
 title: perf: mercenary hidden config read O(n) per toolAllowed call
 sage-review: skipped
+completed: 2026-06-29
 ---
 
 # perf: mercenary hidden config read O(n) per toolAllowed call
@@ -46,3 +47,8 @@ tool; behavior unchanged.
 Target spec area: `plugin-runtime.md` — MCP server internal.
 Expected caller-visible change: none (internal performance fix, no observable behavior change).
 Contract-first spec: no.
+
+
+## Resolution (2026-06-29)
+
+Phase 1 complete: toolAllowed now takes mercenaryHidden bool parameter; filteredTools passes precomputed value, dispatch handler passes s.mercenaryHiddenFromConfig() inline. Tests pass.

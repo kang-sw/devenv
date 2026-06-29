@@ -1,6 +1,7 @@
 ---
 title: design gap: session-scope prefer_mercenary=hide not reflected in tools list
 sage-review: skipped
+completed: 2026-06-29
 ---
 
 # design gap: session-scope prefer_mercenary=hide not reflected in tools list
@@ -45,3 +46,8 @@ Completion boundary: description text updated; no behavior change.
 Target spec area: `mcp-tools.md` — `workflow.prefer_mercenary` config tool entry.
 Expected caller-visible change: none (documentation clarification only).
 Contract-first spec: no — post-implementation closeout updates the spec note if needed.
+
+
+## Resolution (2026-06-29)
+
+Phase 1 complete: added scope-limitation note to config.workflow_prefer_mercenary tool description in server.go. No behavior change.
