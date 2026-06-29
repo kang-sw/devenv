@@ -4,6 +4,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260625-research-fork-posture-leak-system-guarantee: same-failure-family
   260625-feat-ws-session-state-machine: surfaced-during
+dropped: 2026-06-29
 ---
 
 # prefer-subagent fork dispatch: forked executor narrates instead of executing
@@ -130,3 +131,8 @@ fork directive. Decisions:
     A sonnet fresh-spawn with an injected deferral-narrative context is only a
     weak proxy (it skips the real inheritance dynamic).
   - **Clean opus repeat** (above) to rule out the momentum confound.
+
+
+## Resolution (2026-06-29)
+
+Dropped — opus fork narration-vs-execution is a model-level behavior resistant to user-side prompt fixes. No actionable playbook change identified.
