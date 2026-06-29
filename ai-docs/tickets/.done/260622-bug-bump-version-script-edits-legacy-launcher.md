@@ -3,6 +3,7 @@ title: bump-ws-version.sh edits the legacy shell launcher, not the live .py laun
 sage-review: skipped
 related:
   260605-epic-ws-playbook-factory-pivot: surfaced during this epic's pre-shipping Windows-surface discussion
+completed: 2026-06-29
 ---
 
 # bump-ws-version.sh edits the legacy shell launcher, not the live .py launcher
@@ -68,3 +69,12 @@ Completion boundary: both legacy shell launcher files deleted; no `.codex-plugin
 `.claude-plugin` manifest or bump script references remain.
 Deferred: guard/test asserting bump script only edits referenced files (noted in ticket as optional).
 Verification: `grep -r "ws-mcp-launcher[^.]"` across plugin dirs and scripts returns no hits; `go build ./...` clean.
+
+### Result (f3b09968)
+
+Investigation revealed `agent.go:cacheLauncherCommand` still probed the extensionless shell shim
+first on non-Windows, so a bare file deletion would have broken async worker discovery.
+Full fix: removed the shell shim probe from `agent.go` (lines 261–269), deleted the obsolete
+`launcher_probe_unix_test.go`, updated `TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher`
+to use the `.py` launcher, then deleted both shell launcher files. Bump script glob block was
+already removed in a prior pass. `go test ./internal/wsagent/...` passes.

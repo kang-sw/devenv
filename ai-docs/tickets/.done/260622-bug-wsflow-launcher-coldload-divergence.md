@@ -7,6 +7,7 @@ related:
   260523-bug-ws-mcp-launcher-runtime-repair-race: adjacent launcher runtime-repair race investigation
 related-mental-model:
   - plugin-runtime
+completed: 2026-06-29
 ---
 
 # wsflow launcher diverges from canonical — missing cold-load hardening
@@ -75,3 +76,10 @@ canonical is zero for the named functions.
 Deferred: launcher unification behind a shared module (open question); wsflow test
 coverage extension (open question).
 Verification: `diff agents-plugin/bin/ws-mcp-launcher.py agents-plugin-wsflow/bin/ws-mcp-launcher.py` exits 0.
+
+### Result (f3b09968)
+
+Pre-implementation verification found the launchers already identical (`diff` exits 0, 34066 bytes
+each). The `260622` Phase B cold-load hardening had already been ported to wsflow in a prior pass
+(as of 2026-06-26). The extensionless shell shim was removed by the companion bump-version ticket
+fix, so the divergence concern is now resolved. No code change needed here.
