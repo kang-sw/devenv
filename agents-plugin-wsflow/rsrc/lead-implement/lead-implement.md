@@ -260,6 +260,16 @@ Write detailed findings to the findings path.
 In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
 
+### 9. Branch Cleanup
+
+Run after a confirmed merge to reduce branch accumulation.
+
+1. Verify the implementation branch is a strict ancestor of the merge target: `git merge-base --is-ancestor <branch> <target>`.
+2. Skip deletion and report retained when any of the following hold: the branch is currently checked out, it is linked to an active worktree, the merge target was ambiguous, or the branch has commits not reachable from the merge target.
+3. If no skip condition holds, ask the user whether to delete the branch.
+4. Delete only on explicit user approval: `git branch -d <branch>`.
+5. Report each retained branch with its skip reason so cleanup debt stays visible.
+
 ## Doctrine
 
 Implement optimizes for **execution attention**: route facts go to MCP, verdict-specific work goes to todos, and the playbook keeps only shared gates, ownership boundaries, and reusable templates.
