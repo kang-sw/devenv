@@ -3,6 +3,7 @@ title: "Disambiguate skill-surface routing for saving a user preference"
 parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260625-feat-ws-session-state-machine: surfaced-during
+sage-review: required
 ---
 
 # Disambiguate skill-surface routing for saving a user preference
@@ -43,3 +44,7 @@ like it should handle preferences too.
 `config.prompt.set` REPLACES the whole override value for a `(pointId, harness)`
 pair, so a naive preference write can clobber existing preferences — whichever
 surface owns this should preserve-and-append, not overwrite.
+
+## Decision (260629 sweep)
+
+Fix: Clarify routing boundary in lead-discuss and lead-sprint. lead-tune routes ws workflow preferences (delegation posture, model tier, mercenary on/off, prompt overrides). lead-add-rule routes project-level coding/architecture rules and conventions. Add a cross-reference note in each skill's description so the distinction is visible at invocation time. No new behavior; prose-only clarification.

@@ -6,6 +6,7 @@ related:
 related-mental-model:
   - workflow-skills
   - prompt-bundle
+sage-review: required
 ---
 
 # fresh-reader audit playbook for skill and prompt authoring
@@ -37,3 +38,7 @@ skill-authoring audit delegate. It should:
 
 This should be considered alongside the broader playbook-factory migration so
 skill-authoring audits stop depending on hand-built subagent prompts.
+
+## Decision (260629 sweep)
+
+Build: Implement the fresh-reader-audit delegate playbook. The playbook takes a target spec or skill file and produces a structured audit from the perspective of a reader with no prior context: undefined terms, implicit assumptions, missing invariants, and drift from the described behavior. Bundle as a rsrc playbook; surface through lead-discuss on-demand. No new MCP tool needed.

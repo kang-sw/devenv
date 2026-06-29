@@ -4,6 +4,7 @@ related:
   260605-research-ws-native-subagent-pivot: delegate/adapter-boundary direction this surfaces under
 related-mental-model:
   - workflow-skills
+sage-review: required
 ---
 
 # Playbook delegate-continuity tip assumes SendMessage; needs host-neutral fallback
@@ -102,3 +103,7 @@ feature. The fix is twofold and both halves are docs/routing, not new runtime:
 - Original framing undersold layer 2: it treated fresh-spawn as the only fallback
   and missed that a fully host-neutral *stateful* resume (mercenary backend
   session) already ships. The guidance fix should mention both.
+
+## Decision (260629 sweep)
+
+Fix: Replace the SendMessage-assuming delegate-continuity tip with host-neutral guidance. The tip currently tells callers to use SendMessage to resume a subagent; this assumes Claude Code harness features. Replace with: "To continue a delegate, send a follow-up prompt to the same agent using the host's native continuation mechanism (e.g. SendMessage on Claude Code). If no such mechanism exists, re-spawn with a recap of the prior exchange." Docs-only change; no runtime behavior change.
