@@ -38,6 +38,7 @@ type implementScopeFactsInput struct {
 	NewTypeContract           factString `json:"new_type_contract,omitempty"`
 	TestSurface               factString `json:"test_surface,omitempty"`
 	ExplicitDelegationRequest factString `json:"explicit_delegation_request,omitempty"`
+	ExplicitDirectEditRequest factString `json:"explicit_direct_edit_request,omitempty"`
 }
 
 type implementComplexityFactsInput struct {
@@ -147,6 +148,7 @@ type normalizedImplementFacts struct {
 	NewTypeContract           string
 	TestSurface               string
 	ExplicitDelegationRequest string
+	ExplicitDirectEditRequest string
 	ChangePoints              string
 	ReusePoints               string
 	StrategyShape             string
@@ -302,6 +304,9 @@ func parseImplementScopeFacts(m map[string]any) (implementScopeFactsInput, error
 		return out, fmt.Errorf("facts.scope.%w", err)
 	}
 	if out.ExplicitDelegationRequest, err = parseEnumFact(m, "explicit_delegation_request", []string{"yes", "no", "unknown"}); err != nil {
+		return out, fmt.Errorf("facts.scope.%w", err)
+	}
+	if out.ExplicitDirectEditRequest, err = parseEnumFact(m, "explicit_direct_edit_request", []string{"yes", "no", "unknown"}); err != nil {
 		return out, fmt.Errorf("facts.scope.%w", err)
 	}
 	return out, nil
@@ -485,6 +490,7 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		NewTypeContract:           factOr(scope.NewTypeContract, "unknown"),
 		TestSurface:               factOr(scope.TestSurface, "unknown"),
 		ExplicitDelegationRequest: factOr(scope.ExplicitDelegationRequest, "unknown"),
+		ExplicitDirectEditRequest: factOr(scope.ExplicitDirectEditRequest, "unknown"),
 		ChangePoints:              factOr(complexity.ChangePoints, "unknown"),
 		ReusePoints:               factOr(complexity.ReusePoints, "unknown"),
 		StrategyShape:             factOr(complexity.StrategyShape, "unknown"),
@@ -516,12 +522,17 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 }
 
 func deriveImplementDelegation(n normalizedImplementFacts) string {
+	if n.ExplicitDirectEditRequest == "yes" {
+		return "direct-edit"
+	}
+	if n.ExplicitDelegationRequest == "yes" {
+		return "delegated"
+	}
 	if n.Span == "single-file" &&
 		n.Surface == "internal" &&
 		n.NewPublicSymbol == "no" &&
 		n.NewTypeContract == "no" &&
-		n.TestSurface != "new-files" &&
-		n.ExplicitDelegationRequest == "no" {
+		n.TestSurface != "new-files" {
 		return "direct-edit"
 	}
 	return "delegated"
@@ -658,6 +669,7 @@ func implementConditions(n normalizedImplementFacts) []string {
 		"new-type-contract=" + n.NewTypeContract,
 		"test-surface=" + n.TestSurface,
 		"explicit-delegation-request=" + n.ExplicitDelegationRequest,
+		"explicit-direct-edit-request=" + n.ExplicitDirectEditRequest,
 		"change-points=" + n.ChangePoints,
 		"reuse-points=" + n.ReusePoints,
 		"strategy-shape=" + n.StrategyShape,

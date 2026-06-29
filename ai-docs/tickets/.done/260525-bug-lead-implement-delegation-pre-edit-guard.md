@@ -65,4 +65,8 @@ description against this updated baseline when implementing.
 
 ## Decision (260629 sweep)
 
-Deferred — design session needed: The requirement (explicit predicate verification before source mutation in lead-implement) is clear, but the verdict form (checklist block vs. inline table vs. dedicated Pre-edit Verdict section) and playbook insertion point are open design decisions. Design together with 260627-bug-enter-implement-direct-edit-policy-gap in a dedicated session.
+Design confirmed (260629 session): Add fact-source rule and edit gate to lead-implement playbook — facts.scope must be filled from ticket description before any source read; unknown fact defaults to delegated; no Edit/Write permitted until enter.implement returns direct-edit verdict. Implemented together with 260627-bug-enter-implement-direct-edit-policy-gap.
+
+## Result
+
+Implemented: added Fact-source rule and Edit gate to lead-implement.md (both agents-plugin and wsflow mirrors) in the Route section before Execute Verdict. Playbook now explicitly requires facts.scope to be filled from ticket content only, and prohibits Edit/Write calls until enter.implement returns direct-edit.

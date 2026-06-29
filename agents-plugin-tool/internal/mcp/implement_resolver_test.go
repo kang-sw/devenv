@@ -94,6 +94,28 @@ func TestResolveImplementDelegatedDefaultsToSurveyPlan(t *testing.T) {
 	}
 }
 
+func TestResolveImplementExplicitDirectEditOverridesMultiFileScope(t *testing.T) {
+	// explicit_direct_edit_request=yes overrides all other scope facts to direct-edit.
+	input := implementInput{
+		Target: implementTargetInput{Kind: "inline", Label: "force direct", ScopeLabel: "force direct", ScopeSlug: "force-direct"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "cross-module", Present: true},
+				NewPublicSymbol:           factString{Value: "yes", Present: true},
+				ExplicitDirectEditRequest: factString{Value: "yes", Present: true},
+			},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "feature/demo", StartCommit: "abc123"})
+	if result.Verdict.Delegation != "direct-edit" {
+		t.Fatalf("delegation = %q, want direct-edit when explicit_direct_edit_request=yes overrides scope", result.Verdict.Delegation)
+	}
+	if !containsString(result.Conditions, "explicit-direct-edit-request=yes") {
+		t.Fatalf("conditions missing explicit-direct-edit-request=yes: %v", result.Conditions)
+	}
+}
+
 func TestResolveImplementSurveyEscalatesResearchFromSurveySignal(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "ticket", Label: "risky feature", ScopeLabel: "Phase 2", ScopeSlug: "risky-feature"},

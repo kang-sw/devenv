@@ -27,4 +27,8 @@ a narrower multi-file heuristic, or both.
 
 ## Decision (260629 sweep)
 
-Deferred — design session needed: Schema direction for enter.implement (add explicit_direct_edit field vs. improve needs-delegation heuristic vs. both) is an open design decision. Design together with 260525-bug-lead-implement-delegation-pre-edit-guard in a dedicated session.
+Design confirmed (260629 session): Add explicit_direct_edit_request field to implementScopeFactsInput as counterpart to explicit_delegation_request; yes value overrides all other facts to direct-edit. Implemented together with 260525-bug-lead-implement-delegation-pre-edit-guard.
+
+## Result
+
+Implemented: added ExplicitDirectEditRequest field to implementScopeFactsInput, normalizedImplementFacts, normalizeImplementFacts(), deriveImplementDelegation() (early-return before AND-condition block), parseImplementScopeFacts() validation, and implementConditions() output. Also extracted ExplicitDelegationRequest from the AND condition into its own early-return for yes.

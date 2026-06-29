@@ -58,7 +58,7 @@ Fact groups:
 | group | fields |
 | --- | --- |
 | `target` | `kind`, `label`, `ticket_stem`, `ticket_path`, `scope_label`, `scope_slug` |
-| `facts.scope` | `span`, `surface`, `new_public_symbol`, `new_type_contract`, `test_surface`, `explicit_delegation_request` |
+| `facts.scope` | `span`, `surface`, `new_public_symbol`, `new_type_contract`, `test_surface`, `explicit_delegation_request`, `explicit_direct_edit_request` |
 | `facts.complexity` | `change_points`, `reuse_points`, `strategy_shape`, `side_effect_risk`, `cold_context` |
 | `facts.risk` | `correctness`, `fit`, `test`, `security_or_contract` |
 | `policy.branch` | `merge_target`, `allow_rename` |
@@ -72,6 +72,12 @@ Policy rules:
 - Set `policy.branch.allow_rename=yes` only when the caller accepts pre-edit branch rename.
 - Set `policy.review.override` only for explicit caller review policy.
 - Set `policy.docs.mode=skip-with-reason` only with an explicit reason.
+
+`explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
+
+**Fact-source rule**: Fill `facts.scope` fields from the ticket description before reading any source file. If a fact cannot be determined from the ticket alone, leave it `unknown`. Do not update `facts.scope` fields after reading source. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
+
+**Edit gate**: No Edit or Write tool call is permitted until `enter.implement` has returned a `direct-edit` verdict. On a `delegated` verdict, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
 
 ### 2. Execute Verdict
 
