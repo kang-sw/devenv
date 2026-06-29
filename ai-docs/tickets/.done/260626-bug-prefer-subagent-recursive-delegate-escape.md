@@ -5,6 +5,7 @@ related:
   260626-bug-prefer-subagent-fork-executor-narration: same-failure-family
   260625-research-fork-posture-leak-system-guarantee: inherited-posture-risk
 sage-review: skipped
+completed: 2026-06-29
 ---
 
 # prefer-subagent fork executor recursively delegates despite handoff boundary
@@ -45,3 +46,8 @@ Constraints:
 Verification:
 - `go test ./internal/mcp/...` passes including `TestWsflowRsrcMirrorUpToDate`.
 - Fresh read of the edited playbook confirms no ambiguity remains about secondary-executor delegation.
+
+
+## Resolution (2026-06-29)
+
+Extended failed-fork definition to cover secondary-executor escape. Updated fork prompt template opening to forbid AI-backed execution harnesses and name missing-tool as a blocker, not a delegation trigger. wsflow mirror regenerated.

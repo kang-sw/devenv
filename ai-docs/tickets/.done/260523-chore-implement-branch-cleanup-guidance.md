@@ -3,6 +3,7 @@ title: Implement merge flow lacks branch cleanup guidance
 related:
   260523-bug-implement-merge-target-discovery: merge-target safety and cleanup both affect implementation branch lifecycle
 sage-review: skipped
+completed: 2026-06-29
 ---
 
 # Implement merge flow lacks branch cleanup guidance
@@ -40,3 +41,8 @@ Constraints:
 Verification:
 - `go test ./internal/mcp/...` passes.
 - Fresh read confirms cleanup guidance is clear and safety guards are unambiguous.
+
+
+## Resolution (2026-06-29)
+
+Added ### 9. Branch Cleanup to lead-implement after the merge step. Five-step checklist with safety guards: skip if currently checked out, worktree-linked, ambiguous target, or unmerged commits; ask user before deleting; never delete without explicit approval. wsflow mirror regenerated.
