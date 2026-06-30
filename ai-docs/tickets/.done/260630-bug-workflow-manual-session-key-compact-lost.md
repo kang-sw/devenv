@@ -1,5 +1,6 @@
 ---
 title: "Session key lost across compaction: move key to workflow_manual Session invariant block"
+completed: 2026-06-30
 ---
 
 # Session key lost across compaction: move key to workflow_manual Session invariant block

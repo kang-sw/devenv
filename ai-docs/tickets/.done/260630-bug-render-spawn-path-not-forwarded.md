@@ -1,5 +1,6 @@
 ---
 title: "Clarify render→spawn pattern: rendered path must be forwarded to subagent, not read by lead"
+completed: 2026-06-30
 ---
 
 # Clarify render→spawn pattern: rendered path must be forwarded to subagent, not read by lead
