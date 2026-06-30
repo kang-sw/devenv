@@ -5,6 +5,7 @@ related:
   260630-research-wsflow-raw-tool-prefix-removal: research anchor — findings, scope, confirmed direction
   260605-research-ws-native-subagent-pivot: plugin architecture anchor
 spec:
+completed: 2026-06-30
 ---
 
 # refactor(mcp): remove ws. prefix from all raw MCP workflow-state tool names
@@ -125,6 +126,13 @@ WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMi
 ```
 
 Verification: `go build ./...` and `go test ./...` pass.
+
+### Result (3223c6cf) - 2026-06-30
+
+Phase 2 complete. All `ws.*` prose references renamed to unprefixed equivalents across 12 files: `rsrc/lead-workflow-manual/lead-workflow-manual.md` (5 occurrences), `rsrc/lead-salvage/lead-salvage.md` (1), `rsrc/lead-verify-design/lead-verify-design.md` (3), both `manifest.json` files regenerated, `session_state.go` (19 occurrences including `ws.path.generate` and 18 tool const/variable error strings), `implement_resolver.go` (1), `implement_resolver_test.go` (3 assertions), `session_state_test.go` (6 assertions). Both regen tests pass; full test suite passes (`go test -count=1 ./...`).
+
+Review: clean — partitioned test. No Critical/Important. Minor (2): stale `ws.*` labels in t.Fatal failure strings (session_state_test.go:1105, 2014–2028); no functional impact.
+Spec: no changes (mcp-tools.md fully updated in Phase 1).
 
 ## Spec Impact
 
