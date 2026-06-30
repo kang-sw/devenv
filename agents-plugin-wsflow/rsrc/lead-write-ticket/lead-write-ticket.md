@@ -70,12 +70,16 @@ Target: user request
 2. Choose the initial status directory through `judge: initial-status`.
 3. Call `{{.McpNamespace}}/tickets.template(type: "<category>")` to load the typed body skeleton.
 
-### 2. Draft
+### 2. Create Stub
+
+1. Call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, type: "<category>", title: "<title>", status: "<initial-status>")` to create the dated stub file. Fall back to manual file creation only when the tool is unavailable or returns an error.
+
+### 3. Draft
 
 1. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
 2. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure, without `.md`; omit when none applied.
 
-### 3. Shape
+### 4. Shape
 
 1. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
 2. For `epic`: reference existing/planned children.
@@ -88,7 +92,7 @@ Target: user request
 9. For each actionable phase, run **Apply Ticket Content**.
 10. For actionable tickets, note inter-phase dependencies explicitly.
 
-### 4. Ready Guard
+### 5. Ready Guard
 
 1. For `workset`, choose `idea/` or `todo/`; do not create or move it into `ready/`.
 2. For `ready/`, defer focus entry until **Spec-address Check** passes.

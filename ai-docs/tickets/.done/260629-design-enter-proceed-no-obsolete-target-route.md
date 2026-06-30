@@ -4,6 +4,7 @@ parent: 260605-epic-ws-playbook-factory-pivot
 related:
   260627-feat-enter-proceed-deterministic-verdict-engine: deterministic route engine this surfaced against
 sage-review: required
+completed: 2026-06-30
 ---
 
 # enter.proceed has no route for a target already resolved/obsolete
@@ -54,3 +55,8 @@ candidate directions.
 ## Decision (260629 sweep)
 
 Fix: Add lead-side phase-completion check to lead-proceed scope resolution. When the lead reads the ticket and all Phase sections already have a `### Result` block, set `scope_blocked=no-unfinished-phase` rather than routing to promotion. This is a prose-only addition to lead-proceed's scope resolution rules — no new Go MCP tool or markdown parser needed. The existing `no-unfinished-phase` verdict already routes to a clean stop.
+
+
+## Resolution (2026-06-30)
+
+Added phase-completion definition and explicit rule to lead-proceed scope resolution: when every phase in a ticket already has a `### Result` section, set scope_blocked=no-unfinished-phase rather than routing to ticket promotion.

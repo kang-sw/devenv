@@ -5,6 +5,7 @@ related:
 related-mental-model:
   - workflow-skills
 sage-review: required
+completed: 2026-06-30
 ---
 
 # Playbook delegate-continuity tip assumes SendMessage; needs host-neutral fallback
@@ -107,3 +108,8 @@ feature. The fix is twofold and both halves are docs/routing, not new runtime:
 ## Decision (260629 sweep)
 
 Fix: Replace the SendMessage-assuming delegate-continuity tip with host-neutral guidance. The tip currently tells callers to use SendMessage to resume a subagent; this assumes Claude Code harness features. Replace with: "To continue a delegate, send a follow-up prompt to the same agent using the host's native continuation mechanism (e.g. SendMessage on Claude Code). If no such mechanism exists, re-spawn with a recap of the prior exchange." Docs-only change; no runtime behavior change.
+
+
+## Resolution (2026-06-30)
+
+Replaced SendMessage-assuming continuity tip in lead-implement with host-neutral guidance: use host's native continuation mechanism; re-spawn with recap if unavailable. Added note that mercenary delegates provide host-neutral stateful resume.

@@ -22,7 +22,7 @@ Execution
 - Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.
 - Treat the installed todo list as the ordered runbook; do not create a parallel task list.
 - Plans preserve selected-scope decisions about files, public interfaces, tests, exclusions, and accepted or rejected approaches.
-- Delegate prompts are self-contained; resume is optional latency optimization.
+- Delegate prompts are self-contained; resume is optional latency optimization. To continue a delegate, use the host's native continuation mechanism (e.g. SendMessage on Claude Code). If no such mechanism exists, re-spawn with a recap of the prior exchange — artifacts are self-contained so no information is lost. Mercenary delegates (prefer_mercenary mode) provide a host-neutral stateful resume path via backend session; re-spawn cold-context cost applies only to native-subagent delegates.
 
 Review
 - Reviewer count and partitions come from `review_alloc`.

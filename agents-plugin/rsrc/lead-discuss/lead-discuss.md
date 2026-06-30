@@ -31,6 +31,8 @@ Conversation
 - Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
 - Discussion persistence writes only confirmed decisions; ticket cleanup goes through `lead-write-ticket`'s Open Decision Queue.
+- Ticket creation must route through `lead-write-ticket` (which calls `ws/tickets.create`); do not create ticket files directly via `convention.read` + `Write`.
+- Routing preference disambiguation: requests to "save a preference" or "remember a setting" route to `{{.SkillNamespace}}:lead-tune` (ws workflow preferences: delegation posture, model tier, mercenary, prompt overrides). `{{.SkillNamespace}}:lead-add-rule` is for repo-level coding/architecture rules only.
 
 Response
 - Lead with the load-bearing point before options, caveats, or history.

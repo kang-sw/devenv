@@ -7,6 +7,7 @@ related-mental-model:
   - workflow-skills
   - prompt-bundle
 sage-review: required
+completed: 2026-06-30
 ---
 
 # fresh-reader audit playbook for skill and prompt authoring
@@ -42,3 +43,8 @@ skill-authoring audits stop depending on hand-built subagent prompts.
 ## Decision (260629 sweep)
 
 Build: Implement the fresh-reader-audit delegate playbook. The playbook takes a target spec or skill file and produces a structured audit from the perspective of a reader with no prior context: undefined terms, implicit assumptions, missing invariants, and drift from the described behavior. Bundle as a rsrc playbook; surface through lead-discuss on-demand. No new MCP tool needed.
+
+
+## Resolution (2026-06-30)
+
+Created fresh-reader-audit render playbook in agents-plugin/rsrc/fresh-reader-audit/. Takes TargetFiles and AuditScope inputs; produces structured findings (quote, issue type, severity, suggestion) from a zero-context reader perspective. Mirrored to agents-plugin-wsflow/rsrc/.

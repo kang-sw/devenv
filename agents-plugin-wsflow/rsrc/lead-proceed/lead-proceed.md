@@ -38,8 +38,9 @@ Scope Resolution
 - Honor one explicit phase name exactly.
 - Stop facts with `scope_blocked=multiple-explicit-phases` when one proceed request names multiple phases.
 - Stop facts with `scope_blocked=phase-already-complete` when one explicit phase has a `Result` section unless the user explicitly asked to revise or redo it.
+- A phase is unfinished when it has no `### Result` section; a phase with a `### Result` section is complete.
 - When the user does not name a phase, select the first unfinished phase.
-- Stop facts with `scope_blocked=no-unfinished-phase` when no unfinished phase remains.
+- Stop facts with `scope_blocked=no-unfinished-phase` when no unfinished phase remains. When reading a ticket whose every phase already has a `### Result` section, set `scope_blocked=no-unfinished-phase` rather than routing to ticket promotion.
 - Set `slice=whole target` and `scope_blocked=none` for ready tickets without phase sections.
 - Stop facts with `scope_blocked=too-broad` when the next phase is too broad for one complete implementation unit.
 - Treat `--auto-slice`, `auto-slice`, and equivalent phrasing as permission to select the first unfinished phase automatically; do not edit ticket phase structure.
