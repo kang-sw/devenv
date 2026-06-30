@@ -965,10 +965,17 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if _, ok := loginProperties["root"]; !ok {
 		t.Fatalf("ws.ferrule schema missing root bootstrap parameter: %s", byID["2"])
 	}
+	// Tools that may advertise a "root" bootstrap parameter: ws.ferrule (the
+	// primary session-bootstrap tool) and ws.workflow_manual (lead-only fresh-start
+	// shortcut that mints a key inline when root is supplied alongside the sentinel).
+	rootParamAllowed := map[string]bool{
+		"ws.ferrule":          true,
+		"ws.workflow_manual":  true,
+	}
 	for _, rawTool := range listedTools {
 		tool, _ := rawTool.(map[string]any)
 		name, _ := tool["name"].(string)
-		if name == "ws.ferrule" {
+		if rootParamAllowed[name] {
 			continue
 		}
 		schema, _ := tool["inputSchema"].(map[string]any)

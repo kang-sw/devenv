@@ -323,9 +323,20 @@ and branches on `session_key`:
 
 - **fresh** (`session_key` equals the reserved fresh-bootstrap sentinel — a
   deliberately non-descriptive token taught only in lead skill prose such as
-  `lead-revive`): the primitives reference plus the always-shown per-root rule
-  (call `ws.ferrule` once per working root and thread its key) and the
-  self-bootstrap line ("you have no key yet; mint one with `ws.ferrule`").
+  `lead-revive`): two sub-cases based on whether the optional `root` parameter
+  is supplied:
+  - **fresh with root** (`root` is a non-empty absolute Git worktree path): the
+    handler validates and canonicalizes the path via `canonicalSetupRoot` (same
+    as `ws.ferrule`), mints a new lead session key, strips the fresh-only
+    self-bootstrap block from the manual body, and appends a `## Session Key`
+    section containing the minted key followed by an empty `## Session State`
+    section. A separate `ws.ferrule` call is not needed; the caller can proceed
+    directly to `project_tree`, `git.status`, and other keyed tools using the
+    returned key.
+  - **fresh without root** (sentinel, no `root`): the primitives reference plus
+    the always-shown per-root rule (call `ws.ferrule` once per working root and
+    thread its key) and the self-bootstrap line ("you have no key yet; mint one
+    with `ws.ferrule`").
 - **continue** (`session_key` present and its record resolves to a lead scope): the
   primitives plus the per-root rule, with the self-bootstrap line omitted, followed
   by a restored **Session State** section — agenda blobs as a remind list and the

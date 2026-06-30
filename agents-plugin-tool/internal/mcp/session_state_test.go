@@ -2286,6 +2286,68 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 	}
 }
 
+func TestWorkflowManualFreshModeWithRoot(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	// Fresh-with-root mode: sentinel key + root supplied. The handler must mint a
+	// lead session key inline, strip the fresh-only block, and return Session Key
+	// and Session State sections.
+	resp := callToolWithKey(t, server, 5010, freshBootstrapKey, "ws.workflow_manual", map[string]any{
+		"root": root,
+	})
+
+	// (a) Session Key section must be present.
+	if !strings.Contains(resp, "## Session Key") {
+		t.Errorf("fresh-with-root: ## Session Key section absent from response:\n%s", resp)
+	}
+	// (b) Fresh-only block must be stripped — self-bootstrap fragment must be absent.
+	if strings.Contains(resp, "mint your lead key") {
+		t.Errorf("fresh-with-root: self-bootstrap fragment must be absent when root is supplied:\n%s", resp)
+	}
+	// (c) Session State section must be present.
+	if !strings.Contains(resp, "## Session State") {
+		t.Errorf("fresh-with-root: ## Session State section absent from response:\n%s", resp)
+	}
+	// (d) Extract the minted key from the response and verify it resolves to a lead
+	//     session entry. The key appears on the first non-empty line after the
+	//     "## Session Key" heading.
+	var mintedKey string
+	inSessionKeySection := false
+	for _, line := range strings.Split(resp, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "## Session Key" {
+			inSessionKeySection = true
+			continue
+		}
+		if inSessionKeySection {
+			if trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "#") {
+				// Next section — key not found
+				break
+			}
+			mintedKey = trimmed
+			break
+		}
+	}
+	if mintedKey == "" {
+		t.Fatalf("fresh-with-root: could not extract minted key from response:\n%s", resp)
+	}
+	entry, ok := server.sessions.lookup(mintedKey)
+	if !ok {
+		t.Fatalf("fresh-with-root: minted key %q does not resolve to a session entry", mintedKey)
+	}
+	if entry.scope != roleLead {
+		t.Errorf("fresh-with-root: minted key scope = %q; want %q", entry.scope, roleLead)
+	}
+}
+
 func TestWorkflowManualKeylessRejected(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
