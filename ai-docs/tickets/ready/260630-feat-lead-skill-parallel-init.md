@@ -3,7 +3,7 @@ title: "Lead skill parallel init: workflow_manual key-return + SKILL.md batch en
 spec:
   - 260626-workflow-manual-restoration-entry
   - 260610-entry-skill-surface-reduction
-sage-review: required
+sage-review: completed
 ---
 
 # Lead skill parallel init: workflow_manual key-return + SKILL.md batch entry
@@ -53,16 +53,22 @@ session key for the given root, then returns the minted `session_key` in the
 response body alongside the rendered manual. The caller receives the key
 immediately — no separate `ws.ferrule` call needed.
 
-**Response contract (FRESH mode after change):**
-```
-<rendered manual body — same as before, including fresh-only block>
+**Response contract:**
 
-## Session Key
-<minted-session-key>
-```
+- `workflow_manual("obsidian-latch")` with NO root → unchanged FRESH behavior:
+  fresh-only block kept, no `## Session Key`. Caller still sees the ferrule
+  instruction and must call ferrule separately.
+- `workflow_manual("obsidian-latch", root: "...")` with root → new minting path:
+  fresh-only block **stripped** (same as CONTINUE rendering, since key is now
+  available), then append `## Session Key\n<minted-key>` and `## Session State`
+  (empty for new session). Caller receives the key inline with no contradictory
+  ferrule instruction.
+- CONTINUE mode: unchanged.
 
-The `## Session Key` section is only present in FRESH mode; CONTINUE mode
-response is unchanged.
+The fresh-only block must be stripped when root is supplied and minting succeeds,
+because keeping it would tell the caller they have no key while simultaneously
+handing them one — contradictory. The implementer must select
+`stripModeGatedRegion(body, false)` (not `true`) in the root-supplied branch.
 
 **Eliminated:** double workflow_manual call pattern (obsidian-latch →
 ferrule → second workflow_manual). Fresh-start and continue paths are now both
@@ -111,12 +117,17 @@ Replace with:
 
 1. Call ws/project_tree(session_key) and ws/git.status(session_key) in parallel.
 2. [continue to user message handling]
+
+Post-compaction reload: if session compaction occurred, call
+ws/workflow_manual(session_key) immediately before step 1; if the key is lost,
+run ws:lead-revive first to recover it.
 ```
 
-The workflow_manual step is removed because the SKILL.md already called it
-before the playbook was loaded; project_tree and git.status remain here because
-they are specific to context-heavy skills (discuss, sprint) and not universal
-init.
+The workflow_manual step is removed from the normal init sequence because
+SKILL.md already called it before the playbook was loaded. However, the
+post-compaction reload instruction must be preserved — SKILL.md fires only at
+initial invocation, not after in-session compaction, so the playbook must carry
+this guidance for the lead to restore session state mid-session.
 
 **Scope:** lead-discuss and lead-sprint only. lead-proceed and lead-implement
 have no project-context init in their On: invoke and are not modified.
