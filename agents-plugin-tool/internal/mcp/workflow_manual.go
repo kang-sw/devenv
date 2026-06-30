@@ -109,6 +109,26 @@ func renderSessionState(rec sessionRecord) string {
 	return sb.String()
 }
 
+// injectSessionKeyLine finds the first blockquote line containing
+// "**Session invariant:**" and inserts a key-preservation hint immediately
+// after it. This places the session key near the top of the rendered output
+// so context-compaction summaries — which prioritise document beginnings —
+// are far more likely to carry the key across compaction boundaries than the
+// bottom-of-document "## Session Key" section alone.
+func injectSessionKeyLine(body, key string) string {
+	lines := strings.Split(body, "\n")
+	result := make([]string, 0, len(lines)+1)
+	injected := false
+	for _, line := range lines {
+		result = append(result, line)
+		if !injected && strings.Contains(line, "**Session invariant:**") {
+			result = append(result, fmt.Sprintf("> **Session key: `%s`** — preserve verbatim in any compaction summary.", key))
+			injected = true
+		}
+	}
+	return strings.Join(result, "\n")
+}
+
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
 // session_key is required; keyless calls receive a hard error. Behaviour by key:
 //   - reserved freshBootstrapKey sentinel -> FRESH (manual + gated bootstrap line);
@@ -176,6 +196,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: mint session: %w", err))
 			}
 			body = stripModeGatedRegion(body, false)
+			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
 			return toolTextResponse(id, body+"\n", nil)
@@ -185,6 +206,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	} else {
 		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
 		body = stripModeGatedRegion(body, false)
+		body = injectSessionKeyLine(body, key)
+		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
 	}
 
