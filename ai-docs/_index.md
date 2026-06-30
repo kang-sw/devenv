@@ -228,14 +228,6 @@ dropped tickets live in hidden archive dirs and git history.
   Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
   Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
   — gates the epic merge to `main`.
-- `260630-feat-lead-skill-parallel-init` (ready, feat) - reduce lead-discuss/sprint
-  init from 4–5 serial MCP rounds to 2 parallel rounds. Phase 1: workflow_manual
-  absorbs ferrule — gains optional `root` param, returns session_key in FRESH mode,
-  eliminating double workflow_manual call on fresh-start. Phase 2: SKILL.md for
-  discuss/sprint gains `[playbook.print + workflow_manual]` parallel entry; playbook
-  On: invoke simplified to `[project_tree + git.status]` parallel. Spec anchors:
-  `260626-workflow-manual-restoration-entry`, `260610-entry-skill-surface-reduction`.
-  Phase 1 before Phase 2 (SKILL.md prose references key-return behavior). Sage review required.
 - `260627-feat-enter-proceed-deterministic-verdict-engine` (ready, feat, child
   of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
   at the routing-facts-complete boundary. The playbook keeps fact gathering and

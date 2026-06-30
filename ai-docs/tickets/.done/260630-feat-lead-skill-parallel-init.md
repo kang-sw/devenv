@@ -4,6 +4,7 @@ spec:
   - 260626-workflow-manual-restoration-entry
   - 260610-entry-skill-surface-reduction
 sage-review: completed
+completed: 2026-06-30
 ---
 
 # Lead skill parallel init: workflow_manual key-return + SKILL.md batch entry
@@ -180,3 +181,14 @@ completes init in 2 MCP rounds. Fresh-start completes in 2 rounds (round 1
 includes obsidian-latch workflow_manual; round 2 is project_tree + git.status
 after key is available). Confirm parallel call declaration is present in updated
 lead-discuss/SKILL.md and lead-sprint/SKILL.md.
+
+### Result (cac80883) - 2026-06-30
+
+SKILL.md for lead-discuss and lead-sprint (both agents-plugin and agents-plugin-wsflow
+mirrors) now declare parallel init: `playbook.print` + `workflow_manual` called in one
+round. On: invoke in all four rsrc playbooks simplified to `project_tree` + `git.status`
+in parallel; sequential `workflow_manual` init step removed; post-compaction reload note
+preserved. Spec anchor `260610-entry-skill-surface-reduction` updated with the
+context-heavy entry skill exception. Mental model `workflow-skills.md` updated (45b6cd27).
+
+Review: partitioned (correctness, fit) — both clean.
