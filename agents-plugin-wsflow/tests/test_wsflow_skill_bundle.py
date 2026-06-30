@@ -38,6 +38,7 @@ EXPECTED_SKILLS = {
 
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
 EXPECTED_INLINE_SKILLS = {"lead-revive"}
+EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint"}
 
 FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
@@ -91,7 +92,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_skill_files_are_thin_playbook_shims(self):
         offenders = []
-        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS):
+        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS - EXPECTED_PARALLEL_INIT_SKILLS):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
             match = re.fullmatch(
@@ -103,6 +104,28 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 rf"Call `wsflow/playbook\.print\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
                 r"inline against the current user request\. If the playbook cannot be loaded, stop\n"
                 r"and report that blocker\.\n",
+                text,
+            )
+            if match is None:
+                offenders.append(str(path.relative_to(PLUGIN_DIR)))
+        self.assertEqual(offenders, [])
+
+    def test_parallel_init_skill_files_are_playbook_shims(self):
+        offenders = []
+        for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
+            path = SKILLS_DIR / skill / "SKILL.md"
+            text = path.read_text(encoding="utf-8")
+            title = skill.removeprefix("lead-").title()
+            match = re.fullmatch(
+                r"---\n"
+                rf"name: {re.escape(skill)}\n"
+                r"description: .+\n"
+                r"---\n\n"
+                rf"# {re.escape(title)}\n\n"
+                r"Call in parallel:\n"
+                rf"- `wsflow/playbook\.print\(name: \"{re.escape(skill)}\", session_key: <your key>\)`\n"
+                r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
+                r"After both return, execute the procedure returned by `wsflow/playbook\.print`\.\n",
                 text,
             )
             if match is None:
