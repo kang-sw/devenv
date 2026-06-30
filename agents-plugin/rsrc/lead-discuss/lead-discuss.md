@@ -43,11 +43,15 @@ Response
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline; reload after session compaction (a duplicate load is safe). After compaction, recover your key via `{{.SkillNamespace}}:lead-revive` first. No lead key yet (fresh start)? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
-2. Call `{{.McpNamespace}}/project_tree()` to load the current project map.
-3. Call `{{.McpNamespace}}/git.status()`.
-4. If `user request` references a ticket, read it.
-5. Enter user-message handling.
+1. Call `{{.McpNamespace}}/project_tree(session_key: <your key>)` and
+   `{{.McpNamespace}}/git.status(session_key: <your key>)` in parallel.
+2. If `user request` references a ticket, read it.
+3. Enter user-message handling.
+
+Post-compaction reload: if session compaction occurred, call
+`{{.McpNamespace}}/workflow_manual(session_key: <your key>)` immediately before
+step 1 to restore session state. If the key is lost, run
+`{{.SkillNamespace}}:lead-revive` first to recover it.
 
 ## On: user message
 

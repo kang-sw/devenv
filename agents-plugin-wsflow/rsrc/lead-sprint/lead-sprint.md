@@ -33,13 +33,19 @@ Language
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline; reload after session compaction (a duplicate load is safe). After compaction, recover your key via `{{.SkillNamespace}}:lead-revive` first. No lead key yet (fresh start)? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
-2. Call `{{.McpNamespace}}/git.status()`.
-3. Call `{{.McpNamespace}}/project_tree()`.
-4. Recover episode state from active conversation or recent `Sprint-Edit:` commit markers.
-5. If recovery finds one open episode, set `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` from it.
-6. If recovery is empty or ambiguous, initialize `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` as empty.
-7. Enter session loop.
+1. Call `{{.McpNamespace}}/project_tree(session_key: <your key>)` and
+   `{{.McpNamespace}}/git.status(session_key: <your key>)` in parallel.
+2. Recover episode state from active conversation or recent `Sprint-Edit:` commit markers.
+3. If recovery finds one open episode, set `<current-edit-context>`, `<episode-slug>`,
+   and `<episode-start>` from it.
+4. If recovery is empty or ambiguous, initialize `<current-edit-context>`,
+   `<episode-slug>`, and `<episode-start>` as empty.
+5. Enter session loop.
+
+Post-compaction reload: if session compaction occurred, call
+`{{.McpNamespace}}/workflow_manual(session_key: <your key>)` immediately before
+step 1 to restore session state. If the key is lost, run
+`{{.SkillNamespace}}:lead-revive` first to recover it.
 
 ## On: session loop
 
