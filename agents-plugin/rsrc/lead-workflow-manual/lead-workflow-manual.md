@@ -38,19 +38,9 @@ fallback.
 Centralize primitive usage here. Other skills should name the primitive and
 include only local arguments that affect the current step.
 
-## How To Document
-
-- Write compressed professional prose: short sentences, exact verbs, no filler.
-- Prefer `Do X through Y` over `Do not do X` when a positive action exists.
-- Use `Not:` / `Use:` examples only for recurring mistakes.
-- Keep procedure text command-shaped; move rationale to one short Doctrine paragraph.
-- Use full sentences when compression could blur order, ownership, or safety.
-
 ## Available
 
 ### Session setup
-
-`ws.ferrule`
 
 <!-- ws:fresh-only:start -->
 You have no session key yet: call `ws.ferrule(root: "<absolute-working-directory>")`
@@ -79,26 +69,13 @@ For lead-owned tuning of delegation posture or other workflow knobs, use the `{{
 
 ### Scoped Exploration (native Explore)
 
-Use for scoped fact-finding, surveys, and one-turn answers. Pattern: spawn a
-host-native exploration worker directly with an English prompt that includes
-the scoped question or purpose-specific query block; require cited evidence,
-gaps, and follow-up needs; collect the deferred result. For parallel dispatch, spawn
-multiple concurrent subagents in a single turn and collect all before
-synthesizing. For wide structural surveys, ask the worker to trace relevant
-directories, entry points, references, and gaps, then report cited evidence.
+For scoped fact-finding, surveys, and one-turn answers, spawn host-native
+exploration workers with an English prompt and require cited evidence, gaps, and
+follow-up needs. For parallel dispatch, spawn multiple in one turn; collect all
+before synthesizing.
 
 <!-- ws:full-only:start -->
 ### Persistent agents
-
-`ws.mercenary.register`
-`ws.mercenary.call`
-`ws.mercenary.wait`
-`ws.mercenary.result`
-`ws.mercenary.status`
-`ws.mercenary.tail`
-`ws.mercenary.print`
-`ws.mercenary.cancel`
-`ws.mercenary.erase`
 
 Register a stable task name with a self-contained system prompt. Registration
 takes `name`, optional `backend`, `system_prompt_text`, and `tier`; the removed
@@ -124,33 +101,19 @@ with a recovery prompt when cancellation followed a no-result timeout, and
 
 ### Artifact paths
 
-`{{.McpNamespace}}/path.generate`
-
-Use for generated workflow artifact paths. Capture returned paths. Relay paths,
-not large findings, between lead, implementer, and reviewers.
+Use `{{.McpNamespace}}/path.generate` for generated workflow artifact paths. Capture
+returned paths. Relay paths, not large findings, between lead, implementer, and
+reviewers.
 
 ### Runtime metadata
 
-`{{.McpNamespace}}/runtime.info`
-
-Use for runtime compatibility checks and feature detection.
+Use `{{.McpNamespace}}/runtime.info` for runtime compatibility checks and feature detection.
 
 ### Reference discovery
 
-`{{.McpNamespace}}/tickets.list`
-`{{.McpNamespace}}/tickets.find`
-`{{.McpNamespace}}/tickets.status`
-`{{.McpNamespace}}/specs.list`
-`{{.McpNamespace}}/specs.find`
-`{{.McpNamespace}}/specs.status`
-`{{.McpNamespace}}/mental_models.list`
-`{{.McpNamespace}}/mental_models.find`
-`{{.McpNamespace}}/mental_models.status`
-`{{.McpNamespace}}/references.trace`
-
-Use these for {{.McpNamespace}}-owned ticket, spec, and mental-model path/status/reference
-lookup before shell search. Use native file reads after a discovery tool returns
-the path to inspect or edit.
+Use the {{.McpNamespace}}-owned ticket, spec, and mental-model discovery tools for
+path/status/reference lookup before shell search. Use native file reads after a
+discovery tool returns the path to inspect or edit.
 
 Prefer:
 - `{{.McpNamespace}}/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
@@ -166,12 +129,6 @@ Prefer:
 - `{{.McpNamespace}}/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
 
 ### Git
-
-`{{.McpNamespace}}/git.status`
-`{{.McpNamespace}}/git.diff`
-`{{.McpNamespace}}/git.log`
-`{{.McpNamespace}}/git.merge_base`
-`{{.McpNamespace}}/git.commit`
 
 Use `{{.McpNamespace}}/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves plus
@@ -191,64 +148,15 @@ branch creation, tag push, merge execution, or path-filtered file history.
 
 ### API documentation
 
-`{{.McpNamespace}}/api.list`
-
 Use `{{.McpNamespace}}/api.list` only to inspect local API documentation cache domains.
-For third-party API documentation questions, run scoped host-native exploration
-or official documentation lookup directly. Give the worker the exact library,
-version or package manager context when known, and require cited evidence plus
-any staleness caveats. Do not route API documentation questions through {{.McpNamespace}} MCP
-agent-backed tools.
+For external API questions, run scoped host-native exploration or official docs
+lookup directly with exact library/version context and cited evidence; do not
+route them through {{.McpNamespace}} MCP tools.
 
 <!-- ws:full-only:start -->
 ## Planned Or Specialized
 
-Treat active-agent listing and broad message-queue semantics as planned contract
-surfaces unless the runtime exposes the exact tool. Basic async cancellation
-exists through `ws.mercenary.cancel`; retry the same registered agent with
-`ws.mercenary.call` for no-result cancellation recovery. Check runtime before
-assuming richer interrupt behavior.
+Check `{{.McpNamespace}}/runtime.info` before assuming richer interrupt or
+active-agent/message-queue behavior than the runtime exposes; basic async
+cancellation exists through `ws.mercenary.cancel`, with retry via `ws.mercenary.call`.
 <!-- ws:full-only:end -->
-
-## Usage Pattern
-
-```text
-Scoped exploration:
-spawn a host-native exploration worker directly with an English scoped task prompt that requests cited evidence, gaps, and follow-up needs.
-collect the result when the subagent returns.
-for parallel dispatch, spawn multiple concurrent subagents in a single turn; collect all before synthesizing.
-
-<!-- ws:full-only:start -->
-Persistent task:
-call `ws.mercenary.register(name: "<agent-name>")` for a general-purpose delegate.
-for a bundled delegate, render its prompt: `{{.McpNamespace}}/playbook.render(name: "<delegate>")`, then spawn a native subagent or register a mercenary with `system_prompt_text: <rendered>` and `tier: <recommended-tier>`.
-call `ws.mercenary.call(name: "<agent-name>", prompt: <block below>)` for the mercenary path.
-wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.
-erase the task-scoped agent when cleanup matters.
-<!-- ws:full-only:end -->
-
-Review artifacts:
-call `{{.McpNamespace}}/path.generate(kind: "review", stems: ["<stem>"])`.
-tell reviewers to write full findings to those paths.
-relay file paths, not full findings, to the implementer.
-
-API docs:
-call `{{.McpNamespace}}/api.list()` when choosing among cached domains matters.
-for external API lookup, spawn a scoped host-native exploration worker or use
-official documentation lookup directly; include exact package, version, and
-question context, and require cited evidence.
-
-References:
-call `{{.McpNamespace}}/references.trace(ticket_stem: "<ticket-stem>")` for ticket/spec/model links.
-call `{{.McpNamespace}}/references.trace(spec_stem: "<spec-stem>")` for spec/ticket/model links.
-call domain discovery tools first when only paths or status metadata are needed.
-
-Commit:
-call `{{.McpNamespace}}/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])`.
-```
-
-## Doctrine
-
-Workflow notation optimizes for **limited execution attention** during cross-host
-work. References must survive skill execution and map to each host's tool
-display. When ambiguous, preserve execution attention.
