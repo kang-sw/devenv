@@ -101,6 +101,13 @@ WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMi
 
 Verification: `go build ./...` and `go test ./...` pass.
 
+### Result (6a73170e) - 2026-06-30
+
+Phase 1 complete. All `ws.*` workflow-state tool identifiers renamed to unprefixed forms in `server.go` (bootstrapToolName const, isLeadOnlyTool, switch cases, 29 tool definition name fields, 14 mercenary session-key entries, 7 HasPrefix guards), `workflow_manual.go` (5 error strings), `agents-plugin/runtime.json`, and `agents-plugin-wsflow/runtime.json` (17 keys each). Test fixture call strings updated in 6 `*_test.go` files (functional identifiers; deviation from plan's Phase 2 label justified by test-pass requirement). `ws.mercenary.recall` switch case renamed per `ws.mercenary.*` wildcard. Build and all tests pass (`go test -count=1 ./...`).
+
+Review: clean — partitioned correctness/fit/test. No Critical/Important requiring relay. Minor findings (5 total) all Phase 2 prose scope.
+Spec: `mcp-tools.md` updated (44ec9a7c).
+
 ### Phase 2: Update prose references
 
 Update all prose strings that name old `ws.*` tool identifiers.
