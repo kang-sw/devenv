@@ -91,6 +91,37 @@ Doctrine has two jobs: name the finite resource, then add the guiding principle.
 Use measurable nouns such as "context window", not fuzzy nouns such as "quality".
 Test: invariants should re-derive from the named resource.
 
+## Layer Model
+
+Every piece of skill content belongs to exactly one layer. Layers 1 and 2 are
+owned by the MCP tool — delete their content from the playbook unconditionally.
+
+| Layer | Owns | Authoritative source |
+|-------|------|----------------------|
+| 1 — MCP schema | Field names, types, enums, call format | Tool JSON Schema (loaded via ToolSearch) |
+| 2 — MCP logic | Deterministic routing rules, verdict computation, allocation | MCP tool implementation |
+| 3 — Playbook | Observation targets, soft judgments, non-obvious edge cases, step choreography, doctrine | This file |
+
+### Gate: which layers apply to this skill?
+
+Assess before auditing or authoring:
+
+- **Layer 1 applies** when the skill calls an MCP tool with a typed JSON Schema (e.g. `enter.*`, `git.commit`). Do not apply Layer 1 deletion to skills that call no typed MCP tool.
+- **Layer 2 applies** when the skill's conditional routing or verdict logic has already been moved into an MCP tool. If conditional logic still lives in playbook prose and no MCP tool computes it — that is a Lever B migration candidate. File a ticket; do not treat it as Layer 3 and do not audit as if Layer 2 is present.
+- **Layer 3 always applies.**
+
+### Destructive-first stance
+
+The burden of proof is on keeping content, not on deleting it.
+
+Test for every section or rule: *"Would a model following only Layer 3 content plus the referenced MCP tool schemas reach the same execution outcome?"*
+
+- **Yes** → belongs to Layer 1 or 2; delete from the playbook regardless of apparent utility. MCP schema is authoritative; playbook copies become stale and misleading.
+- **No** → belongs to Layer 3; apply the invariant checklist before keeping.
+- **Uncertain** → delete. A missing Layer 3 rule causes one wrong execution; a stale Layer 1/2 copy causes compounding drift across sessions.
+
+Doctrine is Layer 3 only when at least one invariant re-derives from it; otherwise delete.
+
 ## On: Fresh-Reader Audit
 
 Audit targets: `agents-plugin/rsrc/lead-*/lead-*.md` (migrated procedure playbooks) and `agents-plugin/skills/*/SKILL.md` (entry skills).
