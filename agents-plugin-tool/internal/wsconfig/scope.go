@@ -57,11 +57,20 @@ const (
 	// Empty string means no binding (no injection). Declared default scope:
 	// ScopeGlobal (language is a cross-project user preference).
 	ItemWorkflowLang = "workflow.lang"
+
+	// ItemWorkflowSkepticalPosture controls whether the workflow manual renders
+	// a skeptical-posture block reminding the AI to treat user claims as
+	// hypotheses requiring evidence rather than ground truth. This exists because
+	// LLMs tend to accept user statements (e.g. casual examples, remembered names)
+	// at face value and propagate them without verification.
+	// Values: "on" (default) or "off".
+	ItemWorkflowSkepticalPosture = "workflow.skeptical_posture"
 )
 
 func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
 	RegisterGlobalOnly(ItemWorkflowPreferMercenary)
+	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)

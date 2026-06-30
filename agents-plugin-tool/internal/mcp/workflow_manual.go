@@ -115,6 +115,24 @@ func renderSessionState(rec sessionRecord) string {
 // so context-compaction summaries — which prioritise document beginnings —
 // are far more likely to carry the key across compaction boundaries than the
 // bottom-of-document "## Session Key" section alone.
+// skepticalPostureBlock is the standing instruction block injected at the top
+// of every workflow_manual output when workflow.skeptical_posture is "on"
+// (the builtin default). It counteracts the tendency to accept user-stated
+// facts (names, design decisions, remembered behavior) as ground truth without
+// independent verification.
+const skepticalPostureBlock = `> **Skeptical posture is active.**
+> - Do not accept user claims about code, names, or behavior without independent verification.
+> - Assume user memory is stale: if the user says something "was defined as X", check the source.
+> - When a user's casual example or description conflicts with what you observe in source, the source wins.
+> - Ask for evidence before acting on a user assertion that would change architecture, naming, or convention.
+
+`
+
+// injectSkepticalPosture prepends the skeptical-posture block to body.
+func injectSkepticalPosture(body string) string {
+	return skepticalPostureBlock + body
+}
+
 func injectSessionKeyLine(body, key string) string {
 	lines := strings.Split(body, "\n")
 	result := make([]string, 0, len(lines)+1)
@@ -169,11 +187,13 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 
 	overrideLookup := buildOverrideLookup(s, key)
 
-	// Resolve workflow.lang for language-binding injection.
+	// Resolve workflow.lang and workflow.skeptical_posture for rendering.
 	langAdapter := sessionConfigAdapter{s: s.sessions}
 	langResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, langAdapter, langAdapter)
 	workflowLangRV, _ := langResolver.Get(key, wsconfig.ItemWorkflowLang)
 	workflowLang := workflowLangRV.Value
+	skepticalRV, _ := langResolver.Get(key, wsconfig.ItemWorkflowSkepticalPosture)
+	skepticalPosture := skepticalRV.Value != "off" // builtin default is "on"
 
 	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, workflowLang, overrideLookup)
 	if err != nil {
@@ -199,16 +219,25 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
+			if skepticalPosture {
+				body = injectSkepticalPosture(body)
+			}
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
 		body = stripModeGatedRegion(body, true)
+		if skepticalPosture {
+			body = injectSkepticalPosture(body)
+		}
 	} else {
 		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
 		body = stripModeGatedRegion(body, false)
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
+		if skepticalPosture {
+			body = injectSkepticalPosture(body)
+		}
 	}
 
 	return toolTextResponse(id, body+"\n", nil)
