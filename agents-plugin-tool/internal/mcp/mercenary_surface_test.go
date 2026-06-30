@@ -281,7 +281,7 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	props := toolPropertiesByName(t, byID["1"], "ws.mercenary.register")
+	props := toolPropertiesByName(t, byID["1"], "mercenary.register")
 	// prompts/prompt_refs/model stay removed; `tier` is re-introduced in Phase 2
 	// (260611) as a pass-through of playbook.render's recommended-tier.
 	for _, dropped := range []string{"prompts", "prompt_refs", "model"} {
@@ -343,7 +343,7 @@ func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 		t.Fatalf("config.workflow_prefer_subagent must remain visible in no-agent mode: %s", byID["1"])
 	}
 	// the bootstrap tool stays visible (wsflow still needs bootstrap).
-	if !strings.Contains(byID["1"], `"name":"ws.ferrule"`) {
+	if !strings.Contains(byID["1"], `"name":"ferrule"`) {
 		t.Fatalf("ws.ferrule must remain visible in no-agent mode: %s", byID["1"])
 	}
 }

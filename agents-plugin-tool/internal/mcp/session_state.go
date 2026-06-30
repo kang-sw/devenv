@@ -522,7 +522,7 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	case "none", "":
 		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
 	case "survey":
-		return guardrails + "Call ws.path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with ticket_path, selected_phase, and plan_path, and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same plan path before implementer dispatch. Do not create a separate brief."
+		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with ticket_path, selected_phase, and plan_path, and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same plan path before implementer dispatch. Do not create a separate brief."
 	case "research":
 		return guardrails + "Render plan-populator-research with ticket_path, selected_phase, and an existing plan_path, then dispatch it to refine or replace the same implementation plan before implementer dispatch. Do not create a separate brief."
 	default:
@@ -835,7 +835,7 @@ func todoInstructionArg(toolName string, args map[string]any) (*string, error) {
 }
 
 func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.agenda.set"
+	const tool = "agenda.set"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -859,7 +859,7 @@ func (s *Server) handleAgendaSet(id json.RawMessage, args map[string]any) respon
 }
 
 func (s *Server) handleAgendaClear(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.agenda.clear"
+	const tool = "agenda.clear"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -901,7 +901,7 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 
 func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) response {
 	if _, hasNewTarget := args["target"]; hasNewTarget {
-		const tool = "ws.enter.implement"
+		const tool = "enter.implement"
 		sessionKey, err := sessionStateKey(tool, args)
 		if err != nil {
 			return toolTextResponse(id, "", err)
@@ -949,15 +949,15 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	needDoc, _ := args["need_doc"].(bool)
 	delegation, err := parseImplementDelegation(stringValue(args["delegation"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
 	}
 	planDepth, err := parseLegacyImplementPlanDepth(delegation, stringValue(args["plan_depth"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
 	}
 	reviewAlloc, err := parseImplementReviewAlloc(stringValue(args["review_alloc"]))
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("ws.enter.implement: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("enter.implement: %w", err))
 	}
 	args["delegation"] = delegation
 	args["plan_depth"] = planDepth
@@ -969,7 +969,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		NeedReview:  needReview,
 		NeedDoc:     needDoc,
 	})
-	return s.handleEnter(id, "ws.enter.implement", "implement", args, todos)
+	return s.handleEnter(id, "enter.implement", "implement", args, todos)
 }
 
 func parseLegacyImplementPlanDepth(delegation string, raw string) (string, error) {
@@ -1006,7 +1006,7 @@ func stringValue(v any) string {
 }
 
 func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.enter.proceed"
+	const tool = "enter.proceed"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1032,15 +1032,15 @@ func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) res
 }
 
 func (s *Server) handleEnterSprint(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "ws.enter.sprint", "sprint", args, deriveSprintTodos())
+	return s.handleEnter(id, "enter.sprint", "sprint", args, deriveSprintTodos())
 }
 
 func (s *Server) handleEnterSalvage(id json.RawMessage, args map[string]any) response {
-	return s.handleEnter(id, "ws.enter.salvage", "salvage", args, deriveSalvageTodos())
+	return s.handleEnter(id, "enter.salvage", "salvage", args, deriveSalvageTodos())
 }
 
 func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.append"
+	const tool = "todo.append"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1067,9 +1067,9 @@ func (s *Server) handleTodoAppend(id json.RawMessage, args map[string]any) respo
 }
 
 func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after bool) response {
-	tool := "ws.todo.insert_before"
+	tool := "todo.insert_before"
 	if after {
-		tool = "ws.todo.insert_after"
+		tool = "todo.insert_after"
 	}
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
@@ -1101,7 +1101,7 @@ func (s *Server) handleTodoInsert(id json.RawMessage, args map[string]any, after
 }
 
 func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.check"
+	const tool = "todo.check"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1132,7 +1132,7 @@ func (s *Server) handleTodoCheck(id json.RawMessage, args map[string]any) respon
 }
 
 func (s *Server) handleTodoErase(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.erase"
+	const tool = "todo.erase"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1154,7 +1154,7 @@ func (s *Server) handleTodoErase(id json.RawMessage, args map[string]any) respon
 }
 
 func (s *Server) handleTodoClear(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.clear"
+	const tool = "todo.clear"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1172,7 +1172,7 @@ func (s *Server) handleTodoClear(id json.RawMessage, args map[string]any) respon
 }
 
 func (s *Server) handleTodoList(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.list"
+	const tool = "todo.list"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1186,7 +1186,7 @@ func (s *Server) handleTodoList(id json.RawMessage, args map[string]any) respons
 }
 
 func (s *Server) handleTodoRead(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.read"
+	const tool = "todo.read"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -1207,7 +1207,7 @@ func (s *Server) handleTodoRead(id json.RawMessage, args map[string]any) respons
 }
 
 func (s *Server) handleTodoReorder(id json.RawMessage, args map[string]any) response {
-	const tool = "ws.todo.reorder"
+	const tool = "todo.reorder"
 	sessionKey, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)

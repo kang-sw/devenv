@@ -54,7 +54,7 @@ Call `{{.McpNamespace}}/project_tree()`.
 4. Use named agents for broad or stateful surveys:
    a. Register one agent per independent survey, such as `salvage-blast-radius`, `salvage-ticket-graph`, `salvage-doc-impact`, or `salvage-evidence`.
    b. Call each agent with the **Survey Prompt** for its assigned question.
-   c. Collect each result through `ws.mercenary.result(name: "<agent-name>", timeout_seconds: 600)`.
+   c. Collect each result through `mercenary.result(name: "<agent-name>", timeout_seconds: 600)`.
 <!-- ws:full-only:end -->
 <!-- ws:wsflow-only:start -->
 4. For broad surveys, spawn additional native exploration workers with one bounded survey prompt per independent question; collect each result when it returns.

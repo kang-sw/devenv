@@ -123,7 +123,7 @@ func TestPreferMercenaryOnOffRenderGuidanceProductionPath(t *testing.T) {
 		t.Fatalf("hide call must succeed: %s", hideResp)
 	}
 	listResp := callToolsList(t, s)
-	if strings.Contains(listResp, `"name":"ws.mercenary.call"`) || strings.Contains(listResp, `"name":"ws.mercenary.register"`) {
+	if strings.Contains(listResp, `"name":"mercenary.call"`) || strings.Contains(listResp, `"name":"mercenary.register"`) {
 		t.Fatalf("keyless tools/list must re-hide ws.mercenary.* after explicit hide: %s", listResp)
 	}
 }

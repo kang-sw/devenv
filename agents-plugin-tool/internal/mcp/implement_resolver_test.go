@@ -42,7 +42,7 @@ func TestResolveImplementStrategyRules(t *testing.T) {
 	if result.Verdict.ReviewAlloc != "lead-only" || result.Verdict.NeedReview {
 		t.Fatalf("review = %q need=%v, want lead-only false", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
 	}
-	if strings.Contains(result.NextInstruction, "plan-populator") || strings.Contains(result.NextInstruction, "ws.path.generate") {
+	if strings.Contains(result.NextInstruction, "plan-populator") || strings.Contains(result.NextInstruction, "path.generate") {
 		t.Fatalf("direct-edit next instruction mentioned planner actions: %q", result.NextInstruction)
 	}
 	if strings.Contains(result.Raw, "Plan Depth: brief") {
@@ -84,7 +84,7 @@ func TestResolveImplementDelegatedDefaultsToSurveyPlan(t *testing.T) {
 	if result.Verdict.PlanDepth != "survey" {
 		t.Fatalf("plan depth = %q, want survey", result.Verdict.PlanDepth)
 	}
-	for _, want := range []string{"ws.path.generate", "plan-populator-survey", "light plan", "PlanPath"} {
+	for _, want := range []string{"path.generate", "plan-populator-survey", "light plan", "PlanPath"} {
 		if !strings.Contains(result.NextInstruction, want) {
 			t.Fatalf("delegated next instruction missing %q: %q", want, result.NextInstruction)
 		}
@@ -166,7 +166,7 @@ func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 	if result.Verdict.BranchPlan.Action != "stop" {
 		t.Fatalf("branch action = %q, want stop", result.Verdict.BranchPlan.Action)
 	}
-	for _, forbidden := range []string{"ws.path.generate", "plan-populator-survey", "plan-populator-research", "render implementer"} {
+	for _, forbidden := range []string{"path.generate", "plan-populator-survey", "plan-populator-research", "render implementer"} {
 		if strings.Contains(result.NextInstruction, forbidden) {
 			t.Fatalf("branch-stop next instruction includes unreachable %q: %q", forbidden, result.NextInstruction)
 		}

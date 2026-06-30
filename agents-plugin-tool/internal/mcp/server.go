@@ -49,17 +49,17 @@ const (
 // invocation by subagents that share the lead's MCP connection. Invariants:
 // do not give it a descriptive alias, do not leak its purpose through its
 // tools/list description, and do not name it in error-guidance strings.
-const bootstrapToolName = "ws.ferrule"
+const bootstrapToolName = "ferrule"
 
 // isLeadOnlyTool reports whether a tool is restricted to lead-scoped session
 // keys. It is the authority for the keyed-gate escalation block. The bootstrap
 // tool must be listed explicitly because it no longer lives under the
-// `ws.lead.*` prefix (260617 obscurity rename) — a prefix-only check would
-// silently stop blocking it for non-lead keys. ws.workflow_manual is likewise
+// `lead.*` prefix (260617 obscurity rename) — a prefix-only check would
+// silently stop blocking it for non-lead keys. workflow_manual is likewise
 // listed explicitly: delegate/leaf callers must not reach the handler (Phase 3a
-// security hardening), mirroring the ws.ferrule guard.
+// security hardening), mirroring the ferrule guard.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "ws.workflow_manual" || strings.HasPrefix(name, "ws.lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -390,37 +390,37 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.children":
 		return s.handleSessionChildren(req.ID, params.Arguments)
-	case "ws.agenda.set":
+	case "agenda.set":
 		return s.handleAgendaSet(req.ID, params.Arguments)
-	case "ws.agenda.clear":
+	case "agenda.clear":
 		return s.handleAgendaClear(req.ID, params.Arguments)
-	case "ws.enter.implement":
+	case "enter.implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
-	case "ws.enter.proceed":
+	case "enter.proceed":
 		return s.handleEnterProceed(req.ID, params.Arguments)
-	case "ws.enter.sprint":
+	case "enter.sprint":
 		return s.handleEnterSprint(req.ID, params.Arguments)
-	case "ws.enter.salvage":
+	case "enter.salvage":
 		return s.handleEnterSalvage(req.ID, params.Arguments)
-	case "ws.todo.append":
+	case "todo.append":
 		return s.handleTodoAppend(req.ID, params.Arguments)
-	case "ws.todo.insert_before":
+	case "todo.insert_before":
 		return s.handleTodoInsert(req.ID, params.Arguments, false)
-	case "ws.todo.insert_after":
+	case "todo.insert_after":
 		return s.handleTodoInsert(req.ID, params.Arguments, true)
-	case "ws.todo.check":
+	case "todo.check":
 		return s.handleTodoCheck(req.ID, params.Arguments)
-	case "ws.todo.erase":
+	case "todo.erase":
 		return s.handleTodoErase(req.ID, params.Arguments)
-	case "ws.todo.clear":
+	case "todo.clear":
 		return s.handleTodoClear(req.ID, params.Arguments)
-	case "ws.todo.list":
+	case "todo.list":
 		return s.handleTodoList(req.ID, params.Arguments)
-	case "ws.todo.read":
+	case "todo.read":
 		return s.handleTodoRead(req.ID, params.Arguments)
-	case "ws.todo.reorder":
+	case "todo.reorder":
 		return s.handleTodoReorder(req.ID, params.Arguments)
-	case "ws.workflow_manual":
+	case "workflow_manual":
 		return s.handleWorkflowManual(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
@@ -1163,7 +1163,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
-	case "ws.mercenary.register":
+	case "mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1189,7 +1189,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Tier:             tier,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "ws.mercenary.call":
+	case "mercenary.call":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1209,7 +1209,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Handle format: agentId=<name> matches the native agentId shape referenced
 		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
 		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
-	case "ws.mercenary.wait":
+	case "mercenary.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1224,7 +1224,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.result":
+	case "mercenary.result":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1237,7 +1237,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.status":
+	case "mercenary.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1245,7 +1245,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.interrupt":
+	case "mercenary.interrupt":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1261,7 +1261,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
-	case "ws.mercenary.tail":
+	case "mercenary.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1274,7 +1274,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Lines: lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.debug.tail":
+	case "mercenary.debug.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1288,14 +1288,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Raw:   true,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.debug.stdout", "ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events":
+	case "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
-		stream := strings.TrimPrefix(params.Name, "ws.mercenary.debug.")
+		stream := strings.TrimPrefix(params.Name, "mercenary.debug.")
 		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
 			Root:   root,
 			Name:   name,
@@ -1303,7 +1303,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Lines:  lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.cancel":
+	case "mercenary.cancel":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1311,7 +1311,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.recall":
+	case "mercenary.recall":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1324,7 +1324,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Prompt: prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.print":
+	case "mercenary.print":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1332,7 +1332,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.erase":
+	case "mercenary.erase":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -2655,8 +2655,8 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agenda.set",
-			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed ws.enter.* tool.",
+			"name":        "agenda.set",
+			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed enter.* tool.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2668,7 +2668,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agenda.clear",
+			"name":        "agenda.clear",
 			"description": "Remove the session-level agenda blob stored under a key. A missing key is a no-op.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2680,7 +2680,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.enter.implement",
+			"name":        "enter.implement",
 			"description": "Enter implement mode: resolve normalized implementation facts and observed Git branch state into one deterministic implementation verdict, store the 'implement' agenda blob, and replace the todo list with the derived implement checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2767,7 +2767,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.enter.proceed",
+			"name":        "enter.proceed",
 			"description": "Enter routing mode: resolve deterministic proceed facts into one route verdict, store the 'proceed' agenda blob, and replace the todo list with the lead-proceed checklist.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2823,7 +2823,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.enter.sprint",
+			"name":        "enter.sprint",
 			"description": "Enter sprint-episode mode: store the typed payload as the 'sprint' agenda blob AND replace the todo list with the sprint episode lifecycle (Edit, Verify, Commit, Post-edit decision, Wrap episode).",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2837,7 +2837,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.enter.salvage",
+			"name":        "enter.salvage",
 			"description": "Enter salvage mode: store the typed payload as the 'salvage' agenda blob AND replace the todo list with the salvage pipeline (Containment, Survey fanout, Premise interview, Classification, Capture).",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2851,7 +2851,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.append",
+			"name":        "todo.append",
 			"description": "Append a new pending todo item with a caller-provided key (unique within the active list) and title. Erased keys are reusable.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2865,7 +2865,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.insert_before",
+			"name":        "todo.insert_before",
 			"description": "Insert a new pending todo item immediately before ref_key.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2880,7 +2880,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.insert_after",
+			"name":        "todo.insert_after",
 			"description": "Insert a new pending todo item immediately after ref_key.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2895,7 +2895,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.check",
+			"name":        "todo.check",
 			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions get an indented ...+ marker.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2908,7 +2908,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.erase",
+			"name":        "todo.erase",
 			"description": "Remove a todo item by key. The key becomes reusable afterwards.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2920,7 +2920,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.clear",
+			"name":        "todo.clear",
 			"description": "Remove all todo items, or only done items when done_only is true (leaving pending, wip, defer).",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2932,7 +2932,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.list",
+			"name":        "todo.list",
 			"description": "Render the todo list with visible {key} tokens. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2944,7 +2944,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.read",
+			"name":        "todo.read",
 			"description": "Return one todo item's full JSON payload, including nullable instruction.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2956,7 +2956,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.todo.reorder",
+			"name":        "todo.reorder",
 			"description": "Move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3436,13 +3436,13 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.workflow_manual",
+			"name":        "workflow_manual",
 			"description": namespaceText("Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only."),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Required. Your lead session key."),
-					"root":        stringProperty("Optional absolute Git worktree root. When provided alongside the fresh-bootstrap sentinel, the handler mints a lead session key and returns it inline, eliminating the separate ws.ferrule call."),
+					"root":        stringProperty("Optional absolute Git worktree root. When provided alongside the fresh-bootstrap sentinel, the handler mints a lead session key and returns it inline, eliminating the separate ferrule call."),
 				},
 				"required": []string{"session_key"},
 			},
@@ -3475,7 +3475,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.register",
+			"name":        "mercenary.register",
 			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3489,7 +3489,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.call",
+			"name":        "mercenary.call",
 			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3501,7 +3501,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.wait",
+			"name":        "mercenary.wait",
 			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3513,7 +3513,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.result",
+			"name":        "mercenary.result",
 			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3525,7 +3525,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.status",
+			"name":        "mercenary.status",
 			"description": "Return current status for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3536,7 +3536,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.interrupt",
+			"name":        "mercenary.interrupt",
 			"description": "Queue an interrupt or redirect message for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3548,7 +3548,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.tail",
+			"name":        "mercenary.tail",
 			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3560,32 +3560,32 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.debug.tail",
+			"name":        "mercenary.debug.tail",
 			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
 			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.stdout",
+			"name":        "mercenary.debug.stdout",
 			"description": "Debug only: return recent raw stdout lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.stderr",
+			"name":        "mercenary.debug.stderr",
 			"description": "Debug only: return recent raw stderr lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.runtime_log",
+			"name":        "mercenary.debug.runtime_log",
 			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.events",
+			"name":        "mercenary.debug.events",
 			"description": "Debug only: return recent raw agent events log lines.",
 			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.cancel",
+			"name":        "mercenary.cancel",
 			"description": "Best-effort cancel the current async call for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3596,7 +3596,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.print",
+			"name":        "mercenary.print",
 			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3607,7 +3607,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.erase",
+			"name":        "mercenary.erase",
 			"description": "Erase a registered ws agent directory for the current worktree.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -3653,10 +3653,10 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
 		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "path.generate", "playbook.render",
-		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
-		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
-		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
-		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase",
+		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
+		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
+		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
+		"mercenary.cancel", "mercenary.print", "mercenary.erase",
 		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
 		return true
 	default:
@@ -3686,7 +3686,7 @@ func LeadToolNames() []string {
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
-		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
+		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
 			continue
 		}
 		if name != "" {
@@ -3707,7 +3707,7 @@ func (s *Server) filteredTools() []map[string]any {
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if mercenaryHidden && strings.HasPrefix(name, "ws.mercenary.") {
+		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
 			continue
 		}
 		if s.toolAllowed(name, mercenaryHidden) {
@@ -3732,7 +3732,7 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "ws.mercenary.") {
+	if !strings.HasPrefix(name, "mercenary.") {
 		return clone
 	}
 	schema, ok := clone["inputSchema"].(map[string]any)
@@ -3758,7 +3758,7 @@ func (s *Server) toolAllowed(name string, mercenaryHidden bool) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}
-	if strings.HasPrefix(name, "ws.mercenary.") && mercenaryHidden {
+	if strings.HasPrefix(name, "mercenary.") && mercenaryHidden {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
@@ -3775,9 +3775,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.")
+		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
+		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -3892,7 +3892,7 @@ func noAgentHiddenTool(name string) bool {
 	if permanentlyHiddenTool(name) {
 		return true
 	}
-	if strings.HasPrefix(name, "ws.mercenary.") {
+	if strings.HasPrefix(name, "mercenary.") {
 		return true
 	}
 	switch name {
