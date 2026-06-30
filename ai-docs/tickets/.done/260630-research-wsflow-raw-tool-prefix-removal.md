@@ -7,6 +7,7 @@ related-mental-model:
   - mcp-runtime
   - prompt-bundle
   - workflow-skills
+completed: 2026-06-30
 ---
 
 # Research wsflow raw MCP tool prefix removal
@@ -59,3 +60,8 @@ and makes calls such as `wsflow/ws.ferrule(...)` read as double-namespaced.
   mandatory `session_key`, `root` bootstrap constraints, and role gating.
 - Any compatibility aliases must not reintroduce hidden root fallback or weaken
   no-agent mode filtering.
+
+
+## Resolution (2026-06-30)
+
+Research complete. Confirmed direction: remove ws. prefix from all workflow-state MCP tool names in both ws and wsflow products. Findings captured in 260630-refactor-ws-raw-tool-prefix-removal. ws.path.generate confirmed to be prose-only (not a registered tool). Scope: server.go (~74 occurrences), runtime.json, rsrc/*.md prose, Go source AI instruction strings.

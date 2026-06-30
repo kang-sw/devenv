@@ -1,0 +1,124 @@
+---
+title: "refactor(mcp): remove ws. prefix from all raw MCP workflow-state tool names"
+sage-review: required
+related:
+  260630-research-wsflow-raw-tool-prefix-removal: research anchor — findings, scope, confirmed direction
+  260605-research-ws-native-subagent-pivot: plugin architecture anchor
+spec:
+---
+
+# refactor(mcp): remove ws. prefix from all raw MCP workflow-state tool names
+
+## Problem
+
+Workflow-state MCP tools in `ws-mcp` are registered under `ws.*` identifiers
+(`ws.ferrule`, `ws.workflow_manual`, `ws.enter.*`, `ws.todo.*`, `ws.agenda.*`,
+`ws.mercenary.*`, `ws.lead.*`), while all utility tools use unprefixed names
+(`git.*`, `config.*`, `exec.*`, `playbook.*`, etc.).
+
+From the Claude Code host, the workflow-state tools appear as double-namespaced:
+```
+mcp__plugin_ws_ws__ws_ferrule         ← ws duplicated
+mcp__plugin_ws_ws__playbook_print     ← clean
+```
+
+The `ws.` prefix was introduced by LLMs that accepted the user's casual `ws.xxx`
+example idiom as a naming convention without verifying the existing unprefixed pattern.
+
+## Confirmed Direction
+
+From `260630-research-wsflow-raw-tool-prefix-removal` session findings:
+- Remove `ws.` prefix from **all** workflow-state tools. No compatibility aliases.
+- Applies to both `ws` and `wsflow` product modes.
+- `ws.path.generate` is prose-only (not a registered MCP tool); no tool rename needed.
+- All internal callers (rsrc playbooks, Go source prose) updated in the same work slice.
+- Clean cut: internal tooling only, no external API consumers outside the ws-plugin itself.
+
+## Renamed Tools
+
+| Old name | New name |
+|---|---|
+| `ws.ferrule` | `ferrule` |
+| `ws.workflow_manual` | `workflow_manual` |
+| `ws.enter.implement` | `enter.implement` |
+| `ws.enter.proceed` | `enter.proceed` |
+| `ws.enter.sprint` | `enter.sprint` |
+| `ws.enter.salvage` | `enter.salvage` |
+| `ws.todo.append` | `todo.append` |
+| `ws.todo.insert_before` | `todo.insert_before` |
+| `ws.todo.insert_after` | `todo.insert_after` |
+| `ws.todo.check` | `todo.check` |
+| `ws.todo.erase` | `todo.erase` |
+| `ws.todo.clear` | `todo.clear` |
+| `ws.todo.list` | `todo.list` |
+| `ws.todo.read` | `todo.read` |
+| `ws.todo.reorder` | `todo.reorder` |
+| `ws.agenda.set` | `agenda.set` |
+| `ws.agenda.clear` | `agenda.clear` |
+| `ws.mercenary.*` | `mercenary.*` |
+| `ws.lead.*` | `lead.*` |
+| `ws.setup` | `setup` |
+
+## Change Surface
+
+| File | What changes |
+|---|---|
+| `agents-plugin-tool/internal/mcp/server.go` | ~74 `"ws.*"` string occurrences: `bootstrapToolName` const, tool definition blocks, switch case handlers, `isBootstrapTool()` gating function |
+| `agents-plugin-tool/internal/mcp/workflow_manual.go` | Hardcoded error strings referencing `ws.ferrule` and `ws.workflow_manual` |
+| `agents-plugin/runtime.json` | Tool capability declarations |
+| `agents-plugin/rsrc/*.md` | Prose references to `ws.ferrule`, `ws.mercenary.*`, etc. |
+| `agents-plugin-tool/internal/mcp/session_state.go` | AI instruction prose strings (`ws.path.generate` → `path.generate`, other `ws.*` references) |
+| `agents-plugin-tool/internal/mcp/implement_resolver.go` | AI instruction prose strings |
+
+## Phases
+
+### Phase 1: Rename tool identifiers in server.go and runtime.json
+
+Rename all `ws.*` tool identifiers in `server.go` and update `runtime.json`.
+This is the core MCP API surface change.
+
+Goals:
+- `bootstrapToolName` const: `"ws.ferrule"` → `"ferrule"`
+- All tool definition blocks: `"name": "ws.xxx"` → `"name": "xxx"`
+- All switch case handlers: `case "ws.xxx":` → `case "xxx":`
+- `isBootstrapTool()` and any gating function referencing tool name strings — update in lockstep
+- Error strings in `workflow_manual.go` referencing old names
+- `runtime.json`: all `ws.*` capability declarations renamed
+
+Deferred: prose references in rsrc and Go source (Phase 2).
+
+Constraints:
+- `bootstrapToolName` is used in gating logic (`isBootstrapTool`); rename must propagate to all callsites in the same commit.
+- Root-aware session tool safety behavior and `session_key`/`root` bootstrap constraints are unchanged; only the string identifier changes.
+
+Post-edit regen (required after any edit):
+```
+WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -run TestRegenerateShippedManifest
+WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMirror
+```
+
+Verification: `go build ./...` and `go test ./...` pass.
+
+### Phase 2: Update prose references
+
+Update all prose strings that name old `ws.*` tool identifiers.
+
+Goals:
+- `agents-plugin/rsrc/*.md`: replace all `ws.ferrule`, `ws.mercenary.*`, `ws.workflow_manual`, etc. with unprefixed names
+- `agents-plugin-tool/internal/mcp/session_state.go`: AI instruction prose (`ws.path.generate` → `path.generate`, any remaining `ws.*` tool references)
+- `agents-plugin-tool/internal/mcp/implement_resolver.go`: AI instruction prose
+- Test fixture strings that hardcode old names
+
+Post-edit regen after any rsrc edits (required):
+```
+WS_REGEN_MANIFEST=1 go test ./internal/wsrsrc -run TestRegenerateShippedManifest
+WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -run TestRegenerateWsflowRsrcMirror
+```
+
+Verification: `go build ./...` and `go test ./...` pass.
+
+## Spec Impact
+
+- Target spec: `ai-docs/spec/mcp-tools.md`
+- Expected caller-visible change: all workflow-state MCP tool identifiers lose the `ws.` prefix. Host sees `mcp__plugin_ws_ws__ferrule` instead of `mcp__plugin_ws_ws__ws_ferrule`.
+- Contract-first spec: no — rename is unambiguous; `mcp-tools.md` closeout post-implementation.
