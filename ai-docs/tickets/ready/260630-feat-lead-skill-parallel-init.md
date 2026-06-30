@@ -3,7 +3,7 @@ title: "Lead skill parallel init: workflow_manual key-return + SKILL.md batch en
 spec:
   - 260626-workflow-manual-restoration-entry
   - 260610-entry-skill-surface-reduction
-sage-review: required
+sage-review: blocked
 ---
 
 # Lead skill parallel init: workflow_manual key-return + SKILL.md batch entry
@@ -147,4 +147,33 @@ playbook.print + workflow_manual pair is the reliable path.
 **Verification:** After both phases, a continue-path lead-discuss invocation
 completes init in 2 MCP rounds. Fresh-start completes in 2 rounds (round 1
 includes obsidian-latch workflow_manual; round 2 is project_tree + git.status
-after key is available).
+after key is available). Confirm parallel call declaration is present in updated
+lead-discuss/SKILL.md and lead-sprint/SKILL.md.
+
+## Blocked (2026-06-30)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Phase 2 fresh-start init cannot name the sentinel yet must call it (static SKILL.md) | critical | missing |
+| 2 | Obscurity invariant is already drifted; ticket treats it as intact | important | missing |
+| 3 | Phase 1 background mischaracterizes the redundant call | minor | autonomous |
+| 4 | Phase 1 should pin that root never turns FAIL-LOUD/keyless into a minting path | minor | autonomous |
+
+Root cause of issues 1–2: SKILL.md is static (no template substitution), so a fresh-start
+caller must have the literal sentinel token. Phase 2 constraint forbids exposing it. This
+is unsatisfiable unless the sentinel-obscurity invariant is explicitly resolved:
+- If obscurity is a real invariant → Phase 2 must also scrub the 6 playbooks that already
+  leak it (lead-discuss, lead-sprint, lead-proceed, lead-salvage, lead-forge-mental-model,
+  lead-forge-spec) — larger scope.
+- If obscurity is effectively abandoned → drop the no-expose constraint; SKILL.md may
+  name the sentinel like every current surface does.
+
+User must decide before this ticket can proceed.
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Phase 2 verification covers only continue-path timing | minor |
