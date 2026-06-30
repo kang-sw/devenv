@@ -217,11 +217,14 @@ Target: user request
 7. If posture is `required`, run sage review without asking.
 8. If posture is missing or `pending`, treat it as legacy unresolved state: call `{{.McpNamespace}}/config.show()`, resolve `sage_review` as `skipped` for `off`/empty/unset, `recommended` for `ask`, or `required` for `auto`, write that posture to ticket frontmatter, then continue from the matching posture rule above.
 9. Spawn both reviewers in parallel:
+   `playbook.render` returns a file path. Include that path in the subagent's
+   kickoff prompt; the subagent reads the file as its system prompt. Do not read
+   the rendered file in the lead context.
    a. Render `ticket-reviewer-design`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")`;
-      spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
+      spawn native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
       Capture design verdict result.
    b. Render `ticket-reviewer-completeness`: call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-completeness")`;
-      spawn native subagent with rendered prompt; task input: `Ticket path: <ticket-path>`.
+      spawn native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
       Capture completeness verdict result.
 10. Parse `verdict:` from each result. Each reviewer result text contains a `verdict:` line
    whose value is one of `pass`, `concern`, or `block` (exhaustive set).
