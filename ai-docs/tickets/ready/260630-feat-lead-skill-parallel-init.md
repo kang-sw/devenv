@@ -93,6 +93,20 @@ protocol change.
 response. No second workflow_manual call or separate ferrule call is needed
 before calling project_tree or git.status.
 
+### Result (0b67515d) - 2026-06-30
+
+`workflow_manual` now accepts optional `root` in FRESH mode. When `root` is
+supplied with the sentinel key, the handler mints a lead session key inline via
+`canonicalSetupRoot` + `sessions.mint`, strips the fresh-only block with
+`stripModeGatedRegion(body, false)`, and returns `## Session Key` + empty
+`## Session State`. Separate `ws.ferrule` call eliminated for fresh-start flows.
+
+Spec anchor `260626-workflow-manual-restoration-entry` updated with fresh-with-root
+sub-case. Mental models `mcp-runtime.md` and `workflow-skills.md` updated.
+
+Review: partitioned (correctness, fit) — both clean (fit: 1 minor gofmt alignment,
+recorded and accepted).
+
 ### Phase 2: SKILL.md parallel entry + playbook On: invoke simplification
 
 **Change A — SKILL.md for lead-discuss and lead-sprint:**
