@@ -1,5 +1,6 @@
 ---
 title: "Policy sweep implementation (post-260629 triage)"
+completed: 2026-06-30
 ---
 
 # Policy sweep implementation (post-260629 triage)
@@ -36,3 +37,8 @@ Implement the policy-character decisions resolved in the 260629 ferrule pre-merg
 
 - Done: all Track 1 tickets implemented and closed; Track 2 design session held and both tickets implemented.
 - Deferred: research-class tickets and epic-owned items from the parent sweep remain in their own tracks.
+
+
+## Resolution (2026-06-30)
+
+All Track 1 (6 tickets) and Track 2 (2 tickets) implemented and closed. Commits: b7195a6c (direct-edit gate schema + playbook), 4a89053e (5 playbook fixes), 71d082eb (Go harness optional).
