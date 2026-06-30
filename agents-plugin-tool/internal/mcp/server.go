@@ -3442,6 +3442,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Required. Your lead session key."),
+					"root":        stringProperty("Optional absolute Git worktree root. When provided alongside the fresh-bootstrap sentinel, the handler mints a lead session key and returns it inline, eliminating the separate ws.ferrule call."),
 				},
 				"required": []string{"session_key"},
 			},

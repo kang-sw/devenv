@@ -63,7 +63,11 @@ classification axis is whether the user is meant to type `/ws:<name>` directly, 
 cross-skill invocation count. Each entry skill's own procedure body is likewise
 served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
 surface carries only the trigger description and delegates execution to its
-playbook. {#260610-entry-skill-surface-reduction}
+playbook. Context-heavy entry skills (lead-discuss and lead-sprint) are an
+exception: their SKILL.md carries a parallel init declaration —
+`playbook.print` plus `workflow_manual` called in parallel — rather than a pure
+routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel rounds.
+{#260610-entry-skill-surface-reduction}
 
 `lead-tune` is the umbrella workflow-tuning entry skill: its description is the
 runtime trigger surface that fires when the user signals intent to tune how the

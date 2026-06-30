@@ -5,6 +5,8 @@ description: Use when the user wants an ongoing wsflow sprint session for discus
 
 # Sprint
 
-Call `wsflow/playbook.print(name: "lead-sprint")` and execute the returned procedure
-inline against the current user request. If the playbook cannot be loaded, stop
-and report that blocker.
+Call in parallel:
+- `wsflow/playbook.print(name: "lead-sprint", session_key: <your key>)`
+- `wsflow/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
+
+After both return, execute the procedure returned by `wsflow/playbook.print`.

@@ -224,10 +224,13 @@ startup fails instead of falling back to the published release asset.
 ### Enabling the local dogfood loop (manual setup)
 
 The marker is per-machine and gitignored, so place it once in the source
-checkout, then let `install.sh` propagate it into the plugin cache:
+checkout for each package you dogfood, then let the plugin install or refresh
+copy it into the plugin cache:
 
 1. Write `agents-plugin/.local-devenv-runtime` with this machine's absolute
-   paths (use `command -v go` for the Go path):
+   paths (use `command -v go` for the Go path). If dogfooding the separate
+   wsflow package, write the same marker to
+   `agents-plugin-wsflow/.local-devenv-runtime`:
 
    ```json
    {

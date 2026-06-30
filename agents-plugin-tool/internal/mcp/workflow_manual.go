@@ -118,6 +118,8 @@ func renderSessionState(rec sessionRecord) string {
 func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) response {
 	key, _ := args["session_key"].(string)
 	key = strings.TrimSpace(key)
+	root, _ := args["root"].(string)
+	root = strings.TrimSpace(root)
 
 	// 1. Key absent — reject with a required-key error. Do not name the sentinel
 	//    or ferrule in the error so no bootstrap hint leaks to keyless callers.
@@ -161,7 +163,24 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	// Only FRESH (sentinel) and CONTINUE (recOK) remain; the sentinel branch is
 	// checked first so it never depends on a (non-existent) sentinel record.
 	if key == freshBootstrapKey {
-		// 3. FRESH (sentinel): keep the gated bootstrap line; strip only markers.
+		if root != "" {
+			// 3a. FRESH with root: canonicalize the root, mint a lead key, strip the
+			//     fresh-only block (caller already has a root — no need to instruct
+			//     them to call ferrule), and return the key inline.
+			canonical, err := canonicalSetupRoot(root)
+			if err != nil {
+				return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: canonicalize root: %w", err))
+			}
+			mintedKey, err := s.sessions.mint(canonical, roleLead, "")
+			if err != nil {
+				return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: mint session: %w", err))
+			}
+			body = stripModeGatedRegion(body, false)
+			body += "\n\n## Session Key\n" + mintedKey
+			body += "\n\n" + renderSessionState(sessionRecord{})
+			return toolTextResponse(id, body+"\n", nil)
+		}
+		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
 		body = stripModeGatedRegion(body, true)
 	} else {
 		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
