@@ -4,92 +4,8 @@ kind: print
 
 # Skill Authoring
 
-Canonical repository reference for skill and agent authoring.
-Use this reference when authoring or auditing ws skills and agent prompts.
+Canonical reference for skill and agent authoring.
 Apply rules directly; add local procedure only when the target needs it.
-
-## Principles
-
-These apply to both skill and agent documents.
-
-### Reader model
-
-- The audience is a model re-reading under attention pressure, not a leisurely human reader.
-- One-liners survive pressure; paragraphs are skipped. Every rule fits one line.
-- Preserve full grammar when compression could change order, ownership, or safety.
-
-### Layout
-
-- Directives at top, rationale (if any) as a single Doctrine paragraph at bottom. Never interleave.
-- Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
-- Use Markdown hierarchy to route attention before adding prose.
-- Prefer command-shaped fragments over explanatory paragraphs.
-- For dense routing or rule lists, prefer short sections, named groups, fixed lookup tables, and command-shaped lists over long flat lists.
-- For dense `On:` handlers, use H3 sub-blocks when a flat list hides responsibility boundaries.
-- Use Markdown structure before introducing custom notation.
-
-### Content rules
-
-- Skills stand alone. Refer to other skills only as explicit invocation targets, such as `{{.SkillNamespace}}:<skill>` or host-specific slash commands.
-- Agents stand alone. Do not reference session state or conversation history.
-- Use examples only when they prevent repeated wrong execution.
-- Prefer `Do X through Y` over `Do not do X` when a positive action exists.
-- For user shorthand, name the general intent first and list shorthand only as trigger examples.
-
-### Iteration
-
-- Repeatedly violated rule -> mechanize with structure instead of restating it.
-- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
-- After each authoring pass, re-read additions and cut.
-- After skill, agent, or prompt edits, run the audit in **On: Fresh-Reader Audit**.
-- After doctrine, terminology, routing, layout, or audit-gate edits, run a downstream consistency sweep across affected skill surfaces; conservative reviewers report findings only, then the lead classifies fixes.
-
-### Skill semantics
-
-- Skill-to-skill handoffs share the active conversation; write `Continue through <skill>` without a carry block.
-- Skill-level user-approval gates apply only on direct user invocation; chained invocations re-ask only for safety, deletion, or explicit consent rules.
-- If a route references another skill without instructing invocation or delegation, perform the referenced steps locally.
-- The calling lead skill/session owns active-conversation judgments; use direct host-native exploration-worker dispatch (see `lead-workflow-manual`) only for self-contained artifact, source, spec, or ticket evidence.
-- When invoking another skill, name only the target skill and entry route; do not decide that skill's internal judgments in advance.
-- Use "arguments" only for formal tool, command, or template parameters.
-
-### Invariant / Constraint checklist
-
-Check every invariant or constraint after drafting. Every answer is yes/no.
-
-- **Falsifiable?** - Can you describe a concrete violation? If not, it is a wish, not a rule.
-- **Actionable?** - Does it say what to *do*, not just what to *avoid*?
-- **One line?** - If it needs a paragraph to state, it is not yet distilled.
-- **Context-free?** - Understandable without reading the surrounding file?
-- **Non-redundant?** - Does it say something no other line already covers?
-- **Universal?** - Is it a constraint that holds in all situations, not a step at a specific point?
-- **Doctrine-aligned?** - Does it follow from the file's stated doctrine?
-
-Grouped invariant lists are allowed when a skill has many hard rules:
-
-```text
-Group Name
-- <invariant>
-- <invariant>
-```
-
-Group names classify invariants only; they are not rules. Do not nest groups or
-bullets. Do not put handler steps, routing policy, Git branch policy, or
-rationale in invariant groups.
-
-### Handler structure
-
-Use H3 sub-blocks when an `On:` handler exceeds four steps and mixes
-responsibilities. Name each sub-block by the responsibility it performs.
-Do not split single-purpose checklists only because they are long.
-Use domain-specific labels when they make the execution path clearer.
-Compact handlers do not need sub-blocks.
-
-### Doctrine format
-
-Doctrine has two jobs: name the finite resource, then add the guiding principle.
-Use measurable nouns such as "context window", not fuzzy nouns such as "quality".
-Test: invariants should re-derive from the named resource.
 
 ## Layer Model
 
@@ -102,79 +18,121 @@ owned by the MCP tool — delete their content from the playbook unconditionally
 | 2 — MCP logic | Deterministic routing rules, verdict computation, allocation | MCP tool implementation |
 | 3 — Playbook | Observation targets, soft judgments, non-obvious edge cases, step choreography, doctrine | This file |
 
-### Gate: which layers apply to this skill?
+### Gate: which layers apply?
 
-Assess before auditing or authoring:
-
-- **Layer 1 applies** when the skill calls an MCP tool with a typed JSON Schema (e.g. `enter.*`, `git.commit`). Do not apply Layer 1 deletion to skills that call no typed MCP tool.
-- **Layer 2 applies** when the skill's conditional routing or verdict logic has already been moved into an MCP tool. If conditional logic still lives in playbook prose and no MCP tool computes it — that is a Lever B migration candidate. File a ticket; do not treat it as Layer 3 and do not audit as if Layer 2 is present.
-- **Layer 3 always applies.**
+- **Layer 1** applies when the skill calls a typed MCP tool (e.g. `enter.*`, `git.commit`).
+- **Layer 2** applies when conditional routing/verdict logic has been moved into an MCP tool. If the logic still lives in playbook prose with no MCP tool computing it — file a Lever B migration ticket; do not audit as if Layer 2 is present.
+- **Layer 3** always applies.
 
 ### Destructive-first stance
 
-The burden of proof is on keeping content, not on deleting it.
+Burden of proof is on keeping content, not on deleting it.
 
-Test for every section or rule: *"Would a model following only Layer 3 content plus the referenced MCP tool schemas reach the same execution outcome?"*
+Test for every section or rule: *"Would a model following only Layer 3 + MCP tool schemas reach the same execution outcome?"*
 
-- **Yes** → belongs to Layer 1 or 2; delete from the playbook regardless of apparent utility. MCP schema is authoritative; playbook copies become stale and misleading.
-- **No** → belongs to Layer 3; apply the invariant checklist before keeping.
-- **Uncertain** → delete. A missing Layer 3 rule causes one wrong execution; a stale Layer 1/2 copy causes compounding drift across sessions.
+- **Yes** → Layer 1 or 2; delete regardless of apparent utility. MCP schema is authoritative; playbook copies become stale and misleading.
+- **No** → Layer 3; apply the invariant checklist before keeping.
+- **Uncertain** → delete. A missing Layer 3 rule causes one wrong execution; a stale Layer 1/2 copy causes compounding drift.
 
 Doctrine is Layer 3 only when at least one invariant re-derives from it; otherwise delete.
 
-## On: Fresh-Reader Audit
+## Authoring Rules
 
-Audit targets: `agents-plugin/rsrc/lead-*/lead-*.md` (migrated procedure playbooks) and `agents-plugin/skills/*/SKILL.md` (entry skills).
+### Reader model
 
-The audit bar is a good-faith reader: one who applies the text's stated purpose and does not hunt for loopholes. The text passes when such a reader reaches the intended end-state. A finding reachable only by reading the text in a way a good-faith reader would not is `out of scope`, not `fix`.
+- Audience is a model re-reading under attention pressure, not a leisurely human reader.
+- One-liners survive pressure; paragraphs are skipped. Every rule fits one line.
+- Preserve full grammar when compression could change order, ownership, or safety.
 
-1. Run a separate fresh reviewer (agent or subagent) for the audit.
-2. Give the reviewer only the target file or excerpt; do not include prior conversation, project docs, skill docs, specs, rationale, or host-generated metadata.
-3. Tell the reviewer to read only the provided target and not to read any other files, skills, docs, or context.
-4. Ask the reviewer to flag awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing end-state/output wording.
-5. Require each finding to include a quote, the issue, severity (`low`/`medium`/`high`), and either a suggested rewrite or a suggested deletion.
-6. Classify each reviewer finding as `fix`, `risk accepted`, `intentional difference`, or `out of scope` before editing. `risk accepted`: a valid finding whose fix's concrete cost exceeds its residual risk under the bar — record that cost and risk, not a bare assertion. `intentional difference`: wording that diverges from a sibling file on purpose. `out of scope`: the finding targets text outside the audit target, or is reachable only outside the good-faith bar.
-7. Edit only findings classified as `fix`. Record the cost and risk for `risk accepted`; record or ignore `intentional difference` and `out of scope`.
-8. Run at most three audit/revision cycles; stop once no finding is still classified `fix` — all have been edited or are `risk accepted`, `intentional difference`, or `out of scope`. If `fix` findings remain after the third cycle, stop and report them as unresolved rather than starting a fourth cycle.
+### Content
 
-## On: Downstream Consistency Sweep
+- Skills stand alone; reference other skills only as explicit invocation targets (`{{.SkillNamespace}}:<skill>`).
+- Agents stand alone; do not reference session state or conversation history.
+- Use examples only when they prevent repeated wrong execution.
+- Prefer `Do X through Y` over `Do not do X` when a positive action exists.
+- Skill-to-skill handoffs share the active conversation; write `Continue through <skill>` without a carry block.
+- Skill-level user-approval gates apply only on direct user invocation; chained invocations re-ask only for safety, deletion, or explicit consent rules.
+- When invoking another skill, name only the target skill and entry route; do not pre-decide its internal judgments.
 
-1. Select affected rsrc playbook sources (`agents-plugin/rsrc/lead-*/lead-*.md`), entry skill files (`agents-plugin/skills/*/SKILL.md`), agent prompts, specs, mental-models, tests, and mirrored-package surfaces from the edited doctrine, terminology, route, layout, or audit gate.
-2. Use a conservative finding-only first pass for broad skill-surface scans.
-3. Classify each finding as `fix`, `risk accepted`, `intentional difference`, or `out of scope`.
-4. Edit only accepted `fix` findings; record intentional differences when drift would otherwise look stale.
+### Iteration
+
+- Repeatedly violated rule → mechanize with structure rather than restate it.
+- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
+- After each pass: re-read additions, cut, then apply the Layer test to every section.
+- After edits: run **On: Fresh-Reader Audit**. After doctrine/routing/layout edits: also run **On: Downstream Consistency Sweep**.
+
+### Invariant checklist
+
+Every invariant must pass all six: **Falsifiable** (concrete violation describable?) · **Actionable** (says what to do, not just avoid?) · **One line** (fits without a paragraph?) · **Context-free** (understandable without surrounding file?) · **Non-redundant** (says something no other line covers?) · **Doctrine-aligned** (re-derives from the file's doctrine?).
+
+Grouped invariant lists are allowed: `Group Name` / `- <invariant>`. Group names classify only; they are not rules.
+
+### Doctrine format
+
+Name the finite resource; state the guiding principle. Use measurable nouns ("context window", not "quality"). Keep only when at least one invariant re-derives from it.
 
 ## Skill Layout
 
-Use this order. Omit sections the skill does not need.
-Hierarchy clarifies responsibility; handlers preserve required order.
+**Routing skill** (Layer 2 applies — skill delegates decisions to `enter.*`):
 
-1. **Invariants** - unambiguous imperatives, zero interpretation cost, skimmable.
-2. **Event handlers** (`On: X`) - numbered step lists per entry point; use H3 sub-blocks for dense mixed-responsibility handlers.
-3. **Judgments** - soft decision points extracted from handlers. Name them (`judge: <name>`) and centralize criteria here; handlers reference by name. A fixed lookup table with unambiguous triggers is a routing rule in the handler, not a judgment.
-4. **Templates** - structured output formats: brief formats, agent-delegation call formats, addenda. Procedures belong in handlers.
-5. **Doctrine** - one paragraph, the guiding principle.
+Shape: `Invariants` → `On: invoke` (observe → judge → dispatch, thin) → `Judgments` → `Doctrine`
 
-Adapt section names to the document's reading pattern; keep the principles.
+- Handlers are thin: gather facts, call `enter.*`, follow `Next:`. Routing logic belongs in the MCP tool.
+- Keep `judge:` tables only for soft decisions the MCP tool cannot compute (ambiguous inputs requiring model assessment).
+- H3 sub-blocks not needed for thin dispatch handlers.
+
+**Choreography skill** (Layer 2 does not apply — sequential steps, no routing MCP tool):
+
+Shape: `Invariants` → `On: X` handlers → `Judgments` → `Templates` → `Doctrine`
+
+- Handlers may be multi-step; use H3 sub-blocks when a handler exceeds four steps with mixed responsibility.
+- Name each sub-block by its responsibility; do not split single-purpose checklists.
+
+Both: directives at top, doctrine at bottom, never interleaved. Soft judgments extracted from handlers, named `judge: <name>`, referenced by name.
 
 ## Agent Layout
 
-Top-to-bottom order. Simpler agents use the subset they need.
+1. **Identity** — one sentence: what you are and what you do.
+2. **Constraints** — scope boundaries, hard rules. Same checklist as skill invariants.
+3. **Process** — step-by-step; typically a single linear flow.
+4. **Heuristics** — decision tables, escalation criteria. Omit if decisions are purely mechanical.
+5. **Output** — structured return format. Required.
+6. **Doctrine** — one paragraph.
 
-1. **Identity** - one sentence: what you are and what you do. Not a persona essay.
-2. **Constraints** - scope boundaries, hard rules, what you never do. Same checklist as skill invariants.
-3. **Process** - how you work, step by step. Equivalent to skill handlers but typically a single linear flow rather than multiple event-driven entry points.
-4. **Heuristics** - decision tables, escalation criteria. Equivalent to skill judgments. Omit if the agent's decisions are purely mechanical.
-5. **Output** - structured return format. Every agent must define what it sends back to the caller.
-6. **Doctrine** - one paragraph, the guiding principle.
+Agents start with no session context; keep self-contained. Inject communication rules from the calling skill, not the agent definition.
 
-Agents start with no session context. Keep them self-contained. Inject team
-communication rules from the calling skill, not the agent definition.
+## On: Fresh-Reader Audit
+
+Targets: `agents-plugin/rsrc/lead-*/lead-*.md` and `agents-plugin/skills/*/SKILL.md`.
+Bar: a good-faith reader who applies the stated purpose without hunting for loopholes.
+
+1. Run a separate fresh reviewer with only the target file; no prior conversation, project docs, or metadata.
+2. Ask reviewer to flag: awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, missing end-state wording, **and any section that restates an MCP tool schema (Layer 1/2 content in playbook)**.
+3. Require per finding: quote, issue, severity (low/medium/high), suggested rewrite or deletion.
+4. Classify: `fix` · `risk accepted` (record cost and risk) · `intentional difference` · `out of scope`.
+5. Edit only `fix` findings. Max three cycles; stop when no `fix` remains or report unresolved.
+
+## On: Routing Coverage Audit
+
+Applies when Layer 2 is present (skill calls `enter.*` or equivalent).
+
+1. Enumerate all `Next:` values the MCP tool can emit; use tool source or static-analysis subagent.
+2. For each value: verify Layer 3 has adequate fact-gathering guidance for the model to reach it correctly.
+3. For each underspecified `Next:` (post-call model judgment required): verify Layer 3 has supplemental guidance.
+4. Flag branches with no Layer 3 coverage and branches where `Next:` is ambiguous without playbook support.
+
+## On: Downstream Consistency Sweep
+
+After doctrine, terminology, routing, layout, or audit-gate edits:
+
+1. Select affected rsrc playbooks, entry skills, agent prompts, specs, and mirrored surfaces.
+2. Conservative finding-only first pass; classify each finding as `fix` / `risk accepted` / `intentional difference` / `out of scope`.
+3. Edit only `fix` findings; record intentional differences when drift would otherwise look stale.
 
 ## Doctrine
 
-Skill and agent files are reread under attention pressure. Every choice
-optimizes for **executability under pressure**: skimmable imperatives first,
-mechanical structure where judgment fails, preserved judgment where mechanism
-would lose signal, rationale collapsed into one guiding principle. When ambiguous,
-choose what the pressured model will execute reliably.
+Skill and agent files are reread under attention pressure. Every choice optimizes for
+**executability under pressure**: Layer-owned content deleted, skimmable imperatives
+first, mechanical structure where judgment fails, preserved judgment where mechanism
+would lose signal, rationale collapsed into doctrine. When ambiguous, choose what
+the pressured model executes reliably.
