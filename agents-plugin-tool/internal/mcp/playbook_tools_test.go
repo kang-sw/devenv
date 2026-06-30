@@ -634,7 +634,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 				t.Fatalf("%s: wsflow playbook output missing %q:\n%s", label, want, body)
 			}
 		}
-		if !strings.Contains(body, "ws.ferrule") {
+		if !strings.Contains(body, "ferrule") {
 			t.Fatalf("%s: wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", label, body)
 		}
 	}
@@ -804,7 +804,7 @@ Actual tool: ws.ferrule.
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.ferrule"} {
+	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ferrule"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered body missing %q:\n%s", want, body)
 		}

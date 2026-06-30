@@ -162,7 +162,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	// 1. Key absent — reject with a required-key error. Do not name the sentinel
 	//    or ferrule in the error so no bootstrap hint leaks to keyless callers.
 	if key == "" {
-		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: a valid session_key is required"))
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: a valid session_key is required"))
 	}
 
 	// 2. FAIL-LOUD up front, BEFORE rendering: a syntactically valid but
@@ -182,7 +182,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	// playbook.print.
 	rsrcRoot, err := resolveRsrcRoot("")
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: resolve rsrc root: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: resolve rsrc root: %w", err))
 	}
 
 	overrideLookup := buildOverrideLookup(s, key)
@@ -197,7 +197,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 
 	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, workflowLang, overrideLookup)
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: render playbook: %w", err))
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: render playbook: %w", err))
 	}
 
 	// Only FRESH (sentinel) and CONTINUE (recOK) remain; the sentinel branch is
@@ -209,11 +209,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			//     them to call ferrule), and return the key inline.
 			canonical, err := canonicalSetupRoot(root)
 			if err != nil {
-				return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: canonicalize root: %w", err))
+				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: canonicalize root: %w", err))
 			}
 			mintedKey, err := s.sessions.mint(canonical, roleLead, "")
 			if err != nil {
-				return toolTextResponse(id, "", fmt.Errorf("ws.workflow_manual: mint session: %w", err))
+				return toolTextResponse(id, "", fmt.Errorf("workflow_manual: mint session: %w", err))
 			}
 			body = stripModeGatedRegion(body, false)
 			body = injectSessionKeyLine(body, mintedKey)
