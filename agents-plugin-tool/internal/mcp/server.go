@@ -2710,7 +2710,8 @@ func tools() []map[string]any {
 									"new_public_symbol":           nullableEnumStringProperty("Whether work introduces a public symbol.", []string{"yes", "no", "unknown"}),
 									"new_type_contract":           nullableEnumStringProperty("Whether work introduces or changes a type/schema contract.", []string{"yes", "no", "unknown"}),
 									"test_surface":                nullableEnumStringProperty("Test surface affected by the work.", []string{"none", "existing", "new-files", "unknown"}),
-									"explicit_delegation_request": nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
+									"explicit_delegation_request":   nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
+										"explicit_direct_edit_request": nullableEnumStringProperty("When yes, overrides all other predicates and forces direct-edit verdict regardless of span/scope/surface facts. Encodes an explicit human instruction to skip delegation. Accepted: yes, no, unknown.", []string{"yes", "no", "unknown"}),
 								},
 							},
 							"complexity": map[string]any{
