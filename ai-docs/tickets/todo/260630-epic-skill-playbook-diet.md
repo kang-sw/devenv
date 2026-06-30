@@ -1,77 +1,101 @@
 ---
-title: "Epic: skill playbook diet — MCP schema owns input contracts"
+title: "Epic: skill playbook diet — playbook-body / MCP / unnecessary golden rule"
 sage-review: required
 ---
 
 ## Summary
 
-Lead playbooks have accumulated JSON call-format blocks and fact-guidance prose
-that duplicate information already present in MCP tool schemas. This bloat
-inflates context load and maintenance surface without adding execution value.
+Lead playbooks carry three kinds of content that need to be separated:
 
-## Principle
+1. **Playbook-body** — lead-owned judgments, non-obvious edge cases, step ordering, output formats
+2. **MCP** — input contracts (schemas), routing decisions, computed verdicts
+3. **Unnecessary** — restatements of MCP schemas, duplicate fact guidance, rationale prose
 
-> MCP tool schemas own input contracts. Playbooks own decision flow only.
+Currently all three are mixed. This epic defines a golden rule distinguishing them,
+encodes it in `lead-skill-authoring`, and uses it to diet all remaining skills.
 
-When a playbook step calls an MCP tool (e.g. `enter.proceed`, `enter.implement`),
-the tool's JSON Schema already documents every field: name, type, enum values, and
-description. The playbook must not restate this. The playbook's job is:
+## Two Optimization Levers
 
-1. State what facts to gather and how to derive non-obvious ones.
-2. Describe edge cases the MCP tool cannot compute (lead-owned judgments).
-3. Call the tool. Follow its output.
+Skill diet requires both levers applied together:
 
-Prose sections that restate MCP schema content (fact tables, field guidance,
-JSON call format blocks) are filler and must be deleted.
+**Lever A — Text minimization.** Remove any playbook text that restates an MCP tool
+schema (field names, types, enums, call format). The model loads the schema via
+ToolSearch before calling; the playbook must not repeat it.
+
+**Lever B — MCP-ification of conditional logic.** Move rule-based conditional decisions
+(routing, verdict computation, allocation logic) from playbook prose into `enter.*`
+or other MCP tools. Once an MCP tool computes the decision deterministically, the
+playbook collapses to: gather inputs → call tool → follow output.
+
+`lead-proceed` and `lead-implement` already have significant MCP-ification via
+`enter.proceed` and `enter.implement`, so their diet is mainly Lever A.
+Skills without `enter.*` support may need Lever B work before they can be fully dieted.
+
+## Golden Rule (to encode in lead-skill-authoring)
+
+| Content | Where it lives |
+|---------|---------------|
+| Input field names, types, enums, call format | MCP tool schema only — delete from playbook |
+| Routing/verdict logic expressible as deterministic rules | MCP tool (`enter.*`) — delete once tool exists |
+| Non-obvious edge cases not capturable in MCP schema | Playbook body |
+| Lead-owned judgments (soft decision tables) | Playbook body |
+| Step ordering / choreography | Playbook body |
+| Rationale, background, duplication of any row above | Delete |
 
 ## Pilot
 
-`lead-proceed` was dieted in session `glazing-recapture-cedar-facecloth-50` (2026-06-30):
-180 lines → 63 lines. Removed: Route Facts table, Fact Guidance section, `enter.proceed`
-JSON format block. Kept: scope resolution edge cases (non-obvious), three lead-owned
-judgment tables, compressed invariants.
+`lead-proceed` dieted in this session (2026-06-30): 180 → 63 lines via Lever A.
+Removed: Route Facts table, Fact Guidance section, `enter.proceed` JSON format block.
+Kept: scope resolution edge cases (non-obvious), three lead-owned judgment tables.
 
 ## Phases
 
-### Phase 1: Add principle to lead-skill-authoring
+### Phase 1: Encode golden rule in lead-skill-authoring
 
-Add the MCP-schema-owns-input-contracts principle and its diet pattern as a named
-section in `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md`.
+Edit `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md`:
+- Add the two-lever model (Lever A: text minimization; Lever B: MCP-ification)
+- Add the golden rule table
+- Name the section so later authoring passes can apply it without reading this epic
 
-Acceptance: principle is stated in one paragraph and references the pattern
-(remove fact tables and JSON format blocks that duplicate MCP schema content).
+Acceptance: a new authoring pass on any playbook can apply the rule without
+reading this ticket.
 
-### Phase 2: Diet routing playbooks
+### Phase 2: Audit and classify remaining playbooks
 
-Apply the diet pattern to:
-- `lead-implement` (281 lines) — enter.implement call and surrounding fact guidance
-- `lead-salvage` (212 lines)
-- `lead-sprint` (155 lines)
+For each un-dieted playbook, identify:
+- Lever A removable content (MCP schema restatements)
+- Lever B candidates (conditional logic that could move to MCP)
+- Which MCP tools would need to be created or extended for Lever B
 
-For each: read current file, identify MCP-schema-owned content, delete it, verify
-regen tests pass, commit per file or as a batch.
+Produce a per-playbook classification. Research output; no edits in this phase.
 
-### Phase 3: Diet write and forge playbooks
+### Phase 3: MCP-ification (Lever B) where needed
 
-Apply the diet pattern to:
-- `lead-write-ticket` (371 lines)
+Implement new or extended `enter.*` / MCP tools identified in Phase 2.
+Diet the corresponding playbooks immediately after each tool lands.
+
+Likely candidates (confirm in Phase 2):
+- `lead-write-ticket` (371 lines) — complex routing and phase-consistency logic
 - `lead-forge-spec` (290 lines)
-- `lead-forge-mental-model` (222 lines)
 - `lead-review` (212 lines)
+
+### Phase 4: Lever A diet for remaining playbooks
+
+Apply text-minimization diet to playbooks that already have `enter.*` support
+or have no significant conditional logic to MCP-ify:
+
+- `lead-implement` (281 lines) — `enter.implement` exists
+- `lead-salvage` (212 lines)
+- `lead-forge-mental-model` (222 lines)
+- `lead-discuss` (189 lines)
 - `lead-verify-design` (174 lines)
-
-These have more lead-owned logic; audit carefully before deleting.
-
-### Phase 4: Diet remaining playbooks
-
-Apply to:
 - `lead-add-rule` (167 lines)
 - `lead-workflow-manual` (162 lines)
 - `lead-bootstrap` (153 lines)
-- `lead-discuss` (189 lines)
+- `lead-sprint` (155 lines)
 
 ## Out of Scope
 
-- Changing MCP tool behavior or schemas.
-- Removing lead-owned judgment tables (these are NOT duplicated in MCP schemas).
-- Removing genuinely non-obvious edge-case rules (scope resolution guards, etc.).
+- Changing MCP tool behavior or schemas unless serving a Lever B migration.
+- Removing lead-owned judgment tables.
+- Removing non-obvious edge-case guardrails.
