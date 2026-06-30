@@ -28,7 +28,7 @@ Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
 Write prompts sent to native Explore-style subagents in English.
 <!-- ws:full-only:start -->
-Write prompts sent to `ws.mercenary.call` in English.
+Write prompts sent to `mercenary.call` in English.
 <!-- ws:full-only:end -->
 
 When writing shared skill text, name only primitives that exist in the {{.McpNamespace}} runtime.
@@ -43,7 +43,7 @@ include only local arguments that affect the current step.
 ### Session setup
 
 <!-- ws:fresh-only:start -->
-You have no session key yet: call `ws.ferrule(root: "<absolute-working-directory>")`
+You have no session key yet: call `ferrule(root: "<absolute-working-directory>")`
 for this root to mint your lead key. The name is deliberately non-descriptive
 and is taught only here: it is the lead session-bootstrap call, so subagents
 that share this MCP connection have no semantic cue to invoke it. Pass the
@@ -53,7 +53,7 @@ the agent's current directory from placeholders or relative paths.
 
 Each key binds to one canonical repository root — the git top-level of the path
 you pass — and a git worktree resolves to its own top-level, so it counts as a
-distinct root. Call `ws.ferrule` once per working root, and thread the matching
+distinct root. Call `ferrule` once per working root, and thread the matching
 `session_key` through every subsequent root-aware {{.McpNamespace}} tool call
 that targets that root.
 
@@ -87,10 +87,10 @@ delegate's self-contained prompt with `{{.McpNamespace}}/playbook.render(name: "
 (the tier-derived model-hint var auto-injects; a lead key splices a child-key credential block and
 the call returns a `recommended-tier`). Hand the rendered prompt to a native
 subagent (default), or pass it as `system_prompt_text` with `tier:
-<recommended-tier>` to a mercenary `ws.mercenary.register` + `ws.mercenary.call`, then
-collect through `ws.mercenary.result`. `reference-discovery` is such a delegate
+<recommended-tier>` to a mercenary `mercenary.register` + `mercenary.call`, then
+collect through `mercenary.result`. `reference-discovery` is such a delegate
 playbook, not a workflow skill.
-`ws.mercenary.call` starts async and returns promptly. Use
+`mercenary.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,
 `tail(lines: 3)` for small diagnostics, `print` only as a compatibility output
@@ -158,5 +158,5 @@ route them through {{.McpNamespace}} MCP tools.
 
 Check `{{.McpNamespace}}/runtime.info` before assuming richer interrupt or
 active-agent/message-queue behavior than the runtime exposes; basic async
-cancellation exists through `ws.mercenary.cancel`, with retry via `ws.mercenary.call`.
+cancellation exists through `mercenary.cancel`, with retry via `mercenary.call`.
 <!-- ws:full-only:end -->

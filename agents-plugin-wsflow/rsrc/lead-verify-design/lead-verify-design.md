@@ -46,9 +46,9 @@ Scope
 ### 3. Fresh Review
 
 <!-- ws:full-only:start -->
-1. Register a fresh unique reviewer through `ws.mercenary.register(name: "design-reviewer-<unique-suffix>", model: "deep")`; do not reuse an existing reviewer session.
-2. Call `ws.mercenary.call(name: "design-reviewer-<unique-suffix>", prompt: <Design Reviewer prompt>)`.
-3. Read `ws.mercenary.result(name: "design-reviewer-<unique-suffix>", timeout_seconds: 600)`; if the call fails or times out, delete artifacts and return review failure with premise status, failure reason, and next action.
+1. Register a fresh unique reviewer through `mercenary.register(name: "design-reviewer-<unique-suffix>", model: "deep")`; do not reuse an existing reviewer session.
+2. Call `mercenary.call(name: "design-reviewer-<unique-suffix>", prompt: <Design Reviewer prompt>)`.
+3. Read `mercenary.result(name: "design-reviewer-<unique-suffix>", timeout_seconds: 600)`; if the call fails or times out, delete artifacts and return review failure with premise status, failure reason, and next action.
 <!-- ws:full-only:end -->
 <!-- ws:wsflow-only:start -->
 1. Spawn a fresh native reviewer with the **Design Reviewer prompt**; do not reuse an existing reviewer session.
