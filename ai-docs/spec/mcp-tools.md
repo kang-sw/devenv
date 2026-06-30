@@ -69,7 +69,7 @@ per the bootstrap-name obscurity scrub); a call whose key has no record in the
 session store is
 rejected with the `unknown_session` recovery contract. Public schemas for
 root-aware tools advertise `session_key` and do not advertise `root`;
-`ws.ferrule(root)` is the sole bootstrap verb and the only tool that accepts
+`ferrule(root)` is the sole bootstrap verb and the only tool that accepts
 a `root` argument.
 
 The former resolution sources are removed: the explicit per-tool `root` argument,
@@ -88,7 +88,7 @@ an ephemeral, in-memory session-auth model. This is the caller-visible
 authentication contract for ws tool calls.
 
 A lead-centric bootstrap verb mints a session:
-`ws.ferrule(root) -> session_key`. The returned key is an LLM-friendly
+`ferrule(root) -> session_key`. The returned key is an LLM-friendly
 word-chain string (for example `amber-tide-fox`), not a UUID. Only the lead logs
 in; subagents and mercenaries never call login — they receive a render-minted key
 (`#260610-mercenary-delegation-surface`).
@@ -132,9 +132,9 @@ Gating).
 > - The session key is mandatory on every ws call; there is no keyless lead
 >   default. A delegate that drops its key gets `unknown_session`, not a silent
 >   foreign-root operation.
-> - The bootstrap tool (`ws.ferrule`) is lead-only. It lives outside the
->   `ws.lead.*` namespace, so the keyed-call handler blocks non-lead keys from it
->   by explicit name in addition to the `ws.lead.*` prefix block
+> - The bootstrap tool (`ferrule`) is lead-only. It lives outside the
+>   `lead.*` namespace, so the keyed-call handler blocks non-lead keys from it
+>   by explicit name in addition to the `lead.*` prefix block
 >   (`#260610-mercenary-delegation-surface`); a delegate cannot self-bootstrap or
 >   escalate from a contained context. Re-bootstrap for recovery uses the caller's
 >   own already-known root.
@@ -159,10 +159,10 @@ minted after they fall out of its own (compacted or restarted) context.
 - Each session record carries an optional `parent` — the session key that minted
   it. It is absent for a lead's first bootstrap key. Recording a parent is
   metadata only and never widens the child's capability scope.
-- `ws.ferrule` accepts an optional `parent_session_key`. A lead coordinating
+- `ferrule` accepts an optional `parent_session_key`. A lead coordinating
   several repository roots in one conversation (for example multiple git
   worktrees, each a distinct root) records each additional control key's parent
-  as its primary control key. Because `ws.ferrule` is lead-only, control-key
+  as its primary control key. Because `ferrule` is lead-only, control-key
   lineage stays within one lead — it does not create a tree of independent
   control agents.
 - A render-minted delegate child key (`playbook.render`, including a
@@ -192,7 +192,7 @@ The session state machine persists routing and implementation context across
 context compaction. After compaction the session key is the only stable anchor
 that survives, so the state is stored as additive fields on the existing
 per-session record file (`<cache-root>/keys/<session-key>.json`, the same file
-`ws.ferrule` mints) rather than in a separate store. Writes reuse the record's
+`ferrule` mints) rather than in a separate store. Writes reuse the record's
 atomic temp-write+rename path, so a concurrent reader never observes a partial
 record; fields are omitted when empty and unknown fields are ignored, preserving
 backward and forward compatibility.
@@ -206,24 +206,24 @@ Two namespaces share the record:
   point (workflow-manual load and major checkpoints).
 
 All session-state tools require a `session_key` and are reachable by any role
-that holds one — they carry no `session.`/`config.`/`ws.lead.` prefix, so the
+that holds one — they carry no `session.`/`config.`/`lead.` prefix, so the
 keyed capability gate does not restrict them to the lead. This lets a lead
 populate state and hand its key to a delegate that reads or extends it; a child
-that mints its own key via `ws.ferrule` has independent state.
+that mints its own key via `ferrule` has independent state.
 
-**Agenda (freeform).** `ws.agenda.set(key, value)` upserts an arbitrary JSON
-object blob; `ws.agenda.clear(key)` removes one (a missing key is a no-op). These
+**Agenda (freeform).** `agenda.set(key, value)` upserts an arbitrary JSON
+object blob; `agenda.clear(key)` removes one (a missing key is a no-op). These
 are the fallback primitives for modes not covered by a typed enter tool.
 
-**Enter (typed mode switches).** `ws.enter.implement`, `ws.enter.proceed`,
-`ws.enter.sprint`, and `ws.enter.salvage` each perform one atomic write that both
+**Enter (typed mode switches).** `enter.implement`, `enter.proceed`,
+`enter.sprint`, and `enter.salvage` each perform one atomic write that both
 stores the typed payload as an agenda blob (keyed by the mode name) and
 **replaces** the entire todo list with items derived from the mode. Because the
 list is replaced, calling any enter tool is always a mode switch; a prior mode's
 derived list is discarded. Derivation logic lives in Go, so no skill-side
-`ws.todo.append` loop is needed for a covered mode:
+`todo.append` loop is needed for a covered mode:
 
-- `implement`: `ws.enter.implement` is the public mode-switch call for the
+- `implement`: `enter.implement` is the public mode-switch call for the
   implementation-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.scope` / `facts.complexity` /
   `facts.risk` objects, a small `policy` object, and optional `format:
@@ -253,7 +253,7 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
   what policy or branch condition needs correction before source edits continue
   without naming unreachable planner or implementer actions.
-- `proceed`: `ws.enter.proceed` is the public mode-switch call for the
+- `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
   `facts.work` objects, and optional `format: text|json`. It normalizes the
@@ -267,8 +267,8 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   beginning `Proceed Verdict`, `Route: ...`, `NEXT: ...`, and `Next: ...`; JSON
   output returns the structured result plus `next_instruction` and the identical
   `raw` string.
-- `sprint`: Edit, Verify, Commit, Post-edit decision, Wrap episode.
-- `salvage`: Containment, Survey fanout, Premise interview, Classification,
+- `sprint` (`enter.sprint`): Edit, Verify, Commit, Post-edit decision, Wrap episode.
+- `salvage` (`enter.salvage`): Containment, Survey fanout, Premise interview, Classification,
   Capture.
 
 **Todo.** Item identity is a caller-provided `key`, unique within the active
@@ -278,14 +278,14 @@ trailing whitespace. Todo items persist `key`, `title`, `status`, and an
 optional nullable `instruction` field for full execution prose. Existing session
 records without `instruction` remain valid and read as `null`. A duplicate key is
 rejected after normalization, and an erased key is reusable. Creation mutations
-(`ws.todo.append`, `insert_before`, and `insert_after`) accept optional
+(`todo.append`, `todo.insert_before`, and `todo.insert_after`) accept optional
 nullable `instruction` and reject non-string non-null values. Status and order
 mutations do not rewrite untouched item payloads, so existing `instruction`
-values are preserved through status and order changes. `ws.todo.check` returns a
+values are preserved through status and order changes. `todo.check` returns a
 compact confirmation followed by a checkpoint todo rendering. Other status/order
 mutations (`erase`, `clear`, `reorder`) return a compact confirmation.
-`ws.todo.read(key)` returns one item's full JSON payload, including
-`instruction`. `ws.todo.list` returns rendered text. `clear(done_only=false)`
+`todo.read(key)` returns one item's full JSON payload, including
+`instruction`. `todo.list` returns rendered text. `clear(done_only=false)`
 removes all items; `done_only=true` removes only `done` items.
 `reorder(span:{from_key,to_key}, position:{before|after: ref_key})` moves a
 contiguous span as a block; the ref_key must lie outside the span.
@@ -301,7 +301,7 @@ instruction; absent, null, or empty instructions render no second line. Full
 mode shows every item in order and renders each non-empty instruction in full on
 the indented second line. Workflow manual restoration uses the same summary
 rendering, so restored todos show the same 60-rune instruction previews.
-Checkpoint rendering from `ws.todo.check` shows the full ordered list without
+Checkpoint rendering from `todo.check` shows the full ordered list without
 ellipsis collapse after the status update. It renders full instruction lines only
 for the checked item's immediate previous and next items when those items are
 actionable (`pending` or `wip`) and have non-empty instructions; the checked item,
@@ -309,14 +309,14 @@ non-adjacent items, `done` items, `defer` items, and instruction-less items stay
 compact. Compact checkpoint rows with a non-empty instruction that is not rendered
 add an indented `...+` marker line to distinguish hidden instruction payloads from
 instruction-less rows. `ws.commit` does not auto-mark todos; status transitions
-are always explicit via `ws.todo.check`.
+are always explicit via `todo.check`.
 
 ### Workflow Manual Entry And Restoration {#260626-workflow-manual-restoration-entry}
 
-`ws.workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
+`workflow_manual(session_key)` is the canonical workflow-manual entry tool. A
 valid `session_key` is **required**, and the tool is **lead-only**
 (`isLeadOnlyTool`): a `session_key` resolving to a delegate/leaf scope is rejected
-at the keyed capability gate before the handler runs (mirroring `ws.ferrule`). It
+at the keyed capability gate before the handler runs (mirroring `ferrule`). It
 renders the `lead-workflow-manual` playbook through the same variable substitution
 as `playbook.print` — the rsrc playbook stays the single prompt source of truth —
 and branches on `session_key`:
@@ -327,27 +327,27 @@ and branches on `session_key`:
   is supplied:
   - **fresh with root** (`root` is a non-empty absolute Git worktree path): the
     handler validates and canonicalizes the path via `canonicalSetupRoot` (same
-    as `ws.ferrule`), mints a new lead session key, strips the fresh-only
+    as `ferrule`), mints a new lead session key, strips the fresh-only
     self-bootstrap block from the manual body, and appends a `## Session Key`
     section containing the minted key followed by an empty `## Session State`
-    section. A separate `ws.ferrule` call is not needed; the caller can proceed
+    section. A separate `ferrule` call is not needed; the caller can proceed
     directly to `project_tree`, `git.status`, and other keyed tools using the
     returned key.
   - **fresh without root** (sentinel, no `root`): the primitives reference plus
-    the always-shown per-root rule (call `ws.ferrule` once per working root and
+    the always-shown per-root rule (call `ferrule` once per working root and
     thread its key) and the self-bootstrap line ("you have no key yet; mint one
-    with `ws.ferrule`").
+    with `ferrule`").
 - **continue** (`session_key` present and its record resolves to a lead scope): the
   primitives plus the per-root rule, with the self-bootstrap line omitted, followed
   by a restored **Session State** section — agenda blobs as a remind list and the
   todo list in summary mode, rendered server-side from the session record.
 - **keyless** (`session_key` omitted or empty): a hard error requiring a valid
-  `session_key`. The error names neither the sentinel nor `ws.ferrule`, so a
+  `session_key`. The error names neither the sentinel nor `ferrule`, so a
   keyless caller gets no bootstrap hint.
 - **fail-loud** (`session_key` present, non-sentinel, but no record resolves): a
   minimal "no restorable state for this key" notice pointing to the `lead-revive`
   skill for recovery. **No manual body is rendered** — the always-shown per-root
-  rule names `ws.ferrule`, and any unregistered key bypasses the lead-only gate via
+  rule names `ferrule`, and any unregistered key bypasses the lead-only gate via
   lookup-miss, so rendering it would leak the lead self-bootstrap call to a non-lead
   caller. The tool never mints a key in this mode.
 
@@ -453,7 +453,7 @@ concrete backend/model through `config.agents_tier`
 
 The two-vocabulary split is collapsed to a single tier vocabulary. The capability
 vocabulary `small`/`medium`/`large`/`xlarge` is the only tier vocabulary across
-every surface — playbook frontmatter, `playbook.render`, `ws.mercenary.register`,
+every surface — playbook frontmatter, `playbook.render`, `mercenary.register`,
 and the model-config tool (the `config.agents_tier` surface, re-homed by this
 change rather than by the previously pending `config.model_alias` rename, which
 this supersedes). Config is keyed directly by the capability tier: a tier resolves
@@ -764,7 +764,7 @@ while preserving the sanitized logical stem.
 The MCP server supports an environment-selected agentless product mode for the
 internal `wsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
 omit named-agent and model-alias configuration surfaces:
-`ws.mercenary.*` and `config.agents_tier`. `api.list` remains available as
+`mercenary.*` and `config.agents_tier`. `api.list` remains available as
 read-only cache discovery; the agent-backed API documentation ask tools are
 removed from the full ws surface rather than hidden only in wsflow mode.
 
@@ -790,7 +790,7 @@ comments are never emitted, and the remaining user-facing namespace notation is
 rendered through reserved namespace variables such as `McpNamespace` and
 `SkillNamespace`. In wsflow these variables render as `wsflow`; in full ws they
 render as `ws`. The variables do not rename literal generic MCP tool
-identifiers such as `ws.ferrule`.
+identifiers such as `ferrule`.
 
 ## Playbook Tools {#260609-playbook-tools}
 
@@ -812,7 +812,7 @@ worktree-scoped temporary file, and returns that file path together with a
 `recommended-tier` line carrying the playbook's first-class frontmatter tier (when
 declared). The caller hands the path to a host-native subagent or a mercenary and
 routes the recommended tier to whichever path it picks — as a host model-selection
-guide for a native subagent, or as `ws.mercenary.register`'s pass-through `tier` for a
+guide for a native subagent, or as `mercenary.register`'s pass-through `tier` for a
 mercenary. `playbook.print` surfaces the same `recommended-tier` line. It
 carries no routing or strategy decision — the caller selects `name`, and the
 tool only materializes a rendered copy. `root_override`, when set, rebinds both the
@@ -1001,55 +1001,55 @@ empty shared seed unless configured otherwise.
 
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 
-The `ws.mercenary.*` tool family exposes durable named-agent orchestration.
+The `mercenary.*` tool family exposes durable named-agent orchestration.
 
-The `ws.mercenary.*` family is the reshaped scoped **mercenary** delegation surface
+The `mercenary.*` family is the reshaped scoped **mercenary** delegation surface
 (`#260610-mercenary-delegation-surface`): codex and claude runners retained,
 scoped to implementer/reviewer roles, invoked with a single self-contained prompt
 from `playbook.render`.
 
-`ws.mercenary.register` registers a mercenary agent with an optional `backend` (codex
+`mercenary.register` registers a mercenary agent with an optional `backend` (codex
 or claude) and a self-contained `system_prompt_text` produced by
 `playbook.render`. The former `prompts: [stems]`/`prompt_refs` and `model`
 registration fields are removed. The `tier` field is a *pass-through* of the
 first-class recommended tier that `playbook.render` returns — its origin is the
-playbook frontmatter, not a caller-chosen workload tier: `ws.mercenary.register` maps it
+playbook frontmatter, not a caller-chosen workload tier: `mercenary.register` maps it
 to the alias layer and resolves the per-mercenary backend/model from harness config
 (`#260513-harness-local-agent-tier-config`), so a mercenary's model follows its
-playbook frontmatter `tier:` rather than defaulting to core. `ws.mercenary.call` starts an asynchronous
+playbook frontmatter `tier:` rather than defaulting to core. `mercenary.call` starts an asynchronous
 call, returns immediately, and yields a native-shaped continuation handle
 (`agentId=<name>`) so the lead reuses one continuation idiom across the native
 and mercenary paths. Named-agent calls resolve their root from the mandatory
 `session_key` like every other root-aware tool
-(`#260610-ephemeral-session-auth-model`): no `ws.mercenary.*` schema advertises a
+(`#260610-ephemeral-session-auth-model`): no `mercenary.*` schema advertises a
 `root` argument, and there is no actor scope, hidden explicit-root dispatch, or
 persistent child-actor credential injection. The named-agent registry namespaces
 role pointers by the resolved worktree root, so the same public agent name stays
 distinct across distinct worktree roots without an actor dimension.
 
-`ws.mercenary.wait` waits for one or more agents to become ready and returns readiness
-metadata, not final output. `ws.mercenary.result` is the result-consumption surface and
+`mercenary.wait` waits for one or more agents to become ready and returns readiness
+metadata, not final output. `mercenary.result` is the result-consumption surface and
 may optionally wait for completion; successful ephemeral agents are erased after
 their result is consumed.
 
-`ws.mercenary.status`, `ws.mercenary.tail`, and `ws.mercenary.cancel` inspect or control current
-agent work. Cancelled status text points callers toward retrying `ws.mercenary.call`
+`mercenary.status`, `mercenary.tail`, and `mercenary.cancel` inspect or control current
+agent work. Cancelled status text points callers toward retrying `mercenary.call`
 on the same registered agent when no result is available, so timeout-driven
 cancellation does not look like a final erase-only state.
 {#260512-agent-cancel-resume-guidance}
 
-`ws.mercenary.recall` is hidden from the advertised MCP tool surface and workflow
+`mercenary.recall` is hidden from the advertised MCP tool surface and workflow
 guidance. The implementation may remain as a manual or compatibility path, but
-ordinary model-visible recovery uses `ws.mercenary.call` on the same registered agent.
+ordinary model-visible recovery uses `mercenary.call` on the same registered agent.
 {#260512-agent-recall-hidden-surface}
 
-Normal `ws.mercenary.tail` is context-bounded. Raw diagnostic inspection is available
-through `ws.mercenary.debug.tail`, `ws.mercenary.debug.stdout`, `ws.mercenary.debug.stderr`,
-`ws.mercenary.debug.runtime_log`, and `ws.mercenary.debug.events`.
+Normal `mercenary.tail` is context-bounded. Raw diagnostic inspection is available
+through `mercenary.debug.tail`, `mercenary.debug.stdout`, `mercenary.debug.stderr`,
+`mercenary.debug.runtime_log`, and `mercenary.debug.events`.
 
-`ws.mercenary.interrupt` queues a redirect message for a running agent. `ws.mercenary.print`
+`mercenary.interrupt` queues a redirect message for a running agent. `mercenary.print`
 remains a deprecated compatibility reader over the resolved current instance.
-`ws.mercenary.erase` removes or hides the resolved role pointer for the current
+`mercenary.erase` removes or hides the resolved role pointer for the current
 worktree and actor scope; historical instance payloads are removed later by the
 named-agent retention cleanup policy rather than synchronously during erase.
 
@@ -1058,12 +1058,12 @@ named-agent retention cleanup policy rather than synchronously during erase.
 The reshaped delegation surface. A **mercenary** is a ws-spawned external
 subprocess agent — a deliberately distinct term from a harness-native
 **subagent**, so callers never confuse the two delegation paths. This section is
-the caller-visible contract for the reshaped `ws.mercenary.*` family.
+the caller-visible contract for the reshaped `mercenary.*` family.
 
 **Default is hidden; native is the ordinary delegation path.** The global
 `"workflow.prefer_mercenary"` item controls whether the public mercenary surface
 is visible and whether implementer/reviewer playbook renders prefer mercenary
-guidance. Its builtin value is `hide`, which suppresses `ws.mercenary.*` from
+guidance. Its builtin value is `hide`, which suppresses `mercenary.*` from
 tool discovery, runtime capabilities, and explicit calls. `off` exposes the
 mercenary surface but keeps host-native subagents as the default guidance. `on`
 exposes the surface and makes implementer/reviewer renders prefer the
@@ -1091,7 +1091,7 @@ deferred plug, not a structural exclusion.
 with one self-contained prompt produced by `playbook.render`
 (`#260609-playbook-tools`); there is no `register(prompts: [stems])` step. The
 playbook's first-class frontmatter `tier:` is surfaced by `playbook.render` as a
-recommended tier and passed through to `ws.mercenary.register`'s `tier` arg, which
+recommended tier and passed through to `mercenary.register`'s `tier` arg, which
 selects the mercenary's model via config — the caller never hand-picks a workload
 tier. A
 mercenary call returns a continuation handle of the same shape as a native
@@ -1107,7 +1107,7 @@ child runs in a different worktree; render does not infer worktree shape — the
 caller passes the path.
 
 **Containment is server-side on the keyed call handler.** The keyed `tools/call`
-handler rejects `ws.lead.*` calls from non-lead keys. A child key (native or
+handler rejects `lead.*` calls from non-lead keys. A child key (native or
 mercenary) is therefore unable to login or spawn, so spawn depth is strictly 1
 (lead → mercenary leaf); no recursion-depth counter is needed. Schema and
 `tools/list` filtering remain a harness-owned soft-guard for LLM-confusion
@@ -1210,7 +1210,7 @@ as readable line blocks with any requested context.
 ## Runtime Metadata Migration Gate {#260525-runtime-metadata-migration-gate}
 
 The ws runtime has a SQLite metadata migration gate for moving named-agent and
-exec runtime metadata into SQLite authority. The gate keeps public `ws.mercenary.*`
+exec runtime metadata into SQLite authority. The gate keeps public `mercenary.*`
 and `exec.*` MCP APIs stable while separating lifecycle metadata from
 file-backed payload bodies. Named-agent registry metadata and exec job metadata
 are SQLite-backed. SQLite metadata may track identities, lifecycle state,
@@ -1233,17 +1233,17 @@ consistently.
 
 Tool-permission enforcement is the server-side capability check in the keyed
 `tools/call` handler. A session key carries `{root + capability scope}` —
-`lead`, `delegate`, or `leaf` — minted by `ws.ferrule(capability)` or as a
+`lead`, `delegate`, or `leaf` — minted by `ferrule(capability)` or as a
 render-minted child key. When a call presents a known non-lead key, the handler
-rejects any tool that scope disallows (`delegate` cannot call `ws.mercenary.*`,
+rejects any tool that scope disallows (`delegate` cannot call `mercenary.*`,
 `config.*`, or `session.*`; `leaf` additionally cannot call `git.commit`) and
-rejects any lead-only tool from any non-lead key — the `ws.lead.*` prefix plus
-the bootstrap tool `ws.ferrule` matched by explicit name (self-bootstrap
+rejects any lead-only tool from any non-lead key — the `lead.*` prefix plus
+the bootstrap tool `ferrule` matched by explicit name (self-bootstrap
 escalation block). The retained `api.list` cache-domain discovery tool is read-only and
 leaf-callable; the retired agent-backed API ask tools are absent from the
 surface rather than blocked by scope. Keyless callers and lead keys are not
 restricted by this gate,
-so the keyless `ws.ferrule` bootstrap stays open; a delegate can therefore
+so the keyless `ferrule` bootstrap stays open; a delegate can therefore
 keyless-re-`login` to re-escalate. The scope is a soft defense-in-depth guard
 layered on the host's own subagent tool restriction, not a hard sandbox.
 
