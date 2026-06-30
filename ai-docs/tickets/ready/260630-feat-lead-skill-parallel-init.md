@@ -3,7 +3,7 @@ title: "Lead skill parallel init: workflow_manual key-return + SKILL.md batch en
 spec:
   - 260626-workflow-manual-restoration-entry
   - 260610-entry-skill-surface-reduction
-sage-review: blocked
+sage-review: required
 ---
 
 # Lead skill parallel init: workflow_manual key-return + SKILL.md batch entry
@@ -25,7 +25,9 @@ SKILL.md fired
 Additionally, fresh-start sessions call workflow_manual twice:
 1. `workflow_manual("obsidian-latch")` — bootstrap, instructs calling ws.ferrule
 2. `ws.ferrule(root)` — mints session key
-3. `workflow_manual(real-key)` — CONTINUE mode, returns empty session state (redundant)
+3. `workflow_manual(real-key)` — CONTINUE mode, redundant round-trip: the newly-minted
+   session has no stored state, so the only difference from FRESH is the stripped
+   fresh-only block and an empty Session State section
 
 Both problems share the same root: playbook.print gates all subsequent init
 because SKILL.md is a one-line routing stub that defers init sequencing entirely
@@ -68,10 +70,10 @@ single workflow_manual calls.
 
 **Constraints:**
 - `root` must be an absolute filesystem path (same validation as ws.ferrule).
-- FAIL-LOUD and keyless modes are unchanged.
-- The obscurity rationale for ferrule is preserved: obsidian-latch sentinel
-  remains the opaque gateway; `root` is an optional input, not a hint to the
-  ferrule surface.
+- FAIL-LOUD and keyless modes are unchanged. A non-sentinel key with a `root`
+  argument must still hit FAIL-LOUD before any minting — the mint path is gated
+  exclusively on the sentinel branch, consistent with the current FAIL-LOUD guard
+  at `workflow_manual.go:136` running before the render step.
 - Spec anchor `260626-workflow-manual-restoration-entry` in mcp-tools.md must
   be updated to document the new `root` param and FRESH-mode key return.
 
@@ -124,8 +126,12 @@ key-return behavior (fresh-start path). Phase 1 must land before Phase 2 is
 correct end-to-end, though Phase 2 docs can be written independently.
 
 **Constraints:**
-- SKILL.md wording must not expose the obsidian-latch sentinel string; refer to
-  it only as "the fresh-bootstrap sentinel taught in lead-revive."
+- SKILL.md may use the literal `"obsidian-latch"` sentinel string. The earlier
+  no-expose rule was intended to prevent subagent discovery via auto-exposed
+  surfaces (playbook.print), but SKILL.md requires direct file access and is a
+  narrower exposure path than the 6 playbooks that already contain the literal
+  (known-residual: `260626-research-playbook-print-lead-surface-leak`). The
+  per-file rule is stale and removed.
 - Spec anchor `260610-entry-skill-surface-reduction` in workflow-skills.md must
   be updated to reflect that entry skills for context-heavy skills carry a
   parallel init declaration rather than a pure routing stub.
@@ -149,31 +155,3 @@ completes init in 2 MCP rounds. Fresh-start completes in 2 rounds (round 1
 includes obsidian-latch workflow_manual; round 2 is project_tree + git.status
 after key is available). Confirm parallel call declaration is present in updated
 lead-discuss/SKILL.md and lead-sprint/SKILL.md.
-
-## Blocked (2026-06-30)
-
-### Design Reviewer — block
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | Phase 2 fresh-start init cannot name the sentinel yet must call it (static SKILL.md) | critical | missing |
-| 2 | Obscurity invariant is already drifted; ticket treats it as intact | important | missing |
-| 3 | Phase 1 background mischaracterizes the redundant call | minor | autonomous |
-| 4 | Phase 1 should pin that root never turns FAIL-LOUD/keyless into a minting path | minor | autonomous |
-
-Root cause of issues 1–2: SKILL.md is static (no template substitution), so a fresh-start
-caller must have the literal sentinel token. Phase 2 constraint forbids exposing it. This
-is unsatisfiable unless the sentinel-obscurity invariant is explicitly resolved:
-- If obscurity is a real invariant → Phase 2 must also scrub the 6 playbooks that already
-  leak it (lead-discuss, lead-sprint, lead-proceed, lead-salvage, lead-forge-mental-model,
-  lead-forge-spec) — larger scope.
-- If obscurity is effectively abandoned → drop the no-expose constraint; SKILL.md may
-  name the sentinel like every current surface does.
-
-User must decide before this ticket can proceed.
-
-### Completeness Reviewer — pass
-
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | Phase 2 verification covers only continue-path timing | minor |
