@@ -48,7 +48,28 @@ Skills without `enter.*` support may need Lever B work before they can be fully 
   Guidance section, `enter.proceed` JSON format block. Kept scope resolution
   edge cases (non-obvious) and three lead-owned judgment tables.
 - `lead-discuss`: 189 → 93 lines via Lever A.
-- `lead-implement`: 281 → 225 lines via Lever A, in two passes. First pass
+- `lead-write-ticket`: 371 → 277 lines via Lever A, in two passes. First
+  pass merged the Create/Edit Ticket handlers into one invoke flow,
+  collapsed epic/workset body prose into `tickets.template` skeleton
+  pointers, thinned `On: Move` to an MCP-tool-preference directive, and
+  executed `judge:spec-address-gate` instead of restating its
+  trigger/scope in prose (371 → 305). Second pass deduplicated
+  `On: Apply Ticket Content`/`On: Intent Review`'s parallel write/check
+  category lists into one categorized list plus a single generative
+  "fresh implementer" test — placed in Intent Review only, since the
+  test is inherently a re-read/self-review action, not a write-time
+  instruction — merged `On: Cross-ticket decision review` and
+  `On: Cascade Edit`'s near-duplicate graph-identification logic, and
+  removed judge-table restatements of `On: Apply Ticket Content` and
+  `On: Spec-address Check` (305 → 277). `On: Sage Review Gate`
+  (~44 lines), the 8 judge tables, and the `Blocked Section Template`
+  are preserved verbatim — genuine soft-judgment/deterministic-branch
+  content, not duplication. Further reduction of the Sage Review Gate
+  and the Apply Ticket Content/Intent Review checklists is scoped
+  separately in `260701-feat-write-ticket-lever-b-mcp-tools` (Lever B:
+  new MCP tools for checklist-as-todo delivery and sage-review
+  posture/verdict computation), not yet implemented.
+- `lead-implement`: 281 → 225 lines via Lever A, in two passes. First
   removed the JSON call-format block, the Fact groups table, and tautological
   policy bullets. Second pass verified against actual `enter.implement`
   instruction-generation source (`session_state.go`,
@@ -81,7 +102,6 @@ pre-assigned, since `lead-implement` showed the split can only be confirmed
 by reading the tool's actual generated output.
 
 - `lead-write-spec` (129 lines)
-- `lead-write-ticket` (371 lines)
 - `lead-add-rule` (167 lines)
 - `lead-workflow-manual` (162 lines)
 - `lead-sprint` (155 lines) — `enter.sprint`-backed; apply the same

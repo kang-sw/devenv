@@ -19,9 +19,13 @@ pass on this skill (371 → 305 lines); this ticket scopes the Lever-B
 
 ### Phase 1: Checklist-as-todo for `On: Apply Ticket Content` and `On: Intent Review`
 
-`On: Apply Ticket Content` (9 items) and `On: Intent Review` (11 items) are
-static prose checklists the model reads once and self-attests against, with
-nothing forcing per-item verification.
+`On: Apply Ticket Content` (a categorized capture list, currently 2 lines
+after a 2026-07-01 dedup pass) and `On: Intent Review` (a check list plus the
+single generative "fresh implementer" test, currently 7 lines) are static
+prose the model reads once and self-attests against, with nothing forcing
+per-item verification. Exact line/item counts will keep drifting as dedup
+passes land; the checklist-as-todo goal below applies to whatever the current
+category lists are, not a fixed count.
 
 Goal: a new MCP tool (e.g. `ws/tickets.checklist(type, phase: "content"|"intent")`)
 returns each phase's item list as data. The playbook installs exactly **one**
@@ -35,15 +39,16 @@ already gated by `judge: needs-open-decision-queue` as an interactive stop, so
 wrapping it in a todo would duplicate an existing mechanical guard.
 
 Once the tool exists and the playbook calls it, the corresponding static prose
-for `On: Apply Ticket Content` and `On: Intent Review` (~27 lines) becomes
-deletable from the playbook, per the epic's Lever B rule ("Move rule-based
-conditional decisions from playbook prose into `enter.*` or other MCP tools ...
-the playbook collapses to: gather inputs → call tool → follow output").
+for `On: Apply Ticket Content` and `On: Intent Review` becomes deletable from
+the playbook, per the epic's Lever B rule ("Move rule-based conditional
+decisions from playbook prose into `enter.*` or other MCP tools ... the
+playbook collapses to: gather inputs → call tool → follow output").
 
-Rejected alternative: one todo per checklist item (27 todos) — rejected as
-ceremony/overhead disproportionate to the verification benefit; coarse
-per-handler todos with rich `Instruction` text give the same external-check
-benefit at 2 tool-call round-trips instead of 27.
+Rejected alternative: one todo per checklist category (as many todos as
+categories in the current lists) — rejected as ceremony/overhead
+disproportionate to the verification benefit; coarse per-handler todos with
+rich `Instruction` text give the same external-check benefit at 2 tool-call
+round-trips instead of one per category.
 
 Verification: exercise `lead-write-ticket` end to end on a real ticket edit and
 confirm both todos install, carry the full checklist text, and get checked only
