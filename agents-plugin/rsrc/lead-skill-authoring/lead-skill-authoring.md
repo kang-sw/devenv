@@ -60,6 +60,7 @@ Doctrine is Layer 3 only when at least one invariant re-derives from it; otherwi
 
 - Repeatedly violated rule → mechanize with structure rather than restate it.
 - Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
+- Add rules only for observed wrong executions or non-obvious constraints. Unspecified cases are intentional judgment gaps — leave them empty. If gap intentionality is unclear during authoring or audit, surface it to the human author before encoding.
 - After each pass: re-read additions, cut, then apply the Layer test to every section.
 - After edits: run **On: Fresh-Reader Audit**. After doctrine/routing/layout edits: also run **On: Downstream Consistency Sweep**.
 
@@ -89,6 +90,8 @@ Shape: `Invariants` → `On: X` handlers → `Judgments` → `Templates` → `Do
 
 - Handlers may be multi-step; use H3 sub-blocks when a handler exceeds four steps with mixed responsibility.
 - Name each sub-block by its responsibility; do not split single-purpose checklists.
+- State each rule once: if an Invariant already captures a constraint, remove it from handler steps.
+- Judge lives where its gated procedure lives; if the procedure is delegated to another skill, move the judge with it.
 
 Both: directives at top, doctrine at bottom, never interleaved. Soft judgments extracted from handlers, named `judge: <name>`, referenced by name.
 
