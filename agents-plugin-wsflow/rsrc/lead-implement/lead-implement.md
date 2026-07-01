@@ -57,60 +57,42 @@ Policy rules:
 1. Read `raw`, `next_instruction`, warnings, and the installed todos.
 2. Use `{{.McpNamespace}}/todo.read(key: "<todo-key>")` or `{{.McpNamespace}}/todo.list(mode: "full")` when an instruction is truncated.
 3. If the verdict says `Branch Action: stop`, report the blocker before source edits.
-4. Execute todos in order:
-   - `{route}` / branch setup
-   - `{prep}` / direct confirmation or delegated plan
-   - `{edit}` / direct edit or implementer dispatch
-   - `{review}` / lead, single, or partitioned review
-   - `{doc-pre-pass}` / spec and mental-model updates
-   - `{doc-commit-gate}` / ticket, index, and wrapup docs
-   - `{doc-closeout}` / safe documentation-only suffix compaction
-   - `{final-action-gate}` / completion report
-   - `{merge}` / user-approved merge
+4. Execute installed todos in order; each todo's `Instruction` field is a complete how-to for that step — do not restate or supplement it from memory. The subsections below add only what the instruction omits.
 
 ### 3. Prep
 
-1. Run the `{prep}` instruction.
-2. Load required mental models, migration anchor, and `{{.McpNamespace}}/infra.read(name: "impl-playbook")` when instructed.
-3. For direct edit, keep implementation lead-owned from the ticket and do not create a planner artifact unless the route escalates.
-4. For delegated work, call `{{.McpNamespace}}/path.generate(kind: "plan", stems: ["<ticket-stem-or-task>"])`; capture `<plan-path>`.
-5. Render `plan-populator-survey` with `ticket_path`, `selected_phase`, and `plan_path`; dispatch it through **Delegate dispatch** and **Plan prompts**.
-6. If survey returns `[escalate-to-research]`, render `plan-populator-research` with the same `ticket_path`, `selected_phase`, and `plan_path`; dispatch it through **Delegate dispatch** and **Plan prompts**.
-7. Stop for unresolved binding decisions before source edits.
-8. If a plan artifact was created, commit it before Edit.
+- Stop for unresolved binding decisions before source edits.
+- If a plan artifact was created, commit it before Edit.
 
 ### 4. Edit And Verify
 
-1. Run the `{edit}` instruction.
-2. For delegated work, use **Delegate dispatch** with **Implementer spawn prompt**.
-3. Verify before reporting success; fix or escalate real blockers.
-4. Commit logical checkpoints; record `<commit-range>` and `<result-commit>` for review and final reporting, or `none` with reason.
+- Commit logical checkpoints; record `<commit-range>` and `<result-commit>`, or `none` with reason.
 
-### 5. Review
+### 5. Documentation
 
-1. Run `{review}` when installed.
-2. Dispatch reviewers with **Reviewer table** and **Reviewer prompt frame**.
-3. If `review_alloc=lead-only`, review directly and record the verdict; if `single`, dispatch `reviewer`; if `partitioned`, dispatch selected table rows.
-4. For non-clean Critical/Important findings, classify accepted, rejected, and deferred dispositions; dispatch **Review relay dispatch** for accepted fixes, then use **Re-review prompt** for affected partitions.
-5. Record verdicts, minor findings, unresolved disputes, accepted/rejected findings, and review-clean status.
+- `{doc-pre-pass}`: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")`; dispatch `mental-model-updater` only when workflow behavior, reusable domain rules, or modification guidance changed.
+- `{doc-commit-gate}`: refresh `_index.md` only for new skills, agents, or major patterns.
+- Commit spec and mental-model changes separately when both changed.
 
-### 6. Documentation
+### 6. Closeout
 
-1. Run installed doc todos only; absent doc todos mean documentation was skipped by verdict.
-2. For `{doc-pre-pass}`, print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")`, then dispatch `mental-model-updater` when workflow behavior, reusable domain rules, or modification guidance changed.
-3. For `{doc-commit-gate}`, run `{{.McpNamespace}}/infra.read(name: "executor-wrapup")`, update ticket Result when ticket-driven, and refresh `_index.md` only for new skills, agents, or major patterns.
-4. Commit spec and mental-model changes separately when both changed.
+- After doc-closeout compaction, verify final tree equivalence, or report skipped.
+- `{final-action-gate}` report: changes, branch, merge target, docs, ticket Result hash, review, tests, deviations, disputes, skipped closeout.
+- Stop for the user's choice: merge, new slice, sprint, or stop.
 
-### 7. Closeout
+### 7. Merge
 
-1. Run `{doc-closeout}` when installed.
-2. If `{doc-closeout}` instructs compaction, squash only consecutive documentation-only branch-tip commits; verify final tree equivalence or report skipped.
-3. Run `{final-action-gate}` and report changes, branch, merge target, docs, ticket Result hash, review, tests, deviations, disputes, and skipped closeout.
-4. Stop for the user's choice: merge, new slice, sprint, or stop.
+Report: merge target, hash, verification, branch status, skipped cleanup.
 
-### 8. Merge
+### 8. Branch Cleanup
 
-Run `{merge}` only after user approval. Merge to the verdict or caller-approved target, write merge commits per repository rules, then report merge target, hash, verification, branch status, and skipped cleanup.
+Run after a confirmed merge to reduce branch accumulation.
+
+1. Verify the implementation branch is a strict ancestor of the merge target: `git merge-base --is-ancestor <branch> <target>`.
+2. Skip deletion and report retained when any of the following hold: the branch is currently checked out, it is linked to an active worktree, the merge target was ambiguous, or the branch has commits not reachable from the merge target.
+3. If no skip condition holds, ask the user whether to delete the branch.
+4. Delete only on explicit user approval: `git branch -d <branch>`.
+5. Report each retained branch with its skip reason so cleanup debt stays visible.
 
 ## Templates
 
@@ -237,16 +219,6 @@ For each [won't fix], respond [accepted] or [maintained: <short reason>].
 Write detailed findings to the findings path.
 In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
-
-### 9. Branch Cleanup
-
-Run after a confirmed merge to reduce branch accumulation.
-
-1. Verify the implementation branch is a strict ancestor of the merge target: `git merge-base --is-ancestor <branch> <target>`.
-2. Skip deletion and report retained when any of the following hold: the branch is currently checked out, it is linked to an active worktree, the merge target was ambiguous, or the branch has commits not reachable from the merge target.
-3. If no skip condition holds, ask the user whether to delete the branch.
-4. Delete only on explicit user approval: `git branch -d <branch>`.
-5. Report each retained branch with its skip reason so cleanup debt stays visible.
 
 ## Doctrine
 
