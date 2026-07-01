@@ -12,11 +12,13 @@ Apply rules directly; add local procedure only when the target needs it.
 Every piece of skill content belongs to exactly one layer. Layers 1 and 2 are
 owned by the MCP tool — delete their content from the playbook unconditionally.
 
-| Layer | Owns | Authoritative source |
-|-------|------|----------------------|
-| 1 — MCP schema | Field names, types, enums, call format | Tool JSON Schema (loaded via ToolSearch) |
-| 2 — MCP logic | Deterministic routing rules, verdict computation, allocation | MCP tool implementation |
-| 3 — Playbook | Observation targets, soft judgments, non-obvious edge cases, step choreography, doctrine | This file |
+| Layer | Owns | Model-accessible? | Delete from playbook? |
+|-------|------|------|------|
+| 1 — MCP schema | Input field names, types, enums, call format; response schema (Next: labels, state update field names) | Yes — via ToolSearch before call, tool response after | Yes — restatement drifts |
+| 2 — MCP internal | Routing computation, verdict selection logic, `NextInstruction` content | No — black box; post-call instructions arrive via tool response | Yes — always invisible; "if Next: = X, do Y" playbook lines are Layer 2 output restatement |
+| 3 — Playbook | Pre-call only: observation targets, soft judgments, non-obvious edge cases, step choreography, doctrine | Yes — this file | N/A — keep only what passes the destructive-first test |
+
+Layer 3 is **pre-call only**. After the MCP call, the model follows `Next:` exactly; post-call branch handling belongs in `NextInstruction`, not in playbook prose.
 
 ### Gate: which layers apply?
 
@@ -28,10 +30,10 @@ owned by the MCP tool — delete their content from the playbook unconditionally
 
 Burden of proof is on keeping content, not on deleting it.
 
-Test for every section or rule: *"Would a model following only Layer 3 + MCP tool schemas reach the same execution outcome?"*
-
-- **Yes** → Layer 1 or 2; delete regardless of apparent utility. MCP schema is authoritative; playbook copies become stale and misleading.
-- **No** → Layer 3; apply the invariant checklist before keeping.
+Test for every section or rule:
+- *"Would a model following only Layer 3 + MCP tool schemas reach the same execution outcome?"* — Yes → delete.
+- *"Does this say what to do when Next: = X?"* — Yes → Layer 2 output restatement → delete.
+- **No to both** → Layer 3; apply the invariant checklist before keeping.
 - **Uncertain** → delete. A missing Layer 3 rule causes one wrong execution; a stale Layer 1/2 copy causes compounding drift.
 
 Doctrine is Layer 3 only when at least one invariant re-derives from it; otherwise delete.
