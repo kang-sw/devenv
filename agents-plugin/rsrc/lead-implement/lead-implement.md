@@ -151,6 +151,7 @@ expectations, commit-range guidance, and reporting requirements.
 
 **Delegated or escalated route with generated plan:**
 ```text
+Read First: <rendered reviewer-partition playbook path>
 Review partition: <Correctness|Fit|Test>
 Diff range: <parent-of-first-commit>..<last-commit>
 Ticket path: <ticket-path>
@@ -174,6 +175,7 @@ Instructions:
 
 **Direct edit with no generated plan:**
 ```text
+Read First: <rendered reviewer-partition playbook path>
 Review partition: <Correctness|Fit|Test>
 Diff range: <parent-of-first-commit>..<last-commit>
 Ticket path: <ticket-path>

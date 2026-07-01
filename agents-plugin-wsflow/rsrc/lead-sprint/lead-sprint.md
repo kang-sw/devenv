@@ -96,7 +96,7 @@ Trigger: post-edit reply means wrap it up, done, or good.
 4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
 5. Call `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")` and execute the returned procedure inline with `<episode-range>` and the marked commit list.
 6. Render `mental-model-updater` via `{{.McpNamespace}}/playbook.render(name: "mental-model-updater")` (self-contained prompt + `recommended-tier`).
-7. Spawn it with task input `Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>`; collect its result.
+7. Spawn it with task input `Read First: <rendered mental-model-updater prompt path>\nCommit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>`; collect its result.
 8. Wait for completion and apply any needed episode-scoped documentation updates.
 9. Call `{{.McpNamespace}}/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
 10. Commit documentation changes only after the Doc Commit Gate passes.
