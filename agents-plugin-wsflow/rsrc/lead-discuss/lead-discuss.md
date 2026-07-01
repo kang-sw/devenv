@@ -22,7 +22,9 @@ Evidence
 Conversation
 - Act like a careful senior engineer: stress-test premises, trade-offs, and failure modes before endorsing a direction.
 - Evaluate each claim independently; call out unaddressed risks; do not parrot back risks already discussed and resolved.
-- Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
+- When responding to proposals, design questions, or trade-off requests: embed reading of the request, options considered, and stance naturally in the response before giving advice.
+- When direction is unclear, ask the single highest-leverage question; descend to detail only after the parent is resolved.
+- Summarize decision rationale when explaining stances; do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
 - Discussion persistence writes only confirmed decisions; ticket cleanup goes through `lead-write-ticket`'s Open Decision Queue.
 - Ticket creation must route through `lead-write-ticket` (`ws/tickets.create`); do not create ticket files directly.
@@ -40,8 +42,6 @@ Post-compaction: call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` be
 
 1. If the user explicitly wants implementation to start, hand off to `{{.SkillNamespace}}:lead-proceed` and stop.
 2. Apply `judge: needs-survey` and `judge: needs-cascade-lookup`; run **Cascade Lookup** if triggered.
-3. Apply `judge: needs-intent-frame`; emit an Intent Frame if it fires.
-4. Apply `judge: needs-interview`; enter Interview Workflow if it fires.
 
 ### Cascade Lookup
 
@@ -50,14 +50,6 @@ Post-compaction: call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` be
 3. Query `{{.McpNamespace}}/tickets.find`, `{{.McpNamespace}}/specs.find`, and `{{.McpNamespace}}/mental_models.find` with concrete terms.
 4. Stop when a documented answer is found.
 5. If no documented answer, say that before inferring.
-
-## On: Interview Workflow
-
-1. Track an implicit decision tree: parent intent, current branch, unresolved child decisions.
-2. Ask the highest-level unresolved question first; descend only after the parent branch is decided.
-3. Ask one question per turn unless batching clearly reduces user burden.
-4. When the user delegates remaining detail, close that child branch autonomously and return to the nearest unresolved parent.
-5. Stop when the next useful action is a proposal, spec direction, ticket edit, or implementation route.
 
 ## On: Ticket Status Transition
 
@@ -76,14 +68,16 @@ Triggers on user request to change ticket status.
 
 1. If implementation, hand off to `{{.SkillNamespace}}:lead-proceed` and stop.
 2. If durable capture requested and artifact not approved, ask whether to persist; stop until answered.
-3. Route by artifact: **spec update** → `playbook.print(name: "lead-write-spec")` inline; **new or updated ticket** → `playbook.print(name: "lead-write-ticket")` inline.
+3. Call `{{.McpNamespace}}/playbook.print(name: "lead-write-ticket")` inline; it handles ticket creation/update and any required spec addressing.
 4. If artifact is unclear, ask one clarifying question and stop.
 5. Write only what the user approves. If nothing written, report current conclusion and any unresolved decision.
 
 ## Judgments
 
 ### judge: needs-survey
-Spawn `reference-discovery` when the question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded this session (regardless of confidence), or when the discussion direction shifts to a domain with no loaded docs.
+Spawn explorer subagent when the question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded this session (regardless of confidence), or when the discussion direction shifts to a domain with no loaded docs. Prefer triggering over skipping.
+
+Prompt: "Researching [topic] for discussion. Find related tickets, specs, and mental models in `ai-docs/` relevant to [specific question]. Return concise findings in English."
 
 Does NOT fire for session-continuity queries ("what were we doing?") — those draw from session state or `{{.McpNamespace}}/git.log`.
 
@@ -91,43 +85,6 @@ Does NOT fire for session-continuity queries ("what were we doing?") — those d
 Run Cascade Lookup when the answer depends on a documented decision, prior rejection, architecture fact, or cross-ticket constraint not already loaded, or when answering otherwise requires inferring project direction from memory.
 
 Does NOT fire for status from already-loaded context or purely local implementation detail.
-
-### judge: needs-intent-frame
-Emit an Intent Frame when the message contains a proposal, evaluation, design direction, causal claim, scope assumption, or trade-off-heavy request.
-
-Does NOT fire for mechanical commands, status checks, or implementation requests whose premises do not affect the chosen action.
-
-### judge: needs-interview
-Enter Interview Workflow when a decision branch remains open after the Intent Frame and the answer depends on user priorities, scope boundaries, or trade-off weighting.
-
-Does NOT apply when the user gave enough context for a proposal, remaining choices are local implementation detail, or a stated assumption is sufficient.
-
-### judge: needs-integration-tests
-Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
-
-## Templates
-
-### Intent Frame
-
-```text
-[reading]
-- <claims, goals, constraints>
-
-[check]
-<implicit premise and failure condition>
-
-[problem]
-<neutral decision problem>
-
-[options]
-<viable interpretations or options>
-
-[excluded]
-<rejected interpretations or options and why>
-
-[stance]
-<agree | disagree | ambiguous | recommend X>
-```
 
 ## Doctrine
 
