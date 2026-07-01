@@ -82,15 +82,8 @@ Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` over native `git mv`; 
 
 ## On: Apply Ticket Content
 
-1. Capture confirmed goals, contracts, and agreed API/type/event/UI sketches.
-2. Capture completion boundary and deferred scope.
-3. Capture confirmed constraints and rationale.
-4. Capture settled implementation strategy decisions; include suggested strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
-5. Capture rejected alternatives.
-6. Capture confirmed forward-compatibility guardrails.
-7. Capture verification expectations.
-8. Capture enough detail that a fresh implementer can build the intended result without filling settled gaps.
-9. Exclude source-local edit notes unless settled constraints.
+1. Capture every settled decision, contract, agreed API/type/event/UI sketch (literal, not prose-flattened), rejected alternative, constraint, forward-compatibility guardrail, and verification expectation; include suggested implementation strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
+2. Exclude anything unconfirmed — return it to the Open Decision Queue instead of writing it; exclude source-local edit notes unless they are settled constraints.
 
 ## On: Open Decision Queue
 
@@ -104,17 +97,13 @@ Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` over native `git mv`; 
 
 ## On: Intent Review
 
-1. Re-read the written/edited ticket against the conversation and cross-ticket decision review.
-2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility guardrails, verification expectations, and agreed strategy that constrains implementation.
-3. Check whether agreed API/type/event/UI sketches were preserved literally, not prose-flattened.
-4. Check whether the ticket distorts or omits discussed intent.
-5. Check whether a fresh implementer could build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket; if yes, capture the missing settled decision.
-6. Check whether related-ticket decisions that constrain this implementation slice were captured.
-7. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
-8. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases.
-9. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus "Next" line was written.
-10. Fix confirmed gaps in-place; return unconfirmed gaps to the Open Decision Queue instead of writing them.
-11. Present a brief correction summary, or confirm nothing was missed.
+1. Re-read the written/edited ticket against the conversation and cross-ticket decision review, against the categories in **Apply Ticket Content**.
+2. Test: could a fresh implementer build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket? If yes, capture the missing settled decision.
+3. Check that API/type/event/UI sketches were preserved literally, not prose-flattened.
+4. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus "Next" line was written.
+5. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases.
+6. Fix confirmed gaps in-place; return unconfirmed gaps to the Open Decision Queue instead of writing them.
+7. Present a brief correction summary, or confirm nothing was missed.
 
 ## On: Spec-address Check
 
@@ -186,33 +175,21 @@ Always emit the current ticket path on its own final line: `Ticket: ai-docs/tick
 
 ## On: Cross-ticket decision review
 
-1. Identify the target's parent/epic relationships, any worksets that list the target, relevant co-listed workset tickets, child board entries, and explicitly related tickets when those links are available.
+Applies to a single edit target; **Cascade Edit** reuses this logic across multiple targets.
+
+1. Identify the target's parent/epic relationships, worksets that list it, co-listed workset tickets, child board entries, and explicitly related tickets when those links are available.
 2. Read only graph tickets that may contain decisions constraining the target's implementation scope.
-3. Record binding cross-ticket decisions in the target as scope, constraints, forward-compatibility guardrails, rejected alternatives, verification expectations, or phase dependencies.
-4. Do not copy unrelated future-phase detail; preserve only decisions that the current implementation could violate or block.
-5. If the same decision changes another active ticket's role, include that ticket in this logical edit; otherwise leave related tickets untouched.
-6. Keep epics board-level; move implementation constraints into the relevant child ticket or phase.
-7. Keep worksets non-hierarchical; move implementation constraints into the relevant included actionable ticket or phase.
+3. Record binding cross-ticket decisions in the target as scope, constraints, forward-compatibility guardrails, rejected alternatives, verification expectations, or phase dependencies; do not copy unrelated future-phase detail.
+4. If the same decision changes another active ticket's role, include that ticket in this logical edit; otherwise leave related tickets untouched.
+5. Keep epics board-level and worksets non-hierarchical; move implementation constraints into the relevant child or included ticket.
 
 ## On: Cascade Edit
 
-### 1. Select Targets
-
-1. Identify the impacted ticket graph: parent epic, containing epic, worksets that list selected targets, child tickets, related active tickets, and `_index.md` active inventory when it lists edited tickets.
-2. Select edit targets from that graph; do not edit merely-related tickets whose role is unaffected by the propagated decision.
-3. Read each selected target before editing.
-
-### 2. Apply Propagation
-
-1. Keep each edit within its target's **Board artifacts** invariant.
-2. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `{{.SkillNamespace}}:lead-proceed`.
-3. For any selected target entering `ready/`, run **Spec-address Check** before commit.
-
-### 3. Verify and Report
-
-1. Run Intent review across the edited set and commit one logical documentation unit when the edits are one decision propagation.
-2. Report edited ticket paths; if exactly one actionable implementation ticket is the natural next target, emit `Next Ticket: <path>` before the final artifact line.
-3. Always emit the edited/current ticket path as the final `Ticket:` line.
+1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to `_index.md` active inventory when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
+2. Apply per-target decision recording per **Cross-ticket decision review**.
+3. Do not promote a target to `ready/` unless the user explicitly asked for ready promotion or routed through `{{.SkillNamespace}}:lead-proceed`; run **Spec-address Check** before commit for any target entering `ready/`.
+4. Run **Intent Review** across the edited set; commit one logical documentation unit when the edits are one decision propagation.
+5. Report edited ticket paths; if exactly one actionable implementation ticket is the natural next target, emit `Next Ticket: <path>` before the final artifact line. Always emit the edited/current ticket path as the final `Ticket:` line.
 
 ## Judgments
 
@@ -228,9 +205,7 @@ Default: if the user asks for a board without decomposition ownership, choose `w
 
 Trigger: non-`epic`, non-`research`, non-`workset` ticket creation or move into `ready/`.
 Ungated: `idea/` creation and `idea/` -> `todo/` triage.
-Find addressing: identify existing `spec:` or `spec-remove:` stems, or write a ticket-local `## Spec Impact` section.
-Contract-first: call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute inline only when `judge: contract-first-spec` is yes.
-Stop: no stem or `## Spec Impact` can address the behavior, the lead-write-spec procedure failed, or the behavior is too underspecified; name the blocker.
+Mechanics: see **On: Spec-address Check**; stop condition is `judge: missing-spec-address`.
 
 ### judge: initial-status
 
@@ -259,9 +234,6 @@ Do not trigger: mechanical status moves, already-confirmed ticket edits, or crea
 
 ### judge: ticket-shape
 
-Artifact role: keep epics board-level and worksets operating-context-only; put implementation detail in actionable tickets.
-Scope keep: decisions, constraints, and agreed API/type/event/UI sketches.
-Scope exclude: source-local edit notes unless settled constraints.
 Ticket split: only when board, ticket, and implementation-unit roles are mixed, or unrelated increments belong in separate actionable tickets.
 Phase default: actionable tickets use one `Phase 1`.
 Phase unit: one reviewable implementation slice a future fresh session can finish, review, verify, and hand off cleanly.
