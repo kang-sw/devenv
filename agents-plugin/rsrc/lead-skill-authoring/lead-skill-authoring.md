@@ -15,10 +15,10 @@ owned by the MCP tool — delete their content from the playbook unconditionally
 | Layer | Owns | Model-accessible? | Delete from playbook? |
 |-------|------|------|------|
 | 1 — MCP schema | Input field names, types, enums, call format; response schema (Next: labels, state update field names) | Yes — via ToolSearch before call, tool response after | Yes — restatement drifts |
-| 2 — MCP internal | Routing computation, verdict selection logic, `NextInstruction` content | No — black box; post-call instructions arrive via tool response | Yes — always invisible; "if Next: = X, do Y" playbook lines are Layer 2 output restatement |
+| 2 — MCP internal | Routing computation, verdict selection logic, and all post-call output text (e.g. `NextInstruction`, a todo's `Instruction` field) | No — black box; post-call instructions arrive via tool response | Yes — always invisible; playbook lines that say what to do with a tool's post-call output (e.g. `Next:`, a todo `Instruction`) are Layer 2 restatement |
 | 3 — Playbook | Pre-call only: observation targets, soft judgments, non-obvious edge cases, step choreography, doctrine | Yes — this file | N/A — keep only what passes the destructive-first test |
 
-Layer 3 is **pre-call only**. After the MCP call, the model follows `Next:` exactly; post-call branch handling belongs in `NextInstruction`, not in playbook prose.
+Layer 3 is **pre-call only**. After the MCP call, the model follows the tool's returned output exactly (e.g. `Next:`, a todo `Instruction`); post-call branch handling belongs in that output, not in playbook prose. These are examples of a post-call output channel, not an exhaustive list — a new MCP output shape is still Layer 2.
 
 ### Gate: which layers apply?
 
@@ -32,7 +32,7 @@ Burden of proof is on keeping content, not on deleting it.
 
 Test for every section or rule:
 - *"Would a model following only Layer 3 + MCP tool schemas reach the same execution outcome?"* — Yes → delete.
-- *"Does this say what to do when Next: = X?"* — Yes → Layer 2 output restatement → delete.
+- *"Does this say what to do with content an MCP tool returns post-call (e.g. `Next:`, a todo `Instruction`)?"* — Yes → Layer 2 output restatement → delete. Confirm against the tool's actual generated text, not the schema alone.
 - **No to both** → Layer 3; apply the invariant checklist before keeping.
 - **Uncertain** → delete. A missing Layer 3 rule causes one wrong execution; a stale Layer 1/2 copy causes compounding drift.
 
