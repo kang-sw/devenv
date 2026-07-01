@@ -9,120 +9,76 @@ Target: user request
 
 ## Invariants
 
-- Ticket conventions: call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")` for structural rules (path format, status flow, phase rules, stem rules). For typed body skeletons, call `{{.McpNamespace}}/tickets.template(type: "<category>")` after classify.
-- Aside from required conventions, focus updates, and explicitly routed spec or mental-model checks, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions.
-- Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
-- Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
-- Workset tickets stay non-hierarchical operating-context collections; never add, remove, or change `parent:` based on workset inclusion.
-- Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
-- Ready tickets require spec addressing, not mandatory planned spec text.
-- Ordinary `todo/` edits leave the ticket in `todo/`; proceed-routed actionable `todo/` tickets move to `ready/` only after intent review and spec-address check pass.
-- Persist only user-confirmed decisions; keep unconfirmed mechanisms, future-scope hints, and draft forward notes out of tickets and focus text.
-- Before discussion-derived ticket cleanup, resolve the Open Decision Queue with the user and write only confirmed queue items.
+Capture
+- Preserve settled decisions, contracts, agreed API/type/event/UI sketches, rejected alternatives, constraints, forward-compatibility guardrails, and verification expectations — enough for a fresh implementation session to recover intent without inventing missing product, workflow, API, or verification decisions.
+- Persist only user-confirmed decisions; resolve the Open Decision Queue before writing any discussion-derived content.
+
+Board artifacts
+- Epic and workset bodies stay within their `tickets.template` skeleton's board-level sections; implementation detail moves to a separate `lead-write-ticket` invocation scoped to the child/included ticket.
+- Worksets stay in `idea/`/`todo/`; never create or move a workset into `ready/`.
+- Never add, remove, or change `parent:` based on workset inclusion.
+
+Scope
+- Read only ticket files selected as edit targets, graph tickets needed for binding-decision review, required conventions, focus updates, and explicitly routed spec/mental-model checks.
+- Review related-ticket decisions by default; cascade (`judge: cascade-ticket-edit`) only for broader board or multi-ticket propagation.
+- Ready promotion requires spec addressing (`judge: spec-address-gate`), not mandatory planned spec text.
+
+Movement
+- Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` / `tickets.create` over native `git mv` or manual file edits; fall back only when the MCP tool is unavailable or errors.
 
 ## On: invoke
 
 ### 1. Route
 
 1. Call `{{.McpNamespace}}/convention.read(name: "ticket-conventions")`.
-2. Classify category/status; mark **judge: spec-address-gate** for any non-`epic`, non-`research`, non-`workset` ticket entering `ready/`.
-2. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
-3. For a proceed-routed actionable `todo/` ticket, set the requested change to ready promotion.
+2. If `user request` references an existing ticket, read it.
+3. Classify category (`judge: ticket-category`); for a new ticket, choose initial status (`judge: initial-status`). For a proceed-routed actionable `todo/` ticket, set the requested change to ready promotion.
+4. Call `{{.McpNamespace}}/tickets.template(type: "<category>")` for the typed body skeleton.
+5. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
+6. For actionable creation or edits, run **Cross-ticket decision review** before drafting.
+7. For workset creation or edits, verify each existing included ticket's path, current status directory, and stated role; convert missing tickets to planned references or stop on a blocker.
 
-### 2. Load
-
-1. If `user request` references an existing ticket, read it.
-2. For actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
-3. For workset creation or edits, verify each existing included ticket's path, current status directory, and stated role; convert missing tickets to planned references or stop on a blocker.
-
-### 3. Consent Gate
+### 2. Consent Gate
 
 1. Apply `judge: needs-open-decision-queue`; if it fires, run **Open Decision Queue** before editing ticket text.
 
-### 4. Write
+### 3. Populate
 
-1. For a new ticket, run **Create Ticket**.
-2. For an existing ticket, run **Edit Ticket**.
+1. New ticket: call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, type: "<category>", title: "<title>", status: "<initial-status>")`; fall back to manual file creation only when the tool is unavailable or errors.
+2. Existing ticket: apply the requested change — phase update, content update, or status move — directly to the loaded body.
+3. Fill the loaded skeleton with a clear problem/goal statement per **Apply Ticket Content**.
+4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
+5. For actionable tickets, apply `judge: ticket-shape` for phase count and granularity.
+6. For epic/workset detail that belongs to a child or included ticket: stop this invocation; start a separate `lead-write-ticket` invocation scoped to that ticket.
+7. For workset: list not-yet-created work in `## Planned References` with a provisional label, intended role, and creation condition — no status/path/`parent:` until a real ticket exists. If the user also requested included actionable creation or edits, record planned references unless explicit cascade owns those edits; for cascade, create or edit the actionable tickets in separate commits, then update the workset to reference final paths/statuses.
+8. For a status move, see **Move**.
 
-### 5. Verify
+### 4. Verify
 
 1. Run **Intent Review**.
-2. Run **Spec-address Check**.
+2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check**.
 
-### 6. Commit
+### 5. Commit
 
-1. If no file changed because the requested move was refused, skip commit.
+1. If no file changed because a requested move was refused, skip commit.
 2. Commit edited paths with `{{.McpNamespace}}/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
-### 7. Sage Review Gate
+### 6. Sage Review Gate
 
 1. Run **Sage Review Gate**.
 
-### 8. Handoff
+### 7. Handoff
 
 1. Run **Output Handoff**.
 
-## On: Create Ticket
+## On: Move
 
-### 1. Classify
+Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` over native `git mv`; fall back only when the MCP tool is unavailable or errors.
 
-1. Determine category through `judge: ticket-category`.
-2. Choose the initial status directory through `judge: initial-status`.
-3. Call `{{.McpNamespace}}/tickets.template(type: "<category>")` to load the typed body skeleton.
-
-### 2. Create Stub
-
-1. Call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, type: "<category>", title: "<title>", status: "<initial-status>")` to create the dated stub file. Fall back to manual file creation only when the tool is unavailable or returns an error.
-
-### 3. Draft
-
-1. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
-2. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure, without `.md`; omit when none applied.
-
-### 4. Shape
-
-1. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
-2. For `epic`: reference existing/planned children.
-3. For `epic`: if child creation or edit is needed, finish the epic edit first, then start a separate `lead-write-ticket` invocation scoped to the child.
-4. For `workset`: write context, focus, existing included tickets listed by stem/path with current status and role, and exit criteria.
-5. For `workset`: list planned-but-not-created work in `## Planned References` with a provisional label, intended role, and creation condition; do not assign status/path or `parent:`.
-6. For `workset`: if the user also requested included actionable ticket creation or edits, record planned references unless explicit cascade owns those ticket edits.
-7. For `workset` cascade: create or edit actionable tickets in separate commits, then update the workset to reference final paths/statuses; never add `parent:` because of workset inclusion.
-8. For actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
-9. For each actionable phase, run **Apply Ticket Content**.
-10. For actionable tickets, note inter-phase dependencies explicitly.
-
-### 5. Ready Guard
-
-1. For `workset`, choose `idea/` or `todo/`; do not create or move it into `ready/`.
-2. For `ready/`, defer focus entry until **Spec-address Check** passes.
-
-## On: Edit Ticket
-
-### 1. Load
-
-1. Read the ticket first when it was not already loaded.
-2. If the ticket type is known, call `{{.McpNamespace}}/tickets.template(type: "<type>")` for skeleton reference.
-
-### 2. Apply Change
-
-1. Apply the requested change: phase update, content update, or status move.
-2. For `epic`, keep edits board-level.
-3. For `epic` implementation detail, finish the epic edit first, then start a separate `lead-write-ticket` invocation scoped to the child ticket.
-4. For `workset`, keep edits to non-hierarchical operating context and included-ticket notes.
-
-### 3. Move
-
-1. For moves, use `{{.McpNamespace}}/tickets.close(stem, status)` for done/dropped, or `{{.McpNamespace}}/tickets.move(stem, to)` for idea/todo/ready; fall back to native `git mv` when MCP tools are unavailable.
-2. For `.done/` moves via native `git mv`, add `completed:` date in frontmatter; `tickets.close` writes this automatically.
-3. If the only requested change is moving a `workset` to `ready/`, make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.
-4. For `workset` moves to `ready/` with other edits, do not move status; keep only valid content edits.
-5. For proceed-routed `todo/` -> `ready/` promotion, defer the move until **Spec-address Check** passes.
-
-### 4. Shape
-
-1. For actionable shape or phase changes, apply `judge: ticket-shape`.
-2. For each changed actionable phase, run **Apply Ticket Content**.
+1. `.done/` via `tickets.close` writes `completed:` automatically; a native `git mv` fallback requires adding it manually.
+2. Workset → `ready/` as the only requested change: make no file changes, skip commit, report the refusal, and emit the unchanged `Ticket:` path.
+3. Workset → `ready/` combined with other edits: do not move status; keep only the valid content edits.
+4. Deferred `todo/` → `ready/` promotion: move only after **Spec-address Check** passes.
 
 ## On: Apply Ticket Content
 
@@ -162,46 +118,26 @@ Target: user request
 
 ## On: Spec-address Check
 
-### 1. Scope
+Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promotion counts as `ready/` for this check).
 
-1. Skip `epic`, `research`, and `workset`.
-2. Treat requested `todo/` -> `ready/` promotion as `ready/` for this check.
-3. Apply `judge: spec-address-gate` before committing a new `ready/` ticket, a `ready/` promotion, or a `ready/` focus entry.
-4. If Spec-address Check fails, do not move the ticket to `ready/` or add a `Ticket Focus` entry; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
-
-### 2. Todo Handling
-
-1. For `todo/`, preserve existing `spec:` links as optional recovery hints.
-2. For `todo/`, leave the ticket in `todo/`; it may be shown as a non-ready attention item, but implementation must still route through proceed.
-
-### 3. Ready Addressing
-
-1. For `ready/`, use `{{.McpNamespace}}/specs.find` or `{{.McpNamespace}}/specs.status` to confirm existing `spec:` and `spec-remove:` stems.
-2. For `ready/`, keep confirmed existing stems in frontmatter.
-3. For `ready/`, when neither confirmed `spec:` nor `spec-remove:` stems address the phase, write or update `## Spec Impact`.
-4. `## Spec Impact` must name the target spec area, expected caller-visible change, and `Contract-first spec: yes|no`.
-5. If `Contract-first spec: yes`, call `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` and execute the returned procedure inline, re-check the created or updated stem, and list it in `spec:`.
-6. After a contract-first spec is listed in `spec:`, remove redundant `## Spec Impact` text or keep only closeout notes not covered by the spec.
-7. If neither confirmed stems nor `## Spec Impact` addresses a phase, apply `judge: missing-spec-address`.
-
-### 4. Ready Focus
-
-1. `Ticket Focus` may list selected active attention items; only `ready/` entries are direct implementation targets.
-2. For non-ready focus entries, use `` `stem` (`status`, `<role>`) - one-line purpose and why it is in focus; not implementation-ready ``.
-3. For `ready/`, remind that implementation commits should include a `## Spec` section for existing stems or the doc closeout should resolve `## Spec Impact`.
-4. For `ready/`, ensure `ai-docs/_index.md ## Ticket Focus` has `` `stem` - one-line purpose, readiness, and dependency notes ``.
-5. For deferred `todo/` -> `ready/` promotion, use `{{.McpNamespace}}/tickets.move(stem, to: "ready")` or native `git mv` as fallback; then commit.
+1. For `todo/` (not promoting): existing `spec:` links are optional recovery hints only; implementation still routes through proceed.
+2. For `ready/`: confirm existing `spec:`/`spec-remove:` stems via `{{.McpNamespace}}/specs.find` or `specs.status`; keep confirmed stems as-is.
+3. If no confirmed stem addresses a phase: write or update `## Spec Impact` per the loaded skeleton's field guidance. When `judge: contract-first-spec` is yes: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-write-spec")` inline, list the resulting stem in `spec:`, and drop redundant `## Spec Impact` text.
+4. If neither a confirmed stem nor `## Spec Impact` addresses a phase: apply `judge: missing-spec-address` and stop — do not move to `ready/` or add a `Ticket Focus` entry; restore pre-invocation edits unless valid non-ready edits were explicitly requested, then report the kept or reverted paths.
+5. On pass, for `ready/`: ensure `ai-docs/_index.md ## Ticket Focus` carries `` `stem` - one-line purpose, readiness, and dependency notes ``. For a non-ready attention entry, use `` `stem` (`status`, `<role>`) - one-line purpose and why it is in focus; not implementation-ready ``.
 
 ## On: Output Handoff
 
-1. For `epic`, do not suggest proceeding on the epic path.
-2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
-3. For `workset`, suggest one concrete next action: proceed/promote an existing included actionable ticket, or create a planned reference as a new actionable ticket; never suggest proceeding or promoting the workset itself.
-4. For actionable tickets with valid spec addressing, suggest `{{.SkillNamespace}}:lead-proceed`; when spec addressing blocks readiness, report the blocker and omit a proceed suggestion.
-5. State that proceed routes to implementation readiness; the lead-implement procedure resolves plan depth and execution mode.
-6. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
-7. For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
-8. Preserve the final `Ticket:` line; callers such as `{{.SkillNamespace}}:lead-proceed` capture this path from prefix-stage output.
+| Category | Handoff |
+|---|---|
+| `epic` | Suggest creating, promoting, or proceeding a child ticket; never suggest proceeding the epic path itself. |
+| `workset` | Suggest one concrete next action on an included ticket (proceed/promote an existing one, or create a planned reference as a new actionable ticket); never suggest proceeding or promoting the workset itself. |
+| actionable, spec-addressed | Suggest `{{.SkillNamespace}}:lead-proceed`; note that proceed resolves plan depth and execution mode. |
+| actionable, blocked on spec addressing | Report the blocker; omit the proceed suggestion. |
+
+For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
+
+Always emit the current ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`. Preserve this line exactly — callers such as `{{.SkillNamespace}}:lead-proceed` capture the path from prefix-stage output.
 
 ## On: Sage Review Gate
 
@@ -268,11 +204,9 @@ Target: user request
 
 ### 2. Apply Propagation
 
-1. Keep epics to scope, non-scope, child ticket board, cross-child decisions, and completion criteria.
-2. Keep worksets to context, included tickets, focus, and exit criteria; never add child relationships from workset inclusion.
-3. Put implementation decisions, constraints, rejected alternatives, and phases into actionable tickets.
-4. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `{{.SkillNamespace}}:lead-proceed`.
-5. For any selected target entering `ready/`, run Spec-address check before commit.
+1. Keep each edit within its target's **Board artifacts** invariant.
+2. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `{{.SkillNamespace}}:lead-proceed`.
+3. For any selected target entering `ready/`, run **Spec-address Check** before commit.
 
 ### 3. Verify and Report
 
