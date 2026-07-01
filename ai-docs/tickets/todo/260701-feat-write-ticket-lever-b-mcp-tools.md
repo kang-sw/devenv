@@ -1,7 +1,7 @@
 ---
 title: "Lever B: checklist-as-todo and sage-review posture/aggregate MCP tools"
 parent: 260630-epic-skill-playbook-diet
-sage-review: required
+sage-review: completed
 ---
 
 # Lever B: checklist-as-todo and sage-review posture/aggregate MCP tools
