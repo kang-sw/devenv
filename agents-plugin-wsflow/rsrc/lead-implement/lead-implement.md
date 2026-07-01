@@ -18,6 +18,7 @@ Branch
 
 Execution
 - Call `{{.McpNamespace}}/enter.implement` once after facts are complete.
+- No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict. On `delegated`, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
 - Name workflow skill handoffs with `{{.SkillNamespace}}:<skill>` notation.
 - Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.
 - Treat the installed todo list as the ordered runbook; do not create a parallel task list.
@@ -43,49 +44,20 @@ Review
 5. Use the current lead `session_key` from `{{.McpNamespace}}/workflow_manual`; stop if no lead key is available.
 6. Call `{{.McpNamespace}}/enter.implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
 
-```json
-{
-  "session_key": "<lead key>",
-  "target": {"kind": "<ticket|inline|unknown>", "...": "..."},
-  "facts": {"scope": {}, "complexity": {}, "risk": {}},
-  "policy": {"branch": {}, "review": {}, "docs": {}},
-  "format": "json"
-}
-```
-
-Fact groups:
-
-| group | fields |
-| --- | --- |
-| `target` | `kind`, `label`, `ticket_stem`, `ticket_path`, `scope_label`, `scope_slug` |
-| `facts.scope` | `span`, `surface`, `new_public_symbol`, `new_type_contract`, `test_surface`, `explicit_delegation_request`, `explicit_direct_edit_request` |
-| `facts.complexity` | `change_points`, `reuse_points`, `strategy_shape`, `side_effect_risk`, `cold_context` |
-| `facts.risk` | `correctness`, `fit`, `test`, `security_or_contract` |
-| `policy.branch` | `merge_target`, `allow_rename` |
-| `policy.review` | `override` |
-| `policy.docs` | `mode`, `reason` |
-
-Use the live MCP tool schema for enum values; this table is a checklist, not a schema copy.
-
 Policy rules:
 - Set `policy.branch.merge_target` only when already on `implement/*` or the user names it.
 - Set `policy.branch.allow_rename=yes` only when the caller accepts pre-edit branch rename.
-- Set `policy.review.override` only for explicit caller review policy.
-- Set `policy.docs.mode=skip-with-reason` only with an explicit reason.
 
 `explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
 
 **Fact-source rule**: Fill `facts.scope` fields from the ticket description before reading any source file. If a fact cannot be determined from the ticket alone, leave it `unknown`. Do not update `facts.scope` fields after reading source. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
 
-**Edit gate**: No Edit or Write tool call is permitted until `enter.implement` has returned a `direct-edit` verdict. On a `delegated` verdict, source reading is permitted for routing, brief, and plan quality only — source mutation is owned by the implementer agent.
-
 ### 2. Execute Verdict
 
 1. Read `raw`, `next_instruction`, warnings, and the installed todos.
-2. Warnings explain inputs; the verdict still owns branch, delegation, plan, review, and docs.
-3. Use `{{.McpNamespace}}/todo.read(key: "<todo-key>")` or `{{.McpNamespace}}/todo.list(mode: "full")` when an instruction is truncated.
-4. If the verdict says `Branch Action: stop`, report the blocker before source edits.
-5. Execute todos in order:
+2. Use `{{.McpNamespace}}/todo.read(key: "<todo-key>")` or `{{.McpNamespace}}/todo.list(mode: "full")` when an instruction is truncated.
+3. If the verdict says `Branch Action: stop`, report the blocker before source edits.
+4. Execute todos in order:
    - `{route}` / branch setup
    - `{prep}` / direct confirmation or delegated plan
    - `{edit}` / direct edit or implementer dispatch
