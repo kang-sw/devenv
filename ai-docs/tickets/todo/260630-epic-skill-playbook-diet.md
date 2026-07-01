@@ -42,60 +42,68 @@ Skills without `enter.*` support may need Lever B work before they can be fully 
 | Step ordering / choreography | Playbook body |
 | Rationale, background, duplication of any row above | Delete |
 
-## Pilot
+## Pilot / Completed
 
-`lead-proceed` dieted in this session (2026-06-30): 180 → 63 lines via Lever A.
-Removed: Route Facts table, Fact Guidance section, `enter.proceed` JSON format block.
-Kept: scope resolution edge cases (non-obvious), three lead-owned judgment tables.
+- `lead-proceed`: 180 → 63 lines via Lever A. Removed Route Facts table, Fact
+  Guidance section, `enter.proceed` JSON format block. Kept scope resolution
+  edge cases (non-obvious) and three lead-owned judgment tables.
+- `lead-discuss`: 189 → 93 lines via Lever A.
+- `lead-implement`: 281 → 225 lines via Lever A, in two passes. First pass
+  removed the JSON call-format block, the Fact groups table, and tautological
+  policy bullets. Second pass verified against actual `enter.implement`
+  instruction-generation source (`session_state.go`,
+  `implement_resolver.go`) and found Route-onward step prose was near-verbatim
+  restatement of MCP-generated todo `Instruction` text — collapsed to gates
+  and ownership boundaries only. This second-pass method (confirm against
+  actual generated tool output, not schema-inferred guesswork) is now encoded
+  in `lead-skill-authoring`'s destructive-first stance and is the required
+  method for any remaining `enter.*`-backed target below.
 
 ## Phases
 
-### Phase 1: Encode golden rule in lead-skill-authoring
+### Phase 1: Encode golden rule in lead-skill-authoring — Done
 
-Edit `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md`:
-- Add the two-lever model (Lever A: text minimization; Lever B: MCP-ification)
-- Add the golden rule table
-- Name the section so later authoring passes can apply it without reading this epic
-
-Acceptance: a new authoring pass on any playbook can apply the rule without
-reading this ticket.
+Encoded in `agents-plugin/rsrc/lead-skill-authoring/lead-skill-authoring.md`:
+Layer Model table, two-lever framing, destructive-first stance (generalized
+to bind to any MCP post-call output, not just `Next:`), Templates/delegate-
+payload exemption.
 
 ### Phase 2: Audit and classify remaining playbooks
 
-For each un-dieted playbook, identify:
-- Lever A removable content (MCP schema restatements)
-- Lever B candidates (conditional logic that could move to MCP)
-- Which MCP tools would need to be created or extended for Lever B
+Superseded by direct-contact evidence-checking (see `lead-implement` note
+above) rather than a separate up-front audit pass. Remaining targets are
+classified inline, at diet time, against actual MCP tool source.
 
-Produce a per-playbook classification. Research output; no edits in this phase.
+### Phase 3/4 curated targets (2026-07-01 curation)
 
-### Phase 3: MCP-ification (Lever B) where needed
+Merged; lever type (A vs B) is determined per-skill at diet time rather than
+pre-assigned, since `lead-implement` showed the split can only be confirmed
+by reading the tool's actual generated output.
 
-Implement new or extended `enter.*` / MCP tools identified in Phase 2.
-Diet the corresponding playbooks immediately after each tool lands.
-
-Likely candidates (confirm in Phase 2):
-- `lead-write-ticket` (371 lines) — complex routing and phase-consistency logic
-- `lead-forge-spec` (290 lines)
-- `lead-review` (212 lines)
-
-### Phase 4: Lever A diet for remaining playbooks
-
-Apply text-minimization diet to playbooks that already have `enter.*` support
-or have no significant conditional logic to MCP-ify:
-
-- `lead-implement` (281 lines) — `enter.implement` exists
-- `lead-salvage` (212 lines)
-- `lead-forge-mental-model` (222 lines)
-- `lead-discuss` (189 lines)
-- `lead-verify-design` (174 lines)
+- `lead-write-spec` (129 lines)
+- `lead-write-ticket` (371 lines)
 - `lead-add-rule` (167 lines)
 - `lead-workflow-manual` (162 lines)
-- `lead-bootstrap` (153 lines)
-- `lead-sprint` (155 lines)
+- `lead-sprint` (155 lines) — `enter.sprint`-backed; apply the same
+  generated-instruction-text verification method used for `lead-implement`
+  before assuming any section is Layer 3.
+
+### Deletion candidate (not diet)
+
+- `lead-verify-design` (174 lines) — its function is covered by the ticket's
+  `sage-review` gate; delete the skill rather than diet it. No other skill
+  or manifest entry routes to it as a handoff target (confirmed via repo
+  grep). Actual deletion is a separate approval step, not covered by this
+  ticket-scoping edit.
 
 ## Out of Scope
 
 - Changing MCP tool behavior or schemas unless serving a Lever B migration.
 - Removing lead-owned judgment tables.
 - Removing non-obvious edge-case guardrails.
+- `lead-bootstrap`, `lead-forge-mental-model`, `lead-review`, `lead-salvage` —
+  rarely invoked; spec clarity outweighs diet benefit for infrequently-called
+  skills. Excluded from this epic's curated target list (2026-07-01).
+- `lead-forge-spec` (290 lines) — was a Phase 3 candidate in the original
+  scoping; not carried into the 2026-07-01 curated target list. Deferred, not
+  ruled out — revisit in a separate pass if it resurfaces as a target.
