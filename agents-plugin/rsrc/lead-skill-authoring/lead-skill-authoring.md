@@ -38,6 +38,8 @@ Test for every section or rule:
 
 Doctrine is Layer 3 only when at least one invariant re-derives from it; otherwise delete.
 
+Exempt: text rendered verbatim into a subagent/delegate prompt (`Templates` blocks, `playbook.render` payloads). Its reader has no session context or access to this skill's Invariants — apply Agent Layout self-containment to it, not this test.
+
 ## Authoring Rules
 
 ### Reader model
