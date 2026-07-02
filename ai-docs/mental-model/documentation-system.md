@@ -31,7 +31,7 @@ related:
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
 - The root `ai-docs/mental-model.md` may carry a compact project reading map for task/topic routing; it does not own behavior, status, focus, or source-derived claims. {#260505-mental-model-document-system}
 - `### Mental Model Notes` is an optional workflow-internal commit subsection under `## AI Context`; `mental-model-updater` treats those notes as primary intent and uses diffs for verification and fallback. {#260518-mental-model-update-context-annotation}
-- Infra and convention docs are embedded in the Go runtime; retired legacy copies do not affect `ws/infra.read` or `ws/convention.read`.
+- `ws/infra.read` serves infra docs from the rsrc tree (`agents-plugin/rsrc/`, 260611 Phase 6b); `ws/convention.read` serves convention docs from a `go:embed` bundle in `wsdoc`. Retired legacy copies do not affect either.
 - Broad `specs.find` and `mental_models.find` query matching is token-scored in shared wsdoc helpers, not per-discovery substring checks; exact selectors (`spec_stem`, `ticket_stem`, `domain`) still filter before query scoring. {#260519-tolerant-documentation-lookup-query-evidence}
 - Query evidence is body-line-only: metadata can raise a document score, but it must not create synthetic line evidence. This prevents text output from pointing callers at non-existent line zero hits. {#260519-tolerant-documentation-lookup-query-evidence}
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}

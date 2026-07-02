@@ -598,6 +598,12 @@ web-tmux-style surface**; only the subagent-audit / agent-activity logic
 MCP integration surfaces (ticket board, index, file/terminal) are **kept and
 intended to grow**.
 
+> **Re-evaluated under option B (2026-06-09, see ws.lead/child-key section):**
+> the "rip out agent-activity" half no longer holds — the codex mercenary
+> lifecycle survives, so the feed has a live source. agent-activity becomes a
+> port-vs-remove product decision deferred to a separate dashboard `idea/`
+> ticket; M3 only keeps the dashboard compiling against the reshaped surface.
+
 ### Decision: role-containment retained — capability-scoped session keys
 
 `WS_MCP_TOOL_PROFILE` role gating (lead/delegate/leaf tool restrictions) was
@@ -617,6 +623,266 @@ Forward note: the session-key issuance API should therefore reserve an optional
 capability/role-scope parameter from the first cut, even if the first
 implementation only honours a single default profile.
 
+### Refine: spawn core frozen-preserved, not source-deleted (option C)
+
+> **Superseded for the retained core by option B below (2026-06-09).** The
+> dominant codex mercenary path is retained live, not frozen. The freeze framing
+> survives only for genuinely-retired parts (gemini runner, subquery, exploration
+> spawn, diagnostic sprawl). Kept as the decision trail.
+
+Fourth lead-discuss session (2026-06-09). The "total spawn removal" decision is
+refined on its disposition of the spawn **source**, not its disposition of the
+**live path**.
+
+Reconsidered question: is it cheaper to keep ws.agent but hide it from the
+public schema rather than delete it? Findings:
+
+- "Hide from public schema" already exists and is dogfooded: `WS_MCP_NO_AGENT=1`
+  → `noAgentHiddenTool()` (`mcp/server.go:3118`) already filters `agents.*`,
+  `exec.*`, `subquery`, `api.ask*`, `config.agents_tier` from the schema. The
+  hiding cost is ≈ 0 — a default-flip, not new work.
+- The expensive work (skill-text conversion to native delegation, M2) is paid
+  either way; hiding the runtime does not save it.
+- The real tax of keeping the spawn code **compiled-but-dormant** is
+  entanglement: `agent.go`'s `SelfWorkerStarter`/`childActor` paths are welded
+  to the actor/setup machinery this pivot deletes, and `childActorInstruction`
+  recovery is already broken under shared-process native subagents. Keeping it
+  compilable means either reviving the broken actor model or rewiring dormant
+  code onto session-auth — integration labor with no deletion payoff.
+- The token motivation does not favor ws-spawn: a spawned subprocess reboots a
+  full model session (system prompt + full tool schema reload → more tokens),
+  while the context-isolation win is delivered equally by native subagents
+  (which inherit the full ws toolset and return only results). The sole genuine
+  residual value is harness-independence (a harness with no subagent feature at
+  all), which the tip-only / fresh-spawn + resume-brief recovery path already
+  covers as a soft dependency.
+
+Outcome — **option C, chosen over both total source-deletion and
+compiled-but-dormant retention**: remove the spawn surface from the live server
+and delete the actor entanglement, but **freeze-preserve the runner backends
+(claude.go/codex.go/gemini.go) and the spawn core out of the compiled server**
+(build-tag isolation or `ai-docs/ref/`), carrying zero compile/compat tax. The
+capability is resurrectable if a no-native-subagent harness ever becomes a real
+target. Consistent with repo Architecture rule #5 (preserve historical material
+under `ai-docs/ref/`).
+
+Unchanged by this refine: the live `agents.*`/`subquery` schema removal, the
+actor → session-auth replacement, and the resolved-by-deletion outcome for the
+spawn bug backlog (the buggy code no longer executes on any live path; the
+frozen copy carries the known issues only if resurrected, not before).
+
+### Supersede: option B — mercenary retained first-class, scoped to implementer/reviewer
+
+Fifth lead-discuss exchange (2026-06-09). Use-case data plus a verified
+limitation reshape option C into option B. Trail kept (total deletion → freeze →
+retain-reshape); option B is the current decision for the retained core.
+
+Drivers:
+
+- ws-spawn **codex** calls are the dominant real use case and the code is
+  battle-tested; deep-freezing the dominant path is wasteful — option C's
+  "archival insurance" framing under-values it.
+- The assumed recursion barrier is gone: the `WS_MCP_TOOL_PROFILE` env profile
+  is **verified non-functional** for capability containment (recorded in the
+  `named-agent-runtime` mental model, 2026-06). Capability-scoped session keys
+  are soft (re-loginable). Neither layer hard-prevents recursive spawning.
+
+Decision — **option B: retain the spawn engine as a first-class "mercenary"
+surface** (not frozen-archival), but scoped:
+
+- **mercenary = ws-spawned external subprocess agent**, a deliberately distinct
+  term from harness-native "subagent" (resolves the LLM semantic collision). The
+  engine = the runner backends + the reshaped lifecycle.
+- **Scope restriction: mercenary is for implementer and reviewer roles ONLY.**
+  Exploration/survey (reference-discovery, plan-populator), mental-model-update,
+  and `subquery`'s successors route to **native subagents** — the pivot
+  direction is retained for those (subquery→Explore absorption stands).
+- **Routing** (finalized 2026-06-09, see ws.lead/child-key section): default is
+  **always native**; the mercenary is always *available* to the lead, invoked only
+  when (a) the user explicitly requests a mercenary call, or (b)
+  `ws/lead.prefer_mercenary(session_key)` has flipped that key's render mode.
+  `prefer_mercenary` changes only the *default guidance*, never availability.
+- **codex runner stays live** (primary mercenary engine); claude/gemini
+  disposition is refined in the ws.lead/child-key section below (claude
+  **retained**, gemini → **deferred plug**, not a deletion).
+- `subquery.go` spawn path is removed (exploration → native).
+
+What option B changes vs option C / total-deletion:
+
+- The codex (and possibly claude) runner backends + the reshaped `agents.*`
+  call/lifecycle core stay **compiled and live** behind the mercenary surface —
+  NOT frozen out of the server. Freeze/removal now applies only to genuinely
+  retired parts (gemini runner, subquery spawn, exploration spawn paths, and the
+  diagnostic sprawl beyond what mercenary needs).
+- The actor → ephemeral session-auth replacement is **unchanged** (M3 holds);
+  the mercenary spawn path is rewired onto session keys (see wiring below).
+
+Call/interface parity (mercenary aligned to native, not divergent):
+
+- **Drop the `agents.register(prompts: [stems])` schema.** Both native and
+  mercenary are invoked with a single self-contained prompt produced by
+  `playbook.render(name, context)`; the dispatch target is orthogonal to prompt
+  production. Stem assembly at registration is removed.
+- Output parity: a mercenary returns a continuation handle of the same shape as
+  a native agentId; the tip-only continuity fragment applies to both.
+- Net: the retained mercenary interface is SMALLER than today's
+  register-with-stems surface.
+
+Wiring onto session-auth (both feasible; moderate-rewire, sonnet-Explore
+verified — actorID is a lookup coordinate, not an auth token; runner backends
+are fully decoupled from actor identity):
+
+- **native subagent ↔ parent-login**: the lead (same MCP process) mints a key
+  (optionally capability-scoped) and passes it in the delegation brief; worktree
+  native subagents may self-login with their own root.
+- **mercenary ↔ pre-allocate + splice**: the spawn path pre-allocates a session
+  key and splices the login instruction into the spawned system prompt — the
+  existing `ensureAgentChildSetup` mechanism (`agent.go:1243-1265`) with the
+  token swapped from actor-id to session key.
+
+Recursion containment (open, but largely defused by scope):
+
+> **Resolved below (ws.lead/child-key section):** the keyed-call-handler role
+> check rejects non-lead `ws.lead.*` calls, so children cannot spawn → depth
+> strictly 1; the CLI-flag depth-token backstop becomes unnecessary
+> (defense-in-depth only).
+
+- Because mercenaries are spawned **only by the (native) lead** and are scoped to
+  leaf implementer/reviewer roles, the workflow naturally bounds spawning to
+  depth 1 (lead → mercenary; mercenaries do not spawn). Recursion becomes a
+  workflow-design property, not a hard requirement.
+- A server-side **enforced spawn-depth (or capability) backstop** is still wanted
+  because no hard barrier prevents a mercenary from calling the spawn tools (env
+  profile dead, key scope soft). Mechanism detail (depth token propagated via CLI
+  flag — CLI propagation works where env does not — tracked server-side per
+  key-chain to resist forging) is deferred to mercenary-revival design.
+
+ws↔wsflow convergence is PARTIAL under option B:
+
+- mercenary is a **ws-only capability** wsflow (agentless, company-distributed)
+  does not carry. The shared playbook/text core still converges to a single
+  source via namespace rendering, but the mercenary/spawn surface is a ws-only
+  divergence. The earlier "mirroring burden mostly disappears" claim is
+  qualified: the agent/spawn axis stays a real ws-vs-wsflow difference (a ws-only
+  section excluded from wsflow rendering, or separately maintained on that axis).
+
+M3 scope implication: `260609-refactor-ws-spawn-runtime-deletion-session-auth`
+is no longer pure deletion — it becomes spawn-runtime **reshape to mercenary** +
+session-auth for the retained codex/claude path, with deletion confined to
+gemini / subquery / exploration-spawn / diagnostic-sprawl. Re-scope at ready
+promotion.
+
+### Refine: ws.lead namespace, render-minted child keys, containment at the keyed call handler
+
+Sixth lead-discuss exchange (2026-06-09). Refines option B's open details
+(claude retention, child-key acquisition, recursion backstop) and corrects the
+containment mechanism.
+
+**Harness-neutral mercenary backend; claude retained, gemini deferred-plug.**
+
+- harness-neutrality is a kept goal: gemini (now antigravity) and likely a
+  future custom harness will attach via the mercenary **runner-backend
+  interface**, so that abstraction stays harness-neutral/pluggable.
+- **claude mercenary is RETAINED** (closes the option-B OPEN) — harness-neutrality
+  argues for keeping it alongside codex.
+- **gemini is a deferred plug, not a deletion.** Keep the neutral backend
+  interface; remove only the `gemini.go` implementation (its real cost is
+  model-compat tracking, not the abstraction). gemini/antigravity re-attach later
+  through the same interface. Distinguish the two costs: the harness-neutral
+  abstraction (one layer, ~free) is kept; only the unmaintained implementation is
+  unshipped. "gemini dropped" is re-read as "gemini implementation unshipped now;
+  plug point preserved."
+
+**Child-key acquisition = render-minted, with a `root_override` param (option (c)).**
+
+- Rejected: (a) lead key passed verbatim (no role distinction) and (b) an
+  explicit `lead.issue` step (lead handles raw keys, extra round-trip).
+- `playbook.render` is the mint+inject point: it already injects the delegation
+  brief and knows the playbook is a delegate. Final signature:
+  `playbook.render(session_key, name, context?, root_override?)`.
+  - `session_key`: required (render is a ws call → keyed like all others); gives
+    the default root for root-scoped **auto-includes** (e.g. local ai-docs) and
+    the **role** for the mint gate.
+  - `root_override`: when the child will run in a different worktree, overrides
+    BOTH the auto-include resolution root AND the minted child-key binding root.
+    render does **not** infer "lead-in-worktree vs spawn-into-worktree" — the
+    caller that decided the worktree passes its path. Timing holds: the mercenary
+    path pre-allocates the worktree before prompt splice, so the path is known at
+    render time (native worktree likewise decided by the lead).
+  - `role` is derived from the playbook frontmatter (playbooks are role-specific),
+    so `root_override` is the only genuinely new param.
+  - **Mint branch** (mint + inject a fresh child key) fires only when
+    `session_key.role == lead` (server-side check). For non-lead keys render still
+    returns text (auto-includes for the caller's own root) but mints nothing.
+- Native and mercenary both receive "a rendered prompt with the child key already
+  spliced in" → call parity is automatic.
+
+**ws.lead namespace.** `login` and the mercenary spawn/lifecycle move under a
+lead-centric `ws.lead.*` namespace (`ws/lead.login(root)`,
+`ws/lead.<mercenary spawn>`). This resolves the session-term question:
+**`lead.login`** (drop `session.open`/`attach`). `playbook.print`/`playbook.render`
+stay under `playbook.*` (M1 surface); only render's mint branch is lead-gated by a
+capability check, not by namespace.
+
+**Containment correction — schema filtering is soft; enforcement is the keyed
+call handler.** Hiding `ws.lead.*` from `tools/list` is a **harness-owned
+soft-guard** (LLM-confusion reduction, the same role `noAgentHiddenTool` plays) —
+a caller that knows the tool name can still issue `tools/call`. The hard guard is
+a **server-side role check in the keyed `tools/call` handler** that rejects
+`ws.lead.*` calls from non-lead keys. This converges all containment onto the
+keyed-call handler (consistent with "containment lives on the session key,
+server-side"). Same class of correction as the `WS_MCP_TOOL_PROFILE` env-barrier
+finding.
+
+**Recursion backstop resolved.** Because the keyed handler rejects non-lead
+`ws.lead.*` calls, a child (native or mercenary) cannot login or spawn → spawn
+depth is **strictly 1** (lead → mercenary leaf). The earlier deferred spawn-depth
+counter (depth token via CLI flag) is therefore **unnecessary**; demote to
+optional defense-in-depth. Raising depth > 1 later = an explicit lead-key grant to
+a mercenary, never accidental.
+
+**Durable lesson (capture to `named-agent-runtime`):** MCP `tools/list` (schema)
+filtering is harness-owned and advisory; capability/role enforcement must be a
+server-side check in the keyed `tools/call` handler, not schema omission.
+
+**Routing finalized.** Default delegation is **always native**. The mercenary is
+**always available to the lead** (not a feature flag) and is invoked only by
+(a) an explicit user request or (b) a per-session-key render-mode flip
+`ws/lead.prefer_mercenary(session_key)` (under `ws.lead.*`, lead-only). The flip
+changes only the *default guidance*: when set, `playbook.render` advises the
+mercenary spawn idiom as the primary delegation guidance for implementer/reviewer
+prompts; when unset, native idiom is primary. **Independently, a small always-on
+tip fragment** (`tip: if the user requests a mercenary call, …`) is injected into
+every delegation-capable rendering, so the on-request path is reachable without
+the toggle (token noise accepted, same philosophy as the agentId-continuity tip).
+This replaces the earlier "config enables it" framing with a runtime per-key
+toggle; availability is invariant.
+
+**Child `unknown_session` — resolved as a known gap (not a designed path).** It
+fires only when the in-memory session map is lost, i.e. the lead's ws-mcp process
+restarts while a delegation is live (native children share that process;
+mercenary keys live in its map). A child cannot self-recover — it never logged in
+and `ws.lead.*` gating denies login — so the interim behavior is a **generic
+`unknown_session` reject**; the child then escalates to its issuer (the lead),
+which re-renders a fresh key and re-delegates (the existing fresh-spawn +
+resume-brief recovery path). A role-specific child message is not worth designing
+now: a **persistent session backend** (the deferred contract-invariant swap) makes
+cross-restart key survival the norm, shrinking child `unknown_session` to
+~never. Revisit the message only if/when that backend lands.
+
+**Dashboard disposition reconsidered (port, not strip).** The 2026-06-09
+"dashboard retained, strip agent-audit" decision assumed spawn deletion removed
+the agent-activity source. Option B retains the codex mercenary lifecycle, so the
+source survives — the agent-activity feed becomes a **port to the reshaped
+mercenary lifecycle, or a removal**, which is a deferred product decision (a
+separate dashboard `idea/` ticket, `re-evaluate — see epic 260605`). M3 only keeps
+the dashboard **compiling** against the reshaped session/lifecycle surface (the
+actor-model + register-schema change forces a mechanical read adaptation
+regardless); it no longer "strips" the feature. The destructive `260514` child
+drops likewise move to idea-level backlog with an epic pointer (always-ask gate
+preserved). `260429` absorption and `260521` retirement are unaffected by
+mercenary retention and keep their settled direction.
+
 ## Open Questions (continuation agenda)
 
 - ~~Entry-skill keep-list~~ — resolved (11 entry / 9 playbook).
@@ -628,7 +894,17 @@ implementation only honours a single default profile.
 - ~~Session lifecycle/eviction rule~~ — resolved (2026-06-09): in-memory, no
   logout, no eviction (rows tiny + bounded); `unknown_session → re-login`
   guardrail keeps a later persistent backend a contract-invariant swap.
-- **Session term choice**: `login` | `session.open` | `attach`.
+- ~~Session term choice~~ — resolved (2026-06-09): **`ws/lead.login`** under a
+  lead-centric `ws.lead.*` namespace; `session.open`/`attach` dropped.
+- ~~Recursion spawn-depth backstop mechanism~~ — resolved (2026-06-09): the keyed
+  `tools/call` handler rejects non-lead `ws.lead.*` calls → depth strictly 1; the
+  CLI-flag depth-token counter is unnecessary (defense-in-depth only).
+- ~~claude mercenary retention~~ — resolved (2026-06-09): **retained**
+  (harness-neutrality); gemini → deferred plug (neutral backend interface kept,
+  `gemini.go` implementation unshipped).
+- ~~child `unknown_session` recovery message~~ — resolved (2026-06-09) as a known
+  gap: generic reject + lead re-render interim; fires only on lead-process restart;
+  a persistent session backend shrinks it to ~never. Revisit at that backend.
 - ~~Role-containment (`WS_MCP_TOOL_PROFILE`) deprecation~~ — resolved
   (2026-06-09): retained and folded into the session key as an optional
   capability/role scope (soft guard). Session-key issuance reserves a

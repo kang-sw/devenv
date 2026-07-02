@@ -1,5 +1,6 @@
 ---
 title: dashboard-managed worktree local context
+parent: 260514-epic-ws-web-dashboard-mvp
 related-mental-model:
   - ws-web-dashboard
 ---

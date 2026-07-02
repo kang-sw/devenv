@@ -26,9 +26,12 @@ func (m Manager) GeneratePaths(repoPath, kind string, stems []string) ([]Generat
 	if len(stems) == 0 {
 		return nil, fmt.Errorf("at least one path stem is required")
 	}
-	layout, _, _, err := m.Ensure(repoPath)
+	layout, _, worktree, err := m.Ensure(repoPath)
 	if err != nil {
 		return nil, err
+	}
+	if kind == "plan" {
+		return m.generatePlanPaths(worktree.WorktreePath, kind, stems)
 	}
 	dir, ext, err := generatedPathTarget(layout, kind)
 	if err != nil {
@@ -63,6 +66,30 @@ func (m Manager) GeneratePaths(repoPath, kind string, stems []string) ([]Generat
 	return paths, nil
 }
 
+func (m Manager) generatePlanPaths(worktreePath, kind string, stems []string) ([]GeneratedPath, error) {
+	now := m.now().Local()
+	dir := filepath.Join(worktreePath, "ai-docs", ".plans", now.Format("2006-01"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create generated path dir %s: %w", dir, err)
+	}
+
+	paths := make([]GeneratedPath, 0, len(stems))
+	for _, stem := range stems {
+		safeStem := sanitizeGeneratedPathStem(stem)
+		base := fmt.Sprintf("%s-%s", now.Format("02-1504"), safeStem)
+		path, err := reserveUniqueGeneratedPath(dir, base, ".md")
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, GeneratedPath{
+			Kind: kind,
+			Stem: safeStem,
+			Path: path,
+		})
+	}
+	return paths, nil
+}
+
 func generatedPathTarget(layout Layout, kind string) (dir string, ext string, err error) {
 	switch kind {
 	case "review":
@@ -81,6 +108,28 @@ func sanitizeGeneratedPathStem(stem string) string {
 		return "unnamed"
 	}
 	return stem
+}
+
+func reserveUniqueGeneratedPath(dir, base, ext string) (string, error) {
+	for attempt := 1; attempt <= 999; attempt++ {
+		suffix := ""
+		if attempt > 1 {
+			suffix = fmt.Sprintf("-%02d", attempt)
+		}
+		path := filepath.Join(dir, base+suffix+ext)
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			if err := file.Close(); err != nil {
+				return "", fmt.Errorf("close generated path %s: %w", path, err)
+			}
+			return path, nil
+		}
+		if os.IsExist(err) {
+			continue
+		}
+		return "", fmt.Errorf("reserve generated path %s: %w", path, err)
+	}
+	return "", fmt.Errorf("reserve generated path %s: exhausted collision suffixes", filepath.Join(dir, base+ext))
 }
 
 func randomHex(bytes int) (string, error) {

@@ -169,3 +169,72 @@ func TestGeneratePathsUsesWorktreeScopedPromptDirectory(t *testing.T) {
 		t.Fatalf("reserved prompt path %q stat=%v err=%v", paths[0].Path, info, err)
 	}
 }
+
+func TestGeneratePathsAllocatesPlanPathsUnderRepo(t *testing.T) {
+	repo := initRepo(t)
+	manager := NewManager(Options{
+		CacheHome: filepath.Join(t.TempDir(), "cache"),
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	paths, err := manager.GeneratePaths(repo, "plan", []string{"260628-feat-demo"})
+	if err != nil {
+		t.Fatalf("GeneratePaths returned error: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("len(paths) = %d, want 1", len(paths))
+	}
+	if paths[0].Kind != "plan" {
+		t.Fatalf("kind = %q, want plan", paths[0].Kind)
+	}
+	if paths[0].Stem != "260628-feat-demo" {
+		t.Fatalf("stem = %q, want sanitized ticket stem", paths[0].Stem)
+	}
+	localNow := fixedNow.Local()
+	want := filepath.Join(repo, "ai-docs", ".plans", localNow.Format("2006-01"), localNow.Format("02-1504")+"-260628-feat-demo.md")
+	if canonicalForTest(t, paths[0].Path) != canonicalForTest(t, want) {
+		t.Fatalf("plan path = %q, want %q", paths[0].Path, want)
+	}
+	if info, err := os.Stat(paths[0].Path); err != nil || info.IsDir() {
+		t.Fatalf("reserved plan path %q stat=%v err=%v", paths[0].Path, info, err)
+	}
+}
+
+func TestGeneratePathsPlanSanitizesStemAndAvoidsCollisions(t *testing.T) {
+	repo := initRepo(t)
+	manager := NewManager(Options{
+		CacheHome: filepath.Join(t.TempDir(), "cache"),
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	first, err := manager.GeneratePaths(repo, "plan", []string{"../bad stem", "***", "../bad stem"})
+	if err != nil {
+		t.Fatalf("first GeneratePaths returned error: %v", err)
+	}
+	second, err := manager.GeneratePaths(repo, "plan", []string{"../bad stem"})
+	if err != nil {
+		t.Fatalf("second GeneratePaths returned error: %v", err)
+	}
+	if first[0].Stem != "bad-stem" || first[1].Stem != "unnamed" || first[2].Stem != "bad-stem" {
+		t.Fatalf("unexpected sanitized stems: %+v", first)
+	}
+	localNow := fixedNow.Local()
+	wantSuffixes := []string{
+		filepath.Join("ai-docs", ".plans", localNow.Format("2006-01"), localNow.Format("02-1504")+"-bad-stem.md"),
+		filepath.Join("ai-docs", ".plans", localNow.Format("2006-01"), localNow.Format("02-1504")+"-unnamed.md"),
+		filepath.Join("ai-docs", ".plans", localNow.Format("2006-01"), localNow.Format("02-1504")+"-bad-stem-02.md"),
+	}
+	for i, suffix := range wantSuffixes {
+		if !strings.HasSuffix(first[i].Path, suffix) {
+			t.Fatalf("path %d = %q, want suffix %q", i, first[i].Path, suffix)
+		}
+	}
+	if !strings.HasSuffix(second[0].Path, filepath.Join("ai-docs", ".plans", localNow.Format("2006-01"), localNow.Format("02-1504")+"-bad-stem-03.md")) {
+		t.Fatalf("second path = %q, want collision suffix -03", second[0].Path)
+	}
+	for _, generated := range append(first, second...) {
+		if info, err := os.Stat(generated.Path); err != nil || info.IsDir() {
+			t.Fatalf("reserved plan path %q stat=%v err=%v", generated.Path, info, err)
+		}
+	}
+}

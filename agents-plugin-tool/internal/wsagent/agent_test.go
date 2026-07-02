@@ -17,6 +17,17 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
+// TestMain points WS_RSRC_ROOT at the shipped rsrc tree so Register can load
+// delegate-orientation (260611 Phase 6b moved it off the wsprompt go:embed
+// bundle onto rsrc). Tests that need an orientation-load failure override this
+// per-test with t.Setenv.
+func TestMain(m *testing.M) {
+	if os.Getenv("WS_RSRC_ROOT") == "" {
+		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	}
+	os.Exit(m.Run())
+}
+
 var testNow = time.Date(2026, 5, 3, 14, 0, 0, 0, time.UTC)
 
 type fakeRunner struct {
@@ -226,9 +237,8 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		Root:             repo,
 		Name:             "review worker",
 		Backend:          "codex",
-		Tier:             "core",
+		Tier:             "medium",
 		Model:            "gpt-test",
-		PromptRefs:       []string{"code-reviewer"},
 		SystemPromptText: "system prompt\n",
 	})
 	if err != nil {
@@ -248,47 +258,6 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
-	}
-}
-
-func TestRegisterResolvesPromptChain(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-
-	agent, layout, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "reviewer",
-		Prompts: []string{"code-reviewer", "code-review-correctness", "code-review-fit"},
-	})
-	if err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if agent.Tier != "core" || agent.Model != "gpt-5.5" {
-		t.Fatalf("tier/model = %q/%q", agent.Tier, agent.Model)
-	}
-	if agent.SystemPromptPath != "system.md" {
-		t.Fatalf("system prompt path = %q", agent.SystemPromptPath)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
-	if strings.Contains(text, "model: core") {
-		t.Fatalf("frontmatter was not stripped:\n%s", text)
-	}
-	if !strings.Contains(text, "You are a delegated worker") ||
-		!strings.Contains(text, "You are a code reviewer.") ||
-		!strings.Contains(text, "Correctness Partition") ||
-		!strings.Contains(text, "Fit Partition") {
-		t.Fatalf("materialized prompt missing expected sections:\n%s", text)
-	}
-	if len(agent.PromptRefs) != 4 || agent.PromptRefs[0] != "delegate-orientation" || agent.PromptRefs[1] != "code-reviewer" {
-		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
 	}
 }
 
@@ -324,7 +293,7 @@ func TestRegisterInjectsDelegateOrientationForInlineSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
+func TestRegisterExplicitTierWins(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{
@@ -333,99 +302,23 @@ func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
 	})
 
 	agent, _, err := manager.Register(RegisterOptions{
-		Root:       repo,
-		Name:       "reviewer",
-		Tier:       "deep",
-		PromptRefs: []string{"code-reviewer"},
+		Root:             repo,
+		Name:             "reviewer",
+		Tier:             "large",
+		SystemPromptText: "reviewer role",
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Tier != "deep" {
+	if agent.Tier != "large" {
 		t.Fatalf("tier = %q", agent.Tier)
-	}
-}
-
-func TestRegisterConditionalPromptRefPresent(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	binDir := t.TempDir()
-	toolName := "ws-test-tool"
-	bin := filepath.Join(binDir, toolName)
-	script := "#!/bin/sh\nexit 0\n"
-	if runtime.GOOS == "windows" {
-		bin += ".cmd"
-		script = "@echo off\r\nexit /b 0\r\n"
-	}
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-
-	agent, layout, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "conditional",
-		Prompts: []string{"code-reviewer"},
-		ConditionalPromptRefs: []ConditionalPromptRef{
-			{Binary: toolName, PromptRef: "code-review-fit"},
-		},
-		SuppressOrientation: true,
-	})
-	if err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if len(agent.PromptRefs) != 2 || agent.PromptRefs[0] != "code-reviewer" || agent.PromptRefs[1] != "code-review-fit" {
-		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "Fit Partition") {
-		t.Fatalf("conditional prompt was not materialized:\n%s", raw)
-	}
-}
-
-func TestRegisterConditionalPromptRefAbsent(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-
-	agent, layout, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "conditional",
-		Prompts: []string{"code-reviewer"},
-		ConditionalPromptRefs: []ConditionalPromptRef{
-			{Binary: "ws-test-tool-definitely-missing", PromptRef: "code-review-fit"},
-		},
-		SuppressOrientation: true,
-	})
-	if err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if len(agent.PromptRefs) != 1 || agent.PromptRefs[0] != "code-reviewer" {
-		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "Fit Partition") {
-		t.Fatalf("absent conditional prompt was materialized:\n%s", raw)
 	}
 }
 
 func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "core", "", "gemini-3-1-pro"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "medium", "", "claude-sonnet-4"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -434,14 +327,14 @@ func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 	})
 
 	agent, _, err := manager.Register(RegisterOptions{
-		Root:    repo,
-		Name:    "reviewer",
-		Prompts: []string{"code-reviewer"},
+		Root:             repo,
+		Name:             "reviewer",
+		SystemPromptText: "reviewer role",
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Tier != "core" || agent.Backend != "gemini" || agent.Model != "gemini-3-1-pro" {
+	if agent.Tier != "medium" || agent.Backend != "claude" || agent.Model != "claude-sonnet-4" {
 		t.Fatalf("tier/backend/model = %q/%q/%q", agent.Tier, agent.Backend, agent.Model)
 	}
 }
@@ -449,7 +342,7 @@ func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 func TestRegisterExplicitModelBypassesTierConfig(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "core", "gemini", "gemini-3-1-pro"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "medium", "gemini", "gemini-3-1-pro"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -460,7 +353,7 @@ func TestRegisterExplicitModelBypassesTierConfig(t *testing.T) {
 	agent, _, err := manager.Register(RegisterOptions{
 		Root:  repo,
 		Name:  "reviewer",
-		Tier:  "core",
+		Tier:  "medium",
 		Model: "gpt-5.2",
 	})
 	if err != nil {
@@ -483,12 +376,12 @@ func TestRegisterModelAliasUsesHarness(t *testing.T) {
 		Root:    repo,
 		Name:    "reviewer",
 		Harness: "claude",
-		Model:   "core",
+		Model:   "medium", // capability synonym for core
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "claude" || agent.Model != "sonnet" {
+	if agent.Harness != "claude" || agent.Tier != "medium" || agent.Backend != "claude" || agent.Model != "sonnet" {
 		t.Fatalf("harness/tier/backend/model = %q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model)
 	}
 }
@@ -496,7 +389,7 @@ func TestRegisterModelAliasUsesHarness(t *testing.T) {
 func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "claude", "high"); err != nil {
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "medium", "codex", "gpt-5.4", "claude", "high"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -508,12 +401,12 @@ func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 		Root:    repo,
 		Name:    "reviewer",
 		Harness: "claude",
-		Model:   "core",
+		Model:   "medium", // capability synonym for core
 	})
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "codex" || agent.Model != "gpt-5.4" || agent.Effort != "high" {
+	if agent.Harness != "claude" || agent.Tier != "medium" || agent.Backend != "codex" || agent.Model != "gpt-5.4" || agent.Effort != "high" {
 		t.Fatalf("harness/tier/backend/model/effort = %q/%q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model, agent.Effort)
 	}
 	status, err := manager.Status(repo, "reviewer")
@@ -528,7 +421,7 @@ func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 func TestCallThreadsAgentEffortToRunner(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "codex", "high"); err != nil {
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "medium", "codex", "gpt-5.4", "codex", "high"); err != nil {
 		t.Fatal(err)
 	}
 	runner := &fakeRunner{}
@@ -541,7 +434,7 @@ func TestCallThreadsAgentEffortToRunner(t *testing.T) {
 		Root:    repo,
 		Name:    "impl",
 		Harness: "codex",
-		Model:   "core",
+		Model:   "medium",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -802,6 +695,31 @@ func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
 	}
 }
 
+// TestBuildCodexInvocationSystemPromptForwardSlash verifies that
+// buildCodexInvocation applies filepath.ToSlash to the SystemPromptPath before
+// formatting it into the model_instructions_file config arg. On Unix
+// filepath.ToSlash is a no-op (backslash is a valid filename character, not a
+// path separator), so this test exercises a Unix path; the active Windows
+// transform (backslash → forward-slash) is verified on a Windows host in
+// Phase C.
+func TestBuildCodexInvocationSystemPromptForwardSlash(t *testing.T) {
+	// Use a normal Unix path; filepath.ToSlash is identity here, so the emitted
+	// arg must be the double-quoted path with no backslash escaping.
+	unixPath := "/home/user/ws/system.md"
+	invocation, err := buildCodexInvocation(RunnerRequest{
+		Prompt:           "prompt",
+		SystemPromptPath: unixPath,
+	})
+	if err != nil {
+		t.Fatalf("buildCodexInvocation returned error: %v", err)
+	}
+	joined := strings.Join(invocation.Args, "\x00")
+	want := `model_instructions_file="/home/user/ws/system.md"`
+	if !strings.Contains(joined, want) {
+		t.Fatalf("codex args: expected %q; got args: %+v", want, invocation.Args)
+	}
+}
+
 func TestBuildCodexInvocationAddsEffortOverrideWhenPresent(t *testing.T) {
 	invocation, err := buildCodexInvocation(RunnerRequest{
 		Prompt: "effort prompt",
@@ -965,7 +883,7 @@ func TestRecallCancelsActiveCallAndStartsRecoveryRetry(t *testing.T) {
 	if !strings.Contains(text, "recall_recovery_only: true") ||
 		!strings.Contains(text, "recall_cancelled_active_call: true") ||
 		!strings.Contains(text, "impl\trunning\tpid=4567") ||
-		!strings.Contains(text, "follow_up: agents.result --timeout 10m | agents.tail | agents.status | agents.cancel") {
+		!strings.Contains(text, "follow_up: ws.mercenary.result --timeout 10m | ws.mercenary.tail | ws.mercenary.status | ws.mercenary.cancel") {
 		t.Fatalf("recall text mismatch:\n%s", text)
 	}
 	if len(starter.requests) != 2 {
@@ -1041,14 +959,21 @@ func TestAsyncWorkerCommandUsesRuntimeBinaryEnvBeforeStaleExecutable(t *testing.
 }
 
 func TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		python, err = exec.LookPath("python")
+		if err != nil {
+			t.Skip("python not found on PATH; skipping cache launcher py fallback test")
+		}
+	}
 	t.Setenv("WS_MCP_RUNTIME_BINARY", "")
 	temp := t.TempDir()
 	cacheRoot := filepath.Join(temp, ".codex", "plugins", "cache", "kang-sw-devenv")
-	launcher := filepath.Join(cacheRoot, "ws", "0.22.4", "bin", "ws-mcp-launcher")
-	if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
+	pyLauncher := filepath.Join(cacheRoot, "ws", "0.22.4", "bin", "ws-mcp-launcher.py")
+	if err := os.MkdirAll(filepath.Dir(pyLauncher), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(pyLauncher, []byte("#!/usr/bin/env python3\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(cacheRoot, "plugin-backup-old", "ws", "0.22.3", ".runtime", "linux-amd64", "ws-mcp")
@@ -1057,8 +982,8 @@ func TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("asyncWorkerCommandFor returned error: %v", err)
 	}
-	if command.Path != launcher || len(command.Args) != 0 {
-		t.Fatalf("worker command = %+v, want current cache launcher", command)
+	if command.Path != python || len(command.Args) != 1 || command.Args[0] != pyLauncher {
+		t.Fatalf("worker command = %+v, want python %s %s", command, python, pyLauncher)
 	}
 }
 
@@ -1282,119 +1207,6 @@ func TestRunCurrentUsesClaudeBackendRunner(t *testing.T) {
 	}
 }
 
-func TestRunCurrentUsesGeminiBackendRunner(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "gemini.log")
-	writeFakeGeminiExecutable(t, binDir)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("GEMINI_FAKE_LOG", logPath)
-	t.Setenv("GEMINI_FAKE_FAIL", "")
-	t.Setenv("GEMINI_FAKE_SLEEP_AFTER_INIT", "")
-
-	starter := &fakeWorkerStarter{pid: 4567}
-	base := NewManager(Options{
-		CacheHome:     cache,
-		Now:           func() time.Time { return testNow },
-		WorkerStarter: starter,
-	})
-	if _, _, err := base.Register(RegisterOptions{
-		Root:             repo,
-		Name:             "impl",
-		Backend:          "gemini",
-		Model:            "gemini",
-		SystemPromptText: "sys",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
-		t.Fatal(err)
-	}
-
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-	})
-	if err := manager.RunCurrent(repo, "impl"); err != nil {
-		t.Fatalf("RunCurrent returned error: %v", err)
-	}
-	layout, err := manager.layout(repo, "impl", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := manager.Agent(repo, "impl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	call, err := readCurrentCall(layout.CurrentStateFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if agent.Backend != "gemini" || agent.SessionID != "gemini-session" ||
-		call.SessionID != agent.SessionID || call.Status != CallStatusCompleted {
-		t.Fatalf("gemini call state mismatch: agent=%+v call=%+v", agent, call)
-	}
-	result, err := manager.Result(ResultOptions{Root: repo, Name: "impl"})
-	if err != nil {
-		t.Fatalf("Result returned error: %v", err)
-	}
-	if result != "gemini reply" {
-		t.Fatalf("result = %q", result)
-	}
-	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 40})
-	if err != nil {
-		t.Fatalf("Tail returned error: %v", err)
-	}
-	for _, want := range []string{
-		"backend_version",
-		"gemini fake 1.2.3",
-		"prompt_delivery",
-		"final_event_shape",
-		"Gemini notice",
-	} {
-		if !strings.Contains(tail, want) {
-			t.Fatalf("tail missing %q:\n%s", want, tail)
-		}
-	}
-	logRaw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	log := string(logRaw)
-	for _, want := range []string{
-		"--output-format stream-json --approval-mode yolo",
-		"ENV:leaf",
-		"System instructions:",
-		"sys",
-		"User prompt:",
-		"async prompt",
-	} {
-		if !strings.Contains(log, want) {
-			t.Fatalf("gemini log missing %q:\n%s", want, log)
-		}
-	}
-	for _, line := range strings.Split(log, "\n") {
-		if strings.HasPrefix(line, "ARGS:") && strings.Contains(line, "-m ") {
-			t.Fatalf("gemini shorthand model should not be forwarded:\n%s", log)
-		}
-	}
-
-	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "resume prompt"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.RunCurrent(repo, "impl"); err != nil {
-		t.Fatalf("resume RunCurrent returned error: %v", err)
-	}
-	logRaw, err = os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	log = string(logRaw)
-	if !strings.Contains(log, "--resume gemini-session") || !strings.Contains(log, "resume prompt") {
-		t.Fatalf("resume did not use stored session:\n%s", log)
-	}
-}
 
 func TestInterruptQueuesInboxAndHookDeliversMessages(t *testing.T) {
 	repo := initRepo(t)
@@ -1664,7 +1476,7 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 		!strings.Contains(err.Error(), "backend exploded") ||
 		!strings.Contains(err.Error(), "backend invocation failed") ||
 		!strings.Contains(err.Error(), "- claude: "+claudePath) ||
-		!strings.Contains(err.Error(), "re-run agents.register") ||
+		!strings.Contains(err.Error(), "re-run ws.mercenary.register") ||
 		!strings.Contains(err.Error(), "config.agents_tier") {
 		t.Fatalf("RunCurrent error = %v", err)
 	}
@@ -1713,9 +1525,6 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	binDir := t.TempDir()
-	geminiPath := writeBackendShim(t, binDir, "gemini")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	starter := &fakeWorkerStarter{pid: 4567}
 	base := NewManager(Options{
 		CacheHome:     cache,
@@ -1741,8 +1550,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		`unsupported agent backend "bogus"`,
 		"backend: bogus",
 		"model: bogus-model",
-		"- gemini: " + geminiPath,
-		"re-run agents.register",
+		"re-run ws.mercenary.register",
 		"config.agents_tier",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -1755,6 +1563,13 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 	}
 	if !strings.Contains(status, "call_status: failed") || !strings.Contains(status, `unsupported agent backend "bogus"`) {
 		t.Fatalf("status missing unsupported backend diagnostic:\n%s", status)
+	}
+}
+
+func TestRunnerForBackendGeminiIsUnsupported(t *testing.T) {
+	_, err := runnerForBackend("gemini")
+	if err == nil || !strings.Contains(err.Error(), `unsupported agent backend "gemini"`) {
+		t.Fatalf("runnerForBackend(gemini) = _, %v; want unsupported agent backend error", err)
 	}
 }
 
@@ -1795,7 +1610,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if !strings.Contains(timeoutText, "wait_timeout: true") ||
 		!strings.Contains(timeoutText, "call_status: running") ||
 		!strings.Contains(timeoutText, "active: true") ||
-		!strings.Contains(timeoutText, "follow_up: agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel") {
+		!strings.Contains(timeoutText, "follow_up: ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel") {
 		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -1817,7 +1632,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 		!strings.Contains(cancelled, "cancel_pid: 2468") ||
 		!strings.Contains(cancelled, "cleanup_needed: false") ||
 		!strings.Contains(cancelled, "cancel_recovery_tip: If this was cancelled because the agent did not respond") ||
-		!strings.Contains(cancelled, "follow_up: agents.call | agents.tail | agents.erase") {
+		!strings.Contains(cancelled, "follow_up: ws.mercenary.call | ws.mercenary.tail | ws.mercenary.erase") {
 		t.Fatalf("cancel status mismatch:\n%s", cancelled)
 	}
 	call, err := readCurrentCall(layout.CurrentStateFile)
@@ -1865,7 +1680,7 @@ func TestCancelReportsCleanupNeededWhenOwnedProcessSurvives(t *testing.T) {
 	if !strings.Contains(status, "call_status: cancelled") ||
 		!strings.Contains(status, "cancel_pid: 1357") ||
 		!strings.Contains(status, "cleanup_needed: true") ||
-		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | agents.erase") {
+		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | ws.mercenary.erase") {
 		t.Fatalf("cleanup-needed status mismatch:\n%s", status)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -2023,10 +1838,15 @@ func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing
 	if _, err := os.Stat(oldLayout.OutputFile); err != nil {
 		t.Fatalf("old output should remain for history: %v", err)
 	}
-	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", Prompts: []string{filepath.Join(t.TempDir(), "missing.md")}}); err == nil {
-		t.Fatal("expected failed registration with missing prompt")
+	// Force a failed re-registration: point the rsrc root at a nonexistent tree so
+	// the delegate-orientation load fails before the current pointer advances.
+	goodRsrc := os.Getenv("WS_RSRC_ROOT")
+	t.Setenv("WS_RSRC_ROOT", filepath.Join(t.TempDir(), "nonexistent-rsrc"))
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", SystemPromptText: "new2"}); err == nil {
+		t.Fatal("expected failed registration when delegate-orientation cannot load")
 	}
-	stillCurrent, err := manager.scopedLayout(repo, "impl", "", false)
+	t.Setenv("WS_RSRC_ROOT", goodRsrc)
+	stillCurrent, err := manager.scopedLayout(repo, "impl", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2050,168 +1870,6 @@ func TestRegisterPreservesExistingAgentHistoryUnlessCurrentCallActive(t *testing
 	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err == nil || !strings.Contains(err.Error(), "active call") {
 		t.Fatalf("expected active-call register rejection, got %v", err)
 	}
-}
-
-func TestInternalOneShotHidesRoleAndRetainsAgentDirectory(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-		Runner:    &fakeRunner{},
-	})
-	text, err := manager.oneShot(oneShotOptions{Root: repo, Name: "tmp", Prompt: "hello"})
-	if err != nil {
-		t.Fatalf("oneShot returned error: %v", err)
-	}
-	if text != "reply: hello\n" {
-		t.Fatalf("oneshot text = %q", text)
-	}
-	if _, err := manager.Agent(repo, "tmp"); err == nil {
-		t.Fatalf("ephemeral role should be hidden after result consumption")
-	}
-	state, err := manager.scopedLayout(repo, "tmp", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(state.AgentDir), "tmp*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("ephemeral instance dir should remain for retention cleanup")
-	}
-}
-
-func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	starter := &fakeWorkerStarter{pid: 2468}
-	manager := NewManager(Options{
-		CacheHome:     cache,
-		Now:           func() time.Time { return testNow },
-		WorkerStarter: starter,
-	})
-
-	text, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Where is workflow?"})
-	if err != nil {
-		t.Fatalf("Subquery returned error: %v", err)
-	}
-	key := extractFieldLine(t, text, "subquery_key")
-	if !strings.HasPrefix(key, "subquery-tmpdi93gj02ha80-") ||
-		!strings.Contains(text, "agent_name: "+key) ||
-		!strings.Contains(text, "status: running") ||
-		!strings.Contains(text, "pid: 2468") ||
-		!strings.Contains(text, `agents.result(name: "`+key+`", timeout_seconds: 600)`) {
-		t.Fatalf("subquery start text mismatch:\n%s", text)
-	}
-	if len(starter.requests) != 1 || starter.requests[0].Name != key {
-		t.Fatalf("worker starter requests = %+v", starter.requests)
-	}
-	layout, err := manager.layout(repo, key, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	system := string(raw)
-	if strings.Contains(system, "You are a delegated worker") {
-		t.Fatalf("subquery prompt included delegate orientation:\n%s", system)
-	}
-	if !strings.Contains(system, "You are a scoped sub-query worker") {
-		t.Fatalf("subquery prompt missing scoped worker prompt:\n%s", system)
-	}
-	agent, err := manager.Agent(repo, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if agent.Tier != "light" || !agent.Ephemeral {
-		t.Fatalf("subquery metadata mismatch: tier=%q ephemeral=%t", agent.Tier, agent.Ephemeral)
-	}
-
-	deepStarter := &fakeWorkerStarter{pid: 3579}
-	deepManager := NewManager(Options{
-		CacheHome:     filepath.Join(t.TempDir(), "cache"),
-		Now:           func() time.Time { return testNow.Add(time.Second) },
-		WorkerStarter: deepStarter,
-	})
-	deepText, err := deepManager.Subquery(SubqueryOptions{Root: repo, Question: "Trace history", DeepResearch: true})
-	if err != nil {
-		t.Fatalf("deep Subquery returned error: %v", err)
-	}
-	deepKey := extractFieldLine(t, deepText, "subquery_key")
-	if !strings.HasPrefix(deepKey, "subquery-tmpdi93gjglur5s-") || deepKey == key {
-		t.Fatalf("deep subquery key = %q, first key = %q", deepKey, key)
-	}
-	deepAgent, err := deepManager.Agent(repo, deepKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if deepAgent.Tier != "deep" {
-		t.Fatalf("deep subquery tier = %q", deepAgent.Tier)
-	}
-}
-
-func TestSubqueryInjectsChildActorSetupWithoutDelegateOrientation(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	starter := &fakeWorkerStarter{pid: 2468}
-	manager := NewManager(Options{
-		CacheHome:     cache,
-		Now:           func() time.Time { return testNow },
-		WorkerStarter: starter,
-	})
-
-	text, err := manager.Subquery(SubqueryOptions{
-		Root:                  repo,
-		Question:              "Where is workflow?",
-		ChildActorID:          "reader-12345678-abcdef",
-		ChildActorAuthority:   "reader",
-		ChildSetupInstruction: "Call MCP tool `ws.setup` with `id: \"reader-12345678-abcdef\"`.",
-	})
-	if err != nil {
-		t.Fatalf("Subquery returned error: %v", err)
-	}
-	key := extractFieldLine(t, text, "subquery_key")
-	layout, err := manager.layout(repo, key, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(layout.SystemFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	system := string(raw)
-	if strings.Contains(system, "You are a delegated worker") {
-		t.Fatalf("subquery prompt included delegate orientation:\n%s", system)
-	}
-	if !strings.Contains(system, "reader-12345678-abcdef") || !strings.Contains(system, "ws.setup") {
-		t.Fatalf("subquery prompt missing child setup instruction:\n%s", system)
-	}
-	if strings.Count(system, childSetupStart) != 1 || strings.Count(system, childSetupEnd) != 1 {
-		t.Fatalf("subquery prompt has duplicated child setup markers:\n%s", system)
-	}
-	agent, err := manager.Agent(repo, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if agent.ChildActorID != "reader-12345678-abcdef" || agent.ChildActorAuthority != "reader" {
-		t.Fatalf("child actor metadata mismatch: id=%q authority=%q", agent.ChildActorID, agent.ChildActorAuthority)
-	}
-}
-
-func extractFieldLine(t *testing.T, text, field string) string {
-	t.Helper()
-	prefix := field + ": "
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		}
-	}
-	t.Fatalf("missing %s in:\n%s", field, text)
-	return ""
 }
 
 func TestParseCodexJSONL(t *testing.T) {
@@ -2319,7 +1977,7 @@ func TestSQLiteAgentMetadataRoundTripIncludesContractFields(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
-	_, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "reviewer", PromptRefs: []string{"code-reviewer"}})
+	_, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "reviewer", SystemPromptText: "reviewer role"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2480,7 +2138,7 @@ func TestAgentMetadataImportsLegacyAgentJSONReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := manager.registryKey("", "legacy")
+	key, err := manager.registryKey("legacy")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2500,60 +2158,6 @@ func TestAgentMetadataImportsLegacyAgentJSONReadOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(layout.AgentFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("restarted metadata read recreated legacy agent.json, stat err=%v", err)
-	}
-}
-
-func TestActorScopedRegistrationsWithSameNameDoNotCollide(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
-	a, layoutA, err := manager.Register(RegisterOptions{Root: repo, ActorID: "lead-worktree-aaaaaaaaaaaa", Name: "implementer", Model: "model-a"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, layoutB, err := manager.Register(RegisterOptions{Root: repo, ActorID: "delegate-worktree-bbbbbbbbbbbb", Name: "implementer", Model: "model-b"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if layoutA.AgentDir == layoutB.AgentDir {
-		t.Fatalf("actor-scoped layouts collided: %s", layoutA.AgentDir)
-	}
-	gotA, err := manager.AgentScoped(repo, "implementer", "lead-worktree-aaaaaaaaaaaa")
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotB, err := manager.AgentScoped(repo, "implementer", "delegate-worktree-bbbbbbbbbbbb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotA.Model != a.Model || gotB.Model != b.Model || gotA.Model == gotB.Model {
-		t.Fatalf("actor-scoped metadata mismatch: a=%+v b=%+v", gotA, gotB)
-	}
-}
-
-func TestActorScopedAndGlobalSameNameRolePointersDoNotCollide(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }})
-	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", Model: "global-old"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := manager.Register(RegisterOptions{Root: repo, ActorID: "actor-one", Name: "impl", Model: "actor-old"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := manager.Register(RegisterOptions{Root: repo, ActorID: "actor-one", Name: "impl", Model: "actor-new"}); err != nil {
-		t.Fatal(err)
-	}
-	global, err := manager.Agent(repo, "impl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	actor, err := manager.AgentScoped(repo, "impl", "actor-one")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if global.Model != "global-old" || actor.Model != "actor-new" {
-		t.Fatalf("role collision: global=%+v actor=%+v", global, actor)
 	}
 }
 
@@ -2581,65 +2185,6 @@ func TestResultReportsMissingOutputAsRecoverableConsistencyState(t *testing.T) {
 	}
 	if !strings.Contains(text, "payload_consistency: missing_file_backed_payload_recoverable") || !strings.Contains(text, "missing_payload_path: output.md") {
 		t.Fatalf("missing output was not reported as recoverable:\n%s", text)
-	}
-}
-
-func TestActorScopedSubqueryRegistersAndCallsSameScope(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	starter := &fakeWorkerStarter{pid: 2468}
-	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }, WorkerStarter: starter})
-	text, err := manager.Subquery(SubqueryOptions{Root: repo, ActorID: "lead-worktree-actor", Question: "Where is workflow?"})
-	if err != nil {
-		t.Fatalf("actor-scoped Subquery returned error: %v", err)
-	}
-	key := extractFieldLine(t, text, "subquery_key")
-	if len(starter.requests) != 1 || starter.requests[0].ActorID != "lead-worktree-actor" || starter.requests[0].Name != key {
-		t.Fatalf("subquery call did not keep actor scope: %+v", starter.requests)
-	}
-	if _, err := manager.AgentScoped(repo, key, "lead-worktree-actor"); err != nil {
-		t.Fatalf("subquery metadata not actor scoped: %v", err)
-	}
-	if _, err := manager.Agent(repo, key); err == nil {
-		t.Fatalf("actor-scoped subquery unexpectedly registered in global namespace")
-	}
-}
-
-func TestActorScopedInterruptHookAndCheckInboxUseScopedInbox(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	manager := NewManager(Options{CacheHome: cache, Now: func() time.Time { return testNow }, WorkerStarter: &fakeWorkerStarter{pid: 4567}})
-	if _, _, err := manager.Register(RegisterOptions{Root: repo, ActorID: "lead-worktree-actor", Name: "impl"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Call(CallOptions{Root: repo, ActorID: "lead-worktree-actor", Name: "impl", Prompt: "work"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Interrupt(InterruptOptions{Root: repo, ActorID: "lead-worktree-actor", Name: "impl", Message: "Switch now."}); err != nil {
-		t.Fatal(err)
-	}
-	globalMessages, err := manager.DeliverPendingInbox(repo, "impl", "hook")
-	if err == nil && len(globalMessages) != 0 {
-		t.Fatalf("global inbox saw actor-scoped interrupt: %+v", globalMessages)
-	}
-	messages, err := manager.DeliverPendingInboxScoped(repo, "impl", "lead-worktree-actor", "hook")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(messages) != 1 || messages[0].Text != "Switch now." {
-		t.Fatalf("actor-scoped inbox messages mismatch: %+v", messages)
-	}
-	hook := interruptHookCommand(repo, "impl", "lead-worktree-actor")
-	if !strings.Contains(hook, "--actor-id") || !strings.Contains(hook, "lead-worktree-actor") {
-		t.Fatalf("interrupt hook did not include actor id: %s", hook)
-	}
-}
-
-func TestSelfWorkerStarterPropagatesHiddenActorID(t *testing.T) {
-	args := asyncWorkerArgs(asyncWorkerCommand{Path: "ws-mcp"}, AsyncWorkerRequest{Root: "/repo", ActorID: "lead-worktree-actor", Name: "impl"})
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "agents run-current") || !strings.Contains(joined, "--actor-id lead-worktree-actor") {
-		t.Fatalf("runtime args missing actor id: %q", joined)
 	}
 }
 

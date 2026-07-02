@@ -54,15 +54,12 @@ func RuntimeField(source RuntimeStateSource, field string) (RuntimeFieldClassifi
 	return RuntimeFieldClassification{}, false
 }
 
-func AgentInternalKey(actorID, publicName string) (string, error) {
+func AgentInternalKey(publicName string) (string, error) {
 	name := strings.TrimSpace(publicName)
 	if name == "" {
 		return "", errors.New("agent public name is required")
 	}
-	if strings.TrimSpace(actorID) == "" {
-		return "global:" + url.QueryEscape(name), nil
-	}
-	return "actor:" + url.QueryEscape(strings.TrimSpace(actorID)) + ":name:" + url.QueryEscape(name), nil
+	return "name:" + url.QueryEscape(name), nil
 }
 
 type PayloadConsistency string
@@ -124,7 +121,7 @@ var runtimeMetadataInventory = func() []RuntimeFieldClassification {
 	var out []RuntimeFieldClassification
 	out = append(out, sqliteFields(RuntimeSourceAgentJSON,
 		"schema_version", "name", "backend", "harness", "tier", "model", "effort", "session_id", "status",
-		"created_at", "last_seen_at", "last_call_at", "prompt_refs", "system_prompt_path", "last_output_path", "child_actor_id", "child_actor_authority", "capabilities", "ephemeral",
+		"created_at", "last_seen_at", "last_call_at", "prompt_refs", "system_prompt_path", "last_output_path", "capabilities", "ephemeral",
 	)...)
 	out = append(out, RuntimeFieldClassification{Source: RuntimeSourceAgentJSON, Field: "agent_json_compatibility", Storage: RuntimeFieldTemporaryCompatOnly, WriteAuthority: RuntimeAuthorityNone, Note: "bounded read-only import, tombstone, or diagnostic bridge; not metadata write authority"})
 

@@ -1,0 +1,376 @@
+package mcp
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/kang-sw/devenv/internal/wskey"
+	"github.com/kang-sw/devenv/internal/wsstate"
+)
+
+// sessionEntry associates a canonical repository root and a capability scope
+// with an ephemeral session key minted by the session-bootstrap tool.
+type sessionEntry struct {
+	root   string
+	scope  toolRole
+	parent string
+}
+
+// sessionChild is one enumerated descendant of a queried key.
+type sessionChild struct {
+	key    string
+	root   string
+	scope  toolRole
+	parent string
+	depth  int
+	live   bool
+}
+
+// sessionRecord is the on-disk JSON shape of a session entry. It is versioned so
+// the format can grow (render lineage, permission/capability metadata) without a
+// migration; unknown future fields are simply ignored by older readers.
+//
+// Note: the former typed PreferMercenary bool field has been retired. Old records
+// with a "prefer_mercenary" JSON field are silently ignored on read (Go's
+// json.Unmarshal drops unknown fields). The live mercenary preference is the
+// global-only wsconfig.ItemWorkflowPreferMercenary item, not session state.
+type sessionRecord struct {
+	SchemaVersion int    `json:"schema_version"`
+	Root          string `json:"root"`
+	Scope         string `json:"scope"`
+	Parent        string `json:"parent,omitempty"`
+	// Overrides is the session-scope generic config overlay. Keys are item
+	// identifiers; values are string-encoded config values. Added as an additive
+	// field; existing records without it parse with a nil map.
+	Overrides map[string]string `json:"overrides,omitempty"`
+	// Agenda holds session-level mode-context blobs keyed by name. Values are
+	// arbitrary JSON objects (typed enter-payloads or freeform notes). Added as
+	// an additive field; older records parse with a nil map. See session_state.go.
+	Agenda map[string]json.RawMessage `json:"agenda,omitempty"`
+	// Todos is the ordered step-level checklist for the session. Added as an
+	// additive field; older records parse with a nil slice. See session_state.go.
+	Todos []todoItem `json:"todos,omitempty"`
+}
+
+const sessionRecordSchemaVersion = 1
+
+// sessionKeyFilenamePattern bounds which key strings may become a file path. It
+// is deliberately a path-safety guard (no separators, no dots, lowercase alnum +
+// hyphen only), not an exact word-chain format check, so the store tolerates
+// future key-format evolution while still rejecting traversal attempts like
+// "../../etc/passwd" handed to lookup by an untrusted caller.
+var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
+
+// sessionStore maps ephemeral session keys to session entries using one JSON
+// file per key under a flat keys/ directory in the ws cache root. The file is
+// the source of truth, not the process: a fresh MCP server instance (or a lead
+// that restarted mid-delegation) resolves a key by reading its file, so session
+// continuity no longer depends on a shared in-memory registry. There is no
+// eviction or logout; deleting the file is the only physical removal.
+//
+// The flat layout (keys/<key>.json) is required by the access pattern: a caller
+// presents only the opaque key, never its root, so the file path must be
+// derivable from the key plus the globally-deterministic cache root.
+type sessionStore struct {
+	// mu serializes same-process read-modify-write and the mint claim loop.
+	// Cross-process safety rests on filesystem primitives: O_EXCL create for the
+	// unique mint claim, atomic temp+rename for updates.
+	mu sync.Mutex
+}
+
+func newSessionStore() *sessionStore {
+	return &sessionStore{}
+}
+
+// keysDir resolves and creates the flat per-session key directory. The cache
+// root honors WS_CACHE_HOME (and otherwise ~/.cache/ws@...), the same seam every
+// other ws cache artifact uses, so all server instances agree on the location.
+func (s *sessionStore) keysDir() (string, error) {
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(cacheRoot, "keys")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create session keys dir: %w", err)
+	}
+	return dir, nil
+}
+
+func (s *sessionStore) keyPath(dir, key string) string {
+	return filepath.Join(dir, key+".json")
+}
+
+// mint generates a unique session key and writes its record file.
+//
+// Uniqueness is claimed at the filesystem level: O_CREATE|O_EXCL creates the
+// final file atomically, so two processes (or goroutines) generating the same
+// candidate cannot both succeed — the loser sees os.IsExist and retries with a
+// fresh candidate. This is the cross-process analogue of the previous in-memory
+// check-and-insert and has no TOCTOU window.
+func (s *sessionStore) mint(root string, scope toolRole, parent string) (string, error) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return "", err
+	}
+	record := sessionRecord{
+		SchemaVersion: sessionRecordSchemaVersion,
+		Root:          root,
+		Scope:         string(scope),
+		Parent:        parent,
+	}
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return "", err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	const maxAttempts = 64
+	for i := 0; i < maxAttempts; i++ {
+		candidate, err := wskey.Generate()
+		if err != nil {
+			return "", err
+		}
+		f, err := os.OpenFile(s.keyPath(dir, candidate), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			if os.IsExist(err) {
+				continue // rare collision; generate a fresh candidate and retry
+			}
+			return "", fmt.Errorf("create session key file: %w", err)
+		}
+		if _, werr := f.Write(payload); werr != nil {
+			f.Close()
+			os.Remove(s.keyPath(dir, candidate)) // do not leave a half-written claim behind
+			return "", fmt.Errorf("write session key file: %w", werr)
+		}
+		if cerr := f.Close(); cerr != nil {
+			os.Remove(s.keyPath(dir, candidate))
+			return "", fmt.Errorf("close session key file: %w", cerr)
+		}
+		return candidate, nil
+	}
+	return "", errors.New("mcp: could not mint a unique session key after many attempts")
+}
+
+// lookup returns the session entry for the given key and whether it was found.
+// A malformed key (path-unsafe, or simply unknown) returns (zero, false), which
+// callers translate into the unknown_session re-login contract.
+func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return sessionEntry{}, false
+	}
+	record, ok := s.readRecord(dir, key)
+	if !ok {
+		return sessionEntry{}, false
+	}
+	return sessionEntry{
+		root:   record.Root,
+		scope:  toolRole(record.Scope),
+		parent: record.Parent,
+	}, true
+}
+
+// children returns the descendants of parentKey from the flat keys store,
+// ordered deterministically (depth, then key). maxDepth bounds the walk:
+// maxDepth >= 1 returns that many levels; maxDepth <= 0 returns the full
+// subtree. The queried key itself is not included. A cycle guard prevents
+// infinite loops on malformed parent edges.
+func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild, error) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read session keys dir: %w", err)
+	}
+
+	records := map[string]sessionRecord{}
+	adjacency := map[string][]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		key := strings.TrimSuffix(entry.Name(), ".json")
+		record, ok := s.readRecord(dir, key)
+		if !ok {
+			continue
+		}
+		records[key] = record
+		adjacency[record.Parent] = append(adjacency[record.Parent], key)
+	}
+	for parent := range adjacency {
+		sort.Strings(adjacency[parent])
+	}
+	if _, ok := records[parentKey]; !ok {
+		return []sessionChild{}, nil
+	}
+
+	type queued struct {
+		key   string
+		depth int
+	}
+	queue := []queued{{key: parentKey, depth: 0}}
+	visited := map[string]bool{parentKey: true}
+	children := []sessionChild{}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if maxDepth >= 1 && current.depth == maxDepth {
+			continue
+		}
+		for _, childKey := range adjacency[current.key] {
+			if visited[childKey] {
+				continue
+			}
+			visited[childKey] = true
+			record := records[childKey]
+			childDepth := current.depth + 1
+			child := sessionChild{
+				key:    childKey,
+				root:   record.Root,
+				scope:  toolRole(record.Scope),
+				parent: record.Parent,
+				depth:  childDepth,
+				live:   false,
+			}
+			if _, err := os.Stat(record.Root); err == nil {
+				child.live = true
+			}
+			children = append(children, child)
+			queue = append(queue, queued{key: childKey, depth: childDepth})
+		}
+	}
+
+	sort.Slice(children, func(i, j int) bool {
+		if children[i].depth != children[j].depth {
+			return children[i].depth < children[j].depth
+		}
+		return children[i].key < children[j].key
+	})
+	return children, nil
+}
+
+// getOverride returns the Overrides entry for the given item key in the session
+// record identified by sessionKey. Returns ("", false) when the session is not
+// found, the key is path-unsafe, or the item is absent.
+//
+// s.mu is held for the duration of the read to match the mutex discipline of
+// setOverride, preventing a data race when another goroutine is concurrently
+// writing to the same session record.
+func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
+	dir, err := s.keysDir()
+	if err != nil {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return "", false
+	}
+	if record.Overrides == nil {
+		return "", false
+	}
+	v, ok := record.Overrides[itemKey]
+	return v, ok
+}
+
+// listOverrideKeys returns all item keys present in the Overrides map of the
+// session record identified by sessionKey. Returns nil when the session is not
+// found or the Overrides map is empty.
+func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
+	dir, err := s.keysDir()
+	if err != nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok || len(record.Overrides) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(record.Overrides))
+	for k := range record.Overrides {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// setOverride writes an Overrides entry for the given item key/value into the
+// session record identified by sessionKey via atomic read-modify-write.
+// Returns an error if the session key is not found or the write fails.
+func (s *sessionStore) setOverride(sessionKey, itemKey, value string) error {
+	dir, err := s.keysDir()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return fmt.Errorf("session key not found: %s", sessionKey)
+	}
+	if record.Overrides == nil {
+		record.Overrides = map[string]string{}
+	}
+	record.Overrides[itemKey] = value
+	return s.writeRecordAtomic(dir, sessionKey, record)
+}
+
+func (s *sessionStore) readRecord(dir, key string) (sessionRecord, bool) {
+	if !sessionKeyFilenamePattern.MatchString(key) {
+		return sessionRecord{}, false
+	}
+	data, err := os.ReadFile(s.keyPath(dir, key))
+	if err != nil {
+		return sessionRecord{}, false
+	}
+	var record sessionRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return sessionRecord{}, false
+	}
+	return record, true
+}
+
+// writeRecordAtomic replaces an existing key file via temp-write + rename so a
+// concurrent reader never observes a partial record. The caller holds s.mu and
+// has already validated the key via readRecord.
+func (s *sessionStore) writeRecordAtomic(dir, key string, record sessionRecord) error {
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, key+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, s.keyPath(dir, key)); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
+}

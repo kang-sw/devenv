@@ -3,12 +3,13 @@ package wsdoc
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/kang-sw/devenv/internal/wsprompt"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 var ticketRefRE = regexp.MustCompile(`\[(\d{6}-[\w-]+/p\d+)\]`)
@@ -24,7 +25,8 @@ func ProjectTree(root string) (string, error) {
 	}
 
 	var b strings.Builder
-	renderAIDocs(&b, aiDocs)
+	ignored := gitIgnoreMatcher(root)
+	renderAIDocs(&b, aiDocs, ignored)
 	b.WriteString("\n\n")
 	if isDir(filepath.Join(aiDocs, "spec")) {
 		renderSpecs(&b, filepath.Join(aiDocs, "spec"))
@@ -36,11 +38,31 @@ func ProjectTree(root string) (string, error) {
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 
+// ReadInfra returns an infra document body by bare stem, loaded from the rsrc
+// tree (260611 Phase 6b retired the wsprompt go:embed bundle). Path-escaping
+// names are rejected so callers cannot read outside the rsrc root.
 func ReadInfra(name string) (string, error) {
-	return wsprompt.ReadInfra(name)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("infra document name is required")
+	}
+	stem := strings.TrimSuffix(name, ".md")
+	if stem == "" || stem == "." || stem == ".." ||
+		strings.ContainsAny(stem, `/\`) || strings.Contains(stem, "..") {
+		return "", fmt.Errorf("infra document name must be a bare filename or stem")
+	}
+	root, err := wsrsrc.ResolveRoot()
+	if err != nil {
+		return "", fmt.Errorf("resolve rsrc root: %w", err)
+	}
+	pb, err := wsrsrc.Load(root, stem, "", nil)
+	if err != nil {
+		return "", err
+	}
+	return pb.Body, nil
 }
 
-func renderAIDocs(b *strings.Builder, aiDocs string) {
+func renderAIDocs(b *strings.Builder, aiDocs string, ignored func(string) bool) {
 	b.WriteString("ai-docs/\n")
 	entries := sortedEntries(aiDocs)
 	for _, entry := range entries {
@@ -49,25 +71,52 @@ func renderAIDocs(b *strings.Builder, aiDocs string) {
 			continue
 		}
 		path := filepath.Join(aiDocs, name)
+		if ignored(path) {
+			continue
+		}
 		if entry.IsDir() {
 			fmt.Fprintf(b, "  %s/\n", name)
-			renderDirTree(b, path, 2)
+			renderDirTree(b, path, 2, ignored)
 		} else {
 			fmt.Fprintf(b, "  %s\n", name)
 		}
 	}
 }
 
-func renderDirTree(b *strings.Builder, root string, indent int) {
+func renderDirTree(b *strings.Builder, root string, indent int, ignored func(string) bool) {
 	prefix := strings.Repeat("  ", indent)
 	for _, entry := range sortedEntries(root) {
 		path := filepath.Join(root, entry.Name())
+		if ignored(path) {
+			continue
+		}
 		if entry.IsDir() {
 			fmt.Fprintf(b, "%s%s/\n", prefix, entry.Name())
-			renderDirTree(b, path, indent+1)
+			renderDirTree(b, path, indent+1, ignored)
 		} else {
 			fmt.Fprintf(b, "%s%s\n", prefix, entry.Name())
 		}
+	}
+}
+
+func gitIgnoreMatcher(repoRoot string) func(string) bool {
+	if err := exec.Command("git", "-C", repoRoot, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+		return func(string) bool { return false }
+	}
+	cache := map[string]bool{}
+	return func(path string) bool {
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			return false
+		}
+		rel = filepath.ToSlash(rel)
+		if ignored, ok := cache[rel]; ok {
+			return ignored
+		}
+		err = exec.Command("git", "-C", repoRoot, "check-ignore", "-q", "--", rel).Run()
+		ignored := err == nil
+		cache[rel] = ignored
+		return ignored
 	}
 }
 

@@ -97,7 +97,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.30.0`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.30.17`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
@@ -135,7 +135,7 @@ agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>
 
 The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, and selected
-documentation references. Development binaries such as `0.30.0-dev` satisfy
+documentation references. Development binaries such as `0.30.17-dev` satisfy
 plugin `0.29.2`; older or newer minor releases are stale.
 
 ## Release Distribution
@@ -181,11 +181,12 @@ paths run checks without publishing.
 ## Local Devenv Repair
 
 Local development has one repository-specific repair exception. When the
-installed plugin path is under
-`~/.codex/plugins/cache/kang-sw-devenv/ws/` or
-`~/.codex/plugins/cache/kang-sw-devenv/wsflow/` and the installed cache
+installed plugin path is under `~/.codex/plugins/cache/kang-sw-devenv/<ws|wsflow>/`
+or `~/.claude/plugins/cache/kang-sw-devenv/<ws|wsflow>/` and the installed cache
 contains a valid `.local-devenv-runtime` contract, the launcher forces local
-runtime repair before accepting an already compatible cache-local binary.
+runtime repair before accepting an already compatible cache-local binary. Both
+the Codex and Claude plugin caches are recognized so the same source-build
+dogfood loop works on either host.
 
 The contract format is:
 
@@ -199,10 +200,15 @@ The contract format is:
 ```
 
 All paths must be absolute. `source_root` and `tool_dir` must exist, `tool_dir`
-must contain `cmd/ws-mcp`, and `go` must be an executable file. If the marker is
-missing, invalid JSON, missing required fields, references missing paths, or is
-installed on Windows, local repair is inactive and the launcher uses the normal
-cache/release path.
+must contain `cmd/ws-mcp`, and `go` must be an existing file (an executable bit is
+required on POSIX; on Windows the `go.exe` file is trusted because
+`os.access(X_OK)` is not meaningful there). If the marker is missing, invalid
+JSON, missing required fields, or references missing paths, local repair is
+inactive and the launcher uses the normal cache/release path. Local devenv repair
+is honored on all platforms including Windows; the build inherits a launch
+environment with `HOME` recovered on POSIX and `USERPROFILE`/`LOCALAPPDATA`
+recovered on Windows so `go build` resolves its module/build caches under a
+sanitized launch env.
 
 When the contract is valid, the forced local path builds
 `<tool_dir>/cmd/ws-mcp` with the declared Go executable first so pre-release
@@ -215,9 +221,37 @@ path before building. Legacy fixed-name source-cache binaries such as
 If no compatible local runtime can be installed while a valid marker is active,
 startup fails instead of falling back to the published release asset.
 
-This path exists only for the repository-local Codex plugin development loop.
-The marker file is gitignored and should not exist in normal GitHub release
-installs, downstream repositories, or Windows installs.
+### Enabling the local dogfood loop (manual setup)
+
+The marker is per-machine and gitignored, so place it once in the source
+checkout for each package you dogfood, then let the plugin install or refresh
+copy it into the plugin cache:
+
+1. Write `agents-plugin/.local-devenv-runtime` with this machine's absolute
+   paths (use `command -v go` for the Go path). If dogfooding the separate
+   wsflow package, write the same marker to
+   `agents-plugin-wsflow/.local-devenv-runtime`:
+
+   ```json
+   {
+     "schema_version": 1,
+     "source_root": "/home/you/devenv",
+     "tool_dir": "/home/you/devenv/agents-plugin-tool",
+     "go": "/home/linuxbrew/.linuxbrew/bin/go"
+   }
+   ```
+
+2. Run `./install.sh update`. The `rsync` step copies the marker into the
+   plugin snapshot and `claude plugin install` carries it into the versioned
+   cache, so the next MCP launch source-builds the current checkout.
+
+After setup, editing the Go source and reconnecting the MCP server is enough to
+pick up changes — no rebuild-and-stage step. To disable, delete the marker and
+re-run `install.sh update` (the launcher reverts to the cache/release path).
+
+This path exists only for the repository-local Codex or Claude plugin
+development loop. The marker file is gitignored and should not exist in normal
+GitHub release installs, downstream repositories, or Windows installs.
 
 ## Development Verification
 
@@ -236,7 +270,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.30.0-dev
+scripts/build-release-assets.sh 0.30.17-dev
 dist/ws-mcp-darwin-arm64 version
 cd dist
 shasum -a 256 -c SHA256SUMS
@@ -274,3 +308,10 @@ installed plugin packaging changes.
   cache-local binary and compare it with `runtime.json`.
 - Windows startup reports Python alias problems: install Python 3 and refresh
   the plugin so Codex rematerializes the MCP entry.
+- Routing or implementation context lost after context compaction: expected — the
+  transcript is summarized, but session state persists in
+  `<cache-root>/keys/<session-key>.json`. Recover by calling
+  `ws.workflow_manual(session_key: <key preserved in the compaction summary>)`,
+  which reloads the manual primitives and restores the agenda/todo Session State.
+  Do not call `ws.ferrule` to "re-enter" — it is non-idempotent and mints a new key,
+  orphaning the prior state.

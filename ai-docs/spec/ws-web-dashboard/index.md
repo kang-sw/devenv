@@ -56,6 +56,17 @@ non-loopback host only while owner authentication is enabled; bind-mode
 acceptance does not relax browser cookie auth, bearer auth, Host/Origin checks,
 or WebSocket pre-upgrade auth.
 
+For explicit local debugging, `ws-dashboard serve --no-auth` disables the owner
+auth middleware only for loopback, non-public serving. The daemon rejects
+no-auth serving for public bind mode or non-loopback bind hosts before it
+listens, and server startup revalidates the serving config so manually
+constructed configs cannot bypass that guard. In no-auth mode the protected
+router is still built as one route set, but the owner-auth layer is omitted for
+that whole protected router; individual handlers do not select behavior by auth
+mode. Startup output continues to expose the owner pairing URL, and additionally
+prints a token-free direct dashboard URL after the listener address is known so
+local debug sessions do not need to use `/pair`.
+
 The `ws-dashboard --remote-guide` CLI surface prints an AI-agent-readable
 remote deployment guide and exits without starting the daemon. The guide
 describes the local-dashboard-as-gateway model, remote loopback serving,
@@ -527,6 +538,16 @@ live/attention flags, timing fields, source display metadata, transcript
 availability, bounded diagnostics, selected item hint, feed cursor, and update
 mode. Ordering favors active, live, attention, blocked, failed, and recently
 updated activity before using alphabetical order as a tie-breaker.
+
+> [!note] Implementation Gap · 2026-06-20
+> Missing behavior: the Activity Console read model is source-neutral, but the
+> dashboard does not yet expose dashboard-owned Activity source adapters for
+> host-owned agent-client surfaces such as Codex app-server or OpenCode serve.
+> Current provider projection remains centered on ws named-agent / mercenary
+> state. Future adapters should normalize provider thread, turn, message, tool,
+> and status events into Activity Items and Transcript Blocks without exposing
+> provider session ids, ws session keys, cache paths, process ids, or raw
+> provider event ids as browser authority.
 
 Transcript backfill returns bounded normalized blocks rather than backend-native
 cache records, raw session JSON, stdout/stderr paths, or file contents. Each
@@ -1172,6 +1193,12 @@ fallback. Native Windows prefers `pwsh.exe`, then `powershell.exe`, then
 `%COMSPEC%`, and finally the `cmd.exe` fallback. The selection contract is
 testable independently from the compile-time host platform so Unix and Windows
 fallback behavior can be verified on any developer machine.
+
+Browser-backed PTY sessions do not blindly inherit an unusable daemon launch
+terminal type. If the daemon process has no `TERM`, an empty `TERM`, or
+`TERM=dumb`, new dashboard terminal sessions use `xterm-256color` so shell
+programs see terminal capabilities compatible with the browser emulator.
+Explicit non-dumb parent `TERM` values are preserved.
 
 Shell spawn failures stay bounded to recoverable diagnostics. Authenticated
 terminal creation may report that terminal spawning failed, but private

@@ -182,10 +182,10 @@ When no notes are present, the updater falls back to diff-only analysis.
 
 > [!note] Implementation Gap · 2026-05-19
 > Missing behavior: `mental-model-updater` does not explicitly read
-> implementation brief files from `ai-docs/.plans/`. This is accepted as
-> best-effort for now because implementation plans and briefs already appear in
-> the commit-range diff when workflow timing includes them; explicit brief
-> parsing can be revisited if notes plus diff evidence miss important intent.
+> generated implementation plan files from `ai-docs/.plans/`. This is accepted
+> as best-effort for now because implementation plans already appear in the
+> commit-range diff when workflow timing includes them; explicit plan parsing
+> can be revisited if notes plus diff evidence miss important intent.
 
 ## Documentation Reference Tracing {#260505-documentation-reference-tracing}
 

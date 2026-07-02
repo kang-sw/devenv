@@ -30,6 +30,7 @@ const MIN_COLUMNS: u16 = 1;
 const MIN_ROWS: u16 = 1;
 const MAX_COLUMNS: u16 = 300;
 const MAX_ROWS: u16 = 120;
+const DEFAULT_BROWSER_PTY_TERM: &str = "xterm-256color";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPlatform {
@@ -494,6 +495,12 @@ impl TerminalSession {
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
         let mut command = CommandBuilder::new(default_shell());
         command.cwd(spawn_cwd);
+        command.env(
+            "TERM",
+            browser_pty_term(|key| {
+                std::env::var_os(key).map(|value| value.to_string_lossy().into_owned())
+            }),
+        );
         let child = pair
             .slave
             .spawn_command(command)
@@ -901,6 +908,13 @@ fn default_shell() -> PathBuf {
     }
 }
 
+fn browser_pty_term(env: impl Fn(&str) -> Option<String>) -> String {
+    env("TERM")
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty() && value != "dumb")
+        .unwrap_or_else(|| DEFAULT_BROWSER_PTY_TERM.to_owned())
+}
+
 #[cfg(test)]
 mod terminal_portability_skeleton_tests {
     use super::*;
@@ -1021,6 +1035,35 @@ mod terminal_portability_skeleton_tests {
         ));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn browser_pty_term_uses_browser_capable_default_for_unusable_parent_term() {
+        assert_eq!(browser_pty_term(|_| None), DEFAULT_BROWSER_PTY_TERM);
+        assert_eq!(
+            browser_pty_term(|key| (key == "TERM").then(|| "".to_owned())),
+            DEFAULT_BROWSER_PTY_TERM
+        );
+        assert_eq!(
+            browser_pty_term(|key| (key == "TERM").then(|| "   ".to_owned())),
+            DEFAULT_BROWSER_PTY_TERM
+        );
+        assert_eq!(
+            browser_pty_term(|key| (key == "TERM").then(|| "dumb".to_owned())),
+            DEFAULT_BROWSER_PTY_TERM
+        );
+    }
+
+    #[test]
+    fn browser_pty_term_preserves_explicit_capable_parent_term() {
+        assert_eq!(
+            browser_pty_term(|key| (key == "TERM").then(|| "screen-256color".to_owned())),
+            "screen-256color"
+        );
+        assert_eq!(
+            browser_pty_term(|key| (key == "TERM").then(|| " xterm-kitty ".to_owned())),
+            "xterm-kitty"
+        );
     }
 }
 

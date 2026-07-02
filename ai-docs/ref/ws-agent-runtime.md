@@ -287,10 +287,12 @@ MCP tools use server `ws` and the following tool names:
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
 - `config.show` — inspect the current user-local configuration and resolved config path without modifying it. Implemented.
 - `config.agents_tier` — compatibility surface for configuring the user-local backend/model mapping for a model alias. Implemented.
-- `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
-- `runtime.info` — return runtime metadata, including embedded prompt bundle hash. Implemented.
+- `path.generate` — allocate writable workflow artifact paths. Implemented for
+  cache artifacts `kind: "review"` and `kind: "prompt"`, plus repo-local plan
+  artifacts `kind: "plan"` under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`.
+- `runtime.info` — return runtime metadata. Implemented.
 - `api.list` — list existing API documentation cache domains. Implemented.
-- `api.ask` — route an API documentation question to persistent `api-doc-<domain>` manager sessions. Implemented.
+- `api.ask` — retired with the agent-backed API documentation manager surface.
 
 ## CLI Prototype
 
@@ -320,7 +322,7 @@ ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
 ws-mcp config show
 ws-mcp config agents-tier --tier <light|core|deep> [--harness <harness|default>] [--backend <backend>] [--model <concrete-model>] [--effort none|low|medium|high|xhigh]
-ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
+ws-mcp path generate --root <repo> --kind review|prompt|plan <stem> [<stem> ...]
 ws-mcp runtime info
 ```
 
@@ -330,7 +332,7 @@ tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
 `ws/agents.result`, `ws/agents.status`, `ws/agents.interrupt`,
 `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`,
 `ws/config.show`, `ws/config.agents_tier`,
-`ws/path.generate`, `ws/api.list`, `ws/api.ask`, and `ws/runtime.info`.
+`ws/path.generate`, `ws/api.list`, and `ws/runtime.info`.
 
 `agents.call` acquires a short-lived `current/setup.lock`, writes the prompt
 snapshot to `current/prompt.md`, starts an internal `agents run-current` worker
@@ -341,9 +343,8 @@ pid is no longer alive may be recovered. The worker owns the actual backend
 call, captures backend stdout and stderr to `current/stdout` and
 `current/stderr`, persists streamed Codex `session_id` updates, writes the final
 `output.md`, and transitions the current call to `completed` or `failed`. Only
-one active call is allowed per named agent. `api.ask` composes over the same
-agent runtime by registering or reusing `api-doc-<domain>` sessions and by
-serializing same-domain calls before invoking `agents.call`/`agents.result`.
+one active call is allowed per named agent. The retired `api.ask` manager path
+must not be treated as a current named-agent runtime consumer.
 
 `agents.interrupt` appends a durable pending message to `inbox/<id>.json`.
 Messages use a two-state contract: `pending` means the runtime has not injected
@@ -386,8 +387,10 @@ request `--lines 3`; larger tails are for concrete failure diagnosis.
 `agents.cancel` uses the stored worker pid for a best-effort local process kill
 and marks the current call `cancelled`. After process restart, `wait`, `result`,
 `status`, `tail`, and `print` still work from disk state; `cancel` can only
-terminate a process when the stored pid still refers to a live local worker, and
-it does not yet provide backend-specific process-group cleanup.
+terminate a process when the stored pid still refers to a live local worker. The
+kill reaps the whole spawned subtree rooted at that pid on both platforms
+(best-effort) — Unix via a process-group / ps-table walk, Windows via a
+Toolhelp32 PID-tree enumeration — rather than only the root pid.
 Cancelled status output includes a recovery tip for no-result timeout cases and
 points callers toward `agents.call` on the same registered agent before erase.
 
