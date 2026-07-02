@@ -30,12 +30,10 @@ Suggested implementation order, each with a one-line rationale:
    surface, moderate scope, no hard dependency but naturally follows the
    smaller items; re-authored with a phase breakdown and verification
    criteria, sage review completed.
-7. `260702-feat-lead-revive-session-key-candidates` (idea, sage review
-   blocked) - depends on ticket 2's manual-section fix landing first (shares
-   the ferrule-discipline documentation pattern); highest design risk
-   (schema obfuscation posture, plus a design premise correction needed —
-   session-key storage is persistent per-key disk files, not transient
-   in-memory state) so sequenced last among actionable tickets.
+7. `260702-feat-lead-revive-session-key-candidates` - dropped — superseded by
+   existing `workflow_manual` session-key-preservation reminder (see ticket
+   `.dropped/` resolution); no longer part of this workset's implementation
+   sequence.
 8. `260702-research-tool-sprawl-session-key-overhead` (todo) - open
    investigation, `todo/` only, can run in parallel with any of the above;
    not implementation-ready.

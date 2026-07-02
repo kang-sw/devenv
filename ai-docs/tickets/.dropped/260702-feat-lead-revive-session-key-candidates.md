@@ -3,6 +3,7 @@ title: lead-revive should offer in-memory session-key candidates on lost key
 related:
   260702-bug-lead-manual-sections-thin: shares the ferrule-style schema-obfuscation posture this ticket follows
 sage-review: blocked
+dropped: 2026-07-02
 ---
 
 # lead-revive should offer in-memory session-key candidates on lost key
@@ -154,3 +155,8 @@ call site (`workflow_manual.go`'s FRESH-with-root branch calls
 the "every ferrule call" framing misses. This needs a scope decision — new
 dedicated MCP tool vs. hooking into `workflow_manual`'s existing dispatch and
 shared schema — before re-authoring.
+
+
+## Resolution (2026-07-02)
+
+Dropped after two Sage Review Gate blocks on the stateful auto-adopt design: (1) the ticket's original premise that session keys are held only in-memory was factually wrong — session_auth.go persists one JSON file per key on disk; (2) after a corrected redesign (single in-memory last-minted-key scalar, lead-revive-only exposure, same-root guard, auto-adopt on match), review found `lead-revive` has no dedicated server-side MCP surface at all — it is a client-side skill that calls `workflow_manual`, which itself has two undisambiguated lost-key branches, plus an uncovered second key-mint call site outside `ferrule`. Follow-up discussion concluded the underlying problem is already adequately mitigated: `workflow_manual`'s rendered output already carries a bold, imperative "Session key: `<key>` — preserve verbatim in any compaction summary" reminder plus a "Session invariant: must reload after session compaction or continuation" instruction, positioned immediately after the skeptical-posture banner at the top of the manual — and this was independently confirmed to work in the same working session that produced this ticket (the session key survived a real `/compact`). Given the existing preventive control's proven effectiveness and ideal placement, and the architectural cost of the stateful alternative (confirmed by two independent blocked sage reviews), the marginal benefit of either the stateful backstop or additional reinforcement messaging was judged not to justify the cost. No implementation follow-up planned.
