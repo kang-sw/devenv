@@ -234,10 +234,13 @@ dropped tickets live in hidden archive dirs and git history.
   review blocked**: design premise assumed transient in-memory session-key
   storage, but storage is actually persistent per-key disk files with no
   eviction; needs re-authoring before promotion.
-- `260702-feat-workflow-manual-state-only-view` (idea, feat) - **sage review
-  blocked**: completeness reviewer found no phase breakdown and no
-  verification/acceptance criteria for the proposed new tool; needs a phase
-  and verification pass before promotion.
+- `260702-feat-workflow-manual-state-only-view` (ready, feat) - add a
+  lead-only session-state-only MCP tool (name TBD, e.g. `session_state`)
+  returning only the Session State (todos/agenda) for the caller's key,
+  reusing `workflow_manual`'s key-validation behavior; spec addressing via
+  `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
+  completed (re-authored after initial completeness block: added Phase 1 +
+  verification criteria, resolved lead-only-gating design concern).
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
