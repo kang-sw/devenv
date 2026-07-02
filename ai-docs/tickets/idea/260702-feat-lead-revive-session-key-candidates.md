@@ -1,5 +1,6 @@
 ---
 title: lead-revive should offer in-memory session-key candidates on lost key
+sage-review: blocked
 ---
 
 # lead-revive should offer in-memory session-key candidates on lost key
@@ -50,3 +51,47 @@ Constraints:
 This is a complement to, not a replacement for, the existing "preserve the key
 verbatim in the compaction summary" discipline — that remains the primary
 path; this is a fallback when the summary path fails.
+
+## Spec Impact
+
+Target: `ai-docs/spec/workflow-skills.md`. Caller-visible change: `lead-revive`
+can surface same-root in-memory session-key candidates on lost key, with the
+recovery procedure documented only in the lead-gated `workflow_manual` output
+(ferrule-style schema obfuscation), not in the public tool schema.
+Contract-first spec: no.
+
+## Blocked (2026-07-02)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Storage-model premise is factually wrong | critical | missing |
+| 2 | No root-to-keys index exists; ticket doesn't scope how to build one | important | autonomous |
+| 3 | No candidate selection/ordering/cap policy, and no expiry despite unbounded key retention | important | missing |
+| 4 | Interaction with existing FAIL-LOUD no-restore path is unaddressed | important | missing |
+
+### Completeness Reviewer — concern
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | No phase sections | important |
+| 2 | No verification expectations | important |
+| 3 | "Same-root" scoping mechanism unspecified | important |
+| 4 | Candidate surfacing mechanism unspecified | minor |
+
+Design reviewer finding requires resolution before this ticket can proceed:
+the ticket's core premise ("transient in-memory session keys," "requires no
+persistent-storage access, so it cannot leak state across process restarts")
+is factually wrong. The actual implementation
+(`agents-plugin-tool/internal/mcp/session_auth.go:71-80`) stores one JSON
+file per session key on disk under `<cache-root>/keys/<key>.json` with no
+eviction — state already survives process restarts today, the opposite of
+the ticket's stated security invariant. This changes the leak-surface
+analysis (unbounded, cross-restart, on-disk candidate records rather than
+process-lifetime-bounded in-memory ones) and must be re-authored before
+sage review can pass. The reviewer also flagged unresolved candidate
+selection/ordering/cap policy and an unaddressed interaction with the
+existing FAIL-LOUD no-restore branch in `workflow_manual.go` that this
+feature must slot into without reintroducing the leak that branch was
+hardened against.
