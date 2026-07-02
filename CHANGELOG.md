@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.31.0 - 2026-07-02
+
+### Added
+- Add the Codex-visible playbook surface: `playbook.print` and
+  `playbook.render` MCP tools resolve and render lead/delegate playbooks from
+  the rsrc tree, replacing self-contained skill prose with a shared
+  MCP-served source of truth.
+- Add `enter.proceed` and `enter.implement`: deterministic verdict-engine MCP
+  tools that resolve routing and implementation dispatch decisions from
+  caller-supplied facts, returning a `Next:`/`raw`+`next_instruction` handoff
+  instead of leaving verdict computation to playbook prose.
+- Add the `workflow_manual` MCP tool and the session-bootstrap (`ferrule`)
+  tool for minting and restoring lead session keys per working root,
+  including session-parent lineage and session-children enumeration.
+- Add `tickets.create`, `tickets.close`, `tickets.move`, and
+  `tickets.template` MCP tools for ticket lifecycle and skeleton generation,
+  and a `sage_review` posture surface on tickets.
+- Add a session-state machine (agenda/enter/todo primitives) backing
+  installed-todo runbooks for `lead-implement` and `lead-proceed`.
+- Add a layered workflow config surface (`config.prompt`, `config.tuning`,
+  `config.workflow_prefer_mercenary`, `config.workflow_prefer_subagent`) for
+  prompt overrides and delegation-posture tuning.
+
+### Changed
+- Drop the `ws.` prefix from all MCP tool names; every tool is now called by
+  its bare name (e.g. `ferrule`, `project_tree`, `git.commit`).
+- Diet the `lead-proceed`, `lead-discuss`, `lead-implement`,
+  `lead-write-ticket`, and `lead-workflow-manual` playbooks: remove
+  MCP-schema-restatement prose and legacy manual verdict/routing blocks now
+  computed by `enter.proceed`/`enter.implement`.
+- Remove the subquery runtime, its MCP tool, and its CLI subcommand.
+- Remove setup tool dispatch; reshape the agent-backed API tools surface.
+- Rename the docs-discovery pre-invocation agent `project-survey` to
+  `reference-discovery`.
+
 ## v0.30.0 - 2026-05-29
 
 ### Added
