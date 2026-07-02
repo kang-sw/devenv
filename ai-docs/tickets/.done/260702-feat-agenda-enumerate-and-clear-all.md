@@ -77,7 +77,7 @@ no changes to capability gating (`agenda.list` carries no
 `session.`/`config.`/`mercenary.` prefix, so it is unrestricted for every role
 exactly like the existing agenda tools).
 
-### Result (pending commit hash) - 2026-07-02
+### Result (f765a72) - 2026-07-02
 
 Implemented exactly as planned above, direct-edit (no delegated plan
 artifact — `enter.implement` verdict was `direct-edit`, `plan_depth: none`).
