@@ -210,6 +210,34 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
+  as reset-to-builtin (not clear-to-empty) and add `session` scope to
+  `config_prompt_unset`; spec addressing via `## Spec Impact`
+  (`mcp-tools.md`, Contract-first: no). Sage review completed.
+- `260702-bug-lead-manual-sections-thin` (ready, bug) - fill the empty
+  `workflow_manual` `Session setup`/`User preferences` sections with the
+  ferrule reuse-discipline; spec addressing via `## Spec Impact`
+  (`mcp-tools.md`, Contract-first: no). Sage review completed.
+- `260702-feat-agenda-enumerate-and-clear-all` (ready, feat) - add
+  `agenda_list` and/or `agenda_clear(all: true)` to enumerate/clear agenda
+  blob keys; spec addressing via `## Spec Impact` (`mcp-tools.md`,
+  Contract-first: no). Sage review completed.
+- `260702-feat-enter-implement-policy-feedback` (ready, feat) - `enter_implement`
+  verdict notes when a caller policy field was outside its applicability
+  window and ignored; spec addressing via `## Spec Impact` (`mcp-tools.md`,
+  Contract-first: no). Sage review completed.
+- `260702-feat-tickets-move-ready-gate-warning` (ready, feat) - `tickets_move`
+  to `ready` emits a soft non-blocking warning when no spec addressing is
+  detected; spec addressing via `## Spec Impact` (`mcp-tools.md`,
+  Contract-first: no). Sage review completed.
+- `260702-feat-lead-revive-session-key-candidates` (idea, feat) - **sage
+  review blocked**: design premise assumed transient in-memory session-key
+  storage, but storage is actually persistent per-key disk files with no
+  eviction; needs re-authoring before promotion.
+- `260702-feat-workflow-manual-state-only-view` (idea, feat) - **sage review
+  blocked**: completeness reviewer found no phase breakdown and no
+  verification/acceptance criteria for the proposed new tool; needs a phase
+  and verification pass before promotion.
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
