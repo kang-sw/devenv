@@ -688,6 +688,31 @@ func TestStoreAgendaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreClearAllAgenda(t *testing.T) {
+	store, key := newSandboxStore(t)
+	if err := store.setAgenda(key, "implement", json.RawMessage(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.setAgenda(key, "sprint", json.RawMessage(`{"b":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	record, ok := store.readState(key)
+	if !ok || len(record.Agenda) != 2 {
+		t.Fatalf("expected 2 agenda blobs before clear-all: %v", record.Agenda)
+	}
+	if err := store.clearAllAgenda(key); err != nil {
+		t.Fatal(err)
+	}
+	record, _ = store.readState(key)
+	if len(record.Agenda) != 0 {
+		t.Fatalf("clearAllAgenda did not remove every blob: %v", record.Agenda)
+	}
+	// clearing an already-empty agenda map is a no-op, not an error.
+	if err := store.clearAllAgenda(key); err != nil {
+		t.Fatalf("clearAllAgenda on empty agenda returned error: %v", err)
+	}
+}
+
 func TestEnterModeReplacesTodos(t *testing.T) {
 	store, key := newSandboxStore(t)
 	// seed a prior list
@@ -2139,6 +2164,67 @@ func TestServeStdioAgendaHandler(t *testing.T) {
 	rec, _ = server.sessions.readState(key)
 	if len(rec.Agenda) != 0 {
 		t.Fatalf("agenda not cleared via handler: %v", rec.Agenda)
+	}
+}
+
+func TestServeStdioAgendaListHandler(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 903000, root, nil))
+
+	// empty agenda -> explicit no-blobs message, not an error.
+	if got := callToolWithKey(t, server, 3000, key, "agenda.list", map[string]any{}); !strings.Contains(got, "no agenda blobs") {
+		t.Fatalf("agenda.list on empty agenda unexpected: %s", got)
+	}
+
+	if got := callToolWithKey(t, server, 3001, key, "agenda.set", map[string]any{
+		"key":   "implement",
+		"value": map[string]any{"delegation": "direct-edit"},
+	}); !strings.Contains(got, "agenda set: implement") {
+		t.Fatalf("agenda.set unexpected: %s", got)
+	}
+	if got := callToolWithKey(t, server, 3002, key, "agenda.set", map[string]any{
+		"key":   "sprint",
+		"value": map[string]any{"episode": "edit"},
+	}); !strings.Contains(got, "agenda set: sprint") {
+		t.Fatalf("agenda.set unexpected: %s", got)
+	}
+
+	// list must enumerate both keys, sorted alphabetically, each with a summary.
+	got := callToolWithKey(t, server, 3003, key, "agenda.list", map[string]any{})
+	implementIdx := strings.Index(got, "implement")
+	sprintIdx := strings.Index(got, "sprint")
+	if implementIdx == -1 || sprintIdx == -1 {
+		t.Fatalf("agenda.list missing expected keys: %s", got)
+	}
+	if implementIdx > sprintIdx {
+		t.Fatalf("agenda.list keys not sorted alphabetically: %s", got)
+	}
+	if !strings.Contains(got, "delegation") || !strings.Contains(got, "episode") {
+		t.Fatalf("agenda.list missing per-blob summaries: %s", got)
+	}
+
+	// unknown session key -> compact error, not a silent empty list.
+	if got := callToolWithKey(t, server, 3004, "not-a-real-key", "agenda.list", map[string]any{}); !strings.Contains(got, "session key not found") {
+		t.Fatalf("agenda.list with bad key expected session-not-found error, got: %s", got)
+	}
+
+	// clear(all: true) removes every blob in one call.
+	if got := callToolWithKey(t, server, 3005, key, "agenda.clear", map[string]any{
+		"all": true,
+	}); !strings.Contains(got, "agenda cleared: all") {
+		t.Fatalf("agenda.clear(all) unexpected: %s", got)
+	}
+	rec, ok := server.sessions.readState(key)
+	if !ok || len(rec.Agenda) != 0 {
+		t.Fatalf("agenda.clear(all) did not clear every blob: %v", rec.Agenda)
+	}
+	if got := callToolWithKey(t, server, 3006, key, "agenda.list", map[string]any{}); !strings.Contains(got, "no agenda blobs") {
+		t.Fatalf("agenda.list after clear(all) unexpected: %s", got)
 	}
 }
 

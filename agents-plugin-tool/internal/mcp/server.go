@@ -394,6 +394,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleAgendaSet(req.ID, params.Arguments)
 	case "agenda.clear":
 		return s.handleAgendaClear(req.ID, params.Arguments)
+	case "agenda.list":
+		return s.handleAgendaList(req.ID, params.Arguments)
 	case "enter.implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
 	case "enter.proceed":
@@ -2696,14 +2698,26 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agenda.clear",
-			"description": "Remove the session-level agenda blob stored under a key. A missing key is a no-op.",
+			"description": "Remove the session-level agenda blob stored under a key. A missing key is a no-op. Pass all: true instead of key to clear every agenda blob for the session in one call.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"key":         stringProperty("Agenda blob name to remove."),
+					"key":         stringProperty("Agenda blob name to remove. Omit when all: true."),
+					"all":         boolProperty("When true, clear every agenda blob for the session. key is ignored."),
 				},
-				"required": []string{"session_key", "key"},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "agenda.list",
+			"description": "Enumerate current agenda blob keys for a session, each with a short one-line summary, without needing to guess key names from tool descriptions.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+				},
+				"required": []string{"session_key"},
 			},
 		},
 		{

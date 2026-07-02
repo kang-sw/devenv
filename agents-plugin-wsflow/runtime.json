@@ -15,6 +15,7 @@
     "session.children": ">=0.31.1-dev <0.32.0",
     "agenda.set": ">=0.31.1-dev <0.32.0",
     "agenda.clear": ">=0.31.1-dev <0.32.0",
+    "agenda.list": ">=0.31.1-dev <0.32.0",
     "enter.implement": ">=0.31.1-dev <0.32.0",
     "enter.proceed": ">=0.31.1-dev <0.32.0",
     "enter.sprint": ">=0.31.1-dev <0.32.0",

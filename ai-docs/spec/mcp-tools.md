@@ -212,8 +212,15 @@ populate state and hand its key to a delegate that reads or extends it; a child
 that mints its own key via `ferrule` has independent state.
 
 **Agenda (freeform).** `agenda.set(key, value)` upserts an arbitrary JSON
-object blob; `agenda.clear(key)` removes one (a missing key is a no-op). These
-are the fallback primitives for modes not covered by a typed enter tool.
+object blob; `agenda.clear(key)` removes one (a missing key is a no-op), or
+`agenda.clear(all: true)` removes every agenda blob for the session in one
+call (`key` is ignored when `all` is set). `agenda.list(session_key)`
+enumerates the session's current agenda keys, each with a short one-line
+summary (an object blob's top-level keys, or a truncated raw preview for
+non-object JSON), sorted alphabetically; an empty agenda reports `no agenda
+blobs` rather than an empty list. These are the fallback primitives for modes
+not covered by a typed enter tool, and let a caller discover or clear
+orphaned blobs without guessing key names from tool descriptions.
 
 **Enter (typed mode switches).** `enter.implement`, `enter.proceed`,
 `enter.sprint`, and `enter.salvage` each perform one atomic write that both
