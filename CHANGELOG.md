@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.31.1 - 2026-07-02
+
+### Fixed
+- Fix `TestBuildCodexInvocationUsesStdinPromptForFirstCall` (`internal/wsagent`)
+  to match the `filepath.ToSlash` normalization production already applies to
+  `model_instructions_file`, so the test passes on native Windows as well as
+  Linux/WSL.
+- Fix the shared `initGit` test helper (`internal/mcp`) to set a local git
+  identity, so git-commit tests no longer depend on the CI runner or
+  developer machine having a global git identity configured.
+
 ## v0.31.0 - 2026-07-02
 
 ### Added
