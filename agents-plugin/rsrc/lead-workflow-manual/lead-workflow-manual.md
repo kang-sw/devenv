@@ -50,16 +50,24 @@ that share this MCP connection have no semantic cue to invoke it. Pass the
 repository's absolute filesystem path as `root`; the MCP server cannot infer
 the agent's current directory from placeholders or relative paths.
 <!-- ws:fresh-only:end -->
-
 Each key binds to one canonical repository root — the git top-level of the path
 you pass — and a git worktree resolves to its own top-level, so it counts as a
-distinct root. Call `ferrule` once per working root, and thread the matching
-`session_key` through every subsequent root-aware {{.McpNamespace}} tool call
-that targets that root.
+distinct root. Call `ferrule` once per working root, then reuse the returned
+`session_key` for every subsequent root-aware {{.McpNamespace}} tool call that
+targets that root, including across context compaction. Calling `ferrule`
+again for a root you already hold a key for does not reuse or restore the
+existing identity: it mints a brand-new session key with empty state,
+stranding any agenda, todo, or session-tree state bound to the earlier key. If
+you are recovering after compaction, restore the preserved key instead of
+re-minting; only call `ferrule` again when you have genuinely never held a key
+for this root.
 
 ### User preferences
 
 <!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
+No standing user preferences are configured for this project. Use conventional
+terminology and default communication style unless project or session
+configuration overrides this slot via `config.prompt.set`.
 {{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
 
