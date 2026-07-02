@@ -226,6 +226,58 @@ func TestWorkflowPreferSubagentWriterProductionPath(t *testing.T) {
 	}
 }
 
+// TestWorkflowPreferSubagentResetRestoresBuiltin verifies the reset-to-builtin
+// unset path required by ticket 260702-bug-config-unset-asymmetry: reset:true
+// removes the global override (rather than writing an explicit "off" value
+// that would keep shadowing a future builtin default change), and config.show
+// reports the value as builtin-sourced afterward.
+func TestWorkflowPreferSubagentResetRestoresBuiltin(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900007, root, nil))
+
+	onResp := callToolOnce(t, s, 1, "config.workflow_prefer_subagent", map[string]any{
+		"session_key": key,
+		"value":       "on",
+	})
+	if !strings.Contains(toolText(t, onResp), "workflow.prefer_subagent: on [scope:global]") {
+		t.Fatalf("subagent on call must succeed: %s", onResp)
+	}
+
+	resetResp := callToolOnce(t, s, 2, "config.workflow_prefer_subagent", map[string]any{
+		"session_key": key,
+		"reset":       true,
+	})
+	resetText := toolText(t, resetResp)
+	if !strings.Contains(resetText, "workflow.prefer_subagent: off [scope:builtin]") {
+		t.Fatalf("reset must report the builtin-sourced value, not a re-shadowed global write: %s", resetText)
+	}
+
+	showAfterReset := toolText(t, callToolOnce(t, s, 3, "config.show", map[string]any{}))
+	if !strings.Contains(showAfterReset, "workflow.prefer_subagent: off  [scope:builtin]") {
+		t.Fatalf("config.show must report workflow.prefer_subagent as builtin-sourced after reset: %s", showAfterReset)
+	}
+
+	// reset and an explicit value are mutually exclusive.
+	conflictResp := callToolOnce(t, s, 4, "config.workflow_prefer_subagent", map[string]any{
+		"session_key": key,
+		"value":       "on",
+		"reset":       true,
+	})
+	if !strings.Contains(conflictResp, `"isError":true`) {
+		t.Fatalf("value+reset together must error: %s", conflictResp)
+	}
+	if msg := toolText(t, conflictResp); !strings.Contains(msg, "mutually exclusive") {
+		t.Fatalf("value+reset error message must explain mutual exclusivity: %s", msg)
+	}
+}
+
 func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")

@@ -331,6 +331,31 @@ func (s *sessionStore) setOverride(sessionKey, itemKey, value string) error {
 	return s.writeRecordAtomic(dir, sessionKey, record)
 }
 
+// deleteOverride removes an Overrides entry for the given item key from the
+// session record identified by sessionKey via atomic read-modify-write.
+// Returns an error if the session key is not found. Removing an absent item
+// key (or a session with no Overrides map) is a no-op, not an error.
+func (s *sessionStore) deleteOverride(sessionKey, itemKey string) error {
+	dir, err := s.keysDir()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return fmt.Errorf("session key not found: %s", sessionKey)
+	}
+	if record.Overrides == nil {
+		return nil
+	}
+	if _, present := record.Overrides[itemKey]; !present {
+		return nil
+	}
+	delete(record.Overrides, itemKey)
+	return s.writeRecordAtomic(dir, sessionKey, record)
+}
+
 func (s *sessionStore) readRecord(dir, key string) (sessionRecord, bool) {
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return sessionRecord{}, false
