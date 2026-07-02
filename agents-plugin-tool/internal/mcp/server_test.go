@@ -676,6 +676,8 @@ func initGit(t *testing.T, root string) {
 		t.Fatalf("git init failed: %v\n%s", err, string(out))
 	}
 	runGit(t, root, "config", "core.autocrlf", "false")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
 }
 
 func initTicketRepo(t *testing.T, stem string) string {
@@ -1543,8 +1545,6 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
-	runGit(t, root, "config", "user.email", "test@example.com")
-	runGit(t, root, "config", "user.name", "Test User")
 	mustWrite(t, root, "file.txt", "one\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
 	runGit(t, root, "add", "file.txt", "ai-docs/tickets/todo/260503-feat-demo.md")
