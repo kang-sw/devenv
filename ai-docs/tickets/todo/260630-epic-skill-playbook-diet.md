@@ -1,6 +1,6 @@
 ---
 title: "Epic: skill playbook diet — playbook-body / MCP / unnecessary golden rule"
-sage-review: required
+sage-review: completed
 ---
 
 ## Summary
