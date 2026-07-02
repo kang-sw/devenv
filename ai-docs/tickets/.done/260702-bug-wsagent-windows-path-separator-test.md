@@ -1,5 +1,6 @@
 ---
 title: "wsagent test hardcodes forward-slash path, fails on native Windows Go toolchain"
+completed: 2026-07-02
 ---
 
 ## Context
@@ -34,3 +35,8 @@ sibling `rsrc`/`ai-docs` assets its tests read at runtime) to a Windows-native
 temp path (`/mnt/c/...`), then running `go test ./...` there through
 `powershell.exe`. All other packages passed; this was the only failure. No
 repo files were modified; the temp copy was deleted after the run.
+
+
+## Resolution (2026-07-02)
+
+Fixed in f9a33ea224fbe6f18764e8d5099af76af39d8489: the test now expects `filepath.ToSlash(systemPromptPath)`, matching the same normalization production's `buildCodexInvocation` (codex.go:156) already applies via `filepath.ToSlash(req.SystemPromptPath)`. Verified with a full `go test ./...` run on Linux/WSL (all 12 packages pass); native-Windows re-run not performed post-fix but the fix reuses the exact production stdlib call, so it is separator-agnostic by construction rather than assumption.
