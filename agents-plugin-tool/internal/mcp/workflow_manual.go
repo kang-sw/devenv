@@ -147,6 +147,38 @@ func injectSessionKeyLine(body, key string) string {
 	return strings.Join(result, "\n")
 }
 
+// handleWorkflowState implements the ws.workflow_state tool: a cheap,
+// lead-only view of just the Session State section (agenda/todos) for a
+// session_key, with no manual reference/primitives text. It reuses
+// workflow_manual's exact key-validation and fail-loud behavior (260702) so an
+// invalid/expired/unknown key produces the identical error shape rather than a
+// separate state machine. Unlike workflow_manual, there is no FRESH mode here:
+// the fresh-bootstrap sentinel is not a stored record, so it falls through to
+// the same fail-loud path as any other unresolvable key.
+func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) response {
+	key, _ := args["session_key"].(string)
+	key = strings.TrimSpace(key)
+
+	// 1. Key absent — reject with the same required-key error shape as
+	//    workflow_manual. Do not name the sentinel or ferrule.
+	if key == "" {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_state: a valid session_key is required"))
+	}
+
+	// 2. Reuse workflow_manual's fail-loud notice verbatim for any unresolvable
+	//    key (including the sentinel, which is never a stored record). NEVER mint.
+	rec, recOK := s.sessions.readState(key)
+	if !recOK {
+		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
+		return toolTextResponse(id, notice+"\n", nil)
+	}
+
+	// 3. Resolved record — render only the Session State section, no manual body.
+	//    Match workflow_manual's exact trailing-newline shape (it appends the
+	//    same renderSessionState output then a final "\n").
+	return toolTextResponse(id, renderSessionState(rec)+"\n", nil)
+}
+
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
 // session_key is required; keyless calls receive a hard error. Behaviour by key:
 //   - reserved freshBootstrapKey sentinel -> FRESH (manual + gated bootstrap line);

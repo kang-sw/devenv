@@ -57,9 +57,13 @@ const bootstrapToolName = "ferrule"
 // `lead.*` prefix (260617 obscurity rename) — a prefix-only check would
 // silently stop blocking it for non-lead keys. workflow_manual is likewise
 // listed explicitly: delegate/leaf callers must not reach the handler (Phase 3a
-// security hardening), mirroring the ferrule guard.
+// security hardening), mirroring the ferrule guard. workflow_state (260702) is
+// gated the same way as its sibling workflow_manual: it is a cheaper view of
+// the same lead-bootstrap/recovery surface, not a general todo/agenda
+// accessor, so it stays lead-only even though the underlying todo.*/agenda.*
+// data is itself scope-open.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -424,6 +428,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return s.handleTodoReorder(req.ID, params.Arguments)
 	case "workflow_manual":
 		return s.handleWorkflowManual(req.ID, params.Arguments)
+	case "workflow_state":
+		return s.handleWorkflowState(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -3484,6 +3490,17 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"session_key": stringProperty("Required. Your lead session key."),
 					"root":        stringProperty("Optional absolute Git worktree root. When provided alongside the fresh-bootstrap sentinel, the handler mints a lead session key and returns it inline, eliminating the separate ferrule call."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "workflow_state",
+			"description": namespaceText("Return only the Session State section (agenda/todos) for a lead session_key, with no manual reference text. A cheap alternative to workflow_manual for a caller that only needs 'what's my key and current state', costly right after compaction or during lead-revive. An unresolvable key returns the same fail-loud notice as workflow_manual and never mints a new key. Lead-only; workflow_manual itself is unchanged."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Required. Your lead session key."),
 				},
 				"required": []string{"session_key"},
 			},

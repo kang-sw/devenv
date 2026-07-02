@@ -56,6 +56,7 @@
     "tickets.template": ">=0.31.1-dev <0.32.0",
     "path.generate": ">=0.31.1-dev <0.32.0",
     "workflow_manual": ">=0.31.1-dev <0.32.0",
+    "workflow_state": ">=0.31.1-dev <0.32.0",
     "playbook.print": ">=0.31.1-dev <0.32.0",
     "playbook.render": ">=0.31.1-dev <0.32.0",
     "git.status": ">=0.31.1-dev <0.32.0",

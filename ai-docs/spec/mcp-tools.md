@@ -377,6 +377,41 @@ rsrc.
 > there is obscurity. Tracked in idea ticket
 > `260626-research-playbook-print-lead-surface-leak`.
 
+### Session-State-Only View {#260702-workflow-state-tool}
+
+`workflow_state(session_key)` is a cheaper sibling of `workflow_manual`: it
+returns **only** the `## Session State` section (agenda blobs and the todo
+summary) for the caller's session, with no manual reference/primitives text.
+It exists so a lead that only needs "what's my key and current state" —
+notably right after compaction or during `lead-revive`, when context budget is
+tightest — does not have to re-dump the full ~150-line manual body.
+`workflow_manual` itself is unchanged: same always-full-dump behavior, same
+schema.
+
+- **Lead-only, same gating as `workflow_manual`** (`isLeadOnlyTool`): a
+  `session_key` resolving to a delegate/leaf scope is rejected at the keyed
+  capability gate before the handler runs. This tool is a cheaper view of the
+  same lead-bootstrap/recovery surface `workflow_manual` serves, not a general
+  `todo.*`/`agenda.*` accessor, so it stays in the same tool family and gating
+  as its sibling even though the underlying todo/agenda data is itself
+  scope-open to non-lead callers via the dedicated `todo.*`/`agenda.*` tools.
+- **Key validation is reused verbatim from `workflow_manual`**, not a separate
+  state machine:
+  - **keyless** (`session_key` omitted or empty): the same hard
+    required-`session_key` error shape as `workflow_manual`.
+  - **resolved** (`session_key` present and its record resolves): renders only
+    `renderSessionState` for that record — identical content to the
+    `## Session State` suffix `workflow_manual` would render for the same
+    session at the same point in time. An empty session (no agenda, no todos)
+    renders an empty-but-valid Session State payload (`(no todos)`), not an
+    error.
+  - **fail-loud** (`session_key` present but unresolvable, including the
+    fresh-bootstrap sentinel, which is never a stored record): the identical
+    "no restorable state for this key" notice `workflow_manual` renders in its
+    own fail-loud path, pointing to `lead-revive` for recovery. The tool never
+    mints a key. Unlike `workflow_manual`, `workflow_state` has no FRESH mode —
+    the sentinel simply falls through to this same fail-loud path.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current

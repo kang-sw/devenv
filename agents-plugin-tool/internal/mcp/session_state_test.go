@@ -2699,3 +2699,202 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		}
 	}
 }
+
+// --- 260702: ws.workflow_state integration tests -----------------------------
+
+func TestWorkflowStateReturnsSessionStateOnly(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 5500, root, nil))
+
+	// Enter implement mode to populate agenda+todos.
+	enter := callToolWithKey(t, server, 5501, key, "enter.implement", map[string]any{
+		"delegation": "delegated", "need_review": true, "need_doc": false,
+	})
+	if !strings.Contains(enter, "entered implement mode") {
+		t.Fatalf("enter.implement unexpected: %s", enter)
+	}
+
+	manualResp := callToolWithKey(t, server, 5502, key, "workflow_manual", nil)
+	stateResp := callToolWithKey(t, server, 5503, key, "workflow_state", nil)
+
+	// The workflow_state output must exactly equal the "## Session State" section
+	// workflow_manual renders for the same session at the same point in time.
+	manualIdx := strings.Index(manualResp, "## Session State")
+	if manualIdx < 0 {
+		t.Fatalf("workflow_manual response missing Session State section:\n%s", manualResp)
+	}
+	wantState := manualResp[manualIdx:]
+	if stateResp != wantState {
+		t.Fatalf("workflow_state mismatch.\ngot:\n%s\nwant (workflow_manual's Session State suffix):\n%s", stateResp, wantState)
+	}
+
+	// No manual reference/primitives text: workflow_state must be substantially
+	// shorter than the full workflow_manual render, and must not carry manual-only
+	// fragments (e.g. the always-shown per-root rule or ferrule mention).
+	if len(stateResp) >= len(manualResp) {
+		t.Fatalf("workflow_state (%d bytes) not shorter than workflow_manual (%d bytes)", len(stateResp), len(manualResp))
+	}
+	if strings.Contains(stateResp, "once per working root") || strings.Contains(stateResp, "ferrule") {
+		t.Errorf("workflow_state leaked manual body content:\n%s", stateResp)
+	}
+
+	// Session State content itself is present (agenda + todos).
+	if !strings.Contains(stateResp, "### agenda: implement") {
+		t.Errorf("workflow_state missing agenda heading:\n%s", stateResp)
+	}
+	if !strings.Contains(stateResp, "### Todos") {
+		t.Errorf("workflow_state missing Todos heading:\n%s", stateResp)
+	}
+}
+
+func TestWorkflowStateEmptySessionReturnsEmptyPayloadNotError(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 5510, root, nil))
+
+	// No enter.* call, no todos: session exists but has empty agenda/todos.
+	resp := callToolWithKey(t, server, 5511, key, "workflow_state", nil)
+
+	if !strings.Contains(resp, "## Session State") {
+		t.Fatalf("workflow_state empty session missing Session State heading:\n%s", resp)
+	}
+	if !strings.Contains(resp, "(no todos)") {
+		t.Errorf("workflow_state empty session missing empty-todos marker:\n%s", resp)
+	}
+	// Must not be the fail-loud no-restorable-state notice — this is a resolved,
+	// merely-empty session, not an unknown key.
+	if strings.Contains(resp, "no restorable state for session key") {
+		t.Errorf("workflow_state empty session incorrectly returned fail-loud notice:\n%s", resp)
+	}
+}
+
+func TestWorkflowStateKeylessRejected(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	resp := callToolNoKey(t, server, 5520, "workflow_state", nil)
+
+	if !strings.Contains(resp, "session_key") {
+		t.Errorf("keyless: response must mention session_key, got:\n%s", resp)
+	}
+	if strings.Contains(resp, "mint your lead key") {
+		t.Errorf("keyless: self-bootstrap fragment must be absent from error response:\n%s", resp)
+	}
+}
+
+func TestWorkflowStateDelegateKeyBlockedSameAsWorkflowManual(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatalf("mint delegate key: %v", err)
+	}
+
+	manualRawResp := callToolOnce(t, server, 5530, "workflow_manual", map[string]any{
+		"session_key": delegateKey,
+	})
+	stateRawResp := callToolOnce(t, server, 5531, "workflow_state", map[string]any{
+		"session_key": delegateKey,
+	})
+
+	// Same lead-only profile rejection shape (RPC-level -32601 error) as
+	// workflow_manual for a non-lead scoped key.
+	for _, rawResp := range []string{manualRawResp, stateRawResp} {
+		if !strings.Contains(rawResp, "tool not available in current") {
+			t.Errorf("delegate key: expected lead-only rejection, got:\n%s", rawResp)
+		}
+		if !strings.Contains(rawResp, "-32601") {
+			t.Errorf("delegate key: expected JSON-RPC error code -32601, got:\n%s", rawResp)
+		}
+	}
+	if strings.Contains(stateRawResp, "Session State") {
+		t.Errorf("delegate key: workflow_state body must be absent from rejection response:\n%s", stateRawResp)
+	}
+}
+
+func TestWorkflowStateUnknownKeySameFailLoudAsWorkflowManual(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheDir)
+
+	server := NewServer(root, "test")
+
+	badKey := "no-such-key-here"
+	manualResp := callToolWithKey(t, server, 5540, badKey, "workflow_manual", nil)
+	stateResp := callToolWithKey(t, server, 5541, badKey, "workflow_state", nil)
+
+	// workflow_state must produce the identical fail-loud notice text that
+	// workflow_manual renders for the same unresolvable key (both end with the
+	// same "## Session State ... no restorable state ..." notice).
+	manualIdx := strings.Index(manualResp, "## Session State")
+	if manualIdx < 0 {
+		t.Fatalf("workflow_manual fail-loud response missing Session State heading:\n%s", manualResp)
+	}
+	wantNotice := manualResp[manualIdx:]
+	if stateResp != wantNotice {
+		t.Fatalf("workflow_state fail-loud mismatch.\ngot:\n%s\nwant (workflow_manual's fail-loud notice):\n%s", stateResp, wantNotice)
+	}
+	if !strings.Contains(stateResp, "lead-revive") {
+		t.Errorf("unknown key: workflow_state fail-loud notice should point to lead-revive recovery:\n%s", stateResp)
+	}
+	if strings.Contains(stateResp, "ferrule") || strings.Contains(stateResp, "once per working root") {
+		t.Errorf("unknown key: workflow_state must not leak manual body / ferrule mention:\n%s", stateResp)
+	}
+
+	// Must NOT have minted a key file.
+	keysDir := filepath.Join(cacheDir, "keys")
+	_, statErr := os.Stat(filepath.Join(keysDir, badKey+".json"))
+	if !os.IsNotExist(statErr) {
+		t.Errorf("unknown key: key file was minted (stat: %v)", statErr)
+	}
+}
+
+func TestWorkflowStateFreshSentinelIsFailLoudNotFresh(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+
+	// The fresh-bootstrap sentinel is never a stored record; workflow_state has
+	// no FRESH mode, so it must fall through to the same fail-loud path as any
+	// other unresolvable key rather than minting or rendering manual content.
+	resp := callToolWithKey(t, server, 5550, freshBootstrapKey, "workflow_state", nil)
+
+	if !strings.Contains(resp, "no restorable state for session key") {
+		t.Errorf("sentinel key: expected fail-loud notice, got:\n%s", resp)
+	}
+	if strings.Contains(resp, "mint your lead key") {
+		t.Errorf("sentinel key: workflow_state must not render fresh-mode manual content:\n%s", resp)
+	}
+}
+
+func TestWorkflowStateToolSchema(t *testing.T) {
+	useLeadProfile(t)
+	server := NewServer(t.TempDir(), "test")
+	properties := toolPropertiesByName(t, callToolsList(t, server), "workflow_state")
+	if _, ok := properties["session_key"]; !ok {
+		t.Fatalf("workflow_state schema missing session_key property: %#v", properties)
+	}
+}
