@@ -1,5 +1,6 @@
 ---
 title: tickets_move to ready bypasses spec-address gate with no warning at the primitive layer
+sage-review: completed
 ---
 
 # tickets_move to ready bypasses spec-address gate with no warning at the primitive layer
@@ -27,3 +28,10 @@ non-epic/research/workset ticket to `ready/` without detected spec addressing,
 e.g.: "ready gate is normally enforced by lead-write-ticket; no spec
 addressing detected." The move should still succeed — this is advisory, not a
 new hard gate at the primitive layer.
+
+## Spec Impact
+
+Target: `ai-docs/spec/mcp-tools.md`. Caller-visible change: `tickets_move` to
+`ready` emits a soft (non-blocking) warning when no spec addressing is
+detected, noting the gate is normally enforced by `lead-write-ticket`.
+Contract-first spec: no.

@@ -1,5 +1,6 @@
 ---
 title: lead-only workflow_manual sections are empty/thin, missing ferrule discipline
+sage-review: completed
 ---
 
 # lead-only workflow_manual sections are empty/thin, missing ferrule discipline
@@ -37,3 +38,9 @@ session key across the working session; a second `ferrule` call for the same
 root mints a new identity with empty state, stranding prior agenda/todo state;
 preserve the key verbatim across compaction. Also fix the section's spacing
 and fill in (or otherwise repair) the empty `User preferences` section body.
+
+## Spec Impact
+
+Target: `ai-docs/spec/mcp-tools.md`. Caller-visible change: `workflow_manual`'s
+rendered `Session setup` and `User preferences` sections gain the ferrule
+reuse-discipline and are no longer empty/thin. Contract-first spec: no.

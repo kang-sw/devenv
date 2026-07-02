@@ -1,5 +1,6 @@
 ---
 title: enter_implement silently ignores caller policy fields outside their applicability window
+sage-review: completed
 ---
 
 # enter_implement silently ignores caller policy fields outside their applicability window
@@ -23,3 +24,9 @@ When a policy field is present in the input but does not apply given current
 state, add a one-line note to the verdict output, e.g.: "merge_target policy
 ignored (not on an implement/* branch); derived from current branch." This
 keeps the correct behavior but closes the feedback gap.
+
+## Spec Impact
+
+Target: `ai-docs/spec/mcp-tools.md`. Caller-visible change: `enter_implement`
+verdict includes a one-line note when a caller-supplied policy field was
+outside its applicability window and was ignored. Contract-first spec: no.

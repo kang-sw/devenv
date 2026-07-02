@@ -1,5 +1,6 @@
 ---
 title: config unset is asymmetric with set — no builtin restore, no session scope
+sage-review: completed
 ---
 
 # config unset is asymmetric with set — no builtin restore, no session scope
@@ -44,3 +45,10 @@ Concretely:
 Document this set-vs-unset distinction (explicit value vs. reset-to-default)
 wherever config surfaces are described, so future config additions follow the
 same convention by default.
+
+## Spec Impact
+
+Target: `ai-docs/spec/mcp-tools.md`. Caller-visible change: `config_prompt_unset`
+gains a `session` scope; `unset` semantics are redefined to mean
+reset-to-builtin (not clear-to-empty) across `config_prompt_unset` and
+`config_workflow_prefer_subagent`. Contract-first spec: no.

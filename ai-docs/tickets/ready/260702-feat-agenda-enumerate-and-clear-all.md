@@ -1,5 +1,6 @@
 ---
 title: agenda blob keys are not enumerable; add agenda_list or clear-all
+sage-review: completed
 ---
 
 # agenda blob keys are not enumerable; add agenda_list or clear-all
@@ -21,3 +22,9 @@ Add an `agenda_list` tool to enumerate current agenda keys (and ideally a
 short summary of each blob), and/or extend `agenda_clear` with an `all: true`
 option to clear every agenda blob for the session without needing to name
 each key individually.
+
+## Spec Impact
+
+Target: `ai-docs/spec/mcp-tools.md`. Caller-visible change: new `agenda_list`
+tool (or `agenda_clear(all: true)` mode) to enumerate/clear agenda blob keys
+without guessing them from tool descriptions. Contract-first spec: no.
