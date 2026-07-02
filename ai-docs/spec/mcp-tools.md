@@ -212,8 +212,15 @@ populate state and hand its key to a delegate that reads or extends it; a child
 that mints its own key via `ferrule` has independent state.
 
 **Agenda (freeform).** `agenda.set(key, value)` upserts an arbitrary JSON
-object blob; `agenda.clear(key)` removes one (a missing key is a no-op). These
-are the fallback primitives for modes not covered by a typed enter tool.
+object blob; `agenda.clear(key)` removes one (a missing key is a no-op), or
+`agenda.clear(all: true)` removes every agenda blob for the session in one
+call (`key` is ignored when `all` is set). `agenda.list(session_key)`
+enumerates the session's current agenda keys, each with a short one-line
+summary (an object blob's top-level keys, or a truncated raw preview for
+non-object JSON), sorted alphabetically; an empty agenda reports `no agenda
+blobs` rather than an empty list. These are the fallback primitives for modes
+not covered by a typed enter tool, and let a caller discover or clear
+orphaned blobs without guessing key names from tool descriptions.
 
 **Enter (typed mode switches).** `enter.implement`, `enter.proceed`,
 `enter.sprint`, and `enter.salvage` each perform one atomic write that both
@@ -252,7 +259,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   output returns the structured result plus `next_instruction` and the identical
   `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
   what policy or branch condition needs correction before source edits continue
-  without naming unreachable planner or implementer actions.
+  without naming unreachable planner or implementer actions. When a caller
+  supplies `policy.branch.merge_target` outside its applicability window (the
+  observed current branch is not already `implement/*`, so the branch action
+  is `create`), the verdict adds a one-line warning naming the supplied value
+  and the branch it was derived from instead, e.g. `policy.branch.merge_target
+  "master" ignored (not on an implement/* branch); derived from current branch
+  "test/wsflow-smoke"`, so a caller unfamiliar with the applicability rule sees
+  that the field was read and deliberately not applied.
 - `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
@@ -363,6 +377,41 @@ rsrc.
 > there is obscurity. Tracked in idea ticket
 > `260626-research-playbook-print-lead-surface-leak`.
 
+### Session-State-Only View {#260702-workflow-state-tool}
+
+`workflow_state(session_key)` is a cheaper sibling of `workflow_manual`: it
+returns **only** the `## Session State` section (agenda blobs and the todo
+summary) for the caller's session, with no manual reference/primitives text.
+It exists so a lead that only needs "what's my key and current state" —
+notably right after compaction or during `lead-revive`, when context budget is
+tightest — does not have to re-dump the full ~150-line manual body.
+`workflow_manual` itself is unchanged: same always-full-dump behavior, same
+schema.
+
+- **Lead-only, same gating as `workflow_manual`** (`isLeadOnlyTool`): a
+  `session_key` resolving to a delegate/leaf scope is rejected at the keyed
+  capability gate before the handler runs. This tool is a cheaper view of the
+  same lead-bootstrap/recovery surface `workflow_manual` serves, not a general
+  `todo.*`/`agenda.*` accessor, so it stays in the same tool family and gating
+  as its sibling even though the underlying todo/agenda data is itself
+  scope-open to non-lead callers via the dedicated `todo.*`/`agenda.*` tools.
+- **Key validation is reused verbatim from `workflow_manual`**, not a separate
+  state machine:
+  - **keyless** (`session_key` omitted or empty): the same hard
+    required-`session_key` error shape as `workflow_manual`.
+  - **resolved** (`session_key` present and its record resolves): renders only
+    `renderSessionState` for that record — identical content to the
+    `## Session State` suffix `workflow_manual` would render for the same
+    session at the same point in time. An empty session (no agenda, no todos)
+    renders an empty-but-valid Session State payload (`(no todos)`), not an
+    error.
+  - **fail-loud** (`session_key` present but unresolvable, including the
+    fresh-bootstrap sentinel, which is never a stored record): the identical
+    "no restorable state for this key" notice `workflow_manual` renders in its
+    own fail-loud path, pointing to `lead-revive` for recovery. The tool never
+    mints a key. Unlike `workflow_manual`, `workflow_state` has no FRESH mode —
+    the sentinel simply falls through to this same fail-loud path.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
@@ -391,6 +440,14 @@ global config scope. The former unprefixed `"prefer_mercenary"` entry is not
 migrated; it remains orphaned local state unless a later ticket introduces
 migration. `prompt.DelegationSection.*` prompt override keys are likewise not
 migrated.
+
+`config.workflow_prefer_subagent` additionally accepts `reset: true` as an
+alternative to `value`; the two are mutually exclusive. `reset: true` removes
+the global override entirely (rather than writing an explicit value, even the
+builtin's current value) so resolution falls back to `global > builtin` and
+tracks any future change to the builtin default. This mirrors the general
+unset-vs-set distinction in `#260702-unset-means-reset-to-builtin`.
+{#260702-config-unset-reset-to-builtin}
 
 ## Tuning Catalog {#260625-tuning-catalog}
 
@@ -544,6 +601,16 @@ and agentless wsflow modes, since prompt overrides are a mode-neutral rendering
 concern. Once stored, the override is honored at render time by the marker engine
 for the matching `(point id, harness)` and resolved scope.
 
+`config.prompt.unset(point id, harness, scope?)` resets a stored prompt
+override back to whatever the next-broader scope (or the inline seed default)
+resolves to; it never writes an empty-string value in place of the removed
+override — an explicit empty override is a distinct intent covered by
+`config.prompt.set` with an empty `prompt` value. `scope` accepts `session`,
+`project`, or `global` (the same enum as `config.prompt.set`); a `session`-scope
+unset requires the caller's `session_key`, matching the setter's session-scope
+write requirement. With no `scope`, the item's declared default scope is used
+(`project` for unregistered `prompt.*` keys). {#260702-unset-means-reset-to-builtin}
+
 No-argument `config.prompt()` returns a **data listing**, not a manual: a scan of
 the shipped playbook resource tree for declared override markers (the marker
 grammar from `#260619-prompt-override-marker-engine`) reporting each
@@ -633,7 +700,11 @@ resolved `sage_review` config: `skipped` for `off`, empty, or unset;
 leave `recommended` or `required` as the visible unresolved posture. A move into
 `ready/` requires a resolved terminal posture (`completed` or `skipped`);
 `recommended`, `required`, and `blocked` stop with an action-oriented message.
-The move stages atomically and never commits.
+A move into `ready/` for a non-`epic`/`research`/`workset` ticket with no
+detected spec addressing (no confirmed `spec:`/`spec-remove:` frontmatter entry
+and no `## Spec Impact` section) additionally returns a soft, non-blocking tip
+noting that the ready gate is normally enforced by `lead-write-ticket`; the
+move still succeeds. The move stages atomically and never commits.
 {#260620-ticket-move-tool}
 
 `tickets.create` creates a dated ticket stub at a caller-specified initial state

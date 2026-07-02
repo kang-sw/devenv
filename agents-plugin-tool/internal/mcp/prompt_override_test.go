@@ -526,9 +526,9 @@ func TestShippedWorkflowManualOmitsDelegationSection(t *testing.T) {
 }
 
 // TestShippedUserPreferenceSectionEmptySlotAndOverride verifies the shipped
-// user-preference extension slot. With no override it renders no body text; an
-// all-harness override appends preference guidance without replacing delegation
-// posture.
+// user-preference extension slot. With no override it renders the static
+// default-preferences seed text (260702); an all-harness override appends
+// preference guidance without replacing delegation posture.
 func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
@@ -595,6 +595,48 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 	}
 	assertNoMarkerSyntax(t, "Korean lang", langBody)
 	assertManualStructureIntact(t, "Korean lang", langBody)
+}
+
+// TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin verifies the
+// 260702 fix: the shipped Session setup section states the ferrule
+// redundant-mint consequence (a second call for the same root mints a new
+// session identity with empty state, stranding prior agenda/todo state), and
+// the User preferences section is never fully empty in the default render
+// (no override, no workflow.lang configured).
+func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	if !strings.Contains(body, "### Session setup") {
+		t.Fatalf("workflow manual must keep the Session setup heading:\n%s", body)
+	}
+	if !strings.Contains(body, "mints a brand-new session key with empty state") {
+		t.Errorf("Session setup must state the redundant-mint consequence:\n%s", body)
+	}
+	if !strings.Contains(body, "stranding any agenda, todo, or session-tree state") {
+		t.Errorf("Session setup must name the stranded state kinds:\n%s", body)
+	}
+
+	// Extract the User preferences section body (between its heading and the
+	// next heading) and assert it is not empty/whitespace-only.
+	idx := strings.Index(body, "### User preferences")
+	if idx < 0 {
+		t.Fatalf("workflow manual must keep the User preferences heading:\n%s", body)
+	}
+	rest := body[idx+len("### User preferences"):]
+	if next := strings.Index(rest, "\n### "); next >= 0 {
+		rest = rest[:next]
+	}
+	if strings.TrimSpace(rest) == "" {
+		t.Errorf("User preferences section must not be empty in the default render:\n%s", body)
+	}
+	assertNoMarkerSyntax(t, "session setup and user preferences", body)
+	assertManualStructureIntact(t, "session setup and user preferences", body)
 }
 
 // assertManualStructureIntact bounds the override replacement region: the
@@ -723,6 +765,89 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 	assertNoMarkerSyntax(t, "config.prompt.set precedence render", precedenceBody)
 	assertManualStructureIntact(t, "config.prompt.set precedence render", precedenceBody)
+}
+
+// TestConfigPromptUnsetSessionScope verifies ticket 260702-bug-config-unset-asymmetry:
+// config.prompt.unset now supports scope: "session", removing only the
+// session-scoped override and falling back to the next-broader scope (project
+// here) rather than being forced through a global-scope detour or being
+// unsupported entirely.
+func TestConfigPromptUnsetSessionScope(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 910200, root, nil))
+
+	// Seed a project-scope override beneath the session override so the
+	// post-unset fallback lands somewhere concrete rather than the seed default.
+	projectSetResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "UserPreferenceSection",
+		"harness":     "claude",
+		"prompt":      "project-scope fallback text",
+		"scope":       "project",
+	})
+	if !strings.Contains(toolText(t, projectSetResp), "scope: project") {
+		t.Fatalf("project-scope seed set failed: %s", projectSetResp)
+	}
+
+	sessionSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "UserPreferenceSection",
+		"harness":     "claude",
+		"prompt":      "session-scope override text",
+		"scope":       "session",
+	})
+	if !strings.Contains(toolText(t, sessionSetResp), "scope: session") {
+		t.Fatalf("session-scope set failed: %s", sessionSetResp)
+	}
+
+	// Session override wins while present.
+	beforeUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (before unset): %v", err)
+	}
+	if !strings.Contains(beforeUnset, "session-scope override text") {
+		t.Fatalf("session override must win before unset:\n%s", beforeUnset)
+	}
+
+	// Unset at session scope — must not require a global-scope detour and must
+	// not clear the value to empty.
+	unsetResp := callToolOnce(t, s, 3, "config.prompt.unset", map[string]any{
+		"session_key": key,
+		"pointId":     "UserPreferenceSection",
+		"harness":     "claude",
+		"scope":       "session",
+	})
+	unsetText := toolText(t, unsetResp)
+	if strings.Contains(unsetText, `"isError":true`) {
+		t.Fatalf("config.prompt.unset with scope=session must succeed: %s", unsetResp)
+	}
+	if !strings.Contains(unsetText, "prompt override cleared: UserPreferenceSection/claude (scope: session)") {
+		t.Fatalf("config.prompt.unset confirmation missing: %s", unsetText)
+	}
+
+	// Falls back to the project-scope value, not to an empty override.
+	afterUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (after unset): %v", err)
+	}
+	if strings.Contains(afterUnset, "session-scope override text") {
+		t.Fatalf("session override must be gone after unset:\n%s", afterUnset)
+	}
+	if !strings.Contains(afterUnset, "project-scope fallback text") {
+		t.Fatalf("unset must fall back to the next-broader (project) scope, not empty:\n%s", afterUnset)
+	}
 }
 
 // TestConfigPromptSetValidationAndDefaultScope covers the setter's input-validation

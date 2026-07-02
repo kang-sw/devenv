@@ -335,6 +335,155 @@ func TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture(t *testing.T)
 	}
 }
 
+func TestTicketsMoveToReadyWarnsWhenNoSpecAddressing(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-nospec"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: NoSpec\nsage-review: skipped\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "off",
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove: %v", err)
+	}
+	if !strings.Contains(result.Tip, "ready gate is normally enforced by lead-write-ticket") {
+		t.Fatalf("Tip = %q, want ready-gate warning", result.Tip)
+	}
+}
+
+func TestTicketsMoveToReadySucceedsDespiteMissingSpecAddressing(t *testing.T) {
+	// The warning is advisory only; the move must still succeed and the file
+	// must land at the requested destination.
+	root := t.TempDir()
+	stem := "260101-feat-nospec-succeeds"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: NoSpec\nsage-review: skipped\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "off",
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(result.NewPath))); statErr != nil {
+		t.Fatalf("moved ticket missing at %s: %v", result.NewPath, statErr)
+	}
+}
+
+func TestTicketsMoveToReadyNoWarningWithSpecFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-withspec"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: WithSpec\nsage-review: skipped\nspec: 260101-spec-example\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "off",
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove: %v", err)
+	}
+	if strings.Contains(result.Tip, "ready gate") {
+		t.Fatalf("Tip = %q, want no ready-gate warning when spec: is set", result.Tip)
+	}
+}
+
+func TestTicketsMoveToReadyNoWarningWithSpecRemoveFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-withspecremove"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: WithSpecRemove\nsage-review: skipped\nspec-remove: 260101-spec-old\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "off",
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove: %v", err)
+	}
+	if strings.Contains(result.Tip, "ready gate") {
+		t.Fatalf("Tip = %q, want no ready-gate warning when spec-remove: is set", result.Tip)
+	}
+}
+
+func TestTicketsMoveToReadyNoWarningWithSpecImpactSection(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-withimpact"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: WithImpact\nsage-review: skipped\n---\n\nBody.\n\n## Spec Impact\n\nDetails.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "off",
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove: %v", err)
+	}
+	if strings.Contains(result.Tip, "ready gate") {
+		t.Fatalf("Tip = %q, want no ready-gate warning when ## Spec Impact is present", result.Tip)
+	}
+}
+
+func TestTicketsMoveToReadyNoWarningForExemptCategories(t *testing.T) {
+	for _, category := range []string{"epic", "research", "workset"} {
+		t.Run(category, func(t *testing.T) {
+			root := t.TempDir()
+			stem := "260101-" + category + "-sample"
+			mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+				"---\ntitle: Exempt\nsage-review: skipped\n---\n\nBody.\n")
+			runner := &mockGitRunner{}
+
+			result, err := TicketsMove(root, runner, TicketMoveOptions{
+				TicketStem: stem,
+				To:         "ready",
+				SageReview: "off",
+			})
+			if err != nil {
+				t.Fatalf("TicketsMove: %v", err)
+			}
+			if strings.Contains(result.Tip, "ready gate") {
+				t.Fatalf("Tip = %q, want no ready-gate warning for exempt category %s", result.Tip, category)
+			}
+		})
+	}
+}
+
+func TestTicketsMoveToReadyCombinesSageTipAndReadyGateWarning(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-combo"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "idea", stem+".md"),
+		"---\ntitle: Combo\nsage-review: skipped\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "off",
+	})
+	if err != nil {
+		t.Fatalf("TicketsMove: %v", err)
+	}
+	if !strings.Contains(result.Tip, "sage review posture: skipped") {
+		t.Fatalf("Tip = %q, want sage review posture tip", result.Tip)
+	}
+	if !strings.Contains(result.Tip, "ready gate is normally enforced by lead-write-ticket") {
+		t.Fatalf("Tip = %q, want ready-gate warning", result.Tip)
+	}
+}
+
 func TestTicketsMoveUpwardToReadyAllowsResolvedSageReviewPosture(t *testing.T) {
 	for _, posture := range []string{"completed", "skipped"} {
 		t.Run(posture, func(t *testing.T) {

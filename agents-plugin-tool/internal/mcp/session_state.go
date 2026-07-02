@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -743,6 +744,15 @@ func (s *sessionStore) clearAgenda(sessionKey, key string) error {
 	})
 }
 
+// clearAllAgenda removes every agenda blob for the session. An already-empty
+// agenda map is a no-op.
+func (s *sessionStore) clearAllAgenda(sessionKey string) error {
+	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+		r.Agenda = nil
+		return nil
+	})
+}
+
 // enterMode atomically stores the typed payload as an agenda blob under
 // agendaKey and replaces the entire todo list with todos. This is the single
 // write behind every ws.enter.* tool: agenda update and todo replacement land
@@ -864,6 +874,13 @@ func (s *Server) handleAgendaClear(id json.RawMessage, args map[string]any) resp
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	all, _ := args["all"].(bool)
+	if all {
+		if err := s.sessions.clearAllAgenda(sessionKey); err != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		}
+		return toolTextResponse(id, "agenda cleared: all\n", nil)
+	}
 	key, err := stringArg(tool, "key", args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -872,6 +889,56 @@ func (s *Server) handleAgendaClear(id json.RawMessage, args map[string]any) resp
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	return toolTextResponse(id, fmt.Sprintf("agenda cleared: %s\n", key), nil)
+}
+
+// agendaSummary renders a compact single-line preview of an agenda blob's
+// JSON value for ws.agenda.list. Object blobs show their top-level keys;
+// other JSON shapes fall back to a truncated raw rendering.
+func agendaSummary(raw json.RawMessage) string {
+	const maxLen = 80
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		keys := make([]string, 0, len(obj))
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		summary := fmt.Sprintf("{%s}", strings.Join(keys, ", "))
+		if len(summary) > maxLen {
+			summary = summary[:maxLen-1] + "…"
+		}
+		return summary
+	}
+	flat := strings.Join(strings.Fields(string(raw)), " ")
+	if len(flat) > maxLen {
+		flat = flat[:maxLen-1] + "…"
+	}
+	return flat
+}
+
+func (s *Server) handleAgendaList(id json.RawMessage, args map[string]any) response {
+	const tool = "agenda.list"
+	sessionKey, err := sessionStateKey(tool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	record, ok := s.sessions.readState(sessionKey)
+	if !ok {
+		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
+	}
+	if len(record.Agenda) == 0 {
+		return toolTextResponse(id, "no agenda blobs\n", nil)
+	}
+	keys := make([]string, 0, len(record.Agenda))
+	for k := range record.Agenda {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for _, k := range keys {
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", k, agendaSummary(record.Agenda[k])))
+	}
+	return toolTextResponse(id, sb.String(), nil)
 }
 
 // handleEnter stores the typed payload (all args except session_key) under the
