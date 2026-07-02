@@ -658,7 +658,11 @@ resolved `sage_review` config: `skipped` for `off`, empty, or unset;
 leave `recommended` or `required` as the visible unresolved posture. A move into
 `ready/` requires a resolved terminal posture (`completed` or `skipped`);
 `recommended`, `required`, and `blocked` stop with an action-oriented message.
-The move stages atomically and never commits.
+A move into `ready/` for a non-`epic`/`research`/`workset` ticket with no
+detected spec addressing (no confirmed `spec:`/`spec-remove:` frontmatter entry
+and no `## Spec Impact` section) additionally returns a soft, non-blocking tip
+noting that the ready gate is normally enforced by `lead-write-ticket`; the
+move still succeeds. The move stages atomically and never commits.
 {#260620-ticket-move-tool}
 
 `tickets.create` creates a dated ticket stub at a caller-specified initial state

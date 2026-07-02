@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -126,13 +127,71 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
 	if isUpwardMove(curStatus, to) {
 		if posture, err := currentSageReviewPosture(filepath.Join(root, filepath.FromSlash(newPath))); err == nil {
-			result.Tip = sageReviewPostureTip(posture)
+			result.Tip = appendTip(result.Tip, sageReviewPostureTip(posture))
 		}
 	}
 	if curStatus == "ready" && (to == "todo" || to == "idea") {
-		result.Tip = "This ticket had spec entries; clear spec:, spec-remove:, and review ## Spec Impact before re-promoting."
+		result.Tip = appendTip(result.Tip, "This ticket had spec entries; clear spec:, spec-remove:, and review ## Spec Impact before re-promoting.")
+	}
+	if to == "ready" {
+		if warning := readyGateWarning(filepath.Join(root, filepath.FromSlash(newPath)), stem); warning != "" {
+			result.Tip = appendTip(result.Tip, warning)
+		}
 	}
 	return result, nil
+}
+
+// appendTip joins advisory tip messages so multiple warnings from independent
+// checks all remain visible in the response instead of overwriting each other.
+func appendTip(existing, addition string) string {
+	if existing == "" {
+		return addition
+	}
+	if addition == "" {
+		return existing
+	}
+	return existing + " " + addition
+}
+
+// ticketCategoryRE extracts the category token from a ticket stem
+// (YYMMDD-<category>-<slug>), mirroring the lead-write-ticket convention.
+var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
+
+// exemptReadyGateCategories are ticket categories exempt from the spec-address
+// gate enforced by the lead-write-ticket playbook when promoting to ready/.
+var exemptReadyGateCategories = map[string]bool{
+	"epic":     true,
+	"research": true,
+	"workset":  true,
+}
+
+// readyGateWarning returns a soft, non-blocking warning when a non-exempt
+// ticket is moved to ready/ without detected spec addressing (a confirmed
+// spec:/spec-remove: frontmatter entry or a ## Spec Impact section). The
+// spec-address gate itself is documented and enforced only at the
+// lead-write-ticket playbook layer; this primitive-layer warning exists so a
+// lead calling tickets_move directly still gets a signal.
+func readyGateWarning(ticketAbsPath, stem string) string {
+	match := ticketCategoryRE.FindStringSubmatch(stem)
+	if len(match) == 2 && exemptReadyGateCategories[match[1]] {
+		return ""
+	}
+
+	fm := frontmatter(ticketAbsPath)
+	if len(scalarList(fm["spec"])) > 0 || len(scalarList(fm["spec-remove"])) > 0 {
+		return ""
+	}
+
+	raw, err := os.ReadFile(ticketAbsPath)
+	if err == nil {
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "## Spec Impact") {
+				return ""
+			}
+		}
+	}
+
+	return "ready gate is normally enforced by lead-write-ticket; no spec addressing detected."
 }
 
 // statusRank orders the active status axis idea < todo < ready so a move toward
