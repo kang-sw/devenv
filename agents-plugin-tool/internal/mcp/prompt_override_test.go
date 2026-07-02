@@ -526,9 +526,9 @@ func TestShippedWorkflowManualOmitsDelegationSection(t *testing.T) {
 }
 
 // TestShippedUserPreferenceSectionEmptySlotAndOverride verifies the shipped
-// user-preference extension slot. With no override it renders no body text; an
-// all-harness override appends preference guidance without replacing delegation
-// posture.
+// user-preference extension slot. With no override it renders the static
+// default-preferences seed text (260702); an all-harness override appends
+// preference guidance without replacing delegation posture.
 func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
@@ -595,6 +595,48 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 	}
 	assertNoMarkerSyntax(t, "Korean lang", langBody)
 	assertManualStructureIntact(t, "Korean lang", langBody)
+}
+
+// TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin verifies the
+// 260702 fix: the shipped Session setup section states the ferrule
+// redundant-mint consequence (a second call for the same root mints a new
+// session identity with empty state, stranding prior agenda/todo state), and
+// the User preferences section is never fully empty in the default render
+// (no override, no workflow.lang configured).
+func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	if !strings.Contains(body, "### Session setup") {
+		t.Fatalf("workflow manual must keep the Session setup heading:\n%s", body)
+	}
+	if !strings.Contains(body, "mints a brand-new session key with empty state") {
+		t.Errorf("Session setup must state the redundant-mint consequence:\n%s", body)
+	}
+	if !strings.Contains(body, "stranding any agenda, todo, or session-tree state") {
+		t.Errorf("Session setup must name the stranded state kinds:\n%s", body)
+	}
+
+	// Extract the User preferences section body (between its heading and the
+	// next heading) and assert it is not empty/whitespace-only.
+	idx := strings.Index(body, "### User preferences")
+	if idx < 0 {
+		t.Fatalf("workflow manual must keep the User preferences heading:\n%s", body)
+	}
+	rest := body[idx+len("### User preferences"):]
+	if next := strings.Index(rest, "\n### "); next >= 0 {
+		rest = rest[:next]
+	}
+	if strings.TrimSpace(rest) == "" {
+		t.Errorf("User preferences section must not be empty in the default render:\n%s", body)
+	}
+	assertNoMarkerSyntax(t, "session setup and user preferences", body)
+	assertManualStructureIntact(t, "session setup and user preferences", body)
 }
 
 // assertManualStructureIntact bounds the override replacement region: the
