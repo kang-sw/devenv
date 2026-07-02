@@ -259,7 +259,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   output returns the structured result plus `next_instruction` and the identical
   `raw` string. A `Branch Action: stop` verdict is a safety blocker and must say
   what policy or branch condition needs correction before source edits continue
-  without naming unreachable planner or implementer actions.
+  without naming unreachable planner or implementer actions. When a caller
+  supplies `policy.branch.merge_target` outside its applicability window (the
+  observed current branch is not already `implement/*`, so the branch action
+  is `create`), the verdict adds a one-line warning naming the supplied value
+  and the branch it was derived from instead, e.g. `policy.branch.merge_target
+  "master" ignored (not on an implement/* branch); derived from current branch
+  "test/wsflow-smoke"`, so a caller unfamiliar with the applicability rule sees
+  that the field was read and deliberately not applied.
 - `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /

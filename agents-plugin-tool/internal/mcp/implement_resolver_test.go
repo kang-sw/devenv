@@ -173,6 +173,70 @@ func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 	}
 }
 
+func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "single-file", Present: true},
+				Surface:                   factString{Value: "internal", Present: true},
+				NewPublicSymbol:           factString{Value: "no", Present: true},
+				NewTypeContract:           factString{Value: "no", Present: true},
+				TestSurface:               factString{Value: "none", Present: true},
+				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "test/wsflow-smoke", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.Action != "create" {
+		t.Fatalf("branch action = %q, want create", result.Verdict.BranchPlan.Action)
+	}
+	if result.Verdict.BranchPlan.MergeTarget != "test/wsflow-smoke" {
+		t.Fatalf("merge target = %q, want derived current branch", result.Verdict.BranchPlan.MergeTarget)
+	}
+	wantWarning := `policy.branch.merge_target "master" ignored (not on an implement/* branch); derived from current branch "test/wsflow-smoke"`
+	if !containsString(result.Warnings, wantWarning) {
+		t.Fatalf("warnings missing ignored merge_target note: %v", result.Warnings)
+	}
+	if !strings.Contains(result.Raw, wantWarning) {
+		t.Fatalf("raw missing ignored merge_target note:\n%s", result.Raw)
+	}
+}
+
+func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "single-file", Present: true},
+				Surface:                   factString{Value: "internal", Present: true},
+				NewPublicSymbol:           factString{Value: "no", Present: true},
+				NewTypeContract:           factString{Value: "no", Present: true},
+				TestSurface:               factString{Value: "none", Present: true},
+				ExplicitDelegationRequest: factString{Value: "no", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "implement/tiny-edit", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.Action != "continue" {
+		t.Fatalf("branch action = %q, want continue", result.Verdict.BranchPlan.Action)
+	}
+	if result.Verdict.BranchPlan.MergeTarget != "master" {
+		t.Fatalf("merge target = %q, want policy value honored", result.Verdict.BranchPlan.MergeTarget)
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "merge_target") {
+			t.Fatalf("unexpected merge_target warning when policy applied: %v", result.Warnings)
+		}
+	}
+}
+
 func TestResolveImplementBranchPlanRules(t *testing.T) {
 	base := normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "no"}
 	cases := []struct {
