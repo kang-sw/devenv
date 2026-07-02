@@ -6,33 +6,20 @@ SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 RSRC_DIR = Path(__file__).resolve().parents[1] / "rsrc"
 
 
-def fenced_template(text: str, heading: str) -> str:
-    start = text.index(heading)
-    fence_start = text.index("```text", start)
-    fence_end = text.index("```", fence_start + len("```text"))
-    return text[fence_start:fence_end]
-
-
-def verdict_fields(template: str) -> list[str]:
-    return [line.strip() for line in template.splitlines() if line.startswith("- **")]
-
-
 class SkillDispatchContractsTest(unittest.TestCase):
     def test_proceed_keeps_implementation_route_only(self):
         shim = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
         text = (RSRC_DIR / "lead-proceed" / "lead-proceed.md").read_text(encoding="utf-8")
 
         self.assertIn('ws/playbook.print(name: "lead-proceed")', shim)
-        self.assertIn("Always route code-editing work through the lead-implement procedure", text)
-        self.assertIn("## Routing Verdict", text)
-        self.assertIn("NEXT: <{{.SkillNamespace}}:lead-discuss | lead-write-ticket | lead-implement | stop>", text)
-        self.assertIn(
-            'If `NEXT:` names `lead-implement`, call `{{.McpNamespace}}/playbook.print(name: "lead-implement")`',
-            text,
-        )
-        self.assertIn("- **Migration Anchor**: <loaded | n/a | missing | conflict>", text)
-        self.assertIn("especially Slice and Reason, as caller-provided scope", text)
-        self.assertIn("before any source inspection, planning, or editing", text)
+        self.assertIn("Route only; do not implement or plan here.", text)
+        self.assertIn("Always route code-editing work through `lead-implement`", text)
+        self.assertIn("{{.McpNamespace}}/enter.proceed(session_key:", text)
+        self.assertIn("Follow `Next:` from `enter.proceed` exactly", text)
+        self.assertIn("scope_blocked=no-unfinished-phase", text)
+        self.assertIn("scope_blocked=container-ticket", text)
+        self.assertIn("scope_blocked=multiple-explicit-phases", text)
+        self.assertNotIn("## Routing Verdict", text)
         self.assertNotIn("**Implementation Route**", text)
         self.assertNotIn("**Implementation Verdict**", text)
         self.assertNotIn("**Verdict Basis**", text)
@@ -40,39 +27,28 @@ class SkillDispatchContractsTest(unittest.TestCase):
 
     def test_implement_keeps_execution_owner(self):
         text = (RSRC_DIR / "lead-implement" / "lead-implement.md").read_text(encoding="utf-8")
-        verdict = fenced_template(text, "### Implementation Verdict")
 
-        self.assertIn("## Implementation Verdict", text)
-        self.assertIn("Do not use `NEXT:`", text)
-        self.assertIn("Record `<current-branch>`.", text)
-        self.assertIn("Apply `judge: branch-mode` to `<current-branch>`.", text)
-        self.assertIn("Delegated implementation has minimum plan-depth `brief`", text)
-        self.assertIn("extra docs must be listed in brief References", text)
-        self.assertEqual(
-            verdict_fields(verdict),
-            [
-                "- **Target**: <ticket path/stem or inline target>",
-                "- **Mode**: <direct edit | delegated>",
-                "- **Branch Mode**: <continue implementation branch | create implementation branch>",
-                "- **Plan Depth**: <none | brief | survey | research>",
-                "- **Review Allocation**: <lead-only | single reviewer | partitioned: correctness[, fit][, test]>",
-                "- **Scope**: <selected phase, whole target, or caller-provided slice>",
-                "- **Reason**: <decisive route facts only>",
-            ],
+        self.assertIn("{{.McpNamespace}}/enter.implement", text)
+        self.assertIn("Gather `target`, `facts`, and explicit caller `policy`", text)
+        self.assertIn("Follow the returned `raw` verdict and `next_instruction`; do not re-derive deterministic labels.", text)
+        self.assertIn(
+            "No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict.",
+            text,
         )
-        self.assertNotIn("\nNEXT:", verdict)
-        self.assertIn("### judge: needs-delegation", text)
-        self.assertIn("| Direct-edit |", text)
-        self.assertIn("If direct-edit: edit directly", text)
-        self.assertNotIn("caller-provided `write-code` dispatch", text)
-        self.assertNotIn("Confirm dispatch boundary", text)
+        self.assertIn("Wait for user approval before merge or another implementation slice.", text)
+        self.assertIn("### Implementer spawn prompt", text)
+        self.assertIn("### Reviewer table", text)
+        self.assertNotIn("## Implementation Verdict", text)
+        self.assertNotIn("### judge: needs-delegation", text)
+        self.assertNotIn("### judge: branch-mode", text)
+        self.assertNotIn("\nNEXT:", text)
 
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")
 
         self.assertIn("Write prompts sent to native Explore-style subagents in English.", text)
         self.assertIn("<!-- ws:full-only:start -->", text)
-        self.assertIn("Write prompts sent to `ws.mercenary.call` in English.", text)
+        self.assertIn("Write prompts sent to `mercenary.call` in English.", text)
         self.assertIn("<!-- ws:full-only:end -->", text)
 
     def test_verify_discussion_is_entry_shim(self):

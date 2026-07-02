@@ -1764,10 +1764,8 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	for _, want := range []string{
 		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
 		"Treat the installed todo list as the ordered runbook",
-		"For direct edit, keep implementation lead-owned from the ticket and do not create a planner artifact unless the route escalates.",
-		`ws/path.generate(kind: "plan", stems: ["<ticket-stem-or-task>"])`,
-		"Render `plan-populator-survey` with `ticket_path`, `selected_phase`, and `plan_path`",
-		"If survey returns `[escalate-to-research]`, render `plan-populator-research` with the same `ticket_path`, `selected_phase`, and `plan_path`",
+		"Stop for unresolved binding decisions before source edits.",
+		"If a plan artifact was created, commit it before Edit.",
 		"Delegate dispatch",
 		"Implementer spawn prompt",
 		"Rendered implementer prompt: <prompt-path>",
@@ -1889,12 +1887,11 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	}
 	for _, want := range []string{
 		`enter.proceed`,
-		`Next: <concrete next-action instruction>`,
 		"Follow `Next:` exactly",
-		"select the deterministic route from normalized facts",
-		"scope_blocked=phase-already-complete",
+		"Follow `Next:` from `enter.proceed` exactly",
 		"scope_blocked=no-unfinished-phase",
-		"slice=whole target",
+		"scope_blocked=container-ticket",
+		"scope_blocked=multiple-explicit-phases",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
@@ -2105,11 +2102,11 @@ func TestSkillsCallEnterTools(t *testing.T) {
 	}{
 		{
 			skill:   "lead-implement",
-			wantAll: []string{"enter.implement", `"target"`, `"facts"`, `"policy"`},
+			wantAll: []string{"enter.implement", "`target`", "`facts`", "`policy`"},
 		},
 		{
 			skill:    "lead-proceed",
-			wantAll:  []string{"enter.proceed", `Next: <concrete next-action instruction>`, "Follow `Next:` exactly"},
+			wantAll:  []string{"enter.proceed", "Follow `Next:` from `enter.proceed` exactly", "Follow `Next:` exactly"},
 			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
 		},
 		{
