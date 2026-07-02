@@ -27,8 +27,20 @@ expected to be the inverse of whatever set supports, not a narrower subset.
 
 ## Suggestion
 
-Make `config_prompt_unset` accept the same scopes as `config_prompt_set`,
-including `session`. For `config_workflow_prefer_subagent` (and similarly
-shaped on/off workflow preference toggles), add an explicit "reset to
-builtin" path distinct from setting the value to `off`, so the builtin
-fallback can be restored without guessing its polarity.
+Define `unset` consistently, across every scope and every config surface, to
+mean "reset to builtin default" — never "clear to empty." An explicit
+empty-string override is a distinct intent from falling back to builtin, and
+that intent already has a home: `config_prompt_set` with an empty-string
+value. `unset` should not be repurposed to also cover that case.
+
+Concretely:
+- Add `session` scope to `config_prompt_unset`, with `unset` at that scope
+  meaning "drop the session-scoped override and fall back to whatever the
+  next-broader scope (or builtin) resolves to" — not "set it to empty."
+- For `config_workflow_prefer_subagent` (and similarly shaped on/off workflow
+  preference toggles), add an explicit "reset to builtin" unset path distinct
+  from setting the value to `off`, using the same reset-to-builtin semantic.
+
+Document this set-vs-unset distinction (explicit value vs. reset-to-default)
+wherever config surfaces are described, so future config additions follow the
+same convention by default.
