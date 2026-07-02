@@ -26,10 +26,10 @@ Suggested implementation order, each with a one-line rationale:
 3. `260702-feat-agenda-enumerate-and-clear-all` (ready) - small, independent.
 4. `260702-feat-tickets-move-ready-gate-warning` (ready) - small, independent.
 5. `260702-feat-enter-implement-policy-feedback` (ready) - small, independent.
-6. `260702-feat-workflow-manual-state-only-view` (idea, sage review blocked) -
-   new tool surface, moderate scope, no hard dependency but naturally follows
-   the smaller items; blocked pending a phase breakdown and verification
-   criteria.
+6. `260702-feat-workflow-manual-state-only-view` (ready) - new lead-only tool
+   surface, moderate scope, no hard dependency but naturally follows the
+   smaller items; re-authored with a phase breakdown and verification
+   criteria, sage review completed.
 7. `260702-feat-lead-revive-session-key-candidates` (idea, sage review
    blocked) - depends on ticket 2's manual-section fix landing first (shares
    the ferrule-discipline documentation pattern); highest design risk
