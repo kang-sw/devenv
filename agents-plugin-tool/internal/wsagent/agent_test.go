@@ -682,7 +682,7 @@ func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--json",
 		"-m\x00gpt-5.5",
-		fmt.Sprintf("model_instructions_file=%q", systemPromptPath),
+		fmt.Sprintf("model_instructions_file=%q", filepath.ToSlash(systemPromptPath)),
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("codex args missing %q: %+v", want, invocation.Args)
