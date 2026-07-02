@@ -1,6 +1,7 @@
 ---
 title: config unset is asymmetric with set — no builtin restore, no session scope
 sage-review: completed
+completed: 2026-07-02
 ---
 
 # config unset is asymmetric with set — no builtin restore, no session scope
@@ -52,3 +53,41 @@ Target: `ai-docs/spec/mcp-tools.md`. Caller-visible change: `config_prompt_unset
 gains a `session` scope; `unset` semantics are redefined to mean
 reset-to-builtin (not clear-to-empty) across `config_prompt_unset` and
 `config_workflow_prefer_subagent`. Contract-first spec: no.
+
+## Result (21408323)
+
+Both asymmetries fixed:
+
+1. `wsconfig.Resolver.Unset` no longer hard-rejects `ScopeSession`. A new
+   `SessionWriter.DeleteOverride(sessionKey, itemKey)` method removes the
+   session-store override entry (rather than writing an empty-string value),
+   implemented by `sessionStore.deleteOverride` and wired through
+   `sessionConfigAdapter`. `config.prompt.unset`'s MCP schema and description
+   now advertise `scope: "session"` as a first-class option (dropping the old
+   "Session scope is not supported" text); the handler already threaded
+   `session_key` through to the resolver unconditionally, so no dispatch-path
+   change was needed beyond the schema/doc update.
+2. `config.workflow_prefer_subagent` gained an optional `reset: true` argument,
+   mutually exclusive with `value`. `reset: true` calls `resolver.Unset` on the
+   global-only `workflow.prefer_subagent` item, deleting the global override so
+   resolution falls back to `global > builtin` — distinct from writing the
+   builtin's current value (`off`) via `value: "off"`, which would keep
+   shadowing a future change to the builtin default. The `config.tuning`
+   catalog's `workflow.prefer_subagent` knob now also carries a `Reset` writer
+   entry (`{"reset": "true"}`), matching the existing pattern already used for
+   `prompt.*` knobs' `config.prompt.unset` reset writer.
+
+Spec updated: `ai-docs/spec/mcp-tools.md` `#260702-unset-means-reset-to-builtin`
+(prompt unset session scope + reset-to-builtin doc) and
+`#260702-config-unset-reset-to-builtin` (`config.workflow_prefer_subagent`
+`reset` argument).
+
+Verification:
+- New tests: `wsconfig.TestUnsetSessionScopeRestoresNextBroaderScope`,
+  `wsconfig.TestUnsetSessionScopeRequiresSessionKey`,
+  `wsconfig.TestGlobalOnlyItemUnsetResetsToBuiltin`,
+  `mcp.TestConfigPromptUnsetSessionScope`,
+  `mcp.TestWorkflowPreferSubagentResetRestoresBuiltin`.
+- `cd agents-plugin-tool && go build ./...` — clean.
+- `cd agents-plugin-tool && go test ./...` — all packages pass, including the
+  five new tests and the full pre-existing suite (no regressions).
