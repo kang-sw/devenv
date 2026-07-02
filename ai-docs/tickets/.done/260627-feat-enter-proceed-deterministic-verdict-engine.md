@@ -8,6 +8,7 @@ related:
 related-mental-model:
   - workflow-skills
   - mcp-runtime
+completed: 2026-07-02
 ---
 
 # Deterministic enter.proceed route and verdict resolution
