@@ -55,7 +55,7 @@ override-marker, or handler-contract changes. Editing the always-shown
 per-root paragraph plus the fresh-only gated block, and the User-preference
 override seed's static fallback text.
 
-### Result (pending) - 2026-07-02
+### Result (5fad1751) - 2026-07-02
 
 - Edited `agents-plugin/rsrc/lead-workflow-manual/lead-workflow-manual.md`
   (and synced the identical `agents-plugin-wsflow/` copy):
