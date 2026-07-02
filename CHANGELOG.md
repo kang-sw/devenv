@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.32.0 - 2026-07-02
+
+### Added
+- Add `agenda.list` and an `all: true` fast path on `agenda.clear`, so leads
+  can enumerate current agenda entries and clear them all in one call.
+- Add the lead-only `workflow_state` MCP tool: a session-state-only view
+  (agenda/todos) that avoids re-dumping the full `workflow_manual` output.
+
+### Changed
+- Redefine `config.prompt.unset` and `config.workflow_prefer_subagent` so
+  "unset" consistently means reset-to-builtin-default, never clear-to-empty;
+  `config.prompt.unset` gains a `session` scope and
+  `config.workflow_prefer_subagent` gains a `reset: true` argument. Explicit
+  empty overrides now route through `config.prompt.set` instead.
+- Fill the previously thin `Session setup` and `User preferences` sections of
+  the shipped `workflow_manual`/`lead-workflow-manual` template with concrete
+  guidance (ferrule redundant-mint consequences, compaction-recovery
+  reminder, and a non-empty default preference sentence).
+- `tickets.move` to `ready` now emits an advisory (non-blocking) warning when
+  no spec-addressing signal (`spec:`, `spec-remove:`, or `## Spec Impact`) is
+  detected on a non-exempt ticket category.
+- `enter_implement` now warns when a supplied `policy.branch.merge_target` is
+  ignored because the caller isn't yet on an `implement/*` branch.
+
 ## v0.31.1 - 2026-07-02
 
 ### Fixed
