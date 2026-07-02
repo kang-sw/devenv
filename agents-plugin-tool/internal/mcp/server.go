@@ -539,15 +539,35 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if _, err := s.requireLeadSessionKey("config.workflow_prefer_subagent", params.Arguments); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		value, _ := params.Arguments["value"].(string)
+		reset, _ := params.Arguments["reset"].(bool)
+		rawValue, hasValue := params.Arguments["value"]
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if reset {
+			if hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value and reset are mutually exclusive"))
+				}
+			}
+			// Reset means "drop the global override and fall back to the builtin
+			// default" — distinct from explicitly writing the builtin's current
+			// value, which would still shadow a future builtin default change.
+			if err := resolver.Unset(wsconfig.ItemWorkflowPreferSubagent, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+			}
+			resolved, err := resolver.Get("", wsconfig.ItemWorkflowPreferSubagent)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
+		}
+		value, _ := rawValue.(string)
 		value = strings.ToLower(strings.TrimSpace(value))
 		switch value {
 		case "on", "off":
 		default:
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value must be one of on, off; got %q", value))
 		}
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, value, wsconfig.SetOptions{}); err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
 		}
@@ -635,8 +655,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
 
 	case "config.prompt.unset":
-		// Removes a prompt override from the project or global config layer.
-		// Lead-only via the config.* prefix gate (same as config.prompt.set).
+		// Resets a prompt override to the next-broader scope (or builtin/seed
+		// default) by removing it from the session, project, or global config
+		// layer. Lead-only via the config.* prefix gate (same as config.prompt.set).
+		// The caller's session_key doubles as the target session for a
+		// session-scope unset, matching config.prompt.set's session-scope write.
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		sessionKey = strings.TrimSpace(sessionKey)
 		if sessionKey == "" {
@@ -1695,6 +1718,10 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Kind:        "workflow_preference",
 		Description: "Select whether the workflow manual loads strict subagent posture.",
 		Writer:      tuningWriter{Tool: "config.workflow_prefer_subagent"},
+		Reset: &tuningWriter{
+			Tool:           "config.workflow_prefer_subagent",
+			FixedArguments: map[string]string{"reset": "true"},
+		},
 		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
 	})
@@ -3061,13 +3088,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.workflow_prefer_subagent",
-			"description": "Set the global workflow preference for loading strict subagent posture with the workflow manual.",
+			"description": "Set the global workflow preference for loading strict subagent posture with the workflow manual, or reset it back to the builtin default (off) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"value": enumStringProperty("Desired mode: on or off.", []string{"on", "off"}),
+					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
+					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
 				},
-				"required": []string{"value"},
 			},
 		},
 		{
@@ -3098,14 +3125,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.prompt.unset",
-			"description": "Remove a stored prompt override for a named override-point and harness bucket, restoring the inline seed default. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Reset a stored prompt override for a named override-point and harness bucket back to whatever the next-broader scope (or the inline seed default) resolves to. Never writes an empty-string value — an explicit empty override is a distinct intent covered by config.prompt.set. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate."),
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate, and required as the target session for a session-scope unset."),
 					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
 					"harness":     enumStringProperty("Harness bucket to clear. When omitted, defaults to the current session's detected harness. Use * explicitly for cross-harness (all).", []string{"claude", "codex", "*"}),
-					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). Session scope is not supported.", wsconfig.ScopeSchemaEnum()),
+					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). session clears the caller's session-scoped override.", wsconfig.ScopeSchemaEnum()),
 				},
 				"required": []string{"session_key", "pointId"},
 			},

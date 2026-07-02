@@ -392,6 +392,14 @@ migrated; it remains orphaned local state unless a later ticket introduces
 migration. `prompt.DelegationSection.*` prompt override keys are likewise not
 migrated.
 
+`config.workflow_prefer_subagent` additionally accepts `reset: true` as an
+alternative to `value`; the two are mutually exclusive. `reset: true` removes
+the global override entirely (rather than writing an explicit value, even the
+builtin's current value) so resolution falls back to `global > builtin` and
+tracks any future change to the builtin default. This mirrors the general
+unset-vs-set distinction in `#260702-unset-means-reset-to-builtin`.
+{#260702-config-unset-reset-to-builtin}
+
 ## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
@@ -543,6 +551,16 @@ blocked by the `config.*` capability-gate prefix — and is visible in both full
 and agentless wsflow modes, since prompt overrides are a mode-neutral rendering
 concern. Once stored, the override is honored at render time by the marker engine
 for the matching `(point id, harness)` and resolved scope.
+
+`config.prompt.unset(point id, harness, scope?)` resets a stored prompt
+override back to whatever the next-broader scope (or the inline seed default)
+resolves to; it never writes an empty-string value in place of the removed
+override — an explicit empty override is a distinct intent covered by
+`config.prompt.set` with an empty `prompt` value. `scope` accepts `session`,
+`project`, or `global` (the same enum as `config.prompt.set`); a `session`-scope
+unset requires the caller's `session_key`, matching the setter's session-scope
+write requirement. With no `scope`, the item's declared default scope is used
+(`project` for unregistered `prompt.*` keys). {#260702-unset-means-reset-to-builtin}
 
 No-argument `config.prompt()` returns a **data listing**, not a manual: a scan of
 the shipped playbook resource tree for declared override markers (the marker

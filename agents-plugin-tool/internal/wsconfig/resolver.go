@@ -42,6 +42,10 @@ type SessionWriter interface {
 	// session record for the given session key. Returns an error if the session
 	// key is not found or the write fails.
 	SetOverride(sessionKey, itemKey, value string) error
+	// DeleteOverride removes an Overrides entry for the given item key from the
+	// session record for the given session key. Returns an error if the session
+	// key is not found; removing an absent item key is a no-op (not an error).
+	DeleteOverride(sessionKey, itemKey string) error
 }
 
 // Resolver resolves config item values across the session > project > global >
@@ -172,10 +176,11 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	}
 }
 
-// Unset removes an override entry from the target scope. Only project and
-// global scopes are supported; session-scope overrides are ephemeral and do
-// not need an explicit unset path. Removing a key that does not exist is a
-// no-op (not an error).
+// Unset resets an item to its next-broader-scope (or builtin) resolution by
+// removing the override entry from the target scope. Session, project, and
+// global scopes are all supported. Removing a key that does not exist is a
+// no-op (not an error). Unset never writes an empty-string value — that is a
+// distinct intent covered by Set with an explicit empty value.
 func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
 	targetScope := setOpts.ExplicitScope
 	if targetScope == "" {
@@ -206,7 +211,13 @@ func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
 		}
 		return deleteOverrideInFile(path, itemKey)
 	case ScopeSession:
-		return fmt.Errorf("resolver: session-scope override cannot be unset (ephemeral; expires with session)")
+		if r.sessionW == nil {
+			return fmt.Errorf("resolver: session writer not available")
+		}
+		if setOpts.SessionKey == "" {
+			return fmt.Errorf("resolver: session_key required for session-scope unset")
+		}
+		return r.sessionW.DeleteOverride(setOpts.SessionKey, itemKey)
 	default:
 		return fmt.Errorf("resolver: unsupported unset scope %q", targetScope)
 	}
