@@ -2,7 +2,7 @@
 title: "Add lead-drain-ready-queue skill: single-cycle ready/ ticket handoff to lead-proceed"
 spec:
   - 260703-drain-ready-queue-skill
-sage-review: required
+sage-review: completed
 ---
 
 # Add lead-drain-ready-queue skill: single-cycle ready/ ticket handoff to lead-proceed
@@ -57,6 +57,14 @@ and `260703-chore-implement-branch-rename-default-allow`).
      resolved from the stated text, stop and ask the user — do not guess.
   This reuses the existing free-text `related:`/`parent:` annotation
   convention; it does not introduce a new structured dependency field.
+  A candidate's precedence annotation naming an unresolved ticket that is in
+  `todo/` or `idea/` (not `ready/`, not `done`/`dropped`) has no in-ready
+  precedence target to defer to — treat this as no precedence signal and
+  fall through to FIFO. Precedence resolution is single-level only (resolve
+  one referenced ticket, do not chase transitive chains); a single-cycle
+  shim re-evaluates from scratch on its next invocation, so a multi-hop
+  chain resolves itself over successive cycles without needing transitive
+  logic in one pass.
 - **Rejected: full-loop variant.** Considered having the skill loop
   internally until `ready/` is empty. Rejected because the `/goal` Stop-hook
   already owns that repetition; embedding a second loop mechanism is
