@@ -456,9 +456,46 @@ Key properties:
 - **Owner-auth + bearer gating.** Terminal input, resize, and close are mutating
   host control; they preserve owner auth at the local gateway (router placement)
   and bearer auth to the linked daemon, and are never reachable without both.
-- **Socket route still deferred.** `.../terminals/{terminalId}/socket` is *not*
-  registered under the server-scoped prefix in this phase and continues to
-  `404`; live WebSocket transport is Phase 7.
+- **Live socket route.** `.../terminals/{terminalId}/socket` is the live
+  WebSocket transport, described in
+  [Remote Terminal WebSocket Gatewaying](#remote-terminal-websocket-gatewaying).
+
+### Remote Terminal WebSocket Gatewaying {#remote-terminal-websocket-gatewaying}
+
+The live terminal WebSocket route
+`GET /api/dashboard/servers/{serverRoute}/terminals/{terminalId}/socket` carries
+PTY output, input, resize, ping/pong, and close frames. The browser connects
+only to the local gateway; for a linked Server Route the gateway opens its own
+upstream WebSocket to the linked daemon with the memory-only bearer token and
+relays frames. This is a distinct upgrade-and-relay mechanism, not the one-shot
+HTTP envelope.
+
+- **Server-local dispatch.** `server-local` dispatches in-process to the
+  unscoped `terminal_websocket` handler unchanged (no relay).
+- **Refusal before upgrade.** Every linked-server refusal resolves to a bounded
+  HTTP error response *before* the browser-side upgrade is accepted, never a
+  half-open or aborted `101` socket: dot-free rejection (`400`), unknown Server
+  Route (`404`), auth required / tunnel required (`409`), and — when the upstream
+  connect itself fails — unreachable (`502`). The upstream is contacted first;
+  the browser upgrade is completed only after the upstream WebSocket connects.
+- **Upstream URL construction.** The upstream socket URL appends the legacy
+  `/api/dashboard/terminals/{terminalId}/socket?after=` path to the stored linked
+  endpoint through the same helper used by one-shot forwarding *first*, then
+  swaps the `http`/`https` scheme to `ws`/`wss`, so any base path baked into the
+  linked endpoint is preserved.
+- **Bearer on the upstream upgrade.** The upstream upgrade request carries the
+  linked server's bearer token as an `Authorization` header. An upstream that
+  rejects the upgrade with an HTTP status (e.g. `410`) propagates that status as
+  a bounded refusal without completing the browser upgrade.
+- **Bidirectional frame relay.** Text, binary, ping, pong, and close frames relay
+  in both directions with explicit conversion between the browser and upstream
+  message types. Tungstenite's raw frame variant has no browser equivalent and is
+  dropped rather than treated as an error.
+- **Bounded cleanup.** When either side closes or errors, the relay loop breaks,
+  best-effort sends a close frame to the other side, and lets both connections
+  drop — a browser-initiated close tears down the upstream connection and an
+  upstream-initiated close propagates a close frame to the browser, with no
+  lingering task.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
