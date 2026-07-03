@@ -33,11 +33,16 @@ use crate::root_picker::{
 use crate::servers::{
     dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
     reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_create_empty_directory,
-    server_scoped_document_events, server_scoped_open_work_root, server_scoped_read_work_root_file,
-    server_scoped_root_picker, server_scoped_root_picker_pins,
-    server_scoped_set_work_root_activation, server_scoped_work_root_files,
-    server_scoped_write_work_root_file, start_ssh_dashboard_server, LinkedServerSessions,
-    LinkedServerTunnels,
+    server_scoped_document_events, server_scoped_git_branches, server_scoped_git_fetch,
+    server_scoped_git_pull_ff_only, server_scoped_git_push, server_scoped_git_status,
+    server_scoped_git_switch_branch, server_scoped_git_worktree_add_options,
+    server_scoped_git_worktree_add_preview, server_scoped_git_worktree_add_submit,
+    server_scoped_open_work_root, server_scoped_read_work_root_file,
+    server_scoped_remove_workspace, server_scoped_root_picker, server_scoped_root_picker_pins,
+    server_scoped_set_work_root_activation, server_scoped_work_root_activity,
+    server_scoped_work_root_activity_events, server_scoped_work_root_activity_transcript,
+    server_scoped_work_root_files, server_scoped_write_work_root_file, start_ssh_dashboard_server,
+    LinkedServerSessions, LinkedServerTunnels,
 };
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
@@ -131,6 +136,58 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/documents/events",
             get(server_scoped_document_events),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/workspaces/{workspace_id}",
+            delete(server_scoped_remove_workspace),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/workspaces/{workspace_id}/git-worktree-add/options",
+            get(server_scoped_git_worktree_add_options),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/workspaces/{workspace_id}/git-worktree-add/preview",
+            post(server_scoped_git_worktree_add_preview),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/workspaces/{workspace_id}/git-worktree-add",
+            post(server_scoped_git_worktree_add_submit),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity",
+            get(server_scoped_work_root_activity),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/items/{activity_id}/transcript",
+            get(server_scoped_work_root_activity_transcript),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/events",
+            get(server_scoped_work_root_activity_events),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/status",
+            get(server_scoped_git_status),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/branches",
+            get(server_scoped_git_branches).post(server_scoped_git_branches),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/switch-branch",
+            post(server_scoped_git_switch_branch),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/fetch",
+            post(server_scoped_git_fetch),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/push",
+            post(server_scoped_git_push),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/pull-ff-only",
+            post(server_scoped_git_pull_ff_only),
         )
         .route(
             "/api/dashboard/document-translation/providers",

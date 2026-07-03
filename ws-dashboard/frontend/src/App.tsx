@@ -354,9 +354,10 @@ export function App() {
   );
   const [selectedServerId, setSelectedServerId] = useState("server-local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<
-    string | null
-  >(null);
+  const [gitWorktreeTarget, setGitWorktreeTarget] = useState<{
+    serverRoute: string;
+    workspaceId: string;
+  } | null>(null);
   const [serverModal, setServerModal] = useState<ServerModalState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -811,12 +812,15 @@ export function App() {
             });
         };
       } else if (command.payload.type === "gitWorktreeAdd.open") {
-        const { workspaceId } = command.payload;
+        const { workspaceId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () =>
-          setGitWorktreeWorkspaceId(workspaceId);
+          setGitWorktreeTarget({
+            serverRoute: serverRoute ?? "server-local",
+            workspaceId,
+          });
       } else if (command.payload.type === "gitWorktreeAdd.close") {
         executableHandlers[command.commandId] = () =>
-          setGitWorktreeWorkspaceId(null);
+          setGitWorktreeTarget(null);
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -830,19 +834,29 @@ export function App() {
           ) {
             return;
           }
-          const removedRootIds = new Set(
-            workspace?.workRoots.map((root) => root.id) ?? [],
+          const removalServerRoute = serverRoute ?? "server-local";
+          const removedRootKeys = new Set(
+            workspace?.workRoots
+              .filter(
+                (root) => root.resourcePath.serverId === removalServerRoute,
+              )
+              .map((root) =>
+                serverScopedIdentity(removalServerRoute, root.id),
+              ) ?? [],
           );
           void requestWorkspaceRemoval(workspaceId, serverRoute)
             .then((nextResources) => {
               resourceRefreshCoordinatorRef.current?.applyExternalResources(
                 nextResources,
               );
-              if (removedRootIds.size > 0) {
+              if (removedRootKeys.size > 0) {
                 setReadOnlyFilePanes((current) =>
                   Object.fromEntries(
                     Object.entries(current).filter(
-                      ([, pane]) => !removedRootIds.has(pane.workRootId),
+                      ([, pane]) =>
+                        !removedRootKeys.has(
+                          serverScopedIdentity(pane.serverRoute, pane.workRootId),
+                        ),
                     ),
                   ),
                 );
@@ -850,21 +864,28 @@ export function App() {
                   removePanesFromOrder(
                     current,
                     Object.values(readOnlyFilePanes)
-                      .filter((pane) => removedRootIds.has(pane.workRootId))
+                      .filter((pane) =>
+                        removedRootKeys.has(
+                          serverScopedIdentity(
+                            pane.serverRoute,
+                            pane.workRootId,
+                          ),
+                        ),
+                      )
                       .map((pane) => pane.id),
                   ),
                 );
                 setPaneOrderByRoot((current) =>
                   Object.fromEntries(
                     Object.entries(current).filter(
-                      ([rootId]) => !removedRootIds.has(rootId),
+                      ([rootKey]) => !removedRootKeys.has(rootKey),
                     ),
                   ),
                 );
                 setWorkbenchGroupsByRoot((current) =>
                   Object.fromEntries(
                     Object.entries(current).filter(
-                      ([rootId]) => !removedRootIds.has(rootId),
+                      ([rootKey]) => !removedRootKeys.has(rootKey),
                     ),
                   ),
                 );
@@ -955,9 +976,9 @@ export function App() {
             onOpenFile={openReadOnlyFile}
           />
           <GitWorktreeAddModal
-            workspaceId={gitWorktreeWorkspaceId}
+            target={gitWorktreeTarget}
             onCommand={executeCommand}
-            onClose={() => setGitWorktreeWorkspaceId(null)}
+            onClose={() => setGitWorktreeTarget(null)}
             onCreated={(response) => {
               resourceRefreshCoordinatorRef.current?.applyExternalResources(
                 response.resources,
@@ -965,7 +986,7 @@ export function App() {
               if (response.createdWorkRootId) {
                 setSelectedId(response.createdWorkRootId);
               }
-              setGitWorktreeWorkspaceId(null);
+              setGitWorktreeTarget(null);
             }}
           />
           <LinkedServerModal
@@ -1885,12 +1906,12 @@ function OpenWorkRootControl({
 }
 
 function GitWorktreeAddModal({
-  workspaceId,
+  target,
   onCommand,
   onClose,
   onCreated,
 }: {
-  workspaceId: string | null;
+  target: { serverRoute: string; workspaceId: string } | null;
   onCommand: DashboardCommandDispatcher;
   onClose: () => void;
   onCreated: (response: {
@@ -1898,6 +1919,8 @@ function GitWorktreeAddModal({
     createdWorkRootId?: string;
   }) => void;
 }) {
+  const workspaceId = target?.workspaceId ?? null;
+  const serverRoute = target?.serverRoute ?? null;
   const [options, setOptions] = useState<GitWorktreeAddOptions | null>(null);
   const [worktreeName, setWorktreeName] = useState("");
   const [branchMode, setBranchMode] = useState<"auto" | "manual">("auto");
@@ -1915,7 +1938,7 @@ function GitWorktreeAddModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !serverRoute) {
       setOptions(null);
       setPreview(null);
       setPreviewRequestKey(null);
@@ -1931,7 +1954,7 @@ function GitWorktreeAddModal({
     setPreviewRequestKey(null);
     setError(null);
     setLoading(true);
-    void fetchGitWorktreeAddOptions(workspaceId)
+    void fetchGitWorktreeAddOptions(workspaceId, serverRoute)
       .then(setOptions)
       .catch((nextError) =>
         setError(
@@ -1941,7 +1964,7 @@ function GitWorktreeAddModal({
         ),
       )
       .finally(() => setLoading(false));
-  }, [workspaceId]);
+  }, [serverRoute, workspaceId]);
 
   const request = useMemo<GitWorktreeAddPreviewRequest | null>(() => {
     if (!workspaceId) {
@@ -1989,7 +2012,7 @@ function GitWorktreeAddModal({
     setPreview(null);
     setPreviewRequestKey(null);
     const timer = window.setTimeout(() => {
-      void previewGitWorktreeAdd(workspaceId, request)
+      void previewGitWorktreeAdd(workspaceId, request, serverRoute)
         .then((nextPreview) => {
           if (previewSequenceRef.current !== sequence) {
             return;
@@ -2009,14 +2032,14 @@ function GitWorktreeAddModal({
         });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [request, requestKey, worktreeName, workspaceId]);
+  }, [request, requestKey, serverRoute, worktreeName, workspaceId]);
 
-  if (!workspaceId) {
+  if (!workspaceId || !serverRoute) {
     return null;
   }
 
   const close = () => {
-    onCommand(buildGitWorktreeAddCloseCommand(workspaceId), {
+    onCommand(buildGitWorktreeAddCloseCommand(workspaceId, serverRoute), {
       "gitWorktreeAdd.close": onClose,
     });
   };
@@ -2036,12 +2059,16 @@ function GitWorktreeAddModal({
     if (!request || submitDisabled) {
       return;
     }
-    onCommand(buildGitWorktreeAddSubmitCommand(workspaceId), {
+    onCommand(buildGitWorktreeAddSubmitCommand(workspaceId, serverRoute), {
       "gitWorktreeAdd.submit": () => {
         const submittedRequestKey = requestKey;
         setSubmitting(true);
         setError(null);
-        void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
+        void submitGitWorktreeAdd(
+          workspaceId,
+          { ...request, activate: true },
+          serverRoute,
+        )
           .then(onCreated)
           .catch((nextError) => {
             if (
@@ -2663,6 +2690,7 @@ function ServerRows({
             <WorkspaceRows
               key={workspace.id}
               workspace={workspace}
+              serverId={server.id}
               selectedId={selectedId}
               onCommand={onCommand}
             />
@@ -3273,9 +3301,8 @@ function WorkbenchShell({
     requestId: 0,
   });
   const activitySnapshotRequestSeq = useRef(0);
-  const [activityPollFallbackRootId, setActivityPollFallbackRootId] = useState<
-    string | null
-  >(null);
+  const [activityPollFallbackRootKey, setActivityPollFallbackRootKey] =
+    useState<string | null>(null);
   const [activityTranscriptRefresh, setActivityTranscriptRefresh] = useState<{
     rootId: string;
     serverRoute?: string | null;
@@ -3574,7 +3601,9 @@ function WorkbenchShell({
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
     const serverRoute = workbenchModel?.root.resourcePath.serverId;
-    if (!rootId || !serverRoute || !activityPaneOpenForSelected) {
+    const rootKey =
+      rootId && serverRoute ? serverScopedIdentity(serverRoute, rootId) : null;
+    if (!rootId || !serverRoute || !rootKey || !activityPaneOpenForSelected) {
       currentActivityStreamRequest.current = {
         serverRoute: serverRoute ?? "server-local",
         workRootId: rootId ?? "",
@@ -3582,8 +3611,8 @@ function WorkbenchShell({
       };
       activityStreamRequestSeq.current =
         currentActivityStreamRequest.current.requestId;
-      setActivityPollFallbackRootId((current) =>
-        current === rootId ? null : current,
+      setActivityPollFallbackRootKey((current) =>
+        current === rootKey ? null : current,
       );
       return;
     }
@@ -3592,8 +3621,8 @@ function WorkbenchShell({
     activityStreamRequestSeq.current = requestId;
     const expected = { serverRoute, workRootId: rootId, requestId };
     currentActivityStreamRequest.current = expected;
-    setActivityPollFallbackRootId((current) =>
-      current === rootId ? null : current,
+    setActivityPollFallbackRootKey((current) =>
+      current === rootKey ? null : current,
     );
 
     let cancelled = false;
@@ -3640,7 +3669,7 @@ function WorkbenchShell({
               currentActivityStreamRequest.current,
             )
           ) {
-            setActivityPollFallbackRootId(rootId);
+            setActivityPollFallbackRootKey(rootKey);
           }
         });
     };
@@ -3670,7 +3699,7 @@ function WorkbenchShell({
         event.type === "modeChanged" &&
         event.updateMode === "pollFallback"
       ) {
-        setActivityPollFallbackRootId(rootId);
+        setActivityPollFallbackRootKey(rootKey);
       } else if (
         event.type === "modeChanged" &&
         (event.updateMode === "watch" || event.updateMode === "snapshot")
@@ -3679,12 +3708,16 @@ function WorkbenchShell({
           window.clearTimeout(fallbackTimer);
           fallbackTimer = null;
         }
-        setActivityPollFallbackRootId((fallbackRootId) =>
-          fallbackRootId === rootId ? null : fallbackRootId,
+        setActivityPollFallbackRootKey((fallbackRootId) =>
+          fallbackRootId === rootKey ? null : fallbackRootId,
         );
       }
       setWorkRootActivityState((current) => {
-        if (current.rootId !== rootId || current.activity.phase !== "ready") {
+        if (
+          current.rootId !== rootId ||
+          current.serverRoute !== serverRoute ||
+          current.activity.phase !== "ready"
+        ) {
           return current;
         }
         const result = applyActivityConsoleEvent(current.activity.view, event);
@@ -3708,8 +3741,8 @@ function WorkbenchShell({
           window.clearTimeout(fallbackTimer);
           fallbackTimer = null;
         }
-        setActivityPollFallbackRootId((current) =>
-          current === rootId ? null : current,
+        setActivityPollFallbackRootKey((current) =>
+          current === rootKey ? null : current,
         );
       }
     };
@@ -3718,12 +3751,12 @@ function WorkbenchShell({
       try {
         payload = JSON.parse(message.data);
       } catch {
-        setActivityPollFallbackRootId(rootId);
+        setActivityPollFallbackRootKey(rootKey);
         return;
       }
       const event = parseActivityConsoleEvent(payload);
       if (!event) {
-        setActivityPollFallbackRootId(rootId);
+        setActivityPollFallbackRootKey(rootKey);
         return;
       }
       applyStreamEvent(event);
@@ -3741,7 +3774,7 @@ function WorkbenchShell({
         return;
       }
       if (!streamOpened) {
-        setActivityPollFallbackRootId(rootId);
+        setActivityPollFallbackRootKey(rootKey);
         requestSnapshot();
         return;
       }
@@ -3756,7 +3789,7 @@ function WorkbenchShell({
             currentActivityStreamRequest.current,
           )
         ) {
-          setActivityPollFallbackRootId(rootId);
+          setActivityPollFallbackRootKey(rootKey);
         }
       }, 1_000);
     };
@@ -3768,11 +3801,15 @@ function WorkbenchShell({
       }
       source.removeEventListener("activity", handleActivityMessage);
       source.close();
-      setActivityPollFallbackRootId((current) =>
-        current === rootId ? null : current,
+      setActivityPollFallbackRootKey((current) =>
+        current === rootKey ? null : current,
       );
     };
-  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
+  }, [
+    workbenchModel?.root.id,
+    workbenchModel?.root.resourcePath.serverId,
+    activityPaneOpenForSelected,
+  ]);
 
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
@@ -3781,7 +3818,7 @@ function WorkbenchShell({
       !rootId ||
       !serverRoute ||
       !activityPaneOpenForSelected ||
-      activityPollFallbackRootId !== rootId
+      activityPollFallbackRootKey !== serverScopedIdentity(serverRoute, rootId)
     ) {
       return;
     }
@@ -3807,7 +3844,11 @@ function WorkbenchShell({
             return;
           }
           setWorkRootActivityState((current) => {
-            if (current.rootId !== rootId || view.workRootId !== rootId) {
+            if (
+              current.rootId !== rootId ||
+              current.serverRoute !== serverRoute ||
+              view.workRootId !== rootId
+            ) {
               return current;
             }
             if (current.activity.phase !== "ready") {
@@ -3848,7 +3889,7 @@ function WorkbenchShell({
   }, [
     workbenchModel?.root.id,
     activityPaneOpenForSelected,
-    activityPollFallbackRootId,
+    activityPollFallbackRootKey,
     workbenchModel?.root.resourcePath.serverId,
   ]);
 
@@ -4823,10 +4864,12 @@ function WorkRootGitToolbar({
     root.activation === "online" &&
     root.availability === "available";
   const [statusState, setStatusState] = useState<{
+    serverRoute: string;
     workRootId: string;
     status: WorkRootGitStatus;
   } | null>(null);
   const [branchesState, setBranchesState] = useState<{
+    serverRoute: string;
     workRootId: string;
     branches: GitBranchList;
   } | null>(null);
@@ -4841,14 +4884,25 @@ function WorkRootGitToolbar({
   const [baseBranchName, setBaseBranchName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const requestSeq = useRef(0);
-  const currentRootId = useRef(root.id);
-  currentRootId.current = root.id;
   const serverRoute = root.resourcePath.serverId;
+  const currentRootIdentity = useRef({
+    serverRoute,
+    workRootId: root.id,
+  });
+  currentRootIdentity.current = {
+    serverRoute,
+    workRootId: root.id,
+  };
 
   const status =
-    statusState?.workRootId === root.id ? statusState.status : null;
+    statusState?.workRootId === root.id && statusState.serverRoute === serverRoute
+      ? statusState.status
+      : null;
   const branches =
-    branchesState?.workRootId === root.id ? branchesState.branches : null;
+    branchesState?.workRootId === root.id &&
+    branchesState.serverRoute === serverRoute
+      ? branchesState.branches
+      : null;
 
   const refreshGit = useCallback(
     (reason: string) => {
@@ -4868,15 +4922,17 @@ function WorkRootGitToolbar({
         .then(([nextStatus, nextBranches]) => {
           if (
             requestSeq.current !== seq ||
-            currentRootId.current !== requestedRootId
+            currentRootIdentity.current.workRootId !== requestedRootId ||
+            currentRootIdentity.current.serverRoute !== serverRoute
           )
             return;
           setStatusState(
             nextStatus.available
-              ? { workRootId: requestedRootId, status: nextStatus }
+              ? { serverRoute, workRootId: requestedRootId, status: nextStatus }
               : null,
           );
           setBranchesState({
+            serverRoute,
             workRootId: requestedRootId,
             branches: nextBranches,
           });
@@ -4885,7 +4941,8 @@ function WorkRootGitToolbar({
         .catch((nextError) => {
           if (
             requestSeq.current !== seq ||
-            currentRootId.current !== requestedRootId
+            currentRootIdentity.current.workRootId !== requestedRootId ||
+            currentRootIdentity.current.serverRoute !== serverRoute
           )
             return;
           setStatusState(null);
@@ -4956,16 +5013,24 @@ function WorkRootGitToolbar({
         if (pendingAction) setPendingGitAction(pendingAction);
         void run()
           .then((nextStatus) => {
-            if (currentRootId.current !== targetRootId) return;
+            if (
+              currentRootIdentity.current.workRootId !== targetRootId ||
+              currentRootIdentity.current.serverRoute !== serverRoute
+            )
+              return;
             setStatusState(
               nextStatus.available
-                ? { workRootId: targetRootId, status: nextStatus }
+                ? { serverRoute, workRootId: targetRootId, status: nextStatus }
                 : null,
             );
             refreshGit("git mutation refresh");
           })
           .catch((nextError) => {
-            if (currentRootId.current !== targetRootId) return;
+            if (
+              currentRootIdentity.current.workRootId !== targetRootId ||
+              currentRootIdentity.current.serverRoute !== serverRoute
+            )
+              return;
             setError(
               nextError instanceof Error
                 ? nextError.message
@@ -4974,7 +5039,11 @@ function WorkRootGitToolbar({
             refreshGit("git mutation failure refresh");
           })
           .finally(() => {
-            if (currentRootId.current === targetRootId && pendingAction)
+            if (
+              currentRootIdentity.current.workRootId === targetRootId &&
+              currentRootIdentity.current.serverRoute === serverRoute &&
+              pendingAction
+            )
               setPendingGitAction(null);
           });
       },
@@ -5128,8 +5197,15 @@ function WorkRootGitToolbar({
                         serverRoute,
                       )
                         .then((nextStatus) => {
-                          if (currentRootId.current !== targetRootId) return;
+                          if (
+                            currentRootIdentity.current.workRootId !==
+                              targetRootId ||
+                            currentRootIdentity.current.serverRoute !==
+                              serverRoute
+                          )
+                            return;
                           setStatusState({
+                            serverRoute,
                             workRootId: targetRootId,
                             status: nextStatus,
                           });
@@ -5137,7 +5213,13 @@ function WorkRootGitToolbar({
                           refreshGit("git branch create refresh");
                         })
                         .catch((nextError) => {
-                          if (currentRootId.current !== targetRootId) return;
+                          if (
+                            currentRootIdentity.current.workRootId !==
+                              targetRootId ||
+                            currentRootIdentity.current.serverRoute !==
+                              serverRoute
+                          )
+                            return;
                           setError(
                             nextError instanceof Error
                               ? nextError.message
@@ -6891,10 +6973,12 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
 
 function WorkspaceRows({
   workspace,
+  serverId,
   selectedId,
   onCommand,
 }: {
   workspace: WorkspaceView;
+  serverId: string;
   selectedId: string | null;
   onCommand: DashboardCommandDispatcher;
 }) {
@@ -6924,6 +7008,7 @@ function WorkspaceRows({
           selected={selectedId === compactRoot.id}
           actions={workspace.actions}
           actionEntityId={workspace.id}
+          actionServerId={serverId}
           kind={compactRoot.kind}
           availability={compactRoot.availability}
           activation={compactRoot.activation}
@@ -6954,6 +7039,7 @@ function WorkspaceRows({
         selected={selectedWorkspace}
         actions={workspace.actions}
         actionEntityId={workspace.id}
+        actionServerId={serverId}
         canAddWorktree={workspace.workRoots.some(
           (root) =>
             root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree",
@@ -7008,6 +7094,7 @@ function ResourceRow({
   selected,
   actions = [],
   actionEntityId = id,
+  actionServerId = "server-local",
   kind,
   availability,
   activation,
@@ -7023,6 +7110,7 @@ function ResourceRow({
   selected: boolean;
   actions?: ActionHint[];
   actionEntityId?: string;
+  actionServerId?: string;
   kind?: WorkRootView["kind"];
   availability?: WorkRootView["availability"];
   activation?: WorkRootView["activation"];
@@ -7104,7 +7192,12 @@ function ResourceRow({
                   type="button"
                   onClick={() => {
                     setMenuOpen(false);
-                    onCommand(buildGitWorktreeAddOpenCommand(actionEntityId));
+                    onCommand(
+                      buildGitWorktreeAddOpenCommand(
+                        actionEntityId,
+                        actionServerId,
+                      ),
+                    );
                   }}
                 >
                   <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -7118,7 +7211,9 @@ function ResourceRow({
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  onCommand(buildWorkspaceRemoveCommand(actionEntityId));
+                  onCommand(
+                    buildWorkspaceRemoveCommand(actionEntityId, actionServerId),
+                  );
                 }}
               >
                 <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
