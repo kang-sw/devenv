@@ -157,3 +157,34 @@ Implemented as planned, no deviations from the Decisions above.
 - Commits: `375e8c33` (ticket), `88c8de2e` (spec Planned callout),
   `4bd0b805` (sage-review stamp), `6788c678` (survey plan),
   `a1f50ac3` (implementation).
+
+#### Edition (b98e45c) - 2026-07-03
+
+User review found the landed skill too long and too discussable-workflow-
+shaped for what is a purely user/`/goal`-invoked shim. Shrunk it:
+
+- Selection rule condensed from the 8-step list to one sentence: prefer a
+  `related:`/`parent:`-named prerequisite when it is also in `ready/`,
+  otherwise oldest-first FIFO. The explicit conflict-stop-and-ask,
+  todo/idea-fallback, and single-level-only sub-rules were dropped from the
+  skill text (they remain recorded as rejected/superseded detail in
+  `## Decisions` above); FIFO is now the sole fallback for any case the
+  one-sentence rule does not resolve.
+- `description` shortened to a plain trigger sentence, since this skill is
+  effectively user/`/goal`-invocation-only rather than a general discussable
+  workflow entry.
+- Added an explicit lead-context-conservation directive: never read/write
+  files or run commands directly for this invocation; delegate everything,
+  including simple tasks like commits, to an appropriately tiered subagent
+  or forked subagent per `lead-prefer-subagent`. This reflects the skill's
+  purpose inside a long-running `/goal` drain loop, where lead context is
+  the scarce resource.
+- Updated `agents-plugin/tests/test_skill_dispatch_contracts.py`'s
+  `test_drain_ready_queue_is_inlined_static_body` to match the shortened
+  text; regenerated `manifest.json` and the byte-identical wsflow mirror;
+  updated `ai-docs/mental-model/workflow-skills.md` and
+  `ai-docs/spec/workflow-skills.md` entries to match.
+- Verification: `agents-plugin` (41 tests) and `agents-plugin-wsflow` (9
+  tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
+  passes; `go build ./...` clean.
+- Commit: `b98e45c`.
