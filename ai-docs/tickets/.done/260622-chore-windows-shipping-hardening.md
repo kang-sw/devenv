@@ -7,6 +7,7 @@ related:
 related-mental-model:
   - named-agent-runtime
   - plugin-runtime
+completed: 2026-07-03
 ---
 
 # Windows shipping hardening (mercenary v1) + branch-pinned acceptance
@@ -267,3 +268,8 @@ Verification: real Windows cold install + at least one mercenary round-trip and 
 cancel, observed clean.
 
 Depends on: Phase A (and B) landed and version-bumped on the branch.
+
+
+## Resolution (2026-07-03)
+
+Phase A (static code hardening) and Phase B (launcher cold-load robustness) are fully implemented and verified on Linux/WSL2 (go build/test/vet + Windows cross-compile for Phase A; the launcher's Python unittest suite for Phase B; both reviewed). Phase C (branch-pinned Windows acceptance) requires a real Windows host, which was not available in this session. Rather than leave the ticket permanently half-finished in todo/, Phase C's goal, steps, verification, and load-bearing constraints (PID-scoped termination safety, mercenary-on-Windows v1 scope, epic-merge-deferred decision) were split out verbatim into a new standalone ticket: `260703-chore-windows-branch-pinned-acceptance` (todo/, pending a Windows host session). This ticket closes done on the strength of Phase A/B; the epic's Windows shipping gate now points to 260703.
