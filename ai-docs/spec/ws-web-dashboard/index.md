@@ -287,11 +287,12 @@ Server-scoped one-shot HTTP operations resolve by Server Route:
   allowlisted JSON/HTTP helper that attaches the daemon-held memory-only bearer
   token and targets the linked server's endpoint hint. Only explicitly
   registered server-scoped one-shot routes reach the helper; unregistered
-  server-scoped paths (Activity SSE, terminal WebSocket, terminal lifecycle,
-  Git, workspace mutations, and other unlisted operations) fall through the
-  protected router as `404` rather than proxying arbitrary daemon paths.
-  Document-event SSE is the single streaming exception and is proxied
-  explicitly — see [Document-Event SSE Proxying](#document-event-sse-proxying).
+  server-scoped paths (terminal WebSocket, terminal lifecycle, and other
+  unlisted operations) fall through the protected router as `404` rather than
+  proxying arbitrary daemon paths. Document-event and Activity-event SSE are the
+  streaming exceptions and are proxied explicitly — see
+  [Document-Event SSE Proxying](#document-event-sse-proxying) and
+  [Remote Activity, Git, And Workspace Operations](#remote-activity-git-workspace-operations).
 
 A forwarded response preserves the upstream status and body as much as
 practical. For operations that return a `DashboardResourcesView`, the daemon
@@ -362,8 +363,61 @@ re-streams its raw bytes to the browser. Key properties:
   side disconnects, the browser-facing stream drops, which drops the upstream
   `reqwest` response and releases the subscription.
 
-Other server-scoped streams remain deferred and continue to `404`: Activity SSE
-and the terminal WebSocket are not proxied by this phase.
+Activity-event SSE is proxied by the same mechanism — see
+[Remote Activity, Git, And Workspace Operations](#remote-activity-git-workspace-operations).
+The terminal WebSocket remains deferred and continues to `404`; it is not
+proxied by this phase.
+
+### Remote Activity, Git, And Workspace Operations {#remote-activity-git-workspace-operations}
+
+WorkRoot Activity, Git toolbar, workspace removal, and Git worktree-add
+operations are server-scoped through the same envelope. `server-local`
+dispatches in-process to the unscoped handlers (byte-for-byte equivalent);
+any other Server Route forwards over the allowlisted bearer helper. The
+registered server-scoped routes are:
+
+- Activity: `.../work-roots/{workRootId}/activity`,
+  `.../activity/items/{activityId}/transcript`, and
+  `.../activity/events` (SSE).
+- Workspace removal: `DELETE .../workspaces/{workspaceId}`.
+- Git worktree-add: `.../workspaces/{workspaceId}/git-worktree-add/options`,
+  `.../git-worktree-add/preview`, and `.../git-worktree-add`.
+- Git toolbar: `.../work-roots/{workRootId}/git/status`, `.../git/branches`
+  (GET lists, POST creates), `.../git/switch-branch`, `.../git/fetch`,
+  `.../git/push`, and `.../git/pull-ff-only`.
+
+Key properties:
+
+- **Activity-event SSE proxying.** `.../activity/events` reuses the exact
+  document-event SSE mechanism: a bearer-authenticated upstream
+  `text/event-stream` GET, content-type enforcement (`502` on a
+  missing/non-stream content type), upstream error preservation, opaque byte
+  passthrough, and implicit drop-based cleanup. It resolves through the same
+  dot-free refusal and bounded-error boundary as one-shot routes, so the new
+  stream branch never bypasses auth.
+- **Worktree-add resource rewrite.** The `git-worktree-add` submit response
+  carries a `DashboardResourcesView` nested under a wrapper object. The gateway
+  rewrites that nested view — including every `ResourcePath.serverId` — to the
+  selected Server Route, so a linked server's created worktree surfaces under
+  the browser-visible route rather than the linked daemon's local identity.
+  Workspace removal returns a bare `DashboardResourcesView` and is rewritten by
+  the same resources path as `open work-root` and activation.
+- **Owner-auth + bearer gating.** Mutating operations (branch create/switch,
+  fetch/push/pull, workspace removal, worktree add) preserve owner auth at the
+  local gateway (router placement) and bearer auth to the linked daemon; they
+  are never reachable without both.
+- **Body-parsing aliases match axum.** The `server-local` aliases that parse a
+  JSON request body (worktree preview/submit, branch create, switch-branch)
+  enforce the same `application/json` content-type boundary and classify
+  malformed bodies the same way the unscoped `Json` extractor does (`415` for a
+  missing/non-JSON content type, `422` for a data error, `400` for a syntax
+  error), staying byte-for-byte equivalent to the legacy route.
+- **Remote host paths.** Git worktree path previews and error messages returned
+  from a linked server describe remote host paths; the UI presents them as
+  belonging to the selected server, not the local host.
+
+Agent-control actions (interrupt, cancel, erase, retry, terminate) and the
+terminal families remain out of scope for this phase.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
