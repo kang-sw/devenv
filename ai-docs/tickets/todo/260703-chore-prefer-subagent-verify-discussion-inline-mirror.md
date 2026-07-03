@@ -5,7 +5,7 @@ related:
   260610-chore-wsflow-explore-playbook-mirroring: prior deferred wsflow-mirroring-mechanism discussion, related precedent for narrow generated-skill carve-outs
 spec:
   - 260505-workflow-primitive-reference
-sage-review: required
+sage-review: completed
 ---
 
 # Inline lead-prefer-subagent and lead-verify-discussion; add substitution-mirrored skill generation
