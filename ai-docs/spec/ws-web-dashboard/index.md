@@ -287,9 +287,9 @@ Server-scoped one-shot HTTP operations resolve by Server Route:
   allowlisted JSON/HTTP helper that attaches the daemon-held memory-only bearer
   token and targets the linked server's endpoint hint. Only explicitly
   registered server-scoped one-shot routes reach the helper; unregistered
-  server-scoped paths (terminal WebSocket, terminal lifecycle, and other
-  unlisted operations) fall through the protected router as `404` rather than
-  proxying arbitrary daemon paths. Document-event and Activity-event SSE are the
+  server-scoped paths (the terminal WebSocket socket route and other unlisted
+  operations) fall through the protected router as `404` rather than proxying
+  arbitrary daemon paths. Document-event and Activity-event SSE are the
   streaming exceptions and are proxied explicitly — see
   [Document-Event SSE Proxying](#document-event-sse-proxying) and
   [Remote Activity, Git, And Workspace Operations](#remote-activity-git-workspace-operations).
@@ -365,8 +365,9 @@ re-streams its raw bytes to the browser. Key properties:
 
 Activity-event SSE is proxied by the same mechanism — see
 [Remote Activity, Git, And Workspace Operations](#remote-activity-git-workspace-operations).
-The terminal WebSocket remains deferred and continues to `404`; it is not
-proxied by this phase.
+The terminal WebSocket socket route remains deferred and continues to `404`; it
+is not proxied by this phase. Terminal HTTP lifecycle routes are forwarded — see
+[Remote Terminal HTTP Lifecycle](#remote-terminal-http-lifecycle).
 
 ### Remote Activity, Git, And Workspace Operations {#remote-activity-git-workspace-operations}
 
@@ -416,8 +417,48 @@ Key properties:
   from a linked server describe remote host paths; the UI presents them as
   belonging to the selected server, not the local host.
 
-Agent-control actions (interrupt, cancel, erase, retry, terminate) and the
-terminal families remain out of scope for this phase.
+Agent-control actions (interrupt, cancel, erase, retry, terminate) remain out of
+scope for this phase.
+
+### Remote Terminal HTTP Lifecycle {#remote-terminal-http-lifecycle}
+
+Terminal create, list, output poll, input, resize, and close are server-scoped
+through the same one-shot envelope. `server-local` dispatches in-process to the
+unscoped terminal handlers (byte-for-byte equivalent); any other Server Route
+forwards over the allowlisted bearer helper. The registered server-scoped routes
+are:
+
+- `GET`/`POST .../work-roots/{workRootId}/terminals` — list / create.
+- `GET .../terminals/{terminalId}/output` — output poll (carries `?after=`).
+- `POST .../terminals/{terminalId}/input` — raw input.
+- `POST .../terminals/{terminalId}/resize` — PTY resize.
+- `DELETE .../terminals/{terminalId}` — close.
+
+Key properties:
+
+- **Opaque daemon-local terminal ids.** Terminal ids stay opaque ids owned by
+  the target daemon; the gateway does not synthesize or rewrite them. Collision
+  safety is achieved purely on the browser side by keying pane/session/restore
+  state on `{serverRoute, terminalId}`, so the same bare `terminalId` on two
+  servers stays distinct and an operation on one server's terminal never reaches
+  another server's identically-named terminal. Closing a remote terminal
+  forwards `DELETE` to that server only and leaves a local terminal sharing the
+  same bare id untouched.
+- **Close closes upstream.** A forwarded `DELETE` closes the terminal on the
+  linked daemon, so a subsequent output poll for that id surfaces the upstream
+  `404`.
+- **Body-parsing aliases match axum.** The `server-local` aliases that parse a
+  JSON body (create, input, resize) enforce the same `application/json`
+  content-type boundary and classify malformed bodies the same way the unscoped
+  `Json` extractor does (`415` for a missing/non-JSON content type, `422` for a
+  data error, `400` for a syntax error), staying byte-for-byte equivalent to the
+  legacy route.
+- **Owner-auth + bearer gating.** Terminal input, resize, and close are mutating
+  host control; they preserve owner auth at the local gateway (router placement)
+  and bearer auth to the linked daemon, and are never reachable without both.
+- **Socket route still deferred.** `.../terminals/{terminalId}/socket` is *not*
+  registered under the server-scoped prefix in this phase and continues to
+  `404`; live WebSocket transport is Phase 7.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
