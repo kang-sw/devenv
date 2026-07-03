@@ -601,6 +601,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envNamespace, "wsflow")
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
 	s := newTestServerWithHarness(t, "codex")
 	configOpts := isolatedPlaybookConfigOptions(t)
 

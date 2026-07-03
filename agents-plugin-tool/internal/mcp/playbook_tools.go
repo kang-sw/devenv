@@ -347,8 +347,6 @@ type overridePointDecl struct {
 	Desc    string
 }
 
-const preferSubagentInvocationGuidancePointID = "PreferSubagentInvocationGuidance"
-
 const (
 	workflowManualPlaybookName  = "lead-workflow-manual"
 	preferSubagentPlaybookName  = "lead-prefer-subagent"
@@ -356,16 +354,15 @@ const (
 	preferSubagentEnabledValue  = "on"
 )
 
-const preferSubagentCodexInvocationGuidancePrompt = "" +
-	"- Codex binding: call `spawn_agent(fork_context:true, message:<prompt>)`; " +
-	"omit `agent_type`, `model`, and `reasoning_effort` for full-history forks unless the host permits them.\n" +
-	"- If a typed fork is rejected, retry untyped with `fork_context:true`; " +
-	"do not satisfy this posture with `agent_type: explorer` or `agent_type: worker` unless `fork_context:true` is active."
-
+// builtinPromptOverrideDefaults returns code-owned default override values for
+// prompt override-points. Currently empty: the sole prior entry
+// (PreferSubagentInvocationGuidance) was retired when lead-prefer-subagent's
+// body moved to a static inlined SKILL.md with no override-marker pass. The
+// function is kept because buildOverrideLookup and
+// builtinConfigAndPromptDefaults (server.go) call it generically for other
+// override points.
 func builtinPromptOverrideDefaults() map[string]string {
-	return map[string]string{
-		"prompt." + preferSubagentInvocationGuidancePointID + ".codex": preferSubagentCodexInvocationGuidancePrompt,
-	}
+	return map[string]string{}
 }
 
 // scanOverridePoints walks the rsrc tree rooted at rsrcRoot, scans every `.md`
@@ -803,9 +800,13 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 	if !enabled {
 		return body, recommendedTier, nil
 	}
-	appendBody, _, err := renderPlaybookBody(s, rsrcRoot, preferSubagentPlaybookName, nil, configOpts, "", "", false, workflowLang, overrideLookup)
+	skillsRoot, err := wsrsrc.ResolveSkillsRoot()
 	if err != nil {
-		return "", "", fmt.Errorf("render appended %s: %w", preferSubagentPlaybookName, err)
+		return "", "", fmt.Errorf("resolve skills root for appended %s: %w", preferSubagentPlaybookName, err)
+	}
+	appendBody, err := wsrsrc.LoadSkillBody(skillsRoot, preferSubagentPlaybookName)
+	if err != nil {
+		return "", "", fmt.Errorf("load appended %s: %w", preferSubagentPlaybookName, err)
 	}
 	body += "\n\n" + wrapRenderedPlaybookForConcatenation(preferSubagentPlaybookName, preferSubagentPlaybookTitle, appendBody)
 	return body, recommendedTier, nil
