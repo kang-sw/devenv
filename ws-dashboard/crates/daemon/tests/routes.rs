@@ -3581,6 +3581,14 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
         .route(
             "/api/dashboard/work-roots/root-events-invalid/documents/events",
             axum::routing::get(document_events_invalid_content_type),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-activity-error/activity/events",
+            axum::routing::get(document_events_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-activity-invalid/activity/events",
+            axum::routing::get(document_events_invalid_content_type),
         );
     let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
 
@@ -3652,6 +3660,13 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
             "application/json",
             "events unavailable",
         ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-activity-error/activity/events",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            "events unavailable",
+        ),
     ] {
         let response = local_app
             .clone()
@@ -3691,6 +3706,7 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
     }
 
     let invalid_sse = local_app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/dashboard/servers/server-errors/work-roots/root-events-invalid/documents/events")
@@ -3709,6 +3725,27 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
     assert_eq!(
         invalid_value["error"],
         "linked server document events stream unavailable"
+    );
+
+    let invalid_activity_sse = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-errors/work-roots/root-activity-invalid/activity/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("invalid upstream activity SSE content-type request"),
+        )
+        .await
+        .expect("invalid upstream activity SSE content-type response");
+    assert_eq!(invalid_activity_sse.status(), StatusCode::BAD_GATEWAY);
+    let invalid_activity_body = axum::body::to_bytes(invalid_activity_sse.into_body(), 4096)
+        .await
+        .expect("invalid activity SSE response body");
+    let invalid_activity_value: serde_json::Value =
+        serde_json::from_slice(&invalid_activity_body).expect("invalid activity SSE response JSON");
+    assert_eq!(
+        invalid_activity_value["error"],
+        "linked server activity events stream unavailable"
     );
 
     remote_server.abort();
@@ -3877,25 +3914,102 @@ async fn server_scoped_git_and_worktree_local_aliases_match_legacy_routes() {
     );
 
     // The alias must also mirror axum's `Json` extractor rejection statuses so a
-    // malformed body behaves identically to the legacy route.
-    let alias_unsupported = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method(Method::POST)
-                .uri(format!(
-                    "/api/dashboard/servers/server-local/workspaces/{workspace_id}/git-worktree-add/preview"
-                ))
-                .header(header::COOKIE, cookie.as_str())
-                .body(Body::from("{}"))
-                .expect("alias worktree preview without content type"),
-        )
-        .await
-        .expect("alias worktree preview response");
-    assert_eq!(
-        alias_unsupported.status(),
-        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    // malformed body behaves identically to the legacy route. Compare the alias
+    // against the legacy route for each rejection class rather than asserting
+    // hardcoded status codes (Phase 4 review lesson): a missing content type
+    // (415), a valid-JSON body missing a required field (422 data error), and a
+    // syntactically invalid body (400 syntax error).
+    let legacy_preview_uri =
+        format!("/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview");
+    let alias_preview_uri = format!(
+        "/api/dashboard/servers/server-local/workspaces/{workspace_id}/git-worktree-add/preview"
     );
+    for (label, content_type, body) in [
+        ("missing content type", None, "{}"),
+        (
+            "data error (missing required field)",
+            Some("application/json"),
+            "{}",
+        ),
+        (
+            "syntax error (truncated JSON)",
+            Some("application/json"),
+            "{",
+        ),
+    ] {
+        let build = |uri: &str| {
+            let mut builder = Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(header::COOKIE, cookie.as_str());
+            if let Some(content_type) = content_type {
+                builder = builder.header(header::CONTENT_TYPE, content_type);
+            }
+            builder
+                .body(Body::from(body))
+                .expect("worktree preview rejection request")
+        };
+        let alias_rejected = app
+            .clone()
+            .oneshot(build(&alias_preview_uri))
+            .await
+            .expect("alias worktree preview rejection response");
+        let legacy_rejected = app
+            .clone()
+            .oneshot(build(&legacy_preview_uri))
+            .await
+            .expect("legacy worktree preview rejection response");
+        assert_eq!(
+            alias_rejected.status(),
+            legacy_rejected.status(),
+            "server-local worktree preview alias must match legacy rejection status for {label}"
+        );
+    }
+
+    // The mutating Git toolbar routes must dispatch through the `server-local`
+    // alias to the same handler as the legacy route. Drive each into a
+    // deterministic, non-mutating failure (so issuing the request against both
+    // routes is safe and repeatable) and compare status and body for
+    // equivalence, following the same pattern as the GET/preview pairs above.
+    let seed_branch = current_git_branch(&primary);
+    let mutation_pairs: [(&str, serde_json::Value); 5] = [
+        // create-branch: an already-existing name cannot be created.
+        (
+            "git/branches",
+            serde_json::json!({ "branchName": seed_branch, "switchTo": true }),
+        ),
+        // switch-branch: an unavailable branch is rejected without switching.
+        (
+            "git/switch-branch",
+            serde_json::json!({ "branchName": "does-not-exist" }),
+        ),
+        // fetch/push/pull-ff-only: no remote is configured, so each fails.
+        ("git/fetch", serde_json::json!({})),
+        ("git/push", serde_json::json!({})),
+        ("git/pull-ff-only", serde_json::json!({})),
+    ];
+    for (segment, request) in mutation_pairs {
+        let legacy = post_status_and_body(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/work-roots/{git_id}/{segment}"),
+            &request,
+        )
+        .await;
+        let alias = post_status_and_body(
+            app.clone(),
+            cookie.as_str(),
+            &format!("/api/dashboard/servers/server-local/work-roots/{git_id}/{segment}"),
+            &request,
+        )
+        .await;
+        assert_eq!(alias.0, legacy.0, "status mismatch for {segment}");
+        assert_eq!(
+            normalize_volatile_json(&alias.1),
+            normalize_volatile_json(&legacy.1),
+            "body mismatch for {segment}"
+        );
+    }
 
     remove_static_fixture(&base);
 }

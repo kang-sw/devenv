@@ -135,6 +135,21 @@ assertEqual(
   "remote switch URL stays on local gateway server-scoped route",
 );
 assertEqual(
+  calls[10].url,
+  "/api/dashboard/servers/server-remote-1/work-roots/root-same/git/branches",
+  "remote create-branch URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[11].url,
+  "/api/dashboard/servers/server-remote-1/work-roots/root-same/git/fetch",
+  "remote fetch URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[12].url,
+  "/api/dashboard/servers/server-remote-1/work-roots/root-same/git/push",
+  "remote push URL stays on local gateway server-scoped route",
+);
+assertEqual(
   calls[13].url,
   "/api/dashboard/servers/server-remote-1/work-roots/root-same/git/pull-ff-only",
   "remote pull URL stays on local gateway server-scoped route",
