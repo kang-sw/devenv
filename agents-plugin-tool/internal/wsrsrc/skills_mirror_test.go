@@ -58,6 +58,23 @@ func TestWsflowSkillsMirrorUpToDate(t *testing.T) {
 		}
 	}
 
+	// Synthetic namespace-token fixture: none of the curated skills above
+	// currently contain ws:/ws/ tokens, so without this case the loop above
+	// never actually exercises substitution — it only detects added, removed,
+	// or byte-edited mirrors. This pins substitution correctness through the
+	// exact same want-vs-got comparison path.
+	syntheticSrc := "---\nname: synthetic-drift-fixture\n---\n\n" +
+		"Use ws:lead-example and call ws/example.tool for details.\n"
+	syntheticWant, err := GenerateWsflowSkillBody(syntheticSrc)
+	if err != nil {
+		t.Fatalf("generate wsflow body for synthetic drift fixture: %v", err)
+	}
+	syntheticGot := "---\nname: synthetic-drift-fixture\n---\n\n" +
+		"Use wsflow:lead-example and call wsflow/example.tool for details.\n"
+	if syntheticGot != syntheticWant {
+		diffs = append(diffs, "synthetic namespace-token fixture: substitution mismatch")
+	}
+
 	if len(diffs) > 0 {
 		sort.Strings(diffs)
 		t.Fatalf("wsflow skills mirror has drifted from substitution-mirrored full-ws source:\n%s\n\n"+
