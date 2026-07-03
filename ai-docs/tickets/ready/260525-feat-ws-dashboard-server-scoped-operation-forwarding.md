@@ -520,6 +520,65 @@ Verification should include pure endpoint tests, daemon forwarding tests for
 list/read/write, SSE proxy tests or browser smoke coverage for document events,
 and remote Windows dogfood opening/editing a small markdown or text file.
 
+### Result (25859a58) - 2026-07-03
+
+Frontend was already server-scoped from Phase 1 (`workRootFiles.ts` helpers,
+pane identity, and the document-event `EventSource` call site all already
+accept/thread `serverRoute`), so this phase is backend-only. Added four
+`ServerScopedForwardOperation` constructors and four `server_scoped_*`
+handlers for work-root file listing, file read, file write, and
+document-event SSE: `server-local` dispatches in-process to the existing
+`work_root_files.rs` handlers; other routes forward via the Phase 2
+`forward_server_scoped_operation` helper for the one-shot list/read/write
+routes. Document-event SSE is the one genuinely new mechanism: a bearer-authed
+upstream `text/event-stream` GET is opened, the upstream content-type is
+validated (`502` on mismatch/missing), non-success upstream responses are
+preserved as bounded errors, and successful streams are re-emitted as an
+opaque byte passthrough (`Body::from_stream`) with implicit drop-based
+cleanup on client disconnect — it goes through the same
+`resolve_server_scoped_forwarding` resolver (dot-free refusal, owner-auth via
+router placement) as the one-shot routes, so auth is not bypassed for the new
+stream branch. Registered the four routes in `router.rs` next to the existing
+activation route. Ported the phase-7 draft's `server-local` write-alias
+content-type boundary fix so the alias rejects non-JSON bodies the same way
+the unscoped route's `Json` extractor does.
+
+Commits: `92fe58d9` (feat: forward remote file and document-event routes),
+`6ee79296` (test: cover remote file/document forwarding and SSE proxy),
+`25859a58` (docs: spec remote file ops and document-event SSE proxying),
+`b817c8be` (fix: match axum Json data/syntax status split on write alias).
+
+Review: partitioned correctness/fit/test. Fit and test partitions were clean
+with no blocking findings (test partition independently re-ran the full
+daemon suite and confirmed thorough SSE round-trip/failure/cleanup coverage
+and explicit 404 assertions for still-deferred families). Correctness
+partition found one Important-severity gap: the server-local write alias
+manually parsed the JSON body and always returned `400` on failure, while
+axum's real `Json` extractor (used by the unscoped route) returns `422` for a
+data error (e.g. a missing `baseContentHash` field) and `400` only for a
+syntax error — breaking the alias's byte-for-byte parity goal and
+contradicting the phase's own spec prose. Fixed inline (`b817c8be`): classify
+`serde_json::Error::classify()` the same way axum does, updated the
+`missing_hash` test to assert `422` and compare directly against the legacy
+route's response (equivalence assertion instead of a hardcoded status), and
+corrected the spec's "Remote File Operations" section to state the true
+`422` behavior. Full daemon suite re-run clean after the fix: 36 lib + 130
+route + 15 server tests, 0 failures.
+
+**Outstanding follow-ups (not done in this session), matching Phase 3's
+closeout pattern:**
+- Live dogfood against a real remote Windows daemon tunnel (opening/editing a
+  small markdown or text file) is not possible in this environment/session.
+- The phase-7 draft's Playwright e2e additions (same-id local/remote document
+  isolation; remote file/document traffic staying on server-scoped routes)
+  were not ported — the draft's e2e structure has diverged too far from the
+  current `dashboard-acceptance.spec.ts` (Phase 3's `serverRoute` rename,
+  the stale-isolation rewrite, `linkedServerBrowserResources` signature
+  change) to port blind without a way to execute and verify it. Playwright
+  itself also cannot run in this environment (no Chromium/`libasound.so.2`,
+  the same gap established in Phase 3). Executable coverage is provided
+  instead by the daemon-level SSE round-trip, failure, and cleanup tests.
+
 ### Phase 5: Remote Activity, Git, workspace, and WorkRoot mutations
 
 Forward WorkRoot Activity snapshots, transcript reads, Activity event SSE,
