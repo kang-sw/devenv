@@ -2340,6 +2340,149 @@ async fn server_scoped_one_shot_routes_are_protected_and_dispatch_local_aliases(
 }
 
 #[tokio::test]
+async fn server_scoped_one_shot_mutation_routes_dispatch_equivalent_local_aliases() {
+    let create_legacy_parent = temp_fixture_path("server-scoped-create-legacy-parent");
+    let create_scoped_parent = temp_fixture_path("server-scoped-create-scoped-parent");
+    let open_root = temp_fixture_path("server-scoped-open-local-root");
+    fs::create_dir_all(&create_legacy_parent).expect("create legacy create parent");
+    fs::create_dir_all(&create_scoped_parent).expect("create scoped create parent");
+    fs::create_dir_all(&open_root).expect("create open local root");
+
+    let (legacy_app, legacy_cookie) = paired_test_app().await;
+    let (scoped_app, scoped_cookie) = paired_test_app().await;
+
+    let create_name = "created-child";
+    let (legacy_create_status, _, legacy_create) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        "/api/dashboard/root-picker/directories".to_owned(),
+        &legacy_cookie,
+        serde_json::json!({
+            "parentPath": create_legacy_parent.display().to_string(),
+            "name": create_name,
+        }),
+    )
+    .await;
+    let (scoped_create_status, _, scoped_create) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-local/root-picker/directories".to_owned(),
+        &scoped_cookie,
+        serde_json::json!({
+            "parentPath": create_scoped_parent.display().to_string(),
+            "name": create_name,
+        }),
+    )
+    .await;
+    assert_eq!(legacy_create_status, StatusCode::OK);
+    assert_eq!(scoped_create_status, StatusCode::OK);
+    assert_eq!(legacy_create["name"], scoped_create["name"]);
+    assert_eq!(legacy_create["entryType"], scoped_create["entryType"]);
+    assert_eq!(legacy_create["selectable"], scoped_create["selectable"]);
+    assert!(create_legacy_parent.join(create_name).is_dir());
+    assert!(create_scoped_parent.join(create_name).is_dir());
+
+    let pin_path = open_root.display().to_string();
+    let (legacy_pin_status, _, legacy_pin) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        "/api/dashboard/root-picker/pins".to_owned(),
+        &legacy_cookie,
+        serde_json::json!({ "path": pin_path }),
+    )
+    .await;
+    let (scoped_pin_status, _, scoped_pin) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-local/root-picker/pins".to_owned(),
+        &scoped_cookie,
+        serde_json::json!({ "path": pin_path }),
+    )
+    .await;
+    assert_eq!(legacy_pin_status, StatusCode::OK);
+    assert_eq!(scoped_pin_status, StatusCode::OK);
+    assert_eq!(legacy_pin, scoped_pin);
+
+    let (legacy_unpin_status, _, legacy_unpin) = request_json_for_test(
+        legacy_app.clone(),
+        Method::DELETE,
+        "/api/dashboard/root-picker/pins".to_owned(),
+        &legacy_cookie,
+        serde_json::json!({ "path": pin_path }),
+    )
+    .await;
+    let (scoped_unpin_status, _, scoped_unpin) = request_json_for_test(
+        scoped_app.clone(),
+        Method::DELETE,
+        "/api/dashboard/servers/server-local/root-picker/pins".to_owned(),
+        &scoped_cookie,
+        serde_json::json!({ "path": pin_path }),
+    )
+    .await;
+    assert_eq!(legacy_unpin_status, StatusCode::OK);
+    assert_eq!(scoped_unpin_status, StatusCode::OK);
+    assert_eq!(legacy_unpin, scoped_unpin);
+
+    let (legacy_open_status, legacy_open_headers, legacy_open) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        "/api/dashboard/work-roots/open".to_owned(),
+        &legacy_cookie,
+        serde_json::json!({ "path": open_root.display().to_string() }),
+    )
+    .await;
+    let (scoped_open_status, scoped_open_headers, scoped_open) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-local/work-roots/open".to_owned(),
+        &scoped_cookie,
+        serde_json::json!({ "path": open_root.display().to_string() }),
+    )
+    .await;
+    assert_eq!(legacy_open_status, StatusCode::OK);
+    assert_eq!(scoped_open_status, StatusCode::OK);
+    let legacy_opened_id = legacy_open_headers
+        .get("x-ws-dashboard-opened-work-root-id")
+        .expect("legacy opened id header");
+    let scoped_opened_id = scoped_open_headers
+        .get("x-ws-dashboard-opened-work-root-id")
+        .expect("scoped opened id header");
+    assert_eq!(legacy_opened_id, scoped_opened_id);
+    assert_eq!(legacy_open, scoped_open);
+
+    let work_root_id = legacy_opened_id
+        .to_str()
+        .expect("opened workRoot id header string");
+    let (legacy_activation_status, _, legacy_activation) = request_json_for_test(
+        legacy_app,
+        Method::POST,
+        format!("/api/dashboard/work-roots/{work_root_id}/activation"),
+        &legacy_cookie,
+        serde_json::json!({ "activation": "offline" }),
+    )
+    .await;
+    let (scoped_activation_status, _, scoped_activation) = request_json_for_test(
+        scoped_app,
+        Method::POST,
+        format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/activation"),
+        &scoped_cookie,
+        serde_json::json!({ "activation": "offline" }),
+    )
+    .await;
+    assert_eq!(legacy_activation_status, StatusCode::OK);
+    assert_eq!(scoped_activation_status, StatusCode::OK);
+    assert_eq!(legacy_activation, scoped_activation);
+    assert_eq!(
+        work_root_by_id(&scoped_activation, work_root_id)["activation"],
+        "offline"
+    );
+
+    remove_static_fixture(&create_legacy_parent);
+    remove_static_fixture(&create_scoped_parent);
+    remove_static_fixture(&open_root);
+}
+
+#[tokio::test]
 async fn server_scoped_one_shot_routes_return_bounded_refusals() {
     let state_file_root = temp_fixture_path("server-scoped-one-shot-refusal-state");
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
@@ -7940,6 +8083,42 @@ async fn work_root_activity_events_emit_current_item_for_registry_only_update() 
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+async fn paired_test_app() -> (axum::Router, String) {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    (app, cookie)
+}
+
+async fn request_json_for_test(
+    app: axum::Router,
+    method: Method,
+    uri: String,
+    cookie: &str,
+    body: serde_json::Value,
+) -> (StatusCode, axum::http::HeaderMap, serde_json::Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("JSON route request"),
+        )
+        .await
+        .expect("JSON route response");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("JSON route body bytes");
+    let value = serde_json::from_slice(&body).expect("JSON route response body");
+    (status, headers, value)
 }
 
 fn work_root_ids(value: &serde_json::Value) -> Vec<String> {
