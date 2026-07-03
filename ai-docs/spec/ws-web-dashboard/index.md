@@ -268,8 +268,48 @@ that character set). The frontend rejects a route with a reserved character both
 when constructing a canonical `servers/{serverRoute}/...` route and when adding
 a linked server, surfacing a bounded client-side error rather than silently
 rewriting the value. Existing persisted dotted routes are not rewritten.
-Authoritative daemon-side rejection of dotted linked-server route requests is
-delivered with server-scoped forwarding, not by this frontend contract.
+Daemon-side rejection of dotted Server Route requests is authoritative: a
+server-scoped route whose segment contains a dot is refused before any
+linked-server lookup with a bounded `400` error, and this refusal is the sole
+authority regardless of any client-side check. Existing persisted dotted
+linked-server ids are refused the same way rather than being silently rewritten.
+
+### One-Shot Operation Forwarding Envelope
+
+Server-scoped one-shot HTTP operations resolve by Server Route:
+
+- `server-local` (and the `null`/empty default) dispatches **in-process**
+  through the equivalent local handler, so its response is byte-for-byte
+  equivalent to the unscoped local route — including status, JSON body, and
+  headers such as `x-ws-dashboard-opened-work-root-id`. The unscoped local
+  routes remain live as `server-local` compatibility aliases.
+- Any other Server Route forwards to the selected linked server through a single
+  allowlisted JSON/HTTP helper that attaches the daemon-held memory-only bearer
+  token and targets the linked server's endpoint hint. Only explicitly
+  registered server-scoped one-shot routes reach the helper; unregistered
+  server-scoped paths (SSE, terminal WebSocket, unlisted operations) fall
+  through the protected router as `404` rather than proxying arbitrary daemon
+  paths.
+
+A forwarded response preserves the upstream status and body as much as
+practical. For operations that return a `DashboardResourcesView`, the daemon
+rewrites the returned view — including every nested `ResourcePath.serverId` — to
+the selected Server Route so a linked server's local identities never leak into
+server-scoped resource paths, and it preserves the
+`x-ws-dashboard-opened-work-root-id` header.
+
+### Bounded Gateway Errors
+
+Forwarding failures surface as bounded dashboard errors that never leak
+endpoints, tokens, private paths, or daemon/session metadata:
+
+- **Unknown Server Route** — `404`, the route matches no linked server.
+- **Invalid Server Route** — `400`, the route segment contains a dot.
+- **Auth required** — `409`, no in-memory bearer session for the linked server.
+- **Tunnel required** — `409`, the linked server has no endpoint hint yet.
+- **Unreachable upstream** — `502`, the forwarded request could not complete.
+- **Upstream rejection** — the linked server's own status and error body are
+  preserved as returned.
 
 Collision-safe UI identity derives from the Server Route: the same
 `workRootId`, `workspaceId`, `activityId`, or `terminalId` observed on two
