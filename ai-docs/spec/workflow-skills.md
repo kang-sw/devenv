@@ -91,12 +91,15 @@ workflow skills. It defines host-neutral notation: `ws/<tool-name>` means an MCP
 tool on the `ws` server, while `ws:` names plugin skills.
 
 When global `"workflow.prefer_subagent"` is `on`, loading
-`lead-workflow-manual` also loads the rendered `lead-prefer-subagent` posture
-inside an XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
-boundary. The appended posture is rendered through the normal playbook pipeline
-so harness-specific defaults, including Codex invocation guidance, remain
-harness-scoped. Explicitly invoking `lead-prefer-subagent` may duplicate this
-short posture text; that duplication is accepted.
+`lead-workflow-manual` also loads the `lead-prefer-subagent` posture inside an
+XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
+boundary. The appended text is the static body of
+`agents-plugin/skills/lead-prefer-subagent/SKILL.md`, read directly via
+`LoadSkillBody` with no override-marker pass and no per-harness runtime
+branch: Claude and Codex both see the same host-conditional prose, including
+the literal Codex `spawn_agent` fallback wording. Explicitly invoking
+`lead-prefer-subagent` may duplicate this short posture text; that
+duplication is accepted.
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
 queries, generated artifact paths, runtime metadata, workflow discovery, Git

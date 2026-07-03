@@ -71,6 +71,12 @@ Excluded:
   package test encodes this through `EXPECTED_INLINE_SKILLS`, which exempts it
   from the thin-shim, shared-stem, and full-counterpart checks. Any future
   inline wsflow skill must be added to that set and documented here.
+- Exception (temporary, ahead of a formal curated category): `lead-prefer-subagent`
+  and `lead-verify-discussion` also ship inline procedure bodies rather than
+  `playbook.print` shims. Their full-ws counterparts are likewise inline
+  `agents-plugin/skills/lead-*/SKILL.md` bodies now, not `playbook.print`-backed
+  rsrc playbooks — the shared rsrc playbook dirs for these two were deleted.
+  Both are also in `EXPECTED_INLINE_SKILLS` for the same reason as `lead-revive`.
 - Do not mention `ws/`, `ws:`, `ws.`, `subquery`, or `agents.*` in
   distributed wsflow skill text.
 - Do not describe wsflow as ws-lite, a ws mode, or a ws-compatible product.
