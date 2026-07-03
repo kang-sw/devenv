@@ -5,10 +5,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use axum::Json;
-use axum::extract::{Path as AxumPath, State};
-use axum::http::StatusCode;
+use axum::body::{Body, Bytes};
+use axum::extract::{OriginalUri, Path as AxumPath, Query, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -21,6 +22,11 @@ use ws_dashboard_core::{
 use crate::auth::BearerAuthToken;
 use crate::persistent_state::PersistedLinkedServer;
 use crate::resources::local_dashboard_resources_view;
+use crate::root_picker::{
+    create_empty_directory, list_root_picker, open_work_root, pin_root_picker_directory,
+    set_work_root_activation, unpin_root_picker_directory, CreateEmptyDirectoryRequest,
+    OpenWorkRootRequest, RootPickerPinRequest, SetWorkRootActivationRequest,
+};
 use crate::router::AppState;
 
 const LOCAL_SERVER_ID: &str = "server-local";
@@ -466,6 +472,339 @@ pub async fn dashboard_server_resources(
             state.linked_server_tunnels.contains(&server.id).await,
         )),
     )
+}
+
+#[derive(Clone, Debug)]
+struct ServerScopedForwardOperation {
+    method: Method,
+    legacy_path: String,
+    rewrite_resources: bool,
+}
+
+impl ServerScopedForwardOperation {
+    fn root_picker(uri: OriginalUri) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: legacy_path_with_query("/api/dashboard/root-picker", &uri),
+            rewrite_resources: false,
+        }
+    }
+
+    fn create_directory() -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: "/api/dashboard/root-picker/directories".to_owned(),
+            rewrite_resources: false,
+        }
+    }
+
+    fn pins(method: Method) -> Option<Self> {
+        matches!(method, Method::POST | Method::DELETE).then(|| Self {
+            method,
+            legacy_path: "/api/dashboard/root-picker/pins".to_owned(),
+            rewrite_resources: false,
+        })
+    }
+
+    fn open_work_root() -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: "/api/dashboard/work-roots/open".to_owned(),
+            rewrite_resources: true,
+        }
+    }
+
+    fn set_activation(work_root_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!("/api/dashboard/work-roots/{work_root_id}/activation"),
+            rewrite_resources: true,
+        }
+    }
+}
+
+enum ServerScopedResolution {
+    Local,
+    Linked {
+        server: PersistedLinkedServer,
+        endpoint: String,
+        token: BearerAuthToken,
+    },
+    Refusal {
+        status: StatusCode,
+        message: &'static str,
+    },
+}
+
+pub async fn server_scoped_root_picker(
+    State(state): State<AppState>,
+    AxumPath(server_route): AxumPath<String>,
+    Query(query): Query<HashMap<String, String>>,
+    uri: OriginalUri,
+) -> Response {
+    let operation = ServerScopedForwardOperation::root_picker(uri);
+    if server_route == LOCAL_SERVER_ID {
+        return list_root_picker(State(state), Query(query)).await;
+    }
+    forward_server_scoped_operation(state, server_route, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_create_empty_directory(
+    State(state): State<AppState>,
+    AxumPath(server_route): AxumPath<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::create_directory();
+    if server_route == LOCAL_SERVER_ID {
+        return match serde_json::from_slice::<CreateEmptyDirectoryRequest>(&body) {
+            Ok(request) => create_empty_directory(Json(request)).await,
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_root_picker_pins(
+    State(state): State<AppState>,
+    AxumPath(server_route): AxumPath<String>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(operation) = ServerScopedForwardOperation::pins(method.clone()) else {
+        return server_error(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "unsupported server-scoped operation",
+        );
+    };
+    if server_route == LOCAL_SERVER_ID {
+        let request = match serde_json::from_slice::<RootPickerPinRequest>(&body) {
+            Ok(request) => request,
+            Err(_) => return server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+        return if method == Method::POST {
+            pin_root_picker_directory(State(state), Json(request)).await
+        } else {
+            unpin_root_picker_directory(State(state), Json(request)).await
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_open_work_root(
+    State(state): State<AppState>,
+    AxumPath(server_route): AxumPath<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::open_work_root();
+    if server_route == LOCAL_SERVER_ID {
+        return match serde_json::from_slice::<OpenWorkRootRequest>(&body) {
+            Ok(request) => open_work_root(State(state), Json(request)).await,
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_set_work_root_activation(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation = ServerScopedForwardOperation::set_activation(&work_root_id);
+    if server_route == LOCAL_SERVER_ID {
+        return match serde_json::from_slice::<SetWorkRootActivationRequest>(&body) {
+            Ok(request) => {
+                set_work_root_activation(State(state), AxumPath(work_root_id), Json(request)).await
+            }
+            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+async fn forward_server_scoped_operation(
+    state: AppState,
+    server_route: String,
+    operation: ServerScopedForwardOperation,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    match resolve_server_scoped_forwarding(&state, &server_route).await {
+        ServerScopedResolution::Local => server_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server-local dispatch should be handled in-process",
+        ),
+        ServerScopedResolution::Refusal { status, message } => server_error(status, message),
+        ServerScopedResolution::Linked {
+            server,
+            endpoint,
+            token,
+        } => match request_remote_dashboard_operation(&endpoint, &token, &operation, headers, body)
+            .await
+        {
+            Ok(response) => response.into_response_for(&operation, &server),
+            Err(ForwardOperationError::Unavailable) => {
+                server_error(StatusCode::BAD_GATEWAY, "linked server unreachable")
+            }
+        },
+    }
+}
+
+async fn resolve_server_scoped_forwarding(
+    state: &AppState,
+    server_route: &str,
+) -> ServerScopedResolution {
+    if server_route == LOCAL_SERVER_ID {
+        return ServerScopedResolution::Local;
+    }
+
+    // CONTRACT: linked-server Server Routes are dot-free; a dotted route can never
+    // resolve to a forwardable linked server, so refuse it with a bounded message
+    // instead of attempting a lookup. This also rejects any persisted dotted id
+    // without silently rewriting it.
+    if server_route.contains('.') {
+        return ServerScopedResolution::Refusal {
+            status: StatusCode::BAD_REQUEST,
+            message: "invalid server route; re-add the linked server under a dot-free route",
+        };
+    }
+
+    let linked_servers = state.dashboard_state.load_linked_servers().await;
+    let Some(server) = linked_servers
+        .into_iter()
+        .find(|server| server.id.as_str() == server_route)
+    else {
+        return ServerScopedResolution::Refusal {
+            status: StatusCode::NOT_FOUND,
+            message: "unknown server",
+        };
+    };
+
+    let Some(token) = state.linked_server_sessions.get(&server.id).await else {
+        let status = server_status(
+            &server,
+            state.linked_server_tunnels.contains(&server.id).await,
+        );
+        return ServerScopedResolution::Refusal {
+            status: StatusCode::CONFLICT,
+            message: linked_server_refusal_message(status),
+        };
+    };
+
+    let Some(endpoint) = server.endpoint_hint.clone() else {
+        return ServerScopedResolution::Refusal {
+            status: StatusCode::CONFLICT,
+            message: "linked server tunnel required",
+        };
+    };
+
+    ServerScopedResolution::Linked {
+        server,
+        endpoint,
+        token,
+    }
+}
+
+struct ForwardedDashboardResponse {
+    status: StatusCode,
+    content_type: Option<HeaderValue>,
+    opened_work_root_id: Option<HeaderValue>,
+    body: Bytes,
+}
+
+impl ForwardedDashboardResponse {
+    fn into_response_for(
+        self,
+        operation: &ServerScopedForwardOperation,
+        server: &PersistedLinkedServer,
+    ) -> Response {
+        if self.status.is_success() && operation.rewrite_resources {
+            if let Ok(view) = serde_json::from_slice::<DashboardResourcesView>(&self.body) {
+                let mut response =
+                    Json(rewrite_resources_for_linked_server(view, server)).into_response();
+                *response.status_mut() = self.status;
+                if let Some(value) = self.opened_work_root_id {
+                    response
+                        .headers_mut()
+                        .insert("x-ws-dashboard-opened-work-root-id", value);
+                }
+                return response;
+            }
+        }
+
+        let mut response = (self.status, Body::from(self.body)).into_response();
+        if let Some(value) = self.content_type {
+            response.headers_mut().insert(header::CONTENT_TYPE, value);
+        }
+        if let Some(value) = self.opened_work_root_id {
+            response
+                .headers_mut()
+                .insert("x-ws-dashboard-opened-work-root-id", value);
+        }
+        response
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ForwardOperationError {
+    Unavailable,
+}
+
+async fn request_remote_dashboard_operation(
+    endpoint: &str,
+    token: &BearerAuthToken,
+    operation: &ServerScopedForwardOperation,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<ForwardedDashboardResponse, ForwardOperationError> {
+    let mut request = reqwest::Client::new()
+        .request(
+            operation.method.clone(),
+            remote_url(endpoint, &operation.legacy_path),
+        )
+        .header(
+            header::AUTHORIZATION.as_str(),
+            token.as_authorization_header(),
+        );
+    if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
+        request = request.header(header::CONTENT_TYPE.as_str(), content_type.clone());
+    }
+    if !body.is_empty() {
+        request = request.body(body.clone());
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|_| ForwardOperationError::Unavailable)?;
+    let status = response.status();
+    let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
+    let opened_work_root_id = response
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .cloned();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|_| ForwardOperationError::Unavailable)?;
+    Ok(ForwardedDashboardResponse {
+        status,
+        content_type,
+        opened_work_root_id,
+        body,
+    })
+}
+
+fn legacy_path_with_query(path: &str, uri: &OriginalUri) -> String {
+    match uri.query() {
+        Some(query) if !query.is_empty() => format!("{path}?{query}"),
+        _ => path.to_owned(),
+    }
 }
 
 fn local_server_view() -> ServerConnectionView {

@@ -32,8 +32,10 @@ use crate::root_picker::{
 };
 use crate::servers::{
     dashboard_server_resources, dashboard_servers, link_dashboard_server, link_endpoint_server,
-    reconnect_dashboard_server_tunnel, remote_link_auth, start_ssh_dashboard_server,
-    LinkedServerSessions, LinkedServerTunnels,
+    reconnect_dashboard_server_tunnel, remote_link_auth, server_scoped_create_empty_directory,
+    server_scoped_open_work_root, server_scoped_root_picker, server_scoped_root_picker_pins,
+    server_scoped_set_work_root_activation, start_ssh_dashboard_server, LinkedServerSessions,
+    LinkedServerTunnels,
 };
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
@@ -81,16 +83,36 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/dashboard/servers/link", post(link_endpoint_server))
         .route(
-            "/api/dashboard/servers/{server_id}/resources",
+            "/api/dashboard/servers/{server_route}/resources",
             get(dashboard_server_resources),
         )
         .route(
-            "/api/dashboard/servers/{server_id}/link-auth",
+            "/api/dashboard/servers/{server_route}/link-auth",
             post(link_dashboard_server),
         )
         .route(
-            "/api/dashboard/servers/{server_id}/tunnel/reconnect",
+            "/api/dashboard/servers/{server_route}/tunnel/reconnect",
             post(reconnect_dashboard_server_tunnel),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/root-picker",
+            get(server_scoped_root_picker),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/root-picker/directories",
+            post(server_scoped_create_empty_directory),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/root-picker/pins",
+            post(server_scoped_root_picker_pins).delete(server_scoped_root_picker_pins),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/open",
+            post(server_scoped_open_work_root),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activation",
+            post(server_scoped_set_work_root_activation),
         )
         .route(
             "/api/dashboard/document-translation/providers",
