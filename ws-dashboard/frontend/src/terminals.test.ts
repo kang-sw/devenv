@@ -3,6 +3,12 @@ import {
   appendTerminalWebSocketMessage,
   canApplyTerminalOutputPoll,
   clampTerminalSize,
+  closeTerminal,
+  createTerminal,
+  fetchTerminalOutput,
+  listTerminals,
+  resizeTerminal,
+  sendTerminalInput,
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
   mergeListedTerminalSessions,
@@ -448,3 +454,137 @@ assertDeepEqual(
   { columns: 100, rows: 30 },
   "clamp passes an in-bounds size through unchanged",
 );
+
+// Fetch-level coverage: every server-scoped terminal operation must hit the
+// canonical Server Route URL with the right method and payload, and stamp the
+// serverRoute onto returned session state so panes stay collision-safe.
+type RecordedFetch = { url: string; method: string; body: unknown };
+let recordedFetch: RecordedFetch | null = null;
+function installFetchMock(responseBody: unknown, status = 200) {
+  recordedFetch = null;
+  (globalThis as { fetch: typeof fetch }).fetch = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    recordedFetch = {
+      url: String(input),
+      method: init?.method ?? "GET",
+      body:
+        typeof init?.body === "string" ? JSON.parse(init.body) : (init?.body ?? null),
+    };
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => responseBody,
+    } as Response;
+  }) as typeof fetch;
+}
+function recorded(): RecordedFetch {
+  if (!recordedFetch) throw new Error("no fetch recorded");
+  return recordedFetch;
+}
+
+const remote = "server-remote-1";
+const remoteSession: TerminalSessionView = {
+  terminalId: "term-remote",
+  workRootId: "root-remote",
+  title: "Remote",
+  status: "running",
+  columns: 80,
+  rows: 24,
+  createdAtMs: 1,
+  cwdHint: null,
+};
+
+await (async () => {
+  installFetchMock(remoteSession);
+  const created = await createTerminal(
+    "root-remote",
+    { title: "Remote", cwdHint: "sub" },
+    remote,
+  );
+  assertEqual(
+    recorded().url,
+    "/api/dashboard/servers/server-remote-1/work-roots/root-remote/terminals",
+    "createTerminal posts to the server-scoped url",
+  );
+  assertEqual(recorded().method, "POST", "createTerminal uses POST");
+  assertDeepEqual(
+    recorded().body,
+    { columns: 80, rows: 24, title: "Remote", cwdHint: "sub" },
+    "createTerminal forwards the size/title/cwd payload",
+  );
+  assertEqual(
+    created.serverRoute,
+    remote,
+    "createTerminal stamps the serverRoute onto the returned session",
+  );
+
+  installFetchMock([remoteSession]);
+  const listed = await listTerminals("root-remote", remote);
+  assertEqual(
+    recorded().url,
+    "/api/dashboard/servers/server-remote-1/work-roots/root-remote/terminals",
+    "listTerminals gets the server-scoped url",
+  );
+  assertEqual(recorded().method, "GET", "listTerminals uses GET");
+  assertEqual(
+    listed[0]?.serverRoute,
+    remote,
+    "listTerminals stamps the serverRoute onto each session",
+  );
+
+  installFetchMock({
+    terminalId: "term-remote",
+    status: "running",
+    nextSequence: 3,
+    chunks: [],
+  });
+  await fetchTerminalOutput("term-remote", 7, remote);
+  assertEqual(
+    recorded().url,
+    "/api/dashboard/servers/server-remote-1/terminals/term-remote/output?after=7",
+    "fetchTerminalOutput gets the server-scoped url with cursor",
+  );
+  assertEqual(recorded().method, "GET", "fetchTerminalOutput uses GET");
+
+  installFetchMock(null, 204);
+  await sendTerminalInput("term-remote", "echo hi", remote);
+  assertEqual(
+    recorded().url,
+    "/api/dashboard/servers/server-remote-1/terminals/term-remote/input",
+    "sendTerminalInput posts to the server-scoped url",
+  );
+  assertEqual(recorded().method, "POST", "sendTerminalInput uses POST");
+  assertDeepEqual(
+    recorded().body,
+    { data: "echo hi" },
+    "sendTerminalInput forwards the input data payload",
+  );
+
+  installFetchMock(remoteSession);
+  await resizeTerminal("term-remote", 100, 40, remote);
+  assertEqual(
+    recorded().url,
+    "/api/dashboard/servers/server-remote-1/terminals/term-remote/resize",
+    "resizeTerminal posts to the server-scoped url",
+  );
+  assertEqual(recorded().method, "POST", "resizeTerminal uses POST");
+  assertDeepEqual(
+    recorded().body,
+    { columns: 100, rows: 40 },
+    "resizeTerminal forwards the clamped size payload",
+  );
+
+  installFetchMock(null, 204);
+  await closeTerminal("term-remote", remote);
+  assertEqual(
+    recorded().url,
+    "/api/dashboard/servers/server-remote-1/terminals/term-remote",
+    "closeTerminal deletes the server-scoped url",
+  );
+  assertEqual(recorded().method, "DELETE", "closeTerminal uses DELETE");
+})().catch((error) => {
+  console.error(error);
+  throw error;
+});

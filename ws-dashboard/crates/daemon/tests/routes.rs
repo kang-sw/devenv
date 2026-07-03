@@ -2875,6 +2875,11 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
         "/api/dashboard/servers/server-windows/work-roots/root-test/git/branches",
         "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
+        // Phase 6 registers the terminal HTTP lifecycle GET aliases (list,
+        // output), so a tokenless linked server refuses them with the same
+        // bounded auth-required conflict rather than 404.
+        "/api/dashboard/servers/server-windows/work-roots/root-test/terminals",
+        "/api/dashboard/servers/server-windows/terminals/terminal-1/output",
     ] {
         let auth_required = app
             .clone()
@@ -2902,13 +2907,11 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         );
     }
 
-    // Terminal families and gateway-owned translation stay unregistered under
-    // the server-scoped prefix through Phase 5 (terminals are Phase 6/7,
-    // translation is gateway-local), so they still 404.
+    // The terminal socket route stays deferred to Phase 7 and gateway-owned
+    // translation is local-only, so both stay unregistered under the
+    // server-scoped prefix and still 404.
     for uri in [
         "/api/dashboard/servers/server-windows/terminals/terminal-1/socket",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/terminals",
-        "/api/dashboard/servers/server-windows/terminals/terminal-1/input",
         "/api/dashboard/servers/server-windows/document-translation/providers",
     ] {
         let not_forwarded = app
@@ -2923,6 +2926,47 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
             .await
             .expect("non-allowlisted server scoped route response");
         assert_eq!(not_forwarded.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
+
+    // Phase 6 also registers the terminal mutation aliases (input, resize,
+    // close), which refuse a tokenless linked server with the bounded
+    // auth-required conflict before any upstream request.
+    for (method, uri) in [
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-windows/terminals/terminal-1/input",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-windows/terminals/terminal-1/resize",
+        ),
+        (
+            Method::DELETE,
+            "/api/dashboard/servers/server-windows/terminals/terminal-1",
+        ),
+    ] {
+        let auth_required = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "data": "x", "columns": 80, "rows": 24 }).to_string(),
+                    ))
+                    .expect("terminal mutation refusal request"),
+            )
+            .await
+            .expect("terminal mutation refusal response");
+        assert_eq!(auth_required.status(), StatusCode::CONFLICT, "{uri}");
+        let auth_body = axum::body::to_bytes(auth_required.into_body(), 4096)
+            .await
+            .expect("terminal mutation refusal body");
+        let auth_value: serde_json::Value =
+            serde_json::from_slice(&auth_body).expect("terminal mutation refusal JSON");
+        assert_eq!(auth_value["error"], "linked server auth required", "{uri}");
     }
 
     remove_static_fixture(&state_file_root);
@@ -3828,6 +3872,938 @@ async fn server_scoped_activity_git_workspace_routes_are_owner_authenticated() {
             .expect("unauthenticated server-scoped response");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
     }
+}
+
+#[tokio::test]
+async fn server_scoped_terminal_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    let cases: [(Method, &str); 6] = [
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/terminals",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/terminals",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/terminals/terminal-x/output",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/terminals/terminal-x/input",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/terminals/terminal-x/resize",
+        ),
+        (
+            Method::DELETE,
+            "/api/dashboard/servers/server-local/terminals/terminal-x",
+        ),
+    ];
+    for (method, uri) in cases {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated server-scoped terminal request"),
+            )
+            .await
+            .expect("unauthenticated server-scoped terminal response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+// CONTRACT: the `server-local` terminal aliases must behave identically to the
+// legacy bare terminal routes for the full create -> list -> output -> input ->
+// resize -> close lifecycle, and must reject malformed JSON bodies with the same
+// status axum's `Json<T>` extractor returns for the legacy route.
+#[tokio::test]
+async fn server_scoped_terminal_local_aliases_match_legacy_lifecycle() {
+    async fn send_raw(
+        app: axum::Router,
+        method: Method,
+        uri: &str,
+        cookie: &str,
+        content_type: Option<&str>,
+        body: &str,
+    ) -> StatusCode {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::COOKIE, cookie);
+        if let Some(content_type) = content_type {
+            builder = builder.header(header::CONTENT_TYPE, content_type);
+        }
+        app.oneshot(
+            builder
+                .body(Body::from(body.to_owned()))
+                .expect("raw terminal request"),
+        )
+        .await
+        .expect("raw terminal response")
+        .status()
+    }
+
+    let legacy_root = temp_fixture_path("server-scoped-terminal-legacy-root");
+    let scoped_root = temp_fixture_path("server-scoped-terminal-scoped-root");
+    fs::create_dir_all(&legacy_root).expect("create legacy terminal root");
+    fs::create_dir_all(&scoped_root).expect("create scoped terminal root");
+
+    let (legacy_app, legacy_cookie) = paired_test_app().await;
+    let (scoped_app, scoped_cookie) = paired_test_app().await;
+    let legacy_work_root =
+        open_work_root_for_test(legacy_app.clone(), legacy_cookie.as_str(), &legacy_root).await;
+    let scoped_work_root =
+        open_work_root_for_test(scoped_app.clone(), scoped_cookie.as_str(), &scoped_root).await;
+
+    // create
+    let (legacy_create_status, _, legacy_create) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/work-roots/{legacy_work_root}/terminals"),
+        &legacy_cookie,
+        serde_json::json!({ "columns": 80, "rows": 24, "title": "Lifecycle" }),
+    )
+    .await;
+    let (scoped_create_status, _, scoped_create) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-local/work-roots/{scoped_work_root}/terminals"),
+        &scoped_cookie,
+        serde_json::json!({ "columns": 80, "rows": 24, "title": "Lifecycle" }),
+    )
+    .await;
+    assert_eq!(legacy_create_status, StatusCode::OK);
+    assert_eq!(scoped_create_status, legacy_create_status);
+    assert_eq!(legacy_create["title"], scoped_create["title"]);
+    assert_eq!(legacy_create["columns"], scoped_create["columns"]);
+    assert_eq!(legacy_create["rows"], scoped_create["rows"]);
+    assert_eq!(legacy_create["status"], "running");
+    assert_eq!(scoped_create["status"], "running");
+    let legacy_terminal = legacy_create["terminalId"]
+        .as_str()
+        .expect("legacy terminal id")
+        .to_owned();
+    let scoped_terminal = scoped_create["terminalId"]
+        .as_str()
+        .expect("scoped terminal id")
+        .to_owned();
+
+    // list
+    let legacy_list = legacy_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{legacy_work_root}/terminals"
+                ))
+                .header(header::COOKIE, legacy_cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy terminal list request"),
+        )
+        .await
+        .expect("legacy terminal list response");
+    let scoped_list = scoped_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{scoped_work_root}/terminals"
+                ))
+                .header(header::COOKIE, scoped_cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped terminal list request"),
+        )
+        .await
+        .expect("scoped terminal list response");
+    assert_eq!(legacy_list.status(), StatusCode::OK);
+    assert_eq!(scoped_list.status(), StatusCode::OK);
+    let legacy_list_body = axum::body::to_bytes(legacy_list.into_body(), 64 * 1024)
+        .await
+        .expect("legacy list body");
+    let scoped_list_body = axum::body::to_bytes(scoped_list.into_body(), 64 * 1024)
+        .await
+        .expect("scoped list body");
+    let legacy_list_json: serde_json::Value =
+        serde_json::from_slice(&legacy_list_body).expect("legacy list JSON");
+    let scoped_list_json: serde_json::Value =
+        serde_json::from_slice(&scoped_list_body).expect("scoped list JSON");
+    assert!(legacy_list_json
+        .as_array()
+        .expect("legacy list array")
+        .iter()
+        .any(|session| session["terminalId"] == legacy_terminal.as_str()));
+    assert!(scoped_list_json
+        .as_array()
+        .expect("scoped list array")
+        .iter()
+        .any(|session| session["terminalId"] == scoped_terminal.as_str()));
+
+    // output
+    let legacy_output = legacy_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/terminals/{legacy_terminal}/output?after=0"
+                ))
+                .header(header::COOKIE, legacy_cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy terminal output request"),
+        )
+        .await
+        .expect("legacy terminal output response");
+    let scoped_output = scoped_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{scoped_terminal}/output?after=0"
+                ))
+                .header(header::COOKIE, scoped_cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped terminal output request"),
+        )
+        .await
+        .expect("scoped terminal output response");
+    assert_eq!(legacy_output.status(), StatusCode::OK);
+    assert_eq!(scoped_output.status(), StatusCode::OK);
+    let scoped_output_body = axum::body::to_bytes(scoped_output.into_body(), 64 * 1024)
+        .await
+        .expect("scoped output body");
+    let scoped_output_json: serde_json::Value =
+        serde_json::from_slice(&scoped_output_body).expect("scoped output JSON");
+    assert!(scoped_output_json["chunks"].is_array());
+    assert!(scoped_output_json["nextSequence"].is_number());
+
+    // input
+    let legacy_input = legacy_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{legacy_terminal}/input"))
+                .header(header::COOKIE, legacy_cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "echo hi\n" }).to_string(),
+                ))
+                .expect("legacy terminal input request"),
+        )
+        .await
+        .expect("legacy terminal input response");
+    let scoped_input = scoped_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{scoped_terminal}/input"
+                ))
+                .header(header::COOKIE, scoped_cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "echo hi\n" }).to_string(),
+                ))
+                .expect("scoped terminal input request"),
+        )
+        .await
+        .expect("scoped terminal input response");
+    assert_eq!(legacy_input.status(), StatusCode::NO_CONTENT);
+    assert_eq!(scoped_input.status(), StatusCode::NO_CONTENT);
+
+    // resize
+    let (legacy_resize_status, _, legacy_resize) = request_json_for_test(
+        legacy_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/terminals/{legacy_terminal}/resize"),
+        &legacy_cookie,
+        serde_json::json!({ "columns": 100, "rows": 40 }),
+    )
+    .await;
+    let (scoped_resize_status, _, scoped_resize) = request_json_for_test(
+        scoped_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-local/terminals/{scoped_terminal}/resize"),
+        &scoped_cookie,
+        serde_json::json!({ "columns": 100, "rows": 40 }),
+    )
+    .await;
+    assert_eq!(legacy_resize_status, StatusCode::OK);
+    assert_eq!(scoped_resize_status, StatusCode::OK);
+    assert_eq!(legacy_resize["columns"], 100);
+    assert_eq!(scoped_resize["columns"], 100);
+    assert_eq!(legacy_resize["rows"], 40);
+    assert_eq!(scoped_resize["rows"], 40);
+
+    // close
+    let legacy_close = legacy_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{legacy_terminal}"))
+                .header(header::COOKIE, legacy_cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy terminal close request"),
+        )
+        .await
+        .expect("legacy terminal close response");
+    let scoped_close = scoped_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{scoped_terminal}"
+                ))
+                .header(header::COOKIE, scoped_cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped terminal close request"),
+        )
+        .await
+        .expect("scoped terminal close response");
+    assert_eq!(legacy_close.status(), StatusCode::NO_CONTENT);
+    assert_eq!(scoped_close.status(), StatusCode::NO_CONTENT);
+
+    // closed terminals disappear identically
+    let scoped_after_close = scoped_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/terminals/{scoped_terminal}/output?after=0"
+                ))
+                .header(header::COOKIE, scoped_cookie.as_str())
+                .body(Body::empty())
+                .expect("scoped closed terminal output request"),
+        )
+        .await
+        .expect("scoped closed terminal output response");
+    assert_eq!(scoped_after_close.status(), StatusCode::NOT_FOUND);
+
+    // JSON-body boundary parity: create/input/resize aliases must classify a
+    // missing content type (415), a data error (422), and a syntax error (400)
+    // the same way the legacy `Json<T>` extractor does. Assert equivalence
+    // against the legacy route rather than hardcoding the status.
+    let boundary_cases: [(&str, &str, &str); 3] = [
+        (
+            "/api/dashboard/work-roots/root-x/terminals",
+            "/api/dashboard/servers/server-local/work-roots/root-x/terminals",
+            r#"{"columns":"x"}"#,
+        ),
+        (
+            "/api/dashboard/terminals/terminal-x/input",
+            "/api/dashboard/servers/server-local/terminals/terminal-x/input",
+            r#"{"data":5}"#,
+        ),
+        (
+            "/api/dashboard/terminals/terminal-x/resize",
+            "/api/dashboard/servers/server-local/terminals/terminal-x/resize",
+            r#"{"columns":"wide"}"#,
+        ),
+    ];
+    for (legacy_uri, scoped_uri, data_error_body) in boundary_cases {
+        // missing content type -> 415
+        let legacy_missing = send_raw(
+            legacy_app.clone(),
+            Method::POST,
+            legacy_uri,
+            &legacy_cookie,
+            None,
+            "{}",
+        )
+        .await;
+        let scoped_missing = send_raw(
+            scoped_app.clone(),
+            Method::POST,
+            scoped_uri,
+            &scoped_cookie,
+            None,
+            "{}",
+        )
+        .await;
+        assert_eq!(scoped_missing, legacy_missing, "missing content type {scoped_uri}");
+        assert_eq!(scoped_missing, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{scoped_uri}");
+
+        // data error (valid JSON, wrong field type) -> 422
+        let legacy_data = send_raw(
+            legacy_app.clone(),
+            Method::POST,
+            legacy_uri,
+            &legacy_cookie,
+            Some("application/json"),
+            data_error_body,
+        )
+        .await;
+        let scoped_data = send_raw(
+            scoped_app.clone(),
+            Method::POST,
+            scoped_uri,
+            &scoped_cookie,
+            Some("application/json"),
+            data_error_body,
+        )
+        .await;
+        assert_eq!(scoped_data, legacy_data, "data error {scoped_uri}");
+        assert_eq!(scoped_data, StatusCode::UNPROCESSABLE_ENTITY, "{scoped_uri}");
+
+        // syntax error -> 400
+        let legacy_syntax = send_raw(
+            legacy_app.clone(),
+            Method::POST,
+            legacy_uri,
+            &legacy_cookie,
+            Some("application/json"),
+            "{",
+        )
+        .await;
+        let scoped_syntax = send_raw(
+            scoped_app.clone(),
+            Method::POST,
+            scoped_uri,
+            &scoped_cookie,
+            Some("application/json"),
+            "{",
+        )
+        .await;
+        assert_eq!(scoped_syntax, legacy_syntax, "syntax error {scoped_uri}");
+        assert_eq!(scoped_syntax, StatusCode::BAD_REQUEST, "{scoped_uri}");
+    }
+
+    remove_static_fixture(&legacy_root);
+    remove_static_fixture(&scoped_root);
+}
+
+// Forward the full terminal lifecycle to a real linked daemon and confirm the
+// close propagates upstream (the remote terminal is gone afterward).
+#[tokio::test]
+async fn linked_server_terminal_forwarding_preserves_lifecycle() {
+    let remote_root = temp_fixture_path("server-scoped-terminal-remote-root");
+    fs::create_dir_all(&remote_root).expect("create remote terminal root");
+    let remote_state =
+        app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled());
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-terminal-forwarding-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked terminal server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let (link_status, ..) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-windows/link-auth".to_owned(),
+        &cookie,
+        serde_json::json!({ "passphrase": passphrase }),
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+
+    let open = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": remote_root.display().to_string() }).to_string(),
+                ))
+                .expect("remote open request"),
+        )
+        .await
+        .expect("remote open response");
+    assert_eq!(open.status(), StatusCode::OK);
+    let work_root_id = open
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .expect("forwarded opened id header")
+        .to_str()
+        .expect("forwarded opened id string")
+        .to_owned();
+
+    // create
+    let (create_status, _, create) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-windows/work-roots/{work_root_id}/terminals"),
+        &cookie,
+        serde_json::json!({ "columns": 80, "rows": 24, "title": "Remote" }),
+    )
+    .await;
+    assert_eq!(create_status, StatusCode::OK);
+    assert_eq!(create["status"], "running");
+    let terminal_id = create["terminalId"]
+        .as_str()
+        .expect("remote terminal id")
+        .to_owned();
+
+    // list
+    let list = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("remote terminal list request"),
+        )
+        .await
+        .expect("remote terminal list response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list.into_body(), 64 * 1024)
+        .await
+        .expect("remote list body");
+    let list_json: serde_json::Value = serde_json::from_slice(&list_body).expect("remote list JSON");
+    assert!(list_json
+        .as_array()
+        .expect("remote list array")
+        .iter()
+        .any(|session| session["terminalId"] == terminal_id.as_str()));
+
+    // output
+    let output = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/terminals/{terminal_id}/output?after=0"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("remote terminal output request"),
+        )
+        .await
+        .expect("remote terminal output response");
+    assert_eq!(output.status(), StatusCode::OK);
+
+    // input
+    let input = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/terminals/{terminal_id}/input"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "echo remote\n" }).to_string(),
+                ))
+                .expect("remote terminal input request"),
+        )
+        .await
+        .expect("remote terminal input response");
+    assert_eq!(input.status(), StatusCode::NO_CONTENT);
+
+    // resize
+    let (resize_status, _, resize) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-windows/terminals/{terminal_id}/resize"),
+        &cookie,
+        serde_json::json!({ "columns": 120, "rows": 48 }),
+    )
+    .await;
+    assert_eq!(resize_status, StatusCode::OK);
+    assert_eq!(resize["columns"], 120);
+    assert_eq!(resize["rows"], 48);
+
+    // close
+    let close = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/terminals/{terminal_id}"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("remote terminal close request"),
+        )
+        .await
+        .expect("remote terminal close response");
+    assert_eq!(close.status(), StatusCode::NO_CONTENT);
+
+    // closing the remote terminal closed it upstream: output now 404s
+    let after_close = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/terminals/{terminal_id}/output?after=0"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("remote closed terminal output request"),
+        )
+        .await
+        .expect("remote closed terminal output response");
+    assert_eq!(after_close.status(), StatusCode::NOT_FOUND);
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+// Mock-upstream coverage: bearer + legacy path forwarding on success, and
+// upstream status/body/content-type preservation on failure for all six ops.
+#[tokio::test]
+async fn linked_server_terminal_forwarding_preserves_bearer_and_upstream_errors() {
+    async fn link_auth() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({ "bearerToken": "test-token" })),
+        )
+            .into_response()
+    }
+    async fn terminals_list(headers: axum::http::HeaderMap) -> axum::response::Response {
+        // Prove the bearer token was forwarded on the exact legacy path.
+        if headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            != Some("Bearer test-token")
+        {
+            return (StatusCode::UNAUTHORIZED, "missing bearer").into_response();
+        }
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"[{"terminalId":"remote-term","workRootId":"root-ok","title":"Remote","status":"running","columns":80,"rows":24,"createdAtMs":1,"cwdHint":null}]"#),
+        )
+            .into_response()
+    }
+    async fn create_error() -> axum::response::Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/problem+json")],
+            Body::from(r#"{"error":"spawn failed"}"#),
+        )
+            .into_response()
+    }
+    async fn output_error() -> axum::response::Response {
+        (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"unknown terminal"}"#),
+        )
+            .into_response()
+    }
+    async fn input_error() -> axum::response::Response {
+        (
+            StatusCode::GONE,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"terminal is closed"}"#),
+        )
+            .into_response()
+    }
+    async fn resize_error() -> axum::response::Response {
+        (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"invalid terminal size"}"#),
+        )
+            .into_response()
+    }
+    async fn close_error() -> axum::response::Response {
+        (
+            StatusCode::CONFLICT,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"workRoot offline"}"#),
+        )
+            .into_response()
+    }
+
+    let remote_app = axum::Router::new()
+        .route("/api/dashboard/link-auth", axum::routing::post(link_auth))
+        .route(
+            "/api/dashboard/work-roots/root-ok/terminals",
+            axum::routing::get(terminals_list),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-err/terminals",
+            axum::routing::post(create_error),
+        )
+        .route(
+            "/api/dashboard/terminals/term-err/output",
+            axum::routing::get(output_error),
+        )
+        .route(
+            "/api/dashboard/terminals/term-err/input",
+            axum::routing::post(input_error),
+        )
+        .route(
+            "/api/dashboard/terminals/term-err/resize",
+            axum::routing::post(resize_error),
+        )
+        .route(
+            "/api/dashboard/terminals/term-err",
+            axum::routing::delete(close_error),
+        );
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-terminal-upstream-errors-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-errors"),
+            label: "Error fixture".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist terminal error fixture server");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let (link_status, ..) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-errors/link-auth".to_owned(),
+        &cookie,
+        serde_json::json!({ "passphrase": "ok" }),
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+
+    // success path: bearer + legacy path forwarding
+    let list = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-errors/work-roots/root-ok/terminals")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("remote list forwarding request"),
+        )
+        .await
+        .expect("remote list forwarding response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list.into_body(), 64 * 1024)
+        .await
+        .expect("remote list forwarding body");
+    let list_json: serde_json::Value =
+        serde_json::from_slice(&list_body).expect("remote list forwarding JSON");
+    assert_eq!(list_json[0]["terminalId"], "remote-term");
+
+    for (method, uri, expected_status, expected_content_type, expected_error) in [
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-errors/work-roots/root-err/terminals",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/problem+json",
+            "spawn failed",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/terminals/term-err/output",
+            StatusCode::NOT_FOUND,
+            "application/json",
+            "unknown terminal",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-errors/terminals/term-err/input",
+            StatusCode::GONE,
+            "application/json",
+            "terminal is closed",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-errors/terminals/term-err/resize",
+            StatusCode::BAD_REQUEST,
+            "application/json",
+            "invalid terminal size",
+        ),
+        (
+            Method::DELETE,
+            "/api/dashboard/servers/server-errors/terminals/term-err",
+            StatusCode::CONFLICT,
+            "application/json",
+            "workRoot offline",
+        ),
+    ] {
+        let response = local_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "columns": 80, "rows": 24, "data": "x" }).to_string(),
+                    ))
+                    .expect("terminal upstream error request"),
+            )
+            .await
+            .expect("terminal upstream error response");
+        assert_eq!(response.status(), expected_status, "{uri}");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.starts_with(expected_content_type)),
+            Some(true),
+            "{uri} content-type"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("terminal upstream error body");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("terminal upstream error JSON");
+        assert_eq!(value["error"], expected_error, "{uri}");
+    }
+
+    remote_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+// Collision safety: closing a remote terminal whose bare id coincides with a
+// live local terminal must not disturb the local terminal.
+#[tokio::test]
+async fn server_scoped_terminal_close_does_not_disturb_colliding_local_terminal() {
+    async fn link_auth() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({ "bearerToken": "test-token" })),
+        )
+            .into_response()
+    }
+    async fn remote_close() -> axum::response::Response {
+        StatusCode::NO_CONTENT.into_response()
+    }
+
+    let local_root = temp_fixture_path("server-scoped-terminal-collision-root");
+    fs::create_dir_all(&local_root).expect("create collision local root");
+
+    let remote_app = axum::Router::new()
+        .route("/api/dashboard/link-auth", axum::routing::post(link_auth))
+        // Match any terminal id under the remote so the colliding local id
+        // resolves to a remote-side no-op close.
+        .route(
+            "/api/dashboard/terminals/{terminal_id}",
+            axum::routing::delete(remote_close),
+        );
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-terminal-collision-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-remote"),
+            label: "Remote".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist collision fixture server");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let (link_status, ..) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-remote/link-auth".to_owned(),
+        &cookie,
+        serde_json::json!({ "passphrase": "ok" }),
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+
+    let work_root_id = open_work_root_for_test(local_app.clone(), cookie.as_str(), &local_root).await;
+    let local_terminal =
+        create_terminal_for_test(local_app.clone(), cookie.as_str(), &work_root_id).await;
+
+    // Close the *remote* terminal using the same bare id as the live local one.
+    let remote_close_response = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-remote/terminals/{local_terminal}"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("remote colliding close request"),
+        )
+        .await
+        .expect("remote colliding close response");
+    assert_eq!(remote_close_response.status(), StatusCode::NO_CONTENT);
+
+    // The local terminal with the identical bare id must still be alive.
+    let local_output = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/terminals/{local_terminal}/output?after=0"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("surviving local terminal output request"),
+        )
+        .await
+        .expect("surviving local terminal output response");
+    assert_eq!(local_output.status(), StatusCode::OK);
+
+    remote_server.abort();
+    remove_static_fixture(&local_root);
+    remove_static_fixture(&state_file_root);
 }
 
 #[tokio::test]
