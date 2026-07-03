@@ -153,6 +153,27 @@ func TestSubstitutionGuardRejectsDisqualifyingContent(t *testing.T) {
 	}
 }
 
+// TestSubstitutionMirrorRespectsWordBoundaries proves the ws:/ws/ substitution
+// only matches standalone namespace tokens, not substrings inside unrelated
+// words like "shows:" or "draws/". Without a left-side word-boundary anchor, a
+// blind strings.ReplaceAll would mangle "shows:" into "showsflow:" and
+// "draws/" into "drawsflow/".
+func TestSubstitutionMirrorRespectsWordBoundaries(t *testing.T) {
+	source := "---\nname: fixture\n---\n\n" +
+		"This shows: the result and draws/ conclusions alongside " +
+		"ws:playbook.print and ws/enter_implement plus `ws:tickets_create`.\n"
+	out, err := GenerateWsflowSkillBody(source)
+	if err != nil {
+		t.Fatalf("expected guard to accept fixture, got error: %v", err)
+	}
+	want := "---\nname: fixture\n---\n\n" +
+		"This shows: the result and draws/ conclusions alongside " +
+		"wsflow:playbook.print and wsflow/enter_implement plus `wsflow:tickets_create`.\n"
+	if out != want {
+		t.Fatalf("word-boundary substitution mismatch:\ngot:  %q\nwant: %q", out, want)
+	}
+}
+
 // TestSubstitutionGuardAcceptsNamespaceOnlyContent is the positive-path
 // sibling: a source containing only ws:/ws/ namespace tokens must pass the
 // guard and substitute cleanly.
