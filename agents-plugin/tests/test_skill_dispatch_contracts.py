@@ -68,8 +68,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
         text = (SKILLS_DIR / "lead-drain-ready-queue" / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertNotIn('ws/playbook.print(name: "lead-drain-ready-queue")', text)
-        self.assertIn("oldest date-prefix ticket (FIFO)", text)
-        self.assertIn("must land first", text)
+        self.assertIn("otherwise take the oldest (FIFO)", text)
+        self.assertIn("prerequisite", text)
+        self.assertIn("lead-prefer-subagent", text)
+        self.assertIn("run commands yourself", text)
 
 
 if __name__ == "__main__":

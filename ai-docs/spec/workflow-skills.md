@@ -418,23 +418,21 @@ invocation resolves at most one ready ticket and stops — it does not poll
 or repeat internally. Repeated draining across the whole `ready/` backlog
 is the caller's responsibility (for example, a standing `/goal` directive
 whose Stop-hook re-invokes this skill each turn until the queue is empty).
-On invoke, it also applies the `lead-prefer-subagent` posture for the
-current session before handing off, so the resulting `lead-proceed` (and
-any skill it routes to, such as `lead-implement`) runs delegate-heavy.
 
 Ticket selection: if `ready/` is empty, report that and stop with no
-handoff. Otherwise select a candidate by reading each ready ticket's
-`related:`/`parent:` frontmatter annotations for explicit precedence
-language (for example "prerequisite", "predecessor", "must land first",
-"blocks", "depends on") naming another ticket that is not yet `done` or
-`dropped`. If a candidate's annotation names such a not-yet-resolved
-ticket, prefer that referenced ticket first when it is also in `ready/`.
-With no such precedence signal among the candidates, default to the
-oldest date-prefix ticket (FIFO). If two candidates' precedence
-annotations conflict or cannot be resolved from the stated text, stop and
-ask the user rather than guessing. This inspects only existing free-text
+handoff. Otherwise prefer a candidate named as a prerequisite in another
+ready ticket's `related:`/`parent:` frontmatter when that referenced
+ticket is also in `ready/`; with no such signal, default to the oldest
+date-prefix ticket (FIFO). This inspects only existing free-text
 `related:`/`parent:` annotations — no new structured dependency field is
-introduced. The skill's body is inlined as static text directly in
+introduced.
+
+Deliberately kept minimal: this is a purely user/`/goal`-invoked shim, not
+a heavier discussable workflow skill, so its body directs the lead to
+delegate all work for the invocation — including simple tasks like
+commits — to a subagent per `lead-prefer-subagent`, conserving lead
+context across a long-running goal, rather than restating that posture's
+body. The skill's body is inlined as static text directly in
 `agents-plugin/skills/lead-drain-ready-queue/SKILL.md` (no rsrc playbook, no
 `playbook.print` indirection), matching the `lead-verify-discussion`/
 `lead-prefer-subagent` inline-body shape, and is mirrored byte-identically
