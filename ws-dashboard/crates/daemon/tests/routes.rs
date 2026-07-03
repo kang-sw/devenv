@@ -2720,6 +2720,222 @@ async fn linked_server_one_shot_forwarding_preserves_bearer_errors_and_rewrites_
 }
 
 #[tokio::test]
+async fn server_scoped_one_shot_route_returns_bounded_tunnel_required_after_endpoint_drops() {
+    // A linked-server session can outlive its tunnel: the owner links while an
+    // endpoint hint is present, then the tunnel is torn down (e.g. SSH drop)
+    // without a fresh /link-auth, leaving a live session but no endpoint hint.
+    // `resolve_server_scoped_forwarding` must refuse this with a bounded 409
+    // rather than attempting to forward with no destination.
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-one-shot-tunnel-required-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("local link auth request"),
+        )
+        .await
+        .expect("local link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    // Simulate the tunnel dropping: the persisted server loses its endpoint
+    // hint while the in-memory session token (established above) survives.
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: None,
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("clear linked server endpoint hint");
+
+    let response = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/root-picker")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("tunnel-required server scoped route request"),
+        )
+        .await
+        .expect("tunnel-required server scoped route response");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("tunnel-required response body");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("tunnel-required response JSON");
+    assert_eq!(value["error"], "linked server tunnel required");
+    assert_eq!(
+        value.as_object().expect("tunnel-required object").len(),
+        1,
+        "tunnel-required refusal must not leak extra fields"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn server_scoped_one_shot_route_returns_bounded_bad_gateway_when_endpoint_unreachable() {
+    // Once a session is established, the linked endpoint can still become
+    // unreachable (closed port, restarted process, etc.). The forwarding
+    // path must map the raw `reqwest` connection failure to a bounded 502
+    // without leaking the failed endpoint or the underlying transport error.
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-one-shot-unreachable-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("local link auth request"),
+        )
+        .await
+        .expect("local link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    // Reserve a loopback port and immediately drop the listener so the port
+    // is closed (connection refused) rather than merely unassigned; this
+    // simulates an endpoint that has gone unreachable without depending on
+    // external network conditions or DNS behavior.
+    let closed_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind closed-port listener");
+    let closed_addr = closed_listener.local_addr().expect("closed listener addr");
+    drop(closed_listener);
+    let closed_endpoint = format!("http://127.0.0.1:{}", closed_addr.port());
+
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(closed_endpoint.clone()),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("point linked server at closed port");
+
+    let response = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-windows/root-picker")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("unreachable server scoped route request"),
+        )
+        .await
+        .expect("unreachable server scoped route response");
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unreachable response body");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("unreachable response JSON");
+    assert_eq!(value["error"], "linked server unreachable");
+    assert_eq!(
+        value.as_object().expect("unreachable object").len(),
+        1,
+        "unreachable refusal must not leak extra fields"
+    );
+    assert!(
+        !body
+            .windows(closed_addr.port().to_string().len())
+            .any(|window| window == closed_addr.port().to_string().as_bytes()),
+        "unreachable refusal must not leak the failed endpoint port"
+    );
+    assert!(
+        !body.windows(3).any(|window| window == b"127"),
+        "unreachable refusal must not leak the failed endpoint address"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn remote_link_auth_exchanges_passphrase_for_bearer_without_browser_pairing() {
     let state = app_state();
     let passphrase = state
