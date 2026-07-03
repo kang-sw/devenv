@@ -84,9 +84,27 @@ spec edit. Contract-first spec: no.
 - Update the doc comment on `ItemSageReview` in
   `agents-plugin-tool/internal/wsconfig/scope.go:34-38` to state the new
   builtin default (`auto`).
+- **Required, not optional**: the `tickets.move` (`server.go:1063`) and
+  `tickets.create` (`server.go:1086`) call sites — the exact two consumers
+  this ticket targets — build their resolver with
+  `wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)`, passing a
+  literal `nil` for `builtinDefaults`. `NewResolver` substitutes `nil` with an
+  empty map (`wsconfig/resolver.go:65-67`), so anything added to
+  `builtinConfigDefaults()` is structurally unreachable from these two call
+  sites as written. Every other `NewResolver` call site in `server.go` that
+  wants the builtin floor calls `builtinConfigDefaults()` explicitly (lines
+  523, 553, 596, 733, 752, 1184, 3925) — 1063 and 1086 are outliers. Swap
+  `nil` → `builtinConfigDefaults()` at both call sites as part of this phase.
+  (Two other `nil`-passing sites exist, `config.prompt.set`/`unset` at
+  `server.go:651` and `702` — these resolve `prompt.*` override keys via
+  `resolver.Set`/`Unset` only, never read `ItemSageReview` or any other
+  builtin-defaulted item through `Get`, so they are not part of this bug and
+  are left unchanged.)
 - Verification: with no project-scope `sage_review` override present, run
   `ws/tickets.create`/`ws/tickets.move` and confirm the resolved posture is
-  `required` (not `skipped`). Confirm existing tests that assert the current
+  `required` (not `skipped`) — this assertion only holds once the `nil` →
+  `builtinConfigDefaults()` swap above is also made, since the default alone
+  is unreachable without it. Confirm existing tests that assert the current
   `skipped`-by-default behavior are updated to the new expectation, and that
   a test asserts an explicit project-scope `sage_review` override still wins
   over the new builtin default.
