@@ -35,7 +35,7 @@ use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use axum::response::IntoResponse;
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
@@ -2907,13 +2907,13 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         );
     }
 
-    // The terminal socket route stays deferred to Phase 7 and gateway-owned
-    // translation is local-only, so both stay unregistered under the
-    // server-scoped prefix and still 404.
-    for uri in [
-        "/api/dashboard/servers/server-windows/terminals/terminal-1/socket",
-        "/api/dashboard/servers/server-windows/document-translation/providers",
-    ] {
+    // Gateway-owned translation is local-only, so it stays unregistered under
+    // the server-scoped prefix and still 404s. (The terminal socket route is
+    // now registered by Phase 7; its refusal-before-upgrade behavior is
+    // covered by the dedicated WebSocket tests, since a plain GET without an
+    // Upgrade header is rejected by the WebSocketUpgrade extractor before the
+    // refusal logic runs.)
+    for uri in ["/api/dashboard/servers/server-windows/document-translation/providers"] {
         let not_forwarded = app
             .clone()
             .oneshot(
@@ -4479,6 +4479,516 @@ async fn linked_server_terminal_forwarding_preserves_lifecycle() {
 
     remote_server.abort();
     remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+// End-to-end relay against two real daemons: a real terminal on the remote
+// daemon, connected through the local gateway's server-scoped socket route,
+// with typed input relayed upstream and terminal output relayed back to the
+// browser. Also proves browser-initiated close tears down the relay without
+// hanging.
+#[tokio::test]
+async fn linked_server_terminal_websocket_relays_real_two_daemon_io() {
+    let remote_root = temp_fixture_path("server-scoped-ws-relay-remote-root");
+    fs::create_dir_all(&remote_root).expect("create remote ws relay root");
+    let remote_state =
+        app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled());
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-ws-relay-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked ws relay server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let (link_status, ..) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-windows/link-auth".to_owned(),
+        &cookie,
+        serde_json::json!({ "passphrase": passphrase }),
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+
+    let (open_status, open_headers, _) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-windows/work-roots/open".to_owned(),
+        &cookie,
+        serde_json::json!({ "path": remote_root.display().to_string() }),
+    )
+    .await;
+    assert_eq!(open_status, StatusCode::OK);
+    let work_root_id = open_headers
+        .get("x-ws-dashboard-opened-work-root-id")
+        .expect("forwarded opened id header")
+        .to_str()
+        .expect("forwarded opened id string")
+        .to_owned();
+
+    let (create_status, _, create) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-windows/work-roots/{work_root_id}/terminals"),
+        &cookie,
+        serde_json::json!({ "columns": 80, "rows": 24, "title": "Remote" }),
+    )
+    .await;
+    assert_eq!(create_status, StatusCode::OK);
+    let terminal_id = create["terminalId"]
+        .as_str()
+        .expect("remote terminal id")
+        .to_owned();
+
+    let (local_addr, local_server) = spawn_test_server(local_app.clone()).await;
+    let mut request = format!(
+        "ws://{local_addr}/api/dashboard/servers/server-windows/terminals/{terminal_id}/socket"
+    )
+    .into_client_request()
+    .expect("linked terminal websocket relay request");
+    request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("connect linked terminal websocket relay");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "input", "data": terminal_test_commands_for_current_platform("RELAY-WS-MARKER").echo_and_exit })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .expect("send relayed websocket input");
+
+    let mut text = String::new();
+    for _ in 0..80 {
+        let Some(message) = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("relayed websocket message timeout")
+        else {
+            break;
+        };
+        let message = message.expect("relayed websocket message");
+        let TungsteniteMessage::Text(payload) = message else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).expect("relayed websocket frame JSON");
+        assert_eq!(value["terminalId"], terminal_id);
+        match value["type"].as_str() {
+            Some("output") => text.push_str(value["chunk"]["data"].as_str().expect("output data")),
+            Some("exit") => break,
+            Some("status") => {}
+            other => panic!("unexpected relayed websocket frame type: {other:?}"),
+        }
+        if text.contains("RELAY-WS-MARKER") {
+            break;
+        }
+    }
+    assert!(text.contains("RELAY-WS-MARKER"), "{text:?}");
+
+    // Browser-initiated close must tear the relay down; the timeout guard above
+    // and clean shutdown below prove the relay loop does not hang.
+    socket.close(None).await.expect("close relayed websocket");
+
+    local_server.abort();
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+// Every linked-server refusal must resolve to a bounded HTTP error response
+// BEFORE any WebSocket upgrade completes (never a 101, never a half-open
+// socket): dot-free rejection (400), unknown server (404), auth required
+// (409), and unreachable-on-connect (502).
+#[tokio::test]
+async fn linked_server_terminal_websocket_refuses_before_upgrade() {
+    let remote_state =
+        app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled());
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-ws-refusal-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![
+            PersistedLinkedServer {
+                id: ServerId::from("server-authless"),
+                label: "Authless".to_owned(),
+                kind: ServerKind::Manual,
+                ssh_target: None,
+                endpoint_hint: Some("http://127.0.0.1:1".to_owned()),
+                remote_endpoint_hint: None,
+            },
+            PersistedLinkedServer {
+                id: ServerId::from("server-live"),
+                label: "Live".to_owned(),
+                kind: ServerKind::Manual,
+                ssh_target: None,
+                endpoint_hint: Some(format!("http://{remote_addr}")),
+                remote_endpoint_hint: None,
+            },
+        ])
+        .await
+        .expect("persist linked ws refusal seeds");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    // Link "server-live" so it holds a bearer token, then drop its upstream so
+    // a subsequent socket connect is genuinely unreachable (502).
+    let (link_status, ..) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-live/link-auth".to_owned(),
+        &cookie,
+        serde_json::json!({ "passphrase": passphrase }),
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+
+    let (local_addr, local_server) = spawn_test_server(local_app.clone()).await;
+
+    async fn expect_refusal(local_addr: &str, cookie: &str, route: &str, expected: StatusCode) {
+        let mut request = format!(
+            "ws://{local_addr}/api/dashboard/servers/{route}/terminals/term-x/socket"
+        )
+        .into_client_request()
+        .expect("refusal websocket request");
+        request
+            .headers_mut()
+            .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+        let error = tokio_tungstenite::connect_async(request)
+            .await
+            .expect_err("refused websocket must not upgrade");
+        match error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                assert_eq!(response.status(), expected, "route {route}");
+                assert_ne!(
+                    response.status(),
+                    StatusCode::SWITCHING_PROTOCOLS,
+                    "route {route} must not complete the upgrade"
+                );
+            }
+            other => panic!("unexpected refusal error for {route}: {other}"),
+        }
+    }
+
+    // dot-free rejection (dotted route can never resolve to a forwardable server)
+    expect_refusal(&local_addr, &cookie, "server.dotted", StatusCode::BAD_REQUEST).await;
+    // unknown server
+    expect_refusal(&local_addr, &cookie, "server-missing", StatusCode::NOT_FOUND).await;
+    // auth required (linked server with no session token)
+    expect_refusal(&local_addr, &cookie, "server-authless", StatusCode::CONFLICT).await;
+
+    // unreachable-on-connect: server-live has a token but its upstream is gone.
+    remote_server.abort();
+    expect_refusal(&local_addr, &cookie, "server-live", StatusCode::BAD_GATEWAY).await;
+
+    local_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+#[derive(Clone, Default)]
+struct TerminalWebSocketRelayProbe {
+    upgrades: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    frames: Arc<Mutex<Vec<String>>>,
+    closed: Arc<Notify>,
+}
+
+async fn mock_relay_link_auth() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({ "bearerToken": "relay-terminal-token" })),
+    )
+}
+
+async fn mock_relay_terminal_socket(
+    axum::extract::State(probe): axum::extract::State<TerminalWebSocketRelayProbe>,
+    axum::extract::Path(terminal_id): axum::extract::Path<String>,
+    uri: axum::extract::OriginalUri,
+    headers: axum::http::HeaderMap,
+    upgrade: axum::extract::ws::WebSocketUpgrade,
+) -> axum::response::Response {
+    probe.upgrades.lock().await.push((
+        uri.to_string(),
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+    ));
+    if terminal_id == "term-reject" {
+        return StatusCode::GONE.into_response();
+    }
+    upgrade
+        .on_upgrade(move |socket| async move {
+            let (mut sender, mut receiver) = socket.split();
+            if terminal_id == "term-upstream-close" {
+                let _ = sender.send(axum::extract::ws::Message::Close(None)).await;
+                probe.closed.notify_waiters();
+                return;
+            }
+            // Emit one of each non-text frame type so upstream->browser relay of
+            // binary/ping/pong is exercised.
+            let _ = sender
+                .send(axum::extract::ws::Message::Binary(
+                    axum::body::Bytes::from_static(b"upstream-bytes"),
+                ))
+                .await;
+            let _ = sender
+                .send(axum::extract::ws::Message::Ping(
+                    axum::body::Bytes::from_static(b"upstream-ping"),
+                ))
+                .await;
+            let _ = sender
+                .send(axum::extract::ws::Message::Pong(
+                    axum::body::Bytes::from_static(b"upstream-pong"),
+                ))
+                .await;
+            while let Some(Ok(message)) = receiver.next().await {
+                match message {
+                    axum::extract::ws::Message::Text(text) => {
+                        probe.frames.lock().await.push(format!("text:{text}"))
+                    }
+                    axum::extract::ws::Message::Binary(bytes) => probe
+                        .frames
+                        .lock()
+                        .await
+                        .push(format!("binary:{}", String::from_utf8_lossy(&bytes))),
+                    axum::extract::ws::Message::Ping(bytes) => probe
+                        .frames
+                        .lock()
+                        .await
+                        .push(format!("ping:{}", String::from_utf8_lossy(&bytes))),
+                    axum::extract::ws::Message::Pong(bytes) => probe
+                        .frames
+                        .lock()
+                        .await
+                        .push(format!("pong:{}", String::from_utf8_lossy(&bytes))),
+                    axum::extract::ws::Message::Close(_) => break,
+                }
+            }
+            probe.closed.notify_waiters();
+        })
+        .into_response()
+}
+
+// Relay coverage against a mock upstream: bearer + preserved base path on the
+// upstream upgrade, bidirectional non-text (binary/ping/pong) frame relay,
+// upstream rejection propagated before upgrade (410), and cleanup when either
+// side closes (browser-initiated and upstream-initiated).
+#[tokio::test]
+async fn linked_server_terminal_websocket_relays_non_text_frames_and_cleans_up() {
+    let probe = TerminalWebSocketRelayProbe::default();
+    let remote_app = axum::Router::new()
+        .route(
+            "/gateway/api/dashboard/link-auth",
+            axum::routing::post(mock_relay_link_auth),
+        )
+        .route(
+            "/gateway/api/dashboard/terminals/{terminal_id}/socket",
+            axum::routing::get(mock_relay_terminal_socket),
+        )
+        .with_state(probe.clone());
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-ws-nontext-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            // Base path baked into the endpoint proves remote_url-then-scheme
+            // ordering preserves the prefix on the upstream socket URL.
+            endpoint_hint: Some(format!("http://{remote_addr}/gateway")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked ws non-text seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+    let (local_addr, local_server) = spawn_test_server(local_app.clone()).await;
+
+    let (link_status, ..) = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        "/api/dashboard/servers/server-windows/link-auth".to_owned(),
+        &cookie,
+        serde_json::json!({ "passphrase": "mock-passphrase" }),
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+
+    let mut request = format!(
+        "ws://{local_addr}/api/dashboard/servers/server-windows/terminals/term-live/socket?after=41"
+    )
+    .into_client_request()
+    .expect("linked terminal non-text websocket request");
+    request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("connect linked terminal non-text websocket");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    // upstream -> browser non-text frames
+    let mut upstream_non_text = Vec::new();
+    for _ in 0..3 {
+        let frame = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("upstream non-text timeout")
+            .expect("upstream non-text output")
+            .expect("upstream non-text frame");
+        match frame {
+            TungsteniteMessage::Binary(bytes) => {
+                upstream_non_text.push(format!("binary:{}", String::from_utf8_lossy(&bytes)))
+            }
+            TungsteniteMessage::Ping(bytes) => {
+                upstream_non_text.push(format!("ping:{}", String::from_utf8_lossy(&bytes)))
+            }
+            TungsteniteMessage::Pong(bytes) => {
+                upstream_non_text.push(format!("pong:{}", String::from_utf8_lossy(&bytes)))
+            }
+            other => panic!("unexpected upstream non-text frame: {other:?}"),
+        }
+    }
+    assert!(
+        upstream_non_text.contains(&"binary:upstream-bytes".to_owned()),
+        "{upstream_non_text:?}"
+    );
+    assert!(
+        upstream_non_text.contains(&"ping:upstream-ping".to_owned()),
+        "{upstream_non_text:?}"
+    );
+    assert!(
+        upstream_non_text.contains(&"pong:upstream-pong".to_owned()),
+        "{upstream_non_text:?}"
+    );
+
+    // browser -> upstream non-text frames
+    socket
+        .send(TungsteniteMessage::Binary(axum::body::Bytes::from_static(
+            b"raw-bytes",
+        )))
+        .await
+        .expect("send browser binary");
+    socket
+        .send(TungsteniteMessage::Ping(axum::body::Bytes::from_static(
+            b"browser-ping",
+        )))
+        .await
+        .expect("send browser ping");
+    socket
+        .send(TungsteniteMessage::Pong(axum::body::Bytes::from_static(
+            b"browser-pong",
+        )))
+        .await
+        .expect("send browser pong");
+    // browser-initiated close tears down the upstream side.
+    socket.close(None).await.expect("close browser websocket");
+    timeout(Duration::from_secs(2), probe.closed.notified())
+        .await
+        .expect("upstream torn down after browser close");
+
+    let upgrades = probe.upgrades.lock().await.clone();
+    assert_eq!(upgrades.len(), 1);
+    assert_eq!(
+        upgrades[0].0,
+        "/gateway/api/dashboard/terminals/term-live/socket?after=41"
+    );
+    assert_eq!(upgrades[0].1.as_deref(), Some("Bearer relay-terminal-token"));
+    let frames = probe.frames.lock().await.clone();
+    assert!(frames.contains(&"binary:raw-bytes".to_owned()), "{frames:?}");
+    assert!(frames.contains(&"ping:browser-ping".to_owned()), "{frames:?}");
+    assert!(frames.contains(&"pong:browser-pong".to_owned()), "{frames:?}");
+
+    // Upstream rejection before upgrade -> bounded refusal, no 101.
+    let mut reject_request = format!(
+        "ws://{local_addr}/api/dashboard/servers/server-windows/terminals/term-reject/socket"
+    )
+    .into_client_request()
+    .expect("linked terminal reject websocket request");
+    reject_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(reject_request)
+        .await
+        .expect_err("linked terminal upstream rejection");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::GONE);
+        }
+        other => panic!("unexpected upstream rejection error: {other}"),
+    }
+
+    // Upstream-initiated close propagates a Close frame to the browser side.
+    let mut upstream_close_request = format!(
+        "ws://{local_addr}/api/dashboard/servers/server-windows/terminals/term-upstream-close/socket"
+    )
+    .into_client_request()
+    .expect("linked terminal upstream close websocket request");
+    upstream_close_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut upstream_close_socket, close_response) =
+        tokio_tungstenite::connect_async(upstream_close_request)
+            .await
+            .expect("connect linked upstream close websocket");
+    assert_eq!(close_response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    let close = timeout(Duration::from_secs(2), upstream_close_socket.next())
+        .await
+        .expect("upstream close propagation timeout")
+        .expect("upstream close propagation")
+        .expect("upstream close frame");
+    assert!(matches!(close, TungsteniteMessage::Close(_)));
+
+    local_server.abort();
+    remote_server.abort();
     remove_static_fixture(&state_file_root);
 }
 
@@ -11888,6 +12398,72 @@ async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
     assert!(text.contains("WS-SOCKET-TEST"), "{text:?}");
 
     socket.close(None).await.expect("close websocket");
+    server.abort();
+    remove_static_fixture(&root);
+}
+
+// The server-local socket route dispatches in-process to the unscoped legacy
+// terminal_websocket handler, byte-for-byte, without any relay.
+#[tokio::test]
+async fn server_scoped_local_terminal_websocket_dispatches_legacy_handler() {
+    let root = temp_fixture_path("server-scoped-local-terminal-websocket-root");
+    fs::create_dir_all(&root).expect("create server-local terminal websocket root dir");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+    let (addr, server) = spawn_test_server(app.clone()).await;
+
+    let mut request =
+        format!("ws://{addr}/api/dashboard/servers/server-local/terminals/{terminal_id}/socket")
+            .into_client_request()
+            .expect("server-local websocket request");
+    request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("connect server-local terminal websocket");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "input", "data": terminal_test_commands_for_current_platform("SERVER-SCOPED-WS").echo_and_exit })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .expect("send server-local websocket input");
+    let mut text = String::new();
+    for _ in 0..80 {
+        let Some(message) = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("server-local websocket message timeout")
+        else {
+            break;
+        };
+        let message = message.expect("server-local websocket message");
+        let TungsteniteMessage::Text(payload) = message else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).expect("server-local websocket frame JSON");
+        assert_eq!(value["terminalId"], terminal_id);
+        match value["type"].as_str() {
+            Some("output") => text.push_str(value["chunk"]["data"].as_str().expect("output data")),
+            Some("exit") => break,
+            Some("status") => {}
+            other => panic!("unexpected server-local websocket frame type: {other:?}"),
+        }
+        if text.contains("SERVER-SCOPED-WS") {
+            break;
+        }
+    }
+    assert!(text.contains("SERVER-SCOPED-WS"), "{text:?}");
+
+    socket.close(None).await.expect("close server-local websocket");
     server.abort();
     remove_static_fixture(&root);
 }
