@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.32.4 - 2026-07-03
+
+### Changed
+- Inline `lead-prefer-subagent` and `lead-verify-discussion` bodies directly
+  into their `SKILL.md` files instead of routing through the `rsrc`
+  playbook-print indirection; `agents-plugin-wsflow` mirrors both via a new
+  substitution-mirrored skill generation mechanism (literal `ws:`/`ws/` ->
+  `wsflow:`/`wsflow/` namespace substitution over a curated, guarded skill
+  list).
+- Drop the unconditional `delegates:true` continuity-tip/mercenary-path
+  paragraph from `lead-verify-discussion`, since that skill's delegation is
+  conditional ("when investigation is useful"), not guaranteed.
+- Flip the `sage_review` builtin default from off to `auto` (required
+  posture) for `tickets.create`/`tickets.move`, so downstream sessions get a
+  review gate by default unless explicitly overridden at project, session, or
+  global scope.
+
+### Fixed
+- Fix the substitution-mirrored skill generator (`GenerateWsflowSkillBody`)
+  matching `ws:`/`ws/` as raw substrings, which could corrupt unrelated words
+  containing those characters as a tail (e.g. "shows:" -> "showsflow:",
+  "draws/" -> "drawsflow/"); anchor both patterns to a left-side word
+  boundary instead.
+- Fix a stale test asserting the pre-inlining `playbook.print` shim contract
+  for `lead-verify-discussion` after its rsrc tree was deleted.
+
 ## v0.32.0 - 2026-07-02
 
 ### Added
