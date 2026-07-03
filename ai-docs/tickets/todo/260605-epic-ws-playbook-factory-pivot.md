@@ -128,14 +128,20 @@ subagents. Direction, decisions, and evidence live in
   (P2 `f6c4e7d1`), first real Windows full-suite run + exited-process liveness fix
   (P3 `326fa74f`), un-skip linked-worktree layout test (P4 `994974af`). Key
   limitation: verified via `go test` only — never the launcher cold-install path.
-- `260622-chore-windows-shipping-hardening` (**todo** — Windows shipping gate):
-  successor to 260620; makes the Windows surface shipping-correct with
-  **mercenary-on-Windows in v1 scope** (Phase A static code hardening — POSIX
-  quoting / backslash codex path / `.exe` launcher probe / atomic `replaceFile` /
-  `OpenProcess` ACCESS_DENIED / sync-runner tree-kill; Phase B launcher cold-load
-  robustness — rsrc materialization race, AV timeout, replace-over-running-exe;
-  Phase C branch-pinned real-Windows acceptance). Epic merge to `main` is deferred
-  until this passes. **Now gates epic closure** (replaces 260620 as the gate).
+- `260622-chore-windows-shipping-hardening` (**done** `.done/` — Windows static
+  hardening): successor to 260620; made the Windows surface shipping-correct
+  with **mercenary-on-Windows in v1 scope** (Phase A static code hardening —
+  POSIX quoting / backslash codex path / `.exe` launcher probe / atomic
+  `replaceFile` / `OpenProcess` ACCESS_DENIED / sync-runner tree-kill; Phase B
+  launcher cold-load robustness — rsrc materialization race, AV timeout,
+  replace-over-running-exe). Both phases landed and verified on Linux/WSL2.
+  Its Phase C (branch-pinned real-Windows acceptance) required a real Windows
+  host unavailable in that session and was split out into
+  `260703-chore-windows-branch-pinned-acceptance`.
+- `260703-chore-windows-branch-pinned-acceptance` (**todo** — Windows shipping
+  gate): branch-pinned real-Windows acceptance split from 260622's Phase C.
+  Epic merge to `main` is deferred until this passes. **Now gates epic
+  closure** (replaces 260622 as the gate).
 
 ## Cross-Child Decisions
 
