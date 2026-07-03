@@ -2,7 +2,19 @@ package wsrsrc
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+)
+
+// wsColonPattern and wsSlashPattern anchor the ws: / ws/ namespace-token
+// substitution to a left-side word boundary so it only matches "ws:"/"ws/" as
+// a standalone token, not as a substring tail of a longer word (e.g. "shows:"
+// or "draws/"). \b is zero-width, so it does not consume input and cannot
+// cause overlapping-match or non-consumption issues for adjacent tokens like
+// "ws:ws:".
+var (
+	wsColonPattern = regexp.MustCompile(`\bws:`)
+	wsSlashPattern = regexp.MustCompile(`\bws/`)
 )
 
 // disqualifyingTokens are the tokens that make a source SKILL.md ineligible
@@ -30,8 +42,8 @@ func GenerateWsflowSkillBody(source string) (string, error) {
 	if err := guardSubstitutionEligible(source); err != nil {
 		return "", err
 	}
-	out := strings.ReplaceAll(source, "ws:", "wsflow:")
-	out = strings.ReplaceAll(out, "ws/", "wsflow/")
+	out := wsColonPattern.ReplaceAllString(source, "wsflow:")
+	out = wsSlashPattern.ReplaceAllString(out, "wsflow/")
 	return out, nil
 }
 
