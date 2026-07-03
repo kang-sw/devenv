@@ -186,6 +186,7 @@ import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
   flattenEntities,
+  isValidServerRouteSegment,
   reconcileSelectedId,
   serverScopedIdentity,
   workRootActivationEndpoint,
@@ -298,10 +299,10 @@ type ServerModalState =
 async function requestWorkRootActivation(
   workRootId: string,
   activation: "online" | "offline",
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
 ): Promise<DashboardResourcesView> {
   const response = await fetch(
-    workRootActivationEndpoint(workRootId, serverId),
+    workRootActivationEndpoint(workRootId, serverRoute),
     {
       method: "POST",
       headers: {
@@ -319,9 +320,9 @@ async function requestWorkRootActivation(
 
 async function requestWorkspaceRemoval(
   workspaceId: string,
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
 ): Promise<DashboardResourcesView> {
-  const response = await fetch(workspaceEndpoint(workspaceId, serverId), {
+  const response = await fetch(workspaceEndpoint(workspaceId, serverRoute), {
     method: "DELETE",
     headers: { Accept: "application/json" },
   });
@@ -589,13 +590,13 @@ export function App() {
       }
       if (
         !knownWorkRootIds.has(
-          serverScopedIdentity(pane.serverId, pane.workRootId),
+          serverScopedIdentity(pane.serverRoute, pane.workRootId),
         )
       ) {
         continue;
       }
       restoredReadOnlyPaneKeys.current.delete(logicalKey);
-      void fetchWorkRootTextFile(pane.workRootId, pane.path, pane.serverId)
+      void fetchWorkRootTextFile(pane.workRootId, pane.path, pane.serverRoute)
         .then((file) => {
           setReadOnlyFilePanes((current) => {
             const currentPane = current[logicalKey];
@@ -640,25 +641,25 @@ export function App() {
       gesture: ReadOnlyFileOpenGesture = "singleClick",
     ) => {
       const mode = readOnlyFilePaneModeForOpenGesture(gesture);
-      const serverId = workRoot.resourcePath.serverId;
-      const workRootStateKey = serverScopedIdentity(serverId, workRoot.id);
+      const serverRoute = workRoot.resourcePath.serverId;
+      const workRootStateKey = serverScopedIdentity(serverRoute, workRoot.id);
       const pane = createLoadingReadOnlyFilePane(
         workRoot.id,
         entry.path,
         mode,
-        serverId,
+        serverRoute,
       );
       const pinnedLogicalKey = readOnlyFilePaneLogicalKey(
         workRoot.id,
         entry.path,
         "pinned",
-        serverId,
+        serverRoute,
       );
       const previewLogicalKey = readOnlyFilePaneLogicalKey(
         workRoot.id,
         entry.path,
         "preview",
-        serverId,
+        serverRoute,
       );
       const existingPinnedPane = readOnlyFilePanes[pinnedLogicalKey];
       const focusPane = (paneId: string) =>
@@ -739,7 +740,7 @@ export function App() {
       });
       focusPane(pane.id);
 
-      void fetchWorkRootTextFile(workRoot.id, entry.path, serverId)
+      void fetchWorkRootTextFile(workRoot.id, entry.path, serverRoute)
         .then((file) => {
           setReadOnlyFilePanes((current) => {
             const currentPane = current[pane.logicalKey];
@@ -791,9 +792,9 @@ export function App() {
           void loadResources("explicit");
         };
       } else if (command.payload.type === "workRoot.activation.set") {
-        const { workRootId, activation, serverId } = command.payload;
+        const { workRootId, activation, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
-          void requestWorkRootActivation(workRootId, activation, serverId)
+          void requestWorkRootActivation(workRootId, activation, serverRoute)
             .then((nextResources) => {
               resourceRefreshCoordinatorRef.current?.applyExternalResources(
                 nextResources,
@@ -815,7 +816,7 @@ export function App() {
         executableHandlers[command.commandId] = () =>
           setGitWorktreeWorkspaceId(null);
       } else if (command.payload.type === "workspace.remove") {
-        const { workspaceId, serverId } = command.payload;
+        const { workspaceId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
           const workspace = activeResources?.workspaces.find(
             (candidate) => candidate.id === workspaceId,
@@ -830,7 +831,7 @@ export function App() {
           const removedRootIds = new Set(
             workspace?.workRoots.map((root) => root.id) ?? [],
           );
-          void requestWorkspaceRemoval(workspaceId, serverId)
+          void requestWorkspaceRemoval(workspaceId, serverRoute)
             .then((nextResources) => {
               resourceRefreshCoordinatorRef.current?.applyExternalResources(
                 nextResources,
@@ -898,7 +899,7 @@ export function App() {
 
   const applyDocumentSaved = useCallback(
     (source: {
-      serverId?: string;
+      serverRoute?: string;
       workRootId: string;
       path: string;
       content: string;
@@ -909,7 +910,7 @@ export function App() {
         Object.fromEntries(
           Object.entries(current).map(([key, pane]) => [
             key,
-            pane.serverId === (source.serverId ?? "server-local") &&
+            pane.serverRoute === (source.serverRoute ?? "server-local") &&
             pane.workRootId === source.workRootId &&
             pane.path === source.path
               ? applyReadOnlyFilePaneSavedContent(
@@ -2252,17 +2253,27 @@ function LinkedServerModal({
     if (submitDisabled) {
       return;
     }
-    setSubmitting(true);
     setError(null);
     const passphraseValue = passphrase.trim();
-    const request = addMode
-      ? linkEndpointServer({
-          serverId: defaultLinkedServerId(label, endpoint),
-          label: label.trim(),
-          endpoint: endpoint.trim(),
-          ...(passphraseValue ? { passphrase: passphraseValue } : {}),
-        })
-      : linkServerPassphrase(state.server.id, passphraseValue);
+    let request: Promise<ServerConnectionView>;
+    if (addMode) {
+      const serverRoute = defaultLinkedServerId(label, endpoint);
+      if (!isValidServerRouteSegment(serverRoute)) {
+        setError(
+          "Server route must contain only letters, digits, hyphen, or underscore (dot is reserved).",
+        );
+        return;
+      }
+      request = linkEndpointServer({
+        serverId: serverRoute,
+        label: label.trim(),
+        endpoint: endpoint.trim(),
+        ...(passphraseValue ? { passphrase: passphraseValue } : {}),
+      });
+    } else {
+      request = linkServerPassphrase(state.server.id, passphraseValue);
+    }
+    setSubmitting(true);
     void request
       .then((server) => {
         onLinked(server);
@@ -2738,7 +2749,7 @@ function WorkRootFileExplorer({
     async (
       workRootId: string,
       path: string,
-      serverId: string,
+      serverRoute: string,
       workRootKey: string,
     ) => {
       updateSnapshot(workRootKey, (current) => ({
@@ -2750,7 +2761,7 @@ function WorkRootFileExplorer({
       }));
 
       try {
-        const listing = await fetchWorkRootFiles(workRootId, path, serverId);
+        const listing = await fetchWorkRootFiles(workRootId, path, serverRoute);
         updateSnapshot(workRootKey, (current) => ({
           ...current,
           directories: {
@@ -3145,7 +3156,7 @@ function WorkbenchShell({
     SetStateAction<WorkbenchPaneOrder>
   >;
   onDocumentSaved: (source: {
-    serverId?: string;
+    serverRoute?: string;
     workRootId: string;
     path: string;
     content: string;
@@ -3189,14 +3200,14 @@ function WorkbenchShell({
   // renders the previous root's activity for a frame before the effect resets.
   const [workRootActivityState, setWorkRootActivityState] = useState<{
     rootId: string | null;
-    serverId: string | null;
+    serverRoute: string | null;
     activity: WorkRootActivityBadgeInput;
-  }>({ rootId: null, serverId: null, activity: { phase: "loading" } });
+  }>({ rootId: null, serverRoute: null, activity: { phase: "loading" } });
   const workRootActivityStateRef = useRef(workRootActivityState);
   workRootActivityStateRef.current = workRootActivityState;
   const activityStreamRequestSeq = useRef(0);
   const currentActivityStreamRequest = useRef<ActivityConsoleStreamRequest>({
-    serverId: "server-local",
+    serverRoute: "server-local",
     workRootId: "",
     requestId: 0,
   });
@@ -3206,7 +3217,7 @@ function WorkbenchShell({
   >(null);
   const [activityTranscriptRefresh, setActivityTranscriptRefresh] = useState<{
     rootId: string;
-    serverId?: string | null;
+    serverRoute?: string | null;
     activityId: string;
     cursor: string | null;
     sequence: number;
@@ -3249,16 +3260,16 @@ function WorkbenchShell({
       workRootId: string,
       path: string,
       expectedContentHash?: string,
-      serverId: string | null | undefined = selectedWorkRootServerId,
+      serverRoute: string | null | undefined = selectedWorkRootServerId,
     ) => {
-      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path, serverId);
+      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path, serverRoute);
       const requestSequence =
         (documentRefreshSequence.current[sourceKey] ?? 0) + 1;
       documentRefreshSequence.current[sourceKey] = requestSequence;
       if (
         !readOnlyFilePanesRef.current.some(
           (pane) =>
-            pane.serverId === (serverId ?? "server-local") &&
+            pane.serverRoute === (serverRoute ?? "server-local") &&
             pane.workRootId === workRootId &&
             pane.path === path &&
             (!expectedContentHash || pane.contentHash !== expectedContentHash),
@@ -3266,7 +3277,7 @@ function WorkbenchShell({
       ) {
         return;
       }
-      void fetchWorkRootTextFile(workRootId, path, serverId)
+      void fetchWorkRootTextFile(workRootId, path, serverRoute)
         .then((file) => {
           if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
             return;
@@ -3287,7 +3298,7 @@ function WorkbenchShell({
               workRootId,
               path,
               message,
-              serverId,
+              serverRoute,
             ),
           );
         });
@@ -3305,7 +3316,7 @@ function WorkbenchShell({
         readOnlyFilePanesRef.current
           .filter(
             (pane) =>
-              pane.serverId === (selectedWorkRootServerId ?? "server-local") &&
+              pane.serverRoute === (selectedWorkRootServerId ?? "server-local") &&
               pane.workRootId === rootId &&
               pane.status === "loaded",
           )
@@ -3371,11 +3382,11 @@ function WorkbenchShell({
               closedAgentPaneByRoot[root.id] ?? [],
               activityPaneOpenByRoot[rootKey] ?? false,
               workRootActivityState.rootId === root.id &&
-                workRootActivityState.serverId === root.resourcePath.serverId
+                workRootActivityState.serverRoute === root.resourcePath.serverId
                 ? workRootActivityState.activity
                 : { phase: "loading" },
               activityTranscriptRefresh?.rootId === root.id &&
-                activityTranscriptRefresh.serverId ===
+                activityTranscriptRefresh.serverRoute ===
                   root.resourcePath.serverId
                 ? activityTranscriptRefresh
                 : null,
@@ -3400,15 +3411,15 @@ function WorkbenchShell({
       return;
     }
     const rootId = workbenchModel.root.id;
-    const serverId = workbenchModel.root.resourcePath.serverId;
-    const rootKey = serverScopedIdentity(serverId, rootId);
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    const rootKey = serverScopedIdentity(serverRoute, rootId);
     const listStartedAtMs = Date.now();
-    void listTerminals(rootId, serverId)
+    void listTerminals(rootId, serverRoute)
       .then((sessions) => {
         const restoreIntents = terminalRestoreIntentsForWorkRoot(
           loadTerminalRestoreIntents(),
           rootId,
-          serverId,
+          serverRoute,
         );
         if (
           sessions.length === 0 &&
@@ -3417,7 +3428,7 @@ function WorkbenchShell({
         ) {
           restoredTerminalIntentRoots.current.add(rootKey);
           for (const intent of restoreIntents) {
-            onCommand(buildTerminalCreateCommand(rootId, serverId), {
+            onCommand(buildTerminalCreateCommand(rootId, serverRoute), {
               "terminal.create": () =>
                 createTerminalPane({
                   title: intent.title,
@@ -3435,9 +3446,9 @@ function WorkbenchShell({
               rootId,
               sessions,
               listStartedAtMs,
-              serverId,
+              serverRoute,
             ),
-            serverId,
+            serverRoute,
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
@@ -3458,23 +3469,23 @@ function WorkbenchShell({
   // breaks the workbench.
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
-    const serverId = workbenchModel?.root.resourcePath.serverId;
-    if (!rootId || !serverId) {
+    const serverRoute = workbenchModel?.root.resourcePath.serverId;
+    if (!rootId || !serverRoute) {
       return;
     }
     let cancelled = false;
     setWorkRootActivityState({
       rootId,
-      serverId,
+      serverRoute,
       activity: { phase: "loading" },
     });
     const timer = window.setTimeout(() => {
-      void fetchWorkRootActivity(rootId, { serverId })
+      void fetchWorkRootActivity(rootId, { serverRoute })
         .then((view) => {
           if (!cancelled) {
             setWorkRootActivityState({
               rootId,
-              serverId,
+              serverRoute,
               activity: { phase: "ready", view },
             });
           }
@@ -3483,7 +3494,7 @@ function WorkbenchShell({
           if (!cancelled) {
             setWorkRootActivityState({
               rootId,
-              serverId,
+              serverRoute,
               activity: { phase: "error" },
             });
           }
@@ -3501,10 +3512,10 @@ function WorkbenchShell({
   // cannot be established or the daemon explicitly switches to pollFallback.
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
-    const serverId = workbenchModel?.root.resourcePath.serverId;
-    if (!rootId || !serverId || !activityPaneOpenForSelected) {
+    const serverRoute = workbenchModel?.root.resourcePath.serverId;
+    if (!rootId || !serverRoute || !activityPaneOpenForSelected) {
       currentActivityStreamRequest.current = {
-        serverId: serverId ?? "server-local",
+        serverRoute: serverRoute ?? "server-local",
         workRootId: rootId ?? "",
         requestId: activityStreamRequestSeq.current + 1,
       };
@@ -3518,7 +3529,7 @@ function WorkbenchShell({
 
     const requestId = activityStreamRequestSeq.current + 1;
     activityStreamRequestSeq.current = requestId;
-    const expected = { serverId, workRootId: rootId, requestId };
+    const expected = { serverRoute, workRootId: rootId, requestId };
     currentActivityStreamRequest.current = expected;
     setActivityPollFallbackRootId((current) =>
       current === rootId ? null : current,
@@ -3529,18 +3540,18 @@ function WorkbenchShell({
     let fallbackTimer: number | null = null;
     const after =
       workRootActivityStateRef.current.rootId === rootId &&
-      workRootActivityStateRef.current.serverId === serverId &&
+      workRootActivityStateRef.current.serverRoute === serverRoute &&
       workRootActivityStateRef.current.activity.phase === "ready"
         ? workRootActivityStateRef.current.activity.view.feedCursor
         : null;
     const source = new EventSource(
-      workRootActivityEventsEndpoint(rootId, { after, serverId }),
+      workRootActivityEventsEndpoint(rootId, { after, serverRoute }),
     );
 
     const requestSnapshot = () => {
       const snapshotRequestId = activitySnapshotRequestSeq.current + 1;
       activitySnapshotRequestSeq.current = snapshotRequestId;
-      void fetchWorkRootActivity(rootId, { serverId })
+      void fetchWorkRootActivity(rootId, { serverRoute })
         .then((view) => {
           if (
             cancelled ||
@@ -3555,7 +3566,7 @@ function WorkbenchShell({
           }
           setWorkRootActivityState({
             rootId,
-            serverId,
+            serverRoute,
             activity: { phase: "ready", view },
           });
         })
@@ -3589,7 +3600,7 @@ function WorkbenchShell({
       if (event.type === "transcriptUpdated") {
         setActivityTranscriptRefresh((current) => ({
           rootId,
-          serverId,
+          serverRoute,
           activityId: event.activityId,
           cursor: event.transcriptCursor,
           sequence: (current?.sequence ?? 0) + 1,
@@ -3618,7 +3629,7 @@ function WorkbenchShell({
         const result = applyActivityConsoleEvent(current.activity.view, event);
         return {
           rootId,
-          serverId,
+          serverRoute,
           activity: { phase: "ready", view: result.view },
         };
       });
@@ -3704,10 +3715,10 @@ function WorkbenchShell({
 
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
-    const serverId = workbenchModel?.root.resourcePath.serverId;
+    const serverRoute = workbenchModel?.root.resourcePath.serverId;
     if (
       !rootId ||
-      !serverId ||
+      !serverRoute ||
       !activityPaneOpenForSelected ||
       activityPollFallbackRootId !== rootId
     ) {
@@ -3725,7 +3736,7 @@ function WorkbenchShell({
       activitySnapshotRequestSeq.current = snapshotRequestId;
       void fetchWorkRootActivity(rootId, {
         recentLimit: workRootActivityRecentRefreshLimit,
-        serverId,
+        serverRoute,
       })
         .then((view) => {
           if (
@@ -3739,11 +3750,11 @@ function WorkbenchShell({
               return current;
             }
             if (current.activity.phase !== "ready") {
-              return { rootId, serverId, activity: { phase: "ready", view } };
+              return { rootId, serverRoute, activity: { phase: "ready", view } };
             }
             return {
               rootId,
-              serverId,
+              serverRoute,
               activity: {
                 phase: "ready",
                 view: mergeWorkRootActivityViews(current.activity.view, view),
@@ -3848,7 +3859,7 @@ function WorkbenchShell({
       terminalId: string;
       logicalKey: string;
       nextSequence: number;
-      serverId?: string | null;
+      serverRoute?: string | null;
     }>
   >([]);
   livePollPanesRef.current = workbenchModel
@@ -3856,13 +3867,13 @@ function WorkbenchShell({
         .filter(
           (pane) =>
             pane.session.workRootId === workbenchModel.root.id &&
-            (pane.session.serverId ?? "server-local") ===
+            (pane.session.serverRoute ?? "server-local") ===
               workbenchModel.root.resourcePath.serverId &&
             shouldPollTerminalOutput(pane),
         )
         .map((pane) => ({
           terminalId: pane.session.terminalId,
-          serverId: pane.session.serverId,
+          serverRoute: pane.session.serverRoute,
           logicalKey: pane.logicalKey,
           nextSequence: pane.nextSequence,
         }))
@@ -3886,7 +3897,7 @@ function WorkbenchShell({
         void fetchTerminalOutput(
           pane.terminalId,
           pane.nextSequence,
-          pane.serverId,
+          pane.serverRoute,
         )
           .then((output) => {
             if (cancelled) {
@@ -4001,14 +4012,14 @@ function WorkbenchShell({
   function persistTerminalPanesForWorkRoot(
     workRootId: string,
     nextPanes: Record<string, TerminalPaneState>,
-    serverId: string | null | undefined = "server-local",
+    serverRoute: string | null | undefined = "server-local",
   ): Record<string, TerminalPaneState> {
     const nextIntents = terminalRestoreIntentsFromPanes(
       Object.values(nextPanes).filter(
         (pane) =>
           pane.session.workRootId === workRootId &&
-          (pane.session.serverId ?? "server-local") ===
-            (serverId ?? "server-local"),
+          (pane.session.serverRoute ?? "server-local") ===
+            (serverRoute ?? "server-local"),
       ),
     );
     saveTerminalRestoreIntents(
@@ -4016,7 +4027,7 @@ function WorkbenchShell({
         loadTerminalRestoreIntents(),
         workRootId,
         nextIntents,
-        serverId,
+        serverRoute,
       ),
     );
     return nextPanes;
@@ -4027,8 +4038,8 @@ function WorkbenchShell({
       return;
     }
     const rootId = workbenchModel.root.id;
-    const serverId = workbenchModel.root.resourcePath.serverId;
-    void createTerminal(rootId, options, serverId)
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    void createTerminal(rootId, options, serverRoute)
       .then((session) => {
         const pane = terminalPaneFromSession(session);
         setTerminalPanes((current) =>
@@ -4038,7 +4049,7 @@ function WorkbenchShell({
               ...current,
               [pane.logicalKey]: pane,
             },
-            serverId,
+            serverRoute,
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
@@ -4122,7 +4133,7 @@ function WorkbenchShell({
     void sendTerminalInput(
       pane.session.terminalId,
       data,
-      pane.session.serverId,
+      pane.session.serverRoute,
     ).catch((error) => {
       setTerminalPanes((current) =>
         current[pane.logicalKey]
@@ -4154,7 +4165,7 @@ function WorkbenchShell({
       pane.session.terminalId,
       columns,
       rows,
-      pane.session.serverId,
+      pane.session.serverRoute,
     ).then((session) => {
       setTerminalPanes((current) =>
         current[pane.logicalKey]
@@ -4168,13 +4179,13 @@ function WorkbenchShell({
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
-    void closeTerminal(pane.session.terminalId, pane.session.serverId)
+    void closeTerminal(pane.session.terminalId, pane.session.serverRoute)
       .then(() =>
         setTerminalPanes((current) =>
           persistTerminalPanesForWorkRoot(
             pane.session.workRootId,
             removeClosedTerminalPane(current, pane.logicalKey),
-            pane.session.serverId,
+            pane.session.serverRoute,
           ),
         ),
       )
@@ -4344,8 +4355,8 @@ function WorkbenchShell({
     // existing pane and new opens using policy-owned support-split placement
     // instead of a raw Dockview handle.
     const rootId = workbenchModel.root.id;
-    const serverId = workbenchModel.root.resourcePath.serverId;
-    const rootKey = serverScopedIdentity(serverId, rootId);
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    const rootKey = serverScopedIdentity(serverRoute, rootId);
     const paneId = workRootActivityPaneId(rootKey);
     const decision = decideSurfaceOpenWithDynamicGroups(
       workRootActivityPlacementState(workbenchGroups, editorGroups, rootKey),
@@ -4421,7 +4432,7 @@ function WorkbenchShell({
   const { workspace, root } = workbenchModel;
   const activityBadge = workRootActivityBadge(
     workRootActivityState.rootId === root.id &&
-      workRootActivityState.serverId === root.resourcePath.serverId
+      workRootActivityState.serverRoute === root.resourcePath.serverId
       ? workRootActivityState.activity
       : { phase: "loading" },
   );
@@ -4771,7 +4782,7 @@ function WorkRootGitToolbar({
   const requestSeq = useRef(0);
   const currentRootId = useRef(root.id);
   currentRootId.current = root.id;
-  const serverId = root.resourcePath.serverId;
+  const serverRoute = root.resourcePath.serverId;
 
   const status =
     statusState?.workRootId === root.id ? statusState.status : null;
@@ -4790,8 +4801,8 @@ function WorkRootGitToolbar({
       requestSeq.current = seq;
       const requestedRootId = root.id;
       void Promise.all([
-        fetchWorkRootGitStatus(requestedRootId, serverId),
-        fetchWorkRootGitBranches(requestedRootId, serverId),
+        fetchWorkRootGitStatus(requestedRootId, serverRoute),
+        fetchWorkRootGitBranches(requestedRootId, serverRoute),
       ])
         .then(([nextStatus, nextBranches]) => {
           if (
@@ -4825,7 +4836,7 @@ function WorkRootGitToolbar({
           );
         });
     },
-    [gitCapable, root.id, serverId],
+    [gitCapable, root.id, serverRoute],
   );
 
   useEffect(() => {
@@ -4910,7 +4921,7 @@ function WorkRootGitToolbar({
   };
 
   const runBranchCreateCloseCommand = () =>
-    onCommand(buildGitBranchCreateCloseCommand(root.id, serverId), {
+    onCommand(buildGitBranchCreateCloseCommand(root.id, serverRoute), {
       "git.branchCreate.close": closeBranchModal,
     });
 
@@ -4924,7 +4935,7 @@ function WorkRootGitToolbar({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() =>
-            onCommand(buildGitBranchMenuOpenCommand(root.id, serverId), {
+            onCommand(buildGitBranchMenuOpenCommand(root.id, serverRoute), {
               "git.branchMenu.open": () => setMenuOpen((open) => !open),
             })
           }
@@ -4941,7 +4952,7 @@ function WorkRootGitToolbar({
               type="button"
               onClick={() => {
                 setMenuOpen(false);
-                onCommand(buildGitBranchCreateOpenCommand(root.id, serverId), {
+                onCommand(buildGitBranchCreateOpenCommand(root.id, serverRoute), {
                   "git.branchCreate.open": () => setModalOpen(true),
                 });
               }}
@@ -4963,9 +4974,9 @@ function WorkRootGitToolbar({
                 onClick={() => {
                   setMenuOpen(false);
                   mutate(
-                    buildGitBranchSwitchCommand(root.id, branch.name, serverId),
+                    buildGitBranchSwitchCommand(root.id, branch.name, serverRoute),
                     () =>
-                      switchWorkRootGitBranch(root.id, branch.name, serverId),
+                      switchWorkRootGitBranch(root.id, branch.name, serverRoute),
                   );
                 }}
               >
@@ -4985,22 +4996,22 @@ function WorkRootGitToolbar({
         pendingAction={pendingGitAction}
         onFetch={() =>
           mutate(
-            buildGitFetchCommand(root.id, serverId),
-            () => fetchWorkRootGit(root.id, serverId),
+            buildGitFetchCommand(root.id, serverRoute),
+            () => fetchWorkRootGit(root.id, serverRoute),
             "fetch",
           )
         }
         onPush={() =>
           mutate(
-            buildGitPushCommand(root.id, serverId),
-            () => pushWorkRootGit(root.id, serverId),
+            buildGitPushCommand(root.id, serverRoute),
+            () => pushWorkRootGit(root.id, serverRoute),
             "push",
           )
         }
         onPull={() =>
           mutate(
-            buildGitPullFfOnlyCommand(root.id, serverId),
-            () => pullWorkRootGitFfOnly(root.id, serverId),
+            buildGitPullFfOnlyCommand(root.id, serverRoute),
+            () => pullWorkRootGitFfOnly(root.id, serverRoute),
             "pull",
           )
         }
@@ -5045,7 +5056,7 @@ function WorkRootGitToolbar({
                     root.id,
                     branchName,
                     baseBranch || undefined,
-                    serverId,
+                    serverRoute,
                   ),
                   {
                     "git.branchCreate.submit": () => {
@@ -5053,7 +5064,7 @@ function WorkRootGitToolbar({
                         root.id,
                         branchName,
                         baseBranch || undefined,
-                        serverId,
+                        serverRoute,
                       )
                         .then((nextStatus) => {
                           if (currentRootId.current !== targetRootId) return;
@@ -5353,7 +5364,7 @@ function workRootActivityWorkbenchPane(
         activity={activity}
         onCommand={onCommand}
         transcriptRefresh={transcriptRefresh}
-        serverId={root.resourcePath.serverId}
+        serverRoute={root.resourcePath.serverId}
       />
     ),
   };
@@ -5361,7 +5372,7 @@ function workRootActivityWorkbenchPane(
 
 type ActivityTranscriptRefreshSignal = {
   readonly rootId: string;
-  readonly serverId?: string | null;
+  readonly serverRoute?: string | null;
   readonly activityId: string;
   readonly cursor: string | null;
   readonly sequence: number;
@@ -5371,12 +5382,12 @@ function WorkRootActivityPane({
   activity,
   onCommand,
   transcriptRefresh,
-  serverId,
+  serverRoute,
 }: {
   activity: WorkRootActivityBadgeInput;
   onCommand: DashboardCommandDispatcher;
   transcriptRefresh: ActivityTranscriptRefreshSignal | null;
-  serverId: string;
+  serverRoute: string;
 }) {
   // CONTRACT: A reversible read-only Activity Console projection. It consumes
   // source-neutral feed items/transcripts, exposes command-routed controls, and
@@ -5396,7 +5407,7 @@ function WorkRootActivityPane({
           loadTranscript={(workRootId, activityId, options) =>
             fetchWorkRootActivityTranscript(workRootId, activityId, {
               ...options,
-              serverId,
+              serverRoute,
             })
           }
           transcriptRefresh={transcriptRefresh}
@@ -5527,7 +5538,7 @@ function buildWorkbenchEditorGroups(
   activityTranscriptRefresh: ActivityTranscriptRefreshSignal | null,
   onCommand: DashboardCommandDispatcher,
   onDocumentSaved: (source: {
-    serverId?: string;
+    serverRoute?: string;
     workRootId: string;
     path: string;
     content: string;
@@ -5690,7 +5701,7 @@ function terminalWorkbenchPanesByGroup(
     .filter(
       (pane) =>
         pane.session.workRootId === root.id &&
-        (pane.session.serverId ?? "server-local") ===
+        (pane.session.serverRoute ?? "server-local") ===
           root.resourcePath.serverId,
     )
     .map((pane) => terminalWorkbenchPane(pane, terminalActions));
@@ -6082,7 +6093,7 @@ function TerminalPaneBody({
         terminalId,
         terminalWebSocketCursor(liveRef.current.pane),
         window.location,
-        liveRef.current.pane.session.serverId,
+        liveRef.current.pane.session.serverRoute,
       ),
     );
     socketRef.current = socket;
@@ -6316,7 +6327,7 @@ function readOnlyWorkbenchPanesByGroup(
   groups: ReadonlyArray<{ id: string; label: string }>,
   onCommand: DashboardCommandDispatcher,
   onDocumentSaved: (source: {
-    serverId?: string;
+    serverRoute?: string;
     workRootId: string;
     path: string;
     content: string;
@@ -6328,7 +6339,7 @@ function readOnlyWorkbenchPanesByGroup(
     .filter(
       (pane) =>
         pane.workRootId === root.id &&
-        pane.serverId === root.resourcePath.serverId,
+        pane.serverRoute === root.resourcePath.serverId,
     )
     .map((pane) =>
       readOnlyWorkbenchPane(root, pane, onCommand, onDocumentSaved),
@@ -6363,7 +6374,7 @@ function readOnlyWorkbenchPane(
   pane: ReadOnlyFilePane,
   onCommand: DashboardCommandDispatcher,
   onDocumentSaved: (source: {
-    serverId?: string;
+    serverRoute?: string;
     workRootId: string;
     path: string;
     content: string;
@@ -6419,7 +6430,7 @@ function ReadOnlyDocumentPane({
   renderMarkdown: boolean;
   onCommand: DashboardCommandDispatcher;
   onDocumentSaved: (source: {
-    serverId?: string;
+    serverRoute?: string;
     workRootId: string;
     path: string;
     content: string;
@@ -6460,7 +6471,7 @@ function ReadOnlyDocumentPane({
       pane.workRootId,
       pane.path,
       mode,
-      pane.serverId,
+      pane.serverRoute,
     );
     onCommand(command, { [command.commandId]: () => setDocumentMode(mode) });
   };
@@ -6469,7 +6480,7 @@ function ReadOnlyDocumentPane({
     const command = buildDocumentRevertCommand(
       pane.workRootId,
       pane.path,
-      pane.serverId,
+      pane.serverRoute,
     );
     onCommand(command, {
       [command.commandId]: () => {
@@ -6485,7 +6496,7 @@ function ReadOnlyDocumentPane({
     const command = buildDocumentSaveCommand(
       pane.workRootId,
       pane.path,
-      pane.serverId,
+      pane.serverRoute,
     );
     onCommand(command, {
       [command.commandId]: () => {
@@ -6503,7 +6514,7 @@ function ReadOnlyDocumentPane({
             baseContentHash,
             content: draft,
           },
-          pane.serverId,
+          pane.serverRoute,
         )
           .then((response) => {
             setBaseContentHash(response.contentHash);
@@ -6511,7 +6522,7 @@ function ReadOnlyDocumentPane({
             setSaveMessage("Saved");
             setTranslationOverlay(undefined);
             onDocumentSaved({
-              serverId: pane.serverId,
+              serverRoute: pane.serverRoute,
               workRootId: pane.workRootId,
               path: pane.path,
               content: draft,
@@ -6590,7 +6601,7 @@ function ReadOnlyDocumentPane({
     pane.status,
     pane.title,
     pane.workRootId,
-    pane.serverId,
+    pane.serverRoute,
     renderMarkdown,
     translationEnabled,
   ]);
@@ -6685,7 +6696,7 @@ function ReadOnlyDocumentPane({
                 const command = buildDocumentTranslationToggleCommand(
                   pane.workRootId,
                   pane.path,
-                  pane.serverId,
+                  pane.serverRoute,
                 );
                 onCommand(command, {
                   [command.commandId]: () => {
@@ -7241,14 +7252,14 @@ function StateDot({ state }: { state: ViewState }) {
   );
 }
 
-function normalizeServerRoute(serverId: string) {
+function normalizeServerRoute(serverRoute: string) {
   if (typeof window === "undefined") {
     return;
   }
 
   const normalizedPath = normalizeServerRouteLocation(
     window.location,
-    serverId,
+    serverRoute,
   );
   if (normalizedPath) {
     window.history.replaceState(null, "", normalizedPath);

@@ -79,8 +79,8 @@ const sameLabelView: DashboardResourcesView = {
 };
 
 assertEqual(
-  serverOpenWorkRootEndpoint("server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/open",
+  serverOpenWorkRootEndpoint("server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/open",
   "server-scoped open workRoot endpoint encodes server id",
 );
 assertEqual(

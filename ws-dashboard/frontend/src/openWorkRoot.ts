@@ -9,9 +9,9 @@ import {
 export const openWorkRootEndpoint = "/api/dashboard/work-roots/open";
 
 export function serverOpenWorkRootEndpoint(
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, ["work-roots", "open"]);
+  return localCompatibleDashboardApiRoute(serverRoute, ["work-roots", "open"]);
 }
 
 // POST a host path to the daemon open-workRoot route. On success the daemon
@@ -23,9 +23,9 @@ export type OpenWorkRootResult = {
 
 export async function requestOpenWorkRoot(
   path: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<OpenWorkRootResult> {
-  const response = await fetch(serverOpenWorkRootEndpoint(serverId), {
+  const response = await fetch(serverOpenWorkRootEndpoint(serverRoute), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

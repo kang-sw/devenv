@@ -1,12 +1,12 @@
 import {
-  LOCAL_DASHBOARD_SERVER_ID,
+  LOCAL_DASHBOARD_SERVER_ROUTE,
   localCompatibleDashboardApiRoute,
   serverScopedIdentity,
 } from "./resourceModel.js";
 import { defaultPtyLogicalSize } from "./workbench/policy.js";
 
 export type TerminalSessionView = {
-  serverId?: string;
+  serverRoute?: string;
   terminalId: string;
   workRootId: string;
   title: string;
@@ -65,7 +65,7 @@ export type TerminalCreateOptions = {
 };
 
 export type TerminalRestoreIntent = {
-  serverId?: string;
+  serverRoute?: string;
   workRootId: string;
   title: string;
   cwdHint: string | null;
@@ -97,9 +97,9 @@ export function clampTerminalSize(columns: number, rows: number) {
 
 export function workRootTerminalsEndpoint(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "work-roots",
     workRootId,
     "terminals",
@@ -109,17 +109,17 @@ export function workRootTerminalsEndpoint(
 export function terminalOutputEndpoint(
   terminalId: string,
   after = 0,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const query = new URLSearchParams({ after: String(after) });
-  return `${localCompatibleDashboardApiRoute(serverId, ["terminals", terminalId, "output"])}?${query.toString()}`;
+  return `${localCompatibleDashboardApiRoute(serverRoute, ["terminals", terminalId, "output"])}?${query.toString()}`;
 }
 
 export function terminalInputEndpoint(
   terminalId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "terminals",
     terminalId,
     "input",
@@ -128,9 +128,9 @@ export function terminalInputEndpoint(
 
 export function terminalResizeEndpoint(
   terminalId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "terminals",
     terminalId,
     "resize",
@@ -140,23 +140,23 @@ export function terminalResizeEndpoint(
 export function terminalWebSocketEndpoint(
   terminalId: string,
   after = 0,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const query = new URLSearchParams({ after: String(after) });
-  return `${localCompatibleDashboardApiRoute(serverId, ["terminals", terminalId, "socket"])}?${query.toString()}`;
+  return `${localCompatibleDashboardApiRoute(serverRoute, ["terminals", terminalId, "socket"])}?${query.toString()}`;
 }
 
 export function terminalWebSocketUrl(
   terminalId: string,
   after = 0,
   locationLike = window.location,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   // HINT: Implementation should use this helper when attaching xterm panes and
   // tests should assert live panes do not continue periodic output polling once
   // this socket is open.
   const protocol = locationLike.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${locationLike.host}${terminalWebSocketEndpoint(terminalId, after, serverId)}`;
+  return `${protocol}//${locationLike.host}${terminalWebSocketEndpoint(terminalId, after, serverRoute)}`;
 }
 
 export function terminalWebSocketCursor(pane: TerminalPaneState) {
@@ -165,18 +165,18 @@ export function terminalWebSocketCursor(pane: TerminalPaneState) {
 
 export function terminalCloseEndpoint(
   terminalId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, ["terminals", terminalId]);
+  return localCompatibleDashboardApiRoute(serverRoute, ["terminals", terminalId]);
 }
 
 export async function createTerminal(
   workRootId: string,
   options: TerminalCreateOptions = {},
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const response = await fetch(
-    workRootTerminalsEndpoint(workRootId, serverId),
+    workRootTerminalsEndpoint(workRootId, serverRoute),
     {
       method: "POST",
       headers: {
@@ -196,16 +196,16 @@ export async function createTerminal(
   }
   return {
     ...((await response.json()) as TerminalSessionView),
-    serverId: serverId ?? LOCAL_DASHBOARD_SERVER_ID,
+    serverRoute: serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE,
   };
 }
 
 export async function listTerminals(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const response = await fetch(
-    workRootTerminalsEndpoint(workRootId, serverId),
+    workRootTerminalsEndpoint(workRootId, serverRoute),
     {
       headers: { Accept: "application/json" },
     },
@@ -215,17 +215,17 @@ export async function listTerminals(
   }
   return ((await response.json()) as TerminalSessionView[]).map((session) => ({
     ...session,
-    serverId: session.serverId ?? serverId ?? LOCAL_DASHBOARD_SERVER_ID,
+    serverRoute: session.serverRoute ?? serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE,
   }));
 }
 
 export async function fetchTerminalOutput(
   terminalId: string,
   after: number,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const response = await fetch(
-    terminalOutputEndpoint(terminalId, after, serverId),
+    terminalOutputEndpoint(terminalId, after, serverRoute),
     {
       headers: { Accept: "application/json" },
     },
@@ -239,9 +239,9 @@ export async function fetchTerminalOutput(
 export async function sendTerminalInput(
   terminalId: string,
   data: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  const response = await fetch(terminalInputEndpoint(terminalId, serverId), {
+  const response = await fetch(terminalInputEndpoint(terminalId, serverRoute), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ data }),
@@ -255,10 +255,10 @@ export async function resizeTerminal(
   terminalId: string,
   columns: number,
   rows: number,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const size = validateTerminalSize(columns, rows);
-  const response = await fetch(terminalResizeEndpoint(terminalId, serverId), {
+  const response = await fetch(terminalResizeEndpoint(terminalId, serverRoute), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(size),
@@ -271,9 +271,9 @@ export async function resizeTerminal(
 
 export async function closeTerminal(
   terminalId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  const response = await fetch(terminalCloseEndpoint(terminalId, serverId), {
+  const response = await fetch(terminalCloseEndpoint(terminalId, serverRoute), {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -284,20 +284,20 @@ export async function closeTerminal(
 export function terminalPaneLogicalKey(
   workRootId: string,
   terminalId: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
   return [
     "persistentTerminal",
-    serverScopedIdentity(serverId, workRootId),
+    serverScopedIdentity(serverRoute, workRootId),
     terminalId,
   ].join("/");
 }
 
 export function terminalPaneId(
   terminalId: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
-  return `terminal:${encodeURIComponent(serverScopedIdentity(serverId, terminalId))}`;
+  return `terminal:${encodeURIComponent(serverScopedIdentity(serverRoute, terminalId))}`;
 }
 
 export function terminalPaneFromSession(
@@ -308,9 +308,9 @@ export function terminalPaneFromSession(
     logicalKey: terminalPaneLogicalKey(
       session.workRootId,
       session.terminalId,
-      session.serverId,
+      session.serverRoute,
     ),
-    paneId: terminalPaneId(session.terminalId, session.serverId),
+    paneId: terminalPaneId(session.terminalId, session.serverRoute),
     output: "",
     nextSequence: 0,
     error: null,
@@ -326,7 +326,7 @@ export function terminalRestoreIntentsFromPanes(
   return panes
     .filter((pane) => pane.session.status === "running")
     .map((pane) => ({
-      serverId: pane.session.serverId ?? LOCAL_DASHBOARD_SERVER_ID,
+      serverRoute: pane.session.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE,
       workRootId: pane.session.workRootId,
       title: pane.session.title,
       cwdHint: pane.session.cwdHint,
@@ -337,12 +337,12 @@ export function terminalRestoreIntentsFromPanes(
 export function terminalRestoreIntentsForWorkRoot(
   intents: TerminalRestoreIntent[],
   workRootId: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): TerminalRestoreIntent[] {
   return intents.filter(
     (intent) =>
-      (intent.serverId ?? LOCAL_DASHBOARD_SERVER_ID) ===
-        (serverId || LOCAL_DASHBOARD_SERVER_ID) &&
+      (intent.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) ===
+        (serverRoute || LOCAL_DASHBOARD_SERVER_ROUTE) &&
       intent.workRootId === workRootId,
   );
 }
@@ -351,18 +351,18 @@ export function replaceTerminalRestoreIntentsForWorkRoot(
   current: TerminalRestoreIntent[],
   workRootId: string,
   nextForRoot: TerminalRestoreIntent[],
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): TerminalRestoreIntent[] {
-  const scopedServerId = serverId || LOCAL_DASHBOARD_SERVER_ID;
+  const scopedServerId = serverRoute || LOCAL_DASHBOARD_SERVER_ROUTE;
   return [
     ...current.filter(
       (intent) =>
-        (intent.serverId ?? LOCAL_DASHBOARD_SERVER_ID) !== scopedServerId ||
+        (intent.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) !== scopedServerId ||
         intent.workRootId !== workRootId,
     ),
     ...nextForRoot.filter(
       (intent) =>
-        (intent.serverId ?? LOCAL_DASHBOARD_SERVER_ID) === scopedServerId &&
+        (intent.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) === scopedServerId &&
         intent.workRootId === workRootId,
     ),
   ];
@@ -408,10 +408,10 @@ export function loadTerminalRestoreIntents(
       }
       return [
         {
-          serverId:
-            typeof record.serverId === "string"
-              ? record.serverId.trim() || LOCAL_DASHBOARD_SERVER_ID
-              : LOCAL_DASHBOARD_SERVER_ID,
+          serverRoute:
+            typeof record.serverRoute === "string"
+              ? record.serverRoute.trim() || LOCAL_DASHBOARD_SERVER_ROUTE
+              : LOCAL_DASHBOARD_SERVER_ROUTE,
           workRootId: record.workRootId,
           title: record.title.trim() || "Terminal",
           cwdHint: cwdHint?.trim() ? cwdHint.trim() : null,
@@ -455,14 +455,14 @@ export function reconcileListedTerminalSessions(
   workRootId: string,
   sessions: TerminalSessionView[],
   pruneStartedAtMs = Number.POSITIVE_INFINITY,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
   const liveKeys = new Set(
     sessions.map((session) =>
       terminalPaneLogicalKey(
         session.workRootId,
         session.terminalId,
-        session.serverId,
+        session.serverRoute,
       ),
     ),
   );
@@ -470,8 +470,8 @@ export function reconcileListedTerminalSessions(
     Object.entries(current).filter(
       ([key, pane]) =>
         pane.session.workRootId !== workRootId ||
-        (pane.session.serverId ?? LOCAL_DASHBOARD_SERVER_ID) !==
-          (serverId || LOCAL_DASHBOARD_SERVER_ID) ||
+        (pane.session.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) !==
+          (serverRoute || LOCAL_DASHBOARD_SERVER_ROUTE) ||
         liveKeys.has(key) ||
         pane.localCreatedAtMs > pruneStartedAtMs,
     ),
@@ -488,7 +488,7 @@ export function mergeListedTerminalSessions(
     const key = terminalPaneLogicalKey(
       session.workRootId,
       session.terminalId,
-      session.serverId,
+      session.serverRoute,
     );
     next[key] = next[key]
       ? { ...next[key], session }

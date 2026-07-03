@@ -66,24 +66,47 @@ assertEqual(
 );
 
 assertEqual(
-  rootPickerListEndpoint(null, "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/root-picker",
+  rootPickerListEndpoint(null, "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/root-picker",
   "server-scoped picker endpoint encodes server id",
 );
 assertEqual(
-  rootPickerListEndpoint("C:/Users/Test Root", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/root-picker?path=C%3A%2FUsers%2FTest+Root",
+  rootPickerListEndpoint("C:/Users/Test Root", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/root-picker?path=C%3A%2FUsers%2FTest+Root",
   "server-scoped picker endpoint keeps host path only as query data",
 );
 assertEqual(
-  serverRootPickerCreateDirectoryEndpoint("server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/root-picker/directories",
+  serverRootPickerCreateDirectoryEndpoint("server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/root-picker/directories",
   "server-scoped create-directory endpoint encodes server id",
 );
 assertEqual(
-  serverRootPickerPinsEndpoint("server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/root-picker/pins",
+  serverRootPickerPinsEndpoint("server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/root-picker/pins",
   "server-scoped pins endpoint encodes server id",
+);
+
+function assertThrows(fn: () => unknown, label: string) {
+  let threw = false;
+  try {
+    fn();
+  } catch {
+    threw = true;
+  }
+  if (!threw) {
+    throw new Error(`${label}: expected a thrown error`);
+  }
+}
+
+// Dot is reserved as a future hop separator, so a dotted route segment must be
+// rejected by the canonical server route builder rather than URL-encoded.
+assertThrows(
+  () => rootPickerListEndpoint(null, "server.remote"),
+  "dotted server route is rejected by the canonical route builder",
+);
+assertThrows(
+  () => serverRootPickerPinsEndpoint("server remote/1"),
+  "route segment with reserved characters is rejected",
 );
 assertEqual(
   serverRootPickerEndpoint("server-local"),

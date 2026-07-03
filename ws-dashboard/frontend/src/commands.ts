@@ -1,4 +1,4 @@
-import { LOCAL_DASHBOARD_SERVER_ID } from "./resourceModel.js";
+import { LOCAL_DASHBOARD_SERVER_ROUTE } from "./resourceModel.js";
 export type DashboardCommandId =
   | "dashboard.refresh"
   | "workspace.menu.open"
@@ -106,7 +106,7 @@ export type DashboardCommandPayload =
 
 export type DashboardCommand = {
   commandId: DashboardCommandId;
-  payload: DashboardCommandPayload & { readonly serverId?: string };
+  payload: DashboardCommandPayload & { readonly serverRoute?: string };
 };
 
 export type DashboardCommandEntry = {
@@ -132,198 +132,198 @@ export function buildDashboardRefreshCommand(): DashboardCommand {
 
 export function buildWorkRootOpenCommand(
   _submittedHostPath: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "workRoot.open",
-    payload: { type: "workRoot.open", serverId },
+    payload: { type: "workRoot.open", serverRoute },
   };
 }
 
 export function buildRootPickerOpenCommand(
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.open",
-    payload: { type: "rootPicker.open", serverId },
+    payload: { type: "rootPicker.open", serverRoute },
   };
 }
 
 export function buildRootPickerCloseCommand(
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.close",
-    payload: { type: "rootPicker.close", serverId },
+    payload: { type: "rootPicker.close", serverRoute },
   };
 }
 
 export function buildRootPickerNavigateCommand(
   _targetPath: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.navigate",
-    payload: { type: "rootPicker.navigate", serverId },
+    payload: { type: "rootPicker.navigate", serverRoute },
   };
 }
 
 export function buildRootPickerSelectDirectoryCommand(
   _targetPath: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.selectDirectory",
-    payload: { type: "rootPicker.selectDirectory", serverId },
+    payload: { type: "rootPicker.selectDirectory", serverRoute },
   };
 }
 
 export function buildRootPickerCreateDirectoryCommand(
   _parentPath: string,
   _name: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.createDirectory",
-    payload: { type: "rootPicker.createDirectory", serverId },
+    payload: { type: "rootPicker.createDirectory", serverRoute },
   };
 }
 
 export function buildRootPickerPinDirectoryCommand(
   _path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.pinDirectory",
-    payload: { type: "rootPicker.pinDirectory", serverId },
+    payload: { type: "rootPicker.pinDirectory", serverRoute },
   };
 }
 
 export function buildRootPickerUnpinDirectoryCommand(
   _path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "rootPicker.unpinDirectory",
-    payload: { type: "rootPicker.unpinDirectory", serverId },
+    payload: { type: "rootPicker.unpinDirectory", serverRoute },
   };
 }
 
 export function buildWorkspaceMenuOpenCommand(
   workspaceId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "workspace.menu.open",
-    payload: { type: "workspace.menu.open", serverId, workspaceId },
+    payload: { type: "workspace.menu.open", serverRoute, workspaceId },
   };
 }
 
 export function buildGitWorktreeAddOpenCommand(
   workspaceId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "gitWorktreeAdd.open",
-    payload: { type: "gitWorktreeAdd.open", serverId, workspaceId },
+    payload: { type: "gitWorktreeAdd.open", serverRoute, workspaceId },
   };
 }
 
 export function buildGitWorktreeAddCloseCommand(
   workspaceId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "gitWorktreeAdd.close",
-    payload: { type: "gitWorktreeAdd.close", serverId, workspaceId },
+    payload: { type: "gitWorktreeAdd.close", serverRoute, workspaceId },
   };
 }
 
 export function buildGitWorktreeAddSubmitCommand(
   workspaceId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "gitWorktreeAdd.submit",
-    payload: { type: "gitWorktreeAdd.submit", serverId, workspaceId },
+    payload: { type: "gitWorktreeAdd.submit", serverRoute, workspaceId },
   };
 }
 
 export function buildGitRefreshCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.refresh",
-    payload: { type: "git.refresh", serverId, workRootId },
+    payload: { type: "git.refresh", serverRoute, workRootId },
   };
 }
 export function buildGitFetchCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.fetch",
-    payload: { type: "git.fetch", serverId, workRootId },
+    payload: { type: "git.fetch", serverRoute, workRootId },
   };
 }
 export function buildGitPushCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.push",
-    payload: { type: "git.push", serverId, workRootId },
+    payload: { type: "git.push", serverRoute, workRootId },
   };
 }
 export function buildGitPullFfOnlyCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.pullFfOnly",
-    payload: { type: "git.pullFfOnly", serverId, workRootId },
+    payload: { type: "git.pullFfOnly", serverRoute, workRootId },
   };
 }
 export function buildGitBranchMenuOpenCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.branchMenu.open",
-    payload: { type: "git.branchMenu.open", serverId, workRootId },
+    payload: { type: "git.branchMenu.open", serverRoute, workRootId },
   };
 }
 export function buildGitBranchSwitchCommand(
   workRootId: string,
   branchName: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.branch.switch",
-    payload: { type: "git.branch.switch", serverId, workRootId, branchName },
+    payload: { type: "git.branch.switch", serverRoute, workRootId, branchName },
   };
 }
 export function buildGitBranchCreateOpenCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.branchCreate.open",
-    payload: { type: "git.branchCreate.open", serverId, workRootId },
+    payload: { type: "git.branchCreate.open", serverRoute, workRootId },
   };
 }
 export function buildGitBranchCreateSubmitCommand(
   workRootId: string,
   branchName: string,
   baseBranch?: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.branchCreate.submit",
     payload: {
       type: "git.branchCreate.submit",
-      serverId,
+      serverRoute,
       workRootId,
       branchName,
       baseBranch,
@@ -332,34 +332,34 @@ export function buildGitBranchCreateSubmitCommand(
 }
 export function buildGitBranchCreateCloseCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "git.branchCreate.close",
-    payload: { type: "git.branchCreate.close", serverId, workRootId },
+    payload: { type: "git.branchCreate.close", serverRoute, workRootId },
   };
 }
 
 export function buildWorkspaceRemoveCommand(
   workspaceId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "workspace.remove",
-    payload: { type: "workspace.remove", serverId, workspaceId },
+    payload: { type: "workspace.remove", serverRoute, workspaceId },
   };
 }
 
 export function buildWorkRootActivationCommand(
   workRootId: string,
   activation: "online" | "offline",
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "workRoot.activation.set",
     payload: {
       type: "workRoot.activation.set",
-      serverId,
+      serverRoute,
       workRootId,
       activation,
     },
@@ -368,24 +368,24 @@ export function buildWorkRootActivationCommand(
 
 export function buildFileExplorerRefreshCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.refresh",
-    payload: { type: "fileExplorer.refresh", serverId, workRootId },
+    payload: { type: "fileExplorer.refresh", serverRoute, workRootId },
   };
 }
 
 export function buildFileExplorerToggleDirectoryCommand(
   workRootId: string,
   path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.toggleDirectory",
     payload: {
       type: "fileExplorer.toggleDirectory",
-      serverId,
+      serverRoute,
       workRootId,
       path,
     },
@@ -396,13 +396,13 @@ export function buildFileExplorerOpenFileCommand(
   workRootId: string,
   path: string,
   gesture: "singleClick" | "doubleClick",
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.openFile",
     payload: {
       type: "fileExplorer.openFile",
-      serverId,
+      serverRoute,
       workRootId,
       path,
       gesture,
@@ -413,74 +413,74 @@ export function buildFileExplorerOpenFileCommand(
 export function buildFileExplorerSelectEntryCommand(
   workRootId: string,
   path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "fileExplorer.selectEntry",
-    payload: { type: "fileExplorer.selectEntry", serverId, workRootId, path },
+    payload: { type: "fileExplorer.selectEntry", serverRoute, workRootId, path },
   };
 }
 
 export function buildWorkbenchOpenActivityCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "workbench.openActivity",
-    payload: { type: "workbench.openActivity", serverId, workRootId },
+    payload: { type: "workbench.openActivity", serverRoute, workRootId },
   };
 }
 
 export function buildTerminalCreateCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "terminal.create",
-    payload: { type: "terminal.create", serverId, workRootId },
+    payload: { type: "terminal.create", serverRoute, workRootId },
   };
 }
 
 export function buildActivitySelectItemCommand(
   activityId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "activity.selectItem",
-    payload: { type: "activity.selectItem", serverId, activityId },
+    payload: { type: "activity.selectItem", serverRoute, activityId },
   };
 }
 
 export function buildActivityTranscriptLoadMoreCommand(
   activityId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "activity.transcript.loadMore",
-    payload: { type: "activity.transcript.loadMore", serverId, activityId },
+    payload: { type: "activity.transcript.loadMore", serverRoute, activityId },
   };
 }
 
 export function buildActivityRefreshCommand(
   workRootId: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "activity.refresh",
-    payload: { type: "activity.refresh", serverId, workRootId },
+    payload: { type: "activity.refresh", serverRoute, workRootId },
   };
 }
 
 export function buildActivityDetailToggleCommand(
   activityId: string,
   detailKey: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "activity.detail.toggle",
     payload: {
       type: "activity.detail.toggle",
-      serverId,
+      serverRoute,
       activityId,
       detailKey,
     },
@@ -490,13 +490,13 @@ export function buildActivityDetailToggleCommand(
 export function buildDocumentTranslationToggleCommand(
   workRootId: string,
   path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "document.translation.toggle",
     payload: {
       type: "document.translation.toggle",
-      serverId,
+      serverRoute,
       workRootId,
       path,
     },
@@ -507,33 +507,33 @@ export function buildDocumentModeSetCommand(
   workRootId: string,
   path: string,
   mode: "view" | "edit",
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "document.mode.set",
-    payload: { type: "document.mode.set", serverId, workRootId, path, mode },
+    payload: { type: "document.mode.set", serverRoute, workRootId, path, mode },
   };
 }
 
 export function buildDocumentSaveCommand(
   workRootId: string,
   path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "document.save",
-    payload: { type: "document.save", serverId, workRootId, path },
+    payload: { type: "document.save", serverRoute, workRootId, path },
   };
 }
 
 export function buildDocumentRevertCommand(
   workRootId: string,
   path: string,
-  serverId: string = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): DashboardCommand {
   return {
     commandId: "document.revert",
-    payload: { type: "document.revert", serverId, workRootId, path },
+    payload: { type: "document.revert", serverRoute, workRootId, path },
   };
 }
 

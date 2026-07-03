@@ -27,8 +27,8 @@ function assertNotContains(value: string, forbidden: string, label: string) {
 
 const privatePath = "/Users/example/private/repo";
 assertEqual(
-  gitBase("root/id", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/git",
+  gitBase("root/id", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Fid/git",
   "server-scoped Git base encodes server id and workRoot id",
 );
 assertEqual(

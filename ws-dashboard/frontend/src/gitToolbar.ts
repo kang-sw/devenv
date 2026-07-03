@@ -61,8 +61,8 @@ export type GitRefreshSchedulerEnvironment = {
   clearInterval: (handle: number) => void;
 };
 
-export const gitBase = (workRootId: string, serverId?: string | null) =>
-  localCompatibleDashboardApiRoute(serverId, ["work-roots", workRootId, "git"]);
+export const gitBase = (workRootId: string, serverRoute?: string | null) =>
+  localCompatibleDashboardApiRoute(serverRoute, ["work-roots", workRootId, "git"]);
 
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
   if (!response.ok) {
@@ -76,9 +76,9 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
 
 export async function fetchWorkRootGitStatus(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId, serverId)}/status`, {
+  const response = await fetch(`${gitBase(workRootId, serverRoute)}/status`, {
     headers: { Accept: "application/json" },
   });
   return readJson<WorkRootGitStatus>(response, "git status failed");
@@ -86,9 +86,9 @@ export async function fetchWorkRootGitStatus(
 
 export async function fetchWorkRootGitBranches(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<GitBranchList> {
-  const response = await fetch(`${gitBase(workRootId, serverId)}/branches`, {
+  const response = await fetch(`${gitBase(workRootId, serverRoute)}/branches`, {
     headers: { Accept: "application/json" },
   });
   return readJson<GitBranchList>(response, "git branches failed");
@@ -97,10 +97,10 @@ export async function fetchWorkRootGitBranches(
 export async function switchWorkRootGitBranch(
   workRootId: string,
   branchName: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
   const response = await fetch(
-    `${gitBase(workRootId, serverId)}/switch-branch`,
+    `${gitBase(workRootId, serverRoute)}/switch-branch`,
     {
       method: "POST",
       headers: {
@@ -117,9 +117,9 @@ export async function createWorkRootGitBranch(
   workRootId: string,
   branchName: string,
   baseBranch?: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId, serverId)}/branches`, {
+  const response = await fetch(`${gitBase(workRootId, serverRoute)}/branches`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ branchName, baseBranch, switchTo: true }),
@@ -129,9 +129,9 @@ export async function createWorkRootGitBranch(
 
 export async function fetchWorkRootGit(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId, serverId)}/fetch`, {
+  const response = await fetch(`${gitBase(workRootId, serverRoute)}/fetch`, {
     method: "POST",
     headers: { Accept: "application/json" },
   });
@@ -140,9 +140,9 @@ export async function fetchWorkRootGit(
 
 export async function pushWorkRootGit(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
-  const response = await fetch(`${gitBase(workRootId, serverId)}/push`, {
+  const response = await fetch(`${gitBase(workRootId, serverRoute)}/push`, {
     method: "POST",
     headers: { Accept: "application/json" },
   });
@@ -151,10 +151,10 @@ export async function pushWorkRootGit(
 
 export async function pullWorkRootGitFfOnly(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootGitStatus> {
   const response = await fetch(
-    `${gitBase(workRootId, serverId)}/pull-ff-only`,
+    `${gitBase(workRootId, serverRoute)}/pull-ff-only`,
     { method: "POST", headers: { Accept: "application/json" } },
   );
   return readJson<WorkRootGitStatus>(response, "git pull --ff-only failed");

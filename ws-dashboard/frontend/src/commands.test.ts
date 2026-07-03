@@ -205,7 +205,7 @@ const otherRemoteFileCommand = buildFileExplorerOpenFileCommand(
   "server-b",
 );
 assertEqual(
-  remoteFileCommand.payload.serverId,
+  remoteFileCommand.payload.serverRoute,
   "server-a",
   "file command payload carries server id for execution routing",
 );
@@ -216,17 +216,17 @@ assertEqual(
   "same bare file command identity does not collapse across servers",
 );
 assertEqual(
-  buildTerminalCreateCommand("root-same", "server-a").payload.serverId,
+  buildTerminalCreateCommand("root-same", "server-a").payload.serverRoute,
   "server-a",
   "terminal command payload carries server id",
 );
 assertEqual(
-  buildActivitySelectItemCommand("activity-same", "server-a").payload.serverId,
+  buildActivitySelectItemCommand("activity-same", "server-a").payload.serverRoute,
   "server-a",
   "activity command payload carries server id",
 );
 assertEqual(
-  buildWorkRootOpenCommand("/private/path", "server-a").payload.serverId,
+  buildWorkRootOpenCommand("/private/path", "server-a").payload.serverRoute,
   "server-a",
   "open workRoot command payload keeps server id while omitting host path",
 );

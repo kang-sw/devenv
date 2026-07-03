@@ -94,23 +94,23 @@ assertEqual(
 );
 
 assertEqual(
-  workRootFilesEndpoint("root/id", "src/main.ts", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/files?path=src%2Fmain.ts",
+  workRootFilesEndpoint("root/id", "src/main.ts", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Fid/files?path=src%2Fmain.ts",
   "server-scoped file listing endpoint encodes server id and nested ids",
 );
 assertEqual(
-  workRootFileReadEndpoint("root/id", "docs/read me.md", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/files/read?path=docs%2Fread+me.md",
+  workRootFileReadEndpoint("root/id", "docs/read me.md", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Fid/files/read?path=docs%2Fread+me.md",
   "server-scoped file read endpoint encodes server id and relative path",
 );
 assertEqual(
-  workRootFileWriteEndpoint("root/id", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/files/write",
+  workRootFileWriteEndpoint("root/id", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Fid/files/write",
   "server-scoped file write endpoint encodes server id",
 );
 assertEqual(
-  workRootDocumentEventsEndpoint("root/id", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Fid/documents/events",
+  workRootDocumentEventsEndpoint("root/id", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Fid/documents/events",
   "server-scoped document events endpoint encodes server id",
 );
 

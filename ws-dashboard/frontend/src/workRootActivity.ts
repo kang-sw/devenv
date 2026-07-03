@@ -1,6 +1,6 @@
 import { apiErrorDetail } from "./apiError.js";
 import {
-  LOCAL_DASHBOARD_SERVER_ID,
+  LOCAL_DASHBOARD_SERVER_ROUTE,
   localCompatibleDashboardApiRoute,
   serverScopedIdentity,
 } from "./resourceModel.js";
@@ -144,7 +144,7 @@ export type ActivityConsoleEventApplication = {
 };
 
 export type ActivityConsoleStreamRequest = {
-  readonly serverId?: string;
+  readonly serverRoute?: string;
   readonly workRootId: string;
   readonly requestId: number;
 };
@@ -152,19 +152,19 @@ export type ActivityConsoleStreamRequest = {
 export function activityStreamKey(
   workRootId: string,
   activityId: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
-  return serverScopedIdentity(serverId, workRootId, activityId);
+  return serverScopedIdentity(serverRoute, workRootId, activityId);
 }
 
 export function workRootActivityEventsEndpoint(
   workRootId: string,
   options: {
     readonly after?: string | null;
-    readonly serverId?: string | null;
+    readonly serverRoute?: string | null;
   } = {},
 ) {
-  const path = localCompatibleDashboardApiRoute(options.serverId, [
+  const path = localCompatibleDashboardApiRoute(options.serverRoute, [
     "work-roots",
     workRootId,
     "activity",
@@ -307,14 +307,14 @@ export function applyActivityConsoleEvent(
 export function shouldApplyActivityStreamRequest(
   expected: ActivityConsoleStreamRequest,
   current: {
-    readonly serverId?: string | null;
+    readonly serverRoute?: string | null;
     readonly workRootId: string | null;
     readonly requestId: number;
   },
 ): boolean {
   return (
-    (current.serverId ?? LOCAL_DASHBOARD_SERVER_ID) ===
-      (expected.serverId ?? LOCAL_DASHBOARD_SERVER_ID) &&
+    (current.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) ===
+      (expected.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) &&
     expected.workRootId === current.workRootId &&
     expected.requestId === current.requestId
   );
@@ -322,23 +322,23 @@ export function shouldApplyActivityStreamRequest(
 
 export type WorkRootActivityFetchOptions = {
   readonly recentLimit?: number;
-  readonly serverId?: string | null;
+  readonly serverRoute?: string | null;
 };
 
 export type ActivityTranscriptFetchOptions = {
   readonly cursor?: string;
   readonly before?: string;
   readonly limit?: number;
-  readonly serverId?: string | null;
+  readonly serverRoute?: string | null;
 };
 
 export function workRootActivityEndpoint(
   workRootId: string,
   options: WorkRootActivityFetchOptions & {
-    readonly serverId?: string | null;
+    readonly serverRoute?: string | null;
   } = {},
 ) {
-  const path = localCompatibleDashboardApiRoute(options.serverId, [
+  const path = localCompatibleDashboardApiRoute(options.serverRoute, [
     "work-roots",
     workRootId,
     "activity",
@@ -355,10 +355,10 @@ export function workRootActivityTranscriptEndpoint(
   workRootId: string,
   activityId: string,
   options: ActivityTranscriptFetchOptions & {
-    readonly serverId?: string | null;
+    readonly serverRoute?: string | null;
   } = {},
 ) {
-  const path = localCompatibleDashboardApiRoute(options.serverId, [
+  const path = localCompatibleDashboardApiRoute(options.serverRoute, [
     "work-roots",
     workRootId,
     "activity",

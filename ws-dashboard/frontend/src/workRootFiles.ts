@@ -1,6 +1,6 @@
 import { apiErrorDetail } from "./apiError.js";
 import {
-  LOCAL_DASHBOARD_SERVER_ID,
+  LOCAL_DASHBOARD_SERVER_ROUTE,
   localCompatibleDashboardApiRoute,
   serverScopedIdentity,
 } from "./resourceModel.js";
@@ -17,7 +17,7 @@ export type WorkRootFileEntryView = {
 };
 
 export type WorkRootFileListView = {
-  serverId: string;
+  serverRoute: string;
   workRootId: string;
   path: string;
   status: "ok" | string;
@@ -25,7 +25,7 @@ export type WorkRootFileListView = {
 };
 
 export type WorkRootTextFileView = {
-  serverId?: string;
+  serverRoute?: string;
   workRootId: string;
   path: string;
   name: string;
@@ -46,7 +46,7 @@ export type ReadOnlyFilePane = {
   id: string;
   logicalKey: string;
   mode: ReadOnlyFilePaneMode;
-  serverId: string;
+  serverRoute: string;
   workRootId: string;
   path: string;
   title: string;
@@ -103,9 +103,9 @@ export function documentSaveStateForError(
 export function readOnlyFilePaneSourceKey(
   workRootId: string,
   path: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
-  return `${serverScopedIdentity(serverId, workRootId)}\0${path}`;
+  return `${serverScopedIdentity(serverRoute, workRootId)}\0${path}`;
 }
 
 export function applyReadOnlyFilePaneSourceContent(
@@ -115,7 +115,7 @@ export function applyReadOnlyFilePaneSourceContent(
   return Object.fromEntries(
     Object.entries(panes).map(([key, pane]) => [
       key,
-      (file.serverId ?? LOCAL_DASHBOARD_SERVER_ID) === pane.serverId &&
+      (file.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) === pane.serverRoute &&
       pane.workRootId === file.workRootId &&
       pane.path === file.path
         ? applyReadOnlyFilePaneContent(pane, file)
@@ -129,12 +129,12 @@ export function applyReadOnlyFilePaneSourceError(
   workRootId: string,
   path: string,
   message: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): Record<string, ReadOnlyFilePane> {
   return Object.fromEntries(
     Object.entries(panes).map(([key, pane]) => [
       key,
-      pane.serverId === (serverId || LOCAL_DASHBOARD_SERVER_ID) &&
+      pane.serverRoute === (serverRoute || LOCAL_DASHBOARD_SERVER_ROUTE) &&
       pane.workRootId === workRootId &&
       pane.path === path
         ? applyReadOnlyFilePaneError(pane, message)
@@ -144,7 +144,7 @@ export function applyReadOnlyFilePaneSourceError(
 }
 
 type ReadOnlyFilePaneDescriptor = {
-  serverId: string;
+  serverRoute: string;
   workRootId: string;
   path: string;
   mode: ReadOnlyFilePaneMode;
@@ -182,9 +182,9 @@ export const idleDirectoryLoadState = (): DirectoryLoadState => ({
 export function workRootFilesEndpoint(
   workRootId: string,
   path = "",
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  const endpoint = localCompatibleDashboardApiRoute(serverId, [
+  const endpoint = localCompatibleDashboardApiRoute(serverRoute, [
     "work-roots",
     workRootId,
     "files",
@@ -200,19 +200,19 @@ export function workRootFilesEndpoint(
 export function workRootFileReadEndpoint(
   workRootId: string,
   path: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
   const query = new URLSearchParams({ path });
-  return `${localCompatibleDashboardApiRoute(serverId, ["work-roots", workRootId, "files", "read"])}?${query.toString()}`;
+  return `${localCompatibleDashboardApiRoute(serverRoute, ["work-roots", workRootId, "files", "read"])}?${query.toString()}`;
 }
 
 export async function fetchWorkRootTextFile(
   workRootId: string,
   path: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootTextFileView> {
   const response = await fetch(
-    workRootFileReadEndpoint(workRootId, path, serverId),
+    workRootFileReadEndpoint(workRootId, path, serverRoute),
     {
       headers: { Accept: "application/json" },
     },
@@ -248,9 +248,9 @@ export type WorkRootDocumentEvent = {
 
 export function workRootDocumentEventsEndpoint(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "work-roots",
     workRootId,
     "documents",
@@ -289,9 +289,9 @@ export function parseWorkRootDocumentEvent(
 
 export function workRootFileWriteEndpoint(
   workRootId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "work-roots",
     workRootId,
     "files",
@@ -302,10 +302,10 @@ export function workRootFileWriteEndpoint(
 export async function writeWorkRootTextFile(
   workRootId: string,
   request: WorkRootFileWriteRequest,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootFileWriteResponse> {
   const response = await fetch(
-    workRootFileWriteEndpoint(workRootId, serverId),
+    workRootFileWriteEndpoint(workRootId, serverRoute),
     {
       method: "POST",
       headers: {
@@ -349,9 +349,9 @@ export function readOnlyFilePaneLogicalKey(
   workRootId: string,
   path: string,
   mode: ReadOnlyFilePaneMode = "pinned",
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
-  const scopedRoot = serverScopedIdentity(serverId, workRootId);
+  const scopedRoot = serverScopedIdentity(serverRoute, workRootId);
   if (mode === "preview") {
     return ["editor-preview", scopedRoot].join("/");
   }
@@ -363,9 +363,9 @@ export function readOnlyFilePaneId(
   workRootId: string,
   path: string,
   mode: ReadOnlyFilePaneMode = "pinned",
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ) {
-  const scopedRoot = serverScopedIdentity(serverId, workRootId);
+  const scopedRoot = serverScopedIdentity(serverRoute, workRootId);
   if (mode === "preview") {
     return `readonly-preview:${encodeURIComponent(scopedRoot)}`;
   }
@@ -377,17 +377,17 @@ export function createLoadingReadOnlyFilePane(
   workRootId: string,
   path: string,
   mode: ReadOnlyFilePaneMode = "pinned",
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): ReadOnlyFilePane {
   // CONTRACT: Preview panes are one replaceable logical surface per workRoot;
   // pinned panes remain file-path-addressed stable tabs. App-level single-click
   // and double-click handlers must choose the mode, then placement policy
   // focuses existing pinned files or replaces the preview pane.
   return {
-    id: readOnlyFilePaneId(workRootId, path, mode, serverId),
-    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path, mode, serverId),
+    id: readOnlyFilePaneId(workRootId, path, mode, serverRoute),
+    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path, mode, serverRoute),
     mode,
-    serverId: serverId || LOCAL_DASHBOARD_SERVER_ID,
+    serverRoute: serverRoute || LOCAL_DASHBOARD_SERVER_ROUTE,
     workRootId,
     path,
     title: fileNameFromPath(path),
@@ -442,7 +442,7 @@ export function readOnlyFilePaneRestoreSnapshot(
       panes.map((pane) => [
         pane.logicalKey,
         createRestoredReadOnlyFilePane({
-          serverId: pane.serverId,
+          serverRoute: pane.serverRoute,
           workRootId: pane.workRootId,
           path: pane.path,
           mode: pane.mode,
@@ -518,7 +518,7 @@ export function saveReadOnlyFilePaneRestoreSnapshot(
         version: 1,
         panes: panes.map(
           (pane): ReadOnlyFilePaneDescriptor => ({
-            serverId: pane.serverId,
+            serverRoute: pane.serverRoute,
             workRootId: pane.workRootId,
             path: pane.path,
             mode: pane.mode,
@@ -536,10 +536,10 @@ export function saveReadOnlyFilePaneRestoreSnapshot(
 export async function fetchWorkRootFiles(
   workRootId: string,
   path = "",
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<WorkRootFileListView> {
   const response = await fetch(
-    workRootFilesEndpoint(workRootId, path, serverId),
+    workRootFilesEndpoint(workRootId, path, serverRoute),
     {
       headers: { Accept: "application/json" },
     },
@@ -629,7 +629,7 @@ function createRestoredReadOnlyFilePane(
       descriptor.workRootId,
       descriptor.path,
       descriptor.mode,
-      descriptor.serverId,
+      descriptor.serverRoute,
     ),
     title: descriptor.title.trim() || fileNameFromPath(descriptor.path),
   };
@@ -662,10 +662,10 @@ function parseReadOnlyFilePaneDescriptor(
     return null;
   }
   return {
-    serverId:
-      typeof record.serverId === "string"
-        ? record.serverId.trim() || LOCAL_DASHBOARD_SERVER_ID
-        : LOCAL_DASHBOARD_SERVER_ID,
+    serverRoute:
+      typeof record.serverRoute === "string"
+        ? record.serverRoute.trim() || LOCAL_DASHBOARD_SERVER_ROUTE
+        : LOCAL_DASHBOARD_SERVER_ROUTE,
     workRootId,
     path,
     mode: record.mode,

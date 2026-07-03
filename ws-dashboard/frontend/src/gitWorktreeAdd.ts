@@ -51,9 +51,9 @@ export type AddGitWorktreeResponse = {
 
 export const gitWorktreeAddBase = (
   workspaceId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) =>
-  localCompatibleDashboardApiRoute(serverId, [
+  localCompatibleDashboardApiRoute(serverRoute, [
     "workspaces",
     workspaceId,
     "git-worktree-add",
@@ -120,10 +120,10 @@ async function readSubmitResponse(
 
 export async function fetchGitWorktreeAddOptions(
   workspaceId: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<GitWorktreeAddOptions> {
   const response = await fetch(
-    `${gitWorktreeAddBase(workspaceId, serverId)}/options`,
+    `${gitWorktreeAddBase(workspaceId, serverRoute)}/options`,
     {
       headers: { Accept: "application/json" },
     },
@@ -137,10 +137,10 @@ export async function fetchGitWorktreeAddOptions(
 export async function previewGitWorktreeAdd(
   workspaceId: string,
   request: GitWorktreeAddPreviewRequest,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<GitWorktreeAddPreview> {
   const response = await fetch(
-    `${gitWorktreeAddBase(workspaceId, serverId)}/preview`,
+    `${gitWorktreeAddBase(workspaceId, serverRoute)}/preview`,
     {
       method: "POST",
       headers: {
@@ -159,9 +159,9 @@ export async function previewGitWorktreeAdd(
 export async function submitGitWorktreeAdd(
   workspaceId: string,
   request: AddGitWorktreeRequest,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<AddGitWorktreeResponse> {
-  const response = await fetch(gitWorktreeAddBase(workspaceId, serverId), {
+  const response = await fetch(gitWorktreeAddBase(workspaceId, serverRoute), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(request),

@@ -79,16 +79,16 @@ assertEqual(
 );
 
 assertEqual(
-  workRootActivityEndpoint("root/local test", { serverId: "server remote/1" }),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20test/activity",
+  workRootActivityEndpoint("root/local test", { serverRoute: "server-remote-1" }),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Flocal%20test/activity",
   "server-scoped activity endpoint encodes server id",
 );
 assertEqual(
   workRootActivityEndpoint("root-local-abc", {
     recentLimit: 30,
-    serverId: "server remote/1",
+    serverRoute: "server-remote-1",
   }),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root-local-abc/activity?recentLimit=30",
+  "/api/dashboard/servers/server-remote-1/work-roots/root-local-abc/activity?recentLimit=30",
   "server-scoped activity endpoint preserves recent-limit query",
 );
 
@@ -105,9 +105,9 @@ assertEqual(
 assertEqual(
   workRootActivityTranscriptEndpoint("root/local test", "agent/1", {
     cursor: "c 1",
-    serverId: "server remote/1",
+    serverRoute: "server-remote-1",
   }),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20test/activity/items/agent%2F1/transcript?cursor=c+1",
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Flocal%20test/activity/items/agent%2F1/transcript?cursor=c+1",
   "server-scoped transcript endpoint encodes server id, activity id, and cursor",
 );
 
@@ -120,9 +120,9 @@ assertEqual(
 assertEqual(
   workRootActivityEventsEndpoint("root/local test", {
     after: "cursor:1/2",
-    serverId: "server remote/1",
+    serverRoute: "server-remote-1",
   }),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20test/activity/events?after=cursor%3A1%2F2",
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Flocal%20test/activity/events?after=cursor%3A1%2F2",
   "server-scoped activity event endpoint encodes server id and after cursor",
 );
 assertEqual(
@@ -530,16 +530,16 @@ assertDeepEqual(
 
 assertEqual(
   shouldApplyActivityStreamRequest(
-    { serverId: "server-a", workRootId: "root-a", requestId: 1 },
-    { serverId: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverRoute: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverRoute: "server-a", workRootId: "root-a", requestId: 1 },
   ),
   true,
   "matching activity stream request may update state",
 );
 assertEqual(
   shouldApplyActivityStreamRequest(
-    { serverId: "server-a", workRootId: "root-a", requestId: 1 },
-    { serverId: "server-b", workRootId: "root-a", requestId: 1 },
+    { serverRoute: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverRoute: "server-b", workRootId: "root-a", requestId: 1 },
   ),
   false,
   "stale workRoot stream completions are ignored after root switch",

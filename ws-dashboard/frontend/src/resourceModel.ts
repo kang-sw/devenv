@@ -17,66 +17,79 @@ export type ActionHint = {
   enabled: boolean;
 };
 
-export const LOCAL_DASHBOARD_SERVER_ID = "server-local";
+export const LOCAL_DASHBOARD_SERVER_ROUTE = "server-local";
 
+// `serverId` is the ResourcePath wire field name; it carries the selected
+// Server Route, so this structural target reads it to resolve a route.
 export type ServerScopedRouteTarget = { readonly serverId?: string | null };
 
-export function dashboardServerId(
+export function dashboardServerRoute(
   target:
     | string
     | ServerScopedRouteTarget
     | null
-    | undefined = LOCAL_DASHBOARD_SERVER_ID,
+    | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): string {
   if (typeof target === "string") {
-    return target.trim() || LOCAL_DASHBOARD_SERVER_ID;
+    return target.trim() || LOCAL_DASHBOARD_SERVER_ROUTE;
   }
-  return target?.serverId?.trim() || LOCAL_DASHBOARD_SERVER_ID;
+  return target?.serverId?.trim() || LOCAL_DASHBOARD_SERVER_ROUTE;
 }
 
-export function isLocalDashboardServerId(
-  serverId: string | null | undefined,
+export function isLocalDashboardServerRoute(
+  serverRoute: string | null | undefined,
 ): boolean {
-  return dashboardServerId(serverId) === LOCAL_DASHBOARD_SERVER_ID;
+  return dashboardServerRoute(serverRoute) === LOCAL_DASHBOARD_SERVER_ROUTE;
 }
 
 export function dashboardApiRoute(segments: readonly string[]): string {
   return `/api/dashboard/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
 }
 
+// Dot is reserved as a future hop separator, so a single Server Route segment
+// must be dot-free. `server-local` and generated slugs already satisfy this;
+// this guard rejects dotted routes reaching the canonical builder.
+const SERVER_ROUTE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+export function isValidServerRouteSegment(serverRoute: string): boolean {
+  return SERVER_ROUTE_SEGMENT.test(serverRoute);
+}
+
 export function dashboardServerApiRoute(
-  serverId: string,
+  serverRoute: string,
   segments: readonly string[],
 ): string {
-  return dashboardApiRoute([
-    "servers",
-    dashboardServerId(serverId),
-    ...segments,
-  ]);
+  const route = dashboardServerRoute(serverRoute);
+  if (!isValidServerRouteSegment(route)) {
+    throw new Error(
+      `invalid server route segment: ${route} (dot is reserved as a hop separator)`,
+    );
+  }
+  return dashboardApiRoute(["servers", route, ...segments]);
 }
 
 export function localCompatibleDashboardApiRoute(
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
   localSegments: readonly string[],
   serverSegments: readonly string[] = localSegments,
 ): string {
-  return isLocalDashboardServerId(serverId)
+  return isLocalDashboardServerRoute(serverRoute)
     ? dashboardApiRoute(localSegments)
-    : dashboardServerApiRoute(dashboardServerId(serverId), serverSegments);
+    : dashboardServerApiRoute(dashboardServerRoute(serverRoute), serverSegments);
 }
 
 export function serverScopedIdentity(
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
   ...parts: readonly string[]
 ): string {
-  return [dashboardServerId(serverId), ...parts].join("/");
+  return [dashboardServerRoute(serverRoute), ...parts].join("/");
 }
 
 export function workRootActivationEndpoint(
   workRootId: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): string {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "work-roots",
     workRootId,
     "activation",
@@ -85,15 +98,16 @@ export function workRootActivationEndpoint(
 
 export function workspaceEndpoint(
   workspaceId: string,
-  serverId: string | null | undefined = LOCAL_DASHBOARD_SERVER_ID,
+  serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
 ): string {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "workspaces",
     workspaceId,
   ]);
 }
 
 export type ResourcePath = {
+  // Wire field name retained for compatibility; the value is a Server Route.
   serverId: string;
   workspaceId: string;
   workRootId: string;

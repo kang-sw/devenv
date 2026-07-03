@@ -49,30 +49,30 @@ export const rootPickerCreateDirectoryEndpoint =
   "/api/dashboard/root-picker/directories";
 export const rootPickerPinsEndpoint = "/api/dashboard/root-picker/pins";
 
-export function serverRootPickerEndpoint(serverId: string | null | undefined) {
-  return localCompatibleDashboardApiRoute(serverId, ["root-picker"]);
+export function serverRootPickerEndpoint(serverRoute: string | null | undefined) {
+  return localCompatibleDashboardApiRoute(serverRoute, ["root-picker"]);
 }
 
 export function serverRootPickerCreateDirectoryEndpoint(
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, [
+  return localCompatibleDashboardApiRoute(serverRoute, [
     "root-picker",
     "directories",
   ]);
 }
 
 export function serverRootPickerPinsEndpoint(
-  serverId: string | null | undefined,
+  serverRoute: string | null | undefined,
 ) {
-  return localCompatibleDashboardApiRoute(serverId, ["root-picker", "pins"]);
+  return localCompatibleDashboardApiRoute(serverRoute, ["root-picker", "pins"]);
 }
 
 export function rootPickerListEndpoint(
   path: string | null = null,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ) {
-  const endpoint = serverRootPickerEndpoint(serverId);
+  const endpoint = serverRootPickerEndpoint(serverRoute);
   if (path === null || path.length === 0) {
     return endpoint;
   }
@@ -83,9 +83,9 @@ export function rootPickerListEndpoint(
 
 export async function fetchRootPicker(
   path: string | null = null,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<RootPickerView> {
-  const response = await fetch(rootPickerListEndpoint(path, serverId), {
+  const response = await fetch(rootPickerListEndpoint(path, serverRoute), {
     headers: { Accept: "application/json" },
   });
 
@@ -99,10 +99,10 @@ export async function fetchRootPicker(
 export async function createRootPickerDirectory(
   parentPath: string,
   name: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<RootPickerEntry> {
   const response = await fetch(
-    serverRootPickerCreateDirectoryEndpoint(serverId),
+    serverRootPickerCreateDirectoryEndpoint(serverRoute),
     {
       method: "POST",
       headers: {
@@ -122,24 +122,24 @@ export async function createRootPickerDirectory(
 
 export async function pinRootPickerDirectory(
   path: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<RootPickerPlacesView> {
-  return requestRootPickerPin("POST", path, serverId);
+  return requestRootPickerPin("POST", path, serverRoute);
 }
 
 export async function unpinRootPickerDirectory(
   path: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<RootPickerPlacesView> {
-  return requestRootPickerPin("DELETE", path, serverId);
+  return requestRootPickerPin("DELETE", path, serverRoute);
 }
 
 async function requestRootPickerPin(
   method: "POST" | "DELETE",
   path: string,
-  serverId?: string | null,
+  serverRoute?: string | null,
 ): Promise<RootPickerPlacesView> {
-  const response = await fetch(serverRootPickerPinsEndpoint(serverId), {
+  const response = await fetch(serverRootPickerPinsEndpoint(serverRoute), {
     method,
     headers: {
       "Content-Type": "application/json",

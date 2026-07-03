@@ -23,8 +23,8 @@ function assertNotContains(value: string, forbidden: string, label: string) {
 }
 
 assertEqual(
-  gitWorktreeAddBase("workspace/id", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/workspaces/workspace%2Fid/git-worktree-add",
+  gitWorktreeAddBase("workspace/id", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/workspaces/workspace%2Fid/git-worktree-add",
   "server-scoped git worktree add base encodes server id and workspace id",
 );
 assertEqual(

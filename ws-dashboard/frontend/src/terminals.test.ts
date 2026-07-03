@@ -92,33 +92,33 @@ assertEqual(
   "websocket endpoint encodes id and cursor",
 );
 assertEqual(
-  workRootTerminalsEndpoint("root/local abc", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/work-roots/root%2Flocal%20abc/terminals",
+  workRootTerminalsEndpoint("root/local abc", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root%2Flocal%20abc/terminals",
   "server-scoped terminal create/list endpoint encodes server id",
 );
 assertEqual(
-  terminalOutputEndpoint("term/abc", 12, "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/output?after=12",
+  terminalOutputEndpoint("term/abc", 12, "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/terminals/term%2Fabc/output?after=12",
   "server-scoped terminal output endpoint encodes server id",
 );
 assertEqual(
-  terminalInputEndpoint("term/abc", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/input",
+  terminalInputEndpoint("term/abc", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/terminals/term%2Fabc/input",
   "server-scoped terminal input endpoint encodes server id",
 );
 assertEqual(
-  terminalResizeEndpoint("term/abc", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/resize",
+  terminalResizeEndpoint("term/abc", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/terminals/term%2Fabc/resize",
   "server-scoped terminal resize endpoint encodes server id",
 );
 assertEqual(
-  terminalCloseEndpoint("term/abc", "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc",
+  terminalCloseEndpoint("term/abc", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/terminals/term%2Fabc",
   "server-scoped terminal close endpoint encodes server id",
 );
 assertEqual(
-  terminalWebSocketEndpoint("term/abc", 12, "server remote/1"),
-  "/api/dashboard/servers/server%20remote%2F1/terminals/term%2Fabc/socket?after=12",
+  terminalWebSocketEndpoint("term/abc", 12, "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/terminals/term%2Fabc/socket?after=12",
   "server-scoped websocket endpoint encodes server id and cursor",
 );
 assertEqual(
