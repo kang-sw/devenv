@@ -63,22 +63,25 @@ classification axis is whether the user is meant to type `/ws:<name>` directly, 
 cross-skill invocation count. Each entry skill's own procedure body is likewise
 served from a `ws/playbook.print` playbook behind a thin trigger shim: the SKILL.md
 surface carries only the trigger description and delegates execution to its
-playbook. {#260610-entry-skill-surface-reduction}
+playbook. Context-heavy entry skills (lead-discuss and lead-sprint) are an
+exception: their SKILL.md carries a parallel init declaration —
+`playbook.print` plus `workflow_manual` called in parallel — rather than a pure
+routing stub, reducing init round-trips from 4–5 serial calls to 2 parallel rounds.
+{#260610-entry-skill-surface-reduction}
 
 `lead-tune` is the umbrella workflow-tuning entry skill: its description is the
 runtime trigger surface that fires when the user signals intent to tune how the
 workflow runs (delegation posture, mercenary-vs-native delegation, model tiers),
 so the skill can proactively propose a tune. Its playbook is the tuning manual —
-it drives the `config.prompt.*` data plane for prompt overrides
-(`#260620-config-prompt-override-tuning-tools`, with `DelegationSection` for
-delegation posture and `UserPreferenceSection` for standing preferences) and
-introduces or links `prefer_mercenary` and
-`config.agents_tier` without reimplementing their set paths. The always-on
+it loads the `config.tuning` catalog (`#260625-tuning-catalog`) and uses that
+catalog's knob ids, writer tools, field options, and current values to drive
+prompt overrides (`#260620-config-prompt-override-tuning-tools`, including
+`UserPreferenceSection` for standing preferences), workflow preference knobs,
+and `config.agents_tier` without reimplementing their set paths. The always-on
 `lead-workflow-manual` carries only a one-line pointer, keeping tuning guidance out
-of general-task routing attention. In agentless wsflow only the prompt-override
-knob exists (`prefer_mercenary` and `config.agents_tier` are agent-backed and
-hidden there), so the delegation-mode and model-tier sections are `ws:full-only`
-and the wsflow shim advertises only prompt-override tuning.
+of general-task routing attention. In agentless wsflow the catalog omits
+full-ws-only knobs (`workflow.prefer_mercenary` and `config.agents_tier`), while
+keeping shared knobs such as `workflow.prefer_subagent`.
 {#260619-lead-tune-workflow-tuning-skill}
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
@@ -86,6 +89,14 @@ and the wsflow shim advertises only prompt-override tuning.
 `lead-workflow-manual` is the shared primitive reference for writing or executing ws
 workflow skills. It defines host-neutral notation: `ws/<tool-name>` means an MCP
 tool on the `ws` server, while `ws:` names plugin skills.
+
+When global `"workflow.prefer_subagent"` is `on`, loading
+`lead-workflow-manual` also loads the rendered `lead-prefer-subagent` posture
+inside an XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
+boundary. The appended posture is rendered through the normal playbook pipeline
+so harness-specific defaults, including Codex invocation guidance, remain
+harness-scoped. Explicitly invoking `lead-prefer-subagent` may duplicate this
+short posture text; that duplication is accepted.
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
 queries, generated artifact paths, runtime metadata, workflow discovery, Git
@@ -250,11 +261,14 @@ evidence instead of presenting inference as established fact.
 
 When a discussion answer depends on a documented decision, prior rejection,
 architecture fact, or cross-ticket constraint that is not loaded, `lead-discuss`
-searches the ticket/spec/mental-model cascade before answering. Migration topics
-such as plugin architecture, host-neutral migration, spawn-removal, or adapter
-boundaries load the native-subagent pivot anchor before the lead states a
-direction. If the cascade has no documented answer, the reply says that before
-making an inference or proposing the next lookup.
+searches the ticket/spec/mental-model cascade before answering. Commit history is
+an additional project memory tier: `## AI Context` bodies carry decision rationale
+that docs may not yet reflect; `lead-discuss` accesses this tier through
+Explore-type subagent dispatch rather than inline reads. Migration topics such as
+plugin architecture, host-neutral migration, spawn-removal, or adapter boundaries
+load the native-subagent pivot anchor before the lead states a direction. If the
+cascade has no documented answer, the reply says that before making an inference
+or proposing the next lookup.
 
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
@@ -419,17 +433,13 @@ skill file remains available for compatibility, but `lead-implement` no longer
 invokes it and absence of ticket `skeletons:` frontmatter does not create a
 skeleton obligation. {#260510-skeleton-contract-populator-flow}
 
-`lead-implement` delegated mode absorbs the useful skeleton role through brief authoring.
+`lead-implement` delegated mode absorbs the useful skeleton role through plan authoring.
 For public interface, cross-module boundary, or new type contract changes, the
-brief includes concrete `Contract Instructions`: expected files or modules,
-public types/functions/handlers/tools, visibility, call shape, input/output
-shape, lifecycle boundaries, existing mechanisms to reuse, and forbidden
-temporary, fallback, or mock-data wiring. It also includes concrete
-`Integration Test Instructions`: the required boundary type such as parser,
-CLI, MCP tool, doc convention, skill routing, runtime lifecycle, or agent
-relay; whether to extend existing tests or create new integration tests; and
-observable pass criteria. Implementers treat both sections as acceptance
-criteria, and fit/test reviewers compare the implementation against them.
+generated plan carries the relevant ticket contract, expected files or modules,
+public types/functions/handlers/tools when applicable, reusable mechanisms,
+forbidden temporary/fallback/mock-data wiring, implementation steps, and
+verification expectations. Implementers treat the plan as the execution
+contract, and reviewers compare the ticket, plan, and diff together.
 {#260512-skeleton-inside-implement-branch}
 
 Ticket `skeletons:` frontmatter is a backward-compatible legacy artifact map.
@@ -440,36 +450,57 @@ workflow routing does not create new skeleton artifacts. {#260512-skeleton-draft
 
 Implementation skills execute code changes and close the documentation loop.
 
-`lead-implement` is the implementation harness. It routes to direct editing or
-delegated code writing, then runs the shared post-implementation documentation
-pipeline before reporting completion. Existing `implement/*` branches continue
-on the current branch; every other invocation creates an `implement/<scope>`
-branch before source edits. After verification, `lead-implement` records the
-phase result commit, closes spec, mental-model, ticket, and index updates, then
-asks the user to merge, continue, or stop. Follow-up changes after this gate
-route to another implementation slice or sprint and are captured in tickets as
-append-only Result editions for already completed phases.
+`lead-implement` is the implementation harness. It gathers normalized target,
+scope, complexity, risk, and policy facts, calls `ws.enter.implement`, follows
+the MCP-authored Implementation Verdict, then runs the shared
+post-implementation documentation pipeline before reporting completion. The MCP
+verdict owns deterministic implementation labels and branch preflight: it chooses
+direct-edit or delegated mode, branch action, delegated survey planning,
+review allocation, review need, and documentation mode from facts, policy, and
+observed Git state.
+`Branch Action: stop` blocks source edits until the missing merge target, unsafe
+rename, existing target branch, or tracking ambiguity is resolved. After
+verification, `lead-implement` records the phase result commit, closes spec,
+mental-model, ticket, and index updates, then asks the user to merge, continue,
+or stop. Follow-up changes after this gate route to another implementation slice
+or sprint and are captured in tickets as append-only Result editions for already
+completed phases.
 
 `lead-implement` is a unified implementation spine with two edit modes.
 Direct-edit mode: the lead edits and verifies inline on the scoped
 implementation branch, suitable for single-file internal-only changes.
-Delegated mode: the lead writes a brief, optionally populates a plan, spawns an
-implementer agent, and captures the resulting commit range. `judge:
-needs-delegation` selects the edit mode at Route time; branch isolation is
-independent of edit mode, and direct-edit escalates to delegated when scope
-grows beyond single-file internal-only.
+Delegated mode: the lead reads the ticket and selected scope, generates a plan
+path, dispatches a planner to write or refine that single implementation plan,
+spawns an implementer agent with the plan, and captures the resulting commit
+range. The MCP verdict selects edit mode; branch isolation is independent of
+edit mode, and direct-edit is derived only for single-file internal-only work
+with no public symbol, contract, new test-file, or explicit delegation signal.
+Initial implementer dispatch is file-first: the lead renders the `implementer`
+playbook with plan path, verification hint, result expectations, and
+commit-range hint as declared render inputs, then sends the worker only the
+rendered prompt path plus the instruction to execute it. The rendered
+implementer prompt reads the plan and listed references as the task contract; it
+does not read the ticket directly unless the plan's `Escalations` section
+explicitly authorizes ticket-file reading. Otherwise the lead updates the plan
+before ticket material is needed. Recommended tier remains dispatch
+metadata for the lead or transport, not worker-facing task input.
 
-After route judgments and before preparation or source inspection,
-`lead-implement` emits a non-blocking Implementation Verdict. The verdict
-summarizes target, selected scope, branch mode, edit mode, plan depth, review
-allocation, and decisive route facts, then continues immediately. It does not
-use `NEXT:` because `lead-proceed` owns next-skill routing. wsflow mirrors this
-checkpoint with its own verdict spanning branch mode, plan depth, and review
-allocation, because the converged `wsflow:lead-implement` spine owns
-implementation strategy directly rather than deferring it to a separate edit
-skill. See `#260529-wsflow-converged-implement-spine`.
+After fact gathering and before preparation or source inspection,
+`lead-implement` reads the raw Implementation Verdict returned by
+`ws.enter.implement`. The verdict summarizes target, selected scope, branch
+action, edit mode, plan depth, review allocation, documentation mode, normalized
+conditions, warnings, agenda values, and a concrete `Next:` instruction. The
+playbook follows that instruction instead of recomputing deterministic labels,
+then treats the replaced todo list as the authoritative executable runbook for
+post-verdict branch, prep, edit, review, documentation, final-action, and merge
+steps. The always-rendered playbook keeps fact gathering, verdict handoff,
+ambiguous execution judgments, and delegate render handoffs, while verdict-specific
+direct/delegated, review-allocation, and documentation-skip instructions live in
+the focused todo instruction payloads. wsflow mirrors this checkpoint through
+the shared product-mode playbook text. See
+`#260529-wsflow-converged-implement-spine`.
 
-Review is a single stage for both modes. `judge: review-allocation` picks depth
+Review is a single stage for both modes. MCP `review_alloc` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
 test) when partitioned. Each partition carries a default reviewer tier in the
 first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
@@ -480,56 +511,69 @@ the allocation default. Relay cap is 2 cycles for single-reviewer, 3 cycles for
 partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
 {#260612-reviewer-allocation-tier-default}
 
-Delegates in the review fix-loop are stateless: each implementer and reviewer
-dispatch is fed entirely by its relay prompt plus the self-contained artifact set
-(brief, plan, review findings, committed diff), and the loop stays correct when
-every cycle is a fresh spawn. Loop continuity is lead-owned — reconstructed from
-commit `## AI Context`, not from same-agent resume, which is only a latency
-optimization. The implementer records each fix-cycle disposition (won't-fix or
-deferred, with reason) inline in the fix commit `## AI Context`. The reviewer
-returns a severity-explicit verdict (`clean`, `clean with N minor remaining`, or
-`non-clean: M critical/important`); the lead, not a machine gate, decides clean.
-The re-review relay carries the prior findings, their dispositions, and the
-updated diff; the reviewer reviews the current diff per its charter and is not
-asked to classify regression-vs-preexisting. The lead enforces convergence by
-dedup against the durable disposition record — a settled finding is not
-re-relayed, only genuinely new Critical/Important findings are — layered over the
-relay cap as the backstop for the pathological case of a reviewer inventing new
-findings each cycle. {#260619-stateless-implement-review-continuity}
+Delegates in the review fix-loop are stateless by contract: each implementer and
+reviewer dispatch is fed entirely by its relay prompt plus the self-contained
+artifact set (plan, review findings, committed diff), and the loop stays
+correct when every cycle is a fresh spawn. When the host supports same-agent
+resume, `lead-implement` may reuse the prior implementer or reviewer for fix and
+re-review loops to reduce latency, but resume never carries required state. Loop
+continuity is lead-owned — reconstructed from commit `## AI Context`, not from
+agent conversation memory. The implementer records each fix-cycle disposition
+(won't-fix or deferred, with reason) inline in the fix commit `## AI Context`.
+The reviewer returns a severity-explicit verdict (`clean`, `clean with N minor
+remaining`, or `non-clean: M critical/important`); the lead, not a machine gate,
+decides clean. The re-review relay carries the prior findings, their
+dispositions, a findings output path, and the updated diff; the reviewer writes
+full findings, reports the severity verdict, reviews the current diff per its
+charter, and is not asked to classify regression-vs-preexisting. The lead
+enforces convergence by dedup against the durable disposition record — a settled
+finding is not re-relayed, only genuinely new Critical/Important findings are —
+layered over the relay cap as the backstop for the pathological case of a
+reviewer inventing new findings each cycle.
+Delegated review-fix relay is file-first: the lead renders the
+`implementer-relay` playbook with declared inputs for plan path, review cycle,
+current commit range, non-clean review paths, disposition notes, verification
+hint, and result expectations. The lead then sends only the rendered prompt path
+plus a short execute instruction to the implementation owner. Reviewer findings
+remain file inputs, not copied prompt prose.
+{#260619-stateless-implement-review-continuity}
 
-Plan population is an either/or depth choice for delegated mode. When plan depth
-is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
-and possible risk signals without deciding that the implementation direction is
-wrong. If survey cannot safely support implementation without strategy, contract,
-or reuse judgment, it returns `[escalate-to-research]` instead of forcing a
-survey plan. `lead-implement` then routes to `plan-populator-research` before
-spawning the implementer.
+Plan population defaults to the survey planner for delegated mode. The
+plan-populator render contract is ticket-to-plan shaped: ticket path, selected
+phase, and plan path. `plan-populator-survey` clips the relevant ticket
+contract, explores source, writes a light implementation plan with `Relevant
+Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
+`Verification Plan`, and `Escalations`, then returns `[ok]` or
+`[escalate-to-research]` with confidence and rationale. If survey cannot safely
+support implementation without strategy, contract, or reuse judgment,
+`lead-implement` routes to `plan-populator-research` on the same plan path
+before spawning the implementer.
 
-When plan depth is `research`, `plan-populator-research` makes planner
-judgments: it chooses clean existing mechanisms when they fit the brief,
-preserves contract and integration-test guardrails in the plan, rejects
-temporary, fallback, mock-data, and duplicated-glue paths, and escalates when no
-clean plan can satisfy the brief. A survey-to-research route replaces the same
-plan artifact path with the research plan; it does not create a research-suffixed
-plan filename or append research to a survey plan.
+`plan-populator-research` is reached from the survey escalation signal and makes
+planner judgments: it reads any existing survey output at the same plan path,
+chooses clean existing mechanisms when they fit the ticket phase, preserves
+selected contract and verification guardrails in the plan, rejects temporary,
+fallback, mock-data, and duplicated-glue paths, and escalates when no clean plan
+can satisfy the ticket phase. A survey-to-research route replaces or refines the
+same plan artifact path with the research plan; it does not create a
+research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
 signals. It stops and escalates when implementation would likely pursue a wrong
 contract, bypass existing project mechanisms, or rely on a shortcut path. Review
-remains an enforcement step: reviewers compare the implementation against brief
-and plan guardrails and catch implementation-time shortcut drift, but known
+remains an enforcement step: reviewers compare the implementation against the
+ticket, plan, and diff to catch implementation-time shortcut drift, but known
 plan-time risks are handled before source work begins.
 
-The implementation brief is the implementer's sole context source, but it is
-not a lossy ticket summary. For the selected implementation scope, the brief
-records every settled caller-visible contract, implementation strategy decision,
-rejected alternative, and verification expectation from the target, or marks it
-explicitly deferred or out of scope. Ticket noise such as background discussion,
-unsettled options, and unrelated future phases is stripped. In ticket-driven
-runs, the fit reviewer reads the ticket and treats selected-scope binding
-decisions omitted from the brief or violated by the implementation as blocking
-findings. Correctness and test reviewers remain scoped to the diff and their
-assigned partitions.
+The implementation plan is the implementer's sole context source, but it is not
+a lossy ticket summary. For the selected implementation scope, the plan clips the
+relevant ticket contract and records implementation strategy, codebase findings,
+verification expectations, escalations, and explicit out-of-scope boundaries.
+Ticket noise such as background discussion, unsettled options, and unrelated
+future phases is stripped. In ticket-driven runs, reviewers read the ticket and
+plan, then treat selected-scope binding decisions omitted from the plan or
+violated by the implementation as blocking findings within their assigned
+partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
 stages complete. `lead-sprint` runs documentation closure only for marked
@@ -623,32 +667,45 @@ decisions as missing settled decisions.
 
 Implementation always routes through `lead-implement` with the selected scope as
 a hard scope boundary. `lead-proceed` does not rejudge general ticket quality,
-mutate ticket structure, decide contract-brief depth, or invoke implementation
+mutate ticket structure, decide delegated plan depth, or invoke implementation
 primitives before `lead-implement`; it requests phase or ticket slicing only
 when scope resolution blocks safe implementation. Public or cross-module
-contract checkpoints are expressed as `lead-implement` brief contract and
-integration-test instructions.
+contract checkpoints are expressed through the delegated `lead-implement`
+implementation plan.
 
 `lead-implement` also loads the native-subagent pivot anchor before editing when
 the target touches plugin architecture, host-neutral migration, spawn-removal,
-or adapter boundaries. Delegated implementation has minimum brief depth; when
-the migration anchor is read, binding implementation constraints from the anchor
-are copied into the brief and the anchor is listed as a `[Must]` reference before
+or adapter boundaries. Delegated implementation has a required plan artifact;
+when the migration anchor is read, binding implementation constraints from the
+anchor are copied into the plan and the anchor is listed as a `[Must]` reference before
 plan population or implementer dispatch. Delegated implementers receive only the
-brief and optional plan as task input, may read additional documents listed in
-brief References, and must not read the ticket directly.
+plan as task input, may read additional documents listed in the plan, and must
+not read the ticket directly unless the plan's `Escalations` section explicitly
+authorizes ticket-file reading.
 
-Before any handoff, `lead-proceed` emits a Routing Verdict with exactly one
-`NEXT:` skill or `stop`. It does not print a full route chain as the active
-execution instruction. After `lead-write-ticket` refresh or promotion returns,
-`lead-proceed` rebuilds route context and emits a new verdict instead of
-continuing from an old chain. When `NEXT:` is `lead-implement`,
-`lead-proceed` invokes that skill before source inspection, planning, editing,
-or implementation-tool use. It does not apply sibling `lead-implement` judges,
-compute direct/delegated execution mode, compute branch mode, or inspect source.
-`lead-implement` owns those decisions when the handoff executes. wsflow mirrors
-the same route-only boundary without pre-applying `wsflow:lead-implement`
-branch or execution judgments.
+Before any handoff, `lead-proceed` calls `ws.enter.proceed` after lead-owned
+fact gathering and receives a deterministic raw verdict with exactly one
+`NEXT:` value plus a concrete `Next:` instruction. The MCP resolver owns
+deterministic route-row precedence, normalization warnings, raw verdict text,
+the JSON `next_instruction`, proceed agenda storage, and proceed todo
+replacement; the playbook owns artifact reads, uncertain judgments,
+conversation freshness, migration-anchor checks, and user-facing discussion.
+`lead-proceed` does not restate a separate Routing Verdict or print a full route
+chain as the active execution instruction. It follows MCP's `Next:` instruction,
+which includes the route announcement, downstream invocation, verification,
+failure, stop, and post-write reroute rails. After `lead-write-ticket` refresh or
+promotion returns, the `Next:` instruction requires `lead-proceed` to rebuild
+route context and enter `ws.enter.proceed` again instead of continuing from an
+old verdict. When `NEXT:` is `lead-implement`, MCP's instruction tells
+`lead-proceed` to call `ws/playbook.print(name: "lead-implement")` and execute
+that playbook before source inspection, planning, editing, or
+implementation-tool use. `lead-proceed` does not apply sibling `lead-implement`
+judges, compute direct/delegated execution mode, compute branch mode, or inspect
+source.
+`lead-implement` owns those decisions when the handoff executes by calling
+`ws.enter.implement` after fact gathering. wsflow mirrors the same route-only
+proceed boundary without pre-applying `wsflow:lead-implement` branch or
+execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Shell {#260505-sprint-session-container}
@@ -779,3 +836,8 @@ workflow-stage routing, and final documentation ownership for the lead unless a
 delegate is explicitly assigned those responsibilities. Delegates return their
 assigned output through named-agent result surfaces rather than invoking lead
 skills on their own.
+The `implementer` and `implementer-relay` render playbooks are
+direct-execution delegate surfaces, not nested-delegation surfaces: their
+`delegates` metadata is false, so rendering them does not add the generic
+continuation tip. They still carry `role: implementer` for render-minted child
+credentials and tier-derived model guidance.

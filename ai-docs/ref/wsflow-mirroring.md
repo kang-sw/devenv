@@ -47,6 +47,8 @@ Included:
 - `lead-forge-spec`
 - `lead-forge-mental-model`
 - `lead-review`
+- `lead-prefer-subagent`
+- `lead-revive` (inline-body exception; see below)
 
 Excluded:
 
@@ -62,6 +64,13 @@ Excluded:
 - Keep shipped `agents-plugin-wsflow/skills/lead-*` `SKILL.md` files as thin
   `wsflow/playbook.print(name: "<lead-name>")` entry shims; do not place
   procedure bodies there.
+- Exception: `lead-revive` ships an inline procedure body, not a
+  `playbook.print` shim. Revive bootstraps the workflow primitives after
+  compaction, so it cannot depend on the same playbook-print path it restores.
+  It therefore has no shared rsrc playbook and no full-ws skill counterpart. The
+  package test encodes this through `EXPECTED_INLINE_SKILLS`, which exempts it
+  from the thin-shim, shared-stem, and full-counterpart checks. Any future
+  inline wsflow skill must be added to that set and documented here.
 - Do not mention `ws/`, `ws:`, `ws.`, `subquery`, or `agents.*` in
   distributed wsflow skill text.
 - Do not describe wsflow as ws-lite, a ws mode, or a ws-compatible product.
@@ -83,8 +92,9 @@ product-mode playbook rendering, writes the result to a tmp file, and returns
 the path. The lead hands that path to a native subagent.
 
 For the legacy render-eligible stem set, wsflow-mode `playbook.render` appends
-caller `context` as a free-text Render Context block. Other playbooks still
-treat `context` as declared template variables.
+only undeclared caller `context` extras as a free-text Render Context block;
+declared context keys are templated normally. Other playbooks still treat
+`context` as declared template variables only.
 
 - Render-eligible prompt stems: `reference-discovery`, `plan-populator-survey`,
   `plan-populator-research`, `code-reviewer`, `mental-model-updater`. These bare
@@ -118,6 +128,16 @@ identical to canonical — including `manifest.json`.
   cache returns a green `ok` without running the write side effect — omitting it
   silently leaves the artifact stale. git content-dedupes the copy, so storage
   cost is ~0.
+
+- **After-edit checklist — run both in order after any canonical rsrc change:**
+  1. `WSRSRC_REGEN=1 go test ./internal/wsrsrc/... -count=1 -run TestGenerateRealManifest`
+     — regenerates `agents-plugin/rsrc/manifest.json`
+  2. `WS_REGEN_WSFLOW_RSRC=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowRsrcMirror`
+     — syncs `agents-plugin-wsflow/rsrc/` byte-for-byte from canonical
+
+  Both `-count=1` flags are mandatory; without them, go's test cache silently
+  skips the write side effect. Omitting step 2 is the process gap that caused
+  `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit`.
 - **Runtime:** the wsflow launcher's `apply_rsrc_root_env` sets `WS_RSRC_ROOT` to
   the sibling `rsrc/` when present, so the committed copy is resolved with no
   launcher change.

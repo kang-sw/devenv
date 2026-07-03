@@ -94,9 +94,6 @@ shasum -a 256 -c SHA256SUMS
 Notes:
 - Do not commit `agents-plugin-tool/dist/` unless a separate ticket changes the
   artifact policy.
-- The build script refreshes `agents-plugin/runtime.json` prompt bundle metadata
-  when the host binary can report it; commit any resulting metadata drift before
-  tagging.
 - wsflow reuses the same runtime assets. Keep
   `agents-plugin-wsflow/runtime.json` and package tests aligned with the
   selected wsflow no-agent runtime surface before tagging.

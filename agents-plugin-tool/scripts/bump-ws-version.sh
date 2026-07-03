@@ -76,15 +76,6 @@ update_json("agents-plugin-wsflow/.codex-plugin/plugin.json", update_plugin_mani
 update_json("agents-plugin-wsflow/.claude-plugin/plugin.json", update_plugin_manifest)
 update_json("agents-plugin-wsflow/runtime.json", update_runtime)
 
-launcher = read_text("agents-plugin/bin/ws-mcp-launcher")
-launcher = re.sub(
-    r"(?m)^([ \t]*)[0-9]+\.[0-9]+\.\*\) return 0 ;;",
-    rf"\g<1>{compatible_glob}) return 0 ;;",
-    launcher,
-    count=1,
-)
-write_text("agents-plugin/bin/ws-mcp-launcher", launcher)
-
 main_go = read_text("agents-plugin-tool/cmd/ws-mcp/main.go")
 main_go = re.sub(
     r'var version = "[^"]+"',

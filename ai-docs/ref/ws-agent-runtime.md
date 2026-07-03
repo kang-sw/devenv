@@ -287,7 +287,9 @@ MCP tools use server `ws` and the following tool names:
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
 - `config.show` — inspect the current user-local configuration and resolved config path without modifying it. Implemented.
 - `config.agents_tier` — compatibility surface for configuring the user-local backend/model mapping for a model alias. Implemented.
-- `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
+- `path.generate` — allocate writable workflow artifact paths. Implemented for
+  cache artifacts `kind: "review"` and `kind: "prompt"`, plus repo-local plan
+  artifacts `kind: "plan"` under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`.
 - `runtime.info` — return runtime metadata. Implemented.
 - `api.list` — list existing API documentation cache domains. Implemented.
 - `api.ask` — retired with the agent-backed API documentation manager surface.
@@ -320,7 +322,7 @@ ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
 ws-mcp config show
 ws-mcp config agents-tier --tier <light|core|deep> [--harness <harness|default>] [--backend <backend>] [--model <concrete-model>] [--effort none|low|medium|high|xhigh]
-ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
+ws-mcp path generate --root <repo> --kind review|prompt|plan <stem> [<stem> ...]
 ws-mcp runtime info
 ```
 

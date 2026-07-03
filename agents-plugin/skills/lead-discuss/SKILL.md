@@ -5,5 +5,8 @@ description: Use before code changes when the user wants to explore workflow des
 
 # Discuss
 
-Call `ws/playbook.print(name: "lead-discuss")` and execute the returned procedure
-inline against the user request.
+Call in parallel:
+- `ws/playbook.print(name: "lead-discuss", session_key: <your key>)`
+- `ws/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
+
+After both return, execute the procedure returned by `ws/playbook.print`.

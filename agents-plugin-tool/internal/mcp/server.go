@@ -49,15 +49,30 @@ const (
 // invocation by subagents that share the lead's MCP connection. Invariants:
 // do not give it a descriptive alias, do not leak its purpose through its
 // tools/list description, and do not name it in error-guidance strings.
-const bootstrapToolName = "ws.ferrule"
+const bootstrapToolName = "ferrule"
 
 // isLeadOnlyTool reports whether a tool is restricted to lead-scoped session
 // keys. It is the authority for the keyed-gate escalation block. The bootstrap
 // tool must be listed explicitly because it no longer lives under the
-// `ws.lead.*` prefix (260617 obscurity rename) — a prefix-only check would
-// silently stop blocking it for non-lead keys.
+// `lead.*` prefix (260617 obscurity rename) — a prefix-only check would
+// silently stop blocking it for non-lead keys. workflow_manual is likewise
+// listed explicitly: delegate/leaf callers must not reach the handler (Phase 3a
+// security hardening), mirroring the ferrule guard. workflow_state (260702) is
+// gated the same way as its sibling workflow_manual: it is a cheaper view of
+// the same lead-bootstrap/recovery surface, not a general todo/agenda
+// accessor, so it stays lead-only even though the underlying todo.*/agenda.*
+// data is itself scope-open.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || strings.HasPrefix(name, "ws.lead.")
+	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+}
+
+func workflowPreferenceWriterTool(name string) bool {
+	switch name {
+	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+		return true
+	default:
+		return false
+	}
 }
 
 type request struct {
@@ -301,6 +316,21 @@ func RuntimeNamespace() string {
 	return value
 }
 
+func builtinConfigDefaults() map[string]string {
+	return map[string]string{
+		wsconfig.ItemWorkflowPreferSubagent:  "off",
+		wsconfig.ItemWorkflowPreferMercenary: "hide",
+	}
+}
+
+func builtinConfigAndPromptDefaults() map[string]string {
+	defaults := builtinConfigDefaults()
+	for k, v := range builtinPromptOverrideDefaults() {
+		defaults[k] = v
+	}
+	return defaults
+}
+
 // wsNamespaceRef matches the ws namespace prefix token (ws/ or ws:) anchored at
 // a word boundary so that words containing "ws" as an interior substring (e.g.
 // "news/", "rows:", "workflows/") are never mangled.
@@ -322,7 +352,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if NoAgentMode() && noAgentHiddenTool(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
 	}
-	if !s.toolAllowed(params.Name) {
+	if !s.toolAllowed(params.Name, s.mercenaryHiddenFromConfig()) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
@@ -364,6 +394,42 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.children":
 		return s.handleSessionChildren(req.ID, params.Arguments)
+	case "agenda.set":
+		return s.handleAgendaSet(req.ID, params.Arguments)
+	case "agenda.clear":
+		return s.handleAgendaClear(req.ID, params.Arguments)
+	case "agenda.list":
+		return s.handleAgendaList(req.ID, params.Arguments)
+	case "enter.implement":
+		return s.handleEnterImplement(req.ID, params.Arguments)
+	case "enter.proceed":
+		return s.handleEnterProceed(req.ID, params.Arguments)
+	case "enter.sprint":
+		return s.handleEnterSprint(req.ID, params.Arguments)
+	case "enter.salvage":
+		return s.handleEnterSalvage(req.ID, params.Arguments)
+	case "todo.append":
+		return s.handleTodoAppend(req.ID, params.Arguments)
+	case "todo.insert_before":
+		return s.handleTodoInsert(req.ID, params.Arguments, false)
+	case "todo.insert_after":
+		return s.handleTodoInsert(req.ID, params.Arguments, true)
+	case "todo.check":
+		return s.handleTodoCheck(req.ID, params.Arguments)
+	case "todo.erase":
+		return s.handleTodoErase(req.ID, params.Arguments)
+	case "todo.clear":
+		return s.handleTodoClear(req.ID, params.Arguments)
+	case "todo.list":
+		return s.handleTodoList(req.ID, params.Arguments)
+	case "todo.read":
+		return s.handleTodoRead(req.ID, params.Arguments)
+	case "todo.reorder":
+		return s.handleTodoReorder(req.ID, params.Arguments)
+	case "workflow_manual":
+		return s.handleWorkflowManual(req.ID, params.Arguments)
+	case "workflow_state":
+		return s.handleWorkflowState(req.ID, params.Arguments)
 	case bootstrapToolName:
 		return s.handleLeadLogin(req.ID, params.Arguments)
 	case "api.list":
@@ -453,17 +519,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return execRawGrepResponse(req.ID, result, err)
 	case "config.show":
 		sessionKey, _ := params.Arguments["session_key"].(string)
-		var view wsconfig.View
-		var err error
-		if sessionKey != "" {
-			// When a session key is supplied, use ScopedShow so that
-			// ResolvedOverrides is populated with per-key scope labels.
-			adapter := sessionConfigAdapter{s: s.sessions}
-			r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-			view, err = wsconfig.ScopedShow(&r, wsconfig.Options{}, sessionKey)
-		} else {
-			view, err = wsconfig.Show(wsconfig.Options{})
-		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		view, err := wsconfig.ScopedShow(&r, wsconfig.Options{}, strings.TrimSpace(sessionKey))
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, view, err)
 		}
@@ -485,6 +543,62 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolJSONResponse(req.ID, cfg, err)
 
+	case "config.workflow_prefer_subagent":
+		if _, err := s.requireLeadSessionKey("config.workflow_prefer_subagent", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		reset, _ := params.Arguments["reset"].(bool)
+		rawValue, hasValue := params.Arguments["value"]
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if reset {
+			if hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value and reset are mutually exclusive"))
+				}
+			}
+			// Reset means "drop the global override and fall back to the builtin
+			// default" — distinct from explicitly writing the builtin's current
+			// value, which would still shadow a future builtin default change.
+			if err := resolver.Unset(wsconfig.ItemWorkflowPreferSubagent, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+			}
+			resolved, err := resolver.Get("", wsconfig.ItemWorkflowPreferSubagent)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
+		}
+		value, _ := rawValue.(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: value must be one of on, off; got %q", value))
+		}
+		if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_subagent: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_subagent: %s [scope:global]\n", value), nil)
+
+	case "config.workflow_prefer_mercenary":
+		if _, err := s.requireLeadSessionKey("config.workflow_prefer_mercenary", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		value, _ := params.Arguments["value"].(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off", "hide":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: value must be one of on, off, hide; got %q", value))
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_mercenary: %s [scope:global]\n", value), nil)
+
 	case "config.prompt.set":
 		// Lead-only setter for prompt override-points. The config.* prefix gate in
 		// roleAllowsTool already blocks delegate and leaf keys, so no extra role
@@ -504,6 +618,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Normalize the harness value and reject unrecognized inputs.
 		// The caller-visible enum is ["claude","codex","*"]; "*" is stored as "all"
 		// to match the buildOverrideLookup reader which reads prompt.<id>.all.
+		// When omitted, default to the current session's detected harness (matching
+		// config.agents_tier behavior); explicit "*" is still required for all-hosts.
+		if strings.TrimSpace(harness) == "" {
+			harness = s.currentHarness()
+		}
 		switch harness {
 		case "claude", "codex":
 			// accepted as-is
@@ -524,9 +643,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			explicitScope = wsconfig.Scope(scopeArg)
 		}
 		// Write through the layered config resolver. Use wsconfig.Options{} (ambient
-		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as config.agents_tier and
-		// prefer_mercenary do; do NOT call resolveToolRoot (config.* tools are not
-		// root-aware per mcp-runtime mental model).
+		// WS_CACHE_HOME/WS_CONFIG_HOME) exactly as other config.* tools do; do NOT
+		// call resolveToolRoot (config.* tools are not root-aware per mcp-runtime
+		// mental model).
 		overrideKey := "prompt." + pointID + "." + harness
 		adapter := sessionConfigAdapter{s: s.sessions}
 		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
@@ -542,6 +661,56 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			resolvedScope = wsconfig.DefaultScope(overrideKey)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("prompt override set: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
+
+	case "config.prompt.unset":
+		// Resets a prompt override to the next-broader scope (or builtin/seed
+		// default) by removing it from the session, project, or global config
+		// layer. Lead-only via the config.* prefix gate (same as config.prompt.set).
+		// The caller's session_key doubles as the target session for a
+		// session-scope unset, matching config.prompt.set's session-scope write.
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: session_key is required"))
+		}
+		pointID, _ := params.Arguments["pointId"].(string)
+		pointID = strings.TrimSpace(pointID)
+		if pointID == "" {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: pointId must be non-empty"))
+		}
+		harness, _ := params.Arguments["harness"].(string)
+		// When omitted, default to the current session's detected harness (matching
+		// config.agents_tier behavior); explicit "*" is still required for all-hosts.
+		if strings.TrimSpace(harness) == "" {
+			harness = s.currentHarness()
+		}
+		switch harness {
+		case "claude", "codex":
+			// accepted as-is
+		case "*":
+			harness = "all"
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: harness must be one of claude, codex, or *; got %q", harness))
+		}
+		scopeArg, _ := params.Arguments["scope"].(string)
+		var explicitScope wsconfig.Scope
+		if strings.TrimSpace(scopeArg) != "" {
+			explicitScope = wsconfig.Scope(scopeArg)
+		}
+		overrideKey := "prompt." + pointID + "." + harness
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		if err := resolver.Unset(overrideKey, wsconfig.SetOptions{
+			ExplicitScope: explicitScope,
+			SessionKey:    sessionKey,
+		}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.prompt.unset: %w", err))
+		}
+		resolvedScope := explicitScope
+		if resolvedScope == "" {
+			resolvedScope = wsconfig.DefaultScope(overrideKey)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("prompt override cleared: %s/%s (scope: %s)\n", pointID, harness, resolvedScope), nil)
 
 	case "config.prompt":
 		// Read-only listing of declared prompt override-points. Lead-only via the
@@ -561,12 +730,34 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Build the resolver exactly as the setter does: ambient Options, not
 		// root-aware (config.* tools resolve from WS_CACHE_HOME/WS_CONFIG_HOME).
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
 		list := buildPromptOverrideListing(points, &resolver, sessionKey)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, list, nil)
 		}
 		return toolTextResponse(req.ID, formatPromptOverrideListing(list), nil)
+
+	case "config.tuning":
+		// Read-only catalog of workflow tuning knobs. The catalog is a projection
+		// over existing writer schemas plus dynamic prompt override-point discovery;
+		// it never mutates config itself.
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		sessionKey = strings.TrimSpace(sessionKey)
+		rootOverride, _ := params.Arguments["root_override"].(string)
+		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigAndPromptDefaults(), adapter, adapter)
+		catalog, err := buildTuningCatalog(rsrcRoot, &resolver, sessionKey, NoAgentMode())
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, catalog, nil)
+		}
+		return toolTextResponse(req.ID, formatTuningCatalog(catalog), nil)
 
 	case "git.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -634,7 +825,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
-		return toolTextResponse(req.ID, formatGitCommit(result), err)
+		// Re-inject the current session's todo summary after the commit output
+		// (text mode only). resolveToolRoot already required session_key, so it is
+		// available in params.Arguments.
+		commitText := formatGitCommit(result)
+		commitKey, _ := params.Arguments["session_key"].(string)
+		commitKey = strings.TrimSpace(commitKey)
+		if commitKey != "" {
+			if rec, ok := s.sessions.readState(commitKey); ok && len(rec.Todos) > 0 {
+				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
+			}
+		}
+		return toolTextResponse(req.ID, commitText, err)
 	case "project_tree":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -879,14 +1081,23 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		stem, _ := params.Arguments["stem"].(string)
 		initialState, _ := params.Arguments["initial_state"].(string)
+		sessionKey, _ := params.Arguments["session_key"].(string)
+		adapter := sessionConfigAdapter{s: s.sessions}
+		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
 			InitialState: initialState,
+			SageReview:   resolved.Value,
 		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketCreate(result), nil)
+	case "tickets.template":
+		typeStr, _ := params.Arguments["type"].(string)
+		text, err := wsdoc.TicketTemplate(typeStr)
+		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -914,10 +1125,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// Build an override lookup from the session-keyed resolver when a session_key
-		// is present (same pattern as the prefer_mercenary read path in playbook.render).
+		// is present.
 		keyStr, _ := params.Arguments["session_key"].(string)
 		printOverrideLookup := buildOverrideLookup(s, keyStr)
-		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printOverrideLookup)
+		// Resolve workflow.lang for language-binding injection.
+		printLangAdapter := sessionConfigAdapter{s: s.sessions}
+		printLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, printLangAdapter, printLangAdapter)
+		printWorkflowLangRV, _ := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", err)
 
 	case "playbook.render":
@@ -963,52 +1178,23 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 					mintRoot = entry.root
 				}
 				parentKey = capturedKey
-				// Resolve prefer_mercenary through the layered config resolver
-				// (session > project > global > builtin) so both enable and disable
-				// transitions are visible (260618 closer). Builtin default is false.
+				// Mercenary preference is a global workflow setting because it
+				// also controls keyless tool-surface visibility.
 				adapter := sessionConfigAdapter{s: s.sessions}
-				resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-				preferMercenary, _, _ = resolver.GetBool(capturedKey, wsconfig.ItemPreferMercenary)
+				resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+				rv, _ := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
+				preferMercenary = canonicalPreferMercenaryValue(rv.Value) == "on"
 			}
 		}
 
-		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderOverrideLookup)
+		// Resolve workflow.lang for language-binding injection.
+		renderLangAdapter := sessionConfigAdapter{s: s.sessions}
+		renderLangResolver := wsconfig.NewResolver(wsconfig.Options{}, nil, renderLangAdapter, renderLangAdapter)
+		renderWorkflowLangRV, _ := renderLangResolver.Get(renderSessionKey, wsconfig.ItemWorkflowLang)
+		path, recommendedTier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, preferMercenary, renderWorkflowLangRV.Value, renderOverrideLookup)
 		return toolTextResponse(req.ID, withRecommendedTier(path, recommendedTier)+"\n", err)
 
-	case "ws.lead.prefer_mercenary":
-		// Lead-only desired-state setter for the default delegation guidance toggle.
-		// The ws.lead.* prefix gate in callTool already blocks non-lead keys —
-		// do not add a second role check here (sole keyed-gate-is-authority rule).
-		keyStr, _ := params.Arguments["session_key"].(string)
-		keyStr = strings.TrimSpace(keyStr)
-		if keyStr == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("ws.lead.prefer_mercenary: session_key is required"))
-		}
-		// enabled defaults to true when absent (backward-compatible call shape).
-		enabled := true
-		if v, ok := params.Arguments["enabled"]; ok {
-			if b, isBool := v.(bool); isBool {
-				enabled = b
-			}
-		}
-		// Write through the layered config resolver (declared default scope: session).
-		value := "false"
-		if enabled {
-			value = "true"
-		}
-		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
-		if err := resolver.Set(wsconfig.ItemPreferMercenary, value, wsconfig.SetOptions{
-			SessionKey: keyStr,
-		}); err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual and retry"))
-		}
-		if enabled {
-			return toolTextResponse(req.ID, "prefer_mercenary: enabled\n", nil)
-		}
-		return toolTextResponse(req.ID, "prefer_mercenary: disabled\n", nil)
-
-	case "ws.mercenary.register":
+	case "mercenary.register":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1034,7 +1220,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Tier:             tier,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "ws.mercenary.call":
+	case "mercenary.call":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1054,7 +1240,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		// Handle format: agentId=<name> matches the native agentId shape referenced
 		// by terminologyForHarness ContinueIdiom (e.g. SendMessage(to: <agentId>)).
 		return toolTextResponse(req.ID, agentCallHandleText(result.AgentName, result.Status, result.PID), nil)
-	case "ws.mercenary.wait":
+	case "mercenary.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1069,7 +1255,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.result":
+	case "mercenary.result":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1082,7 +1268,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.status":
+	case "mercenary.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1090,7 +1276,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.interrupt":
+	case "mercenary.interrupt":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1106,7 +1292,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
-	case "ws.mercenary.tail":
+	case "mercenary.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1119,7 +1305,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Lines: lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.debug.tail":
+	case "mercenary.debug.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1133,14 +1319,14 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Raw:   true,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.debug.stdout", "ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events":
+	case "mercenary.debug.stdout", "mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
-		stream := strings.TrimPrefix(params.Name, "ws.mercenary.debug.")
+		stream := strings.TrimPrefix(params.Name, "mercenary.debug.")
 		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
 			Root:   root,
 			Name:   name,
@@ -1148,7 +1334,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Lines:  lines,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.cancel":
+	case "mercenary.cancel":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1156,7 +1342,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.recall":
+	case "mercenary.recall":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1169,7 +1355,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Prompt: prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.print":
+	case "mercenary.print":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1177,7 +1363,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mercenary.erase":
+	case "mercenary.erase":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
@@ -1429,7 +1615,7 @@ var promptOverrideHarnessBuckets = []string{"claude", "codex", "all"}
 func buildPromptOverrideListing(points []overridePointDecl, resolver *wsconfig.Resolver, sessionKey string) []promptOverridePoint {
 	listing := make([]promptOverridePoint, 0, len(points))
 	for _, p := range points {
-		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc}
+		entry := promptOverridePoint{PointId: p.PointId, Desc: p.Desc, Overrides: []promptOverrideValue{}}
 		for _, harness := range promptOverrideHarnessBuckets {
 			rv, _ := resolver.Get(sessionKey, "prompt."+p.PointId+"."+harness)
 			if strings.TrimSpace(rv.Value) == "" {
@@ -1466,6 +1652,303 @@ func formatPromptOverrideListing(listing []promptOverridePoint) string {
 	}
 	b.WriteString("Tuning manual & how-to: run the ws:lead-tune skill.\n")
 	return b.String()
+}
+
+type tuningCatalog struct {
+	Knobs []tuningKnob `json:"knobs"`
+}
+
+type tuningKnob struct {
+	ID             string        `json:"id"`
+	Kind           string        `json:"kind"`
+	Description    string        `json:"description,omitempty"`
+	Writer         tuningWriter  `json:"writer"`
+	Reset          *tuningWriter `json:"reset,omitempty"`
+	SelectorFields []tuningField `json:"selector_fields,omitempty"`
+	ValueFields    []tuningField `json:"value_fields,omitempty"`
+	Current        any           `json:"current"`
+}
+
+type tuningWriter struct {
+	Tool           string            `json:"tool"`
+	FixedArguments map[string]string `json:"fixed_arguments,omitempty"`
+}
+
+type tuningField struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+}
+
+type tuningScopedValue struct {
+	Value string `json:"value"`
+	Scope string `json:"scope"`
+}
+
+type tuningAgentTierCurrent struct {
+	Tier    string `json:"tier"`
+	Harness string `json:"harness"`
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+}
+
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey string, noAgentMode bool) (tuningCatalog, error) {
+	points, err := scanOverridePoints(rsrcRoot)
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	promptListing := buildPromptOverrideListing(points, resolver, sessionKey)
+
+	catalog := tuningCatalog{Knobs: make([]tuningKnob, 0, len(promptListing)+3)}
+	for _, p := range promptListing {
+		catalog.Knobs = append(catalog.Knobs, tuningKnob{
+			ID:          "prompt." + p.PointId,
+			Kind:        "prompt_override",
+			Description: p.Desc,
+			Writer: tuningWriter{
+				Tool:           "config.prompt.set",
+				FixedArguments: map[string]string{"pointId": p.PointId},
+			},
+			Reset: &tuningWriter{
+				Tool:           "config.prompt.unset",
+				FixedArguments: map[string]string{"pointId": p.PointId},
+			},
+			SelectorFields: tuningFieldsFromSchema("config.prompt.set", "harness", "scope"),
+			ValueFields:    tuningFieldsFromSchema("config.prompt.set", "prompt"),
+			Current:        p.Overrides,
+		})
+	}
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "workflow.prefer_subagent",
+		Kind:        "workflow_preference",
+		Description: "Select whether the workflow manual loads strict subagent posture.",
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_subagent"},
+		Reset: &tuningWriter{
+			Tool:           "config.workflow_prefer_subagent",
+			FixedArguments: map[string]string{"reset": "true"},
+		},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+	})
+
+	if noAgentMode {
+		return catalog, nil
+	}
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "workflow.prefer_mercenary",
+		Kind:        "workflow_preference",
+		Description: "Select whether lead renders prefer native subagents, prefer ws.mercenary, or hide ws.mercenary surfaces.",
+		Writer:      tuningWriter{Tool: "config.workflow_prefer_mercenary"},
+		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_mercenary", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferMercenary),
+	})
+
+	agentTiers, err := currentAgentTierMappings()
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:             "agents.tier",
+		Kind:           "model_tier",
+		Description:    "Configure the backend/model mapping for a ws agent capability tier.",
+		Writer:         tuningWriter{Tool: "config.agents_tier"},
+		SelectorFields: tuningFieldsFromSchema("config.agents_tier", "tier", "harness"),
+		ValueFields:    tuningFieldsFromSchema("config.agents_tier", "backend", "model", "effort"),
+		Current:        agentTiers,
+	})
+
+	return catalog, nil
+}
+
+func currentWorkflowPreference(resolver *wsconfig.Resolver, itemKey string) tuningScopedValue {
+	rv, _ := resolver.Get("", itemKey)
+	value := rv.Value
+	if itemKey == wsconfig.ItemWorkflowPreferMercenary {
+		value = canonicalPreferMercenaryValue(value)
+	}
+	return tuningScopedValue{
+		Value: value,
+		Scope: string(rv.Scope),
+	}
+}
+
+func canonicalPreferMercenaryValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "on":
+		return "on"
+	case "false", "off":
+		return "off"
+	default:
+		return "hide"
+	}
+}
+
+func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
+	cfg, err := wsconfig.Load(wsconfig.Options{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tuningAgentTierCurrent, 0)
+	for _, tier := range sortedAgentModelAliasKeys(cfg.Agents.ModelAliases) {
+		byHarness := cfg.Agents.ModelAliases[tier]
+		for _, harness := range sortedAgentTierKeys(byHarness) {
+			value := byHarness[harness]
+			rows = append(rows, tuningAgentTierCurrent{
+				Tier:    tier,
+				Harness: harness,
+				Backend: value.Backend,
+				Model:   value.Model,
+				Effort:  value.Effort,
+			})
+		}
+	}
+	return rows, nil
+}
+
+func tuningFieldsFromSchema(toolName string, fieldNames ...string) []tuningField {
+	fields := make([]tuningField, 0, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		fields = append(fields, tuningFieldFromSchema(toolName, fieldName))
+	}
+	return fields
+}
+
+func tuningFieldFromSchema(toolName, fieldName string) tuningField {
+	field := tuningField{Name: fieldName}
+	properties, required := toolInputSchemaDetails(toolName)
+	field.Required = required[fieldName]
+	raw, ok := properties[fieldName]
+	if !ok {
+		return field
+	}
+	if description, ok := propertyString(raw, "description"); ok {
+		field.Description = description
+	}
+	if enum := propertyStringSlice(raw, "enum"); len(enum) > 0 {
+		field.Enum = enum
+	}
+	return field
+}
+
+func toolInputSchemaDetails(toolName string) (map[string]any, map[string]bool) {
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		if name != toolName {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		required := map[string]bool{}
+		switch values := schema["required"].(type) {
+		case []string:
+			for _, value := range values {
+				required[value] = true
+			}
+		case []any:
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					required[text] = true
+				}
+			}
+		}
+		return properties, required
+	}
+	return map[string]any{}, map[string]bool{}
+}
+
+func propertyString(raw any, key string) (string, bool) {
+	switch typed := raw.(type) {
+	case map[string]any:
+		value, ok := typed[key].(string)
+		return value, ok
+	case map[string]string:
+		value, ok := typed[key]
+		return value, ok
+	default:
+		return "", false
+	}
+}
+
+func propertyStringSlice(raw any, key string) []string {
+	switch typed := raw.(type) {
+	case map[string]any:
+		switch values := typed[key].(type) {
+		case []string:
+			return append([]string(nil), values...)
+		case []any:
+			out := make([]string, 0, len(values))
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					out = append(out, text)
+				}
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+func formatTuningCatalog(catalog tuningCatalog) string {
+	var b strings.Builder
+	for _, knob := range catalog.Knobs {
+		fmt.Fprintf(&b, "%s (%s)\n", knob.ID, knob.Kind)
+		if knob.Description != "" {
+			fmt.Fprintf(&b, "  %s\n", knob.Description)
+		}
+		fmt.Fprintf(&b, "  writer: %s\n", knob.Writer.Tool)
+		if len(knob.SelectorFields) > 0 {
+			fmt.Fprintf(&b, "  selectors: %s\n", strings.Join(tuningFieldLabels(knob.SelectorFields), ", "))
+		}
+		if len(knob.ValueFields) > 0 {
+			fmt.Fprintf(&b, "  values: %s\n", strings.Join(tuningFieldLabels(knob.ValueFields), ", "))
+		}
+		if current := formatTuningCurrent(knob.Current); current != "" {
+			fmt.Fprintf(&b, "  current: %s\n", current)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func tuningFieldLabels(fields []tuningField) []string {
+	labels := make([]string, 0, len(fields))
+	for _, field := range fields {
+		label := field.Name
+		if len(field.Enum) > 0 {
+			values := make([]string, 0, len(field.Enum))
+			for _, value := range field.Enum {
+				if value == "" {
+					values = append(values, "<empty>")
+				} else {
+					values = append(values, value)
+				}
+			}
+			label += "[" + strings.Join(values, "|") + "]"
+		}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func formatTuningCurrent(current any) string {
+	raw, err := json.Marshal(current)
+	if err != nil || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+func sortedAgentModelAliasKeys(values map[string]map[string]wsconfig.AgentTier) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func sortedAgentTierKeys(values map[string]wsconfig.AgentTier) []string {
@@ -2207,15 +2690,344 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.lead.prefer_mercenary",
-			"description": "Set or clear the default delegation guidance for this session key. When enabled (default), playbook.render for implementer/reviewer playbooks advises the ws.mercenary.call (mercenary) path as default; when disabled, it reverts to host-native subagent guidance. Does not affect tool availability — mercenary is always reachable on request regardless of this setting. Lead-only; non-lead keys are rejected by the server-side keyed gate.",
+			"name":        "agenda.set",
+			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Freeform fallback for cases not covered by a typed enter.* tool.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"session_key": stringProperty("Caller's lead ws session key."),
-					"enabled":     boolProperty("Whether to enable (true, default) or disable (false) the mercenary-primary delegation guidance. Omit to enable (backward-compatible call shape)."),
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Agenda blob name to upsert."),
+					"value":       objectProperty("Arbitrary JSON object stored under key."),
+				},
+				"required": []string{"session_key", "key", "value"},
+			},
+		},
+		{
+			"name":        "agenda.clear",
+			"description": "Remove the session-level agenda blob stored under a key. A missing key is a no-op. Pass all: true instead of key to clear every agenda blob for the session in one call.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Agenda blob name to remove. Omit when all: true."),
+					"all":         boolProperty("When true, clear every agenda blob for the session. key is ignored."),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "agenda.list",
+			"description": "Enumerate current agenda blob keys for a session, each with a short one-line summary, without needing to guess key names from tool descriptions.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "enter.implement",
+			"description": "Enter implement mode: resolve normalized implementation facts and observed Git branch state into one deterministic implementation verdict, store the 'implement' agenda blob, and replace the todo list with the derived implement checklist.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Implementation target after lead-owned route fact gathering.",
+						"properties": map[string]any{
+							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket", "inline", "unknown"}),
+							"label":       nullableStringProperty("Short target label or summary."),
+							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
+							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
+							"scope_label": nullableStringProperty("Selected implementation scope label."),
+							"scope_slug":  nullableStringProperty("Kebab-case implementation branch suffix."),
+						},
+					},
+					"facts": map[string]any{
+						"type":        "object",
+						"description": "Grouped normalized implementation facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
+						"properties": map[string]any{
+							"scope": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"span":                        nullableEnumStringProperty("Implementation span.", []string{"single-file", "multi-file", "unknown"}),
+									"surface":                     nullableEnumStringProperty("Touched surface.", []string{"internal", "public-interface", "cross-module", "unknown"}),
+									"new_public_symbol":           nullableEnumStringProperty("Whether work introduces a public symbol.", []string{"yes", "no", "unknown"}),
+									"new_type_contract":           nullableEnumStringProperty("Whether work introduces or changes a type/schema contract.", []string{"yes", "no", "unknown"}),
+									"test_surface":                nullableEnumStringProperty("Test surface affected by the work.", []string{"none", "existing", "new-files", "unknown"}),
+									"explicit_delegation_request":   nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
+										"explicit_direct_edit_request": nullableEnumStringProperty("When yes, overrides all other predicates and forces direct-edit verdict regardless of span/scope/surface facts. Encodes an explicit human instruction to skip delegation. Accepted: yes, no, unknown.", []string{"yes", "no", "unknown"}),
+								},
+							},
+							"complexity": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"change_points":    nullableEnumStringProperty("Known change-point clarity.", []string{"clear", "partially-known", "unknown"}),
+									"reuse_points":     nullableEnumStringProperty("Known reuse point status.", []string{"confirmed", "unconfirmed", "not-applicable", "unknown"}),
+									"strategy_shape":   nullableEnumStringProperty("Implementation strategy shape.", []string{"single-obvious", "multiple-viable", "unknown"}),
+									"side_effect_risk": nullableEnumStringProperty("Side-effect risk.", []string{"low", "moderate", "high", "unknown"}),
+									"cold_context":     nullableEnumStringProperty("Whether the code area is cold for the lead.", []string{"yes", "no", "unknown"}),
+								},
+							},
+							"risk": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"correctness":          nullableEnumStringProperty("Correctness risk.", []string{"low", "moderate", "high", "unknown"}),
+									"fit":                  nullableEnumStringProperty("Fit/contract-preservation risk.", []string{"low", "moderate", "high", "unknown"}),
+									"test":                 nullableEnumStringProperty("Test risk.", []string{"low", "moderate", "high", "unknown"}),
+									"security_or_contract": nullableEnumStringProperty("Security or external contract risk.", []string{"low", "moderate", "high", "unknown"}),
+								},
+							},
+						},
+					},
+					"policy": map[string]any{
+						"type":        "object",
+						"description": "Small explicit caller policy set. Observable Git state is read by MCP.",
+						"properties": map[string]any{
+							"branch": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"merge_target": nullableStringProperty("Required when already on an implementation branch."),
+									"allow_rename": nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict.", []string{"yes", "no", "unknown"}),
+								},
+							},
+							"review": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"override": nullableEnumStringProperty("Review override. auto or null lets MCP derive allocation.", []string{"auto", "lead-only", "single", "partitioned"}),
+								},
+							},
+							"docs": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"mode":   nullableEnumStringProperty("Documentation mode.", []string{"standard", "skip-with-reason", "unknown"}),
+									"reason": nullableStringProperty("Required reason when mode=skip-with-reason."),
+								},
+							},
+						},
+					},
+					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
+				},
+				"required": []string{"session_key", "target"},
+			},
+		},
+		{
+			"name":        "enter.proceed",
+			"description": "Enter routing mode: resolve deterministic proceed facts into one route verdict, store the 'proceed' agenda blob, and replace the todo list with the lead-proceed checklist.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Proceed target after lead-owned artifact reading.",
+						"properties": map[string]any{
+							"kind":        nullableEnumStringProperty("Target kind.", []string{"ticket-path", "inline", "unknown"}),
+							"label":       nullableStringProperty("Short target label or summary."),
+							"ticket_stem": nullableStringProperty("Ticket stem when applicable; null or omit when inapplicable."),
+							"ticket_path": nullableStringProperty("Ticket path when applicable; null or omit when inapplicable."),
+						},
+					},
+					"facts": map[string]any{
+						"type":        "object",
+						"description": "Grouped normalized route facts. Groups and fields are optional; unknown/null values are normalized by the resolver.",
+						"properties": map[string]any{
+							"ticket": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"ticket_missing": nullableEnumStringProperty("Whether a ticket-path target is missing.", []string{"yes", "no", "unknown"}),
+									"has_ticket":     nullableEnumStringProperty("Whether the target has a ticket artifact.", []string{"yes", "no", "unknown"}),
+									"status":         nullableEnumStringProperty("Ticket status.", []string{"idea", "todo", "ready", "done", "dropped", "unknown", "n/a"}),
+									"category":       nullableEnumStringProperty("Ticket category.", []string{"epic", "workset", "other", "n/a", "unknown"}),
+									"actionable":     nullableEnumStringProperty("Actionability judgment.", []string{"yes", "no", "unknown"}),
+									"freshness":      nullableEnumStringProperty("Ticket freshness against active conversation decisions.", []string{"current", "missing-settled-decisions", "uncertain", "n/a", "unknown"}),
+									"phase":          nullableStringProperty("Selected phase label when one is named."),
+								},
+							},
+							"gates": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"discussion_needed": nullableEnumStringProperty("Whether user-blocking discussion is needed.", []string{"yes", "no", "unknown"}),
+									"needs_ticket":      nullableEnumStringProperty("Whether an inline target needs a ticket first.", []string{"yes", "no", "n/a", "unknown"}),
+									"scope_blocked":     nullableEnumStringProperty("Scope blocker.", []string{"none", "container-ticket", "multiple-explicit-phases", "too-broad", "no-unfinished-phase", "phase-already-complete", "unknown"}),
+									"migration_anchor":  nullableEnumStringProperty("Migration-anchor check result.", []string{"loaded", "n/a", "missing", "conflict", "unknown"}),
+								},
+							},
+							"work": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"category": nullableEnumStringProperty("Current work category hint.", []string{"implementation", "ticket_write", "discussion", "status_report", "unknown"}),
+									"slice":    nullableStringProperty("Resolved implementation slice, whole target, blocked, n/a, or unknown."),
+								},
+							},
+						},
+					},
+					"format": enumStringProperty(`Optional output format. Defaults to "text"; use "json" for the structured verdict, next_instruction, and raw text.`, []string{"text", "json"}),
+				},
+				"required": []string{"session_key", "target"},
+			},
+		},
+		{
+			"name":        "enter.sprint",
+			"description": "Enter sprint-episode mode: store the typed payload as the 'sprint' agenda blob AND replace the todo list with the sprint episode lifecycle (Edit, Verify, Commit, Post-edit decision, Wrap episode).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":          stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"episode_slug":         stringProperty("Short kebab-case slug identifying the sprint-edit episode."),
+					"episode_start":        stringProperty("Episode-start commit hash (parent of the first marked commit)."),
+					"current_edit_context": stringProperty("One-line description of the current edit context."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "enter.salvage",
+			"description": "Enter salvage mode: store the typed payload as the 'salvage' agenda blob AND replace the todo list with the salvage pipeline (Containment, Survey fanout, Premise interview, Classification, Capture).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":        stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"failure_claim":      stringProperty("User-confirmed failure claim."),
+					"confirmed_premises": stringArrayProperty("Invalidated premises the user has confirmed."),
+					"survey_status":      stringProperty("Survey fanout status (e.g. pending, in-progress, complete)."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "todo.append",
+			"description": "Append a new pending todo item with a caller-provided key (unique within the active list) and title. Erased keys are reusable.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
+					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
+				},
+				"required": []string{"session_key", "key", "title"},
+			},
+		},
+		{
+			"name":        "todo.insert_before",
+			"description": "Insert a new pending todo item immediately before ref_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"ref_key":     stringProperty("Existing item key to insert before."),
+					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
+					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
+				},
+				"required": []string{"session_key", "ref_key", "key", "title"},
+			},
+		},
+		{
+			"name":        "todo.insert_after",
+			"description": "Insert a new pending todo item immediately after ref_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"ref_key":     stringProperty("Existing item key to insert after."),
+					"key":         stringProperty("Caller-provided item key. Normalized to lowercase; accepts letters, digits, '.', '_', and '-'; leading or trailing whitespace is rejected; unique within the active list after normalization."),
+					"title":       stringProperty("Human-facing item title."),
+					"instruction": nullableStringProperty("Optional full instruction prose for this item. Null or omit to leave unset."),
+				},
+				"required": []string{"session_key", "ref_key", "key", "title"},
+			},
+		},
+		{
+			"name":        "todo.check",
+			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions get an indented ...+ marker.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to update."),
+					"status":      enumStringProperty("New status.", []string{"pending", "wip", "done", "defer"}),
+				},
+				"required": []string{"session_key", "key", "status"},
+			},
+		},
+		{
+			"name":        "todo.erase",
+			"description": "Remove a todo item by key. The key becomes reusable afterwards.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to remove."),
+				},
+				"required": []string{"session_key", "key"},
+			},
+		},
+		{
+			"name":        "todo.clear",
+			"description": "Remove all todo items, or only done items when done_only is true (leaving pending, wip, defer).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"done_only":   boolProperty("When true, remove only done items. Defaults to false (remove all)."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "todo.list",
+			"description": "Render the todo list with visible {key} tokens. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"mode":        enumStringProperty("Rendering mode. Defaults to summary.", []string{"summary", "full"}),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "todo.read",
+			"description": "Return one todo item's full JSON payload, including nullable instruction.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"key":         stringProperty("Item key to read."),
+				},
+				"required": []string{"session_key", "key"},
+			},
+		},
+		{
+			"name":        "todo.reorder",
+			"description": "Move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"span": map[string]any{
+						"type":        "object",
+						"description": "Contiguous span to move, by key.",
+						"properties": map[string]any{
+							"from_key": stringProperty("First item key of the span."),
+							"to_key":   stringProperty("Last item key of the span."),
+						},
+						"required": []string{"from_key", "to_key"},
+					},
+					"position": map[string]any{
+						"type":        "object",
+						"description": "Destination relative to a ref_key. Set exactly one of before or after.",
+						"properties": map[string]any{
+							"before": stringProperty("Move the span before this ref_key."),
+							"after":  stringProperty("Move the span after this ref_key."),
+						},
+					},
+				},
+				"required": []string{"session_key", "span", "position"},
 			},
 		},
 		{
@@ -2295,18 +3107,54 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "config.workflow_prefer_subagent",
+			"description": "Set the global workflow preference for loading strict subagent posture with the workflow manual, or reset it back to the builtin default (off) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
+					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
+				},
+			},
+		},
+		{
+			"name":        "config.workflow_prefer_mercenary",
+			"description": "Set the global mercenary delegation preference. 'on' prefers ws.mercenary guidance for implementer/reviewer renders. 'off' keeps native-subagent default guidance while leaving explicit mercenary use available. 'hide' is the builtin default and hides ws.mercenary.* from the public tool surface. Note: tool-list suppression ('hide') requires project or global scope; a session-scope 'hide' suppresses mercenary playbook blocks but does not remove ws.mercenary.* from the tools list.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on, off, or hide.", []string{"on", "off", "hide"}),
+				},
+				"required": []string{"value"},
+			},
+		},
+		{
 			"name":        "config.prompt.set",
 			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate and to support session-scope writes."),
-					"pointId":     stringProperty("Override-point id, e.g. DelegationSection. Must be non-empty."),
-					"harness":     enumStringProperty("Harness bucket the override applies to. Use * for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket the override applies to. When omitted, defaults to the current session's detected harness. Use * explicitly for cross-harness (all).", []string{"claude", "codex", "*"}),
 					"prompt":      stringProperty("Override text that replaces the seed block at render time. Must be non-empty."),
 					"scope":       enumStringProperty("Storage scope. When omitted the write lands in the item's declared default scope (project for unregistered prompt.* keys).", wsconfig.ScopeSchemaEnum()),
 				},
-				"required": []string{"session_key", "pointId", "harness", "prompt"},
+				"required": []string{"session_key", "pointId", "prompt"},
+			},
+		},
+		{
+			"name":        "config.prompt.unset",
+			"description": "Reset a stored prompt override for a named override-point and harness bucket back to whatever the next-broader scope (or the inline seed default) resolves to. Never writes an empty-string value — an explicit empty override is a distinct intent covered by config.prompt.set. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's lead ws session key. Required to engage the keyed capability gate, and required as the target session for a session-scope unset."),
+					"pointId":     stringProperty("Override-point id, e.g. UserPreferenceSection. Must be non-empty."),
+					"harness":     enumStringProperty("Harness bucket to clear. When omitted, defaults to the current session's detected harness. Use * explicitly for cross-harness (all).", []string{"claude", "codex", "*"}),
+					"scope":       enumStringProperty("Storage scope to clear from. When omitted the item's declared default scope is used (project for unregistered prompt.* keys). session clears the caller's session-scoped override.", wsconfig.ScopeSchemaEnum()),
+				},
+				"required": []string{"session_key", "pointId"},
 			},
 		},
 		{
@@ -2316,6 +3164,18 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope overrides are included and annotated."),
+					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
+					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
+				},
+			},
+		},
+		{
+			"name":        "config.tuning",
+			"description": "Return a read-only catalog of supported ws workflow tuning knobs, including writer tools, schema-derived field options, and current values when available.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key":   stringProperty("Optional lead session key. When supplied, session-scope prompt overrides and scoped config values are included."),
 					"format":        stringProperty(`Optional output format. Use "json" for structured output.`),
 					"root_override": stringProperty("Optional rsrc root override (test/advanced use); when omitted the shipped rsrc tree is scanned."),
 				},
@@ -2577,7 +3437,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves check the sage_review config and the ticket's sage-review frontmatter field. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
+			"description": "Move a ticket along the idea <-> todo <-> ready axis. Upward moves stamp or validate a resolved sage-review posture from config. Downward moves from ready/ return a spec-cleanup tip. Stages atomically; does not commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2589,7 +3449,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus sage-review: pending for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
+			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for todo/ready). Returns the path and a promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2600,15 +3460,49 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "tickets.template",
+			"description": "Return the fill-in body skeleton for a given ticket type. Use at creation time instead of loading the full ticket-conventions document.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+				},
+				"required": []string{"type"},
+			},
+		},
+		{
 			"name":        "path.generate",
 			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"kind":  stringProperty("Generated path kind. Initially supports review."),
+					"kind":  enumStringProperty(`Generated path kind. "review" and "prompt" allocate cache artifacts; "plan" allocates a repo-local implementation plan under ai-docs/.plans/.`, []string{"review", "prompt", "plan"}),
 					"stems": stringArrayProperty("Logical file stems to allocate in stable order."),
 				},
 				"required": []string{"kind", "stems"},
+			},
+		},
+		{
+			"name":        "workflow_manual",
+			"description": namespaceText("Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Required. Your lead session key."),
+					"root":        stringProperty("Optional absolute Git worktree root. When provided alongside the fresh-bootstrap sentinel, the handler mints a lead session key and returns it inline, eliminating the separate ferrule call."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "workflow_state",
+			"description": namespaceText("Return only the Session State section (agenda/todos) for a lead session_key, with no manual reference text. A cheap alternative to workflow_manual for a caller that only needs 'what's my key and current state', costly right after compaction or during lead-revive. An unresolvable key returns the same fail-loud notice as workflow_manual and never mints a new key. Lead-only; workflow_manual itself is unchanged."),
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Required. Your lead session key."),
+				},
+				"required": []string{"session_key"},
 			},
 		},
 		{
@@ -2639,7 +3533,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.register",
+			"name":        "mercenary.register",
 			"description": "Register a durable ws mercenary agent for the current worktree. Use a self-contained prompt from playbook.render as system_prompt_text, and pass playbook.render's returned recommended-tier through as tier; the former prompts/model registration fields are removed.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2653,7 +3547,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.call",
+			"name":        "mercenary.call",
 			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2665,7 +3559,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.wait",
+			"name":        "mercenary.wait",
 			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2677,7 +3571,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.result",
+			"name":        "mercenary.result",
 			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2689,7 +3583,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.status",
+			"name":        "mercenary.status",
 			"description": "Return current status for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2700,7 +3594,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.interrupt",
+			"name":        "mercenary.interrupt",
 			"description": "Queue an interrupt or redirect message for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2712,7 +3606,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.tail",
+			"name":        "mercenary.tail",
 			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2724,32 +3618,32 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.debug.tail",
+			"name":        "mercenary.debug.tail",
 			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
 			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.stdout",
+			"name":        "mercenary.debug.stdout",
 			"description": "Debug only: return recent raw stdout lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.stderr",
+			"name":        "mercenary.debug.stderr",
 			"description": "Debug only: return recent raw stderr lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.runtime_log",
+			"name":        "mercenary.debug.runtime_log",
 			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
 			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.debug.events",
+			"name":        "mercenary.debug.events",
 			"description": "Debug only: return recent raw agent events log lines.",
 			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
 		},
 		{
-			"name":        "ws.mercenary.cancel",
+			"name":        "mercenary.cancel",
 			"description": "Best-effort cancel the current async call for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2760,7 +3654,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.print",
+			"name":        "mercenary.print",
 			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2771,7 +3665,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mercenary.erase",
+			"name":        "mercenary.erase",
 			"description": "Erase a registered ws agent directory for the current worktree.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -2782,13 +3676,13 @@ func tools() []map[string]any {
 			},
 		},
 	}
-	return withRootAwareToolSchemas(toolList)
+	return withSessionKeyToolSchemas(toolList)
 }
 
-func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
+func withSessionKeyToolSchemas(toolList []map[string]any) []map[string]any {
 	for _, tool := range toolList {
 		name, _ := tool["name"].(string)
-		if !rootAwareToolSchemaRequiresSessionKey(name) {
+		if !toolSchemaRequiresSessionKey(name) {
 			continue
 		}
 		schema, _ := tool["inputSchema"].(map[string]any)
@@ -2809,7 +3703,7 @@ func withRootAwareToolSchemas(toolList []map[string]any) []map[string]any {
 	return toolList
 }
 
-func rootAwareToolSchemaRequiresSessionKey(name string) bool {
+func toolSchemaRequiresSessionKey(name string) bool {
 	switch name {
 	case "api.list",
 		"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep",
@@ -2817,10 +3711,11 @@ func rootAwareToolSchemaRequiresSessionKey(name string) bool {
 		"project_tree", "spec_stem.generate", "spec_index.verify", "specs.list", "specs.find", "specs.status",
 		"mental_models.list", "mental_models.find", "mental_models.status", "references.trace",
 		"tickets.list", "tickets.find", "tickets.status", "tickets.close", "tickets.move", "tickets.create", "path.generate", "playbook.render",
-		"ws.mercenary.register", "ws.mercenary.call", "ws.mercenary.wait", "ws.mercenary.result", "ws.mercenary.status",
-		"ws.mercenary.interrupt", "ws.mercenary.tail", "ws.mercenary.debug.tail", "ws.mercenary.debug.stdout",
-		"ws.mercenary.debug.stderr", "ws.mercenary.debug.runtime_log", "ws.mercenary.debug.events",
-		"ws.mercenary.cancel", "ws.mercenary.print", "ws.mercenary.erase":
+		"mercenary.register", "mercenary.call", "mercenary.wait", "mercenary.result", "mercenary.status",
+		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
+		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
+		"mercenary.cancel", "mercenary.print", "mercenary.erase",
+		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
 		return true
 	default:
 		return false
@@ -2838,11 +3733,18 @@ func appendRequiredString(raw any, value string) []string {
 }
 
 func LeadToolNames() []string {
+	mercenaryHidden := mercenaryHiddenFromGlobalConfig()
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
+		if permanentlyHiddenTool(name) {
+			continue
+		}
 		if NoAgentMode() && noAgentHiddenTool(name) {
+			continue
+		}
+		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
 			continue
 		}
 		if name != "" {
@@ -2856,10 +3758,17 @@ func LeadToolNames() []string {
 func (s *Server) filteredTools() []map[string]any {
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
+	mercenaryHidden := s.mercenaryHiddenFromConfig()
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
-		if s.toolAllowed(name) {
+		if permanentlyHiddenTool(name) {
+			continue
+		}
+		if mercenaryHidden && strings.HasPrefix(name, "mercenary.") {
+			continue
+		}
+		if s.toolAllowed(name, mercenaryHidden) {
 			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
 	}
@@ -2881,7 +3790,7 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
 		clone["inputSchema"] = namespaceValue(schema)
 	}
-	if !strings.HasPrefix(name, "ws.mercenary.") {
+	if !strings.HasPrefix(name, "mercenary.") {
 		return clone
 	}
 	schema, ok := clone["inputSchema"].(map[string]any)
@@ -2903,8 +3812,11 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 	return clone
 }
 
-func (s *Server) toolAllowed(name string) bool {
+func (s *Server) toolAllowed(name string, mercenaryHidden bool) bool {
 	if NoAgentMode() && noAgentHiddenTool(name) {
+		return false
+	}
+	if strings.HasPrefix(name, "mercenary.") && mercenaryHidden {
 		return false
 	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
@@ -2921,9 +3833,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 		if strings.HasPrefix(name, "session.") {
 			return false
 		}
-		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.")
+		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "ws.mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
+		return !strings.HasPrefix(name, "mercenary.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && name != "git.commit"
 	default:
 		return false
 	}
@@ -2994,17 +3906,57 @@ func agentCallHandleText(name, status string, pid int) string {
 	return fmt.Sprintf("agentId=%s\tstatus=%s\tpid=%d\ncontinue: use the agentId above with the host continuation idiom (e.g. SendMessage(to: agentId) or resume by task id)\nfollow_up: ws.mercenary.result --timeout 10m | ws.mercenary.wait --timeout 10m | ws.mercenary.status | ws.mercenary.tail | ws.mercenary.cancel\n", name, status, pid)
 }
 
+// permanentlyHiddenTool returns true for tools that must never appear on the
+// public MCP surface regardless of mode. exec.* tools are under active
+// development (epic 260524) and not yet documented in lead-workflow-manual;
+// they are hidden until the surface stabilizes.
+func permanentlyHiddenTool(name string) bool {
+	return strings.HasPrefix(name, "exec.")
+}
+
+// mercenaryHiddenFromConfig returns true when workflow.prefer_mercenary resolves
+// to "hide" from global/builtin state. The item is global-only because
+// filteredTools and toolAllowed are request-level, not session/root keyed.
+func (s *Server) mercenaryHiddenFromConfig() bool {
+	return mercenaryHiddenFromGlobalConfig()
+}
+
+func mercenaryHiddenFromGlobalConfig() bool {
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), nil, nil)
+	rv, err := resolver.Get("", wsconfig.ItemWorkflowPreferMercenary)
+	if err != nil {
+		return false
+	}
+	return canonicalPreferMercenaryValue(rv.Value) == "hide"
+}
+
+func (s *Server) requireLeadSessionKey(toolName string, arguments map[string]any) (string, error) {
+	key, _ := arguments["session_key"].(string)
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", fmt.Errorf("%s: session_key is required", toolName)
+	}
+	entry, found := s.sessions.lookup(key)
+	if !found {
+		return "", fmt.Errorf("%s: unknown_session: session key not found; if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
+	}
+	if entry.scope != roleLead {
+		return "", fmt.Errorf("%s: session_key must belong to a lead session", toolName)
+	}
+	return key, nil
+}
+
 func noAgentHiddenTool(name string) bool {
-	if strings.HasPrefix(name, "exec.") {
+	if permanentlyHiddenTool(name) {
 		return true
 	}
-	if strings.HasPrefix(name, "ws.mercenary.") {
+	if strings.HasPrefix(name, "mercenary.") {
 		return true
 	}
 	switch name {
 	case "config.agents_tier":
 		return true
-	case "ws.lead.prefer_mercenary":
+	case "config.workflow_prefer_mercenary":
 		// Mercenary render-mode control is ws-only; the agentless wsflow surface
 		// has no mercenary path, so prefer_mercenary is hidden there. The
 		// bootstrap tool stays visible (wsflow still needs session-key bootstrap).
@@ -3218,6 +4170,13 @@ func stringProperty(description string) map[string]string {
 	}
 }
 
+func nullableStringProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        []string{"string", "null"},
+		"description": description,
+	}
+}
+
 func stringArrayProperty(description string) map[string]any {
 	return map[string]any{
 		"type":        "array",
@@ -3233,6 +4192,19 @@ func enumStringProperty(description string, values []string) map[string]any {
 		"type":        "string",
 		"description": description,
 		"enum":        values,
+	}
+}
+
+func nullableEnumStringProperty(description string, values []string) map[string]any {
+	enumValues := make([]any, 0, len(values)+1)
+	for _, value := range values {
+		enumValues = append(enumValues, value)
+	}
+	enumValues = append(enumValues, nil)
+	return map[string]any{
+		"type":        []string{"string", "null"},
+		"description": description,
+		"enum":        enumValues,
 	}
 }
 
@@ -3267,6 +4239,25 @@ func boolProperty(description string) map[string]string {
 	return map[string]string{
 		"type":        "boolean",
 		"description": description,
+	}
+}
+
+// objectProperty describes a free-form JSON object parameter (no fixed property
+// schema), used for arbitrary payloads such as ws.agenda.set value blobs.
+func objectProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": description,
+	}
+}
+
+// objectArrayProperty describes an array-of-objects parameter without pinning a
+// per-item schema, used for typed enter-payload lists such as active_agents.
+func objectArrayProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"description": description,
+		"items":       map[string]any{"type": "object"},
 	}
 }
 

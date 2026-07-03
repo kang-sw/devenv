@@ -42,15 +42,19 @@ type SessionWriter interface {
 	// session record for the given session key. Returns an error if the session
 	// key is not found or the write fails.
 	SetOverride(sessionKey, itemKey, value string) error
+	// DeleteOverride removes an Overrides entry for the given item key from the
+	// session record for the given session key. Returns an error if the session
+	// key is not found; removing an absent item key is a no-op (not an error).
+	DeleteOverride(sessionKey, itemKey string) error
 }
 
 // Resolver resolves config item values across the session > project > global >
 // builtin precedence chain. It is a value type; construct one with NewResolver.
 type Resolver struct {
-	opts      Options
-	builtin   map[string]string
-	sessionR  SessionReader // nil when session scope is not available
-	sessionW  SessionWriter // nil when session scope writes are not supported
+	opts     Options
+	builtin  map[string]string
+	sessionR SessionReader // nil when session scope is not available
+	sessionW SessionWriter // nil when session scope writes are not supported
 }
 
 // NewResolver creates a Resolver. builtinDefaults provides the code-default
@@ -74,6 +78,10 @@ func NewResolver(opts Options, builtinDefaults map[string]string, sessionReader 
 // value and the scope it resolved from. If the key is absent from all scopes,
 // Scope is ScopeBuiltin and Value is "".
 func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
+	if GlobalOnly(itemKey) {
+		return r.getGlobalOnly(itemKey)
+	}
+
 	// Session scope.
 	if r.sessionR != nil && sessionKey != "" {
 		if v, ok := r.sessionR.GetOverride(sessionKey, itemKey); ok {
@@ -108,6 +116,20 @@ func (r *Resolver) Get(sessionKey, itemKey string) (ResolvedValue, error) {
 	return ResolvedValue{Value: v, Scope: ScopeBuiltin}, nil
 }
 
+func (r *Resolver) getGlobalOnly(itemKey string) (ResolvedValue, error) {
+	globalCfg, err := loadGlobalConfig(r.opts)
+	if err != nil {
+		return ResolvedValue{}, fmt.Errorf("resolver: load global config: %w", err)
+	}
+	if globalCfg.Overrides != nil {
+		if v, ok := globalCfg.Overrides[itemKey]; ok {
+			return ResolvedValue{Value: v, Scope: ScopeGlobal}, nil
+		}
+	}
+	v := r.builtin[itemKey]
+	return ResolvedValue{Value: v, Scope: ScopeBuiltin}, nil
+}
+
 // Set writes the value for the given item key to the appropriate scope. The
 // target scope is determined as: setOpts.ExplicitScope (when non-empty) else the
 // item's declared default scope. Item-level capability gating is honored via the
@@ -116,6 +138,9 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	targetScope := setOpts.ExplicitScope
 	if targetScope == "" {
 		targetScope = DefaultScope(itemKey)
+	}
+	if GlobalOnly(itemKey) && targetScope != ScopeGlobal {
+		return fmt.Errorf("resolver: item %q is global-only", itemKey)
 	}
 
 	// Capability check hook — item-level write gating.
@@ -149,6 +174,117 @@ func (r *Resolver) Set(itemKey, value string, setOpts SetOptions) error {
 	default:
 		return fmt.Errorf("resolver: unsupported write scope %q", targetScope)
 	}
+}
+
+// Unset resets an item to its next-broader-scope (or builtin) resolution by
+// removing the override entry from the target scope. Session, project, and
+// global scopes are all supported. Removing a key that does not exist is a
+// no-op (not an error). Unset never writes an empty-string value — that is a
+// distinct intent covered by Set with an explicit empty value.
+func (r *Resolver) Unset(itemKey string, setOpts SetOptions) error {
+	targetScope := setOpts.ExplicitScope
+	if targetScope == "" {
+		targetScope = DefaultScope(itemKey)
+	}
+	if GlobalOnly(itemKey) && targetScope != ScopeGlobal {
+		return fmt.Errorf("resolver: item %q is global-only", itemKey)
+	}
+
+	// Capability check hook — mirrors Set's item-level write gating.
+	if setOpts.CapabilityCheck != nil {
+		if err := setOpts.CapabilityCheck(itemKey, targetScope); err != nil {
+			return err
+		}
+	}
+
+	switch targetScope {
+	case ScopeProject:
+		path, err := Path(r.opts)
+		if err != nil {
+			return err
+		}
+		return deleteOverrideInFile(path, itemKey)
+	case ScopeGlobal:
+		path, err := GlobalPath(r.opts)
+		if err != nil {
+			return err
+		}
+		return deleteOverrideInFile(path, itemKey)
+	case ScopeSession:
+		if r.sessionW == nil {
+			return fmt.Errorf("resolver: session writer not available")
+		}
+		if setOpts.SessionKey == "" {
+			return fmt.Errorf("resolver: session_key required for session-scope unset")
+		}
+		return r.sessionW.DeleteOverride(setOpts.SessionKey, itemKey)
+	default:
+		return fmt.Errorf("resolver: unsupported unset scope %q", targetScope)
+	}
+}
+
+// deleteOverrideInFile performs an flock-serialized read-modify-write on the
+// config file at path, removing overrides[key]. A missing key or missing file
+// is a no-op.
+func deleteOverrideInFile(path, itemKey string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	lockPath := path + ".lock"
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("acquire config lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("timed out waiting for config file lock: %s", lockPath)
+	}
+	defer fl.Unlock() //nolint:errcheck
+
+	var cfg Config
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read config for update: %w", err)
+	}
+	if err == nil {
+		if jerr := json.Unmarshal(raw, &cfg); jerr != nil {
+			return fmt.Errorf("parse config for update: %w", jerr)
+		}
+	}
+	if _, exists := cfg.Overrides[itemKey]; !exists {
+		return nil
+	}
+	delete(cfg.Overrides, itemKey)
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("encode config: %w", err)
+	}
+	payload = append(payload, '\n')
+	if _, werr := tmp.Write(payload); werr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write temp config: %w", werr)
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close temp config: %w", cerr)
+	}
+	if rerr := os.Rename(tmpName, path); rerr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("atomic rename config: %w", rerr)
+	}
+	return nil
 }
 
 // GetBool resolves the value for itemKey and interprets it as a boolean.

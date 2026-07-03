@@ -12,15 +12,15 @@ package mcp
 //   5. Production-path case: override stored via the real resolver/session store
 //      is honored at playbook.render time (mirrors
 //      TestPreferMercenaryOnOffRenderGuidanceProductionPath).
-//   6. Phase 2 shipped seed: the DelegationSection marker in the real
-//      lead-workflow-manual renders its seed posture (markers stripped) and an
-//      override replaces only that posture, leaving manual structure intact.
+//   6. Phase 2 shipped manual: DelegationSection is absent, while the
+//      UserPreferenceSection marker remains the shipped freeform slot.
 //
 // Unit-level cases (1–4) drive renderPlaybookBody with an injected fake
 // overrideLookupFn.  Case 5 uses the production dispatch (callToolOnce on
 // playbook.render) so the server-side resolver wiring is exercised end-to-end.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,7 +85,7 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// nil lookup: every override-point falls back to its seed.
-	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Claude harness: should get the per-harness override.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -142,7 +142,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Codex harness: no codex-specific or "all" override → must fall back to seed.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -174,7 +174,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Claude harness: no claude-specific override → "all" applies.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -187,7 +187,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Codex harness: same expectation.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -200,7 +200,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 		"SeedSection/claude": "claude wins",
 		"SeedSection/all":    "all-bucket",
 	})
-	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookupBoth)
+	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookupBoth)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (both): %v", err)
 	}
@@ -221,7 +221,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// No override stored: extension slot must render nothing (empty body).
-	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (no override): %v", err)
 	}
@@ -234,7 +234,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"ExtSlot/claude": "injected extension text",
 	})
-	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, lookup)
+	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", false, "", lookup)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (with override): %v", err)
 	}
@@ -495,62 +495,47 @@ func TestOverridePrintProductionPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Case 6: Phase 2 — shipped DelegationSection seed in lead-workflow-manual
+// Case 6: Phase 2 — shipped lead-workflow-manual override surface
 // ---------------------------------------------------------------------------
 
-// TestShippedDelegationSectionSeedAndOverride verifies the first shipped override
-// marker. With no override the seed posture renders (markers stripped); an
-// override on DelegationSection replaces only the posture body and leaves the
-// rest of the manual intact. It runs against the real shipped rsrc tree, so it
-// also guards the manifest regen for the edited manual.
-func TestShippedDelegationSectionSeedAndOverride(t *testing.T) {
+// TestShippedWorkflowManualOmitsDelegationSection verifies that the shipped
+// workflow manual no longer carries the legacy posture override marker or seed.
+func TestShippedWorkflowManualOmitsDelegationSection(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	const seedPhrase = "Delegate to preserve lead execution context"
-
-	// No override → seed posture renders, markers stripped, structure intact.
-	seedBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
-		t.Fatalf("printPlaybook (seed): %v", err)
+		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(seedBody, seedPhrase) {
-		t.Errorf("seed posture must render with no override:\n%s", seedBody)
+	for _, forbidden := range []string{
+		"DelegationSection",
+		"### Delegation posture",
+		"Delegate all work to subagents for this session.",
+		"Dispatch:",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("workflow manual must not contain removed delegation surface %q:\n%s", forbidden, body)
+		}
 	}
-	assertNoMarkerSyntax(t, "shipped seed", seedBody)
-	assertManualStructureIntact(t, "shipped seed", seedBody)
-
-	// Override DelegationSection (all bucket) → posture replaced, seed gone,
-	// structure intact, markers stripped.
-	lookup := staticLookup(map[string]string{
-		"DelegationSection/all": "ALWAYS delegate aggressively to conserve context.",
-	})
-	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, lookup)
-	if err != nil {
-		t.Fatalf("printPlaybook (override): %v", err)
+	if !strings.Contains(body, "### User preferences") {
+		t.Errorf("workflow manual must keep the user-preferences heading:\n%s", body)
 	}
-	if !strings.Contains(ovBody, "ALWAYS delegate aggressively to conserve context.") {
-		t.Errorf("override posture must replace the seed:\n%s", ovBody)
-	}
-	if strings.Contains(ovBody, seedPhrase) {
-		t.Errorf("seed posture must not appear when overridden:\n%s", ovBody)
-	}
-	assertNoMarkerSyntax(t, "shipped override", ovBody)
-	assertManualStructureIntact(t, "shipped override", ovBody)
+	assertNoMarkerSyntax(t, "shipped manual", body)
+	assertManualStructureIntact(t, "shipped manual", body)
 }
 
 // TestShippedUserPreferenceSectionEmptySlotAndOverride verifies the shipped
-// user-preference extension slot. With no override it renders no body text; an
-// all-harness override appends preference guidance without replacing delegation
-// posture.
+// user-preference extension slot. With no override it renders the static
+// default-preferences seed text (260702); an all-harness override appends
+// preference guidance without replacing delegation posture.
 func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
 	const preferenceText = "User preferences:\n- Prefer conventional terminology when user wording is imprecise."
-	const delegationSeed = "Delegate to preserve lead execution context"
 
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (base): %v", err)
 	}
@@ -566,28 +551,101 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"UserPreferenceSection/all": preferenceText,
 	})
-	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, lookup)
+	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", lookup)
 	if err != nil {
 		t.Fatalf("printPlaybook (override): %v", err)
 	}
 	if !strings.Contains(ovBody, preferenceText) {
 		t.Errorf("user-preference override must render:\n%s", ovBody)
 	}
-	if !strings.Contains(ovBody, delegationSeed) {
-		t.Errorf("user-preference override must not replace delegation seed:\n%s", ovBody)
+	if strings.Contains(ovBody, "DelegationSection") || strings.Contains(ovBody, "Delegate all work to subagents for this session.") {
+		t.Errorf("user-preference override must not restore removed delegation posture:\n%s", ovBody)
 	}
 	assertNoMarkerSyntax(t, "user preference override", ovBody)
 	assertManualStructureIntact(t, "user preference override", ovBody)
 }
 
+// TestWorkflowLangInjectionIntoUserPreferenceSection verifies that a non-empty
+// workflowLang generates a language-binding instruction in the ### User preferences
+// seed, and that an empty workflowLang leaves the section empty.
+func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	// Empty workflowLang → section stays empty (no lang instruction).
+	emptyBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (empty lang): %v", err)
+	}
+	if strings.Contains(emptyBody, "Respond to the user in") {
+		t.Errorf("empty workflowLang must not inject lang instruction:\n%s", emptyBody)
+	}
+	assertNoMarkerSyntax(t, "empty lang", emptyBody)
+
+	// Non-empty workflowLang → instruction appears in User preferences seed.
+	langBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "Korean", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook (Korean): %v", err)
+	}
+	if !strings.Contains(langBody, "Respond to the user in Korean") {
+		t.Errorf("workflowLang=Korean must inject lang instruction:\n%s", langBody)
+	}
+	if !strings.Contains(langBody, "### User preferences") {
+		t.Errorf("User preferences heading must survive lang injection:\n%s", langBody)
+	}
+	assertNoMarkerSyntax(t, "Korean lang", langBody)
+	assertManualStructureIntact(t, "Korean lang", langBody)
+}
+
+// TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin verifies the
+// 260702 fix: the shipped Session setup section states the ferrule
+// redundant-mint consequence (a second call for the same root mints a new
+// session identity with empty state, stranding prior agenda/todo state), and
+// the User preferences section is never fully empty in the default render
+// (no override, no workflow.lang configured).
+func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+
+	if !strings.Contains(body, "### Session setup") {
+		t.Fatalf("workflow manual must keep the Session setup heading:\n%s", body)
+	}
+	if !strings.Contains(body, "mints a brand-new session key with empty state") {
+		t.Errorf("Session setup must state the redundant-mint consequence:\n%s", body)
+	}
+	if !strings.Contains(body, "stranding any agenda, todo, or session-tree state") {
+		t.Errorf("Session setup must name the stranded state kinds:\n%s", body)
+	}
+
+	// Extract the User preferences section body (between its heading and the
+	// next heading) and assert it is not empty/whitespace-only.
+	idx := strings.Index(body, "### User preferences")
+	if idx < 0 {
+		t.Fatalf("workflow manual must keep the User preferences heading:\n%s", body)
+	}
+	rest := body[idx+len("### User preferences"):]
+	if next := strings.Index(rest, "\n### "); next >= 0 {
+		rest = rest[:next]
+	}
+	if strings.TrimSpace(rest) == "" {
+		t.Errorf("User preferences section must not be empty in the default render:\n%s", body)
+	}
+	assertNoMarkerSyntax(t, "session setup and user preferences", body)
+	assertManualStructureIntact(t, "session setup and user preferences", body)
+}
+
 // assertManualStructureIntact bounds the override replacement region: the
-// far-above heading, the `### Delegation posture` heading (immediately above the
-// override block, outside it), and the following `Scoped Exploration` section
-// must all survive both seed and override renders. A mis-scoped marker that
-// swallowed the heading or the next section would fail here.
+// far-above heading, the user-preference slot, and the following
+// `Scoped Exploration` section must all survive both seed and override renders.
+// A mis-scoped marker that swallowed adjacent sections would fail here.
 func assertManualStructureIntact(t *testing.T, label, body string) {
 	t.Helper()
-	for _, want := range []string{"WS Workflow Primitives", "### User preferences", "### Delegation posture", "Scoped Exploration"} {
+	for _, want := range []string{"WS Workflow Primitives", "### User preferences", "Scoped Exploration"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s: manual structure must remain intact, missing %q:\n%s", label, want, body)
 		}
@@ -606,15 +664,15 @@ func assertManualStructureIntact(t *testing.T, label, body string) {
 //     through the real layered config resolver.
 //  2. Rendering lead-workflow-manual via buildOverrideLookup + printPlaybook
 //     (the same path used by playbook.print dispatch) shows the stored override
-//     instead of the DelegationSection seed.
+//     in the shipped UserPreferenceSection slot.
 //  3. Marker syntax is absent; manual structure is intact.
 //  4. Harness-exact match vs all-bucket: a harness-specific override (claude)
 //     wins over a previously stored all-bucket override when both are present.
 func TestConfigPromptSetEndToEnd(t *testing.T) {
 	useLeadProfile(t)
 
-	// Use the real shipped rsrc tree so lead-workflow-manual loads with its
-	// real DelegationSection marker.
+	// Use the real shipped rsrc tree so lead-workflow-manual loads with its real
+	// UserPreferenceSection marker.
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
 
@@ -623,6 +681,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	s := NewServer(root, "test")
 	// Set harness to "claude" so per-harness lookups resolve predictably.
@@ -631,31 +690,30 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	// Bootstrap a lead session key.
 	key, _ := parseLoginResponse(t, callLogin(t, s, 910100, root, nil))
 
-	const seedPhrase = "Delegate to preserve lead execution context"
+	const overrideText = "Use concise Korean status updates when reporting workflow state."
 
-	// --- Baseline: without any override, seed renders ---
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	// --- Baseline: without any override, custom preference is absent ---
+	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (baseline): %v", err)
 	}
-	if !strings.Contains(baseBody, seedPhrase) {
-		t.Errorf("baseline: seed phrase must appear before any override is set:\n%s", baseBody)
+	if strings.Contains(baseBody, overrideText) {
+		t.Errorf("baseline: override text must not appear before any override is set:\n%s", baseBody)
 	}
 
 	// --- Set override via the real config.prompt.set dispatch ---
 	// Scope: session (explicit) so the test exercises the session-scope write path
 	// and does not touch the project-scope file on disk.
-	const overrideText = "ALWAYS delegate to save context — custom override for test."
 	setResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
 		"session_key": key,
-		"pointId":     "DelegationSection",
+		"pointId":     "UserPreferenceSection",
 		"harness":     "claude",
 		"prompt":      overrideText,
 		"scope":       "session",
 	})
 	setText := toolText(t, setResp)
 	// Confirm the tool returned the expected confirmation line.
-	if !strings.Contains(setText, "prompt override set: DelegationSection/claude") {
+	if !strings.Contains(setText, "prompt override set: UserPreferenceSection/claude") {
 		t.Fatalf("config.prompt.set confirmation missing: %s", setText)
 	}
 	if !strings.Contains(setText, "scope: session") {
@@ -663,17 +721,14 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// --- Render with the override active ---
-	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (after set): %v", err)
 	}
 
-	// Override text must appear; seed must be gone.
+	// Override text must appear.
 	if !strings.Contains(overrideBody, overrideText) {
 		t.Errorf("config.prompt.set: stored override must appear in render:\n%s", overrideBody)
-	}
-	if strings.Contains(overrideBody, seedPhrase) {
-		t.Errorf("config.prompt.set: seed phrase must not appear when override is set:\n%s", overrideBody)
 	}
 
 	// Marker syntax must be absent; manual structure intact.
@@ -686,19 +741,19 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	const allOverrideText = "All-harness override — should lose to claude-specific."
 	allSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
 		"session_key": key,
-		"pointId":     "DelegationSection",
+		"pointId":     "UserPreferenceSection",
 		"harness":     "*",
 		"prompt":      allOverrideText,
 		"scope":       "session",
 	})
 	allSetText := toolText(t, allSetResp)
 	// Confirm the harness normalization: "*" is stored as "all".
-	if !strings.Contains(allSetText, "prompt override set: DelegationSection/all") {
+	if !strings.Contains(allSetText, "prompt override set: UserPreferenceSection/all") {
 		t.Fatalf("config.prompt.set (all bucket) confirmation missing: %s", allSetText)
 	}
 
 	// Render again — claude-specific override must still win.
-	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, buildOverrideLookup(s, key))
+	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (precedence): %v", err)
 	}
@@ -708,11 +763,91 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	if strings.Contains(precedenceBody, allOverrideText) {
 		t.Errorf("all-bucket text must not appear when harness-specific override is set:\n%s", precedenceBody)
 	}
-	if strings.Contains(precedenceBody, seedPhrase) {
-		t.Errorf("seed phrase must not appear when overrides are set:\n%s", precedenceBody)
-	}
 	assertNoMarkerSyntax(t, "config.prompt.set precedence render", precedenceBody)
 	assertManualStructureIntact(t, "config.prompt.set precedence render", precedenceBody)
+}
+
+// TestConfigPromptUnsetSessionScope verifies ticket 260702-bug-config-unset-asymmetry:
+// config.prompt.unset now supports scope: "session", removing only the
+// session-scoped override and falling back to the next-broader scope (project
+// here) rather than being forced through a global-scope detour or being
+// unsupported entirely.
+func TestConfigPromptUnsetSessionScope(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 910200, root, nil))
+
+	// Seed a project-scope override beneath the session override so the
+	// post-unset fallback lands somewhere concrete rather than the seed default.
+	projectSetResp := callToolOnce(t, s, 1, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "UserPreferenceSection",
+		"harness":     "claude",
+		"prompt":      "project-scope fallback text",
+		"scope":       "project",
+	})
+	if !strings.Contains(toolText(t, projectSetResp), "scope: project") {
+		t.Fatalf("project-scope seed set failed: %s", projectSetResp)
+	}
+
+	sessionSetResp := callToolOnce(t, s, 2, "config.prompt.set", map[string]any{
+		"session_key": key,
+		"pointId":     "UserPreferenceSection",
+		"harness":     "claude",
+		"prompt":      "session-scope override text",
+		"scope":       "session",
+	})
+	if !strings.Contains(toolText(t, sessionSetResp), "scope: session") {
+		t.Fatalf("session-scope set failed: %s", sessionSetResp)
+	}
+
+	// Session override wins while present.
+	beforeUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (before unset): %v", err)
+	}
+	if !strings.Contains(beforeUnset, "session-scope override text") {
+		t.Fatalf("session override must win before unset:\n%s", beforeUnset)
+	}
+
+	// Unset at session scope — must not require a global-scope detour and must
+	// not clear the value to empty.
+	unsetResp := callToolOnce(t, s, 3, "config.prompt.unset", map[string]any{
+		"session_key": key,
+		"pointId":     "UserPreferenceSection",
+		"harness":     "claude",
+		"scope":       "session",
+	})
+	unsetText := toolText(t, unsetResp)
+	if strings.Contains(unsetText, `"isError":true`) {
+		t.Fatalf("config.prompt.unset with scope=session must succeed: %s", unsetResp)
+	}
+	if !strings.Contains(unsetText, "prompt override cleared: UserPreferenceSection/claude (scope: session)") {
+		t.Fatalf("config.prompt.unset confirmation missing: %s", unsetText)
+	}
+
+	// Falls back to the project-scope value, not to an empty override.
+	afterUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, key))
+	if err != nil {
+		t.Fatalf("printPlaybook (after unset): %v", err)
+	}
+	if strings.Contains(afterUnset, "session-scope override text") {
+		t.Fatalf("session override must be gone after unset:\n%s", afterUnset)
+	}
+	if !strings.Contains(afterUnset, "project-scope fallback text") {
+		t.Fatalf("unset must fall back to the next-broader (project) scope, not empty:\n%s", afterUnset)
+	}
 }
 
 // TestConfigPromptSetValidationAndDefaultScope covers the setter's input-validation
@@ -861,15 +996,308 @@ func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 	text := toolText(t, resp)
 
 	for _, want := range []string{
-		"DelegationSection",
-		"lead delegation eagerness and context-saving stance",
 		"UserPreferenceSection",
 		"user standing preferences for communication, terminology, and workflow behavior",
+		"PreferSubagentInvocationGuidance",
+		"harness-specific forked subagent invocation guidance",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("shipped config.prompt listing missing %q:\n%s", want, text)
 		}
 	}
+	for _, forbidden := range []string{
+		"DelegationSection",
+		"lead delegation eagerness and context-saving stance",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("shipped config.prompt listing must not expose removed %q:\n%s", forbidden, text)
+		}
+	}
+	if strings.Contains(text, "PreferSubagent"+"CodexBinding") {
+		t.Fatalf("shipped config.prompt listing must not expose Codex-specific point id:\n%s", text)
+	}
+}
+
+func TestConfigTuningShippedPromptKnobsOmitDelegationSection(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900301, root, nil))
+
+	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	})
+	catalog := parseTuningCatalogResponse(t, resp)
+
+	requireTuningKnob(t, catalog, "prompt.UserPreferenceSection")
+	requireTuningKnob(t, catalog, "prompt.PreferSubagentInvocationGuidance")
+	if knob := findTuningKnob(catalog, "prompt.DelegationSection"); knob != nil {
+		t.Fatalf("config.tuning must not expose removed DelegationSection marker: %+v", *knob)
+	}
+}
+
+func TestLeadPreferSubagentInvocationGuidanceUsesCodexBuiltinPromptOverride(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+
+	sCodex := NewServer(root, "test")
+	sCodex.observeHarness("test", "codex")
+	codexPrintResp := callToolOnce(t, sCodex, 900309, "playbook.print", map[string]any{
+		"name": "lead-prefer-subagent",
+	})
+	if codexPrintText := toolText(t, codexPrintResp); !strings.Contains(codexPrintText, "spawn_agent(fork_context:true, message:<prompt>)") {
+		t.Fatalf("codex playbook.print without session_key must include builtin binding:\n%s", codexPrintText)
+	}
+
+	keyCodex, _ := parseLoginResponse(t, callLogin(t, sCodex, 900310, root, nil))
+
+	codexBody, _, err := printPlaybook(sCodex, rsrcRoot, "lead-prefer-subagent", nil, wsconfig.Options{}, "", buildOverrideLookup(sCodex, keyCodex))
+	if err != nil {
+		t.Fatalf("printPlaybook codex: %v", err)
+	}
+	for _, want := range []string{
+		"spawn_agent(fork_context:true, message:<prompt>)",
+		"retry untyped with `fork_context:true`",
+		"`agent_type: explorer`",
+		"`agent_type: worker`",
+	} {
+		if !strings.Contains(codexBody, want) {
+			t.Fatalf("codex render missing %q:\n%s", want, codexBody)
+		}
+	}
+	assertNoMarkerSyntax(t, "lead-prefer-subagent codex", codexBody)
+
+	sClaude := NewServer(root, "test")
+	sClaude.observeHarness("test", "claude")
+	claudePrintResp := callToolOnce(t, sClaude, 900312, "playbook.print", map[string]any{
+		"name": "lead-prefer-subagent",
+	})
+	if claudePrintText := toolText(t, claudePrintResp); strings.Contains(claudePrintText, "spawn_agent(fork_context:true, message:<prompt>)") {
+		t.Fatalf("claude playbook.print without session_key must not include codex binding:\n%s", claudePrintText)
+	}
+
+	keyClaude, _ := parseLoginResponse(t, callLogin(t, sClaude, 900311, root, nil))
+
+	claudeBody, _, err := printPlaybook(sClaude, rsrcRoot, "lead-prefer-subagent", nil, wsconfig.Options{}, "", buildOverrideLookup(sClaude, keyClaude))
+	if err != nil {
+		t.Fatalf("printPlaybook claude: %v", err)
+	}
+	for _, forbidden := range []string{
+		"spawn_agent(fork_context:true, message:<prompt>)",
+		"`agent_type: explorer`",
+		"`agent_type: worker`",
+	} {
+		if strings.Contains(claudeBody, forbidden) {
+			t.Fatalf("claude render must not include codex binding %q:\n%s", forbidden, claudeBody)
+		}
+	}
+	assertNoMarkerSyntax(t, "lead-prefer-subagent claude", claudeBody)
+}
+
+func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	s.observeHarness("test", "claude")
+
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900400, root, nil))
+
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	if err := resolver.Set("prompt.SeedSection.claude", "seeded override value", wsconfig.SetOptions{
+		ExplicitScope: wsconfig.ScopeSession,
+		SessionKey:    key,
+	}); err != nil {
+		t.Fatalf("seed override via resolver: %v", err)
+	}
+
+	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	})
+	catalog := parseTuningCatalogResponse(t, resp)
+
+	textResp := callToolOnce(t, s, 2, "config.tuning", map[string]any{
+		"session_key": key,
+	})
+	text := toolText(t, textResp)
+	for _, want := range []string{
+		"prompt.SeedSection",
+		"harness[claude|codex|*]",
+		"scope[session|project|global]",
+		`"scope":"session"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config.tuning text missing %q:\n%s", want, text)
+		}
+	}
+
+	promptKnob := requireTuningKnob(t, catalog, "prompt.SeedSection")
+	if promptKnob.Writer.Tool != "config.prompt.set" || promptKnob.Writer.FixedArguments["pointId"] != "SeedSection" {
+		t.Fatalf("prompt knob writer mismatch: %+v", promptKnob.Writer)
+	}
+	if promptKnob.Reset == nil || promptKnob.Reset.Tool != "config.prompt.unset" || promptKnob.Reset.FixedArguments["pointId"] != "SeedSection" {
+		t.Fatalf("prompt knob reset mismatch: %+v", promptKnob.Reset)
+	}
+	assertFieldEnum(t, promptKnob.SelectorFields, "harness", []string{"claude", "codex", "*"})
+	assertFieldEnum(t, promptKnob.SelectorFields, "scope", []string{"session", "project", "global"})
+	assertFieldRequired(t, promptKnob.ValueFields, "prompt", true)
+	if !strings.Contains(mustMarshalJSON(t, promptKnob.Current), `"scope":"session"`) {
+		t.Fatalf("prompt knob current override missing session scope: %+v", promptKnob.Current)
+	}
+
+	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
+		t.Fatalf("workflow.prefer_subagent writer tool mismatch: %+v", subagentKnob.Writer)
+	}
+	assertFieldEnum(t, subagentKnob.ValueFields, "value", []string{"on", "off"})
+	if !strings.Contains(mustMarshalJSON(t, subagentKnob.Current), `"value":"off"`) {
+		t.Fatalf("workflow.prefer_subagent default should be cataloged as off: %+v", subagentKnob.Current)
+	}
+
+	mercenaryKnob := requireTuningKnob(t, catalog, "workflow.prefer_mercenary")
+	if mercenaryKnob.Writer.Tool != "config.workflow_prefer_mercenary" {
+		t.Fatalf("workflow.prefer_mercenary writer tool mismatch: %+v", mercenaryKnob.Writer)
+	}
+	assertFieldEnum(t, mercenaryKnob.ValueFields, "value", []string{"on", "off", "hide"})
+	if findTuningField(mercenaryKnob.ValueFields, "enabled") != nil {
+		t.Fatalf("workflow.prefer_mercenary catalog must not expose legacy enabled field: %+v", mercenaryKnob.ValueFields)
+	}
+	if !strings.Contains(mustMarshalJSON(t, mercenaryKnob.Current), `"value":"hide"`) {
+		t.Fatalf("workflow.prefer_mercenary default should be cataloged as hide: %+v", mercenaryKnob.Current)
+	}
+
+	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
+	assertFieldEnum(t, agentsKnob.SelectorFields, "tier", []string{"small", "medium", "large", "xlarge"})
+	assertFieldEnum(t, agentsKnob.ValueFields, "effort", []string{"", "none", "low", "medium", "high", "xhigh"})
+}
+
+func TestConfigTuningCatalogNoAgentOmitsFullWsKnobs(t *testing.T) {
+	useLeadProfile(t)
+
+	rsrcRoot := buildOverrideTestTree(t)
+	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, s, 900500, root, nil))
+
+	resp := callToolOnce(t, s, 1, "config.tuning", map[string]any{
+		"session_key": key,
+		"format":      "json",
+	})
+	catalog := parseTuningCatalogResponse(t, resp)
+
+	requireTuningKnob(t, catalog, "prompt.SeedSection")
+	subagentKnob := requireTuningKnob(t, catalog, "workflow.prefer_subagent")
+	if subagentKnob.Writer.Tool != "config.workflow_prefer_subagent" {
+		t.Fatalf("workflow.prefer_subagent writer tool mismatch in no-agent catalog: %+v", subagentKnob.Writer)
+	}
+	for _, hidden := range []string{"workflow.prefer_mercenary", "delegation.prefer_mercenary", "agents.tier"} {
+		if knob := findTuningKnob(catalog, hidden); knob != nil {
+			t.Fatalf("no-agent config.tuning exposed full-ws-only knob %s: %+v", hidden, knob)
+		}
+	}
+}
+
+func parseTuningCatalogResponse(t *testing.T, line string) tuningCatalog {
+	t.Helper()
+	var catalog tuningCatalog
+	if err := json.Unmarshal([]byte(toolText(t, line)), &catalog); err != nil {
+		t.Fatalf("parse config.tuning JSON: %v", err)
+	}
+	return catalog
+}
+
+func requireTuningKnob(t *testing.T, catalog tuningCatalog, id string) tuningKnob {
+	t.Helper()
+	if knob := findTuningKnob(catalog, id); knob != nil {
+		return *knob
+	}
+	t.Fatalf("config.tuning missing knob %q in %+v", id, catalog.Knobs)
+	return tuningKnob{}
+}
+
+func findTuningKnob(catalog tuningCatalog, id string) *tuningKnob {
+	for i := range catalog.Knobs {
+		if catalog.Knobs[i].ID == id {
+			return &catalog.Knobs[i]
+		}
+	}
+	return nil
+}
+
+func assertFieldEnum(t *testing.T, fields []tuningField, name string, want []string) {
+	t.Helper()
+	field := findTuningField(fields, name)
+	if field == nil {
+		t.Fatalf("missing field %q in %+v", name, fields)
+	}
+	if strings.Join(field.Enum, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("field %q enum = %#v, want %#v", name, field.Enum, want)
+	}
+}
+
+func assertFieldRequired(t *testing.T, fields []tuningField, name string, want bool) {
+	t.Helper()
+	field := findTuningField(fields, name)
+	if field == nil {
+		t.Fatalf("missing field %q in %+v", name, fields)
+	}
+	if field.Required != want {
+		t.Fatalf("field %q required = %t, want %t", name, field.Required, want)
+	}
+}
+
+func findTuningField(fields []tuningField, name string) *tuningField {
+	for i := range fields {
+		if fields[i].Name == name {
+			return &fields[i]
+		}
+	}
+	return nil
+}
+
+func mustMarshalJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+	return string(raw)
 }
 
 // TestParseOverrideOpenMarkerDesc unit-tests the desc-aware open-marker parser

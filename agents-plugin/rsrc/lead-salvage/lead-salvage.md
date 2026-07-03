@@ -26,7 +26,7 @@ Call `{{.McpNamespace}}/project_tree()`.
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/playbook.print(name: "lead-workflow-manual")` and execute the returned reference inline.
+1. Call `{{.McpNamespace}}/workflow_manual(session_key: <your lead key>)` and execute the returned reference inline; reload after session compaction (a duplicate load is safe). After compaction, recover your key via `{{.SkillNamespace}}:lead-revive` first. No lead key yet (fresh start)? Call `{{.McpNamespace}}/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
 2. Call `{{.McpNamespace}}/git.status()`.
 3. Identify target kind: branch, sprint, commit range, ticket graph, worktree diff, agent run, or user-described failure.
 4. Enter **Containment**.
@@ -38,7 +38,8 @@ Call `{{.McpNamespace}}/project_tree()`.
 3. Ask the user for the **Failure Claim**: what is wrong, what must not be trusted, and what must not be lost.
 4. Restate the failure claim and ask the user to confirm or amend it.
 5. Stop if the user cannot confirm a failure claim; suggest `{{.SkillNamespace}}:lead-discuss` for exploratory diagnosis.
-6. Enter **Survey Fanout**.
+6. Call `{{.McpNamespace}}/enter.salvage(session_key: <lead key>, failure_claim: <user-confirmed failure claim>, confirmed_premises: [], survey_status: "pending")` to record the confirmed failure claim so it survives compaction without re-confirmation.
+7. Enter **Survey Fanout**.
 
 ## On: Survey Fanout
 
@@ -53,7 +54,7 @@ Call `{{.McpNamespace}}/project_tree()`.
 4. Use named agents for broad or stateful surveys:
    a. Register one agent per independent survey, such as `salvage-blast-radius`, `salvage-ticket-graph`, `salvage-doc-impact`, or `salvage-evidence`.
    b. Call each agent with the **Survey Prompt** for its assigned question.
-   c. Collect each result through `ws.mercenary.result(name: "<agent-name>", timeout_seconds: 600)`.
+   c. Collect each result through `mercenary.result(name: "<agent-name>", timeout_seconds: 600)`.
 <!-- ws:full-only:end -->
 <!-- ws:wsflow-only:start -->
 4. For broad surveys, spawn additional native exploration workers with one bounded survey prompt per independent question; collect each result when it returns.
@@ -70,7 +71,8 @@ Call `{{.McpNamespace}}/project_tree()`.
 4. Separate low-level bugs from premise collapse; do not patch while the parent premise is unresolved.
 5. Move unconfirmed premise candidates to `Unresolved Premise Questions`; do not use them to justify recovery tickets.
 6. Stop interviewing when the salvage report can classify evidence without inventing user intent.
-7. Enter **Classification**.
+7. Call `{{.McpNamespace}}/agenda.set(session_key: <lead key>, key: "salvage", value: {failure_claim: <confirmed claim>, confirmed_premises: [<user-confirmed premises>], survey_status: "complete"})` to lock the confirmed premises into the salvage agenda blob.
+8. Enter **Classification**.
 
 ## On: Classification
 

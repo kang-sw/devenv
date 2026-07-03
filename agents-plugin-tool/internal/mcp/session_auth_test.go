@@ -27,7 +27,7 @@ func callLogin(t *testing.T, server *Server, id int, root string, extra map[stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"ws.ferrule","arguments":%s}}`, id, raw)
+	line := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"ferrule","arguments":%s}}`, id, raw)
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(line), &out); err != nil {
 		t.Fatalf("ServeStdio error: %v", err)
@@ -433,7 +433,7 @@ func TestUnknownSessionKeyReturnsError(t *testing.T) {
 	}
 	// 260617 scrub: the recovery hint must NOT leak the bootstrap tool name and
 	// must route the lead to the manual instead.
-	if strings.Contains(text, "ws.lead.login") || strings.Contains(text, "ws.ferrule") {
+	if strings.Contains(text, "ws.lead.login") || strings.Contains(text, "ferrule") {
 		t.Fatalf("error text must not leak the bootstrap tool name: %q", text)
 	}
 	if !strings.Contains(text, "workflow-manual") {
@@ -516,14 +516,14 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	assertGateError(t, "delegate/config.prompt", deniedPromptListResp, -32601)
 
 	// Non-lead key calling the bootstrap tool must be denied (self-bootstrap escalation block).
-	deniedLoginResp := callToolOnce(t, server, 3, "ws.ferrule", map[string]any{
+	deniedLoginResp := callToolOnce(t, server, 3, "ferrule", map[string]any{
 		"session_key": leafKey,
 		"root":        root,
 	})
 	assertGateError(t, "leaf/bootstrap escalation", deniedLoginResp, -32601)
 
 	// Delegate key calling the bootstrap tool must also be denied.
-	deniedDelegateLoginResp := callToolOnce(t, server, 4, "ws.ferrule", map[string]any{
+	deniedDelegateLoginResp := callToolOnce(t, server, 4, "ferrule", map[string]any{
 		"session_key": delegateKey,
 		"root":        root,
 	})
@@ -1014,9 +1014,11 @@ func TestKeylessAgentCallRequiresSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 	server := NewServer(root, "test")
 
-	resp := callToolOnce(t, server, 1, "ws.mercenary.status", map[string]any{"name": "worker"})
+	resp := callToolOnce(t, server, 1, "mercenary.status", map[string]any{"name": "worker"})
 	if !toolIsError(t, resp) {
 		t.Fatalf("keyless ws.mercenary.status should be a tool error: %s", resp)
 	}

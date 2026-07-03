@@ -80,7 +80,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	mintRoot := "/work/tree-a"
 
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRenderMintsChildKeyForLeadDelegatePlaybook(t *testing.T) {
 	}
 
 	// A second render mints a DISTINCT key (registry uniqueness).
-	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, nil)
+	body2, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, mintRoot, "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (2nd): %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRenderNoMintForNonLeadCaller(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// mintRoot empty → caller is not a lead → no mint, no key block.
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestRenderNoMintForNonDelegateRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// Lead caller (mintRoot set) but the playbook role is not delegate-eligible → no mint.
-	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "delegate-pb", nil, wsconfig.Options{}, "/work/tree-a", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRenderRootOverrideBindsChildKey(t *testing.T) {
 
 	// renderPlaybookBody binds the minted key to mintRoot; the dispatch passes
 	// root_override as mintRoot when set (server.go playbook.render handler).
-	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", false, nil)
+	body, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, overrideRoot, "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
 
 	// preferMercenary=false: always-on mercenary tip present (delegates:true),
 	// but the prefer-mercenary "Delegation mode" guidance block absent.
-	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, nil)
+	bodyOff, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody off: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestPreferMercenaryGuidanceAndAlwaysOnTip(t *testing.T) {
 	}
 
 	// preferMercenary=true on an implementer playbook: guidance block present.
-	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", true, nil)
+	bodyOn, _, err := renderPlaybookBody(s, root, "impl-pb", nil, wsconfig.Options{}, "", "", true, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody on: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestPreferMercenaryGuidanceAbsentForNonImplementerRole(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// preferMercenary=true but role is leaf (not implementer/reviewer): no guidance block.
-	body, _, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", "", true, nil)
+	body, _, err := renderPlaybookBody(s, root, "leaf-pb", nil, wsconfig.Options{}, "", "", true, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -217,10 +217,9 @@ func TestPreferMercenaryGuidanceAbsentForNonImplementerRole(t *testing.T) {
 	}
 }
 
-// TestSetPreferMercenaryViaResolver verifies that setting prefer_mercenary through
-// the layered config resolver writes to the session Overrides overlay and can be
-// read back via GetBool, replacing the former one-way setPreferMercenary path.
-func TestSetPreferMercenaryViaResolver(t *testing.T) {
+// TestWorkflowPreferMercenaryViaResolver verifies that the workflow-prefixed
+// mercenary preference is global-only and stores canonical on/off/hide values.
+func TestWorkflowPreferMercenaryViaResolver(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 	key, err := s.sessions.mint("/work/root", roleLead, "")
 	if err != nil {
@@ -228,18 +227,18 @@ func TestSetPreferMercenaryViaResolver(t *testing.T) {
 	}
 
 	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+	resolver := wsconfig.NewResolver(wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}, builtinConfigDefaults(), adapter, adapter)
 
 	// Enable.
-	if err := resolver.Set(wsconfig.ItemPreferMercenary, "true", wsconfig.SetOptions{SessionKey: key}); err != nil {
-		t.Fatalf("set prefer_mercenary=true: %v", err)
+	if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, "on", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set workflow.prefer_mercenary=on: %v", err)
 	}
-	got, scope, err := resolver.GetBool(key, wsconfig.ItemPreferMercenary)
+	got, err := resolver.Get(key, wsconfig.ItemWorkflowPreferMercenary)
 	if err != nil {
-		t.Fatalf("GetBool: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
-	if !got || scope != wsconfig.ScopeSession {
-		t.Errorf("after enable: got=%v scope=%s, want true/session", got, scope)
+	if got.Value != "on" || got.Scope != wsconfig.ScopeGlobal {
+		t.Errorf("after enable: got=%s scope=%s, want on/global", got.Value, got.Scope)
 	}
 
 	// Verify the session entry root/scope were not corrupted.
@@ -249,20 +248,20 @@ func TestSetPreferMercenaryViaResolver(t *testing.T) {
 	}
 
 	// Disable.
-	if err := resolver.Set(wsconfig.ItemPreferMercenary, "false", wsconfig.SetOptions{SessionKey: key}); err != nil {
-		t.Fatalf("set prefer_mercenary=false: %v", err)
+	if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, "off", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set workflow.prefer_mercenary=off: %v", err)
 	}
-	got2, scope2, err := resolver.GetBool(key, wsconfig.ItemPreferMercenary)
+	got2, err := resolver.Get(key, wsconfig.ItemWorkflowPreferMercenary)
 	if err != nil {
-		t.Fatalf("GetBool after disable: %v", err)
+		t.Fatalf("Get after disable: %v", err)
 	}
-	if got2 || scope2 != wsconfig.ScopeSession {
-		t.Errorf("after disable: got=%v scope=%s, want false/session", got2, scope2)
+	if got2.Value != "off" || got2.Scope != wsconfig.ScopeGlobal {
+		t.Errorf("after disable: got=%s scope=%s, want off/global", got2.Value, got2.Scope)
 	}
 
-	// Unknown key must return an error.
-	if err := resolver.Set(wsconfig.ItemPreferMercenary, "true", wsconfig.SetOptions{SessionKey: "no-such-key"}); err == nil {
-		t.Errorf("set for unknown session key must return an error")
+	// Explicit non-global scopes are rejected for this global-only item.
+	if err := resolver.Set(wsconfig.ItemWorkflowPreferMercenary, "on", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: key}); err == nil {
+		t.Errorf("session-scope set for workflow.prefer_mercenary must return an error")
 	}
 }
 
@@ -274,6 +273,7 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	mustEnableMercenary(t)
 
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n"
 	var out bytes.Buffer
@@ -281,7 +281,7 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	props := toolPropertiesByName(t, byID["1"], "ws.mercenary.register")
+	props := toolPropertiesByName(t, byID["1"], "mercenary.register")
 	// prompts/prompt_refs/model stay removed; `tier` is re-introduced in Phase 2
 	// (260611) as a pass-through of playbook.render's recommended-tier.
 	for _, dropped := range []string{"prompts", "prompt_refs", "model"} {
@@ -296,23 +296,25 @@ func TestRegisterSchemaDropsLegacyFields(t *testing.T) {
 	}
 }
 
-func TestPreferMercenaryEnabledForLeadKey(t *testing.T) {
+func TestWorkflowPreferMercenaryWriterSetsGlobalPreference(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
-	// serveStdioWithSession logs in as a lead key and injects it into the call.
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.lead.prefer_mercenary","arguments":{}}}` + "\n"
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 900006, root, nil))
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.workflow_prefer_mercenary","arguments":{"session_key":"` + key + `","value":"on"}}}` + "\n"
 	var out bytes.Buffer
-	if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	text := toolText(t, byID["1"])
-	if !strings.Contains(text, "prefer_mercenary: enabled") {
-		t.Fatalf("lead prefer_mercenary did not enable: %s", byID["1"])
+	if !strings.Contains(text, "workflow.prefer_mercenary: on [scope:global]") {
+		t.Fatalf("workflow prefer mercenary did not enable: %s", byID["1"])
 	}
 }
 
@@ -331,53 +333,96 @@ func TestPreferMercenaryHiddenInNoAgentMode(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	// Use a tool-name boundary check, not a raw substring (the prefer_mercenary
-	// description text would otherwise false-match). The tool is hidden, so its
-	// name token "ws.lead.prefer_mercenary" must not appear as a list entry.
 	if strings.Contains(byID["1"], `"name":"ws.lead.prefer_mercenary"`) {
-		t.Fatalf("ws.lead.prefer_mercenary must be hidden in no-agent (wsflow) mode: %s", byID["1"])
+		t.Fatalf("removed ws.lead.prefer_mercenary must not appear in no-agent mode: %s", byID["1"])
+	}
+	if strings.Contains(byID["1"], `"name":"config.workflow_prefer_mercenary"`) {
+		t.Fatalf("config.workflow_prefer_mercenary must be hidden in no-agent (wsflow) mode: %s", byID["1"])
+	}
+	if !strings.Contains(byID["1"], `"name":"config.workflow_prefer_subagent"`) {
+		t.Fatalf("config.workflow_prefer_subagent must remain visible in no-agent mode: %s", byID["1"])
 	}
 	// the bootstrap tool stays visible (wsflow still needs bootstrap).
-	if !strings.Contains(byID["1"], `"name":"ws.ferrule"`) {
+	if !strings.Contains(byID["1"], `"name":"ferrule"`) {
 		t.Fatalf("ws.ferrule must remain visible in no-agent mode: %s", byID["1"])
 	}
 }
 
-// TestPreferMercenaryRejectedForNonLeadKey exercises the lead-only failure path:
-// a delegate-scoped key calling ws.lead.prefer_mercenary is rejected by the
-// server-side keyed-handler ws.lead.* gate (not by a tool-local check).
-func TestPreferMercenaryRejectedForNonLeadKey(t *testing.T) {
+func TestPreferMercenaryRemovedLeadToolUnknownAndOmittedFromLeadToolNames(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_MCP_NO_AGENT", "")
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+
+	server := NewServer(root, "test")
+	resp := callToolOnce(t, server, 1, "ws.lead.prefer_mercenary", map[string]any{})
+	if !strings.Contains(resp, `"error"`) || !strings.Contains(resp, "unknown tool") {
+		t.Fatalf("removed ws.lead.prefer_mercenary explicit call must be unknown: %s", resp)
+	}
+	for _, name := range LeadToolNames() {
+		if name == "ws.lead.prefer_mercenary" {
+			t.Fatalf("removed ws.lead.prefer_mercenary must not appear in LeadToolNames: %v", LeadToolNames())
+		}
+	}
+}
+
+// TestWorkflowPreferenceWritersRequireLeadSessionKey verifies that global
+// workflow preference writers still require lead authority even though they
+// write global config.
+func TestWorkflowPreferenceWritersRequireLeadSessionKey(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	// Mint a delegate-scoped key directly (a delegate never logs in; it receives
-	// a render-minted key). The keyed gate must reject its ws.lead.* call.
+	// a render-minted key). The keyed gate must reject workflow preference writes.
 	delegateKey, err := server.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatalf("mint delegate key: %v", err)
 	}
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.lead.prefer_mercenary","arguments":{"session_key":"` + delegateKey + `"}}}` + "\n"
-	var out bytes.Buffer
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatalf("ServeStdio: %v", err)
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "config.workflow_prefer_mercenary",
+			args: map[string]any{"value": "on"},
+		},
+		{
+			name: "config.workflow_prefer_subagent",
+			args: map[string]any{"value": "on"},
+		},
+	} {
+		resp := callToolOnce(t, server, 1, tc.name, tc.args)
+		if !toolIsError(t, resp) || !strings.Contains(toolText(t, resp), "session_key is required") {
+			t.Fatalf("%s keyless write must require session_key: %s", tc.name, resp)
+		}
+
+		argsWithDelegateKey := map[string]any{}
+		for key, value := range tc.args {
+			argsWithDelegateKey[key] = value
+		}
+		argsWithDelegateKey["session_key"] = delegateKey
+		resp = callToolOnce(t, server, 2, tc.name, argsWithDelegateKey)
+		if strings.Contains(resp, "workflow.prefer_") && strings.Contains(resp, "[scope:global]") {
+			t.Fatalf("delegate key must NOT write %s: %s", tc.name, resp)
+		}
+		if !strings.Contains(resp, tc.name) || !strings.Contains(resp, `"error"`) {
+			t.Fatalf("expected a keyed-gate error rejecting %s: %s", tc.name, resp)
+		}
 	}
-	line := strings.TrimSpace(out.String())
-	if strings.Contains(line, "prefer_mercenary: enabled") {
-		t.Fatalf("delegate key must NOT enable prefer_mercenary: %s", line)
-	}
-	if !strings.Contains(line, "ws.lead.prefer_mercenary") || !strings.Contains(line, `"error"`) {
-		t.Fatalf("expected a keyed-gate error rejecting ws.lead.prefer_mercenary: %s", line)
-	}
-	// The delegate key's prefer_mercenary override must remain completely unset in
-	// the session Overrides map — the keyed-gate rejection fires before any resolver
-	// write, so no value (not even "false") should appear for this key.
-	_, ok := server.sessions.getOverride(delegateKey, wsconfig.ItemPreferMercenary)
-	if ok {
-		t.Fatalf("rejected call must not have written ANY prefer_mercenary value for the delegate key")
+
+	showResp := callToolOnce(t, server, 2, "config.show", map[string]any{"format": "json"})
+	if strings.Contains(toolText(t, showResp), `"scope":"global"`) {
+		t.Fatalf("rejected delegate call must not write global workflow preference: %s", showResp)
 	}
 }
 
@@ -416,7 +461,11 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 	for _, name := range []string{"implementer", "reviewer"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, nil)
+			var ctx map[string]string
+			if name == "implementer" {
+				ctx = shippedImplementerContext()
+			}
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -451,7 +500,11 @@ func TestRenderGoldenShippedDelegateModelVarsPerHarness(t *testing.T) {
 	render := func(t *testing.T, name, harness string) string {
 		t.Helper()
 		s := newTestServerWithHarness(t, harness)
-		body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)
+		var ctx map[string]string
+		if name == "implementer" {
+			ctx = shippedImplementerContext()
+		}
+		body, _, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s, %q): %v", name, harness, err)
 		}
@@ -504,7 +557,11 @@ func TestRenderGoldenShippedPhase4Delegates(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, nil)
+			var context map[string]string
+			if name == "plan-populator-survey" || name == "plan-populator-research" {
+				context = shippedPlanPopulatorContext()
+			}
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, context, wsconfig.Options{CacheHome: t.TempDir()}, mintRoot, "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -538,7 +595,7 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 	for _, name := range []string{"code-review-correctness", "code-review-fit", "code-review-test"} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)
+			body, _, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 			}
@@ -547,6 +604,15 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 			}
 			if !strings.Contains(body, "Partition scope") {
 				t.Errorf("%s missing partition-specific scope section:\n%s", name, body)
+			}
+			for _, want := range []string{
+				"When the prompt frame names ticket and plan paths, review against ticket, plan, and diff together.",
+				"When the prompt frame names only ticket and diff, review the direct-edit change without requiring a plan.",
+				"Read ticket and plan paths named by the prompt frame; if no plan path is named, continue with ticket and diff.",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing reviewer base contract %q:\n%s", name, want, body)
+				}
 			}
 		})
 	}
@@ -574,14 +640,18 @@ func TestWithRecommendedTier(t *testing.T) {
 func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	rsrcRoot := shippedRsrcRootForTest()
 	want := map[string]string{
-		"implementer":                    "medium",
-		"reviewer":                       "large",
-		"ticket-reviewer-design":         "large",
-		"ticket-reviewer-completeness":   "medium",
+		"implementer":                  "medium",
+		"reviewer":                     "large",
+		"ticket-reviewer-design":       "large",
+		"ticket-reviewer-completeness": "medium",
 	}
 	for name, wantTier := range want {
 		s := newTestServerWithHarness(t, "claude")
-		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, nil)
+		var ctx map[string]string
+		if name == "implementer" {
+			ctx = shippedImplementerContext()
+		}
+		_, tier, err := renderPlaybookBody(s, rsrcRoot, name, ctx, wsconfig.Options{CacheHome: t.TempDir()}, "", "", false, "", nil)
 		if err != nil {
 			t.Fatalf("renderPlaybookBody(%s): %v", name, err)
 		}

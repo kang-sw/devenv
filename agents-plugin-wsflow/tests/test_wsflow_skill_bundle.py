@@ -32,9 +32,13 @@ EXPECTED_SKILLS = {
     "lead-workflow-manual",
     "lead-write-spec",
     "lead-write-ticket",
+    "lead-prefer-subagent",
+    "lead-revive",
 }
 
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
+EXPECTED_INLINE_SKILLS = {"lead-revive"}
+EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint"}
 
 FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
@@ -65,7 +69,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         # rsrc playbook directory (internal procedures migrated to playbooks).
         full_counterparts = full_skills | full_playbooks
         missing_full_counterparts = sorted(
-            EXPECTED_SKILLS - EXPECTED_WSFLOW_ONLY_SKILLS - full_counterparts
+            EXPECTED_SKILLS - EXPECTED_WSFLOW_ONLY_SKILLS - EXPECTED_INLINE_SKILLS - full_counterparts
         )
         unexpected_wsflow_skills = sorted(
             {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()} - EXPECTED_SKILLS
@@ -88,7 +92,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_skill_files_are_thin_playbook_shims(self):
         offenders = []
-        for skill in sorted(EXPECTED_SKILLS):
+        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS - EXPECTED_PARALLEL_INIT_SKILLS):
             path = SKILLS_DIR / skill / "SKILL.md"
             text = path.read_text(encoding="utf-8")
             match = re.fullmatch(
@@ -106,9 +110,31 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 offenders.append(str(path.relative_to(PLUGIN_DIR)))
         self.assertEqual(offenders, [])
 
+    def test_parallel_init_skill_files_are_playbook_shims(self):
+        offenders = []
+        for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
+            path = SKILLS_DIR / skill / "SKILL.md"
+            text = path.read_text(encoding="utf-8")
+            title = skill.removeprefix("lead-").title()
+            match = re.fullmatch(
+                r"---\n"
+                rf"name: {re.escape(skill)}\n"
+                r"description: .+\n"
+                r"---\n\n"
+                rf"# {re.escape(title)}\n\n"
+                r"Call in parallel:\n"
+                rf"- `wsflow/playbook\.print\(name: \"{re.escape(skill)}\", session_key: <your key>\)`\n"
+                r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
+                r"After both return, execute the procedure returned by `wsflow/playbook\.print`\.\n",
+                text,
+            )
+            if match is None:
+                offenders.append(str(path.relative_to(PLUGIN_DIR)))
+        self.assertEqual(offenders, [])
+
     def test_skill_shims_point_to_shared_playbooks(self):
         missing = []
-        for skill in sorted(EXPECTED_SKILLS):
+        for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS):
             subdir_playbook = FULL_PLUGIN_RSRC_DIR / skill / f"{skill}.md"
             flat_playbook = FULL_PLUGIN_RSRC_DIR / f"{skill}.md"
             if not subdir_playbook.exists() and not flat_playbook.exists():

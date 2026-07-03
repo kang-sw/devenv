@@ -37,12 +37,10 @@ type sessionChild struct {
 // the format can grow (render lineage, permission/capability metadata) without a
 // migration; unknown future fields are simply ignored by older readers.
 //
-// Note: the former typed PreferMercenary bool field has been retired. The
-// prefer_mercenary toggle now lives in the generic Overrides map under the key
-// wsconfig.ItemPreferMercenary ("prefer_mercenary"), routed through the layered
-// config resolver. Old records with a "prefer_mercenary" JSON field are silently
-// ignored on read (Go's json.Unmarshal drops unknown fields); the resolver reads
-// the Overrides map instead.
+// Note: the former typed PreferMercenary bool field has been retired. Old records
+// with a "prefer_mercenary" JSON field are silently ignored on read (Go's
+// json.Unmarshal drops unknown fields). The live mercenary preference is the
+// global-only wsconfig.ItemWorkflowPreferMercenary item, not session state.
 type sessionRecord struct {
 	SchemaVersion int    `json:"schema_version"`
 	Root          string `json:"root"`
@@ -52,6 +50,13 @@ type sessionRecord struct {
 	// identifiers; values are string-encoded config values. Added as an additive
 	// field; existing records without it parse with a nil map.
 	Overrides map[string]string `json:"overrides,omitempty"`
+	// Agenda holds session-level mode-context blobs keyed by name. Values are
+	// arbitrary JSON objects (typed enter-payloads or freeform notes). Added as
+	// an additive field; older records parse with a nil map. See session_state.go.
+	Agenda map[string]json.RawMessage `json:"agenda,omitempty"`
+	// Todos is the ordered step-level checklist for the session. Added as an
+	// additive field; older records parse with a nil slice. See session_state.go.
+	Todos []todoItem `json:"todos,omitempty"`
 }
 
 const sessionRecordSchemaVersion = 1
@@ -323,6 +328,31 @@ func (s *sessionStore) setOverride(sessionKey, itemKey, value string) error {
 		record.Overrides = map[string]string{}
 	}
 	record.Overrides[itemKey] = value
+	return s.writeRecordAtomic(dir, sessionKey, record)
+}
+
+// deleteOverride removes an Overrides entry for the given item key from the
+// session record identified by sessionKey via atomic read-modify-write.
+// Returns an error if the session key is not found. Removing an absent item
+// key (or a session with no Overrides map) is a no-op, not an error.
+func (s *sessionStore) deleteOverride(sessionKey, itemKey string) error {
+	dir, err := s.keysDir()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.readRecord(dir, sessionKey)
+	if !ok {
+		return fmt.Errorf("session key not found: %s", sessionKey)
+	}
+	if record.Overrides == nil {
+		return nil
+	}
+	if _, present := record.Overrides[itemKey]; !present {
+		return nil
+	}
+	delete(record.Overrides, itemKey)
 	return s.writeRecordAtomic(dir, sessionKey, record)
 }
 

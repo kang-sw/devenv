@@ -96,8 +96,8 @@ render-time transforms: the shared playbook renderer selects full-only or
 wsflow-only marker blocks and resolves explicit namespace variables to the
 active product namespace. The retired wsflow-only `prompt.render` tool is no
 longer part of the runtime contract; `playbook.render` covers its five legacy
-render-eligible stems and appends the same free-text Render Context block in
-wsflow mode. The stored rsrc copy does not diverge from canonical; a byte-equality drift guard
+render-eligible stems by templating declared context keys and appending only
+undeclared extras in the legacy Render Context block in wsflow mode. The stored rsrc copy does not diverge from canonical; a byte-equality drift guard
 (regenerated with `WS_REGEN_WSFLOW_RSRC=1`, mirroring `WS_REGEN_MANIFEST`) keeps
 the copy in sync, and the launcher sets `WS_RSRC_ROOT` to the sibling tree when
 present. The rsrc subtree is the one generated-sameness exception to the
@@ -252,6 +252,24 @@ match is not followed by legacy tools/list or CLI fan-out validation.
 Old runtimes that do not provide the command are not silently trusted. During
 the transition, the launcher either falls back to the existing bounded full
 validation path or repairs the runtime before writing a compatibility stamp.
+
+## Post-Compaction Session Restoration {#260626-post-compaction-session-restoration}
+
+Context compaction discards in-flight routing and implementation context from the
+session transcript, but the runtime persists session state on disk in the
+per-session record (`<cache-root>/keys/<session-key>.json`), so the session key —
+preserved in the compaction summary — is the only anchor needed to recover. The
+`ws.workflow_manual` MCP tool is the runtime's restoration entry point: a continued
+agent passes its surviving session key and receives the reloaded primitives plus the
+restored agenda/todo Session State. Because `ws.ferrule` is non-idempotent (a second
+call on the same root mints a new key and orphans the prior record), restoration
+relies on threading the original key rather than re-minting; `ws.workflow_manual`
+never mints a key, so a stale or missing key fails loud (a minimal no-restore
+notice, no manual body) instead of silently starting a fresh session. The tool is
+lead-only — a delegate/leaf-scoped key is rejected at the capability gate — and a
+valid key is required, with a reserved sentinel (taught only in lead skill prose)
+gating the fresh-bootstrap render. After compaction the `lead-revive` skill recovers
+the surviving key from the summary and threads it into `ws.workflow_manual`.
 
 ## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 

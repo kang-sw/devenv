@@ -258,15 +258,6 @@ func cacheLauncherCommand(exe string) (asyncWorkerCommand, bool) {
 	}
 	sort.Strings(pluginDirs)
 	for i := len(pluginDirs) - 1; i >= 0; i-- {
-		// On Windows the extensionless shell shim (ws-mcp-launcher) is not
-		// executable; skip it so the .py + python branch is reached. On non-
-		// Windows keep the original probe order (shell shim first, then .py).
-		if runtime.GOOS != "windows" {
-			shim := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher")
-			if regularFileExists(shim) {
-				return asyncWorkerCommand{Path: shim}, true
-			}
-		}
 		// Native Windows launcher: ws-mcp-launcher.exe (Windows LookPath already
 		// resolves .exe, but probe the explicit path first if it is present).
 		if runtime.GOOS == "windows" {

@@ -1,5 +1,75 @@
 # Changelog
 
+## v0.32.0 - 2026-07-02
+
+### Added
+- Add `agenda.list` and an `all: true` fast path on `agenda.clear`, so leads
+  can enumerate current agenda entries and clear them all in one call.
+- Add the lead-only `workflow_state` MCP tool: a session-state-only view
+  (agenda/todos) that avoids re-dumping the full `workflow_manual` output.
+
+### Changed
+- Redefine `config.prompt.unset` and `config.workflow_prefer_subagent` so
+  "unset" consistently means reset-to-builtin-default, never clear-to-empty;
+  `config.prompt.unset` gains a `session` scope and
+  `config.workflow_prefer_subagent` gains a `reset: true` argument. Explicit
+  empty overrides now route through `config.prompt.set` instead.
+- Fill the previously thin `Session setup` and `User preferences` sections of
+  the shipped `workflow_manual`/`lead-workflow-manual` template with concrete
+  guidance (ferrule redundant-mint consequences, compaction-recovery
+  reminder, and a non-empty default preference sentence).
+- `tickets.move` to `ready` now emits an advisory (non-blocking) warning when
+  no spec-addressing signal (`spec:`, `spec-remove:`, or `## Spec Impact`) is
+  detected on a non-exempt ticket category.
+- `enter_implement` now warns when a supplied `policy.branch.merge_target` is
+  ignored because the caller isn't yet on an `implement/*` branch.
+
+## v0.31.1 - 2026-07-02
+
+### Fixed
+- Fix `TestBuildCodexInvocationUsesStdinPromptForFirstCall` (`internal/wsagent`)
+  to match the `filepath.ToSlash` normalization production already applies to
+  `model_instructions_file`, so the test passes on native Windows as well as
+  Linux/WSL.
+- Fix the shared `initGit` test helper (`internal/mcp`) to set a local git
+  identity, so git-commit tests no longer depend on the CI runner or
+  developer machine having a global git identity configured.
+
+## v0.31.0 - 2026-07-02
+
+### Added
+- Add the Codex-visible playbook surface: `playbook.print` and
+  `playbook.render` MCP tools resolve and render lead/delegate playbooks from
+  the rsrc tree, replacing self-contained skill prose with a shared
+  MCP-served source of truth.
+- Add `enter.proceed` and `enter.implement`: deterministic verdict-engine MCP
+  tools that resolve routing and implementation dispatch decisions from
+  caller-supplied facts, returning a `Next:`/`raw`+`next_instruction` handoff
+  instead of leaving verdict computation to playbook prose.
+- Add the `workflow_manual` MCP tool and the session-bootstrap (`ferrule`)
+  tool for minting and restoring lead session keys per working root,
+  including session-parent lineage and session-children enumeration.
+- Add `tickets.create`, `tickets.close`, `tickets.move`, and
+  `tickets.template` MCP tools for ticket lifecycle and skeleton generation,
+  and a `sage_review` posture surface on tickets.
+- Add a session-state machine (agenda/enter/todo primitives) backing
+  installed-todo runbooks for `lead-implement` and `lead-proceed`.
+- Add a layered workflow config surface (`config.prompt`, `config.tuning`,
+  `config.workflow_prefer_mercenary`, `config.workflow_prefer_subagent`) for
+  prompt overrides and delegation-posture tuning.
+
+### Changed
+- Drop the `ws.` prefix from all MCP tool names; every tool is now called by
+  its bare name (e.g. `ferrule`, `project_tree`, `git.commit`).
+- Diet the `lead-proceed`, `lead-discuss`, `lead-implement`,
+  `lead-write-ticket`, and `lead-workflow-manual` playbooks: remove
+  MCP-schema-restatement prose and legacy manual verdict/routing blocks now
+  computed by `enter.proceed`/`enter.implement`.
+- Remove the subquery runtime, its MCP tool, and its CLI subcommand.
+- Remove setup tool dispatch; reshape the agent-backed API tools surface.
+- Rename the docs-discovery pre-invocation agent `project-survey` to
+  `reference-discovery`.
+
 ## v0.30.0 - 2026-05-29
 
 ### Added

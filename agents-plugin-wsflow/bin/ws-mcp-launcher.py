@@ -57,13 +57,43 @@ def note(message: str) -> None:
         print(f"ws-mcp-launcher: {message}", file=sys.stderr)
 
 
+def wait_for_runtime_contract(path: Path, *, timeout_seconds: float | None = None, interval_seconds: float = 0.05) -> None:
+    # Use a longer default on Windows: AV scanners can delay file visibility on
+    # cold installs (freshly-extracted packages are held open by the AV service).
+    if timeout_seconds is None:
+        timeout_seconds = 10.0 if os.name == "nt" else 2.0
+    if path.is_file():
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        if path.is_file():
+            note(f"runtime contract appeared after package materialization wait: {path}")
+            return
+    fail(f"plugin package not fully materialized: missing runtime contract after {timeout_seconds:.1f}s: {path}")
+
+
 def read_runtime_contract(path: Path) -> dict:
-    if not path.is_file():
-        fail(f"missing runtime contract: {path}")
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        fail(f"invalid runtime contract {path}: {exc}")
+    wait_for_runtime_contract(path)
+    # The file may exist but be momentarily unreadable (AV sharing hold on
+    # Windows).  Retry a small number of times on OSError (covers PermissionError)
+    # and ValueError (covers json.JSONDecodeError and UnicodeDecodeError — both
+    # subclasses of ValueError) before giving up.  A partially-written or
+    # byte-corrupt file in the cold-install window can raise UnicodeDecodeError,
+    # which is NOT an OSError; catching (OSError, ValueError) ensures every
+    # transient read/parse error reaches fail() rather than escaping as a
+    # traceback.  A first-try success incurs no added latency.
+    _read_attempts = 4
+    _read_backoff = 0.05  # seconds; kept short — this is a transient window only
+    last_exc: Exception | None = None
+    for attempt in range(_read_attempts):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            last_exc = exc
+        if attempt < _read_attempts - 1:
+            time.sleep(_read_backoff)
+    fail(f"invalid runtime contract {path}: {last_exc}")
 
 
 def host_os() -> str:
@@ -364,15 +394,29 @@ def copy_runtime(source: Path, destination: Path) -> None:
 
 
 def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Path, message: str) -> bool:
-    try:
-        os.replace(tmp, binary)
-    except OSError as exc:
-        if runtime_fully_compatible(binary, contract, runtime_dir):
-            note(f"using compatible runtime already installed at {binary} after replace failed: {exc}")
-            return False
-        fail(f"failed to install runtime at {binary}: {exc}")
-    note(message)
-    return True
+    # Bounded retry on OSError: AV scanners and concurrent installers can hold
+    # the target file open briefly on Windows, causing a sharing-violation error.
+    # Mirrors the Phase A Go-side MoveFileEx bounded retry (~5 attempts, ~10ms
+    # exponential backoff).  On POSIX, os.replace is atomic and never raises this
+    # error, so the retry loop never triggers and there is zero added latency.
+    _replace_attempts = 5
+    _replace_backoff = 0.01  # seconds; doubles per attempt
+    last_exc: OSError | None = None
+    for attempt in range(_replace_attempts):
+        try:
+            os.replace(tmp, binary)
+            note(message)
+            return True
+        except OSError as exc:
+            last_exc = exc
+            if attempt < _replace_attempts - 1:
+                time.sleep(_replace_backoff * (2 ** attempt))
+    # Replace budget exhausted; fall through to the existing compatible-binary
+    # fallback before failing hard.
+    if runtime_fully_compatible(binary, contract, runtime_dir):
+        note(f"using compatible runtime already installed at {binary} after replace failed: {last_exc}")
+        return False
+    fail(f"failed to install runtime at {binary}: {last_exc}")
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
@@ -440,6 +484,18 @@ def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
 
 def local_devenv_runtime_enabled(plugin_dir: Path, os_name: str) -> bool:
     return read_local_devenv_contract(plugin_dir, os_name) is not None
+
+
+def bootstrap_runtime_forced() -> bool:
+    return bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL"))
+
+
+def runtime_install_forced(plugin_dir: Path, os_name: str, *, local_enabled: bool | None = None) -> bool:
+    if bootstrap_runtime_forced():
+        return True
+    if local_enabled is None:
+        local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    return local_enabled
 
 
 def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | None:
@@ -702,6 +758,26 @@ def detect_project_root(plugin_dir: Path) -> None:
             return
 
 
+def wait_for_rsrc_tree(plugin_dir: Path, *, timeout_seconds: float = 5.0, interval_seconds: float = 0.05) -> None:
+    """Wait for the rsrc tree to be materialized before the one-shot apply_rsrc_root_env check.
+
+    Uses manifest.json as the presence sentinel: it is written last during rsrc
+    tree extraction and proves the tree is populated, not merely an empty dir.
+    On timeout, emits a note and returns — apply_rsrc_root_env already no-ops
+    gracefully when the rsrc dir is absent, so this wait is best-effort.
+    """
+    sentinel = plugin_dir / "rsrc" / "manifest.json"
+    if sentinel.is_file():
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        time.sleep(interval_seconds)
+        if sentinel.is_file():
+            note(f"rsrc tree materialized after wait: {sentinel}")
+            return
+    note(f"rsrc tree sentinel not found after {timeout_seconds:.1f}s; proceeding without rsrc env (best-effort): {sentinel}")
+
+
 def apply_rsrc_root_env(plugin_dir: Path, env: dict) -> None:
     """Point the runtime at the staged rsrc tree through its WS_RSRC_ROOT seam.
 
@@ -730,8 +806,9 @@ def main() -> int:
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
-    bootstrap_forced = bool(os.environ.get("WS_MCP_BOOTSTRAP_BINARY") or os.environ.get("WS_MCP_BOOTSTRAP_URL"))
+    bootstrap_forced = bootstrap_runtime_forced()
     local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
+    install_forced = runtime_install_forced(plugin_dir, os_name, local_enabled=local_enabled)
     # The stamp encodes the local source fingerprint, so a stamp hit under local
     # devenv proves the cached binary already matches the current source: skip the
     # rebuild. A miss means the source changed (or no runtime exists) -> rebuild.
@@ -744,7 +821,7 @@ def main() -> int:
         need_install = True
     elif compatibility_stamp_current(binary, contract, contract_path, runtime_dir, source_fingerprint):
         pass
-    elif local_enabled:
+    elif install_forced and local_enabled:
         note("local devenv source changed or runtime missing; rebuilding from source")
         need_install = True
     elif runtime_fully_compatible(binary, contract, runtime_dir):
@@ -770,6 +847,7 @@ def main() -> int:
     note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
 
     os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
+    wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":

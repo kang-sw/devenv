@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -113,7 +114,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	if isUpwardMove(curStatus, to) {
-		if err := checkSageReview(filepath.Join(root, filepath.FromSlash(oldPath)), opts.SageReview); err != nil {
+		if _, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), opts.SageReview, to); err != nil {
 			return TicketMutateResult{}, err
 		}
 	}
@@ -124,10 +125,73 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
+	if isUpwardMove(curStatus, to) {
+		if posture, err := currentSageReviewPosture(filepath.Join(root, filepath.FromSlash(newPath))); err == nil {
+			result.Tip = appendTip(result.Tip, sageReviewPostureTip(posture))
+		}
+	}
 	if curStatus == "ready" && (to == "todo" || to == "idea") {
-		result.Tip = "This ticket had spec entries; clear spec:, spec-remove:, and review ## Spec Impact before re-promoting."
+		result.Tip = appendTip(result.Tip, "This ticket had spec entries; clear spec:, spec-remove:, and review ## Spec Impact before re-promoting.")
+	}
+	if to == "ready" {
+		if warning := readyGateWarning(filepath.Join(root, filepath.FromSlash(newPath)), stem); warning != "" {
+			result.Tip = appendTip(result.Tip, warning)
+		}
 	}
 	return result, nil
+}
+
+// appendTip joins advisory tip messages so multiple warnings from independent
+// checks all remain visible in the response instead of overwriting each other.
+func appendTip(existing, addition string) string {
+	if existing == "" {
+		return addition
+	}
+	if addition == "" {
+		return existing
+	}
+	return existing + " " + addition
+}
+
+// ticketCategoryRE extracts the category token from a ticket stem
+// (YYMMDD-<category>-<slug>), mirroring the lead-write-ticket convention.
+var ticketCategoryRE = regexp.MustCompile(`^\d{6}-([a-z]+)-`)
+
+// exemptReadyGateCategories are ticket categories exempt from the spec-address
+// gate enforced by the lead-write-ticket playbook when promoting to ready/.
+var exemptReadyGateCategories = map[string]bool{
+	"epic":     true,
+	"research": true,
+	"workset":  true,
+}
+
+// readyGateWarning returns a soft, non-blocking warning when a non-exempt
+// ticket is moved to ready/ without detected spec addressing (a confirmed
+// spec:/spec-remove: frontmatter entry or a ## Spec Impact section). The
+// spec-address gate itself is documented and enforced only at the
+// lead-write-ticket playbook layer; this primitive-layer warning exists so a
+// lead calling tickets_move directly still gets a signal.
+func readyGateWarning(ticketAbsPath, stem string) string {
+	match := ticketCategoryRE.FindStringSubmatch(stem)
+	if len(match) == 2 && exemptReadyGateCategories[match[1]] {
+		return ""
+	}
+
+	fm := frontmatter(ticketAbsPath)
+	if len(scalarList(fm["spec"])) > 0 || len(scalarList(fm["spec-remove"])) > 0 {
+		return ""
+	}
+
+	raw, err := os.ReadFile(ticketAbsPath)
+	if err == nil {
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "## Spec Impact") {
+				return ""
+			}
+		}
+	}
+
+	return "ready gate is normally enforced by lead-write-ticket; no spec addressing detected."
 }
 
 // statusRank orders the active status axis idea < todo < ready so a move toward
@@ -153,18 +217,70 @@ func isUpwardMove(from, to string) bool {
 	return tr > fr
 }
 
-func checkSageReview(ticketAbsPath, sageReview string) error {
-	switch strings.TrimSpace(sageReview) {
-	case "", "off":
-		return nil
+func ResolvedSageReviewPosture(sageReview string) string {
+	switch strings.ToLower(strings.TrimSpace(sageReview)) {
+	case "ask":
+		return "recommended"
+	case "auto":
+		return "required"
+	default:
+		return "skipped"
 	}
+}
+
+func prepareSageReviewForUpwardMove(ticketAbsPath, sageReview, to string) (string, error) {
+	resolved := ResolvedSageReviewPosture(sageReview)
 	fm := frontmatter(ticketAbsPath)
 	value, _ := fm["sage-review"].(string)
-	switch strings.TrimSpace(value) {
-	case "pending", "blocked":
-		return fmt.Errorf("sage-review: %s; review must complete or be skipped before promoting", value)
+	posture := strings.TrimSpace(value)
+	if posture == "" || posture == "pending" {
+		if err := writeFrontmatterField(ticketAbsPath, map[string]string{"sage-review": resolved}); err != nil {
+			return "", err
+		}
+		posture = resolved
+	}
+
+	if posture == "blocked" {
+		return posture, fmt.Errorf("sage-review: blocked; address blocked review before promoting")
+	}
+	if to != "ready" {
+		return posture, nil
+	}
+
+	switch posture {
+	case "completed", "skipped":
+		return posture, nil
+	case "recommended":
+		return posture, fmt.Errorf("sage-review: recommended; run sage review or skip recommended review before promoting to ready")
+	case "required":
+		return posture, fmt.Errorf("sage-review: required; run sage review before promoting to ready")
 	default:
-		return nil
+		return posture, fmt.Errorf("sage-review: %s; review must complete or be skipped before promoting to ready", posture)
+	}
+}
+
+func currentSageReviewPosture(ticketAbsPath string) (string, error) {
+	fm := frontmatter(ticketAbsPath)
+	value, _ := fm["sage-review"].(string)
+	posture := strings.TrimSpace(value)
+	if posture == "" {
+		return "", fmt.Errorf("sage-review missing")
+	}
+	return posture, nil
+}
+
+func sageReviewPostureTip(posture string) string {
+	switch posture {
+	case "skipped":
+		return "sage review posture: skipped."
+	case "recommended":
+		return "sage review posture: recommended; run sage review or skip it before ready."
+	case "required":
+		return "sage review posture: required; sage review must run before ready."
+	case "completed":
+		return "sage review posture: completed."
+	default:
+		return "sage review posture: " + posture + "."
 	}
 }
 

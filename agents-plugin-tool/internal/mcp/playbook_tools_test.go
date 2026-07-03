@@ -54,6 +54,43 @@ func newTestServerWithHarness(t *testing.T, harness string) *Server {
 	return s
 }
 
+func isolatedPlaybookConfigOptions(t *testing.T) wsconfig.Options {
+	t.Helper()
+	return wsconfig.Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "config"),
+	}
+}
+
+func shippedImplementerContext() map[string]string {
+	return map[string]string{
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"ResultExpectations": "Report outcome, files changed, commits, verification, and blockers.",
+		"CommitRangeHint":    "Report <first-commit>..<last-commit> after committing logical checkpoints.",
+	}
+}
+
+func shippedImplementerRelayContext() map[string]string {
+	return map[string]string{
+		"PlanPath":           "ai-docs/.plans/plan.md",
+		"ReviewCycle":        "2",
+		"CommitRange":        "abc123..def456",
+		"ReviewPaths":        "ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"DispositionNotes":   "Fix correctness finding C1; defer test fixture rename until Phase 3.",
+		"VerificationHint":   "go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
+		"ResultExpectations": "Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
+	}
+}
+
+func shippedPlanPopulatorContext() map[string]string {
+	return map[string]string{
+		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
+		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
+		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
+	}
+}
+
 // initGitRepo creates a git repository in a temp dir and returns its path.
 // Required for renderPlaybook tests since GeneratePaths calls gitIdentity.
 func initGitRepo(t *testing.T) string {
@@ -164,7 +201,7 @@ func TestPlaybookPrintUnknownHarness(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "") // no harness → host-neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -187,7 +224,7 @@ func TestPlaybookPrintClaudeHarness(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -215,7 +252,7 @@ func TestPlaybookPrintCodexHarness(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -238,7 +275,7 @@ func TestPlaybookPrintDelegatesTipPresent(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -258,7 +295,7 @@ func TestPlaybookPrintDelegatesTipAbsent(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-123"}, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-123"}, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -277,7 +314,7 @@ func TestPlaybookPrintCallerContextSubstituted(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-abc"}, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-abc"}, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -299,7 +336,7 @@ func TestPlaybookPrintNoVarsPlaybook(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "novars", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "novars", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -322,7 +359,7 @@ func TestPlaybookRenderWritesTmpFile(t *testing.T) {
 
 	s := newTestServerWithHarness(t, "claude")
 
-	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, nil)
+	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -363,7 +400,7 @@ func TestPlaybookPrintModelAliasFromConfig(t *testing.T) {
 	}
 
 	// Render using the custom config.
-	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -393,11 +430,11 @@ func TestPlaybookPrintModelAliasVariesWithConfig(t *testing.T) {
 		t.Fatalf("config B: %v", err)
 	}
 
-	bodyA, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheA}, nil)
+	bodyA, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheA}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook A: %v", err)
 	}
-	bodyB, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheB}, nil)
+	bodyB, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheB}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook B: %v", err)
 	}
@@ -423,7 +460,7 @@ func TestPlaybookPrintMissingManifest(t *testing.T) {
 	// No manifest written.
 
 	s := newTestServerWithHarness(t, "")
-	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, nil)
+	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error for missing manifest, got nil")
 	}
@@ -439,7 +476,7 @@ func TestPlaybookPrintSchemaMismatch(t *testing.T) {
 	writeTestFile(t, root, "manifest.json", `{"schema_version":999,"files":{"pb/pb.md":"deadbeef"}}`)
 
 	s := newTestServerWithHarness(t, "")
-	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, nil)
+	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error for schema mismatch, got nil")
 	}
@@ -457,7 +494,7 @@ func TestPlaybookPrintUndeclaredCallerVar(t *testing.T) {
 
 	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb",
 		map[string]string{"WorktreeID": "wt", "Undeclared": "oops"},
-		wsconfig.Options{}, nil)
+		wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected ErrUndeclaredVar for undeclared caller var, got nil")
 	}
@@ -477,7 +514,7 @@ func TestPlaybookPrintUnprovidedVar(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{}, wsconfig.Options{}, nil)
+	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{}, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected ErrUnprovidedVar for missing required var, got nil")
 	}
@@ -500,7 +537,7 @@ func TestPlaybookPrintDanglingInclude(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	_, _, err := printPlaybook(s, rsrcRoot, "dangle-pb", nil, wsconfig.Options{}, nil)
+	_, _, err := printPlaybook(s, rsrcRoot, "dangle-pb", nil, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error for dangling include, got nil")
 	}
@@ -565,29 +602,149 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	t.Setenv(envNamespace, "wsflow")
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
+	configOpts := isolatedPlaybookConfigOptions(t)
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	assertCleanWsflowManual := func(label, body string) {
+		t.Helper()
+		for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws", "ws:override:", "ws:/override:"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s: wsflow playbook output contains forbidden %q:\n%s", label, forbidden, body)
+			}
+		}
+		// Exclude HTML comment lines (e.g. <!-- ws:fresh-only:start -->): these
+		// inert Markdown marker tokens are not namespace notation, so filtering
+		// them avoids false positives on the workflow-manual fresh-only markers.
+		bodyLinesWithoutComments := strings.Join(func() []string {
+			var out []string
+			for _, line := range strings.Split(body, "\n") {
+				if !strings.HasPrefix(strings.TrimSpace(line), "<!--") {
+					out = append(out, line)
+				}
+			}
+			return out
+		}(), "\n")
+		if regexp.MustCompile(`\bws[/:]`).MatchString(bodyLinesWithoutComments) {
+			t.Fatalf("%s: wsflow playbook output contains bare ws namespace notation:\n%s", label, body)
+		}
+		if strings.Contains(body, "{{.") {
+			t.Fatalf("%s: wsflow playbook output contains unsubstituted placeholder:\n%s", label, body)
+		}
+		for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s: wsflow playbook output missing %q:\n%s", label, want, body)
+			}
+		}
+		if !strings.Contains(body, "ferrule") {
+			t.Fatalf("%s: wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", label, body)
+		}
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "ws.mercenary.", "exec.", "Full ws", "full ws"} {
+	assertCleanWsflowManual("prefer-subagent off", body)
+	if strings.Contains(body, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
+		t.Fatalf("wsflow workflow manual must not append lead-prefer-subagent while preference is off:\n%s", body)
+	}
+
+	resolver := wsconfig.NewResolver(configOpts, builtinConfigDefaults(), nil, nil)
+	if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, "on", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("enable workflow.prefer_subagent: %v", err)
+	}
+	bodyOn, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook on: %v", err)
+	}
+	assertCleanWsflowManual("prefer-subagent on", bodyOn)
+	for _, want := range []string{
+		`<playbook name="lead-prefer-subagent" title="Prefer Subagent">`,
+		"Maximum-delegation posture for this session",
+		"spawn_agent(fork_context:true, message:<prompt>)",
+	} {
+		if !strings.Contains(bodyOn, want) {
+			t.Fatalf("wsflow workflow manual with prefer-subagent on missing %q:\n%s", want, bodyOn)
+		}
+	}
+}
+
+func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook lead-tune: %v", err)
+	}
+	for _, want := range []string{
+		`ws/config.tuning(session_key: <lead key>)`,
+		`"workflow.prefer_subagent"`,
+		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		`"workflow.prefer_mercenary"`,
+		"catalog-provided writer for `\"workflow.prefer_mercenary\"`",
+		"prompt.UserPreferenceSection",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lead-tune render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"Call `config.workflow_prefer_subagent`",
+		"Call `config.workflow_prefer_mercenary`",
+		"prompt.DelegationSection",
+		"DelegationSection",
+		"delegation.prefer_mercenary",
+		"ws.lead.prefer_mercenary",
+		"session-scoped",
+	} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("wsflow playbook output contains forbidden %q:\n%s", forbidden, body)
+			t.Fatalf("lead-tune render contains stale guidance %q:\n%s", forbidden, body)
+		}
+	}
+}
+
+func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "codex")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", buildOverrideLookup(s, ""))
+	if err != nil {
+		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
+	}
+	for _, want := range []string{
+		`wsflow/config.tuning(session_key: <lead key>)`,
+		"wsflow workflow",
+		`"workflow.prefer_subagent"`,
+		"catalog-provided writer for `\"workflow.prefer_subagent\"`",
+		"prompt.UserPreferenceSection",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow lead-tune render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		`"workflow.prefer_mercenary"`,
+		"config.workflow_prefer_mercenary",
+		"delegation.prefer_mercenary",
+		"agents.tier",
+		"config.agents_tier",
+		"ws.mercenary.",
+		"Full ws",
+		"full ws",
+		"ws:override:",
+		"ws:/override:",
+		"{{.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow lead-tune render contains forbidden %q:\n%s", forbidden, body)
 		}
 	}
 	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
-		t.Fatalf("wsflow playbook output contains bare ws namespace notation:\n%s", body)
-	}
-	if strings.Contains(body, "{{.") {
-		t.Fatalf("wsflow playbook output contains unsubstituted placeholder:\n%s", body)
-	}
-	for _, want := range []string{"wsflow/", "wsflow:", "wsflow runtime"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("wsflow playbook output missing %q:\n%s", want, body)
-		}
-	}
-	if !strings.Contains(body, "ws.ferrule") {
-		t.Fatalf("wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", body)
+		t.Fatalf("wsflow lead-tune render contains bare ws namespace notation:\n%s", body)
 	}
 }
 
@@ -604,7 +761,7 @@ func TestProductModeBlockSelection(t *testing.T) {
 	}, "\n")
 
 	t.Setenv(envNoAgent, "1")
-	wsflow := renderProductModePlaybookBody(input)
+	wsflow := renderProductModePlaybookBody(input, false)
 	for _, forbidden := range []string{"full-only text", fullOnlyStart, wsflowOnlyStart} {
 		if strings.Contains(wsflow, forbidden) {
 			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
@@ -617,7 +774,7 @@ func TestProductModeBlockSelection(t *testing.T) {
 	}
 
 	t.Setenv(envNoAgent, "")
-	full := renderProductModePlaybookBody(input)
+	full := renderProductModePlaybookBody(input, true)
 	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
 		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
 	}
@@ -643,11 +800,11 @@ Actual tool: ws.ferrule.
 	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", map[string]string{
 		"McpNamespace":   "spoof",
 		"SkillNamespace": "spoof",
-	}, wsconfig.Options{}, nil)
+	}, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ws.ferrule"} {
+	for _, want := range []string{"wsflow/tickets.find", "wsflow:lead-discuss", "ferrule"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered body missing %q:\n%s", want, body)
 		}
@@ -669,7 +826,7 @@ Call {{.McpNamespace}}/tickets.find and {{.SkillNamespace}}:lead-discuss.
 	})
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -689,17 +846,20 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", false, nil)
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer recommended tier = %q, want medium", tier)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read rendered playbook: %v", err)
 	}
 	body := string(data)
-	if !strings.Contains(body, "Continuity tip") {
-		t.Fatalf("rendered delegate output missing continuity tip:\n%s", body)
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("rendered implementer output must not include delegation continuity tip:\n%s", body)
 	}
 	for _, forbidden := range []string{fullOnlyStart, fullOnlyEnd, wsflowOnlyStart, wsflowOnlyEnd, "Mercenary path", "ws.mercenary.", "exec.", "showsflow", "knowsflow", "followsflow", "workflowsflow"} {
 		if strings.Contains(body, forbidden) {
@@ -708,6 +868,123 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	}
 	if regexp.MustCompile(`\bws[/:]`).MatchString(body) {
 		t.Fatalf("rendered wsflow delegate contains bare ws namespace notation:\n%s", body)
+	}
+}
+
+func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer recommended tier = %q, want medium", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Alias model for this role: gpt-5.5.",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
+		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
+		"Commit-range reporting requirement: Report <first-commit>..<last-commit> after committing logical checkpoints.",
+		"The plan and its listed references are the task contract.",
+		"Read the plan path above and all `[Must]` References listed in the plan except ticket files.",
+		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
+		"ask the caller to update the plan's `Escalations` section unless that section already authorizes ticket-file reading",
+		"Satisfy `ResultExpectations`; it is binding output scope, not advisory text.",
+		"Normal completion report:",
+		"If `ResultExpectations` names an output file, also include its path plus a short completion summary.",
+		"Always include final commit hash and commit range, or `none` with reason.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"BriefPath",
+		"Brief path:",
+		"No-plan sentinel",
+		"brief or plan",
+		"plan or brief",
+		"Do not read ticket files directly, even when a ticket path appears",
+		"caller explicitly authorizes ticket-file reading",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("implementer render retained old brief/implicit-ticket contract %q:\n%s", forbidden, body)
+		}
+	}
+}
+
+func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", shippedImplementerRelayContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("implementer-relay recommended tier = %q, want medium", tier)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rendered playbook: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Alias model for this role: gpt-5.5.",
+		"Plan path: `ai-docs/.plans/plan.md`",
+		"Review cycle: 2",
+		"Current commit range: abc123..def456",
+		"Non-clean review paths: ai-docs/.reviews/correctness.md, ai-docs/.reviews/test.md",
+		"Lead disposition notes: Fix correctness finding C1; defer test fixture rename until Phase 3.",
+		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerRelayDeclaredContext",
+		"Result expectations: Report per-finding dispositions, fix commits, updated range, verification, and blockers.",
+		"Rely only on this prompt and named paths; do not depend on prior conversation.",
+		"Read the plan and every non-clean review path directly.",
+		"Won't-fix is allowed only for style suggestions conflicting with local patterns, findings that require scope expansion beyond the plan, or findings disproven by specific evidence.",
+		"Do not read ticket files directly unless the plan's `Escalations` section explicitly authorizes ticket-file reading.",
+		"escalate for a plan update if a required fix needs ticket material or a plan deviation.",
+		"Won't-fix is not allowed for correctness, security, contract, regression, or required-test violations.",
+		"records the relevant per-finding dispositions known at that checkpoint",
+		"`[fixed]`",
+		"`[won't fix: <reason>]`",
+		"`[deferred: <reason>]`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("implementer-relay render missing %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"BriefPath",
+		"Brief path:",
+		"No-plan sentinel",
+		"Read the brief",
+		"scope expansion beyond the brief",
+		"findings, or disposition notes explicitly authorize ticket-file reading",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("implementer-relay render retained old brief contract %q:\n%s", forbidden, body)
+		}
+	}
+	if strings.Contains(body, "Continuity tip") {
+		t.Fatalf("implementer-relay render must not include delegation continuity tip:\n%s", body)
 	}
 }
 
@@ -722,7 +999,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 
 	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
 		"note": "see ws/specs.find for details",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, nil)
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
 	}
@@ -737,26 +1014,150 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 		}
 	}
 
-	planPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", map[string]string{
-		"brief_path": "ai-docs/.plans/brief.md",
-		"plan_path":  "ai-docs/.plans/plan.md",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, nil)
+	planContext := shippedPlanPopulatorContext()
+	planContext["note"] = "legacy extra context"
+	planPath, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-survey", planContext, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
 	if err != nil {
 		t.Fatalf("renderPlaybook plan-populator-survey with legacy context: %v", err)
+	}
+	if tier != "medium" {
+		t.Fatalf("plan-populator-survey tier = %q, want medium", tier)
 	}
 	planData, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatalf("read plan-populator-survey render: %v", err)
 	}
 	planBody := string(planData)
-	for _, want := range []string{"## Render Context", "- brief_path: ai-docs/.plans/brief.md", "- plan_path: ai-docs/.plans/plan.md"} {
+	for _, want := range []string{
+		"## Render Context",
+		"- note: legacy extra context",
+		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
+		"## Relevant Ticket Contract",
+		"## Out of Scope",
+		"## Codebase Findings",
+		"## Implementation Plan",
+		"## Verification Plan",
+		"## Escalations",
+		"[escalate-to-research]",
+		"Confidence: `<high|medium|low>`",
+	} {
 		if !strings.Contains(planBody, want) {
 			t.Fatalf("plan-populator-survey render missing %q:\n%s", want, planBody)
 		}
 	}
-	for _, forbidden := range []string{"Mercenary path", "ws.mercenary.", "exec."} {
+	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path", "Mercenary path", "ws.mercenary.", "exec."} {
 		if strings.Contains(planBody, forbidden) {
 			t.Fatalf("plan-populator-survey wsflow render contains forbidden %q:\n%s", forbidden, planBody)
+		}
+	}
+
+	researchContext := shippedPlanPopulatorContext()
+	researchContext["note"] = "legacy extra context"
+	researchPath, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "plan-populator-research", researchContext, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+	if err != nil {
+		t.Fatalf("renderPlaybook plan-populator-research with legacy context: %v", err)
+	}
+	if tier != "large" {
+		t.Fatalf("plan-populator-research tier = %q, want large", tier)
+	}
+	researchData, err := os.ReadFile(researchPath)
+	if err != nil {
+		t.Fatalf("read plan-populator-research render: %v", err)
+	}
+	researchBody := string(researchData)
+	for _, want := range []string{
+		"## Render Context",
+		"- note: legacy extra context",
+		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
+		"If `ai-docs/.plans/2026-06/28-1200-demo.md` already contains survey output, read it before replacing or",
+		"## Relevant Ticket Contract",
+		"## Out of Scope",
+		"## Codebase Findings",
+		"## Implementation Plan",
+		"## Verification Plan",
+		"## Escalations",
+	} {
+		if !strings.Contains(researchBody, want) {
+			t.Fatalf("plan-populator-research render missing %q:\n%s", want, researchBody)
+		}
+	}
+	for _, forbidden := range []string{"- brief_path:", "brief path", "Brief path"} {
+		if strings.Contains(researchBody, forbidden) {
+			t.Fatalf("plan-populator-research wsflow render contains forbidden %q:\n%s", forbidden, researchBody)
+		}
+	}
+}
+
+func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
+	t.Setenv(envNoAgent, "")
+	t.Setenv(envNamespace, "")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	worktreeRoot := initGitRepo(t)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	s := newTestServerWithHarness(t, "codex")
+
+	assertPlanner := func(name, wantTier string, wants []string) {
+		t.Helper()
+		path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, shippedPlanPopulatorContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+		if err != nil {
+			t.Fatalf("renderPlaybook %s with declared planner context: %v", name, err)
+		}
+		if tier != wantTier {
+			t.Fatalf("%s tier = %q, want %s", name, tier, wantTier)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s render: %v", name, err)
+		}
+		body := string(data)
+		commonWants := []string{
+			"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
+			"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
+			"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
+			"## Relevant Ticket Contract",
+			"## Out of Scope",
+			"## Codebase Findings",
+			"## Implementation Plan",
+			"## Verification Plan",
+			"## Escalations",
+		}
+		for _, want := range append(commonWants, wants...) {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s full ws render missing %q:\n%s", name, want, body)
+			}
+		}
+		for _, forbidden := range []string{"brief_path", "BriefPath", "brief path", "Brief path"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s full ws render retained brief dependency %q:\n%s", name, forbidden, body)
+			}
+		}
+	}
+
+	assertPlanner("plan-populator-survey", "medium", []string{
+		"[ok]` or `[escalate-to-research]`",
+		"Confidence: `<high|medium|low>`",
+		"Escalation rationale when returning `[escalate-to-research]`",
+	})
+	assertPlanner("plan-populator-research", "large", []string{
+		"[ok]` or `[escalate-to-lead]`",
+		"Include `None` when no blocker remains. Otherwise include the blocker,",
+	})
+
+	ctx := shippedPlanPopulatorContext()
+	ctx["brief_path"] = "ai-docs/.plans/legacy-brief.md"
+	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
+		if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+			t.Fatalf("full ws renderPlaybook accepted brief_path for %s", name)
+		} else {
+			var undeclared wsrsrc.ErrUndeclaredVar
+			if !errors.As(err, &undeclared) || undeclared.Name != "brief_path" {
+				t.Fatalf("%s brief_path error = %T %v, want ErrUndeclaredVar brief_path", name, err, err)
+			}
 		}
 	}
 }
@@ -772,12 +1173,56 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
 		"note": "ordinary full ws context remains template vars",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, nil); err == nil {
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for code-reviewer")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("full ws renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	ctx := shippedImplementerContext()
+	ctx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	implCtx := shippedImplementerContext()
+	implCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", implCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) || undeclared.Name != "BriefPath" {
+			t.Fatalf("full ws implementer BriefPath error = %T %v, want ErrUndeclaredVar BriefPath", err, err)
+		}
+	}
+
+	relayBriefCtx := shippedImplementerRelayContext()
+	relayBriefCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayBriefCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer-relay")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) || undeclared.Name != "BriefPath" {
+			t.Fatalf("full ws implementer-relay BriefPath error = %T %v, want ErrUndeclaredVar BriefPath", err, err)
+		}
+	}
+
+	relayCtx := shippedImplementerRelayContext()
+	relayCtx["Undeclared"] = "must fail"
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", relayCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer-relay")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("full ws implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -793,12 +1238,23 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 
 	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", map[string]string{
 		"note": "wsflow non-legacy stems still require declared template vars",
-	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, nil); err == nil {
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
 		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared context")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
 		if !errors.As(err, &undeclared) {
 			t.Fatalf("wsflow non-legacy renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
+		}
+	}
+
+	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer-relay", map[string]string{
+		"note": "implementer-relay is not a wsflow legacy freeform stem",
+	}, wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil); err == nil {
+		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared implementer-relay context")
+	} else {
+		var undeclared wsrsrc.ErrUndeclaredVar
+		if !errors.As(err, &undeclared) {
+			t.Fatalf("wsflow implementer-relay renderPlaybook error = %T %v, want ErrUndeclaredVar", err, err)
 		}
 	}
 }
@@ -877,7 +1333,7 @@ func TestPlaybookPrintGoldenDelegateSampleClaudeHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -906,7 +1362,7 @@ func TestPlaybookPrintGoldenDelegateSampleCodexHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -934,7 +1390,7 @@ func TestPlaybookPrintGoldenDelegateSampleUnknownHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "") // host-neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -953,7 +1409,7 @@ func TestPlaybookPrintGoldenSamplePlaybookNoDelegation(t *testing.T) {
 
 	body, _, err := printPlaybook(s, rsrcRoot, "sample-playbook",
 		map[string]string{"WorktreeID": "wt-golden"},
-		wsconfig.Options{}, nil)
+		wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -973,7 +1429,7 @@ func TestPlaybookPrintGoldenExploreClaudeHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1001,7 +1457,7 @@ func TestPlaybookPrintGoldenExploreCodexHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1029,7 +1485,7 @@ func TestPlaybookPrintGoldenExploreUnknownHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "") // host-neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1056,7 +1512,7 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "junk-harness-xyz") // unrecognized → neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1139,7 +1595,7 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-check-blockers", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-check-blockers", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1159,7 +1615,7 @@ func TestPlaybookPrintGoldenLeadVerifyDiscussion(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-discussion", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-discussion", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1178,7 +1634,7 @@ func TestPlaybookPrintGoldenLeadUpdateSpec(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-update-spec", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-update-spec", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1204,7 +1660,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1230,7 +1686,7 @@ func TestPlaybookPrintGoldenLeadWriteSpec(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-spec", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-spec", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1249,12 +1705,23 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-ticket", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-write-ticket", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	if !strings.Contains(body, "recoverability of intent") {
 		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
+	}
+	for _, want := range []string{
+		"If posture is `recommended`, ask the user",
+		"If posture is `required`, run sage review without asking",
+		"add `sage-review: skipped`",
+		"add or update `sage-review: completed`",
+		"add or update `sage-review: blocked`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing sage review gate language %q:\n%s", want, body)
+		}
 	}
 	// delegates:false — no tip.
 	if strings.Contains(body, "Continuity tip") {
@@ -1268,7 +1735,7 @@ func TestPlaybookPrintGoldenLeadVerifyDesign(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-design", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-design", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1287,16 +1754,117 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "verified code reaching the target branch") {
-		t.Errorf("body %q: expected doctrine text 'verified code reaching the target branch'", body)
+	if !strings.Contains(body, "execution attention") {
+		t.Errorf("body %q: expected doctrine text 'execution attention'", body)
+	}
+	for _, want := range []string{
+		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
+		"Treat the installed todo list as the ordered runbook",
+		"Stop for unresolved binding decisions before source edits.",
+		"If a plan artifact was created, commit it before Edit.",
+		"Delegate dispatch",
+		"Implementer spawn prompt",
+		"Rendered implementer prompt: <prompt-path>",
+		"contains the plan path, verification",
+		"implementer-relay` gets **Review relay dispatch**",
+		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
+		"Collect the normal completion report",
+		"Ticket path: <ticket-path>",
+		"Selected phase: <selected-phase>",
+		"Plan path: <plan-path>",
+		"Direct edit with no generated plan:",
+		"Reviewer prompt frame",
+		"Review the ticket contract, plan contract, and diff together.",
+		"Review the ticket contract and diff together.",
+		"Do not require a plan artifact for direct-edit review.",
+		"Review relay dispatch",
+		"Render `implementer-relay` with declared inputs",
+		"Rendered review relay prompt: <prompt-path>",
+		"Mercenary path:",
+		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Recommended tier: <recommended-tier>") {
+		t.Fatalf("lead-implement full ws render still exposes recommended tier in worker-facing task text:\n%s", body)
+	}
+	for _, forbidden := range []string{
+		"Brief template",
+		"BriefPath",
+		"Brief path:",
+		"implementation brief",
+		"lead-authored brief",
+		"contains the brief path",
+		"using the brief",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render retained old brief contract %q:\n%s", forbidden, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"Review cycle <N>. Rely only on this prompt and named paths.",
+		"Non-clean review paths: <paths>. Read each file directly.",
+		"Commit fixes, run verification, and report commit hashes plus test results.",
+		"Won't-fix allowed: style conflicts with codebase patterns; scope expansion beyond brief.",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render still embeds old review relay prompt body %q:\n%s", forbidden, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"If `Branch Action: create`",
+		"If `Branch Action: rename`",
+		"If `Branch Action: continue`",
+		"If direct-edit:",
+		"If delegated:",
+		"If lead-only:",
+		"If single:",
+		"If partitioned:",
+		"If `doc_mode` is `skipped`",
+		"Acceptance:",
+		"Implement or escalate Brief `## Contract Instructions`",
+		"Satisfy Brief `## Integration Test Instructions`",
+		"Test files: <paths, or None with reason>",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("lead-implement full ws render still contains unreachable-path prose %q:\n%s", forbidden, body)
+		}
 	}
 	// delegates:true (spawns implementer/reviewer agents) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	}
+}
+
+func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
+	t.Setenv(envNoAgent, "1")
+	t.Setenv(envNamespace, "wsflow")
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-implement", nil, wsconfig.Options{}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, forbidden := range []string{
+		"ws/mercenary.",
+		"ws.mercenary.",
+		`"workflow.prefer_mercenary"`,
+		"Mercenary (when selected):",
+		fullOnlyStart,
+		fullOnlyEnd,
+		mercenaryOnlyStart,
+		mercenaryOnlyEnd,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("wsflow lead-implement render contains forbidden %q:\n%s", forbidden, body)
+		}
 	}
 }
 
@@ -1310,12 +1878,36 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-proceed", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-proceed", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 	if !strings.Contains(body, "full-pipeline routing accuracy") {
 		t.Errorf("body %q: expected doctrine text 'full-pipeline routing accuracy'", body)
+	}
+	for _, want := range []string{
+		`enter.proceed`,
+		"Follow `Next:` exactly",
+		"Follow `Next:` from `enter.proceed` exactly",
+		"scope_blocked=no-unfinished-phase",
+		"scope_blocked=container-ticket",
+		"scope_blocked=multiple-explicit-phases",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)
+		}
+	}
+	for _, old := range []string{
+		"Use the first matching route block",
+		"#### Implementation Dispatch",
+		"| `has-ticket=yes`, `status=ready`, `freshness=current`, `scope-blocked=none` | `lead-implement` |",
+		"### 3. Report Routing Verdict",
+		"## Routing Verdict",
+		"If `NEXT: lead-discuss`, continue through `ws:lead-discuss`.",
+	} {
+		if strings.Contains(body, old) {
+			t.Errorf("body %q: old deterministic route matrix text still present: %q", body, old)
+		}
 	}
 	// delegates:false — continuity tip must NOT appear.
 	if strings.Contains(body, "Continuity tip") {
@@ -1329,7 +1921,7 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-ship", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-ship", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1348,7 +1940,7 @@ func TestPlaybookPrintGoldenLeadAddRule(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-add-rule", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-add-rule", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1367,7 +1959,7 @@ func TestPlaybookPrintGoldenLeadSprint(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-sprint", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-sprint", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1386,7 +1978,7 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-discuss", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-discuss", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1405,7 +1997,7 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-review", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-review", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1424,7 +2016,7 @@ func TestPlaybookPrintGoldenLeadSalvage(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-salvage", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-salvage", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1443,7 +2035,7 @@ func TestPlaybookPrintGoldenLeadSkillAuthoring(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1462,7 +2054,7 @@ func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-spec", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-spec", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1481,7 +2073,7 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-mental-model", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-forge-mental-model", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1494,13 +2086,116 @@ func TestPlaybookPrintGoldenLeadForgeMentalModel(t *testing.T) {
 	}
 }
 
+// TestSkillsCallEnterTools verifies that the four skills modified in Phase 2
+// contain the expected enter.* and agenda.set call tokens after rendering.
+// Tokens are chosen to be non-incidental: enter.<mode> appears only from the
+// inserted calls, and target/facts/policy or agenda.set are argument-level
+// signals that cannot appear from surrounding prose alone.
+func TestSkillsCallEnterTools(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	s := newTestServerWithHarness(t, "claude")
+
+	cases := []struct {
+		skill    string
+		wantAll  []string
+		wantNone []string
+	}{
+		{
+			skill:   "lead-implement",
+			wantAll: []string{"enter.implement", "`target`", "`facts`", "`policy`"},
+		},
+		{
+			skill:    "lead-proceed",
+			wantAll:  []string{"enter.proceed", "Follow `Next:` from `enter.proceed` exactly", "Follow `Next:` exactly"},
+			wantNone: []string{"### 3. Report Routing Verdict", "## Routing Verdict"},
+		},
+		{
+			skill:   "lead-sprint",
+			wantAll: []string{"enter.sprint"},
+		},
+		{
+			skill:   "lead-salvage",
+			wantAll: []string{"enter.salvage", "agenda.set"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.skill, func(t *testing.T) {
+			body, _, err := printPlaybook(s, rsrcRoot, tc.skill, nil, wsconfig.Options{}, "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook(%q): %v", tc.skill, err)
+			}
+			for _, token := range tc.wantAll {
+				if !strings.Contains(body, token) {
+					t.Errorf("printPlaybook(%q): rendered body does not contain %q", tc.skill, token)
+				}
+			}
+			for _, token := range tc.wantNone {
+				if strings.Contains(body, token) {
+					t.Errorf("printPlaybook(%q): rendered body should not contain %q", tc.skill, token)
+				}
+			}
+		})
+	}
+}
+
+// TestPhase3bSkillRepoint verifies that the four repointed lead skills call
+// ws.workflow_manual and reference lead-revive instead of the removed
+// playbook.print(name: "lead-workflow-manual") self-load pattern, and that the
+// lead-revive skill exists while lead-load-workflow-manual does not.
+func TestPhase3bSkillRepoint(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
+	wsflowSkillsRoot := filepath.Join("..", "..", "..", "agents-plugin-wsflow", "skills")
+	s := newTestServerWithHarness(t, "claude")
+
+	// Verify the four repointed skills call workflow_manual and lead-revive,
+	// and no longer contain the removed playbook.print self-load call.
+	repointed := []string{"lead-proceed", "lead-discuss", "lead-sprint", "lead-salvage"}
+	for _, skill := range repointed {
+		t.Run(skill, func(t *testing.T) {
+			body, _, err := printPlaybook(s, rsrcRoot, skill, nil, wsconfig.Options{}, "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook(%q): %v", skill, err)
+			}
+			if !strings.Contains(body, "workflow_manual") {
+				t.Errorf("%s: rendered body must contain 'workflow_manual'", skill)
+			}
+			if !strings.Contains(body, "lead-revive") {
+				t.Errorf("%s: rendered body must contain 'lead-revive'", skill)
+			}
+			if strings.Contains(body, `playbook.print(name: "lead-workflow-manual")`) {
+				t.Errorf("%s: rendered body must not contain removed playbook.print self-load call", skill)
+			}
+		})
+	}
+
+	// lead-revive SKILL.md must exist in agents-plugin/skills/.
+	reviveSkillPath := filepath.Join(skillsRoot, "lead-revive", "SKILL.md")
+	if _, err := os.Stat(reviveSkillPath); err != nil {
+		t.Errorf("lead-revive SKILL.md missing from agents-plugin/skills/: %v", err)
+	}
+
+	// lead-revive SKILL.md must exist in agents-plugin-wsflow/skills/.
+	wsflowReviveSkillPath := filepath.Join(wsflowSkillsRoot, "lead-revive", "SKILL.md")
+	if _, err := os.Stat(wsflowReviveSkillPath); err != nil {
+		t.Errorf("lead-revive SKILL.md missing from agents-plugin-wsflow/skills/: %v", err)
+	}
+
+	// lead-load-workflow-manual must NOT exist in agents-plugin/skills/.
+	removedSkillPath := filepath.Join(skillsRoot, "lead-load-workflow-manual", "SKILL.md")
+	if _, err := os.Stat(removedSkillPath); !os.IsNotExist(err) {
+		t.Errorf("lead-load-workflow-manual SKILL.md should be removed but still present (stat: %v)", err)
+	}
+}
+
 // TestPlaybookPrintGoldenLeadBootstrap verifies lead-bootstrap resolves from the
 // real rsrc tree and contains procedure body text. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-bootstrap", nil, wsconfig.Options{}, nil)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-bootstrap", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}

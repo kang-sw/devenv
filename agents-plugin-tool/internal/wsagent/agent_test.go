@@ -682,7 +682,7 @@ func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--json",
 		"-m\x00gpt-5.5",
-		fmt.Sprintf("model_instructions_file=%q", systemPromptPath),
+		fmt.Sprintf("model_instructions_file=%q", filepath.ToSlash(systemPromptPath)),
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("codex args missing %q: %+v", want, invocation.Args)
@@ -959,14 +959,21 @@ func TestAsyncWorkerCommandUsesRuntimeBinaryEnvBeforeStaleExecutable(t *testing.
 }
 
 func TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		python, err = exec.LookPath("python")
+		if err != nil {
+			t.Skip("python not found on PATH; skipping cache launcher py fallback test")
+		}
+	}
 	t.Setenv("WS_MCP_RUNTIME_BINARY", "")
 	temp := t.TempDir()
 	cacheRoot := filepath.Join(temp, ".codex", "plugins", "cache", "kang-sw-devenv")
-	launcher := filepath.Join(cacheRoot, "ws", "0.22.4", "bin", "ws-mcp-launcher")
-	if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
+	pyLauncher := filepath.Join(cacheRoot, "ws", "0.22.4", "bin", "ws-mcp-launcher.py")
+	if err := os.MkdirAll(filepath.Dir(pyLauncher), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(pyLauncher, []byte("#!/usr/bin/env python3\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(cacheRoot, "plugin-backup-old", "ws", "0.22.3", ".runtime", "linux-amd64", "ws-mcp")
@@ -975,8 +982,8 @@ func TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("asyncWorkerCommandFor returned error: %v", err)
 	}
-	if command.Path != launcher || len(command.Args) != 0 {
-		t.Fatalf("worker command = %+v, want current cache launcher", command)
+	if command.Path != python || len(command.Args) != 1 || command.Args[0] != pyLauncher {
+		t.Fatalf("worker command = %+v, want python %s %s", command, python, pyLauncher)
 	}
 }
 

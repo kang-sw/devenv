@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.30.2`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.30.2`).
+Active plugin package: `agents-plugin/` (`ws@0.32.0`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.32.0`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -156,7 +156,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260622-epic-ws-dashboard-session-key-realignment` | todo | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
-| `260620-feat-ws-dashboard-agent-client-activity-sources` | idea | Deferred structured Activity adapter track for Codex app-server and OpenCode ACP provider data after the managed CLI path |
+| `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
+| `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | todo | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
@@ -166,6 +167,14 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260524-bug-wsstore-ci-sqlite-busy` | todo | Capture CI SQLite busy failures when concurrent wsstore handles write one state database |
 | `260525-bug-implement-review-fix-owner` | todo | Clarify lead-implement review fixes so the implementation owner applies findings |
+| `260626-bug-sage-review-config-setter-missing` | idea | Add a lead-facing setter/tuning catalog knob for `sage_review` so review posture can be changed without manual config JSON edits |
+| `260627-bug-write-ticket-bypasses-tickets-create` | idea | Capture dogfood failure where ticket authoring manually created a file instead of invoking `ws.tickets.create` |
+| `260627-bug-enter-implement-direct-edit-policy-gap` | idea | Investigate `ws.enter.implement` lacking a direct-edit/no-delegation policy override for narrow multi-file text changes |
+| `260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood` | idea | Investigate branch-local playbook render or cache-refresh guidance for source rsrc dogfood |
+| `260627-research-lead-proceed-route-matrix-authoring` | idea | Research whether Route Facts and Route Matrix tables would make `lead-proceed` routing clearer without semantic drift |
+| `260626-feat-session-key-format-and-retention` | todo | Change new session keys to three words plus two digits, refresh key-file mtime on keyed use, and prune stale key records about monthly with daily-bounded scans |
+| `260626-bug-workflow-manual-bootstrap-sentinel-surface` | idea | Investigate the fresh workflow-manual sentinel guidance not matching the visible session-state tool surface during dogfooding |
+| `260626-bug-prefer-subagent-recursive-delegate-escape` | idea | Investigate forked workers that complete work through a second delegate despite an explicit direct-edit handoff boundary |
 | `260616-refactor-remove-agent-backed-api-tools` | done | Remove the agent-backed api.ask MCP tool family from the playbook pivot |
 | `260616-epic-api-namespace-documentation-memory-tooling` | todo | Rebuild api.* later as pure documentation, corpus, hierarchical memory, and playbook-manual tooling |
 | `260616-refactor-wsflow-product-mode-convergence` | done | Collapsed wsflow onto product-mode playbook rendering and removed curated skill bodies |
@@ -181,7 +190,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260524-bug-ws-agent-register-stale-dir-result-hang` | idea | Investigate ws agent stale registration reset failure, register/call ordering, and post-test missing result |
 | `260620-feat-ws-ticket-status-transition-tools` | done | New `tickets.close` and `tickets.move` MCP tools for atomic ticket status transitions (promotion/demotion/close/drop) with convention guards |
-| `260622-feat-sage-review-ticket-gate` | ready | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and config substrate |
+| `260622-feat-sage-review-ticket-gate` | done | Sage review gate: `create-ticket` MCP tool, two-reviewer playbooks, `lead-write-ticket` judge-gate integration, and `sage_review*` config substrate (all 3 phases done) |
 | `260616-bug-launcher-runtime-install-forced-test-drift` | done | Restore launcher runtime_install_forced test contract |
 | `260616-bug-exec-mcp-running-large-abort-flaky-under-full-suite` | done | Fixed exec finalize/reconcile race + too-tight abort window flaking the full-suite abort test (260620 Phase 2) |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
@@ -192,6 +201,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-bug-implement-merge-target-discovery` | idea | Investigate safer merge-target discovery for nested implement branches |
 | `260523-bug-ws-mcp-launcher-runtime-repair-race` | idea | Investigate ws-mcp launcher runtime repair race behavior |
 | `260523-chore-implement-branch-cleanup-guidance` | idea | Add post-merge branch cleanup guidance to implement workflows |
+| `260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit` | idea | Capture wsflow rsrc mirror drift when canonical shipped rsrc edits are not mirrored |
+| `260626-bug-wsflow-lead-revive-skill-inventory-drift` | idea | Capture wsflow lead-revive shipped skill inventory drift blocking the wsflow package test suite |
 | `260524-bug-subquery-non-head-history-evidence` | idea | Prevent subquery ticket surveys from citing non-HEAD branch commits as current evidence without labeling the boundary |
 | `260524-bug-subquery-working-directory-stderr` | idea | Investigate delegated subquery shell stderr from inaccessible process working directories |
 | `260525-bug-ws-setup-cwd-plugin-cache-root` | idea | Clarify or fix ws setup cwd placeholder resolution in installed-plugin sessions |
@@ -213,6 +224,37 @@ dropped tickets live in hidden archive dirs and git history.
   substrate commits from `origin/discuss` (`2954a622`, `9c169d1c`,
   `bfab8b7b`) and then design the backend server-target resolver plus
   allowlisted one-shot forwarding skeleton against current docs.
+- `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
+  as reset-to-builtin (not clear-to-empty) and add `session` scope to
+  `config_prompt_unset`; spec addressing via `## Spec Impact`
+  (`mcp-tools.md`, Contract-first: no). Sage review completed.
+- `260702-bug-lead-manual-sections-thin` (ready, bug) - fill the empty
+  `workflow_manual` `Session setup`/`User preferences` sections with the
+  ferrule reuse-discipline; spec addressing via `## Spec Impact`
+  (`mcp-tools.md`, Contract-first: no). Sage review completed.
+- `260702-feat-agenda-enumerate-and-clear-all` (ready, feat) - add
+  `agenda_list` and/or `agenda_clear(all: true)` to enumerate/clear agenda
+  blob keys; spec addressing via `## Spec Impact` (`mcp-tools.md`,
+  Contract-first: no). Sage review completed.
+- `260702-feat-enter-implement-policy-feedback` (ready, feat) - `enter_implement`
+  verdict notes when a caller policy field was outside its applicability
+  window and ignored; spec addressing via `## Spec Impact` (`mcp-tools.md`,
+  Contract-first: no). Sage review completed.
+- `260702-feat-tickets-move-ready-gate-warning` (ready, feat) - `tickets_move`
+  to `ready` emits a soft non-blocking warning when no spec addressing is
+  detected; spec addressing via `## Spec Impact` (`mcp-tools.md`,
+  Contract-first: no). Sage review completed.
+- `260702-feat-lead-revive-session-key-candidates` (idea, feat) - **sage
+  review blocked**: design premise assumed transient in-memory session-key
+  storage, but storage is actually persistent per-key disk files with no
+  eviction; needs re-authoring before promotion.
+- `260702-feat-workflow-manual-state-only-view` (ready, feat) - add a
+  lead-only session-state-only MCP tool (name TBD, e.g. `session_state`)
+  returning only the Session State (todos/agenda) for the caller's key,
+  reusing `workflow_manual`'s key-validation behavior; spec addressing via
+  `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
+  completed (re-authored after initial completeness block: added Phase 1 +
+  verification criteria, resolved lead-only-gating design concern).
 - `260622-chore-windows-shipping-hardening` (ready, chore, child of 260605) -
   successor to the done 260620; makes the Windows surface shipping-correct with
   mercenary-on-Windows in v1 scope. Phase A static code hardening (`go test`-
@@ -231,27 +273,19 @@ dropped tickets live in hidden archive dirs and git history.
   Empirical cold-install/cmd.exe/backslash/tree-kill assertions deferred to
   Phase C (real Windows host). Next target: **Phase C** (branch-pinned acceptance)
   — gates the epic merge to `main`.
-- `260622-feat-windows-local-devenv-autobuild` (ready, feat, child of 260605) -
-  makes the chore's Phase C "cold install -> real Go build" actually work on
-  Windows. **Both phases done** (branch
-  `implement/260622-windows-local-devenv-autobuild`, unmerged). Phase 1
-  (`ba67f61e`): lifted the launcher `os_name == "windows"` gate so a valid
-  `.local-devenv-runtime` marker drives source build-on-launch on Windows
-  (canonical + wsflow mirror), Windows-aware `go` check, `USERPROFILE`/`LOCALAPPDATA`
-  build-env recovery; 40+8 tests green; no spec change (text already OS-neutral).
-  Phase 2 (`cbb7f983`): `scripts/install-claude-plugin.ps1` one-shot installer
-  (install.sh port + marker) and `windows-dogfood.md` rewrite. PowerShell syntax
-  deferred to Windows host; empirical auto-build cold-load deferred to chore
-  Phase C. Partially closes `260622-bug-wsflow-launcher-coldload-divergence`
-  (gate mirrored).
-- `260622-feat-sage-review-ticket-gate` (ready, feat) - design-quality gate for
-  ticket writes: `create-ticket` MCP tool, reviewer playbooks (design + completeness),
-  `lead-write-ticket` judge-gate integration, and `sage_review*` config substrate.
-  **Phase 1 done** (`8ced5351`): `tickets.create` MCP tool + CLI mirror; spec
-  `{#260622-create-ticket-tool}` written. **Phase 2 done** (`1b715fa1`):
-  `ticket-reviewer-design` + `ticket-reviewer-completeness` delegate playbooks,
-  Sage Review Gate in `lead-write-ticket`; spec `{#260624-sage-review-gate}` written.
-  Phase 3 (`sage_review*` config registration in `scope.go` + `tickets.move` gate) next.
+- `260627-feat-enter-proceed-deterministic-verdict-engine` (ready, feat, child
+  of 260605) - make `ws.enter.proceed` the deterministic route/verdict resolver
+  at the routing-facts-complete boundary. The playbook keeps fact gathering and
+  ambiguous judgments, while MCP owns normalized precedence, warnings, JSON
+  result shape, canonical raw verdict text, `next_instruction`, agenda storage,
+  and proceed todo replacement. Spec addressing via `## Spec Impact`
+  (Contract-first: no — ticket pins the implementation slice; closeout updates
+  `workflow-skills` and `mcp-tools`). Sage review completed. **Phases 1-3 done**
+  on branch `implement/260627-enter-proceed-verdict-engine` (latest
+  `cc930648`), unmerged: deterministic `ws.enter.proceed` resolver, canonical
+  raw/JSON verdict output, concrete raw/JSON next-action directives with common
+  follow rails, two-item proceed todo replacement, lead-proceed MCP handoff,
+  docs, manifests, wsflow mirror, and partitioned review clean for Phase 1.
 - `260605-epic-ws-playbook-factory-pivot` (todo, epic) - playbook-factory board;
   not implementation-ready (board artifact). **M0/M1/M2/M3 done.** M1
   `260609-feat-ws-playbook-surface-mvp` (`.done/`, merged `4bc4efd9`):
@@ -385,3 +419,25 @@ dropped tickets live in hidden archive dirs and git history.
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
 assignment remains deferred.
+
+### Closeout: 260625 Phase 2 forge migration (260626)
+
+Dogfooding the ws session-state machine. Lead session key
+`thong-surfboard-container-easiness-26`. The unresolved forge audit from WIP
+`14244ca6` was closed by `72503fd1`; commit-message heading normalization
+followed in `41b2163e`, and `2a4aaba7` recorded Phase 2 completion. Dev-merge
+`47aebbf9` integrated `implement/260625-forge-migration-audit-fix` into
+`feature/ferrule`, and the merge path bumped `ws`/`wsflow` to `0.30.11`.
+
+Phase 2 is fully complete on `feature/ferrule`: enter-call integration,
+forge/delegate migration, audit fixes, wsrsrc manifest regeneration, wsflow
+mirror regeneration, and the additive `lead-sprint` closeout are all recorded.
+The ticket remains open until the larger branch is integrated to its final
+target. `python3 -m unittest discover agents-plugin-wsflow/tests` still fails
+only on pre-existing `lead-revive` inventory drift, captured as
+`260626-bug-wsflow-lead-revive-skill-inventory-drift`.
+
+Dogfood findings from this session remain under epic
+`260605-epic-ws-playbook-factory-pivot`; the sage-review posture surface ticket
+is closed, while follow-up tuning and session-key retention work remain active
+in their respective idea/todo tickets.

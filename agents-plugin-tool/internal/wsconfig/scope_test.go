@@ -43,6 +43,17 @@ func (f *fakeSessionStore) SetOverride(sessionKey, itemKey, value string) error 
 	return nil
 }
 
+func (f *fakeSessionStore) DeleteOverride(sessionKey, itemKey string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.sessions[sessionKey]
+	if !ok {
+		return nil
+	}
+	delete(m, itemKey)
+	return nil
+}
+
 // ListOverrideKeys implements the optional key-enumeration interface consumed by
 // ScopedShow to discover session-only keys (not visible from file scopes).
 func (f *fakeSessionStore) ListOverrideKeys(sessionKey string) []string {
@@ -263,6 +274,156 @@ func TestDefaultScopeFallbackToProject(t *testing.T) {
 	if projectCfg.Overrides == nil || projectCfg.Overrides[key] != "val" {
 		t.Errorf("project overrides = %v", projectCfg.Overrides)
 	}
+}
+
+func TestWorkflowPreferenceDefaultScopesAreGlobalOnly(t *testing.T) {
+	for _, key := range []string{ItemWorkflowPreferSubagent, ItemWorkflowPreferMercenary} {
+		if got := DefaultScope(key); got != ScopeGlobal {
+			t.Fatalf("DefaultScope(%q) = %s, want global", key, got)
+		}
+		if !GlobalOnly(key) {
+			t.Fatalf("GlobalOnly(%q) = false, want true", key)
+		}
+	}
+}
+
+func TestGlobalOnlyWorkflowPreferenceSkipsSessionAndProject(t *testing.T) {
+	sess := newFakeSessionStore()
+	builtins := map[string]string{ItemWorkflowPreferSubagent: "off"}
+	r, opts := newTestResolver(t, builtins, sess)
+	const sessionKey = "sk"
+
+	if err := r.Set(ItemWorkflowPreferSubagent, "project-on", SetOptions{ExplicitScope: ScopeProject}); err == nil {
+		t.Fatal("explicit project write for global-only item succeeded; want error")
+	}
+	if err := r.Set(ItemWorkflowPreferSubagent, "session-on", SetOptions{ExplicitScope: ScopeSession, SessionKey: sessionKey}); err == nil {
+		t.Fatal("explicit session write for global-only item succeeded; want error")
+	}
+
+	// Simulate orphaned/manual values in lower scopes. Global-only resolution must
+	// ignore them and fall through to builtin until a global value exists.
+	if err := setOverrideInFile(mustProjectPath(t, opts), ItemWorkflowPreferSubagent, "project-on"); err != nil {
+		t.Fatalf("seed project value: %v", err)
+	}
+	if err := sess.SetOverride(sessionKey, ItemWorkflowPreferSubagent, "session-on"); err != nil {
+		t.Fatalf("seed session value: %v", err)
+	}
+	rv, err := r.Get(sessionKey, ItemWorkflowPreferSubagent)
+	if err != nil {
+		t.Fatalf("get builtin: %v", err)
+	}
+	if rv.Value != "off" || rv.Scope != ScopeBuiltin {
+		t.Fatalf("global-only get with only session/project values = %q/%s, want off/builtin", rv.Value, rv.Scope)
+	}
+
+	if err := r.Set(ItemWorkflowPreferSubagent, "on", SetOptions{}); err != nil {
+		t.Fatalf("default global write: %v", err)
+	}
+	rv, err = r.Get(sessionKey, ItemWorkflowPreferSubagent)
+	if err != nil {
+		t.Fatalf("get global: %v", err)
+	}
+	if rv.Value != "on" || rv.Scope != ScopeGlobal {
+		t.Fatalf("global-only get after global write = %q/%s, want on/global", rv.Value, rv.Scope)
+	}
+}
+
+// TestUnsetSessionScopeRestoresNextBroaderScope verifies that Unset now
+// supports ScopeSession: it removes the session-scoped override and
+// resolution falls back to whatever the next-broader scope (or builtin)
+// holds, without ever writing an empty-string value in place of the removed
+// override.
+func TestUnsetSessionScopeRestoresNextBroaderScope(t *testing.T) {
+	sess := newFakeSessionStore()
+	r, _ := newTestResolver(t, map[string]string{"item": "builtin-val"}, sess)
+	const sessionKey = "sk"
+	const key = "item"
+
+	// Seed a project-scope value beneath the session override so fallback has
+	// somewhere concrete to land other than builtin.
+	if err := r.Set(key, "project-val", SetOptions{ExplicitScope: ScopeProject}); err != nil {
+		t.Fatalf("seed project value: %v", err)
+	}
+	if err := r.Set(key, "session-val", SetOptions{ExplicitScope: ScopeSession, SessionKey: sessionKey}); err != nil {
+		t.Fatalf("seed session value: %v", err)
+	}
+
+	rv, err := r.Get(sessionKey, key)
+	if err != nil {
+		t.Fatalf("get before unset: %v", err)
+	}
+	if rv.Value != "session-val" || rv.Scope != ScopeSession {
+		t.Fatalf("get before unset = %q/%s, want session-val/session", rv.Value, rv.Scope)
+	}
+
+	if err := r.Unset(key, SetOptions{ExplicitScope: ScopeSession, SessionKey: sessionKey}); err != nil {
+		t.Fatalf("unset session scope: %v", err)
+	}
+
+	rv, err = r.Get(sessionKey, key)
+	if err != nil {
+		t.Fatalf("get after unset: %v", err)
+	}
+	if rv.Value != "project-val" || rv.Scope != ScopeProject {
+		t.Fatalf("get after session unset = %q/%s, want fallback to project-val/project (not empty)", rv.Value, rv.Scope)
+	}
+
+	// Unsetting again (already absent) is a no-op, not an error.
+	if err := r.Unset(key, SetOptions{ExplicitScope: ScopeSession, SessionKey: sessionKey}); err != nil {
+		t.Fatalf("re-unset session scope (no-op expected): %v", err)
+	}
+}
+
+// TestUnsetSessionScopeRequiresSessionKey verifies the explicit error path
+// when a session-scope unset is requested without a session key.
+func TestUnsetSessionScopeRequiresSessionKey(t *testing.T) {
+	sess := newFakeSessionStore()
+	r, _ := newTestResolver(t, nil, sess)
+
+	if err := r.Unset("item", SetOptions{ExplicitScope: ScopeSession}); err == nil {
+		t.Fatal("unset with session scope and no session key succeeded; want error")
+	}
+}
+
+// TestGlobalOnlyItemUnsetResetsToBuiltin verifies that Unset on a global-only
+// item (like workflow.prefer_subagent) removes the global override and
+// resolution falls back to the builtin default — the "reset" semantic the
+// ticket asks for, distinct from writing the builtin's current value via Set.
+func TestGlobalOnlyItemUnsetResetsToBuiltin(t *testing.T) {
+	builtins := map[string]string{ItemWorkflowPreferSubagent: "off"}
+	r, _ := newTestResolver(t, builtins, nil)
+
+	if err := r.Set(ItemWorkflowPreferSubagent, "on", SetOptions{}); err != nil {
+		t.Fatalf("set global override: %v", err)
+	}
+	rv, err := r.Get("", ItemWorkflowPreferSubagent)
+	if err != nil {
+		t.Fatalf("get after set: %v", err)
+	}
+	if rv.Value != "on" || rv.Scope != ScopeGlobal {
+		t.Fatalf("get after set = %q/%s, want on/global", rv.Value, rv.Scope)
+	}
+
+	if err := r.Unset(ItemWorkflowPreferSubagent, SetOptions{}); err != nil {
+		t.Fatalf("unset global-only item: %v", err)
+	}
+
+	rv, err = r.Get("", ItemWorkflowPreferSubagent)
+	if err != nil {
+		t.Fatalf("get after unset: %v", err)
+	}
+	if rv.Value != "off" || rv.Scope != ScopeBuiltin {
+		t.Fatalf("get after unset = %q/%s, want off/builtin (reset, not shadowed)", rv.Value, rv.Scope)
+	}
+}
+
+func mustProjectPath(t *testing.T, opts Options) string {
+	t.Helper()
+	path, err := Path(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // TestGlobalPathUsesConfigHomeEnvVar verifies that $WS_CONFIG_HOME controls

@@ -54,7 +54,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 
 	contract := readRuntimeContractTest(t)
 	cmd := exec.Command(bin, "runtime", "capabilities")
-	cmd.Env = append(os.Environ(), "WS_MCP_TOOL_PROFILE=leaf", "WS_MCP_ALLOWED_TOOLS=project_tree")
+	cmd.Env = append(os.Environ(),
+		"WS_CONFIG_HOME="+t.TempDir(),
+		"WS_MCP_TOOL_PROFILE=leaf",
+		"WS_MCP_ALLOWED_TOOLS=project_tree",
+	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -84,6 +88,11 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	if !slices.Equal(got.Tools, wantTools) {
 		t.Fatalf("tools = %v, want full lead runtime contract tools %v", got.Tools, wantTools)
 	}
+	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register"} {
+		if slices.Contains(got.Tools, hidden) {
+			t.Fatalf("runtime capabilities exposed hidden mercenary tool %s in %v", hidden, got.Tools)
+		}
+	}
 	wantCommands := sortedMapKeys(contract.Commands)
 	slices.Sort(got.Commands)
 	if !slices.Equal(got.Commands, wantCommands) {
@@ -109,12 +118,12 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+	for _, hidden := range []string{"ws.lead.prefer_mercenary", "ws.mercenary.call", "ws.mercenary.register", "ws.mercenary.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}
 	}
-	for _, visible := range []string{"api.list", "config.show", "tickets.list"} {
+	for _, visible := range []string{"api.list", "config.show", "config.tuning", "tickets.list"} {
 		if !slices.Contains(got.Tools, visible) {
 			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
 		}

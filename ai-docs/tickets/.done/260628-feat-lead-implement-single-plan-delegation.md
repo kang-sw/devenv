@@ -1,0 +1,367 @@
+---
+title: Lead implement single-plan delegation
+sage-review: recommended
+parent: 260605-epic-ws-playbook-factory-pivot
+related:
+  260627-feat-enter-implement-deterministic-verdict-engine: predecessor that moved deterministic implement verdict and todo guidance into MCP
+  260627-feat-lead-implement-rendered-delegate-prompts: predecessor that made implementer and review relay prompts file-first
+related-mental-model:
+  - mcp-runtime
+  - prompt-bundle
+  - workflow-skills
+completed: 2026-06-28
+---
+
+# Lead implement single-plan delegation
+
+## Background
+
+The delegated `lead-implement` path still carries two artifact concepts:
+a lead-authored brief, then an optional survey or research plan populated from
+that brief. Dogfooding showed that this keeps too much responsibility on the
+lead. In delegated work, the lead can drift into source exploration while trying
+to write a useful brief, which pollutes lead context and duplicates the
+planner's job.
+
+The settled design is to keep the existing delegation route shape and review/fix
+loop, but collapse the artifact contract into one generated implementation plan.
+The ticket and selected phase remain the authoritative contract. A planner reads
+that ticket/phase, clips the relevant contract, explores the codebase, and writes
+or refines the plan. The executor then reads only that plan. Reviewers review the
+ticket, plan, and diff.
+
+This is a convention-centered refactor of an already working route, not a new
+delegation architecture. The route still supports a medium/light survey planner
+and escalation to a large research planner; the difference is that both write to
+the same plan file instead of chaining brief plus survey/research artifacts.
+
+## Decisions
+
+- Delegated `lead-implement` should remove the lead-authored brief artifact.
+- The lead may read the ticket and selected phase in delegated mode, but should
+  not directly explore source, specs, mental models, or implementation files
+  before planner dispatch unless another workflow gate explicitly requires it.
+- A generated plan path is created before planner dispatch. The intended MCP
+  surface is `ws.path.generate(kind: "plan", stems: ["<ticket-stem-or-task>"])`.
+- Plan files live under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`.
+- The survey planner is the delegated default. It runs at the existing medium
+  tier, reads the ticket and selected phase, clips relevant contract text,
+  explores the codebase, writes a light implementation plan, and reports
+  confidence.
+- Survey escalation is preserved. When confidence is low or strategy requires
+  deeper judgment, the survey planner returns an escalation signal and reason.
+- The research planner runs at the existing large tier and refines or replaces
+  the same plan file. Do not introduce xlarge as a default in this ticket; leave
+  xlarge tier policy as a future tuning decision if needed.
+- The executor reads the plan path only. It should not read the ticket directly
+  unless the plan explicitly authorizes that as an escalation path.
+- Reviewers review against the ticket, the plan, and the diff. The existing
+  partitioned review and fix loop stay in place.
+- Final merge ceremony should avoid a mandatory lead diff reread after clean
+  reviewer passes. The lead still aggregates review disposition, verification,
+  ticket/doc status, and user approval before merge.
+
+## Plan Contract
+
+The plan file is the single delegated implementation contract. It must be
+self-contained enough for a fresh executor to act without re-researching, while
+making clear that the ticket remains the source of truth.
+
+Required plan sections:
+
+- `Relevant Ticket Contract` - clipped ticket and phase requirements that govern
+  the implementation.
+- `Out of Scope` - ticket content or nearby concerns intentionally excluded from
+  this phase.
+- `Codebase Findings` - concrete files, APIs, tests, conventions, and reusable
+  mechanisms discovered by planner exploration.
+- `Implementation Plan` - ordered steps with expected files or components.
+- `Verification Plan` - commands, tests, and manual checks the executor should
+  run.
+- `Escalations` - unresolved blockers, low-confidence areas, or explicit
+  permissions needed before execution.
+
+The planner may summarize or quote ticket contract only to preserve scope. It
+must not create new policy decisions that are absent from the ticket. When the
+ticket is insufficient, contradictory, or underspecified for implementation, the
+planner should escalate instead of silently filling in missing contract.
+
+## Spec Impact
+
+Target spec areas:
+
+- `mcp-tools`: update `ws.enter.implement` todo/verdict contract to remove
+  `plan_depth=brief` as a reachable delegated artifact, describe single-plan
+  delegated routing, and add `path.generate(kind: "plan")`.
+- `workflow-skills`: update `lead-implement` workflow contract so delegated work
+  is planner-to-executor over one plan file, while direct edit remains
+  lead-owned implementation from the ticket.
+
+Expected caller-visible change:
+
+- Delegated implementation no longer asks the lead to write a separate brief.
+  The visible workflow creates a plan path, dispatches a planner, optionally
+  escalates to research on the same path, dispatches the executor with that plan,
+  then runs the existing review/fix loop.
+
+Contract-first spec: yes.
+
+## Phases
+
+### Phase 1: Generate plan artifact paths
+
+Add `ws.path.generate(kind: "plan")` support. Plan paths must be repo-local under
+`ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`, with the existing path generation
+semantics for collision avoidance and safe stem normalization. Keep existing
+`review` and `prompt` path behavior unchanged.
+
+Verification boundary:
+
+- Unit tests cover `kind="plan"` path shape, stem normalization, uniqueness, and
+  unchanged behavior for existing kinds.
+- The MCP schema and docs mention `plan` as an accepted path kind.
+
+### Result (058f0a51) - 2026-06-28
+
+`ws.path.generate(kind: "plan")` now allocates repo-local implementation plan
+artifacts under `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem>.md`. Plan stems reuse the
+existing safe stem normalization, create parent directories on demand, reserve a
+writable markdown file, and append numeric suffixes for same-minute/stem
+collisions. Existing `review` and `prompt` path allocation remains
+cache-backed and unchanged.
+
+The MCP schema now advertises `review`, `prompt`, and `plan` as accepted
+`path.generate` kinds. `mcp-tools` and `ws-agent-runtime` document the new plan
+path behavior.
+
+Verification passed:
+
+- `go test ./internal/wsstate -run 'TestGeneratePaths' -count=1`
+- `go test ./internal/mcp -run 'TestPathGenerateAdvertisesAndAllocatesPlanPaths|TestServeStdioToolsListAndCall' -count=1`
+- `go test ./internal/wsstate ./internal/mcp -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
+### Phase 2: Rework planner playbooks around ticket-to-plan
+
+Update `plan-populator-survey` and `plan-populator-research` so their render
+context is ticket path, selected phase, and plan path. Remove the brief-path
+dependency from the planner contract.
+
+Survey should write the light plan format and return `[ok]` or
+`[escalate-to-research]` with confidence and escalation rationale. Research
+should read any existing survey output at the same plan path, then refine or
+replace it with a deeper implementation plan.
+
+Verification boundary:
+
+- Playbook render tests cover the new context variables and absence of required
+  `brief_path`.
+- Prompt text preserves existing tier frontmatter: survey remains medium,
+  research remains large.
+- Tests or golden checks cover the required plan sections and escalation output.
+
+### Result (6443e8e9) - 2026-06-28
+
+`plan-populator-survey` and `plan-populator-research` now use a ticket-to-plan
+contract: the caller provides ticket path, selected phase, and plan path. The
+survey planner writes the required six-section light plan (`Relevant Ticket
+Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
+`Verification Plan`, `Escalations`) and reports `[ok]` or
+`[escalate-to-research]` with confidence and escalation rationale. The research
+planner reads any existing survey output at the same plan path, then refines or
+replaces it with a deeper plan.
+
+The brief-path dependency was removed from the planner prompt contract while
+preserving existing tier frontmatter: survey remains `medium`, research remains
+`large`. Render tests now cover the new context variables, absence of
+`brief_path`, required plan sections, and escalation output. The wsflow rsrc
+mirror and shipped rsrc manifests were regenerated.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookWsflowLegacyPromptStemsAppendContext|TestWsflowModePlaybookRenderAbsorbsPromptRenderContext' -count=1`
+- `go test ./internal/wsrsrc -run 'TestValidateRealTree|TestShippedManifestMatchesGenerated|TestWsflowRsrcMirrorUpToDate' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
+#### Edition (1d18df9e) - 2026-06-28
+
+Phase 2 review found that the initial planner prompt rewrite covered wsflow
+legacy rendering but still rejected the required planner context in full `ws`
+rendering. The fix declares and renders `ticket_path`, `selected_phase`, and
+`plan_path` for both planner playbooks, keeps `brief_path` rejected, and adds
+full `ws` render tests for survey and research. The correctness and test review
+partitions are clean after the fix. The fit re-review is clean with one minor
+documentation drift: wsflow legacy-context docs needed to clarify that declared
+keys are templated and only undeclared extras are appended in the compatibility
+block.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookFullWsPlannerContext|TestRenderPlaybookFullWsStillRejectsUndeclaredContext|TestRenderPlaybookWsflowLegacyPromptStemsAppendContext|TestWsflowModePlaybookRenderAbsorbsPromptRenderContext|TestWsflowPlaybookRenderAllLegacyStemsFromRsrc|TestRenderGoldenShippedPhase4Delegates' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
+### Phase 3: Route lead-implement delegated prep through single-plan flow
+
+Update `lead-implement` and related rendered implementer/review relay prompts so
+delegated work follows:
+
+1. lead reads ticket and selected phase;
+2. lead generates a plan path;
+3. planner writes or refines the plan;
+4. executor reads the plan only;
+5. reviewers review ticket, plan, and diff;
+6. the existing review/fix loop continues.
+
+Direct edit mode remains lead-owned: the lead reads the ticket and implements
+without generating a planner artifact unless the implementation route escalates
+to delegated planning.
+
+Verification boundary:
+
+- Lead implement golden tests no longer require a lead-authored brief for
+  delegated mode.
+- Implementer prompt tests assert plan-only execution unless an explicit
+  escalation authorizes reading the ticket.
+- Reviewer prompt tests assert review against ticket, plan, and diff.
+
+### Result (eb878d4d) - 2026-06-28
+
+`lead-implement` delegated prep now routes through a single implementation plan:
+the lead reads the ticket and selected scope, generates a `plan` path, dispatches
+the survey planner to write the plan, optionally escalates to research on the
+same path, then sends the implementer only the rendered prompt with `PlanPath`.
+Direct edit remains lead-owned from the ticket and does not create a planner
+artifact unless the route escalates.
+
+The rendered `implementer` and `implementer-relay` prompts no longer declare or
+render `BriefPath`. They treat the plan and listed references as the execution
+contract and block direct ticket-file reads unless the plan, findings,
+disposition notes, or caller explicitly authorize ticket access. Reviewer
+guidance now checks ticket, plan, and diff together, and the workflow-skills spec
+plus workflow mental model reflect the single-plan delegated contract.
+
+Focused render tests now assert plan-only implementer execution, rejection of
+legacy `BriefPath` context, and ticket+plan+diff review framing. The wsflow rsrc
+mirror and shipped manifests were regenerated.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookShippedImplementerDeclaredContext|TestRenderPlaybookShippedImplementerRelayDeclaredContext|TestRenderPlaybookFullWsStillRejectsUndeclaredContext|TestPlaybookPrintGoldenLeadImplement|TestRenderGoldenShippedDelegateChildKey|TestRenderGoldenShippedDelegateModelVarsPerHarness|TestRenderGoldenShippedPhase4Delegates|TestRenderGoldenShippedReviewPartitionIncludesBase|TestRenderPlaybookWsflowProductModeUsesShippedDelegate' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./internal/wsdoc -count=1`
+- `git diff --check`
+
+`spec_index.verify` could not run through MCP in this session because the exposed
+tool rejected the unavailable bootstrap key with `unknown_session`; the local
+`internal/wsdoc` package check covering the verifier code passed.
+
+#### Edition (1b61537a) - 2026-06-28
+
+Phase 3 review found three prompt-contract gaps. The review frame now separates
+generated-plan reviews from direct-edit reviews: delegated or escalated work
+reviews ticket, plan, and diff together, while direct-edit reviews use ticket
+and diff without requiring a nonexistent plan. The implementer and review relay
+prompts now allow direct ticket reads only when the plan's `Escalations` section
+explicitly authorizes ticket-file reading; caller prompts, findings, and
+disposition notes no longer bypass the plan-only executor contract. Reviewer
+partition render tests now assert the shared reviewer base includes the
+ticket/plan/diff contract and the no-plan direct-edit fallback.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestRenderPlaybookShippedImplementerDeclaredContext|TestRenderPlaybookShippedImplementerRelayDeclaredContext|TestRenderPlaybookFullWsStillRejectsUndeclaredContext|TestPlaybookPrintGoldenLeadImplement|TestRenderGoldenShippedReviewPartitionIncludesBase' -count=1`
+- `go test ./internal/mcp ./internal/wsrsrc ./internal/wsdoc -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+
+### Phase 4: Update enter.implement resolver and todo instructions
+
+Update `ws.enter.implement` resolver labels and derived todo instructions so
+delegated mode no longer exposes `brief` as a plan depth. The default delegated
+prep should be the survey planner writing a light plan, with research escalation
+when the survey planner reports low confidence or strategic uncertainty.
+
+The raw verdict and todo instructions should tell the lead the next concrete MCP
+or playbook action without requiring the LLM to re-solve the old brief/survey
+decision tree.
+
+Verification boundary:
+
+- Resolver tests cover delegated default, survey escalation language, direct edit
+  behavior, and branch-stop behavior without unreachable planner instructions.
+- Todo rendering tests show plan-generation and planner/executor steps in the
+  reachable delegated path.
+- Existing review/fix loop tests continue to pass.
+
+### Result (4e351867) - 2026-06-28
+
+`ws.enter.implement` no longer emits `brief` as a reachable plan depth. The
+new-schema resolver now returns `plan_depth=survey` for delegated work and
+`plan_depth=none` for direct edit. High-risk or multi-strategy delegated work
+still starts with the survey planner; research is reached only when survey
+returns `[escalate-to-research]` for low confidence or strategic uncertainty.
+
+Raw verdict `Next:` text and derived todo instructions now name the concrete
+actions: generate a plan path through `ws.path.generate(kind: "plan")`, render
+and dispatch `plan-populator-survey`, optionally render
+`plan-populator-research` on the same plan path, then render `implementer` with
+`PlanPath`. Branch-stop verdicts and todos stay blocker-only and do not include
+unreachable planner or implementer instructions. Legacy manual
+`plan_depth="brief"` input is rejected.
+
+Focused resolver and todo tests cover delegated default, survey escalation
+language, direct edit behavior, branch-stop behavior, and full todo rendering
+with plan-generation/planner/executor steps. The `mcp-tools` and
+`workflow-skills` specs plus related mental models were updated to reflect the
+survey-default delegated contract.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestResolveImplement|TestDeriveImplementTodo|TestServeStdioEnterImplementVerdictLabels|TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda|TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs|TestEnterImplementStopsOnImplementBranchWithoutMergeTarget' -count=1`
+- `go test ./internal/mcp ./internal/wsdoc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
+#### Edition (6ff4eb38) - 2026-06-28
+
+Phase 4 review found a legacy compatibility-path gap after the result commit:
+the no-target `ws.enter.implement` path could still compose direct research prep
+and could default direct-edit calls to survey planning. The fix makes legacy
+plan-depth parsing delegation-aware: direct edit defaults to `none` and rejects
+planner depths, delegated mode defaults to `survey`, and direct `research` is
+rejected so research remains reachable only through survey escalation.
+
+Review disposition after the fix is clean. The re-review confirmed the Phase 4
+resolver/todo behavior and compatibility path now preserve the single-plan
+delegated invariant without reopening source, spec, or mental-model findings.
+
+Verification passed:
+
+- `go test ./internal/mcp -run 'TestResolveImplement|TestDeriveImplementTodo|TestServeStdioEnterImplementVerdictLabels|TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda|TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs|TestEnterImplementStopsOnImplementBranchWithoutMergeTarget' -count=1`
+- `go test ./internal/mcp ./internal/wsdoc -count=1`
+- `go test ./... -count=1`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check`
+- `spec_index.verify`
+
+## Resolution (2026-06-28)
+
+Completed all four phases of the single-plan delegated lead-implement flow.
+Phase 4 includes implementation commit 4e351867 and compatibility-path fix
+6ff4eb38; post-fix re-review is clean. Documentation closeout refreshed the
+ticket, active index, and stale implementation-plan wording.
