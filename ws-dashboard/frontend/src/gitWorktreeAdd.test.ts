@@ -125,6 +125,77 @@ assertEqual(
   "submit parses daemon-created workRoot id",
 );
 
+// A linked server sharing the same bare workspace id must keep every worktree
+// add request on the local gateway's server-scoped route.
+responses.push(
+  {
+    workspaceId: "workspace-same",
+    git: { available: true, rootLabel: "repo" },
+    branches: [{ name: "main", checkedOut: true, current: true }],
+    defaults: { worktreeBaseDirLabel: ".git/ws-worktree" },
+  },
+  {
+    branchName: "feature-one",
+    filesystemName: "feature-one",
+    targetPathLabel: privatePath,
+    status: "willCreateBranch",
+    message: "new branch will be created",
+    blockers: [],
+  },
+  {
+    resources: {
+      server: {
+        id: "server-remote-1",
+        label: "Remote",
+        state: { status: "online", loading: false, stale: false },
+        actions: [],
+      },
+      workspaces: [],
+    },
+    createdWorkRootId: "root-remote-created",
+  },
+);
+await fetchGitWorktreeAddOptions("workspace-same", "server-remote-1");
+await previewGitWorktreeAdd(
+  "workspace-same",
+  {
+    worktreeName: "Feature One",
+    branch: { mode: "auto" },
+    path: { mode: "custom", targetPath: privatePath },
+  },
+  "server-remote-1",
+);
+await submitGitWorktreeAdd(
+  "workspace-same",
+  {
+    worktreeName: "Feature One",
+    branch: { mode: "auto" },
+    path: { mode: "custom", targetPath: privatePath },
+    activate: true,
+  },
+  "server-remote-1",
+);
+assertEqual(
+  calls[3].url,
+  "/api/dashboard/servers/server-remote-1/workspaces/workspace-same/git-worktree-add/options",
+  "remote options URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[4].url,
+  "/api/dashboard/servers/server-remote-1/workspaces/workspace-same/git-worktree-add/preview",
+  "remote preview URL stays on local gateway server-scoped route",
+);
+assertEqual(
+  calls[5].url,
+  "/api/dashboard/servers/server-remote-1/workspaces/workspace-same/git-worktree-add",
+  "remote submit URL stays on local gateway server-scoped route",
+);
+assertNotContains(
+  calls[4].url,
+  privatePath,
+  "remote preview URL omits private target path",
+);
+
 responses.push({
   branchName: "main",
   filesystemName: "main-copy",

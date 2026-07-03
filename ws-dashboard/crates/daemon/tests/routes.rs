@@ -2866,6 +2866,15 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         "/api/dashboard/servers/server-windows/work-roots/root-test/files",
         "/api/dashboard/servers/server-windows/work-roots/root-test/files/read?path=README.md",
         "/api/dashboard/servers/server-windows/work-roots/root-test/documents/events",
+        // Phase 5 allowlisted GET aliases resolve through the same forwarding
+        // refusal path, so a tokenless linked server refuses them with the
+        // bounded auth-required conflict rather than 404.
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/items/agent-x/transcript",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/git/branches",
+        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
     ] {
         let auth_required = app
             .clone()
@@ -2893,14 +2902,13 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         );
     }
 
+    // Terminal families and gateway-owned translation stay unregistered under
+    // the server-scoped prefix through Phase 5 (terminals are Phase 6/7,
+    // translation is gateway-local), so they still 404.
     for uri in [
         "/api/dashboard/servers/server-windows/terminals/terminal-1/socket",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
         "/api/dashboard/servers/server-windows/work-roots/root-test/terminals",
         "/api/dashboard/servers/server-windows/terminals/terminal-1/input",
-        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
-        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
         "/api/dashboard/servers/server-windows/document-translation/providers",
     ] {
         let not_forwarded = app
@@ -3705,6 +3713,619 @@ async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_inv
 
     remote_server.abort();
     remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn server_scoped_activity_git_workspace_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    let cases: [(Method, &str); 14] = [
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/activity",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/activity/items/agent-x/transcript",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/activity/events",
+        ),
+        (
+            Method::DELETE,
+            "/api/dashboard/servers/server-local/workspaces/workspace-x",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/workspaces/workspace-x/git-worktree-add/options",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/workspaces/workspace-x/git-worktree-add/preview",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/workspaces/workspace-x/git-worktree-add",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/status",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/branches",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/branches",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/switch-branch",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/fetch",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/push",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-local-x/git/pull-ff-only",
+        ),
+    ];
+    for (method, uri) in cases {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated server-scoped request"),
+            )
+            .await
+            .expect("unauthenticated server-scoped response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn server_scoped_git_and_worktree_local_aliases_match_legacy_routes() {
+    if skip_without_git("server_scoped_git_and_worktree_local_aliases_match_legacy_routes") {
+        return;
+    }
+    let base = temp_fixture_path("server-scoped-git-alias-parity");
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned();
+
+    // CONTRACT: the `server-local` alias must be byte-for-byte equivalent to the
+    // legacy bare route. Compare status and body directly rather than asserting
+    // hardcoded status codes (Phase 4 review lesson).
+    let get_pairs = [
+        (
+            format!("/api/dashboard/work-roots/{git_id}/git/status"),
+            format!("/api/dashboard/servers/server-local/work-roots/{git_id}/git/status"),
+        ),
+        (
+            format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+            format!("/api/dashboard/servers/server-local/work-roots/{git_id}/git/branches"),
+        ),
+        (
+            format!("/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options"),
+            format!(
+                "/api/dashboard/servers/server-local/workspaces/{workspace_id}/git-worktree-add/options"
+            ),
+        ),
+    ];
+    for (legacy_uri, alias_uri) in get_pairs {
+        let legacy = get_status_and_body(app.clone(), cookie.as_str(), &legacy_uri).await;
+        let alias = get_status_and_body(app.clone(), cookie.as_str(), &alias_uri).await;
+        assert_eq!(alias.0, legacy.0, "status mismatch for {alias_uri}");
+        assert_eq!(
+            normalize_volatile_json(&alias.1),
+            normalize_volatile_json(&legacy.1),
+            "body mismatch for {alias_uri}"
+        );
+    }
+
+    // Worktree-add preview is a POST body route; the alias must forward the same
+    // response as the legacy route for the same request.
+    let preview_request = serde_json::json!({
+        "worktreeName": "Feature One",
+        "branch": { "mode": "auto" },
+        "path": { "mode": "auto" }
+    });
+    let legacy_preview = post_status_and_body(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview"),
+        &preview_request,
+    )
+    .await;
+    let alias_preview = post_status_and_body(
+        app.clone(),
+        cookie.as_str(),
+        &format!(
+            "/api/dashboard/servers/server-local/workspaces/{workspace_id}/git-worktree-add/preview"
+        ),
+        &preview_request,
+    )
+    .await;
+    assert_eq!(alias_preview.0, legacy_preview.0);
+    assert_eq!(
+        normalize_volatile_json(&alias_preview.1),
+        normalize_volatile_json(&legacy_preview.1)
+    );
+
+    // The alias must also mirror axum's `Json` extractor rejection statuses so a
+    // malformed body behaves identically to the legacy route.
+    let alias_unsupported = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/workspaces/{workspace_id}/git-worktree-add/preview"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::from("{}"))
+                .expect("alias worktree preview without content type"),
+        )
+        .await
+        .expect("alias worktree preview response");
+    assert_eq!(
+        alias_unsupported.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn server_scoped_workspace_remove_local_alias_forgets_workspace() {
+    let root = temp_fixture_path("server-scoped-workspace-remove-alias");
+    let state_file_root = temp_fixture_path("server-scoped-workspace-remove-alias-state");
+    fs::create_dir_all(&root).expect("create workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned();
+
+    let removed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/workspaces/{workspace_id}"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server-local workspace remove request"),
+        )
+        .await
+        .expect("server-local workspace remove response");
+    assert_eq!(removed.status(), StatusCode::OK);
+    let removed_body = axum::body::to_bytes(removed.into_body(), 64 * 1024)
+        .await
+        .expect("server-local workspace remove body");
+    let removed_value: serde_json::Value =
+        serde_json::from_slice(&removed_body).expect("server-local workspace remove JSON");
+    assert!(!work_root_ids(&removed_value).contains(&root_id));
+    assert!(root.is_dir(), "workspace removal must not delete files");
+    assert_eq!(store.load_opened_work_roots().await, Vec::<PathBuf>::new());
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_git_and_worktree_forwarding_rewrites_resources_to_server_route() {
+    if skip_without_git("linked_server_git_and_worktree_forwarding_rewrites_resources_to_server_route")
+    {
+        return;
+    }
+    let fixture = link_and_open_remote_git_root("git-worktree").await;
+    let LinkedRemoteGitFixture {
+        local_app,
+        cookie,
+        work_root_id,
+        workspace_id,
+        remote_server,
+        remote_root,
+        state_file_root,
+    } = fixture;
+
+    // Read forwarding: git status through the linked server returns the remote
+    // repository's branch without leaking the remote path.
+    let status = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/git/status"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("linked git status request"),
+        )
+        .await
+        .expect("linked git status response");
+    assert_eq!(status.status(), StatusCode::OK);
+    let status_body = axum::body::to_bytes(status.into_body(), 64 * 1024)
+        .await
+        .expect("linked git status body");
+    let status_value: serde_json::Value =
+        serde_json::from_slice(&status_body).expect("linked git status JSON");
+    assert_eq!(status_value["available"], true);
+    assert!(status_value["branch"]["name"].is_string());
+    assert!(
+        !status_body
+            .windows(remote_root.to_string_lossy().len().max(1))
+            .any(|window| window == remote_root.to_string_lossy().as_bytes()),
+        "linked git status must not leak the remote path"
+    );
+
+    let options = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/workspaces/{workspace_id}/git-worktree-add/options"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("linked worktree options request"),
+        )
+        .await
+        .expect("linked worktree options response");
+    assert_eq!(options.status(), StatusCode::OK);
+    let options_body = axum::body::to_bytes(options.into_body(), 64 * 1024)
+        .await
+        .expect("linked worktree options body");
+    let options_value: serde_json::Value =
+        serde_json::from_slice(&options_body).expect("linked worktree options JSON");
+    assert_eq!(options_value["git"]["available"], true);
+
+    // Write forwarding with resource rewrite: the worktree-add submit response
+    // carries a resources view whose Server Route identities must be rewritten
+    // to the browser-visible linked route.
+    let submit = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        format!(
+            "/api/dashboard/servers/server-windows/workspaces/{workspace_id}/git-worktree-add"
+        ),
+        &cookie,
+        serde_json::json!({
+            "worktreeName": "Feature One",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+    )
+    .await;
+    assert_eq!(submit.0, StatusCode::OK);
+    assert_eq!(submit.2["resources"]["server"]["id"], "server-windows");
+    for workspace in submit.2["resources"]["workspaces"]
+        .as_array()
+        .expect("submit workspaces")
+    {
+        for root in workspace["workRoots"].as_array().expect("submit roots") {
+            assert_eq!(
+                root["resourcePath"]["serverId"], "server-windows",
+                "worktree-add submit must rewrite workRoot serverId to the linked route"
+            );
+        }
+    }
+
+    // Workspace removal forwards and rewrites the returned resources view too.
+    let removed = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/workspaces/{workspace_id}"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("linked workspace remove request"),
+        )
+        .await
+        .expect("linked workspace remove response");
+    assert_eq!(removed.status(), StatusCode::OK);
+    let removed_body = axum::body::to_bytes(removed.into_body(), 64 * 1024)
+        .await
+        .expect("linked workspace remove body");
+    let removed_value: serde_json::Value =
+        serde_json::from_slice(&removed_body).expect("linked workspace remove JSON");
+    assert_eq!(removed_value["server"]["id"], "server-windows");
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_activity_events_forwarding_preserves_sse() {
+    let fixture = link_and_open_remote_git_root_plain("activity-sse").await;
+    let LinkedRemoteGitFixture {
+        local_app,
+        cookie,
+        work_root_id,
+        remote_server,
+        remote_root,
+        state_file_root,
+        ..
+    } = fixture;
+
+    let events = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/activity/events"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("linked activity events request"),
+        )
+        .await
+        .expect("linked activity events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    assert_eq!(
+        events
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("text/event-stream")),
+        Some(true),
+        "forwarded activity events must preserve the SSE content type"
+    );
+    let mut stream = events.into_body().into_data_stream();
+    // The activity events stream emits an initial `activity` event immediately,
+    // so a successful proxy delivers at least one chunk through the gateway.
+    let first = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("forwarded activity SSE chunk before timeout")
+        .expect("forwarded activity SSE stream item")
+        .expect("forwarded activity SSE body chunk");
+    assert!(
+        std::str::from_utf8(&first)
+            .expect("forwarded activity SSE UTF-8")
+            .contains("event:activity")
+            || std::str::from_utf8(&first)
+                .expect("forwarded activity SSE UTF-8")
+                .contains("event: activity"),
+        "forwarded activity stream must relay the daemon's activity events"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+struct LinkedRemoteGitFixture {
+    local_app: axum::Router,
+    cookie: String,
+    work_root_id: String,
+    workspace_id: String,
+    remote_server: tokio::task::JoinHandle<()>,
+    remote_root: PathBuf,
+    state_file_root: PathBuf,
+}
+
+async fn link_and_open_remote_git_root(tag: &str) -> LinkedRemoteGitFixture {
+    let remote_root = temp_fixture_path(&format!("linked-remote-{tag}-root"));
+    fs::create_dir_all(&remote_root).expect("create remote git root");
+    init_git_repo(&remote_root);
+    fs::write(remote_root.join("README.md"), "seed\n").expect("write remote seed");
+    run_git(&remote_root, &["add", "README.md"]);
+    run_git(&remote_root, &["commit", "-m", "seed"]);
+    link_and_open_remote_root_at(tag, remote_root).await
+}
+
+async fn link_and_open_remote_git_root_plain(tag: &str) -> LinkedRemoteGitFixture {
+    let remote_root = temp_fixture_path(&format!("linked-remote-{tag}-root"));
+    fs::create_dir_all(&remote_root).expect("create remote root");
+    link_and_open_remote_root_at(tag, remote_root).await
+}
+
+async fn link_and_open_remote_root_at(tag: &str, remote_root: PathBuf) -> LinkedRemoteGitFixture {
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path(&format!("linked-remote-{tag}-state"));
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("local link auth request"),
+        )
+        .await
+        .expect("local link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    let open = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": remote_root.display().to_string() }).to_string(),
+                ))
+                .expect("server scoped remote open request"),
+        )
+        .await
+        .expect("server scoped remote open response");
+    assert_eq!(open.status(), StatusCode::OK);
+    let work_root_id = open
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .expect("forwarded opened id header")
+        .to_str()
+        .expect("forwarded opened id string")
+        .to_owned();
+    let open_body = axum::body::to_bytes(open.into_body(), 64 * 1024)
+        .await
+        .expect("remote open body");
+    let open_value: serde_json::Value =
+        serde_json::from_slice(&open_body).expect("remote open JSON");
+    let workspace_id = open_value["workspaces"][0]["id"]
+        .as_str()
+        .expect("remote workspace id")
+        .to_owned();
+
+    LinkedRemoteGitFixture {
+        local_app,
+        cookie,
+        work_root_id,
+        workspace_id,
+        remote_server,
+        remote_root,
+        state_file_root,
+    }
+}
+
+// Strips volatile response fields (live timestamps) so a `server-local` alias
+// body can be compared for structural equivalence against the legacy route.
+fn normalize_volatile_json(body: &[u8]) -> serde_json::Value {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(body).expect("normalize JSON body");
+    strip_volatile_fields(&mut value);
+    value
+}
+
+fn strip_volatile_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("refreshedAtMs");
+            for nested in map.values_mut() {
+                strip_volatile_fields(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_volatile_fields(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn get_status_and_body(
+    app: axum::Router,
+    cookie: &str,
+    uri: &str,
+) -> (StatusCode, axum::body::Bytes) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("GET request"),
+        )
+        .await
+        .expect("GET response");
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("GET body");
+    (status, body)
+}
+
+async fn post_status_and_body(
+    app: axum::Router,
+    cookie: &str,
+    uri: &str,
+    request: &serde_json::Value,
+) -> (StatusCode, axum::body::Bytes) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("POST request"),
+        )
+        .await
+        .expect("POST response");
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("POST body");
+    (status, body)
 }
 
 #[tokio::test]
