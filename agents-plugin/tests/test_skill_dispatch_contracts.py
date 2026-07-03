@@ -61,6 +61,16 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Treat user preference as input, not evidence.", text)
         self.assertIn("Build the strongest concise countercase", text)
 
+    def test_drain_ready_queue_is_inlined_static_body(self):
+        # lead-drain-ready-queue's body is inlined directly in SKILL.md (no
+        # rsrc playbook, no playbook.print indirection), mirroring the
+        # lead-verify-discussion inline-body shape.
+        text = (SKILLS_DIR / "lead-drain-ready-queue" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertNotIn('ws/playbook.print(name: "lead-drain-ready-queue")', text)
+        self.assertIn("oldest date-prefix ticket (FIFO)", text)
+        self.assertIn("must land first", text)
+
 
 if __name__ == "__main__":
     unittest.main()

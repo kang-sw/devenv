@@ -17,6 +17,7 @@ EXPECTED_SKILLS = {
     "lead-add-rule",
     "lead-bootstrap",
     "lead-discuss",
+    "lead-drain-ready-queue",
     "lead-forge-mental-model",
     "lead-forge-spec",
     "lead-implement",
@@ -37,7 +38,12 @@ EXPECTED_SKILLS = {
 }
 
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
-EXPECTED_INLINE_SKILLS = {"lead-revive", "lead-prefer-subagent", "lead-verify-discussion"}
+EXPECTED_INLINE_SKILLS = {
+    "lead-revive",
+    "lead-prefer-subagent",
+    "lead-verify-discussion",
+    "lead-drain-ready-queue",
+}
 EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint"}
 
 FORBIDDEN_PATTERNS = {
