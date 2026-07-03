@@ -115,3 +115,105 @@ and `260703-chore-implement-branch-rename-default-allow`).
   dispatch-contract test asserting the skill contains the FIFO-fallback and
   precedence-language selection rule text, mirroring the existing
   `test_verify_discussion_is_inlined_static_body`-style pattern.
+
+### Result
+
+Implemented as planned, no deviations from the Decisions above.
+
+- Authored `agents-plugin/skills/lead-drain-ready-queue/SKILL.md` as a static-
+  inline entry skill (no rsrc playbook, no `playbook.print` indirection),
+  containing the full 8-step selection rule text verbatim-equivalent to
+  Decisions, explicit single-cycle framing, `lead-prefer-subagent`
+  posture-by-reference, and explicit-target `lead-proceed` handoff.
+- Registered in `agents-plugin/skills/manifest.json` (regenerated via
+  `WSRSRC_REGEN_SKILLS=1 go test ./internal/wsrsrc -run TestGenerateRealSkillsManifest`,
+  not the `TestRegenerateShippedManifest`/`WS_REGEN_MANIFEST=1` command named
+  in this phase's verification bullet, which regenerates a different
+  parallel manifest under `agents-plugin/rsrc/`).
+- Updated `ai-docs/mental-model/workflow-skills.md` with a new entry bullet
+  under `{#260703-drain-ready-queue-skill}` and corrected the stale entry-
+  skill count (was already 2 skills stale pre-existing this ticket; now 16,
+  matching the actual `manifest.json` `SKILL.md` file count post-add).
+- Finalized `ai-docs/spec/workflow-skills.md`'s `{#260703-drain-ready-queue-skill}`
+  block from its `> [!note] Planned 🚧` pre-implementation callout to landed
+  prose, and added a closing sentence recording the inline-body/mirror shape.
+- **Wsflow-mirror decision: mirror it.** The skill's body contains no
+  `ws:`/`ws/`/`ws.` full-namespace tokens (only skill names), so it is
+  substitution-mirror-eligible via the existing curated-list mechanism
+  (`agents-plugin-tool/internal/wsrsrc/skills_mirror.go`) — added
+  `"lead-drain-ready-queue"` to `substitutionMirroredSkills` and regenerated
+  the byte-identical `agents-plugin-wsflow/skills/lead-drain-ready-queue/SKILL.md`
+  via `WS_REGEN_WSFLOW_SKILLS=1 go test ./internal/wsrsrc -count=1 -run TestRegenerateWsflowSkillsMirror`,
+  matching the `lead-prefer-subagent`/`lead-verify-discussion` precedent; no
+  hand-authored wsflow variant was needed.
+- Added `test_drain_ready_queue_is_inlined_static_body` to
+  `agents-plugin/tests/test_skill_dispatch_contracts.py`, and added the stem
+  to `EXPECTED_SKILLS`/`EXPECTED_INLINE_SKILLS` in
+  `agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py`.
+- Verification: `agents-plugin` (41 tests) and `agents-plugin-wsflow` (9
+  tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
+  passes; `go build ./...` clean. Partitioned `correctness` and `test`
+  reviewers both returned `clean`.
+- Commits: `375e8c33` (ticket), `88c8de2e` (spec Planned callout),
+  `4bd0b805` (sage-review stamp), `6788c678` (survey plan),
+  `a1f50ac3` (implementation).
+
+#### Edition (b98e45c) - 2026-07-03
+
+User review found the landed skill too long and too discussable-workflow-
+shaped for what is a purely user/`/goal`-invoked shim. Shrunk it:
+
+- Selection rule condensed from the 8-step list to one sentence: prefer a
+  `related:`/`parent:`-named prerequisite when it is also in `ready/`,
+  otherwise oldest-first FIFO. The explicit conflict-stop-and-ask,
+  todo/idea-fallback, and single-level-only sub-rules were dropped from the
+  skill text (they remain recorded as rejected/superseded detail in
+  `## Decisions` above); FIFO is now the sole fallback for any case the
+  one-sentence rule does not resolve.
+- `description` shortened to a plain trigger sentence, since this skill is
+  effectively user/`/goal`-invocation-only rather than a general discussable
+  workflow entry.
+- Added an explicit lead-context-conservation directive: never read/write
+  files or run commands directly for this invocation; delegate everything,
+  including simple tasks like commits, to an appropriately tiered subagent
+  or forked subagent per `lead-prefer-subagent`. This reflects the skill's
+  purpose inside a long-running `/goal` drain loop, where lead context is
+  the scarce resource.
+- Updated `agents-plugin/tests/test_skill_dispatch_contracts.py`'s
+  `test_drain_ready_queue_is_inlined_static_body` to match the shortened
+  text; regenerated `manifest.json` and the byte-identical wsflow mirror;
+  updated `ai-docs/mental-model/workflow-skills.md` and
+  `ai-docs/spec/workflow-skills.md` entries to match.
+- Verification: `agents-plugin` (41 tests) and `agents-plugin-wsflow` (9
+  tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
+  passes; `go build ./...` clean.
+- Commit: `b98e45c`.
+
+#### Edition (90bb4bf) - 2026-07-03
+
+Re-review of the b98e45c edition flagged a minor ordering issue: the
+lead-context-conservation directive appeared after the selection-rule
+paragraph, so an executing agent could read the selection step as
+something done inline before reaching the no-self-read rule (the two
+paragraphs were logically consistent together, but presentation order
+invited misreading). It also separately flagged that the removed
+precedence-conflict tie-break has no explicit replacement — accepted as a
+non-blocking simplification since the single-cycle shim hands the winner
+off to `lead-proceed` immediately either way, self-correcting on the next
+cycle.
+
+Rather than just reordering prose to fix the ordering issue, the lead
+delegated the selection step itself: the skill now spawns a light-tier
+Explore-style subagent to list `ready/`, apply the one-sentence
+prerequisite-or-FIFO rule, and return exactly one ticket path (or report
+the queue empty). The lead never lists `ready/` or reads ticket files at
+all — closing the ordering ambiguity at the source instead of relying on
+prose sequencing. `description`, `manifest.json`, the wsflow mirror, the
+dispatch-contract test, and both spec/mental-model docs were updated to
+match.
+
+Verification: `agents-plugin` (41 tests) and `agents-plugin-wsflow` (9
+tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
+passes; `go build ./...` clean.
+
+Commit: `90bb4bf`.
