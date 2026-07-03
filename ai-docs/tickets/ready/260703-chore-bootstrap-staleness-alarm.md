@@ -2,7 +2,7 @@
 title: "Warn on stale downstream bootstrap template version at session-bootstrap time"
 related:
   260605-research-ws-native-subagent-pivot: precedent for tip-injection-point discipline (agentId-continuity tip is action-time-only, not per-call)
-sage-review: required
+sage-review: completed
 ---
 
 # Warn on stale downstream bootstrap template version at session-bootstrap time
@@ -80,13 +80,25 @@ moved forward without requiring them to manually diff `AGENTS.md`.
 - Survey where session-bootstrap (`ws/ferrule` / `ws/workflow_manual`)
   is implemented in `agents-plugin-tool/internal/mcp/`, and how/whether
   "latest template version per package" can be sourced without hand
-  duplication.
+  duplication. The numbered migration checklist in
+  `agents-plugin/skills/lead-bootstrap/AGENTS.template.md` (max `vNNNN`)
+  is a viable source for "latest version" without a new manifest.
 - Add the `wsconfig.ItemBootstrapAlarm` config item (builtin default
   `on`), wire it into `config.tuning`/`ws:lead-tune`.
 - Add the `AGENTS.md` template-version reader and the staleness
   comparison, gated by the new config item, firing at session-bootstrap
   time only.
+- Decide and document the no-tag case: default to silent (an untagged
+  project never opted into ws bootstrap), not maximally-stale.
+- Identify the warning-delivery channel in the `ferrule`/`workflow_manual`
+  return payload (e.g. appended to the manual body vs. a distinct
+  response field) from the existing handler shape in
+  `agents-plugin-tool/internal/mcp/workflow_manual.go`.
 - Warning text includes the silencing instruction per Decisions.
+- Verification: add a test confirming the warning fires when the
+  installed tag version is behind latest, is suppressed when
+  `ItemBootstrapAlarm` is off, is silent when no tag is present, and that
+  `config.tuning`/`ws:lead-tune` lists and can set the new item.
 
 ## Spec Impact
 

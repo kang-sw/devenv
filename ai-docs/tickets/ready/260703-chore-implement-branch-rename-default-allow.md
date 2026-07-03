@@ -1,6 +1,6 @@
 ---
 title: "Default-allow branch rename in lead-implement's enter.implement branch plan"
-sage-review: required
+sage-review: completed
 ---
 
 # Default-allow branch rename in lead-implement's enter.implement branch plan
@@ -78,12 +78,15 @@ skip-condition set, only decide whether the *default value* of the
   `session_state_test.go` covering: default-allow now reaches a `rename`
   verdict when no explicit policy is given and no guardrail trips; explicit
   `allow_rename: "no"` still stops.
+- Update the affected `enter.implement` spec entry (branch-plan default
+  posture) alongside the code change; this phase is not complete until
+  that spec update lands.
 
 ## Spec Impact
 
 `enter.implement`'s branch-plan behavior is documented caller-visible
 contract surface (used by `lead-implement`); changing the default posture
-needs spec addressing before `ready/` promotion. Not addressed yet — left
-for the implementation-survey pass. Contract-first spec: no — this is a
+needs spec addressing as part of Phase 1 (see the added spec-update bullet
+above), not deferred past it. Contract-first spec: no — this is a
 default-value change to existing documented resolver behavior, not a new
 planned contract.
