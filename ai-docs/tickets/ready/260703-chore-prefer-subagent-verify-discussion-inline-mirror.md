@@ -208,6 +208,29 @@ playbooks — not a separate phase):
 - `python3 -m unittest discover agents-plugin-wsflow/tests` still passes
   after the wsflow skill files change shape.
 
+### Result
+
+Implemented on `implement/inline-skill-bodies-repoint-embed`
+(`f9b8e0c7^..c8e824f4`, 5 commits). Both skill bodies inlined into
+`agents-plugin/skills/<name>/SKILL.md` and `agents-plugin-wsflow/skills/<name>/SKILL.md`;
+`wsrsrc.ResolveSkillsRoot()`/`LoadSkillBody()` added; `printPlaybook()`'s
+manual-embed call site repointed from `renderPlaybookBody`(rsrc) to
+`LoadSkillBody`(skills); override-marker Go symbols and their test coverage
+deleted; independent `agents-plugin/skills/manifest.json` + drift test added;
+rsrc trees for both skills deleted (ws and wsflow mirrors). Spec
+(`{#260505-workflow-primitive-reference}`) and mental-model docs updated to
+describe the static `LoadSkillBody` embed.
+
+Partitioned review: correctness clean, fit clean, test non-clean (1 important
+— `ResolveSkillsRoot()` executable-path fallback branch untested), fixed in
+`a7996fed` with `TestResolveSkillsRootEnv`/`TestResolveSkillsRootFallsBackToExecutablePath`
+mirroring the `ResolveRoot()` precedent. All verification/acceptance criteria
+above independently re-confirmed by the test reviewer, including an
+end-to-end `printPlaybook()` exercise and a negative-path drift-test check
+(tampered manifest hash correctly caught).
+
+Plugin version bumped 0.32.0 → 0.32.1 (dev-merge rule) in `c8e824f4`.
+
 ### Phase 2: Substitution-mirrored skill generation mechanism
 
 Implement the generation script, the hard-gate eligibility guard, and the
