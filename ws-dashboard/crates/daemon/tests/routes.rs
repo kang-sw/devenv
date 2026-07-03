@@ -2728,6 +2728,11 @@ async fn server_scoped_work_root_files_and_document_routes_dispatch_equivalent_l
     assert_eq!(stale_hash_status, StatusCode::CONFLICT);
     assert_eq!(stale_hash["error"], "content hash mismatch");
 
+    let missing_hash_body = serde_json::json!({
+        "path": "src/main.rs",
+        "content": "missing hash"
+    })
+    .to_string();
     let missing_hash = app
         .clone()
         .oneshot(
@@ -2738,18 +2743,30 @@ async fn server_scoped_work_root_files_and_document_routes_dispatch_equivalent_l
                 ))
                 .header(header::COOKIE, cookie.as_str())
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "path": "src/main.rs",
-                        "content": "missing hash"
-                    })
-                    .to_string(),
-                ))
+                .body(Body::from(missing_hash_body.clone()))
                 .expect("server scoped missing base hash write request"),
         )
         .await
         .expect("server scoped missing base hash write response");
-    assert_eq!(missing_hash.status(), StatusCode::BAD_REQUEST);
+    let legacy_missing_hash = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/files/write"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(missing_hash_body))
+                .expect("legacy missing base hash write request"),
+        )
+        .await
+        .expect("legacy missing base hash write response");
+    assert_eq!(missing_hash.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        missing_hash.status(),
+        legacy_missing_hash.status(),
+        "server-local scoped write should preserve legacy JSON data-error status"
+    );
 
     for (label, stream) in [
         ("legacy", &mut legacy_stream),

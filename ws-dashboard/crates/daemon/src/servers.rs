@@ -717,7 +717,13 @@ pub async fn server_scoped_write_work_root_file(
             Ok(request) => {
                 write_work_root_file(State(state), AxumPath(work_root_id), Json(request)).await
             }
-            Err(_) => server_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+            Err(err) => {
+                let status = match err.classify() {
+                    serde_json::error::Category::Data => StatusCode::UNPROCESSABLE_ENTITY,
+                    _ => StatusCode::BAD_REQUEST,
+                };
+                server_error(status, "invalid JSON body")
+            }
         };
     }
     forward_server_scoped_operation(state, server_route, operation, headers, body).await

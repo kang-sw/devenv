@@ -330,11 +330,13 @@ the unscoped handlers; any other route forwards over the allowlisted bearer
 helper. File write preserves optimistic-concurrency semantics end to end: the
 `baseContentHash`/`contentHash` conflict contract is carried through unchanged,
 so a stale base hash surfaces the upstream `409` content-hash mismatch and a
-missing base hash surfaces `400`, identically for local and remote routes. The
+missing base hash surfaces `422`, identically for local and remote routes. The
 `server-local` write alias enforces the same `application/json` request
-content-type boundary as the unscoped route before dispatching, so it stays
-byte-for-byte equivalent rather than silently accepting bodies the unscoped
-`Json` extractor would reject.
+content-type boundary as the unscoped route before dispatching, and classifies
+malformed-JSON bodies the same way the unscoped `Json` extractor does (`422`
+for a data error such as a missing field, `400` for a syntax error), so it
+stays byte-for-byte equivalent rather than silently accepting bodies the
+unscoped `Json` extractor would reject or diverging on status code.
 
 ### Document-Event SSE Proxying
 
