@@ -8,6 +8,7 @@ related:
   260514-research-ws-web-dashboard-direction: longer-range remote hardening and server federation direction
 related-mental-model:
   - ws-web-dashboard
+sage-review: completed
 ---
 
 # ws dashboard server-scoped operation forwarding
@@ -210,6 +211,55 @@ Deferred or local-gateway surfaces:
 - Use remote root picker/open WorkRoot as the first end-to-end proof because it
   exercises host-path locality and resource rewriting without SSE or terminal
   gateway complexity.
+- A prior draft implementation exists on branch
+  `implement/dashboard-server-scoped-forwarding-phase-7`
+  (`origin/implement/dashboard-server-scoped-forwarding-phase-7`, HEAD
+  `7f2c8c58`, common ancestor `be31fd42` with `ws-dashboard-dev`; fetch it
+  into its own worktree rather than switching branches in-place, since
+  reviewing it side by side with current `ws-dashboard-dev` is the point).
+  Most of its touched source files have no independent upstream drift since
+  that ancestor, but two do not: `ws-dashboard/crates/daemon/src/router.rs`
+  (`ws-dashboard-dev` added loopback no-auth debug serving, `bc799496`) and
+  `ws-dashboard/crates/daemon/src/terminal.rs` (`ws-dashboard-dev` normalized
+  browser terminal TERM, `2abc8bc8`). Expect real cherry-pick/rebase conflicts
+  on these two files specifically - resolve them by keeping both sides' logic
+  (the no-auth debug path and the TERM fix must survive alongside the
+  server-scoped routing/forwarding changes), not by dropping either side.
+  Reuse its source commits via rebase/cherry-pick rather than
+  reimplementing from scratch; do not replay its docs/plan/closeout commits
+  (`ae264e67`, `d8c7e3a6`, `6d453e35`, `b9aada26`, `ebd5f105`, `9fa98238`,
+  `3a92b53c`, `ad776834`, `7a49326a`, `ea647e04`, `73779e59`, `9927d12a`,
+  `d80591a9`, `df056763`, `d42d7a76`, `50c56d33`, `b97f6704`, `4f06a742`,
+  `f84025e3`, `53f65537`, `1a83d5a4`, `12478500`, `cc881d5a`, `7f2c8c58`) -
+  those diverged independently and should be re-authored against current docs
+  as each phase lands. Per-phase source commit mapping (oldest first):
+  - Phase 1: `2954a622`, `9c169d1c`, `bfab8b7b`
+  - Phase 2: `7462bad4`, `51a148b4`
+  - Phase 3: `4614200a`, `1bbf4fe3`, `294f7c1b`, `e760ecf8`
+  - Phase 4: `b6ebae74`, `d5d02e42`, `1201cf8d`
+  - Phase 5: `6f9fc757`, `15ff7df0`, `c3ef069a`
+  - Phase 6: `fd51c06d`, `a2af58b1`, `c4231ea5`
+  - Phase 7: `3a84ba6f`, `82b86660`
+
+  It predates this ticket's `serverRoute`/`server_route` naming and dot-free
+  slug validation decisions (it uses `serverId`/`server_id` throughout and has
+  no dot-rejection logic). Apply the rename and dot-free validation
+  incrementally, within each phase's own cherry-pick, not as a separate
+  upfront or trailing pass: a phase is not complete until its own landed diff
+  already reads as `serverRoute`/`server_route` with dot-free validation in
+  place, so no phase's diff is transiently non-compliant with the Decisions
+  section.
+
+## Spec Impact
+
+No existing spec stem documents the Server Route-scoped daemon route family;
+`ai-docs/spec/ws-web-dashboard/index.md` does not yet mention `serverRoute` or
+the canonical `/api/dashboard/servers/{serverRoute}/...` route shapes.
+Contract-first spec: yes - the route naming, `server-local` alias behavior,
+one-hop forwarding envelope, and dot-free route-segment rule are a new
+browser-visible contract and should be captured in
+`ai-docs/spec/ws-web-dashboard/index.md` as Phase 1/2 land, before later
+phases build on top of an undocumented contract.
 
 ## Phases
 
@@ -249,6 +299,11 @@ collision tests for same bare ids on different servers, persisted-state
 compatibility tests where state formats change, and command payload tests that
 prove `serverRoute` is carried where it constrains execution.
 
+Completion also requires drafting the `ai-docs/spec/ws-web-dashboard/index.md`
+contract entry for the canonical route shapes and `serverRoute` naming (per
+`## Spec Impact`) so Phase 2 forwards against a written contract instead of
+only this ticket's prose.
+
 ### Phase 2: Backend local aliases and one-shot forwarding skeleton
 
 Add Server Route-scoped daemon routes for one-shot HTTP operations, with
@@ -274,6 +329,11 @@ Verification should cover protected-route auth on new Server Route aliases,
 local alias equivalence for representative routes, linked-server refusal
 states, bearer forwarding on at least one test remote route, upstream error
 preservation, and resource-view rewriting.
+
+Completion also requires extending the Phase 1 spec entry with the
+one-shot forwarding envelope, `server-local` alias behavior, and bounded
+gateway error shapes, so Phase 3 onward forward individual operations against
+an already-written contract.
 
 ### Phase 3: Remote root picker and open WorkRoot
 
