@@ -3,6 +3,7 @@ title: "Flip sage_review plugin builtin default from unset to auto"
 related:
   260626-bug-sage-review-config-setter-missing: adjacent gap in the sage_review config surface (missing lead-facing setter/tuning knob); this ticket only changes the shipped builtin default value, not the setter surface
 sage-review: completed
+completed: 2026-07-03
 ---
 
 # Flip sage_review plugin builtin default from unset to auto
