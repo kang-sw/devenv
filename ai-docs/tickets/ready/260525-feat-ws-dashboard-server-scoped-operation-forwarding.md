@@ -774,3 +774,87 @@ Verification should include endpoint helper tests, daemon forwarding tests for
 WebSocket upgrade refusal states, browser or integration evidence that
 WebSocket output and input flow through the local gateway for a remote Windows
 terminal, and cleanup checks for close/disconnect on either side of the relay.
+
+### Result (a71162ab) - 2026-07-03
+
+Added `server_scoped_terminal_websocket`, the final route family this
+ticket's API Inventory calls for. `server-local` dispatches in-process to the
+existing unscoped `terminal_websocket` handler unchanged. For linked servers,
+this phase reuses what should be reused (`resolve_server_scoped_forwarding`
+for dot-free/unknown-server/auth-required/unreachable refusal semantics,
+resolved BEFORE any upgrade is attempted) while implementing what genuinely
+needed to be new: an upstream `tokio_tungstenite::connect_async` WebSocket
+client (bearer token attached as an `Authorization` header on the upgrade
+request), completing the browser-side upgrade only after a successful
+upstream connect, and a bidirectional `tokio::select!` relay loop with
+explicit axum-`Message` <-> tungstenite-`Message` conversion (tungstenite's
+raw `Frame` variant is dropped, not errored). The upstream URL is built via
+the existing `remote_url(endpoint, legacy_path)` helper first and the
+http(s)->ws(s) scheme swap applied second, preserving any path prefix baked
+into a stored linked-server endpoint — the reference draft's first pass got
+this ordering backwards and needed a follow-up fix; this phase implemented
+it correctly from the start. `tokio-tungstenite` was promoted from a
+dev-only dependency to a normal one since production code now uses it, with
+zero `Cargo.lock` churn (independently confirmed via a `--release` build).
+
+Commits: `7c0db03c` (feat: gateway server-scoped terminal websockets),
+`a184b8ad` (test: cover server-scoped terminal websocket gateway),
+`a71162ab` (docs: spec remote terminal websocket gatewaying).
+
+Review: partitioned correctness/fit/test, all three clean with zero findings
+of any severity — the second phase in a row (after Phase 6) to clear every
+partition without a single Minor note, despite this being the
+highest-risk mechanism in the ticket (WebSocket upgrade proxying, not
+one-shot HTTP or SSE). Verified end-to-end: refusal-before-upgrade is
+structurally provable (the browser can only receive `101 Switching
+Protocols` from the single code path that runs after both the resolver and
+the upstream connect succeed) and tested for all four refusal classes;
+upstream-rejection (`TungsteniteError::Http`, propagated status) and
+generic connect failure (502) are genuinely disjoint and each proven against
+a real failure condition; the path-prefix-preserving URL construction was
+manually verified against a concrete example and tested with a real
+`/gateway`-prefixed mock endpoint; bearer auth was confirmed to arrive at
+the upstream's actual inbound request; the relay loop's Close-handling,
+`Frame`-dropping, and cleanup-on-either-side-disconnect were all traced and
+tested with bounded timeouts (no hang risk); and a real two-daemon
+end-to-end test proves typed input sent through the relayed connection
+produces correctly-relayed output, not just a successful handshake.
+
+**Ticket-wide completeness check** (required for this, the ticket's final
+phase): cross-referenced the `## API Inventory` "Must become server-aware"
+list against every `/api/dashboard/servers/{server_route}/...` route
+registered across Phases 2-7. All listed routes are registered: root-picker
+(+directories/pins), work-roots/open, activation, workspaces/{id}, all 3
+git-worktree-add routes, all 6 Git toolbar routes, files (+read/write),
+documents/events, activity (+transcript/events), and all 6 terminal routes
+including the now-registered socket route. Nothing from that list is left
+unregistered. This ticket's Phases 1-7 are now all complete.
+
+**Outstanding follow-ups (not done in any session), consolidated across
+Phases 3-7's closeout pattern — these are the ticket's residual gaps, not
+this phase's alone:**
+- Live dogfood against a real remote Windows daemon tunnel was never
+  possible in this environment across any phase (root picker/open WorkRoot,
+  file read/write, Git status/branches, Git worktree-add, terminal
+  create/close, and now terminal WebSocket relay all lack this evidence).
+  This remains the ticket's single largest verification gap and should be
+  performed in a session with actual network access to a remote Windows
+  endpoint before this substrate is treated as fully proven in production.
+- Playwright e2e coverage is thin for Phases 4-7: Phase 3 landed one
+  executable-when-run e2e scenario (never actually executed — no
+  Chromium/`libasound.so.2` in any session across this ticket), and Phases
+  4-7 each independently concluded that porting further draft e2e cases
+  would be blind/unverifiable given both the environment limitation and
+  structural drift in `dashboard-acceptance.spec.ts`. All four phases
+  substituted daemon-level and frontend-unit coverage instead. A session
+  with a working Playwright/Chromium environment should both execute the
+  existing Phase 3 e2e scenario and consider whether the later phases'
+  un-ported draft scenarios (server-scoped Git toolbar isolation, terminal
+  create/close, terminal WebSocket relay) are worth porting for genuine
+  browser-level proof.
+- Minor, informational-only items noted but not acted on in individual
+  phase Results: Phase 4's file-write alias wasn't retrofitted to Phase 5's
+  `parse_json_alias_body` helper (duplicate but identical logic); Phase 5's
+  `serverId`/`actionServerId` frontend prop names don't follow the
+  `serverRoute` convention used elsewhere in the same diff, though
+  functionally correct.
