@@ -416,14 +416,6 @@ dropped tickets live in hidden archive dirs and git history.
   remain the safety net. Spec addressing via Phase 1 (spec update bullet
   added per completeness-reviewer finding, Contract-first: no). Sage
   review completed.
-- `260703-feat-lead-drain-ready-queue-skill` (ready, feat) - new
-  `lead-drain-ready-queue` entry skill: single-cycle shim that selects the
-  next `ready/` ticket (FIFO, deferring to explicit `related:`/`parent:`
-  precedence language when present) and hands it to `lead-proceed` as an
-  explicit target, applying `lead-prefer-subagent` posture first; does not
-  loop internally. Spec addressing via `spec: 260703-drain-ready-queue-skill`
-  (`workflow-skills.md`, Contract-first: yes — planned 🚧 entry written).
-  Sage review completed.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

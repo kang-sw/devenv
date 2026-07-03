@@ -3,6 +3,7 @@ title: "Add lead-drain-ready-queue skill: single-cycle ready/ ticket handoff to 
 spec:
   - 260703-drain-ready-queue-skill
 sage-review: completed
+completed: 2026-07-03
 ---
 
 # Add lead-drain-ready-queue skill: single-cycle ready/ ticket handoff to lead-proceed
@@ -217,3 +218,8 @@ tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
 passes; `go build ./...` clean.
 
 Commit: `90bb4bf`.
+
+
+## Resolution (2026-07-03)
+
+Phase 1 shipped: lead-drain-ready-queue authored as a minimal delegate-only shim (selection delegated to a light-tier Explore-style subagent, handoff to lead-proceed with an explicit ticket path), registered in manifest.json, mirrored byte-identically into agents-plugin-wsflow, and documented in spec/mental-model. Partitioned correctness+test review clean; two follow-up Editions (b98e45c, 90bb4bf) shrank the skill per user feedback. Merged to main.
