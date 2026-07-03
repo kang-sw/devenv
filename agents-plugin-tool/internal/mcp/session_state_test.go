@@ -1824,6 +1824,142 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 	}
 }
 
+func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902601, root, nil))
+
+	resp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-create-default",
+		"initial_state": "todo",
+	})
+	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "required") {
+		t.Fatalf("tickets.create response missing created path or posture: %s", resp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create-default.md"))
+	if err != nil {
+		t.Fatalf("glob created ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("created ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read created ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review: required") {
+		t.Fatalf("created ticket missing required posture (builtin default should now be required):\n%s", body)
+	}
+}
+
+func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-move-default",
+		"initial_state": "idea",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
+		t.Fatalf("tickets.create response missing created path: %s", createResp)
+	}
+	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-default.md"))
+	if err != nil || len(createdMatches) != 1 {
+		t.Fatalf("glob created ticket: matches=%v err=%v", createdMatches, err)
+	}
+	datedStem := strings.TrimSuffix(filepath.Base(createdMatches[0]), ".md")
+
+	moveResp := callToolWithKey(t, server, 2, key, "tickets.move", map[string]any{
+		"stem": datedStem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "required") {
+		t.Fatalf("tickets.move response missing required posture tip (builtin default should now be required): %s", moveResp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-move-default.md"))
+	if err != nil {
+		t.Fatalf("glob moved ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("moved ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read moved ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review: required") {
+		t.Fatalf("moved ticket missing required posture (builtin default should now be required):\n%s", body)
+	}
+}
+
+func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+	if err := resolver.Set(wsconfig.ItemSageReview, "ask", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set sage_review: %v", err)
+	}
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902603, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-move-override",
+		"initial_state": "idea",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
+		t.Fatalf("tickets.create response missing created path: %s", createResp)
+	}
+	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-override.md"))
+	if err != nil || len(createdMatches) != 1 {
+		t.Fatalf("glob created ticket: matches=%v err=%v", createdMatches, err)
+	}
+	datedStem := strings.TrimSuffix(filepath.Base(createdMatches[0]), ".md")
+
+	moveResp := callToolWithKey(t, server, 2, key, "tickets.move", map[string]any{
+		"stem": datedStem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "recommended") {
+		t.Fatalf("tickets.move response missing recommended posture tip (explicit override should win): %s", moveResp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-move-override.md"))
+	if err != nil {
+		t.Fatalf("glob moved ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("moved ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read moved ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review: recommended") {
+		t.Fatalf("moved ticket missing recommended posture (explicit project-scope override should win over builtin default):\n%s", body)
+	}
+}
+
 func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
