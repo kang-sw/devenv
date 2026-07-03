@@ -412,6 +412,14 @@ dropped tickets live in hidden archive dirs and git history.
   scoped only to these two skills. Spec addressing via `## Spec Impact`
   (`workflow-skills.md` `{#260505-workflow-primitive-reference}`,
   Contract-first: no). Sage review completed.
+- `260703-chore-sage-review-builtin-default-on` (ready, chore) - add
+  `wsconfig.ItemSageReview: "auto"` to `builtinConfigDefaults()` so fresh
+  projects default to running the sage-review gate; also fixes the
+  `tickets.move`/`tickets.create` call sites (`server.go:1063`, `1086`)
+  passing a literal `nil` resolver builtin-defaults map, which made the new
+  default structurally unreachable without the fix. Spec addressing via
+  `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
+  completed.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
