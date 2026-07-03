@@ -51,11 +51,13 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Write prompts sent to `mercenary.call` in English.", text)
         self.assertIn("<!-- ws:full-only:end -->", text)
 
-    def test_verify_discussion_is_entry_shim(self):
-        shim = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
-        text = (RSRC_DIR / "lead-verify-discussion" / "lead-verify-discussion.md").read_text(encoding="utf-8")
+    def test_verify_discussion_is_inlined_static_body(self):
+        # lead-verify-discussion's body is inlined directly in SKILL.md (no
+        # rsrc playbook, no playbook.print indirection) since the
+        # substitution-mirrored inline-mirror work landed.
+        text = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn('ws/playbook.print(name: "lead-verify-discussion")', shim)
+        self.assertNotIn('ws/playbook.print(name: "lead-verify-discussion")', text)
         self.assertIn("Treat user preference as input, not evidence.", text)
         self.assertIn("Build the strongest concise countercase", text)
 
