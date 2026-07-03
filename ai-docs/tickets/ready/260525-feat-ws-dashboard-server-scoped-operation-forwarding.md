@@ -598,6 +598,85 @@ Verification should include forwarding tests for representative read and write
 operations, Activity SSE behavior, and remote Windows dogfood for Git status or
 bounded non-destructive Git operations when a remote Git fixture is available.
 
+### Result (cc6da4c7) - 2026-07-03
+
+Added 13 new server-scoped handlers: workspace remove; Git worktree-add
+options/preview/submit; Activity snapshot/transcript/events (SSE); Git status/
+branches/switch-branch/fetch/push/pull-ff-only. `server-local` dispatches
+in-process; other routes forward through the Phase 2 one-shot helper.
+Generalized Phase 4's document-event SSE proxy into a shared
+`forward_server_scoped_sse` helper reused by both document-events and the new
+activity-events route (single implementation, not a parallel copy). Replaced
+the `rewrite_resources: bool` field with a `ForwardResponseRewrite` enum
+(`None`/`Resources`/`GitWorktreeAdd`) so the Git worktree-add submit response's
+nested resources view is rewritten to the linked Server Route, gated on
+`status.is_success()` so validation-rejection responses pass through
+unrewritten. Added a `parse_json_alias_body` helper, applying the Phase 4
+write-alias lesson (`b817c8be`) proactively: the four new JSON-body aliases
+(worktree-add preview/submit, branch create, switch-branch) classify malformed
+bodies the same way axum's `Json` extractor does (415 missing/wrong
+content-type, 422 data error, 400 syntax error) instead of a flat 400.
+Frontend: Git-toolbar state guards keyed by `{serverRoute, workRootId}`,
+worktree-add modal keyed by `{serverRoute, workspaceId}`, workspace-removal
+pane cleanup and the Activity SSE poll-fallback rekeyed by
+`serverScopedIdentity`, reusing the ref-based staleness-guard idiom
+established in Phase 3 rather than inventing a new mechanism.
+
+Commits: `c7a4b3e6` (feat: forward remote activity git and workspace
+operations), `faca56d2` (test: cover phase five activity git and workspace
+forwarding), `ed71c0e1` (docs: spec remote activity git and workspace
+operations), `cc6da4c7` (test: close phase 5 review coverage gaps).
+
+Review: partitioned correctness/fit/test. Correctness and fit were both
+clean — no Critical/Important findings; the `parse_json_alias_body` helper
+was verified to be a faithful port of the Phase 4 fix, the SSE generalization
+was traced line-by-line to confirm no divergent/weaker copy, the
+`ForwardResponseRewrite::GitWorktreeAdd` rewrite path was confirmed to
+correctly skip non-success responses, and the frontend collision guards were
+traced to confirm the server-scoped key check happens at async-callback
+usage time. The test partition initially returned `needs-follow-up`: the
+implementer's claimed "legacy-vs-alias equivalence over hardcoded status"
+pattern did not hold for the one `parse_json_alias_body` test that existed
+(hardcoded status, no legacy comparison), the 422/400 branches of that helper
+had zero coverage, 5 of the 9 new Git/worktree mutation routes
+(`branches`/`switch-branch`/`fetch`/`push`/`pull-ff-only`) had no
+dispatch-equivalence or forwarding test beyond a blanket 401 check, and
+activity-events SSE had only success-path coverage at its own call site
+(failure paths were de-risked only by inference from the shared helper's
+Phase 4 coverage). All five gaps were closed in a dedicated test-only
+follow-up (`cc6da4c7`): the hardcoded assertion was rewritten as a genuine
+legacy-vs-alias equivalence check; 422/400 cases were added for the
+worktree-add preview route; all five previously-uncovered mutation routes
+got deterministic legacy-vs-alias equivalence coverage (duplicate-branch,
+unavailable-branch, and no-configured-remote failure cases — no fragile
+push-to-real-remote needed); activity-events got dedicated invalid-content-type
+(502) and upstream-error-preserved fixtures/assertions; and the three
+previously-unchecked `gitToolbar.test.ts` remote calls (create-branch, fetch,
+push) got real URL assertions. Full daemon suite re-run clean after the fix:
+36 lib + 135 route + 15 server tests, 0 failures.
+
+**Outstanding follow-ups (not done in this session), matching Phase 3/4's
+closeout pattern:**
+- Live dogfood against a real remote Windows daemon tunnel (Git status,
+  branches, or a bounded non-destructive Git operation) is not possible in
+  this environment/session.
+- The phase-7 draft's Playwright e2e case (`c3ef069a`: Git toolbar staying on
+  server-scoped routes when local/remote roots share a bare `workRootId`,
+  and a late-arriving local response not clobbering remote toolbar state) was
+  not ported — the current `dashboard-acceptance.spec.ts` has diverged (Phase
+  3's `serverRoute` rename and stale-isolation rewrite) enough that porting
+  would be blind/unverifiable, and Playwright cannot execute in this
+  environment regardless (same gap established in Phase 3/4). The mechanical
+  routing check is covered at the daemon and frontend-unit level; the
+  specific late-response non-clobbering scenario for Git toolbar state
+  remains untested beyond the general staleness-guard idiom it reuses.
+- Two informational-only minors, left as-is (non-blocking): Phase 4's
+  pre-existing file-write alias was not retrofitted to reuse the new
+  `parse_json_alias_body` helper (duplicate but identical logic); the new
+  frontend props `serverId`/`actionServerId` (`WorkspaceRows`/`ResourceRow`)
+  don't follow the `serverRoute` naming convention used elsewhere in this
+  same diff, though functionally correct.
+
 ### Phase 6: Remote terminal HTTP lifecycle
 
 Forward terminal creation, list, output polling, input, resize, and close
