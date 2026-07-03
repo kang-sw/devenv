@@ -542,7 +542,23 @@ assertEqual(
     { serverRoute: "server-b", workRootId: "root-a", requestId: 1 },
   ),
   false,
+  "stale server route stream completions are ignored after server switch",
+);
+assertEqual(
+  shouldApplyActivityStreamRequest(
+    { serverRoute: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverRoute: "server-a", workRootId: "root-b", requestId: 1 },
+  ),
+  false,
   "stale workRoot stream completions are ignored after root switch",
+);
+assertEqual(
+  shouldApplyActivityStreamRequest(
+    { serverRoute: "server-a", workRootId: "root-a", requestId: 1 },
+    { serverRoute: "server-a", workRootId: "root-a", requestId: 2 },
+  ),
+  false,
+  "stale requestId stream completions are ignored after a newer request supersedes it",
 );
 
 assertEqual(

@@ -4,6 +4,8 @@ import {
   flattenEntities,
   preferredSelection,
   reconcileSelectedId,
+  workRootActivationEndpoint,
+  workspaceEndpoint,
   type DashboardResourcesView,
   type InstanceView,
   type ViewState,
@@ -21,6 +23,58 @@ function assertTrue(value: boolean, label: string) {
     throw new Error(`${label}: expected true`);
   }
 }
+
+function assertThrows(fn: () => unknown, label: string) {
+  let threw = false;
+  try {
+    fn();
+  } catch {
+    threw = true;
+  }
+  if (!threw) {
+    throw new Error(`${label}: expected a thrown error`);
+  }
+}
+
+assertEqual(
+  workRootActivationEndpoint("root-local-abc"),
+  "/api/dashboard/work-roots/root-local-abc/activation",
+  "activation endpoint defaults to the server-local compat route",
+);
+assertEqual(
+  workRootActivationEndpoint("root-local-abc", "server-local"),
+  "/api/dashboard/work-roots/root-local-abc/activation",
+  "activation endpoint uses the server-local compat route explicitly",
+);
+assertEqual(
+  workRootActivationEndpoint("root-a", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/work-roots/root-a/activation",
+  "activation endpoint uses the canonical server-scoped route for a remote server",
+);
+assertThrows(
+  () => workRootActivationEndpoint("root-a", "server.remote"),
+  "activation endpoint rejects a dotted server route segment",
+);
+
+assertEqual(
+  workspaceEndpoint("workspace-local-abc"),
+  "/api/dashboard/workspaces/workspace-local-abc",
+  "workspace endpoint defaults to the server-local compat route",
+);
+assertEqual(
+  workspaceEndpoint("workspace-local-abc", "server-local"),
+  "/api/dashboard/workspaces/workspace-local-abc",
+  "workspace endpoint uses the server-local compat route explicitly",
+);
+assertEqual(
+  workspaceEndpoint("workspace-a", "server-remote-1"),
+  "/api/dashboard/servers/server-remote-1/workspaces/workspace-a",
+  "workspace endpoint uses the canonical server-scoped route for a remote server",
+);
+assertThrows(
+  () => workspaceEndpoint("workspace-a", "server.remote"),
+  "workspace endpoint rejects a dotted server route segment",
+);
 
 const readyState: ViewState = { status: "ready", loading: false, stale: false, error: null };
 
