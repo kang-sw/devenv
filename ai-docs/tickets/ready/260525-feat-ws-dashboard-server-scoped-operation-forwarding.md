@@ -448,6 +448,58 @@ Verification should dogfood against a remote Windows endpoint tunnel: add the
 server, click its folder icon, browse the remote filesystem, open a remote test
 directory, and confirm the opened remote workspace appears under that server.
 
+### Result (f0d2b940) - 2026-07-03
+
+Backend forwarding for this phase's routes (root-picker/directories/pins,
+open-work-root) was already landed in Phase 2; this phase is frontend-only.
+Threaded `serverRoute` through `OpenWorkRootControl` and its call sites
+(`fetchRootPicker`, `requestOpenWorkRoot`, `createRootPickerDirectory`,
+`pinRootPickerDirectory`, `unpinRootPickerDirectory`, and their command
+builders) so a linked server's root picker/open-workroot flow hits the
+Server Route-scoped gateway routes instead of local ones; server-local
+behavior is unchanged by construction (`server-local` resolves through the
+same helpers unchanged). Ported the phase-7 draft's stale-picker-response
+race guard (`pickerRequestSequence` + `pickerOpenRef`, adapted to
+`serverRoute` naming) rather than cherry-picking, since the draft branches
+from a pre-Phase-1 `App.tsx` and predates `serverRoute` naming; the guard
+invalidates late responses on server-context switch, picker close, and
+successful open, and follows the same ref-sequence idiom already used for
+Activity streams. Added context-aware UI labeling (button title, section
+summary, dialog heading, path placeholder) distinguishing "this host" from a
+named remote server so remote paths are not mistaken for local, per the
+ticket's Constraints. `handleWorkRootOpened` was verified (not modified) to
+already refresh/select the linked server via the gateway-rewritten Server
+Route without mutating local registry state.
+
+Commits: `98e1de25` (feat: route remote root picker and open WorkRoot through
+gateway), `f0d2b940` (test: cover linked-server root picker gateway routing
+and stale isolation).
+
+Review: partitioned correctness/fit/test, all clean (3 optional minors: a
+dead disabled-button-title cosmetic path; a documented guard-idiom
+consistency note between the picker's bare-sequence guard and Activity's
+structured-key guard, both intentional; the stale-response race guard's only
+executable-suite gap, see below).
+
+Verification: `npm run build` and the frontend unit suites (root-picker,
+open-work-root, commands, resource-model) all pass, independently re-run by
+the test reviewer. A new Playwright e2e scenario
+(`e2e/dashboard-acceptance.spec.ts`) covering server-scoped routing and all
+three race-guard cases (close-then-reopen, open-while-loading,
+server-context-switch) was added and reads correct on inspection, but could
+**not** be executed in this environment: no headless-Chromium runtime
+(`libasound.so.2` missing, no Chromium binary present) — a legitimate
+environment limitation, not a code defect, independently confirmed by the
+test reviewer.
+
+**Outstanding follow-ups (not done in this session):**
+- Live dogfood against a real remote Windows daemon tunnel (this ticket
+  phase's stated verification method) is not possible in this
+  environment/session.
+- The new Playwright e2e scenario, including the stale-response race guard's
+  only test coverage, has never been executed — it needs to run on a host
+  with Chromium/`libasound.so.2` available to confirm its assertions.
+
 ### Phase 4: Remote files, documents, and document events
 
 Forward file listing, file read, file write, and document-event SSE routes
