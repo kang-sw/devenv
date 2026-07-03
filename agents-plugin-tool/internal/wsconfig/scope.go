@@ -34,7 +34,8 @@ const (
 	// ItemSageReview is the layered config key for the sage review gate on ticket
 	// writes. Value "auto" runs reviewers unconditionally after a todo/ready commit;
 	// "ask" prompts the user first; absent/empty/"off" disables the gate entirely.
-	// Builtin default: off (absent = disabled).
+	// Builtin default: auto (gate runs unless a project/session/global override
+	// disables it).
 	ItemSageReview = "sage_review"
 
 	// ItemSageReviewDesignTier is the model capability tier for the design reviewer

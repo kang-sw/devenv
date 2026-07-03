@@ -320,6 +320,7 @@ func builtinConfigDefaults() map[string]string {
 	return map[string]string{
 		wsconfig.ItemWorkflowPreferSubagent:  "off",
 		wsconfig.ItemWorkflowPreferMercenary: "hide",
+		wsconfig.ItemSageReview:              "auto",
 	}
 }
 
@@ -1060,7 +1061,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		stem, _ := params.Arguments["stem"].(string)
 		to, _ := params.Arguments["to"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
 			TicketStem: stem,
@@ -1083,7 +1084,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		initialState, _ := params.Arguments["initial_state"].(string)
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
