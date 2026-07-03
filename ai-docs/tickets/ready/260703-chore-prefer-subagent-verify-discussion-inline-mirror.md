@@ -233,6 +233,29 @@ Plugin version bumped 0.32.0 → 0.32.1 (dev-merge rule) in `c8e824f4`.
 
 ### Phase 2: Substitution-mirrored skill generation mechanism
 
+**Edition (lead-resolved) - 2026-07-03**: Phase 2's survey found that the
+already-merged Phase 1 `lead-verify-discussion/SKILL.md` contained an unmarked
+"mercenary" paragraph, which the guard wording above would reject outright —
+a direct conflict with this being one of exactly two initial eligible skills.
+Superseded resolution: rather than carving a marker exception into the guard,
+the user (on review) concluded the `delegates:true`-driven continuity-tip and
+mercenary-path paragraphs were never a good fit for this skill in the first
+place — `lead-verify-discussion`'s own delegation is conditional
+("when investigation is useful"), unlike `lead-verify-design`'s unconditional
+"isolate a fresh deep reviewer", and the sibling checkpoint
+`lead-check-blockers` (same "compact, lightweight checkpoint" framing) never
+carried `delegates:true` at all. Both paragraphs were removed outright from
+`agents-plugin/skills/lead-verify-discussion/SKILL.md` and
+`agents-plugin-wsflow/skills/lead-verify-discussion/SKILL.md` (the latter's
+existing hand-authored copy already omitted the mercenary line; it now also
+drops the continuity-tip line, making the two files byte-identical). This
+dissolves the guard conflict entirely: the source contains no
+product-specific content, so no marker mechanism is needed and Phase 2
+proceeds as originally specified (pure namespace substitution, no exception
+carve-out). A separate `todo/` ticket
+(`260703-chore-review-delegates-true-classification`) covers a broader review
+of `delegates:true` usage across all rsrc playbooks, sage-review skipped.
+
 Implement the generation script, the hard-gate eligibility guard, and the
 drift test described in Decisions. Register `lead-prefer-subagent` and
 `lead-verify-discussion` as the initial (and currently only) entries in the
