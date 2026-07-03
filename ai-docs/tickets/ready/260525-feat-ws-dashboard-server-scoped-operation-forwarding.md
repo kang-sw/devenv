@@ -377,6 +377,58 @@ one-shot forwarding envelope, `server-local` alias behavior, and bounded
 gateway error shapes, so Phase 3 onward forward individual operations against
 an already-written contract.
 
+### Result (cd1f2b56) - 2026-07-03
+
+Reused the phase-7 draft's two Phase 2 source commits (`7462bad4` skeleton,
+`51a148b4` tests) against current `ws-dashboard-dev` daemon source. The
+predicted `router.rs` conflict with the loopback no-auth debug path
+(`bc799496`) was purely mechanical import/route-list grouping churn; the
+no-auth auth-layer logic survived untouched. `terminal.rs` was not touched by
+this phase (its independent-drift warning applies to a later terminal phase).
+
+Landed a representative one-shot HTTP slice
+(root-picker/directories/pins, open-work-root, work-root activation) as
+Server Route-scoped daemon routes: `server-local` dispatches fully in-process,
+byte-for-byte equivalent to the old bare routes; other routes go through a
+single allowlisted, generic forwarding helper
+(`forward_server_scoped_operation` / `request_remote_dashboard_operation`)
+using the linked server's memory-only bearer token. Renamed
+`server_id`/`serverId` -> `server_route`/`serverRoute` within this phase's own
+new code and the 3 pre-existing sibling route placeholders (for diff
+uniformity; axum path-param names are not browser-visible, so no route
+behavior changed), while leaving the `ResourcePath.serverId` wire field and
+daemon-side `server.id` storage identity untouched. Added net-new daemon-side
+dot-free route validation (`resolve_server_scoped_forwarding` rejects a dotted
+route with a bounded 400 that does not echo the raw value or rewrite
+persisted dotted ids). Extended the existing Phase 1 spec anchor
+(`#260703-ws-dashboard-server-route-scoped-operation-endpoints`, no duplicate
+heading) with the one-shot forwarding envelope, `server-local` alias
+equivalence, and the full bounded gateway error set (unknown 404 / invalid
+400 / auth-required 409 / tunnel-required 409 / unreachable 502 /
+upstream-rejection preserved), making the daemon-side dot rejection
+authoritative per Phase 1's forward-reference.
+
+Commits: `ac4f4556` (feat: forwarding skeleton + rename + dot validation),
+`d7e59fa0` (test: server-local mutation aliases, cherry-pick `51a148b4`),
+`de44a01f` (docs: spec extension), `cd1f2b56` (test: cover tunnel-required and
+unreachable-upstream refusal states, fixing one Important test-review
+finding).
+
+Review: partitioned correctness/fit/test. Correctness clean — verified the
+no-auth debug path survived intact, the rename/wire-field boundary held, and
+no error path leaks endpoints/tokens/paths. Fit clean (2 optional minors: the
+forwarding helper's response-header passthrough is currently narrowed to one
+header and will likely need generalizing in Phase 4+; an unreachable
+defensive 500 sentinel in the resolver's local-dispatch arm is dead code by
+construction). Test found 1 Important issue (two of the six enumerated
+linked-server refusal states — tunnel-required and unreachable — had code but
+zero test coverage) — fixed in `cd1f2b56` and re-verified; the reviewer
+independently re-ran the full suite and confirmed 127 passed, 0 failed.
+
+Verification: `cargo build -p ws-dashboard-daemon` clean; full daemon test
+suite (`routes.rs` 127 passed, `server.rs` 15 passed, doc-tests) all pass,
+independently re-run by the test reviewer, not just self-reported.
+
 ### Phase 3: Remote root picker and open WorkRoot
 
 Make the server row folder/open-root affordance available for connected linked
