@@ -185,7 +185,9 @@ import {
 import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
+  dashboardServerRoute,
   flattenEntities,
+  isLocalDashboardServerRoute,
   isValidServerRouteSegment,
   reconcileSelectedId,
   serverScopedIdentity,
@@ -1190,11 +1192,13 @@ function PanelHeader({
 }
 
 function OpenWorkRootControl({
+  server,
   onOpened,
   onCommand,
   variant = "section",
   disabled = false,
 }: {
+  server?: Pick<ServerConnectionView, "id" | "label"> | null;
   onOpened: (
     view: DashboardResourcesView,
     requestedWorkRootId?: string,
@@ -1219,13 +1223,27 @@ function OpenWorkRootControl({
   const [error, setError] = useState<string | null>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
+  const pickerOpenRef = useRef(open);
+  const pickerRequestSequence = useRef(0);
+  const pickerServerRoute = dashboardServerRoute(server?.id);
+  const pickerServerLabel = server?.label ?? "Local ws dashboard";
+  const pickerIsLocal = isLocalDashboardServerRoute(pickerServerRoute);
+  const pickerContextLabel = pickerIsLocal ? "this host" : pickerServerLabel;
 
   const loadPicker = useCallback(
     async (path: string | null, historyMode: "push" | "replace" = "push") => {
+      const requestSequence = pickerRequestSequence.current + 1;
+      pickerRequestSequence.current = requestSequence;
       setLoading(true);
       setError(null);
       try {
-        const view = await fetchRootPicker(path);
+        const view = await fetchRootPicker(path, pickerServerRoute);
+        if (
+          pickerRequestSequence.current !== requestSequence ||
+          !pickerOpenRef.current
+        ) {
+          return;
+        }
         setPickerView(view);
         setSelectedPath(view.currentPath);
         setAddressPath(view.currentPath);
@@ -1236,15 +1254,38 @@ function OpenWorkRootControl({
           );
         }
       } catch (nextError) {
+        if (
+          pickerRequestSequence.current !== requestSequence ||
+          !pickerOpenRef.current
+        ) {
+          return;
+        }
         setError(
           nextError instanceof Error ? nextError.message : "picker load failed",
         );
       } finally {
-        setLoading(false);
+        if (pickerRequestSequence.current === requestSequence) {
+          setLoading(false);
+        }
       }
     },
-    [],
+    [pickerServerRoute],
   );
+
+  useEffect(() => {
+    pickerRequestSequence.current += 1;
+    setPickerView(null);
+    setSelectedPath(null);
+    setAddressPath("");
+    setExactPath("");
+    setCreateName("");
+    setHistory(rootPickerHistoryInitial());
+    setLoading(false);
+    setPendingOpen(false);
+    setCreating(false);
+    setPinningPath(null);
+    setError(null);
+  }, [pickerServerRoute]);
 
   useEffect(() => {
     if (!open || pickerView || loading) {
@@ -1254,6 +1295,7 @@ function OpenWorkRootControl({
   }, [loadPicker, loading, open, pickerView]);
 
   useEffect(() => {
+    pickerOpenRef.current = open;
     if (wasOpenRef.current && !open) {
       openerRef.current?.focus();
     }
@@ -1261,16 +1303,19 @@ function OpenWorkRootControl({
   }, [open]);
 
   const closePicker = () => {
-    onCommand(buildRootPickerCloseCommand(), {
+    onCommand(buildRootPickerCloseCommand(pickerServerRoute), {
       "rootPicker.close": () => {
+        pickerRequestSequence.current += 1;
+        setLoading(false);
         setOpen(false);
       },
     });
   };
 
   const openPicker = () => {
-    onCommand(buildRootPickerOpenCommand(), {
+    onCommand(buildRootPickerOpenCommand(pickerServerRoute), {
       "rootPicker.open": () => {
+        pickerOpenRef.current = true;
         setError(null);
         setOpen(true);
       },
@@ -1281,7 +1326,7 @@ function OpenWorkRootControl({
     path: string,
     historyMode: "push" | "replace" = "push",
   ) => {
-    onCommand(buildRootPickerNavigateCommand(path), {
+    onCommand(buildRootPickerNavigateCommand(path, pickerServerRoute), {
       "rootPicker.navigate": () => {
         void loadPicker(path, historyMode);
       },
@@ -1289,7 +1334,7 @@ function OpenWorkRootControl({
   };
 
   const selectDirectory = (path: string) => {
-    onCommand(buildRootPickerSelectDirectoryCommand(path), {
+    onCommand(buildRootPickerSelectDirectoryCommand(path, pickerServerRoute), {
       "rootPicker.selectDirectory": () => {
         setSelectedPath(path);
         setExactPath(path);
@@ -1331,12 +1376,15 @@ function OpenWorkRootControl({
       return;
     }
 
-    onCommand(buildWorkRootOpenCommand(requestedPath), {
+    onCommand(buildWorkRootOpenCommand(requestedPath, pickerServerRoute), {
       "workRoot.open": () => {
         setPendingOpen(true);
         setError(null);
-        void requestOpenWorkRoot(requestedPath)
+        void requestOpenWorkRoot(requestedPath, pickerServerRoute)
           .then((result) => {
+            pickerRequestSequence.current += 1;
+            pickerOpenRef.current = false;
+            setLoading(false);
             setOpen(false);
             setPickerView(null);
             setSelectedPath(null);
@@ -1364,34 +1412,43 @@ function OpenWorkRootControl({
     if (!parentPath || name.length === 0 || creating) {
       return;
     }
-    onCommand(buildRootPickerCreateDirectoryCommand(parentPath, name), {
-      "rootPicker.createDirectory": () => {
-        setCreating(true);
-        setError(null);
-        void createRootPickerDirectory(parentPath, name)
-          .then((entry) => {
-            setPickerView((current) =>
-              current
-                ? {
-                    ...current,
-                    entries: rootPickerInsertEntry(current.entries, entry),
-                  }
-                : current,
-            );
-            setSelectedPath(entry.path);
-            setExactPath(entry.path);
-            setCreateName("");
-          })
-          .catch((nextError) => {
-            setError(
-              nextError instanceof Error ? nextError.message : "create failed",
-            );
-          })
-          .finally(() => {
-            setCreating(false);
-          });
+    onCommand(
+      buildRootPickerCreateDirectoryCommand(
+        parentPath,
+        name,
+        pickerServerRoute,
+      ),
+      {
+        "rootPicker.createDirectory": () => {
+          setCreating(true);
+          setError(null);
+          void createRootPickerDirectory(parentPath, name, pickerServerRoute)
+            .then((entry) => {
+              setPickerView((current) =>
+                current
+                  ? {
+                      ...current,
+                      entries: rootPickerInsertEntry(current.entries, entry),
+                    }
+                  : current,
+              );
+              setSelectedPath(entry.path);
+              setExactPath(entry.path);
+              setCreateName("");
+            })
+            .catch((nextError) => {
+              setError(
+                nextError instanceof Error
+                  ? nextError.message
+                  : "create failed",
+              );
+            })
+            .finally(() => {
+              setCreating(false);
+            });
+        },
       },
-    });
+    );
   };
 
   const updatePickerPlaces = (places: RootPickerView["places"]) => {
@@ -1402,11 +1459,11 @@ function OpenWorkRootControl({
     if (pinningPath) {
       return;
     }
-    onCommand(buildRootPickerPinDirectoryCommand(path), {
+    onCommand(buildRootPickerPinDirectoryCommand(path, pickerServerRoute), {
       "rootPicker.pinDirectory": () => {
         setPinningPath(path);
         setError(null);
-        void pinRootPickerDirectory(path)
+        void pinRootPickerDirectory(path, pickerServerRoute)
           .then((view) => updatePickerPlaces(view.places))
           .catch((nextError) => {
             setError(
@@ -1422,11 +1479,11 @@ function OpenWorkRootControl({
     if (pinningPath) {
       return;
     }
-    onCommand(buildRootPickerUnpinDirectoryCommand(path), {
+    onCommand(buildRootPickerUnpinDirectoryCommand(path, pickerServerRoute), {
       "rootPicker.unpinDirectory": () => {
         setPinningPath(path);
         setError(null);
-        void unpinRootPickerDirectory(path)
+        void unpinRootPickerDirectory(path, pickerServerRoute)
           .then((view) => updatePickerPlaces(view.places))
           .catch((nextError) => {
             setError(
@@ -1459,7 +1516,9 @@ function OpenWorkRootControl({
       data-command-id="rootPicker.open"
       disabled={disabled}
       title={
-        disabled ? "Open workRoot is local-only in this build" : "Open workRoot"
+        disabled
+          ? `Open workRoot is unavailable for ${pickerServerLabel}`
+          : `Open workRoot on ${pickerContextLabel}`
       }
       type="button"
       onClick={openPicker}
@@ -1482,7 +1541,7 @@ function OpenWorkRootControl({
           <div>
             <div className="section-label">Open workRoot</div>
             <div className="open-work-root-summary">
-              Choose a directory from this host
+              Choose a directory from {pickerContextLabel}
             </div>
           </div>
           {openerButton}
@@ -1504,7 +1563,7 @@ function OpenWorkRootControl({
           <Dialog aria-label="Open workRoot" className="root-picker-dialog">
             <div className="root-picker-titlebar">
               <Heading className="root-picker-title" slot="title">
-                Open workRoot
+                Open workRoot on {pickerContextLabel}
               </Heading>
               <div className="root-picker-window-actions">
                 <ChromeIconButton
@@ -1520,7 +1579,8 @@ function OpenWorkRootControl({
               className="root-picker-current root-picker-context"
               title={pickerView?.currentPath ?? ""}
             >
-              {pickerView?.currentPath ?? "Loading host directories"}
+              {pickerView?.currentPath ??
+                `Loading directories from ${pickerContextLabel}`}
             </div>
 
             <form
@@ -2589,6 +2649,7 @@ function ServerRows({
             (action) => action.id === "openRoot" && action.enabled,
           ) ? (
             <OpenWorkRootControl
+              server={server}
               variant="icon"
               onOpened={onOpenWorkRoot}
               onCommand={onCommand}

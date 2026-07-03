@@ -345,6 +345,34 @@ for (const command of rootPickerCommands) {
     `${command.commandId} command omits host paths`,
   );
 }
+
+const remoteRootPickerCommands = [
+  buildRootPickerOpenCommand("server-a"),
+  buildRootPickerNavigateCommand(rootPickerPrivatePath, "server-a"),
+  buildRootPickerSelectDirectoryCommand(rootPickerPrivatePath, "server-a"),
+  buildRootPickerCreateDirectoryCommand(
+    rootPickerPrivatePath,
+    "child",
+    "server-a",
+  ),
+  buildRootPickerPinDirectoryCommand(rootPickerPrivatePath, "server-a"),
+  buildRootPickerUnpinDirectoryCommand(rootPickerPrivatePath, "server-a"),
+  buildRootPickerCloseCommand("server-a"),
+  buildWorkRootOpenCommand(rootPickerPrivatePath, "server-a"),
+];
+for (const command of remoteRootPickerCommands) {
+  assertEqual(
+    command.payload.serverRoute,
+    "server-a",
+    `${command.commandId} command carries remote server route`,
+  );
+  assertNotContains(
+    JSON.stringify(command),
+    rootPickerPrivatePath,
+    `${command.commandId} command keeps host path out of logical payload`,
+  );
+}
+
 assertEqual(
   dashboardCommandLabel(buildRootPickerOpenCommand()),
   "Open root picker",

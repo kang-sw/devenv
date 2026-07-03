@@ -220,13 +220,13 @@ globalThis.fetch = (async (input, init) => {
   capturedUrl = String(input);
   capturedBody = String(init?.body ?? "");
   capturedMethod = String(init?.method ?? "GET");
-  if (capturedUrl === rootPickerPinsEndpoint) {
+  if (capturedUrl.endsWith("/root-picker/pins")) {
     return new Response(JSON.stringify({ places: pickerView.places }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   }
-  if (capturedUrl === rootPickerCreateDirectoryEndpoint) {
+  if (capturedUrl.endsWith("/root-picker/directories")) {
     return new Response(JSON.stringify(alpha), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -250,6 +250,18 @@ assertEqual(
   "fetchRootPicker decodes picker view",
 );
 
+const remoteFetched = await fetchRootPicker("C:/Remote Root", "server-remote");
+assertEqual(
+  capturedUrl,
+  "/api/dashboard/servers/server-remote/root-picker?path=C%3A%2FRemote+Root",
+  "remote fetchRootPicker targets server-scoped picker listing endpoint",
+);
+assertEqual(
+  remoteFetched.currentPath,
+  "/tmp/root",
+  "remote fetchRootPicker decodes picker view through local gateway",
+);
+
 const created = await createRootPickerDirectory("/tmp/root", "alpha");
 assertEqual(
   capturedUrl,
@@ -262,6 +274,18 @@ assertDeepEqual(
   "create directory request carries parent and single-segment name",
 );
 assertEqual(created.path, "/tmp/root/alpha", "create directory decodes entry");
+
+await createRootPickerDirectory("C:/Remote Root", "alpha", "server-remote");
+assertEqual(
+  capturedUrl,
+  "/api/dashboard/servers/server-remote/root-picker/directories",
+  "remote create directory targets server-scoped endpoint through local gateway",
+);
+assertDeepEqual(
+  JSON.parse(capturedBody),
+  { parentPath: "C:/Remote Root", name: "alpha" },
+  "remote create directory keeps remote path in authenticated request body",
+);
 
 await pinRootPickerDirectory("/tmp/root/alpha");
 assertEqual(
@@ -276,6 +300,19 @@ assertDeepEqual(
   "pin directory request carries path as authenticated request data",
 );
 
+await pinRootPickerDirectory("C:/Remote Root/alpha", "server-remote");
+assertEqual(
+  capturedUrl,
+  "/api/dashboard/servers/server-remote/root-picker/pins",
+  "remote pin directory targets server-scoped endpoint through local gateway",
+);
+assertEqual(capturedMethod, "POST", "remote pin directory uses POST");
+assertDeepEqual(
+  JSON.parse(capturedBody),
+  { path: "C:/Remote Root/alpha" },
+  "remote pin directory keeps remote path in authenticated request body",
+);
+
 await unpinRootPickerDirectory("/tmp/root/alpha");
 assertEqual(
   capturedUrl,
@@ -283,5 +320,13 @@ assertEqual(
   "unpin directory endpoint is stable",
 );
 assertEqual(capturedMethod, "DELETE", "unpin directory uses DELETE");
+
+await unpinRootPickerDirectory("C:/Remote Root/alpha", "server-remote");
+assertEqual(
+  capturedUrl,
+  "/api/dashboard/servers/server-remote/root-picker/pins",
+  "remote unpin directory targets server-scoped endpoint through local gateway",
+);
+assertEqual(capturedMethod, "DELETE", "remote unpin directory uses DELETE");
 
 globalThis.fetch = originalFetch;

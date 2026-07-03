@@ -126,4 +126,24 @@ assertEqual(
   "ambiguous first aggregate row remains distinct from opened id header",
 );
 
+const remoteResult = await requestOpenWorkRoot(
+  "C:/Remote/same-name",
+  "server-remote",
+);
+assertEqual(
+  capturedUrl,
+  "/api/dashboard/servers/server-remote/work-roots/open",
+  "remote open workRoot request targets server-scoped local gateway endpoint",
+);
+assertEqual(
+  JSON.parse(capturedBody).path,
+  "C:/Remote/same-name",
+  "remote open workRoot request carries remote path to daemon gateway",
+);
+assertEqual(
+  remoteResult.openedWorkRootId,
+  "root-second-same-name",
+  "remote open wrapper preserves daemon-opened id header unchanged",
+);
+
 globalThis.fetch = originalFetch;
