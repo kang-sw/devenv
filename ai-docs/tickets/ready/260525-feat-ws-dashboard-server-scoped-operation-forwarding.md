@@ -304,6 +304,48 @@ contract entry for the canonical route shapes and `serverRoute` naming (per
 `## Spec Impact`) so Phase 2 forwards against a written contract instead of
 only this ticket's prose.
 
+### Result (c72013f5) - 2026-07-03
+
+Reused the phase-7 draft's three Phase 1 source commits
+(`2954a622`, `9c169d1c`, `bfab8b7b`) cleanly against current
+`ws-dashboard-dev` frontend source (zero drift confirmed), then renamed the
+server-routing surface `serverId` -> `serverRoute` across helper names,
+constants, params, and non-wire state/identity keys, while explicitly
+preserving the wire/JSON field names `ResourcePath.serverId` and the
+linked-server `EndpointLinkedServerRequest.serverId` per the ticket's
+Decisions. Added a dot-free route-segment guard
+(`isValidServerRouteSegment`, `/^[A-Za-z0-9_-]+$/`) enforced in the canonical
+route builder plus client-side validation on the linked-server add form.
+Drafted the `ai-docs/spec/ws-web-dashboard/index.md` contract entry
+(`{#260703-ws-dashboard-server-route-scoped-operation-endpoints}`) documenting
+the canonical route shapes, the `serverRoute`-canonical/`serverId`-wire
+distinction, the `server-local` alias, and the dot-free rule, reconciled
+against pre-existing sections that still serialize `serverId` so the two do
+not contradict.
+
+Commits: `59c39f78` (feat: server-scoped frontend operation helpers,
+cherry-pick `2954a622`), `5f6db4fa` (fix: thread server identity through
+workbench operations, cherry-pick `9c169d1c`), `1ceddd8b` (fix: scope
+workbench pane state by server, cherry-pick `bfab8b7b`), `88836ed1` (refactor:
+rename server-scoped surface to `serverRoute` with dot-free guard), `d8b06bd4`
+(docs: draft server route scoped endpoint contract), `c72013f5` (test: restore
+stream-request staleness coverage + add activation/workspace endpoint tests,
+fixing two Important test-review findings).
+
+Review: partitioned correctness/fit/test. Correctness clean (1 optional
+minor: mixed `??`/`||` fallback operators for missing `serverRoute`,
+currently harmless). Fit clean (1 optional minor: a pre-existing spec section
+still shows the `/servers/{serverId}/...` route placeholder alongside the new
+`/servers/{serverRoute}/...` shape — cosmetic, the contract itself is
+unambiguous). Test found 2 Important issues (lost workRootId/requestId
+staleness coverage on `shouldApplyActivityStreamRequest`; missing endpoint
+tests for `workRootActivationEndpoint`/`workspaceEndpoint`) — both fixed in
+`c72013f5` and re-verified.
+
+Verification: `npm run build` (tsc -b + vite build) and the full touched test
+suites (resource-model, root-picker, commands, work-root-files,
+work-root-activity, open-work-root, git, terminals route suites) all pass.
+
 ### Phase 2: Backend local aliases and one-shot forwarding skeleton
 
 Add Server Route-scoped daemon routes for one-shot HTTP operations, with
