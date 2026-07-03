@@ -188,3 +188,32 @@ shaped for what is a purely user/`/goal`-invoked shim. Shrunk it:
   tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
   passes; `go build ./...` clean.
 - Commit: `b98e45c`.
+
+#### Edition (90bb4bf) - 2026-07-03
+
+Re-review of the b98e45c edition flagged a minor ordering issue: the
+lead-context-conservation directive appeared after the selection-rule
+paragraph, so an executing agent could read the selection step as
+something done inline before reaching the no-self-read rule (the two
+paragraphs were logically consistent together, but presentation order
+invited misreading). It also separately flagged that the removed
+precedence-conflict tie-break has no explicit replacement — accepted as a
+non-blocking simplification since the single-cycle shim hands the winner
+off to `lead-proceed` immediately either way, self-correcting on the next
+cycle.
+
+Rather than just reordering prose to fix the ordering issue, the lead
+delegated the selection step itself: the skill now spawns a light-tier
+Explore-style subagent to list `ready/`, apply the one-sentence
+prerequisite-or-FIFO rule, and return exactly one ticket path (or report
+the queue empty). The lead never lists `ready/` or reads ticket files at
+all — closing the ordering ambiguity at the source instead of relying on
+prose sequencing. `description`, `manifest.json`, the wsflow mirror, the
+dispatch-contract test, and both spec/mental-model docs were updated to
+match.
+
+Verification: `agents-plugin` (41 tests) and `agents-plugin-wsflow` (9
+tests) Python suites pass; `agents-plugin-tool` (`go test ./... -count=1`)
+passes; `go build ./...` clean.
+
+Commit: `90bb4bf`.
