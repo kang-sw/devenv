@@ -226,6 +226,58 @@ The left navigation's add-server affordance opens a compact endpoint-first
 modal. SSH-managed start or reconnect remains an advanced or agent-operated
 path and is not required by the default add-server flow.
 
+## 🚧 Server Route Identity And Scoped Operation Endpoints {#260703-ws-dashboard-server-route-scoped-operation-endpoints}
+
+`serverRoute` is the canonical browser-visible term for the daemon routing
+identity that selects which daemon a dashboard operation targets. Existing
+serialized fields named `serverId` — notably the resource path's `serverId` and
+the linked-server registry/link-auth/tunnel identity — are compatibility wire
+field names that carry the selected Server Route. The canonical term is
+`serverRoute`; the wire field name stays `serverId` so this contract does not
+contradict the resource-path and linked-server sections that still serialize
+`serverId`.
+
+The local daemon's Server Route is always `server-local`. Frontend callers pass
+a `serverRoute` (or a full resource path whose `serverId` carries it); a `null`,
+empty, or `server-local` route resolves to the local, unscoped route shape, and
+any other route resolves to the server-scoped shape. This keeps existing
+local-only persisted UI records readable: an omitted route defaults to
+`server-local`.
+
+Server-scoped dashboard operations address a target daemon through canonical
+route shapes rooted at `/api/dashboard/servers/{serverRoute}/...`:
+
+```text
+/api/dashboard/servers/{serverRoute}/resources
+/api/dashboard/servers/{serverRoute}/root-picker[/directories|/pins]
+/api/dashboard/servers/{serverRoute}/work-roots/open
+/api/dashboard/servers/{serverRoute}/work-roots/{workRootId}/...
+/api/dashboard/servers/{serverRoute}/workspaces/{workspaceId}/...
+/api/dashboard/servers/{serverRoute}/terminals/{terminalId}/...
+```
+
+The equivalent local, unscoped routes (for example `/api/dashboard/root-picker`
+or `/api/dashboard/work-roots/{workRootId}/...`) remain the observed shape for
+the `server-local` route, so a route-agnostic caller sees no behavior change for
+local operations.
+
+A single Server Route segment must be dot-free: it matches `[A-Za-z0-9_-]+`. Dot
+is reserved as a future hop separator for multi-hop routing. Generated
+linked-server routes already satisfy this (a `server-<slug>` slug reduces to
+that character set). The frontend rejects a route with a reserved character both
+when constructing a canonical `servers/{serverRoute}/...` route and when adding
+a linked server, surfacing a bounded client-side error rather than silently
+rewriting the value. Existing persisted dotted routes are not rewritten.
+Authoritative daemon-side rejection of dotted linked-server route requests is
+delivered with server-scoped forwarding, not by this frontend contract.
+
+Collision-safe UI identity derives from the Server Route: the same
+`workRootId`, `workspaceId`, `activityId`, or `terminalId` observed on two
+different Server Routes produces distinct workbench panes, file-pane source
+keys, document/Activity subscription keys, Git state keys, terminal
+pane/restore/list records, command payloads, and persisted UI records. Records
+that omit a route are treated as `server-local`.
+
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
 The dashboard exposes known workspace and workRoot membership from a
