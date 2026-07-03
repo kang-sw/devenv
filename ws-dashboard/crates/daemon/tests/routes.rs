@@ -4517,6 +4517,14 @@ async fn linked_server_terminal_forwarding_preserves_bearer_and_upstream_errors(
         )
             .into_response()
     }
+    async fn list_error() -> axum::response::Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"workRoot unreachable"}"#),
+        )
+            .into_response()
+    }
     async fn output_error() -> axum::response::Response {
         (
             StatusCode::NOT_FOUND,
@@ -4559,6 +4567,10 @@ async fn linked_server_terminal_forwarding_preserves_bearer_and_upstream_errors(
         .route(
             "/api/dashboard/work-roots/root-err/terminals",
             axum::routing::post(create_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-list-err/terminals",
+            axum::routing::get(list_error),
         )
         .route(
             "/api/dashboard/terminals/term-err/output",
@@ -4637,6 +4649,13 @@ async fn linked_server_terminal_forwarding_preserves_bearer_and_upstream_errors(
             StatusCode::SERVICE_UNAVAILABLE,
             "application/problem+json",
             "spawn failed",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-list-err/terminals",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            "workRoot unreachable",
         ),
         (
             Method::GET,
