@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.33.0 - 2026-07-03
+
+### Added
+- `lead-drain-ready-queue` entry skill: delegates ticket selection to a
+  light-tier Explore-style subagent that lists `ai-docs/tickets/ready/`,
+  prefers a candidate named as a prerequisite in another ready ticket's
+  `related:`/`parent:` frontmatter (falling back to oldest-first FIFO), and
+  returns exactly one ticket path — then hands that path to `lead-proceed`
+  as an explicit target. A minimal, delegate-only shim intended for
+  standing `/goal` directives that repeatedly drain the `ready/` backlog;
+  mirrored byte-identically into `agents-plugin-wsflow`.
+
 ## v0.32.4 - 2026-07-03
 
 ### Changed
