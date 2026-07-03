@@ -287,9 +287,11 @@ Server-scoped one-shot HTTP operations resolve by Server Route:
   allowlisted JSON/HTTP helper that attaches the daemon-held memory-only bearer
   token and targets the linked server's endpoint hint. Only explicitly
   registered server-scoped one-shot routes reach the helper; unregistered
-  server-scoped paths (SSE, terminal WebSocket, unlisted operations) fall
-  through the protected router as `404` rather than proxying arbitrary daemon
-  paths.
+  server-scoped paths (Activity SSE, terminal WebSocket, terminal lifecycle,
+  Git, workspace mutations, and other unlisted operations) fall through the
+  protected router as `404` rather than proxying arbitrary daemon paths.
+  Document-event SSE is the single streaming exception and is proxied
+  explicitly — see [Document-Event SSE Proxying](#document-event-sse-proxying).
 
 A forwarded response preserves the upstream status and body as much as
 practical. For operations that return a `DashboardResourcesView`, the daemon
@@ -317,6 +319,49 @@ different Server Routes produces distinct workbench panes, file-pane source
 keys, document/Activity subscription keys, Git state keys, terminal
 pane/restore/list records, command payloads, and persisted UI records. Records
 that omit a route are treated as `server-local`.
+
+### Remote File Operations
+
+WorkRoot file listing, file read, and file write are server-scoped one-shot
+operations that resolve through the same forwarding envelope above:
+`/api/dashboard/servers/{serverRoute}/work-roots/{workRootId}/files`,
+`.../files/read`, and `.../files/write`. `server-local` dispatches in-process to
+the unscoped handlers; any other route forwards over the allowlisted bearer
+helper. File write preserves optimistic-concurrency semantics end to end: the
+`baseContentHash`/`contentHash` conflict contract is carried through unchanged,
+so a stale base hash surfaces the upstream `409` content-hash mismatch and a
+missing base hash surfaces `400`, identically for local and remote routes. The
+`server-local` write alias enforces the same `application/json` request
+content-type boundary as the unscoped route before dispatching, so it stays
+byte-for-byte equivalent rather than silently accepting bodies the unscoped
+`Json` extractor would reject.
+
+### Document-Event SSE Proxying
+
+Document-event SSE is the one streaming route this envelope proxies rather than
+`404`-ing. `/api/dashboard/servers/{serverRoute}/work-roots/{workRootId}/documents/events`
+dispatches in-process for `server-local`; for any other route the gateway
+resolves the linked server through the same dot-free refusal and bounded-error
+boundary, then opens a bearer-authenticated upstream `text/event-stream` GET and
+re-streams its raw bytes to the browser. Key properties:
+
+- **Opaque byte passthrough.** The gateway does not parse or rewrite SSE frames.
+  Document-event payloads carry only `source.workRootId`/`path`/`contentHash`,
+  and the browser scopes events by the *subscription* URL it connected to (the
+  server-scoped endpoint), so no per-frame `serverRoute` rewrite is needed and
+  same-`workRootId` documents on different routes stay isolated by subscription.
+- **Content-type enforcement.** A successful upstream response whose content type
+  is missing or is not `text/event-stream` is rejected as `502` rather than
+  forwarded, so a non-stream upstream can never masquerade as an event stream.
+- **Upstream error preservation.** A non-success upstream response is forwarded
+  with its status and body preserved (like other one-shot forwards); an
+  unreachable upstream surfaces `502`.
+- **Implicit cleanup.** No explicit lifecycle frames are exchanged. When either
+  side disconnects, the browser-facing stream drops, which drops the upstream
+  `reqwest` response and releases the subscription.
+
+Other server-scoped streams remain deferred and continue to `404`: Activity SSE
+and the terminal WebSocket are not proxied by this phase.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
