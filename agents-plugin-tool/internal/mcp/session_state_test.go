@@ -1830,6 +1830,7 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 	initGit(t, root)
 	cacheHome := filepath.Join(t.TempDir(), "cache")
 	t.Setenv("WS_CACHE_HOME", cacheHome)
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902601, root, nil))
@@ -1865,6 +1866,7 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 	initGit(t, root)
 	cacheHome := filepath.Join(t.TempDir(), "cache")
 	t.Setenv("WS_CACHE_HOME", cacheHome)
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	server := NewServer(root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
