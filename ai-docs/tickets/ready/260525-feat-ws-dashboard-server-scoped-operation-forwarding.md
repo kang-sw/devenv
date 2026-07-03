@@ -698,6 +698,64 @@ create/list/output/input/resize/close, terminal pane identity collision tests,
 and browser or integration evidence that a remote terminal can be created and
 closed through the local gateway.
 
+### Result (b9ab1fb1) - 2026-07-03
+
+Added 5 new server-scoped handlers (one, `server_scoped_terminals`, handles
+both GET list and POST create) covering all six terminal HTTP lifecycle
+operations: create, list, output, input, resize, close. `server-local`
+dispatches in-process to the existing unscoped terminal handlers; other
+routes forward via Phase 2's `forward_server_scoped_operation`, preserving
+bearer auth and upstream status/body/content-type. The JSON-body aliases
+(create, input, resize) reuse Phase 5's `parse_json_alias_body` helper
+unmodified for axum-parity status classification (415/422/400) rather than
+reintroducing the draft's flat-400 behavior. The terminal socket route is
+deliberately left unregistered at any server-scoped path — it stays 404,
+deferred to Phase 7. Frontend `terminals.ts` was already fully server-scoped
+from Phase 1; the only gap was one call site (`WorkbenchToolbar`'s
+"New terminal" button) not yet passing `serverRoute` into
+`buildTerminalCreateCommand`, fixed in one line.
+
+Commits: `57ecf559` (feat: forward server-scoped terminal http lifecycle),
+`da4729fd` (test: cover server-scoped terminal http lifecycle), `6a4e5227`
+(docs: spec remote terminal http lifecycle), `b9ab1fb1` (test: cover
+terminal list upstream-error forwarding).
+
+Review: partitioned correctness/fit/test. Correctness and fit were both
+clean with zero findings of any severity — notably the first phase in this
+ticket to clear both partitions without any Minor notes. Verified
+end-to-end: close-closes-upstream is proven against a real second daemon
+instance (close then a subsequent output-poll genuinely 404s from the
+independent upstream registry, not a mocked assertion), and collision safety
+is proven by creating a real local terminal and a same-bare-id remote
+terminal, closing only the remote one via the server-scoped route, and
+confirming the local terminal is still alive via an independent follow-up
+request. The test partition found one narrow gap: the linked-server
+upstream-error-preservation test covered failure-path preservation for
+create/output/input/resize/close but not list (1 of a 6-operations x
+4-dimensions coverage matrix, contradicting the commit message's "all six
+ops" claim) — closed immediately in `b9ab1fb1` by adding a list-specific
+503 upstream fixture to the same table-test. This is the smallest
+review-found gap of any phase so far (Phase 4 needed one status-code fix,
+Phase 5 needed five gaps closed in a follow-up commit), consistent with the
+plan's explicit goal of applying the Phase 4/5 review lessons proactively
+from the first pass.
+
+**Outstanding follow-ups (not done in this session), matching Phase 3-5's
+closeout pattern:**
+- Live dogfood against a real remote Windows daemon tunnel (create/close a
+  remote terminal) is not possible in this environment/session.
+- A Playwright e2e case for terminal create/close server-scoped routing was
+  not added — the current `dashboard-acceptance.spec.ts` (3089 lines) has
+  diverged from the phase-7 draft's structure enough that porting would be
+  blind/unverifiable, and Playwright cannot execute in this environment
+  regardless (same gap established in Phases 3-5). The mechanical routing
+  and collision-safety checks are covered at the daemon and frontend-unit
+  level instead.
+- Minor (non-blocking, noted by the test reviewer): the one-line `App.tsx`
+  `WorkbenchToolbar` fix isn't independently asserted by name in the test
+  diff, though it is exercised indirectly through the existing terminal
+  creation flow tests.
+
 ### Phase 7: Remote terminal WebSocket gatewaying
 
 Forward live terminal WebSocket transport through the local gateway after the
