@@ -37,7 +37,7 @@ EXPECTED_SKILLS = {
 }
 
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set()
-EXPECTED_INLINE_SKILLS = {"lead-revive"}
+EXPECTED_INLINE_SKILLS = {"lead-revive", "lead-prefer-subagent", "lead-verify-discussion"}
 EXPECTED_PARALLEL_INIT_SKILLS = {"lead-discuss", "lead-sprint"}
 
 FORBIDDEN_PATTERNS = {

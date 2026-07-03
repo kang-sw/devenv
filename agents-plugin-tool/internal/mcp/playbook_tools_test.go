@@ -601,6 +601,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envNamespace, "wsflow")
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
 	s := newTestServerWithHarness(t, "codex")
 	configOpts := isolatedPlaybookConfigOptions(t)
 
@@ -1609,22 +1610,29 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadVerifyDiscussion verifies lead-verify-discussion
-// resolves and is marked delegates:true (tip must appear).
-func TestPlaybookPrintGoldenLeadVerifyDiscussion(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
+// TestSkillBodyGoldenLeadVerifyDiscussion verifies lead-verify-discussion
+// resolves from the real skills tree as a static inlined SKILL.md body and
+// includes the hardcoded continuity-tip text. lead-verify-discussion is no
+// longer a playbook.print-backed rsrc playbook (its procedure body was
+// inlined directly into SKILL.md), so this reads through
+// wsrsrc.LoadSkillBody rather than printPlaybook.
+func TestSkillBodyGoldenLeadVerifyDiscussion(t *testing.T) {
+	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-discussion", nil, wsconfig.Options{}, "", nil)
+	body, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-verify-discussion")
 	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
+		t.Fatalf("LoadSkillBody: %v", err)
 	}
 	if !strings.Contains(body, "Re-objectify the discussion") {
 		t.Errorf("body %q: expected procedure text 'Re-objectify the discussion'", body)
 	}
-	// delegates:true — continuity tip must appear.
+	// The hardcoded continuity-tip line (formerly delegationTip's rendered
+	// output for delegates:true playbooks) must be present as static text.
 	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+		t.Errorf("body %q: expected hardcoded continuity tip text", body)
+	}
+	if !strings.Contains(body, "Mercenary path (always available)") {
+		t.Errorf("body %q: expected hardcoded full-ws mercenary-path line", body)
 	}
 }
 

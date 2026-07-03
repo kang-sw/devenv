@@ -8,6 +8,7 @@ import (
 )
 
 const envRsrcRoot = "WS_RSRC_ROOT"
+const envSkillsRoot = "WS_SKILLS_ROOT"
 
 // ResolveRoot returns the rsrc tree root directory.
 //
@@ -37,6 +38,37 @@ func ResolveRoot() (string, error) {
 		return "", fmt.Errorf("WS_RSRC_ROOT not set and cannot determine plugin path: %w", err)
 	}
 	return filepath.Join(filepath.Dir(exe), "..", "rsrc"), nil
+}
+
+// ResolveSkillsRoot returns the skills tree root directory.
+//
+// Resolution order:
+//  1. WS_SKILLS_ROOT environment variable, when set and non-empty.
+//  2. Plugin-path default: filepath.Join(filepath.Dir(os.Executable()), "..", "skills"),
+//     sibling to the rsrc root derived by ResolveRoot.
+func ResolveSkillsRoot() (string, error) {
+	if env := os.Getenv(envSkillsRoot); env != "" {
+		return env, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("WS_SKILLS_ROOT not set and cannot determine plugin path: %w", err)
+	}
+	return filepath.Join(filepath.Dir(exe), "..", "skills"), nil
+}
+
+// LoadSkillBody reads <root>/<name>/SKILL.md and returns its body with
+// frontmatter stripped via parseFrontmatter. Unlike Load, this does not verify
+// manifest integrity and applies no override-marker pass — skills are not
+// hash-checked the way rsrc playbooks are.
+func LoadSkillBody(root, name string) (string, error) {
+	path := filepath.Join(root, name, "SKILL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read skill %s: %w", name, err)
+	}
+	_, body := parseFrontmatter(string(data))
+	return body, nil
 }
 
 // Load loads a playbook by name from root, optionally selecting a harness
