@@ -4779,9 +4779,12 @@ function WorkbenchToolbar({
           icon={SquareTerminal}
           label="New terminal"
           onClick={() => {
-            onCommand(buildTerminalCreateCommand(root.id), {
-              "terminal.create": onCreateTerminal,
-            });
+            onCommand(
+              buildTerminalCreateCommand(root.id, root.resourcePath.serverId),
+              {
+                "terminal.create": onCreateTerminal,
+              },
+            );
           }}
         />
         <div className="workbench-overflow" ref={overflowRef}>
