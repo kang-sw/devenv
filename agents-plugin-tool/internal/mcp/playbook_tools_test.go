@@ -1611,11 +1611,14 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 }
 
 // TestSkillBodyGoldenLeadVerifyDiscussion verifies lead-verify-discussion
-// resolves from the real skills tree as a static inlined SKILL.md body and
-// includes the hardcoded continuity-tip text. lead-verify-discussion is no
-// longer a playbook.print-backed rsrc playbook (its procedure body was
-// inlined directly into SKILL.md), so this reads through
-// wsrsrc.LoadSkillBody rather than printPlaybook.
+// resolves from the real skills tree as a static inlined SKILL.md body.
+// lead-verify-discussion is no longer a playbook.print-backed rsrc playbook
+// (its procedure body was inlined directly into SKILL.md), so this reads
+// through wsrsrc.LoadSkillBody rather than printPlaybook. The former
+// delegates:true continuity-tip and mercenary-path paragraphs were removed
+// (see 864902a3): they were a poor fit for this checkpoint's conditional
+// delegation, and their removal makes the source eligible for
+// substitution-mirrored wsflow generation (no product-specific content).
 func TestSkillBodyGoldenLeadVerifyDiscussion(t *testing.T) {
 	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
 
@@ -1626,13 +1629,8 @@ func TestSkillBodyGoldenLeadVerifyDiscussion(t *testing.T) {
 	if !strings.Contains(body, "Re-objectify the discussion") {
 		t.Errorf("body %q: expected procedure text 'Re-objectify the discussion'", body)
 	}
-	// The hardcoded continuity-tip line (formerly delegationTip's rendered
-	// output for delegates:true playbooks) must be present as static text.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected hardcoded continuity tip text", body)
-	}
-	if !strings.Contains(body, "Mercenary path (always available)") {
-		t.Errorf("body %q: expected hardcoded full-ws mercenary-path line", body)
+	if strings.Contains(body, "mercenary") {
+		t.Errorf("body %q: must not contain mercenary-path content (removed in 864902a3)", body)
 	}
 }
 

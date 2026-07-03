@@ -31,6 +31,3 @@ Topic: user request
 
 Return corrected premises, concrete evidence, reuse opportunities, constraints,
 hygiene findings, countercase, and the best-supported recommendation.
-
----
-**Continuity tip:** This playbook delegates to a subagent. When the subagent returns an agent id, continue by resuming the agent using its returned id to send follow-up messages to the same agent rather than spawning a new one. The playbook surface keeps no agent registry; record the agent id in your workflow state if you need it across turns.

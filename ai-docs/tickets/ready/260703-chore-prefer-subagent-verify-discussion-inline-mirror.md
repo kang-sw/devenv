@@ -233,6 +233,29 @@ Plugin version bumped 0.32.0 → 0.32.1 (dev-merge rule) in `c8e824f4`.
 
 ### Phase 2: Substitution-mirrored skill generation mechanism
 
+**Edition (lead-resolved) - 2026-07-03**: Phase 2's survey found that the
+already-merged Phase 1 `lead-verify-discussion/SKILL.md` contained an unmarked
+"mercenary" paragraph, which the guard wording above would reject outright —
+a direct conflict with this being one of exactly two initial eligible skills.
+Superseded resolution: rather than carving a marker exception into the guard,
+the user (on review) concluded the `delegates:true`-driven continuity-tip and
+mercenary-path paragraphs were never a good fit for this skill in the first
+place — `lead-verify-discussion`'s own delegation is conditional
+("when investigation is useful"), unlike `lead-verify-design`'s unconditional
+"isolate a fresh deep reviewer", and the sibling checkpoint
+`lead-check-blockers` (same "compact, lightweight checkpoint" framing) never
+carried `delegates:true` at all. Both paragraphs were removed outright from
+`agents-plugin/skills/lead-verify-discussion/SKILL.md` and
+`agents-plugin-wsflow/skills/lead-verify-discussion/SKILL.md` (the latter's
+existing hand-authored copy already omitted the mercenary line; it now also
+drops the continuity-tip line, making the two files byte-identical). This
+dissolves the guard conflict entirely: the source contains no
+product-specific content, so no marker mechanism is needed and Phase 2
+proceeds as originally specified (pure namespace substitution, no exception
+carve-out). A separate `todo/` ticket
+(`260703-chore-review-delegates-true-classification`) covers a broader review
+of `delegates:true` usage across all rsrc playbooks, sage-review skipped.
+
 Implement the generation script, the hard-gate eligibility guard, and the
 drift test described in Decisions. Register `lead-prefer-subagent` and
 `lead-verify-discussion` as the initial (and currently only) entries in the
@@ -249,3 +272,54 @@ exception per Decisions.
   file containing the word "mercenary" or a `ws:full-only` marker) must make
   the guard test fail, proving the guard actually rejects disqualifying
   content rather than only running on already-clean input.
+
+### Result
+
+Implemented on `implement/substitution-mirrored-skill-generation`
+(`864902a3..0aaacd01`, 3 commits). Added `GenerateWsflowSkillBody` in
+`agents-plugin-tool/internal/wsrsrc/skills_mirror.go`: reads the full raw
+`SKILL.md` (frontmatter included), guards against disqualifying tokens
+(`mercenary`, `ws:full-only`/`ws:wsflow-only` markers, `ws.`, the four
+wsflow-excluded skill names), then applies literal `ws:`→`wsflow:`/`ws/`→`wsflow/`
+substitution — no marker-stripping exception path, per the revised (design
+conflict resolved by removing the disqualifying content from the source
+instead of exempting it). `skills_mirror_test.go` adds
+`TestWsflowSkillsMirrorUpToDate` (substitution-aware drift guard, parallel to
+`TestWsflowRsrcMirrorUpToDate`), `TestRegenerateWsflowSkillsMirror` (gated by
+`WS_REGEN_WSFLOW_SKILLS`, skipped by default), 4 negative-path guard subtests,
+and 1 positive-path substitution test. `ai-docs/ref/wsflow-mirroring.md` gets
+a new "Substitution-Mirrored Skill Generation" section as a bounded exception
+(curated list: exactly `lead-prefer-subagent` and `lead-verify-discussion`),
+retiring the old "temporary exception" wording.
+
+Design conflict resolved before implementation: Phase 2's survey found the
+already-merged Phase 1 `lead-verify-discussion/SKILL.md` carried an unmarked
+`delegates:true`-driven mercenary paragraph, which the guard would reject
+outright. Rather than carving a marker exception into the guard, review
+concluded the classification itself was wrong for this skill (conditional
+"when investigation is useful" delegation, not the unconditional delegation
+`lead-verify-design` has) and removed both the continuity-tip and mercenary
+paragraphs from `lead-verify-discussion/SKILL.md` in both `agents-plugin` and
+`agents-plugin-wsflow` trees (`864902a3`), making the two files
+byte-identical and dissolving the guard conflict entirely. A follow-up
+`todo/` ticket (`260703-chore-review-delegates-true-classification`, sage-review
+skipped) covers a broader review of `delegates:true` usage across the rest
+of the rsrc playbook set.
+
+Partitioned review: test non-clean (1 important — the drift test's
+substitution-aware comparison was unexercised by real data, since both
+curated fixtures contain zero `ws:`/`ws/` tokens and are true no-ops), fixed
+in `0aaacd01` by adding an inline synthetic namespace-token fixture inside
+`TestWsflowSkillsMirrorUpToDate`. Fix verified empirically by both the fix
+author and the original reviewer's methodology (break the substitution
+`ReplaceAll` calls, confirm the new assertion fails, restore, confirm clean).
+1 minor finding (guard's excluded-skill-name subtest only exercises one of
+four names) left as-is per lead disposition (low-risk, shared code path).
+
+`go build ./...` and `go test ./internal/wsrsrc/... ./internal/mcp/...`
+(agents-plugin-tool) pass; `python3 -m unittest discover
+agents-plugin-wsflow/tests` passes unchanged (9 tests).
+
+Plugin version bumped 0.32.2 → 0.32.3 (dev-merge rule) in `198c0290`.
+
+This was the ticket's final phase.
