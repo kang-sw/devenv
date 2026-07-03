@@ -33,6 +33,7 @@ use rusqlite::{params, Connection};
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
+use axum::response::IntoResponse;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
@@ -884,6 +885,51 @@ async fn dashboard_resources_refresh_prunes_workspace_without_available_work_roo
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
+
+    for (method, uri, body) in [
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-test/files",
+            Body::empty(),
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-test/files/read?path=src/main.rs",
+            Body::empty(),
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-local/work-roots/root-test/files/write",
+            Body::from(
+                serde_json::json!({
+                    "path": "src/main.rs",
+                    "baseContentHash": "sha256:missing",
+                    "content": "changed"
+                })
+                .to_string(),
+            ),
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-local/work-roots/root-test/documents/events",
+            Body::empty(),
+        ),
+    ] {
+        let unauthenticated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("unauthenticated server scoped file/document request"),
+            )
+            .await
+            .expect("unauthenticated server scoped file/document response");
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
@@ -2483,6 +2529,257 @@ async fn server_scoped_one_shot_mutation_routes_dispatch_equivalent_local_aliase
 }
 
 #[tokio::test]
+async fn server_scoped_work_root_files_and_document_routes_dispatch_equivalent_local_aliases() {
+    let root = temp_fixture_path("server-scoped-file-local-root");
+    fs::create_dir_all(root.join("src")).expect("create local alias file root");
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write local alias file");
+
+    let state = app_state_with_opened_and_store(
+        OpenedWorkRoots::from_paths(vec![root.clone()]),
+        DashboardStateStore::disabled(),
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let legacy_list = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files?path=src"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy file list request"),
+        )
+        .await
+        .expect("legacy file list response");
+    let scoped_list = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/files?path=src"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped local file list request"),
+        )
+        .await
+        .expect("server scoped local file list response");
+    assert_eq!(legacy_list.status(), StatusCode::OK);
+    assert_eq!(scoped_list.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(scoped_list.into_body(), 64 * 1024)
+            .await
+            .expect("scoped list body"),
+        axum::body::to_bytes(legacy_list.into_body(), 64 * 1024)
+            .await
+            .expect("legacy list body")
+    );
+
+    let legacy_read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=src/main.rs"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy file read request"),
+        )
+        .await
+        .expect("legacy file read response");
+    let scoped_read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/read?path=src/main.rs"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped local file read request"),
+        )
+        .await
+        .expect("server scoped local file read response");
+    assert_eq!(legacy_read.status(), StatusCode::OK);
+    assert_eq!(scoped_read.status(), StatusCode::OK);
+    let legacy_read_body = axum::body::to_bytes(legacy_read.into_body(), 64 * 1024)
+        .await
+        .expect("legacy read body");
+    let scoped_read_body = axum::body::to_bytes(scoped_read.into_body(), 64 * 1024)
+        .await
+        .expect("scoped read body");
+    assert_eq!(scoped_read_body, legacy_read_body);
+    let read_json: serde_json::Value =
+        serde_json::from_slice(&legacy_read_body).expect("legacy read JSON");
+
+    let legacy_events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/documents/events"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("legacy document events request"),
+        )
+        .await
+        .expect("legacy document events response");
+    let scoped_events = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/documents/events"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped document events request"),
+        )
+        .await
+        .expect("server scoped document events response");
+    assert_eq!(legacy_events.status(), StatusCode::OK);
+    assert_eq!(scoped_events.status(), StatusCode::OK);
+    let mut legacy_stream = legacy_events.into_body().into_data_stream();
+    let mut scoped_stream = scoped_events.into_body().into_data_stream();
+
+    let write_body = serde_json::json!({
+        "path": "src/main.rs",
+        "baseContentHash": read_json["contentHash"],
+        "content": "fn main() { println!(\"scoped\"); }\n"
+    });
+    let (scoped_write_status, _, scoped_write) = request_json_for_test(
+        app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"),
+        &cookie,
+        write_body,
+    )
+    .await;
+    assert_eq!(scoped_write_status, StatusCode::OK);
+    assert_eq!(scoped_write["sizeBytes"], 34);
+
+    let missing_content_type = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "src/main.rs",
+                        "baseContentHash": scoped_write["contentHash"],
+                        "content": "missing content type\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped write missing content-type request"),
+        )
+        .await
+        .expect("server scoped write missing content-type response");
+    let legacy_missing_content_type = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/write"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "src/main.rs",
+                        "baseContentHash": scoped_write["contentHash"],
+                        "content": "missing content type\n"
+                    })
+                    .to_string(),
+                ))
+                .expect("legacy write missing content-type request"),
+        )
+        .await
+        .expect("legacy write missing content-type response");
+    assert_eq!(
+        missing_content_type.status(),
+        legacy_missing_content_type.status(),
+        "server-local scoped write should preserve legacy JSON content-type boundary"
+    );
+
+    let (stale_hash_status, _, stale_hash) = request_json_for_test(
+        app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"),
+        &cookie,
+        serde_json::json!({
+            "path": "src/main.rs",
+            "baseContentHash": read_json["contentHash"],
+            "content": "stale hash should conflict\n"
+        }),
+    )
+    .await;
+    assert_eq!(stale_hash_status, StatusCode::CONFLICT);
+    assert_eq!(stale_hash["error"], "content hash mismatch");
+
+    let missing_hash = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/servers/server-local/work-roots/{work_root_id}/files/write"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "src/main.rs",
+                        "content": "missing hash"
+                    })
+                    .to_string(),
+                ))
+                .expect("server scoped missing base hash write request"),
+        )
+        .await
+        .expect("server scoped missing base hash write response");
+    assert_eq!(missing_hash.status(), StatusCode::BAD_REQUEST);
+
+    for (label, stream) in [
+        ("legacy", &mut legacy_stream),
+        ("scoped", &mut scoped_stream),
+    ] {
+        let mut buffer = String::new();
+        let mut seen = Vec::<serde_json::Value>::new();
+        timeout(Duration::from_secs(5), async {
+            while !seen.iter().any(|event| {
+                event["type"] == "document.contentChanged"
+                    && event["source"]["path"] == "src/main.rs"
+                    && event["contentHash"] == scoped_write["contentHash"]
+            }) {
+                let chunk = stream
+                    .next()
+                    .await
+                    .unwrap_or_else(|| panic!("{label} document SSE chunk"))
+                    .unwrap_or_else(|_| panic!("{label} document SSE body chunk"));
+                buffer.push_str(std::str::from_utf8(&chunk).expect("document SSE UTF-8"));
+                drain_document_sse_events(&mut buffer, &mut seen);
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{label} save invalidation event"));
+    }
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
 async fn server_scoped_one_shot_routes_return_bounded_refusals() {
     let state_file_root = temp_fixture_path("server-scoped-one-shot-refusal-state");
     let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
@@ -2521,42 +2818,87 @@ async fn server_scoped_one_shot_routes_return_bounded_refusals() {
         serde_json::from_slice(&unknown_body).expect("unknown response JSON");
     assert_eq!(unknown_value["error"], "unknown server");
 
-    let auth_required = app
+    let unknown_file = app
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/dashboard/servers/server-windows/root-picker")
+                .uri("/api/dashboard/servers/server-missing/work-roots/root-test/files")
                 .header(header::COOKIE, cookie.as_str())
                 .body(Body::empty())
-                .expect("auth-required server scoped route request"),
+                .expect("unknown server scoped file request"),
         )
         .await
-        .expect("auth-required server scoped route response");
-    assert_eq!(auth_required.status(), StatusCode::CONFLICT);
-    let auth_body = axum::body::to_bytes(auth_required.into_body(), 4096)
-        .await
-        .expect("auth-required body");
-    let auth_value: serde_json::Value =
-        serde_json::from_slice(&auth_body).expect("auth-required response JSON");
-    assert_eq!(auth_value["error"], "linked server auth required");
-    assert!(
-        !auth_body
-            .windows(b"owner@example.test".len())
-            .any(|window| window == b"owner@example.test"),
-        "server scoped refusal must not expose SSH target"
-    );
+        .expect("unknown server scoped file response");
+    assert_eq!(unknown_file.status(), StatusCode::NOT_FOUND);
 
-    let not_forwarded = app
+    let unknown_document_events = app
+        .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/dashboard/servers/server-windows/terminals/terminal-1/socket")
+                .uri("/api/dashboard/servers/server-missing/work-roots/root-test/documents/events")
                 .header(header::COOKIE, cookie.as_str())
                 .body(Body::empty())
-                .expect("non-allowlisted server scoped route request"),
+                .expect("unknown server scoped document events request"),
         )
         .await
-        .expect("non-allowlisted server scoped route response");
-    assert_eq!(not_forwarded.status(), StatusCode::NOT_FOUND);
+        .expect("unknown server scoped document events response");
+    assert_eq!(unknown_document_events.status(), StatusCode::NOT_FOUND);
+
+    for uri in [
+        "/api/dashboard/servers/server-windows/root-picker",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/files",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/files/read?path=README.md",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/documents/events",
+    ] {
+        let auth_required = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("auth-required server scoped route request"),
+            )
+            .await
+            .expect("auth-required server scoped route response");
+        assert_eq!(auth_required.status(), StatusCode::CONFLICT, "{uri}");
+        let auth_body = axum::body::to_bytes(auth_required.into_body(), 4096)
+            .await
+            .expect("auth-required body");
+        let auth_value: serde_json::Value =
+            serde_json::from_slice(&auth_body).expect("auth-required response JSON");
+        assert_eq!(auth_value["error"], "linked server auth required", "{uri}");
+        assert!(
+            !auth_body
+                .windows(b"owner@example.test".len())
+                .any(|window| window == b"owner@example.test"),
+            "server scoped refusal must not expose SSH target for {uri}"
+        );
+    }
+
+    for uri in [
+        "/api/dashboard/servers/server-windows/terminals/terminal-1/socket",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity/events",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/activity",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/terminals",
+        "/api/dashboard/servers/server-windows/terminals/terminal-1/input",
+        "/api/dashboard/servers/server-windows/work-roots/root-test/git/status",
+        "/api/dashboard/servers/server-windows/workspaces/workspace-test/git-worktree-add/options",
+        "/api/dashboard/servers/server-windows/document-translation/providers",
+    ] {
+        let not_forwarded = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("non-allowlisted server scoped route request"),
+            )
+            .await
+            .expect("non-allowlisted server scoped route response");
+        assert_eq!(not_forwarded.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
 
     remove_static_fixture(&state_file_root);
 }
@@ -2929,6 +3271,419 @@ async fn server_scoped_one_shot_route_returns_bounded_bad_gateway_when_endpoint_
     assert!(
         !body.windows(3).any(|window| window == b"127"),
         "unreachable refusal must not leak the failed endpoint address"
+    );
+
+    remote_server.abort();
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_work_root_files_and_document_forwarding_preserves_bearer_and_sse() {
+    let remote_root = temp_fixture_path("server-scoped-file-remote-root");
+    fs::create_dir_all(remote_root.join("docs")).expect("create remote docs root");
+    fs::write(remote_root.join("docs/readme.md"), "# Remote\n").expect("write remote doc");
+    let remote_state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::disabled(),
+    );
+    let passphrase = remote_state
+        .auth
+        .link_passphrase()
+        .expose_for_owner_record()
+        .to_owned();
+    let remote_app = build_router(remote_state);
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-file-forwarding-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-windows"),
+            label: "Windows dogfood".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: Some("owner@example.test".to_owned()),
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist linked file server seed");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": passphrase }).to_string(),
+                ))
+                .expect("local link auth request"),
+        )
+        .await
+        .expect("local link auth response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    let open = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-windows/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": remote_root.display().to_string() }).to_string(),
+                ))
+                .expect("server scoped remote open request"),
+        )
+        .await
+        .expect("server scoped remote open response");
+    assert_eq!(open.status(), StatusCode::OK);
+    let work_root_id = open
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .expect("forwarded opened id header")
+        .to_str()
+        .expect("forwarded opened id string")
+        .to_owned();
+
+    let list = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/files?path=docs"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped remote file list request"),
+        )
+        .await
+        .expect("server scoped remote file list response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list.into_body(), 64 * 1024)
+        .await
+        .expect("remote list body");
+    let list_json: serde_json::Value =
+        serde_json::from_slice(&list_body).expect("remote list JSON");
+    assert_eq!(list_json["workRootId"], work_root_id);
+    assert_eq!(list_json["path"], "docs");
+    assert_eq!(list_json["entries"][0]["name"], "readme.md");
+
+    let read = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/files/read?path=docs/readme.md"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped remote file read request"),
+        )
+        .await
+        .expect("server scoped remote file read response");
+    assert_eq!(read.status(), StatusCode::OK);
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("remote read body");
+    let read_json: serde_json::Value =
+        serde_json::from_slice(&read_body).expect("remote read JSON");
+    assert_eq!(read_json["content"], "# Remote\n");
+
+    let events = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/documents/events"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped remote document events request"),
+        )
+        .await
+        .expect("server scoped remote document events response");
+    assert_eq!(events.status(), StatusCode::OK);
+    assert_eq!(
+        events
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("text/event-stream")),
+        Some(true)
+    );
+    let mut stream = events.into_body().into_data_stream();
+
+    let write = request_json_for_test(
+        local_app.clone(),
+        Method::POST,
+        format!("/api/dashboard/servers/server-windows/work-roots/{work_root_id}/files/write"),
+        &cookie,
+        serde_json::json!({
+            "path": "docs/readme.md",
+            "baseContentHash": read_json["contentHash"],
+            "content": "# Remote updated\n"
+        }),
+    )
+    .await;
+    assert_eq!(write.0, StatusCode::OK);
+    assert_eq!(write.2["sizeBytes"], 17);
+
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "document.contentChanged"
+                && event["source"]["workRootId"] == work_root_id
+                && event["source"]["path"] == "docs/readme.md"
+                && event["contentHash"] == write.2["contentHash"]
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("forwarded document SSE chunk")
+                .expect("forwarded document SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("forwarded SSE UTF-8"));
+            drain_document_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("forwarded document invalidation event");
+
+    let reread = local_app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/servers/server-windows/work-roots/{work_root_id}/files/read?path=docs/readme.md"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("server scoped remote reread request"),
+        )
+        .await
+        .expect("server scoped remote reread response");
+    let reread_body = axum::body::to_bytes(reread.into_body(), 64 * 1024)
+        .await
+        .expect("remote reread body");
+    let reread_json: serde_json::Value =
+        serde_json::from_slice(&reread_body).expect("remote reread JSON");
+    assert_eq!(reread_json["content"], "# Remote updated\n");
+
+    remote_server.abort();
+    remove_static_fixture(&remote_root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn linked_server_file_forwarding_preserves_upstream_errors_and_rejects_invalid_sse() {
+    async fn link_auth() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({ "bearerToken": "test-token" })),
+        )
+            .into_response()
+    }
+    async fn file_list_error() -> axum::response::Response {
+        (
+            StatusCode::IM_A_TEAPOT,
+            [(header::CONTENT_TYPE, "application/problem+json")],
+            Body::from(r#"{"error":"list failed"}"#),
+        )
+            .into_response()
+    }
+    async fn file_read_error() -> axum::response::Response {
+        (
+            StatusCode::BAD_GATEWAY,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"read upstream failed"}"#),
+        )
+            .into_response()
+    }
+    async fn file_write_conflict() -> axum::response::Response {
+        (
+            StatusCode::CONFLICT,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"content hash mismatch"}"#),
+        )
+            .into_response()
+    }
+    async fn document_events_error() -> axum::response::Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"error":"events unavailable"}"#),
+        )
+            .into_response()
+    }
+    async fn document_events_invalid_content_type() -> axum::response::Response {
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Body::from(r#"{"not":"sse"}"#),
+        )
+            .into_response()
+    }
+
+    let remote_app = axum::Router::new()
+        .route("/api/dashboard/link-auth", axum::routing::post(link_auth))
+        .route(
+            "/api/dashboard/work-roots/root-error/files",
+            axum::routing::get(file_list_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/files/read",
+            axum::routing::get(file_read_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-error/files/write",
+            axum::routing::post(file_write_conflict),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-events-error/documents/events",
+            axum::routing::get(document_events_error),
+        )
+        .route(
+            "/api/dashboard/work-roots/root-events-invalid/documents/events",
+            axum::routing::get(document_events_invalid_content_type),
+        );
+    let (remote_addr, remote_server) = spawn_test_server(remote_app).await;
+
+    let state_file_root = temp_fixture_path("server-scoped-file-upstream-errors-state");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    store
+        .persist_linked_servers(vec![PersistedLinkedServer {
+            id: ServerId::from("server-errors"),
+            label: "Error fixture".to_owned(),
+            kind: ServerKind::Manual,
+            ssh_target: None,
+            endpoint_hint: Some(format!("http://{remote_addr}")),
+            remote_endpoint_hint: None,
+        }])
+        .await
+        .expect("persist upstream error fixture server");
+    let local_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let token = local_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let local_app = build_router(local_state);
+    let cookie = pair_and_cookie(local_app.clone(), &token).await;
+
+    let linked = local_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-errors/link-auth")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "passphrase": "ok" }).to_string(),
+                ))
+                .expect("link custom error fixture server"),
+        )
+        .await
+        .expect("link custom error fixture response");
+    assert_eq!(linked.status(), StatusCode::OK);
+
+    for (method, uri, expected_status, expected_content_type, expected_error) in [
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/files?path=missing",
+            StatusCode::IM_A_TEAPOT,
+            "application/problem+json",
+            "list failed",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/files/read?path=missing.txt",
+            StatusCode::BAD_GATEWAY,
+            "application/json",
+            "read upstream failed",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/servers/server-errors/work-roots/root-error/files/write",
+            StatusCode::CONFLICT,
+            "application/json",
+            "content hash mismatch",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/servers/server-errors/work-roots/root-events-error/documents/events",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            "events unavailable",
+        ),
+    ] {
+        let response = local_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "path": "missing.txt",
+                            "baseContentHash": "sha256:stale",
+                            "content": "new"
+                        })
+                        .to_string(),
+                    ))
+                    .expect("upstream error preservation request"),
+            )
+            .await
+            .expect("upstream error preservation response");
+        assert_eq!(response.status(), expected_status, "{uri}");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.starts_with(expected_content_type)),
+            Some(true),
+            "{uri} content-type"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("upstream error body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("upstream error JSON");
+        assert_eq!(value["error"], expected_error, "{uri}");
+    }
+
+    let invalid_sse = local_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/servers/server-errors/work-roots/root-events-invalid/documents/events")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("invalid upstream SSE content-type request"),
+        )
+        .await
+        .expect("invalid upstream SSE content-type response");
+    assert_eq!(invalid_sse.status(), StatusCode::BAD_GATEWAY);
+    let invalid_body = axum::body::to_bytes(invalid_sse.into_body(), 4096)
+        .await
+        .expect("invalid SSE response body");
+    let invalid_value: serde_json::Value =
+        serde_json::from_slice(&invalid_body).expect("invalid SSE response JSON");
+    assert_eq!(
+        invalid_value["error"],
+        "linked server document events stream unavailable"
     );
 
     remote_server.abort();
