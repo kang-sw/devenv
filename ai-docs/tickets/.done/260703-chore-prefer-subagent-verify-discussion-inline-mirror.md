@@ -6,6 +6,7 @@ related:
 spec:
   - 260505-workflow-primitive-reference
 sage-review: completed
+completed: 2026-07-03
 ---
 
 # Inline lead-prefer-subagent and lead-verify-discussion; add substitution-mirrored skill generation
@@ -323,3 +324,8 @@ agents-plugin-wsflow/tests` passes unchanged (9 tests).
 Plugin version bumped 0.32.2 → 0.32.3 (dev-merge rule) in `198c0290`.
 
 This was the ticket's final phase.
+
+
+## Resolution (2026-07-03)
+
+Both phases implemented and merged into main. Phase 1 (f9b8e0c7^..c8e824f4): inlined lead-prefer-subagent/lead-verify-discussion into static SKILL.md bodies, repointed the lead-workflow-manual embed to LoadSkillBody. Phase 2 (864902a3..0aaacd01): substitution-mirrored skill generation mechanism (GenerateWsflowSkillBody, drift test, guard, curated-list doc), plus removal of lead-verify-discussion's ill-fitting delegates:true continuity/mercenary content that had blocked the guard. Follow-up delegates:true classification review split into todo/260703-chore-review-delegates-true-classification.
