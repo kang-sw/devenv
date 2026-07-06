@@ -1538,6 +1538,18 @@ button {
   text-transform: lowercase;
 }
 
+/* Wrapper for one open work root's persistently-mounted dockview instance.
+   Replaces `.dockview-workbench-layout` as the direct flex child of
+   `.workbench-shell` so multiple root instances can coexist in the DOM;
+   the inactive-root `display: none` toggle is applied inline per instance. */
+.workbench-root-instance {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
 .dockview-workbench-layout {
   display: flex;
   min-width: 0;
