@@ -394,6 +394,68 @@ No buffer retention policy change (chunk-count vs. byte-size vs. time-based)
 is in scope for this ticket — flag as a candidate follow-up if Phase 4's gap
 signal fires often in practice.
 
+### Result (6c0d1b3d) - 2026-07-06
+
+Frontend: added `markTerminalOutputCursor` (`terminals.ts`), reusing the
+cursor-advance formula already proven correct in
+`appendTerminalWebSocketMessage`'s `status`/`exit` branch
+(`nextSequence: Math.max(pane.nextSequence, chunkSequence + 1)`), and wired it
+into `applyTerminalSocketMessage`'s previously-no-op `output` branch — the
+direct xterm-write/`writtenLengthRef` path stays untouched, so this only adds
+the missing cursor field, not a second copy of output text. Backend: added
+`truncated: bool` to both the `Status` and `Exit` variants of
+`TerminalWebSocketServerMessage`, and a new `TerminalSession::is_range_truncated(after)`
+predicate wired into `send_output_backfill` using the `after` cursor value
+captured *before* the backfill loop advances it (an ordering the plan
+explicitly flagged as the mechanism's correctness-critical detail). The
+truncation check only fires when `after > 0` **and** the oldest retained
+chunk's sequence exceeds `after + 1`, deliberately excluding a fresh
+`after == 0` first-time attach (which always means "send me everything you
+have") from ever being misreported as a gap, even against a terminal that has
+already produced more than `MAX_OUTPUT_CHUNKS` output. Frontend renders a
+truncated frame as a visible gap-marker string appended to `pane.output`,
+reusing the existing xterm-write diffing effect rather than a new render
+path. No buffer retention-policy change and no touch to the HTTP
+`terminal_output`/`TerminalOutputView` route, per the ticket's explicit
+non-goal.
+
+Commits: `182d4e28` (fix: advance terminal cursor per output frame and signal
+ring-buffer truncation on resume), `6c0d1b3d` (test: cover cursor-capture
+ordering and off-by-one boundary).
+
+Review: partitioned correctness/fit/test. Correctness clean with zero
+findings. Fit clean (1 minor accepted as-is: the new backend unit tests
+landed in an existing `#[cfg(test)]` module whose name — inherited from
+unrelated shell/PTY-portability tests — no longer describes its contents,
+an unavoidable consequence of `TerminalSession` being file-private with no
+external constructor). Test initially found 2 Important issues: (1) the
+`send_output_backfill` wiring itself — the capture-before-loop ordering that
+is the actual correctness-critical detail — had zero test coverage, since
+the two original unit tests called `is_range_truncated` directly rather than
+through the real call site; (2) the frontend cursor-advance test suite was
+missing the exact off-by-one boundary (`chunkSequence == nextSequence - 1`).
+Both fixed in `6c0d1b3d`: extracted `send_output_backfill`'s body into a pure,
+directly-unit-testable `plan_output_backfill(session, cursor)` function
+(`TerminalSession`'s file-private constructors made an external
+`tests/routes.rs` integration test structurally impossible, and driving a
+real PTY past 1024 discrete chunks is not deterministically controllable due
+to OS-level write coalescing — both independently ruled out the plan's
+originally suggested integration-test approach), with a new test proving the
+capture-before-loop ordering by construction; and added the missing boundary
+assertion for `markTerminalOutputCursor`. Re-verified clean.
+
+Verification: `cargo test -p ws-dashboard-daemon` (39 lib tests including the
+two new truncation tests, 144 route tests, 15 server tests) and
+`npm run test:terminals` all pass. Playwright e2e remains not runnable in
+this sandbox (`libasound.so.2` missing, no Chromium binary), the same
+pre-existing gap as Phases 1-3.
+
+Spec Impact: none, per this ticket's own Spec Impact classification
+(Contract-first: no for Phase 4) — an internal wire-protocol field addition
+with no documented contract to revise; checked the spec's terminal WebSocket
+anchors, which describe behavior at a high level and do not enumerate
+per-message field shapes.
+
 ### Phase 5: Persist and restore per-work-root dockview layout across reload
 
 Serialize each work root's dockview arrangement (groups, tab order, split
