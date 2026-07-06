@@ -235,6 +235,69 @@ only: dockview panel removal, xterm dispose, socket close, and any
 `terminalPanes`/`workbenchGroupsByRoot`/`paneOrderByRoot` entries scoped to
 that root. Switching among still-open roots must not trigger this path.
 
+### Result (d05f5fc0) - 2026-07-06
+
+Added an `X`-iconed close affordance to left-panel work-root rows (no
+confirmation dialog, since this action does not touch daemon state), wired
+through a new `workRoot.close` command. Closing a root removes its key from
+Phase 1's `openWorkRootKeys` (lifted from `WorkbenchShell` to `App()` to give
+the left panel read/close access, mirroring the existing
+`workbenchGroupsByRoot`/`paneOrderByRoot` lift pattern), which stops rendering
+that root's `DockviewWorkbenchLayout` instance and triggers its existing
+unmount-driven dispose/socket-close cleanup — no new dispose/close code was
+needed. `workbenchGroupsByRoot`/`paneOrderByRoot` are cleared in the
+App-level command handler; `terminalPanes` (via a new pure
+`removeTerminalPanesForWorkRoot` filter in `terminals.ts`) and
+`activityPaneOpenByRoot`/`activePaneByRoot`/`closedAgentPaneByRoot` are
+cleared in a `WorkbenchShell`-local cleanup effect. The daemon `closeTerminal()`
+API is never called, so the daemon terminal stays alive for a later reattach
+(matching the ticket's `WorkRoot IO Restore Model` framing). A same-commit
+deletion-ordering hazard (the close handler deletes a key from both
+`openWorkRootKeys` and `openWorkRootRefs` in one React commit, which would
+otherwise lose the `{rootId, serverRoute}` needed to filter `terminalPanes`)
+was resolved by snapshotting both into refs that only advance from inside the
+cleanup effect, and the pure key-diff computation at the center of that fix
+was extracted into `resolveClosedWorkRootRefs` (`workbench/openRootLookup.ts`,
+alongside Phase 1's `findOpenWorkRoot`) rather than left inline.
+
+Commits: `7591d9f5` (feat: add `workRoot.close` command and pane-filter
+helper), `8af5405c` (feat: wire left-panel close action for open work roots),
+`d05f5fc0` (fix: fix compact-root close no-op, guard selected-root close,
+extract key-diff helper).
+
+Review: partitioned correctness/fit/test. Fit clean (1 minor accepted as-is:
+inline `serverScopedIdentity` duplication across the compact/non-compact row
+branches, purely stylistic). Correctness initially found 1 Critical and 1
+Important issue: the compact work-root row's close button was a no-op
+because it dispatched the close command with `workspace.id` instead of the
+work-root id (`compactRoot.id`), so the membership-key filter never matched;
+and closing the currently-selected root did not stick, because nothing
+prevented closing the selected root and the App-level population effect
+re-added it on the next resources poll. Both fixed in `d05f5fc0` (route the
+concrete work-root id into `buildWorkRootCloseCommand` at both row call
+sites, keeping `actionEntityId` as `workspace.id` for `gitWorktreeAdd`/
+`workspace.remove` on the same compact row; disable the close affordance for
+the currently-selected root rather than attempting to move selection) and
+re-verified clean, with 2 minors remaining (a pre-existing `closedAgentPaneByRoot`
+keying-by-plain-rootId scheme, accepted as unrelated to this diff; two now-dead
+`onOpenWorkRootKeysChange`/`onOpenWorkRootRefsChange` props left on
+`WorkbenchShell` after the population effect moved to `App()`, cleanliness-only).
+Test initially found 1 Important issue — the cleanup effect's pure key-diff
+computation (the crux of the same-commit deletion-ordering fix) had zero unit
+coverage despite being extractable without a React harness — fixed in
+`d05f5fc0` (extracted `resolveClosedWorkRootRefs`, added coverage for a
+dropped-key resolution, a still-present key being excluded, and a
+missing-`previousRefs`-entry skip) and re-verified clean.
+
+Verification: `npm run build` and `npm run test:terminals`/`test:commands`/
+`test:workbench` all pass. Playwright e2e remains not runnable in this
+sandbox (`libasound.so.2` missing, no Chromium binary), the same
+pre-existing gap as Phase 1.
+
+Spec Impact: none, per this ticket's own Spec Impact classification
+(Contract-first: no for Phase 2) — internal lifecycle change only, no new
+browser-visible contract.
+
 ### Phase 3: Visibility-gated terminal WebSocket lifecycle
 
 Extend the terminal socket effect (`frontend/src/App.tsx:6235-6306`) so the
