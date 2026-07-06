@@ -160,6 +160,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
+| `260703-feat-dashboard-workroot-session-keepalive` | todo | Keep terminal panes alive across work-root switches with visibility-gated sockets and a reconnect cursor/gap fix |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | ready | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
@@ -214,24 +215,20 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Focus
 
 - `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`ready`, feat) -
-  top-priority dashboard architecture correction before managed CLI or new
-  agent-facing daemon APIs. All daemon-scoped operation routes should become
-  server-aware through the local gateway, with **Server Route** / `serverRoute`
-  as the canonical browser-visible routing term. Bare local routes remain
-  `server-local` compatibility aliases through this ticket; direct linked-server
-  route segments are dot-free because dot is reserved as a future multi-hop
-  separator. Implementation should cherry-pick per-phase commits from the
-  stale prior draft `implement/dashboard-server-scoped-forwarding-phase-7`
-  (per-phase commit mapping in the ticket's Implementation Strategy), renaming
-  `serverId`/`server_id` to `serverRoute`/`server_route` and adding dot-free
-  slug validation within each phase's own cherry-pick; expect real conflicts on
-  `router.rs` and `terminal.rs` against independent `ws-dashboard-dev` fixes
-  (loopback no-auth debug serving, TERM normalization) landed since the
-  draft's ancestor. Spec addressing via `## Spec Impact` (contract-first: yes,
-  written incrementally into `ai-docs/spec/ws-web-dashboard/index.md` in
-  Phases 1-2). Sage review completed (design: concern on a false
-  no-upstream-drift claim, fixed; completeness: block on missing
-  cherry-pick/spec-timing detail, fixed).
+  **all 7 phases complete** (Phase 1 `c72013f5` through Phase 7 `a71162ab`,
+  each closed out with a `### Result` section and a clean partitioned
+  correctness/fit/test review). All daemon-scoped operation routes are now
+  server-aware through the local gateway under the **Server Route** /
+  `serverRoute` naming, with `server-local` compatibility aliases preserved
+  and dot-free linked-server route segments (dot reserved for a future
+  multi-hop separator). Spec addressed incrementally into
+  `ai-docs/spec/ws-web-dashboard/index.md` across the phases (contract-first:
+  yes). The ticket was deliberately **not** moved to `.done/`: the API
+  Inventory is fully covered by landed code, but live remote-Windows dogfood
+  and thin-Playwright e2e execution remain outstanding, verification-only
+  gaps (consolidated in the Phase 7 Result) — closing the ticket status is
+  left as a user judgment call, not an automatic consequence of all phases
+  landing.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
