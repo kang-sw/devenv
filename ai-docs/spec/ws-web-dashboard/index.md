@@ -1557,6 +1557,21 @@ Browser-visible terminal tab descriptors can restore after daemon restart as
 newly created daemon terminal sessions attached to the remembered workRoot. The
 restore descriptor carries title plus a workRoot-relative cwd hint, but it does
 not treat old daemon terminal ids or PTY processes as resumable state.
+
+When the frontend instead reattaches to a still-alive daemon terminal by id on
+reload, it restores that pane's visual appearance rather than replaying only
+plain text: each terminal pane's serialized scrollback buffer (text, cursor
+position, and styles) and scroll viewport offset are captured into a bounded,
+debounced browser-local snapshot keyed by serverRoute + workRootId + terminal
+id. On reattach, the freshly created terminal surface writes the matching
+snapshot's serialized buffer and restores its scroll offset, then the existing
+delta-cursor mechanism resumes the live WebSocket from the sequence captured
+alongside that snapshot to catch up on any output the daemon produced since -
+surfacing the same truncation gap marker as any other stale-cursor reconnect
+if the daemon's retained output no longer covers that gap. This visual
+snapshot is never treated as authoritative over live daemon state: a
+reattached terminal with no matching snapshot, and a new session spawned via
+the restore-intent fallback above, both still start from an empty buffer.
 {#260523-ws-dashboard-terminal-tab-restore}
 
 ## WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}

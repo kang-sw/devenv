@@ -177,6 +177,69 @@ assertEqual(
 );
 
 const pane = terminalPaneFromSession(session);
+
+// Visual-restore nextSequence seeding: a reattached pane with a matching
+// persisted entry resumes from the captured sequence instead of 0, and an
+// unmatched/absent lookup leaves the existing 0-seeded behavior unchanged.
+const restoredSessionPane = terminalPaneFromSession(session, {
+  [terminalPaneLogicalKey(session.workRootId, session.terminalId, session.serverRoute)]:
+    { nextSequence: 42 },
+});
+assertEqual(
+  restoredSessionPane.nextSequence,
+  42,
+  "terminalPaneFromSession seeds nextSequence from a matching visual-restore entry",
+);
+assertEqual(
+  terminalPaneFromSession(session, {}).nextSequence,
+  0,
+  "terminalPaneFromSession leaves nextSequence at 0 when no visual-restore entry matches",
+);
+assertEqual(
+  terminalPaneFromSession(session, {
+    "some-other-logical-key": { nextSequence: 99 },
+  }).nextSequence,
+  0,
+  "terminalPaneFromSession ignores a visual-restore entry keyed to a different logical key",
+);
+const mergedWithVisualRestore = mergeListedTerminalSessions({}, [session], {
+  [terminalPaneLogicalKey(session.workRootId, session.terminalId, session.serverRoute)]:
+    { nextSequence: 7 },
+});
+assertEqual(
+  mergedWithVisualRestore[pane.logicalKey]?.nextSequence,
+  7,
+  "mergeListedTerminalSessions threads the visual-restore lookup into freshly built panes",
+);
+assertEqual(
+  mergeListedTerminalSessions(
+    { [pane.logicalKey]: { ...pane, nextSequence: 3 } },
+    [session],
+    {
+      [terminalPaneLogicalKey(session.workRootId, session.terminalId, session.serverRoute)]:
+        { nextSequence: 7 },
+    },
+  )[pane.logicalKey]?.nextSequence,
+  3,
+  "mergeListedTerminalSessions does not re-seed nextSequence for an already-tracked pane",
+);
+const reconciledWithVisualRestore = reconcileListedTerminalSessions(
+  {},
+  session.workRootId,
+  [session],
+  Number.POSITIVE_INFINITY,
+  undefined,
+  {
+    [terminalPaneLogicalKey(session.workRootId, session.terminalId, session.serverRoute)]:
+      { nextSequence: 5 },
+  },
+);
+assertEqual(
+  reconciledWithVisualRestore[pane.logicalKey]?.nextSequence,
+  5,
+  "reconcileListedTerminalSessions threads the visual-restore lookup through to newly built panes",
+);
+
 assertEqual(pane.nextSequence, 0, "new pane starts at cursor zero");
 assertEqual(
   pane.socketStatus,

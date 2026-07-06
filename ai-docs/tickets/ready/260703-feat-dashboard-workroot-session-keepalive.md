@@ -577,6 +577,72 @@ Verification should cover buffer-serialize/restore round-trip tests, scroll
 offset restore, size-bound enforcement, and a check that the delta-cursor
 catch-up after a restored snapshot does not duplicate or drop output.
 
+### Result (07d14b4d) - 2026-07-06
+
+Implemented on `implement/phase-6-terminal-visual-buffer-restore`
+(`97d1f9b0..07d14b4d`), merged into `ws-dashboard-dev`.
+
+- Added `@xterm/addon-serialize@^0.14.0` as a new frontend dependency
+  (compatible with existing `@xterm/xterm@^5.5.0`/`@xterm/addon-fit@^0.10.0`).
+- New module `workbench/terminalVisualRestore.ts`: `TerminalVisualRestoreEntry`
+  (`logicalKey`, `serialized`, `nextSequence`, `viewportY`, `capturedAtMs`),
+  `loadTerminalVisualRestoreSnapshot`/`saveTerminalVisualRestoreSnapshot`
+  against `localStorage` key `ws-dashboard.terminalVisual.v1`, a per-entry size
+  bound (`terminalVisualRestoreMaxSerializedLength`, ~200,000 chars) that drops
+  (never truncates) oversized entries so no partial ANSI escape sequence can
+  reach `terminal.write`, and the pure decision function
+  `resolveTerminalMountWrite(pane, restoreEntry)` returning
+  `{kind:"restore", serialized, viewportY} | {kind:"replay", text} | {kind:"none"}`.
+- `TerminalPaneBody`'s mount effect now loads `SerializeAddon` alongside the
+  existing `FitAddon`, calls `resolveTerminalMountWrite` to pick the branch,
+  and for the `restore` kind writes the serialized snapshot with
+  `terminal.write(serialized, () => terminal.scrollToLine(viewportY))` — the
+  `scrollToLine` call runs inside xterm's write-completion callback so it acts
+  on the fully parsed buffer instead of racing xterm's asynchronous write.
+  `writtenLengthRef` is left at 0 for the `restore` kind (decoupled from the
+  snapshot write) so Phase 4's delta-write effect only writes output produced
+  after the snapshot, appended after the restored buffer with no duplication
+  or drop.
+- Reattach-only threading: `terminalPaneFromSession`, `mergeListedTerminalSessions`,
+  and `reconcileListedTerminalSessions` gained an optional
+  `visualRestoreByLogicalKey` lookup that seeds `pane.nextSequence` from the
+  matching snapshot's captured cursor, feeding Phase 4's
+  `terminalWebSocketCursor = Math.max(0, nextSequence - 1)` catch-up math. The
+  two non-reattach call sites (`createTerminalPane`, `placeTerminalSessions`)
+  intentionally do not receive the lookup and keep starting empty.
+- A debounced (~900ms) capture effect persists a `TerminalVisualRestoreEntry`
+  per pane on `pane.output` changes via `SerializeAddon.serialize({scrollback: 2000})`,
+  reading latest state through a ref at fire time; the timer is cleared on
+  every dependency change and on unmount, with a guard against firing after
+  the addon/terminal refs are nulled during teardown.
+- Spec anchor `#260523-ws-dashboard-terminal-tab-restore` updated to describe
+  the richer visual-buffer restore for id-reattached terminals, alongside the
+  unchanged new-session-on-daemon-restart behavior.
+
+Review and fix cycle: Fit review was clean throughout. Correctness review
+(opus-tier) came back "clean with 2 minor" — a scroll-offset restore
+reliability bug (the original code called `scrollToLine` immediately after
+`terminal.write` rather than inside its completion callback, so it raced
+xterm's async write-buffer parse) and an out-of-scope stale-entry-accumulation
+follow-up (accepted, no fix — degrades gracefully, per-entry size bound was
+the documented guardrail). Test review found one Important finding (the
+mount-effect's three-way write-branch decision was inlined and untested,
+repeating the same extractable-pure-glue gap shape already caught and fixed
+in Phases 1/2/4/5) and one Minor (missing exact-boundary size tests). A single
+combined fix-relay cycle (`07d14b4d`) fixed the scroll-offset race, extracted
+`resolveTerminalMountWrite` with unit tests for all three branches, and added
+the boundary-size tests; re-review confirmed all three partitions clean with
+no new issues introduced by the extraction.
+
+Verification: `npm run test:terminals`, `npm run test:workbench`, and
+`npm run build` all pass in `ws-dashboard/frontend`. Playwright e2e
+(`dashboard-acceptance.spec.ts`) remains not runnable in this sandbox
+(`libasound.so.2` missing, no Chromium binary) — consistent with the
+disclosure in every prior phase's Result; the mount-effect's DOM/xterm-coupled
+behavior (async write-completion ordering, debounce-timer lifecycle) was
+verified via direct code reading plus the extracted pure function's unit
+tests, not an end-to-end run.
+
 ### Phase 7: Reuse layout/terminal-visual restore for in-session close/reopen
 
 Wire Phase 2's explicit "close work root" teardown and its later reopen path
