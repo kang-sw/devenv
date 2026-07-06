@@ -262,6 +262,7 @@ pub enum TerminalWebSocketServerMessage {
         status: TerminalStatus,
         #[serde(rename = "nextSequence")]
         next_sequence: u64,
+        truncated: bool,
     },
     Exit {
         #[serde(rename = "terminalId")]
@@ -269,6 +270,7 @@ pub enum TerminalWebSocketServerMessage {
         status: TerminalStatus,
         #[serde(rename = "nextSequence")]
         next_sequence: u64,
+        truncated: bool,
     },
 }
 
@@ -575,6 +577,17 @@ impl TerminalSession {
         }
     }
 
+    // Reports whether a client resuming from `after` has missed retained
+    // history: only meaningful for a genuine resume (`after > 0`; `after ==
+    // 0` always means "send me everything you have", never a gap - see
+    // Phase 4 plan risk signal), and only true when the oldest retained
+    // chunk's sequence is past `after + 1`, i.e. there is a real hole between
+    // what the client last saw and what is still retained.
+    fn is_range_truncated(&self, after: u64) -> bool {
+        let inner = self.inner.lock().expect("terminal session lock poisoned");
+        after > 0 && inner.output.front().is_some_and(|chunk| chunk.sequence > after + 1)
+    }
+
     fn write_input(&self, input: &[u8]) -> Result<(), TerminalError> {
         if input.len() > MAX_INPUT_BYTES {
             return Err(TerminalError::BadRequest("terminal input too large"));
@@ -710,24 +723,24 @@ async fn terminal_socket_task(
                 match message {
                     Message::Text(text) => {
                         if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
-                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
                         let Ok(message) = serde_json::from_str::<TerminalWebSocketClientMessage>(&text) else {
                             break;
                         };
                         if handle_terminal_socket_client_message(&session, message).is_err() {
-                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
                     }
                     Message::Binary(bytes) => {
                         if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
-                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
                         if session.write_input(&bytes).is_err() {
-                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            let _ = send_terminal_socket_status(&session, &mut sender, false, false).await;
                             break;
                         }
                     }
@@ -773,7 +786,12 @@ async fn send_output_backfill(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     cursor: &mut u64,
 ) -> Result<(), ()> {
-    let output = session.output_after(*cursor);
+    // Capture the cursor as requested, before the backfill loop below
+    // advances it to the last sent chunk's sequence - the truncation check
+    // must see what the client actually asked for, not where the cursor
+    // ends up after catching up, or it would never fire.
+    let requested_after = *cursor;
+    let output = session.output_after(requested_after);
     for chunk in output.chunks {
         *cursor = (*cursor).max(chunk.sequence);
         send_socket_json(
@@ -785,13 +803,15 @@ async fn send_output_backfill(
         )
         .await?;
     }
-    send_terminal_socket_status(session, sender, !session.is_live()).await
+    let truncated = session.is_range_truncated(requested_after);
+    send_terminal_socket_status(session, sender, !session.is_live(), truncated).await
 }
 
 async fn send_terminal_socket_status(
     session: &TerminalSession,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     exit: bool,
+    truncated: bool,
 ) -> Result<(), ()> {
     let output = session.output_after(u64::MAX);
     let message = if exit {
@@ -799,12 +819,14 @@ async fn send_terminal_socket_status(
             terminal_id: session.id.clone(),
             status: output.status,
             next_sequence: output.next_sequence,
+            truncated,
         }
     } else {
         TerminalWebSocketServerMessage::Status {
             terminal_id: session.id.clone(),
             status: output.status,
             next_sequence: output.next_sequence,
+            truncated,
         }
     };
     send_socket_json(sender, &message).await
@@ -1064,6 +1086,69 @@ mod terminal_portability_skeleton_tests {
             browser_pty_term(|key| (key == "TERM").then(|| " xterm-kitty ".to_owned())),
             "xterm-kitty"
         );
+    }
+
+    // Builds a TerminalSession without spawning a real PTY, so the ring
+    // buffer eviction / truncation-detection contract can be exercised
+    // deterministically and fast, independent of the environment's PTY
+    // availability (see Phase 4 plan: no PTY-based e2e coverage needed for
+    // this backend-only cursor/eviction logic).
+    fn fake_terminal_session() -> TerminalSession {
+        TerminalSession {
+            id: opaque_terminal_id(),
+            work_root_id: WorkRootId::from("fake-work-root".to_owned()),
+            title: "fake".to_owned(),
+            cwd_hint: None,
+            created_at_ms: now_ms(),
+            inner: Mutex::new(TerminalSessionInner {
+                status: TerminalStatus::Running,
+                columns: default_columns(),
+                rows: default_rows(),
+                output: VecDeque::new(),
+                next_sequence: 1,
+                writer: None,
+                master: None,
+                child: None,
+            }),
+            output_signal: watch::channel(0).0,
+        }
+    }
+
+    #[test]
+    fn is_range_truncated_never_fires_on_fresh_after_zero_attach() {
+        let session = fake_terminal_session();
+        for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
+            session.append_output("x".to_owned());
+        }
+        // A fresh pane always requests after=0 ("send me everything you
+        // have"), even against a terminal that has already evicted far more
+        // than MAX_OUTPUT_CHUNKS chunks - that must never be reported as a
+        // gap, since the client never observed the evicted data in the first
+        // place.
+        assert!(!session.is_range_truncated(0));
+    }
+
+    #[test]
+    fn is_range_truncated_fires_only_for_a_genuine_resume_past_eviction() {
+        let session = fake_terminal_session();
+        for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
+            session.append_output("x".to_owned());
+        }
+        let oldest_retained = session
+            .inner
+            .lock()
+            .expect("terminal session lock poisoned")
+            .output
+            .front()
+            .expect("output non-empty after eviction")
+            .sequence;
+
+        // Resuming from a cursor at or before the last chunk the client
+        // could still have seen contiguously is not a gap...
+        assert!(!session.is_range_truncated(oldest_retained - 1));
+        // ...but resuming from anything older than that has a real hole
+        // between what the client last observed and what remains retained.
+        assert!(session.is_range_truncated(oldest_retained - 2));
     }
 }
 

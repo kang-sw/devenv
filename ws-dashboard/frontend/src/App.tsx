@@ -163,6 +163,7 @@ import {
   createTerminal,
   fetchTerminalOutput,
   listTerminals,
+  markTerminalOutputCursor,
   markTerminalPaneCloseError,
   markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
@@ -4430,6 +4431,17 @@ function WorkbenchShell({
     message: TerminalWebSocketServerMessage,
   ) {
     if (message.type === "output") {
+      setTerminalPanes((current) =>
+        current[pane.logicalKey]
+          ? {
+              ...current,
+              [pane.logicalKey]: markTerminalOutputCursor(
+                current[pane.logicalKey],
+                message.chunk.sequence,
+              ),
+            }
+          : current,
+      );
       return;
     }
     setTerminalPanes((current) =>
