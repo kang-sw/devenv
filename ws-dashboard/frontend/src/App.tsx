@@ -123,6 +123,7 @@ import {
   revalidateWorkbenchLayoutForRoot,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
+  resolveTerminalMountWrite,
   terminalVisualRestoreScrollbackLines,
   terminalVisualRestoreDebounceMs,
   type SurfaceKind,
@@ -6551,20 +6552,31 @@ function TerminalPaneBody({
     // reattached pane either way). New sessions spawned via the
     // restore-intent fallback have no matching entry and fall through to the
     // existing replay path unchanged.
+    //
+    // The three-way branch selection itself (restore vs. replay vs. no-op)
+    // is pure and lives in `resolveTerminalMountWrite` (`workbench/terminalVisualRestore.ts`)
+    // so it is unit testable independent of xterm/DOM; only the actual
+    // `terminal.write`/`scrollToLine`/`writtenLengthRef` side effects stay here.
     const restoreEntry = liveRef.current.actions.onVisualRestoreEntryFor(
       liveRef.current.pane,
     );
-    if (restoreEntry) {
-      terminal.write(restoreEntry.serialized);
-      terminal.scrollToLine(restoreEntry.viewportY);
-    } else {
+    const mountWrite = resolveTerminalMountWrite(
+      liveRef.current.pane,
+      restoreEntry,
+    );
+    if (mountWrite.kind === "restore") {
+      // `terminal.write()` is asynchronous (parsed on a later tick via the
+      // internal write buffer), so `scrollToLine` must run in the write's
+      // completion callback - calling it immediately after `write()` would
+      // clamp the scroll target against the then-still-empty buffer.
+      terminal.write(mountWrite.serialized, () => {
+        terminal.scrollToLine(mountWrite.viewportY);
+      });
+    } else if (mountWrite.kind === "replay") {
       // Replay PTY output buffered before this surface mounted so reselecting
       // a terminal tab restores its emulator contents.
-      const initialOutput = liveRef.current.pane.output;
-      if (initialOutput.length > 0) {
-        terminal.write(initialOutput);
-        writtenLengthRef.current = initialOutput.length;
-      }
+      terminal.write(mountWrite.text);
+      writtenLengthRef.current = mountWrite.text.length;
     }
 
     // Keyboard input originates from the focused emulator surface and reaches

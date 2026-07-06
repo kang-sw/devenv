@@ -127,6 +127,34 @@ export function upsertTerminalVisualRestoreEntry(
   );
 }
 
+// Three-way selection of what `TerminalPaneBody`'s mount effect should write
+// into a freshly opened xterm instance, extracted as a pure function so the
+// branch selection (restore-snapshot vs. plain-text replay vs. no-op) is unit
+// testable without a React/xterm harness. The actual `terminal.write(...)`/
+// `terminal.scrollToLine(...)`/`writtenLengthRef` side effects stay at the
+// call site - this only decides which of the three applies.
+export type TerminalMountWrite =
+  | { kind: "restore"; serialized: string; viewportY: number }
+  | { kind: "replay"; text: string }
+  | { kind: "none" };
+
+export function resolveTerminalMountWrite(
+  pane: { output: string },
+  restoreEntry: Pick<TerminalVisualRestoreEntry, "serialized" | "viewportY"> | null | undefined,
+): TerminalMountWrite {
+  if (restoreEntry) {
+    return {
+      kind: "restore",
+      serialized: restoreEntry.serialized,
+      viewportY: restoreEntry.viewportY,
+    };
+  }
+  if (pane.output.length > 0) {
+    return { kind: "replay", text: pane.output };
+  }
+  return { kind: "none" };
+}
+
 function parseTerminalVisualRestoreEntry(
   value: unknown,
 ): TerminalVisualRestoreEntry | null {

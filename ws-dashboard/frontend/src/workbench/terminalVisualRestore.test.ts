@@ -3,6 +3,7 @@ import {
   saveTerminalVisualRestoreSnapshot,
   terminalVisualRestoreMaxSerializedLength,
   upsertTerminalVisualRestoreEntry,
+  resolveTerminalMountWrite,
   type TerminalVisualRestoreEntry,
 } from "./terminalVisualRestore.js";
 
@@ -80,6 +81,35 @@ const smallEntry: TerminalVisualRestoreEntry = {
   );
 }
 
+// Exact-boundary sizes: at maxLength the entry is kept, one char above is
+// dropped (already covered above); one char below maxLength is also kept.
+// Locks in the off-by-one in both directions around the `<=`/`>` comparisons.
+{
+  const { storage } = fakeStorage();
+  const atMaxEntry: TerminalVisualRestoreEntry = {
+    ...smallEntry,
+    logicalKey: "persistentTerminal/server-local/root-a/term-at-max",
+    serialized: "x".repeat(terminalVisualRestoreMaxSerializedLength),
+  };
+  const belowMaxEntry: TerminalVisualRestoreEntry = {
+    ...smallEntry,
+    logicalKey: "persistentTerminal/server-local/root-a/term-below-max",
+    serialized: "x".repeat(terminalVisualRestoreMaxSerializedLength - 1),
+  };
+  saveTerminalVisualRestoreSnapshot([atMaxEntry, belowMaxEntry], storage);
+  const loaded = loadTerminalVisualRestoreSnapshot(storage);
+  assertEqual(
+    Boolean(loaded[atMaxEntry.logicalKey]),
+    true,
+    "an entry exactly at the max serialized length is kept, not dropped",
+  );
+  assertEqual(
+    Boolean(loaded[belowMaxEntry.logicalKey]),
+    true,
+    "an entry one char below the max serialized length is kept",
+  );
+}
+
 // Saving an empty list clears any persisted snapshot.
 {
   const { storage, backing } = fakeStorage();
@@ -135,5 +165,46 @@ const smallEntry: TerminalVisualRestoreEntry = {
     loadTerminalVisualRestoreSnapshot(null),
     {},
     "a null storage handle degrades to an empty snapshot without throwing",
+  );
+}
+
+// resolveTerminalMountWrite: a matching restore entry takes priority over
+// pane.output and yields the "restore" kind with the entry's serialized
+// text/viewportY, regardless of pane.output's contents.
+{
+  const write = resolveTerminalMountWrite(
+    { output: "should be ignored" },
+    smallEntry,
+  );
+  assertDeepEqual(
+    write,
+    {
+      kind: "restore",
+      serialized: smallEntry.serialized,
+      viewportY: smallEntry.viewportY,
+    },
+    "a matching restore entry yields the restore kind with its serialized/viewportY",
+  );
+}
+
+// resolveTerminalMountWrite: no restore entry but non-empty pane.output
+// yields the "replay" kind carrying the output text.
+{
+  const write = resolveTerminalMountWrite({ output: "hello world" }, undefined);
+  assertDeepEqual(
+    write,
+    { kind: "replay", text: "hello world" },
+    "no restore entry with non-empty pane.output yields the replay kind",
+  );
+}
+
+// resolveTerminalMountWrite: no restore entry and empty pane.output yields
+// the "none" kind (nothing to write).
+{
+  const write = resolveTerminalMountWrite({ output: "" }, null);
+  assertDeepEqual(
+    write,
+    { kind: "none" },
+    "no restore entry and empty pane.output yields the none kind",
   );
 }
