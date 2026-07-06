@@ -168,6 +168,65 @@ Constraints:
 - No socket-visibility changes in this phase — a pane in a hidden root instance
   keeps its live socket for now (Phase 3 addresses this).
 
+### Result (1ba87971) - 2026-07-06
+
+Replaced the single shared `DockviewWorkbenchLayout` mount in `WorkbenchShell`
+with one instance per visited work root. Added `openWorkRootKeys`/
+`openWorkRootRefs` state (an append-only, de-duplicated membership list keyed
+by `serverScopedIdentity`) to track which roots have been visited, and a pure
+`findOpenWorkRoot` resolver (extracted to
+`ws-dashboard/frontend/src/workbench/openRootLookup.ts`) that re-resolves each
+open root against `resources` every render, independent of the tree-walk
+selection state. Factored the existing `buildWorkbenchEditorGroups` +
+`applyWorkbenchPaneOrder` call into a `buildEditorGroupsForRoot` helper,
+invoked once per open root per render; live Activity state
+(`activityPaneOpenByRoot`/`workRootActivityState`/`activityTranscriptRefresh`)
+is passed only for the selected root, with inert defaults for background
+roots. Render now `.map()`s over resolved open roots, each wrapped in a
+`.workbench-root-instance` div toggling `display:none` inline instead of
+unmounting; `terminalPanes`, `workbenchGroupsByRoot`, and `paneOrderByRoot`
+were reused unchanged, per the ticket's Constraints. The pre-existing CONTRACT
+`data-workbench-layout-owner="dockview"` locator was left untouched (latent,
+not current risk, since no existing test opens two roots mid-flow); the new
+wrapper carries `data-workbench-root-active` as the escape hatch for future
+multi-root test scoping.
+
+Commits: `c7a1f59c` (feat: mount one dockview workbench instance per open work
+root), `1ba87971` (test: add unit coverage for `findOpenWorkRoot`, closing a
+review-found coverage gap).
+
+Review: partitioned correctness/fit/test. Correctness clean (3 minors, all
+accepted as-is: a plan-sanctioned `mainInstances[0]` display simplification
+for the agent tab on multi-main-instance roots; a one-frame empty-workbench
+flash on first opening a not-yet-visited root, smoothness-only with no
+terminal state loss; a pre-existing, not-introduced-by-this-diff keep-alive
+hole when `selection` itself becomes null, noted as a forward-reference for
+later phases). Fit clean (1 minor accepted as-is: a new
+`.workbench-root-instance` CSS class for flex sizing, a necessary and
+well-justified deviation from the plan's "no styles.css change" framing).
+Test initially found 2 Important issues — the claimed
+`test:workbench`/`test:terminals` pass results provided zero regression
+coverage for this diff's actual changed code (neither suite touches
+`App.tsx`), and the pure `findOpenWorkRoot` helper was a realistic, missed
+unit-test opportunity — both fixed in `1ba87971` (extracted `findOpenWorkRoot`
+into a testable module, added coverage for its no-match and
+`serverRoute`-mismatch collision branches, corrected the report's
+test-coverage framing) and re-verified clean.
+
+Verification: `npm run build` (tsc -b + vite build) and
+`npm run test:workbench`/`npm run test:terminals` all pass. Playwright e2e
+(`dashboard-acceptance.spec.ts`) could not run in this sandbox
+(`libasound.so.2` missing, no Chromium binary), matching the pre-existing
+environment gap already documented in the sibling
+`260525-feat-ws-dashboard-server-scoped-operation-forwarding` ticket's Phase
+3-7 Results; manual/structural verification confirmed inactive root instances
+are hidden via `display:none` rather than unmounted, so their dockview/xterm
+DOM nodes are never destroyed on a root switch.
+
+Spec Impact: none, per this ticket's own Spec Impact classification
+(Contract-first: no for Phases 1-4/7) — this phase is an internal render
+restructuring with no new browser-visible contract; no spec entry added.
+
 ### Phase 2: Explicit "close work root" action
 
 Add a close affordance for open work roots in the left panel. Triggering it

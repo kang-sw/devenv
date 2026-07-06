@@ -114,6 +114,7 @@ import {
   surfaceLogicalKey,
   workbenchGroupId,
   DockviewWorkbenchLayout,
+  findOpenWorkRoot,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -3275,6 +3276,15 @@ function WorkbenchShell({
   const [closedAgentPaneByRoot, setClosedAgentPaneByRoot] = useState<
     Record<string, readonly string[]>
   >({});
+  // Work roots the user has visited this session stay mounted (own dockview
+  // instance each) instead of being destroyed on selection switch. Ordered,
+  // de-duplicated set of `serverScopedIdentity(serverId, rootId)` keys, plus
+  // the raw ids needed to re-resolve each root from `resources` without
+  // depending on the tree-walk `selectedId`/`selection` state.
+  const [openWorkRootKeys, setOpenWorkRootKeys] = useState<string[]>([]);
+  const [openWorkRootRefs, setOpenWorkRootRefs] = useState<
+    Record<string, { rootId: string; serverRoute: string }>
+  >({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
@@ -3335,6 +3345,22 @@ function WorkbenchShell({
   const activePaneByGroup = selectedWorkRootId
     ? (activePaneByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ?? {})
     : {};
+  useEffect(() => {
+    if (!selectedWorkRootStateKey || !selection) {
+      return;
+    }
+    const rootKey = selectedWorkRootStateKey;
+    const rootId = selection.root.id;
+    const serverRoute = selection.root.resourcePath.serverId;
+    setOpenWorkRootKeys((current) =>
+      current.includes(rootKey) ? current : [...current, rootKey],
+    );
+    setOpenWorkRootRefs((current) =>
+      current[rootKey]
+        ? current
+        : { ...current, [rootKey]: { rootId, serverRoute } },
+    );
+  }, [selectedWorkRootStateKey, selection]);
   const activityPaneOpenForSelected = selectedWorkRootId
     ? (activityPaneOpenByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
       false)
@@ -3434,54 +3460,82 @@ function WorkbenchShell({
     });
   };
 
+  // Compute the dockview editor-group model for a single open work root.
+  // Called once per open root per render (a plain function call, not a
+  // hook — `buildWorkbenchEditorGroups` is pure) so every open root's
+  // dockview instance gets its own pane set. Only the selected root gets
+  // live selection/activity data; inactive roots reuse the same defaults
+  // `buildWorkbenchEditorGroups` already falls back to.
+  const buildEditorGroupsForRoot = (
+    root: WorkRootView,
+    mainInstance: InstanceView | null,
+    rootKey: string,
+  ): WorkbenchEditorGroupModel[] => {
+    const isSelectedRoot = rootKey === selectedWorkRootStateKey;
+    const groupsForRoot =
+      workbenchGroupsByRoot[rootKey] ?? initialWorkbenchGroups;
+    const paneOrderForRoot = paneOrderByRoot[rootKey] ?? {};
+    const selectedInstanceForRoot = isSelectedRoot
+      ? (selection?.selectedInstance ?? mainInstance)
+      : mainInstance;
+    const supportEntityForRoot = isSelectedRoot
+      ? (selectedEntity ?? resourceEntityForWorkRoot(root))
+      : resourceEntityForWorkRoot(root);
+    return applyWorkbenchPaneOrder(
+      buildWorkbenchEditorGroups(
+        root,
+        groupsForRoot,
+        mainInstance,
+        selectedInstanceForRoot,
+        supportEntityForRoot,
+        readOnlyFilePanes,
+        readOnlyFilePaneOrderByGroup,
+        paneOrderForRoot,
+        Object.values(terminalPanes),
+        terminalPaneOrderByGroup,
+        {
+          onSendData: sendTerminalData,
+          onClose: closeTerminalPane,
+          onResize: forwardTerminalResize,
+          onSocketStatus: updateTerminalSocketStatus,
+          onSocketMessage: applyTerminalSocketMessage,
+          onSocketResize: acceptTerminalSocketResize,
+          onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
+          isActivePane: (pane) =>
+            focusedTerminalPaneIdRef.current === pane.paneId,
+        },
+        closedAgentPaneByRoot[root.id] ?? [],
+        isSelectedRoot ? activityPaneOpenByRoot[rootKey] ?? false : false,
+        isSelectedRoot &&
+          workRootActivityState.rootId === root.id &&
+          workRootActivityState.serverRoute === root.resourcePath.serverId
+          ? workRootActivityState.activity
+          : { phase: "loading" },
+        isSelectedRoot &&
+          activityTranscriptRefresh?.rootId === root.id &&
+          activityTranscriptRefresh.serverRoute === root.resourcePath.serverId
+          ? activityTranscriptRefresh
+          : null,
+        onCommand,
+        onDocumentSaved,
+      ),
+      paneOrderForRoot,
+    );
+  };
+
   const workbenchModel =
     resources && selection
       ? (() => {
-          const { workspace, root, mainInstance, selectedInstance } = selection;
+          const { workspace, root, mainInstance, selectedInstance } =
+            selection;
           const rootKey = serverScopedIdentity(
             root.resourcePath.serverId,
             root.id,
           );
-          const supportEntity =
-            selectedEntity ?? resourceEntityForWorkRoot(root);
-          const editorGroups = applyWorkbenchPaneOrder(
-            buildWorkbenchEditorGroups(
-              root,
-              workbenchGroups,
-              mainInstance,
-              selectedInstance,
-              supportEntity,
-              readOnlyFilePanes,
-              readOnlyFilePaneOrderByGroup,
-              paneOrderByGroup,
-              Object.values(terminalPanes),
-              terminalPaneOrderByGroup,
-              {
-                onSendData: sendTerminalData,
-                onClose: closeTerminalPane,
-                onResize: forwardTerminalResize,
-                onSocketStatus: updateTerminalSocketStatus,
-                onSocketMessage: applyTerminalSocketMessage,
-                onSocketResize: acceptTerminalSocketResize,
-                onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
-                isActivePane: (pane) =>
-                  focusedTerminalPaneIdRef.current === pane.paneId,
-              },
-              closedAgentPaneByRoot[root.id] ?? [],
-              activityPaneOpenByRoot[rootKey] ?? false,
-              workRootActivityState.rootId === root.id &&
-                workRootActivityState.serverRoute === root.resourcePath.serverId
-                ? workRootActivityState.activity
-                : { phase: "loading" },
-              activityTranscriptRefresh?.rootId === root.id &&
-                activityTranscriptRefresh.serverRoute ===
-                  root.resourcePath.serverId
-                ? activityTranscriptRefresh
-                : null,
-              onCommand,
-              onDocumentSaved,
-            ),
-            paneOrderByGroup,
+          const editorGroups = buildEditorGroupsForRoot(
+            root,
+            mainInstance,
+            rootKey,
           );
           return {
             workspace,
@@ -3493,6 +3547,34 @@ function WorkbenchShell({
         })()
       : null;
   const editorGroups = workbenchModel?.editorGroups ?? [];
+  // Every open work root's own resolved root/mainInstance + editor groups,
+  // used to mount one persistent `DockviewWorkbenchLayout` per root below.
+  // Roots that no longer resolve against `resources` (e.g. transient
+  // resource-fetch gaps) are silently skipped for that render.
+  const openWorkRootInstances = openWorkRootKeys
+    .map((rootKey) => {
+      const ref = openWorkRootRefs[rootKey];
+      if (!ref) {
+        return null;
+      }
+      const resolved = findOpenWorkRoot(resources, ref);
+      if (!resolved) {
+        return null;
+      }
+      return {
+        rootKey,
+        root: resolved.root,
+        mainInstance: resolved.mainInstance,
+        editorGroups: buildEditorGroupsForRoot(
+          resolved.root,
+          resolved.mainInstance,
+          rootKey,
+        ),
+      };
+    })
+    .filter(
+      (entry): entry is NonNullable<typeof entry> => entry !== null,
+    );
 
   useEffect(() => {
     if (!workbenchModel) {
@@ -4558,13 +4640,25 @@ function WorkbenchShell({
       {loading ? (
         <InlineNotice tone="info" title="Refreshing" detail="resources" />
       ) : null}
-      <DockviewWorkbenchLayout
-        activePaneByGroup={activePaneByGroup}
-        groups={editorGroups}
-        onMovePane={movePane}
-        onRequestClosePane={requestWorkbenchPaneClose}
-        onSelectPane={selectPane}
-      />
+      {openWorkRootInstances.map(({ rootKey, editorGroups: rootGroups }) => {
+        const isActiveRoot = rootKey === selectedWorkRootStateKey;
+        return (
+          <div
+            key={rootKey}
+            className="workbench-root-instance"
+            data-workbench-root-active={isActiveRoot ? "true" : "false"}
+            style={isActiveRoot ? undefined : { display: "none" }}
+          >
+            <DockviewWorkbenchLayout
+              activePaneByGroup={activePaneByRoot[rootKey] ?? {}}
+              groups={rootGroups}
+              onMovePane={movePane}
+              onRequestClosePane={requestWorkbenchPaneClose}
+              onSelectPane={selectPane}
+            />
+          </div>
+        );
+      })}
       {pendingCloseRequest ? (
         <WorkbenchClosePopover
           request={pendingCloseRequest}
