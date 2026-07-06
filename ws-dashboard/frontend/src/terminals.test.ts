@@ -10,6 +10,7 @@ import {
   resizeTerminal,
   sendTerminalInput,
   markTerminalPaneCloseError,
+  markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
   mergeListedTerminalSessions,
   loadTerminalRestoreIntents,
@@ -200,6 +201,37 @@ assertEqual(
   canApplyTerminalOutputPoll(pane, 0),
   true,
   "poll response can apply when pane cursor and polling state still match",
+);
+assertEqual(
+  pane.visibilityGated,
+  false,
+  "new pane starts visible (not gated)",
+);
+assertEqual(
+  shouldPollTerminalOutput(markTerminalPaneVisibilityGated(pane, true)),
+  false,
+  "a pane closed solely because it is hidden is excluded from HTTP fallback polling",
+);
+assertEqual(
+  markTerminalPaneVisibilityGated(pane, true).visibilityGated,
+  true,
+  "marking a pane visibility-gated sets the flag",
+);
+assertEqual(
+  markTerminalPaneVisibilityGated(pane, false) === pane,
+  true,
+  "marking a pane visibility-gated with no change returns the same reference",
+);
+assertEqual(
+  shouldPollTerminalOutput(
+    markTerminalSocketStatus(
+      markTerminalPaneVisibilityGated(pane, false),
+      "fallback",
+      "terminal WebSocket failed",
+    ),
+  ),
+  true,
+  "a genuine socket error still polls once the pane becomes visible again (gate cleared)",
 );
 assertEqual(
   canApplyTerminalOutputPoll(markTerminalSocketStatus(pane, "connecting"), 0),

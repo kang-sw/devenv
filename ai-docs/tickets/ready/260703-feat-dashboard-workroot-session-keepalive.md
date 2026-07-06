@@ -312,6 +312,66 @@ have a meaningful population of sockets to gate. Should land after Phase 4's
 cursor-accuracy fix, or explicitly accept minor duplicate-output-on-resume
 until Phase 4 lands.
 
+### Result (7c7c913c) - 2026-07-06
+
+Landed under the explicit-acceptance branch: Phase 4 has not landed yet, so
+the duplicate-output-on-resume risk from the still-open `nextSequence`
+tracking gap is knowingly accepted for now. A `paneVisible` state was added to
+`TerminalPaneBody`, driven by extending the existing 100ms `focusWatchdog`
+interval to unconditionally compute `container.offsetParent` on every tick
+(reusing the established visibility idiom already used by the focus-restore
+logic, rather than adding a second timer). The terminal socket-open effect now
+depends on `paneVisible` and no-ops (setting `socketStatus="disconnected"`)
+while hidden, letting React's own cleanup close the live socket; becoming
+visible again re-runs the effect body unchanged, reopening via the existing
+`terminalWebSocketCursor` resume mechanism — no new resume logic was needed.
+A survey finding simplified the scope: Dockview already hides an
+inactive-in-group tab via `display:none` on its content wrapper, and Phase 1
+hides an inactive root's `.workbench-root-instance` the same way, so the
+ticket's two visibility conditions ("root not active" and "group not
+frontmost") both collapse to the same `offsetParent` check — no prop plumbing
+through `buildWorkbenchEditorGroups`/`terminalWorkbenchPanesByGroup` was
+needed. The xterm instance and `TerminalPaneState` (aside from
+`socketStatus`) are untouched across the gate; no daemon-side change was made,
+since the daemon's existing `after`-cursor backfill already tolerates a
+closed/reopened client socket like any other reconnect.
+
+Commits: `b0834727` (feat: gate terminal WebSocket lifecycle on pane
+visibility), `7c7c913c` (fix: stop visibility-gated terminal sockets from
+triggering HTTP poll fallback).
+
+Review: partitioned correctness/fit/test. Fit and test both clean with zero
+findings. Correctness found 1 Important issue: gating a socket closed sets
+`socketStatus="disconnected"`, which flips `shouldPollTerminalOutput()` to
+true — but the HTTP output-poll fleet is filtered to the active work root
+only, so a background-root pane goes genuinely quiet (socket closed, not
+polled, matching the phase's resource-reduction goal) while an active-root,
+non-frontmost tab stayed in the poll fleet and began a continuous 120ms HTTP
+poll while hidden — a net increase in traffic for exactly the in-group
+tab-switch case the phase's own verification plan claimed to handle. Fixed in
+`7c7c913c` by adding a `visibilityGated` field to `TerminalPaneState`,
+distinct from `socketStatus`, so `shouldPollTerminalOutput` can tell
+"intentionally gated closed" apart from "genuinely disconnected" — the gate
+flag is set only in the hidden branch (where no live socket exists, so it can
+never coincide with a real disconnect) and cleared as the first statement of
+the visible branch, before the new socket is even opened, so a subsequent
+real error/exit still polls correctly. Re-verified clean. One correctness
+minor was accepted as-is (reusing `"disconnected"` status also makes
+`dockviewLayoutModel.ts` treat the pane's meta as churn-allowed while hidden,
+no visible effect).
+
+Verification: `npm run build` and `npm run test:terminals`/`test:workbench`
+all pass, including new unit coverage for the `visibilityGated` gate/poll
+interaction. Playwright e2e remains not runnable in this sandbox
+(`libasound.so.2` missing, no Chromium binary), the same pre-existing gap as
+Phases 1-2; this phase's actual close-on-hide/reopen-on-show timing was
+verified structurally via code reading instead (effect cleanup/dependency
+ordering, functional setState guards against redundant transitions).
+
+Spec Impact: none, per this ticket's own Spec Impact classification
+(Contract-first: no for Phase 3) — internal lifecycle change only, no new
+browser-visible contract.
+
 ### Phase 4: Cursor accuracy and gap signaling for reconnect
 
 Two independent fixes to the existing delta-reconnect path:
