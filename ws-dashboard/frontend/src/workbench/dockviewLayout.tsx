@@ -46,6 +46,11 @@ export type DockviewTabCloseRequest = {
   readonly clientY: number;
 };
 
+export type DockviewWorkbenchGroupSize = {
+  readonly width?: number;
+  readonly height?: number;
+};
+
 export type DockviewWorkbenchLayoutProps = {
   readonly groups: readonly DockviewWorkbenchGroup[];
   readonly activePaneByGroup: Readonly<Record<string, string>>;
@@ -59,6 +64,21 @@ export type DockviewWorkbenchLayoutProps = {
       readonly targetGroupId: string;
       readonly targetGroupLabel?: string;
     },
+  ) => void;
+  // Best-effort split-size restore (ticket's "split proportions" clause).
+  // Applied once per workbench group id, the first time that group exists
+  // after a sync; later live resizes are never overridden by this prop
+  // changing identity (see `appliedInitialSizeRef` in the component).
+  readonly initialGroupSizeById?: Readonly<
+    Record<string, DockviewWorkbenchGroupSize>
+  >;
+  // Fired (debounced via `queueMicrotask`, matching this file's existing
+  // sync-tick idiom) whenever Dockview reports a layout change, with the
+  // current width/height of every live workbench group. Best-effort: a
+  // group id absent from Dockview's current live set is simply absent from
+  // the callback's map, not an error.
+  readonly onLayoutSnapshot?: (
+    sizeByWorkbenchGroupId: Record<string, DockviewWorkbenchGroupSize>,
   ) => void;
 };
 
@@ -97,14 +117,33 @@ export function DockviewWorkbenchLayout({
   onMovePane,
   onRequestClosePane,
   onSelectPane,
+  initialGroupSizeById,
+  onLayoutSnapshot,
 }: DockviewWorkbenchLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
   const syncingRef = useRef(false);
   const dockGroupToWorkbenchGroupRef = useRef<ReadonlyMap<string, string>>(
     new Map(),
   );
-  const callbacksRef = useRef({ onMovePane, onRequestClosePane, onSelectPane });
-  callbacksRef.current = { onMovePane, onRequestClosePane, onSelectPane };
+  const callbacksRef = useRef({
+    onMovePane,
+    onRequestClosePane,
+    onSelectPane,
+    onLayoutSnapshot,
+  });
+  callbacksRef.current = {
+    onMovePane,
+    onRequestClosePane,
+    onSelectPane,
+    onLayoutSnapshot,
+  };
+  const initialGroupSizeByIdRef = useRef(initialGroupSizeById);
+  initialGroupSizeByIdRef.current = initialGroupSizeById;
+  // Applying a restored split size is a one-shot best-effort action per
+  // workbench group id, not a continuous constraint - once applied (or once
+  // determined there is nothing to apply for a group), later live resizes by
+  // the user must never be overridden by a stale restore value.
+  const appliedInitialSizeRef = useRef<Set<string>>(new Set());
 
   const components = useMemo(
     () => ({
@@ -131,6 +170,25 @@ export function DockviewWorkbenchLayout({
         activePaneByGroup,
         callbacksRef.current.onRequestClosePane,
       );
+      const initialSizeById = initialGroupSizeByIdRef.current;
+      if (initialSizeById) {
+        for (const dockGroup of apiRef.current.groups) {
+          const workbenchGroupId = dockGroupToWorkbenchGroupRef.current.get(
+            dockGroup.id,
+          );
+          if (
+            !workbenchGroupId ||
+            appliedInitialSizeRef.current.has(workbenchGroupId)
+          ) {
+            continue;
+          }
+          appliedInitialSizeRef.current.add(workbenchGroupId);
+          const size = initialSizeById[workbenchGroupId];
+          if (size && (size.width !== undefined || size.height !== undefined)) {
+            dockGroup.api.setSize(size);
+          }
+        }
+      }
     } finally {
       queueMicrotask(() => {
         syncingRef.current = false;
@@ -144,6 +202,36 @@ export function DockviewWorkbenchLayout({
       // CONTRACT: Dashboard policy remains outside Dockview. Dockview events are
       // reduced to dashboard pane/group ids before invoking product callbacks;
       // raw Dockview panel/group handles must not escape this adapter.
+      event.api.onDidLayoutChange(() => {
+        if (syncingRef.current || !callbacksRef.current.onLayoutSnapshot) {
+          return;
+        }
+        // Debounced via microtask (matching this file's `syncPanels`
+        // finally-block idiom) so a burst of layout events collapses to one
+        // snapshot read of the settled group sizes.
+        queueMicrotask(() => {
+          if (!apiRef.current || !callbacksRef.current.onLayoutSnapshot) {
+            return;
+          }
+          const sizeByWorkbenchGroupId: Record<
+            string,
+            DockviewWorkbenchGroupSize
+          > = {};
+          for (const dockGroup of apiRef.current.groups) {
+            const workbenchGroupId = dockGroupToWorkbenchGroupRef.current.get(
+              dockGroup.id,
+            );
+            if (!workbenchGroupId) {
+              continue;
+            }
+            sizeByWorkbenchGroupId[workbenchGroupId] = {
+              width: dockGroup.api.width,
+              height: dockGroup.api.height,
+            };
+          }
+          callbacksRef.current.onLayoutSnapshot(sizeByWorkbenchGroupId);
+        });
+      });
       event.api.onDidActivePanelChange((panel) => {
         if (syncingRef.current) {
           return;

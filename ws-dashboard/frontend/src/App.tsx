@@ -117,11 +117,16 @@ import {
   DockviewWorkbenchLayout,
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
+  loadWorkbenchLayoutRestoreSnapshot,
+  saveWorkbenchLayoutRestoreSnapshot,
+  revalidateWorkbenchLayoutForRoot,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
   type DockviewTabCloseRequest,
   type WorkbenchPlacementState,
+  type WorkbenchLayoutRestoreEntry,
+  type WorkbenchLayoutRestoreSnapshot,
 } from "./workbench";
 import {
   applyReadOnlyFilePaneContent,
@@ -387,6 +392,15 @@ export function App() {
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
   >({});
+  // Snapshot of persisted per-work-root dockview layouts (group membership,
+  // pane order, active pane, best-effort group size), loaded once at mount.
+  // Consumed lazily by the open-work-root effect below the first time each
+  // rootKey is visited this session, so a root not yet opened keeps its
+  // restore entry available for however long into the session it takes the
+  // user to first visit it.
+  const [initialWorkbenchLayoutRestore] = useState<WorkbenchLayoutRestoreSnapshot>(
+    () => loadWorkbenchLayoutRestoreSnapshot(),
+  );
   // Work roots the user has visited this session stay mounted (own dockview
   // instance each) instead of being destroyed on selection switch. Ordered,
   // de-duplicated set of `serverScopedIdentity(serverId, rootId)` keys, plus
@@ -671,7 +685,25 @@ export function App() {
         ? current
         : { ...current, [rootKey]: { rootId, serverRoute } },
     );
-  }, [workbenchSelection]);
+    // Seed this root's layout from a persisted restore snapshot the first
+    // time it is opened this session. Guarded on `workbenchGroupsByRoot`
+    // absence so this never clobbers an in-session live layout (e.g. a root
+    // reopened after an explicit close within the same session already has
+    // live state by the time this effect re-runs for it).
+    const restoredEntry = initialWorkbenchLayoutRestore[rootKey];
+    if (restoredEntry) {
+      setWorkbenchGroupsByRoot((current) =>
+        current[rootKey]
+          ? current
+          : { ...current, [rootKey]: restoredEntry.groups },
+      );
+      setPaneOrderByRoot((current) =>
+        current[rootKey]
+          ? current
+          : { ...current, [rootKey]: restoredEntry.paneOrderByGroup },
+      );
+    }
+  }, [workbenchSelection, initialWorkbenchLayoutRestore]);
   const openWorkRootKeysSet = useMemo(
     () => new Set(openWorkRootKeys),
     [openWorkRootKeys],
@@ -1093,6 +1125,7 @@ export function App() {
             paneOrderByRoot={paneOrderByRoot}
             openWorkRootKeys={openWorkRootKeys}
             openWorkRootRefs={openWorkRootRefs}
+            initialWorkbenchLayoutRestore={initialWorkbenchLayoutRestore}
             onCommand={executeCommand}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
@@ -3303,6 +3336,7 @@ function WorkbenchShell({
   paneOrderByRoot,
   openWorkRootKeys,
   openWorkRootRefs,
+  initialWorkbenchLayoutRestore,
   onWorkbenchGroupsByRootChange,
   onPaneOrderByRootChange,
   onOpenWorkRootKeysChange,
@@ -3328,6 +3362,7 @@ function WorkbenchShell({
   paneOrderByRoot: Record<string, WorkbenchPaneOrder>;
   openWorkRootKeys: string[];
   openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
+  initialWorkbenchLayoutRestore: WorkbenchLayoutRestoreSnapshot;
   onWorkbenchGroupsByRootChange: Dispatch<
     SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
   >;
@@ -3356,6 +3391,15 @@ function WorkbenchShell({
   const [activePaneByRoot, setActivePaneByRoot] = useState<
     Record<string, Record<string, string>>
   >({});
+  // Best-effort per-root dockview group split sizes, captured from
+  // `DockviewWorkbenchLayout`'s `onLayoutSnapshot` and persisted alongside
+  // groups/pane order/active pane. Not seeded eagerly like the other three -
+  // `DockviewWorkbenchLayout` applies the restored size itself, once, from
+  // `initialWorkbenchLayoutRestore` directly (see the render below), so this
+  // state only needs to track the live/updated values for the save effect.
+  const [groupSizeByRoot, setGroupSizeByRoot] = useState<
+    Record<string, Record<string, { width?: number; height?: number }>>
+  >({});
   const [terminalPanes, setTerminalPanes] = useState<
     Record<string, TerminalPaneState>
   >({});
@@ -3379,6 +3423,19 @@ function WorkbenchShell({
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
   const restoredTerminalIntentRoots = useRef<Set<string>>(new Set());
+  // Tracks which roots' `listTerminals` call has resolved (success or
+  // failure) at least once this session. Terminal listing is async
+  // (Phase 4), while a restored `paneOrderByRoot[rootKey]` can be seeded
+  // synchronously the moment a root is opened - so the prune/reconcile
+  // revalidation effect must not treat "not yet loaded" the same as
+  // "genuinely gone" for terminal pane references, or it permanently strips
+  // a restored terminal layout before terminals ever get a chance to load.
+  // Read-only file panes need no equivalent gate: they are seeded
+  // synchronously at mount (App.tsx:379-381) and are always immediately
+  // revalidatable.
+  const [terminalsReadyRootKeys, setTerminalsReadyRootKeys] = useState<
+    ReadonlySet<string>
+  >(new Set());
   const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<
     string | null
   >(null);
@@ -3458,6 +3515,27 @@ function WorkbenchShell({
     const previousRefs = lastOpenWorkRootRefsRef.current;
     lastOpenWorkRootKeysRef.current = openWorkRootKeys;
     lastOpenWorkRootRefsRef.current = openWorkRootRefs;
+    // Seed `activePaneByRoot` for a rootKey the first time it appears in
+    // `openWorkRootKeys` this session, mirroring the App()-level
+    // `workbenchGroupsByRoot`/`paneOrderByRoot` seed. `activePaneByRoot` is
+    // local to this component (unlike those two), so it must be seeded here
+    // rather than alongside them. Only seeds when absent, so an in-session
+    // live layout (e.g. a freshly created group with no restore entry yet)
+    // is never clobbered.
+    const addedKeys = openWorkRootKeys.filter(
+      (rootKey) => !previousKeys.includes(rootKey),
+    );
+    for (const rootKey of addedKeys) {
+      const restoredEntry = initialWorkbenchLayoutRestore[rootKey];
+      if (!restoredEntry) {
+        continue;
+      }
+      setActivePaneByRoot((current) =>
+        current[rootKey]
+          ? current
+          : { ...current, [rootKey]: restoredEntry.activePaneByGroup },
+      );
+    }
     const closedRefs = resolveClosedWorkRootRefs(
       previousKeys,
       previousRefs,
@@ -3486,6 +3564,28 @@ function WorkbenchShell({
         delete next[rootKey];
         return next;
       });
+      setGroupSizeByRoot((current) => {
+        if (!(rootKey in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[rootKey];
+        return next;
+      });
+      // Clear the closed root's terminals-ready flag alongside its other
+      // per-root state: it is append-only otherwise, so a same-session
+      // reopen of this root would find the stale flag still set and
+      // immediately prune the freshly re-seeded restored terminal refs
+      // before the re-triggered `listTerminals` call resolves, instead of
+      // re-entering the not-yet-loaded grace window.
+      setTerminalsReadyRootKeys((current) => {
+        if (!current.has(rootKey)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(rootKey);
+        return next;
+      });
       setClosedAgentPaneByRoot((current) => {
         if (!(rootId in current)) {
           return current;
@@ -3495,7 +3595,130 @@ function WorkbenchShell({
         return next;
       });
     }
-  }, [openWorkRootKeys, openWorkRootRefs]);
+  }, [openWorkRootKeys, openWorkRootRefs, initialWorkbenchLayoutRestore]);
+
+  // Persist each open root's dockview layout (groups, pane order, active
+  // pane) whenever any of the three change, mirroring the App()-level
+  // read-only-file-pane save effect's style: a plain effect, no bespoke
+  // debounce, since that existing precedent doesn't use one either.
+  //
+  // CONTRACT: this save must never drop a persisted root just because it
+  // wasn't (re)visited this session. `openWorkRootKeys` only ever grows with
+  // roots actually selected this session (App.tsx's selection-seed effect),
+  // so on first render it is `[]` and would otherwise `removeItem` the whole
+  // snapshot before the user opens anything. Saved entries are therefore the
+  // union of (a) live entries for `openWorkRootKeys` (this session's current
+  // state) and (b) untouched entries from the originally-loaded
+  // `initialWorkbenchLayoutRestore` snapshot for every rootKey NOT in
+  // `openWorkRootKeys` this session - mirroring how `readOnlyFilePanes` avoids
+  // the same bug by being seeded at mount from *all* persisted panes
+  // (App.tsx:379-381) before any save happens.
+  useEffect(() => {
+    const openWorkRootKeysSet = new Set(openWorkRootKeys);
+    const liveEntries: WorkbenchLayoutRestoreEntry[] = openWorkRootKeys.flatMap(
+      (rootKey) => {
+        const ref = openWorkRootRefs[rootKey];
+        const groups = workbenchGroupsByRoot[rootKey];
+        if (!ref || !groups) {
+          return [];
+        }
+        const groupSizeById = groupSizeByRoot[rootKey];
+        return [
+          {
+            serverRoute: ref.serverRoute,
+            workRootId: ref.rootId,
+            groups,
+            paneOrderByGroup: paneOrderByRoot[rootKey] ?? {},
+            activePaneByGroup: activePaneByRoot[rootKey] ?? {},
+            ...(groupSizeById ? { groupSizeById } : {}),
+          },
+        ];
+      },
+    );
+    const untouchedEntries = Object.entries(initialWorkbenchLayoutRestore)
+      .filter(([rootKey]) => !openWorkRootKeysSet.has(rootKey))
+      .map(([, restoredEntry]) => restoredEntry);
+    saveWorkbenchLayoutRestoreSnapshot([...liveEntries, ...untouchedEntries]);
+  }, [
+    openWorkRootKeys,
+    openWorkRootRefs,
+    workbenchGroupsByRoot,
+    paneOrderByRoot,
+    activePaneByRoot,
+    groupSizeByRoot,
+    initialWorkbenchLayoutRestore,
+  ]);
+
+  // Revalidate restored/live pane references against currently-known live
+  // pane ids whenever the live terminal or read-only-file pane sets change.
+  // Restore never treats persisted layout as authoritative over live
+  // daemon/resource state: unavailable references are dropped from the pane
+  // order, and `reconcileActiveWorkbenchPanes` (already falls back to
+  // `group.panes[0]?.id`) repairs any active-pane entry left pointing at a
+  // now-pruned pane id.
+  //
+  // The actual prune+reconcile transformation is delegated to
+  // `revalidateWorkbenchLayoutForRoot` (a pure function extracted for unit
+  // testing), gated per-root on `terminalsReadyRootKeys` so a restored
+  // terminal-pane order is never destructively pruned before that root's
+  // `listTerminals` call has resolved at least once.
+  useEffect(() => {
+    for (const rootKey of openWorkRootKeys) {
+      const ref = openWorkRootRefs[rootKey];
+      const orderForRoot = paneOrderByRoot[rootKey];
+      if (!ref || !orderForRoot) {
+        continue;
+      }
+      const livePaneIds = new Set<string>([
+        ...Object.values(terminalPanes)
+          .filter(
+            (pane) =>
+              pane.session.workRootId === ref.rootId &&
+              (pane.session.serverRoute ?? "server-local") === ref.serverRoute,
+          )
+          .map((pane) => pane.paneId),
+        ...readOnlyFilePanes
+          .filter(
+            (pane) =>
+              pane.workRootId === ref.rootId &&
+              pane.serverRoute === ref.serverRoute,
+          )
+          .map((pane) => pane.id),
+      ]);
+      const groupsForRoot = workbenchGroupsByRoot[rootKey] ?? [];
+      const { prunedOrder, reconciledActivePane } =
+        revalidateWorkbenchLayoutForRoot(
+          groupsForRoot,
+          orderForRoot,
+          activePaneByRoot[rootKey] ?? {},
+          livePaneIds,
+          terminalsReadyRootKeys.has(rootKey),
+        );
+      if (JSON.stringify(prunedOrder) !== JSON.stringify(orderForRoot)) {
+        onPaneOrderByRootChange((current) => ({
+          ...current,
+          [rootKey]: prunedOrder,
+        }));
+      }
+      setActivePaneByRoot((current) => {
+        const preferred = current[rootKey] ?? {};
+        if (JSON.stringify(preferred) === JSON.stringify(reconciledActivePane)) {
+          return current;
+        }
+        return { ...current, [rootKey]: reconciledActivePane };
+      });
+    }
+  }, [
+    terminalPanes,
+    readOnlyFilePanes,
+    openWorkRootKeys,
+    openWorkRootRefs,
+    paneOrderByRoot,
+    activePaneByRoot,
+    workbenchGroupsByRoot,
+    terminalsReadyRootKeys,
+    onPaneOrderByRootChange,
+  ]);
   const activityPaneOpenForSelected = selectedWorkRootId
     ? (activityPaneOpenByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
       false)
@@ -3767,7 +3990,12 @@ function WorkbenchShell({
           ),
         );
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        setTerminalsReadyRootKeys((current) =>
+          current.has(rootKey) ? current : new Set(current).add(rootKey),
+        );
+      });
   }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
 
   // Fetch named-agent activity for the selected workRoot through the Phase 1
@@ -4816,9 +5044,18 @@ function WorkbenchShell({
             <DockviewWorkbenchLayout
               activePaneByGroup={activePaneByRoot[rootKey] ?? {}}
               groups={rootGroups}
+              initialGroupSizeById={
+                initialWorkbenchLayoutRestore[rootKey]?.groupSizeById
+              }
               onMovePane={movePane}
               onRequestClosePane={requestWorkbenchPaneClose}
               onSelectPane={selectPane}
+              onLayoutSnapshot={(sizeByWorkbenchGroupId) => {
+                setGroupSizeByRoot((current) => ({
+                  ...current,
+                  [rootKey]: sizeByWorkbenchGroupId,
+                }));
+              }}
             />
           </div>
         );

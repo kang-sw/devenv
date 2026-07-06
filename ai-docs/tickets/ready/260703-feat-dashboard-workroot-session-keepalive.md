@@ -482,6 +482,77 @@ behavior when a referenced file/terminal is no longer available, and
 collision tests for the same `workRootId` on two different `serverRoute`
 values.
 
+### Result (cfcd5a3d) - 2026-07-06
+
+Added a new `workbench/layoutRestore.ts` module (modeled on
+`workRootFiles.ts`'s existing read-only-file-pane restore snapshot shape,
+which this phase reuses rather than dockview's native `toJSON()`/`fromJSON()`
+— unusable here since this app's panel params carry live, non-serializable
+`ReactNode`s/closures and the app already owns a competing declarative
+reconciliation loop). Persists each open work root's dockview groups, tab
+order, active pane per group, and (landed in full, not deferred)
+best-effort split proportions to a versioned `localStorage` key, seeded once
+per rootKey the first time it's visited each session (never clobbering an
+in-session live layout) and revalidated/pruned against currently-live
+terminal/file pane ids on every relevant change, reusing
+`reconcileActiveWorkbenchPanes` for active-pane repair. Updated the
+`WorkRoot IO Restore Model` spec anchor to narrow "exact browser workbench
+arrangement remain outside the restore model" to: arrangement is persisted
+keyed by `serverRoute`+`workRootId`, restored on reload, never authoritative
+over live daemon/resource state, and unavailable references are silently
+dropped — Auth/terminal-process/Activity-acknowledgement exclusions
+unchanged. Flagged `workbench/layoutSerialization.ts` as pre-existing,
+unrelated dead code (a recursive tree-shaped model incompatible with this
+app's actual flat `groups[]`/`paneOrderByGroup` shape) rather than retrofitting
+it.
+
+Commits: `cd8c93ed` (feat: add the layout restore module + tests),
+`6591cc04` (feat: wire seed/save/revalidate into App.tsx), `a39d7da0` (feat:
+best-effort split-size restore + spec anchor update), `de56d11c` (fix: merge
+unvisited-root layout saves, gate terminal prune on load), `cfcd5a3d` (fix:
+clear `terminalsReadyRootKeys` on work-root close).
+
+Review: partitioned correctness/fit/test. Fit clean throughout with zero
+findings. Test initially found 2 Important issues — the module's own
+drop-stale-group-id defensive parsing branches were unexercised, and the
+highest-restore-risk App.tsx wiring (the prune+reconcile revalidation
+transformation) repeated a gap pattern this ticket's earlier phases already
+flagged and fixed (extractable pure glue logic left untested) — both fixed
+by extracting `revalidateWorkbenchLayoutForRoot` into `layoutRestore.ts` with
+new unit tests, and adding the missing boundary tests; re-verified clean.
+Correctness found 2 Critical issues on the first pass: (1) the save effect
+built its persisted entries only from roots visited *this* session and did a
+full overwrite of the storage key, silently wiping any root not re-visited
+before the next reload (including wiping the entire snapshot on the very
+first render); (2) the revalidation/prune effect ran synchronously the
+moment a restored layout was seeded, before the async `listTerminals` call
+for that root had resolved, permanently stripping every restored terminal
+reference before terminals ever had a chance to load. Both fixed in
+`de56d11c` — the save now writes the union of live entries for open roots
+and untouched entries (from the frozen mount-time snapshot) for every root
+not open this session, and a new `terminalsReadyRootKeys` per-root grace
+flag (set once `listTerminals` resolves, including on error via `.finally`)
+gates the terminal-pane portion of the prune. A second re-review found one
+residual Important gap in that fix: the grace flag was append-only and never
+cleared on work-root close, so reopening a previously-visited root within
+the same session immediately re-pruned its restored terminal order using the
+stale "ready" flag from its earlier visit — fixed in `cfcd5a3d` by clearing
+the flag in the same close-cleanup effect that already tears down the
+root's other per-root state. Final re-review: correctness clean (1 minor
+accepted as-is: `pruneWorkbenchLayoutOrder`'s return type loses a nominal
+type via an `Object.fromEntries` cast, cosmetic only), fit clean, test
+clean.
+
+Verification: `npm run test:workbench`, `npm run test:terminals`, and
+`npm run build` all pass. Playwright e2e remains not runnable in this
+sandbox (`libasound.so.2` missing, no Chromium binary), the same
+pre-existing gap as Phases 1-4; this phase's actual dockview-visible restore
+behavior was verified structurally via code reading and unit tests of the
+extracted pure logic instead.
+
+Spec Impact: `WorkRoot IO Restore Model` anchor updated per this ticket's
+Contract-first: yes classification for Phase 5 (see above).
+
 ### Phase 6: Capture and restore terminal visual buffer state across reload
 
 Capture each terminal pane's visible scrollback buffer, cursor position, text
