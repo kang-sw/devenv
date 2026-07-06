@@ -190,6 +190,66 @@ export function revalidateWorkbenchLayoutForRoot(
   return { prunedOrder, reconciledActivePane };
 }
 
+// CONTRACT: pure merge/clobber-fix transformation extracted out of
+// `WorkbenchShell`'s layout save effect in App.tsx (Phase 7 review
+// Test-partition finding), mirroring `revalidateWorkbenchLayoutForRoot`
+// (Phase 5) and `resolveTerminalMountWrite` (Phase 6) — this is the highest-
+// restore-correctness-risk glue logic in the phase (the clobber-bug fix
+// itself), so it must be unit-testable without a React harness.
+//
+// Computes the save effect's persisted entry set as the union of (a) live
+// entries built from the currently-open roots' in-memory state and (b)
+// untouched entries carried over from `priorSnapshot` for every rootKey NOT
+// currently open, then rebuilds a fresh snapshot object (keyed via
+// `workbenchLayoutRestoreRootKey`) from that same merged list so the caller
+// can write it back into its live ref. Passing the effect's own just-written
+// `priorSnapshot` back in on the next run (rather than a frozen mount-time
+// value) is what fixes the clobber bug: a just-closed root's untouched-entry
+// fallback then reflects its last live state instead of a stale snapshot.
+export function mergeWorkbenchLayoutRestoreEntries(
+  openRootKeys: readonly string[],
+  openRootRefs: Record<string, { rootId: string; serverRoute: string }>,
+  groupsByRoot: Record<string, ReadonlyArray<{ id: string; label: string }>>,
+  paneOrderByRoot: Record<string, WorkbenchPaneOrder>,
+  activePaneByRoot: Record<string, WorkbenchActivePaneState>,
+  groupSizeByRoot: Record<string, Record<string, WorkbenchLayoutGroupSize>>,
+  priorSnapshot: WorkbenchLayoutRestoreSnapshot,
+): {
+  mergedEntries: WorkbenchLayoutRestoreEntry[];
+  mergedSnapshot: WorkbenchLayoutRestoreSnapshot;
+} {
+  const openRootKeysSet = new Set(openRootKeys);
+  const liveEntries: WorkbenchLayoutRestoreEntry[] = openRootKeys.flatMap(
+    (rootKey) => {
+      const ref = openRootRefs[rootKey];
+      const groups = groupsByRoot[rootKey];
+      if (!ref || !groups) {
+        return [];
+      }
+      const groupSizeById = groupSizeByRoot[rootKey];
+      return [
+        {
+          serverRoute: ref.serverRoute,
+          workRootId: ref.rootId,
+          groups,
+          paneOrderByGroup: paneOrderByRoot[rootKey] ?? {},
+          activePaneByGroup: activePaneByRoot[rootKey] ?? {},
+          ...(groupSizeById ? { groupSizeById } : {}),
+        },
+      ];
+    },
+  );
+  const untouchedEntries = Object.entries(priorSnapshot)
+    .filter(([rootKey]) => !openRootKeysSet.has(rootKey))
+    .map(([, restoredEntry]) => restoredEntry);
+  const mergedEntries = [...liveEntries, ...untouchedEntries];
+  const mergedSnapshot: WorkbenchLayoutRestoreSnapshot = {};
+  for (const entry of mergedEntries) {
+    mergedSnapshot[workbenchLayoutRestoreRootKey(entry)] = entry;
+  }
+  return { mergedEntries, mergedSnapshot };
+}
+
 function parseWorkbenchLayoutRestoreEntry(
   value: unknown,
 ): WorkbenchLayoutRestoreEntry | null {

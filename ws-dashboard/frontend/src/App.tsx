@@ -120,10 +120,11 @@ import {
   resolveClosedWorkRootRefs,
   loadWorkbenchLayoutRestoreSnapshot,
   saveWorkbenchLayoutRestoreSnapshot,
-  workbenchLayoutRestoreRootKey,
+  mergeWorkbenchLayoutRestoreEntries,
   revalidateWorkbenchLayoutForRoot,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
+  upsertTerminalVisualRestoreEntryInSnapshot,
   resolveTerminalMountWrite,
   terminalVisualRestoreScrollbackLines,
   terminalVisualRestoreDebounceMs,
@@ -132,7 +133,6 @@ import {
   type WorkbenchPaneOrder,
   type DockviewTabCloseRequest,
   type WorkbenchPlacementState,
-  type WorkbenchLayoutRestoreEntry,
   type WorkbenchLayoutRestoreSnapshot,
   type TerminalVisualRestoreEntry,
   type TerminalVisualRestoreSnapshot,
@@ -3646,38 +3646,16 @@ function WorkbenchShell({
   // the clobber bug where a close previously caused this effect to write the
   // mount-time entry back over the closed root's live layout.
   useEffect(() => {
-    const openWorkRootKeysSet = new Set(openWorkRootKeys);
-    const liveEntries: WorkbenchLayoutRestoreEntry[] = openWorkRootKeys.flatMap(
-      (rootKey) => {
-        const ref = openWorkRootRefs[rootKey];
-        const groups = workbenchGroupsByRoot[rootKey];
-        if (!ref || !groups) {
-          return [];
-        }
-        const groupSizeById = groupSizeByRoot[rootKey];
-        return [
-          {
-            serverRoute: ref.serverRoute,
-            workRootId: ref.rootId,
-            groups,
-            paneOrderByGroup: paneOrderByRoot[rootKey] ?? {},
-            activePaneByGroup: activePaneByRoot[rootKey] ?? {},
-            ...(groupSizeById ? { groupSizeById } : {}),
-          },
-        ];
-      },
-    );
-    const untouchedEntries = Object.entries(
+    const { mergedEntries, mergedSnapshot } = mergeWorkbenchLayoutRestoreEntries(
+      openWorkRootKeys,
+      openWorkRootRefs,
+      workbenchGroupsByRoot,
+      paneOrderByRoot,
+      activePaneByRoot,
+      groupSizeByRoot,
       workbenchLayoutRestoreRef.current,
-    )
-      .filter(([rootKey]) => !openWorkRootKeysSet.has(rootKey))
-      .map(([, restoredEntry]) => restoredEntry);
-    const mergedEntries = [...liveEntries, ...untouchedEntries];
+    );
     saveWorkbenchLayoutRestoreSnapshot(mergedEntries);
-    const mergedSnapshot: WorkbenchLayoutRestoreSnapshot = {};
-    for (const entry of mergedEntries) {
-      mergedSnapshot[workbenchLayoutRestoreRootKey(entry)] = entry;
-    }
     workbenchLayoutRestoreRef.current = mergedSnapshot;
   }, [
     openWorkRootKeys,
@@ -3912,10 +3890,11 @@ function WorkbenchShell({
               capturedAtMs: Date.now(),
             };
             upsertTerminalVisualRestoreEntry(entry);
-            terminalVisualRestoreRef.current = {
-              ...terminalVisualRestoreRef.current,
-              [entry.logicalKey]: entry,
-            };
+            terminalVisualRestoreRef.current =
+              upsertTerminalVisualRestoreEntryInSnapshot(
+                terminalVisualRestoreRef.current,
+                entry,
+              );
           },
         },
         closedAgentPaneByRoot[root.id] ?? [],

@@ -108,6 +108,21 @@ export function saveTerminalVisualRestoreSnapshot(
   }
 }
 
+// Replace (or add) a single logical key's entry in an in-memory snapshot,
+// leaving every other entry untouched. Pure, storage-independent upsert-by-
+// key contract shared by every writer of a `TerminalVisualRestoreSnapshot`
+// (Phase 7 review Test-partition finding): the localStorage-backed
+// `upsertTerminalVisualRestoreEntry` below and App.tsx's live
+// `terminalVisualRestoreRef` mirror write both call this instead of each
+// re-implementing "overwrite by logicalKey" independently, so the two stay
+// tied to one contract and cannot silently diverge.
+export function upsertTerminalVisualRestoreEntryInSnapshot(
+  snapshot: TerminalVisualRestoreSnapshot,
+  entry: TerminalVisualRestoreEntry,
+): TerminalVisualRestoreSnapshot {
+  return { ...snapshot, [entry.logicalKey]: entry };
+}
+
 // Replace (or add) a single logical key's entry in the persisted snapshot,
 // leaving every other entry untouched. Used by the per-pane debounced
 // capture path so one terminal's capture never clobbers another's.
@@ -116,15 +131,8 @@ export function upsertTerminalVisualRestoreEntry(
   storage: (Pick<Storage, "getItem"> & Pick<Storage, "setItem" | "removeItem">) | null = browserStorage(),
 ) {
   const current = loadTerminalVisualRestoreSnapshot(storage);
-  saveTerminalVisualRestoreSnapshot(
-    [
-      ...Object.values(current).filter(
-        (existing) => existing.logicalKey !== entry.logicalKey,
-      ),
-      entry,
-    ],
-    storage,
-  );
+  const merged = upsertTerminalVisualRestoreEntryInSnapshot(current, entry);
+  saveTerminalVisualRestoreSnapshot(Object.values(merged), storage);
 }
 
 // Three-way selection of what `TerminalPaneBody`'s mount effect should write

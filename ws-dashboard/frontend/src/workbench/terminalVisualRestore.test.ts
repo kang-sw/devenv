@@ -3,8 +3,10 @@ import {
   saveTerminalVisualRestoreSnapshot,
   terminalVisualRestoreMaxSerializedLength,
   upsertTerminalVisualRestoreEntry,
+  upsertTerminalVisualRestoreEntryInSnapshot,
   resolveTerminalMountWrite,
   type TerminalVisualRestoreEntry,
+  type TerminalVisualRestoreSnapshot,
 } from "./terminalVisualRestore.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -155,6 +157,60 @@ const smallEntry: TerminalVisualRestoreEntry = {
     loaded[otherEntry.logicalKey],
     otherEntry,
     "upsert leaves an unrelated logical key's entry untouched",
+  );
+}
+
+// `upsertTerminalVisualRestoreEntryInSnapshot` is the shared pure upsert-by-
+// key contract both `upsertTerminalVisualRestoreEntry` (localStorage path,
+// exercised above) and App.tsx's `terminalVisualRestoreRef` mirror write
+// call, extracted so the two stay tied to one implementation (Phase 7 review
+// Test-partition Minor finding). This test ties both call sites to the same
+// observed behavior: overwrite-by-logicalKey, leave every other key
+// untouched, no mutation of the input snapshot.
+{
+  const priorSnapshot: TerminalVisualRestoreSnapshot = {
+    [smallEntry.logicalKey]: smallEntry,
+  };
+  const updatedEntry: TerminalVisualRestoreEntry = {
+    ...smallEntry,
+    serialized: "ref-mirror-updated",
+    nextSequence: 42,
+  };
+  const nextSnapshot = upsertTerminalVisualRestoreEntryInSnapshot(
+    priorSnapshot,
+    updatedEntry,
+  );
+  assertDeepEqual(
+    nextSnapshot[smallEntry.logicalKey],
+    updatedEntry,
+    "the matching logical key's entry is replaced in the returned snapshot",
+  );
+  assertDeepEqual(
+    priorSnapshot[smallEntry.logicalKey],
+    smallEntry,
+    "the input snapshot is left unmutated (a new object is returned)",
+  );
+
+  // Same helper, exercised against a snapshot holding an unrelated key, to
+  // confirm the "leaves every other entry untouched" half of the contract
+  // that App.tsx's ref-mirror write and the localStorage-backed upsert must
+  // both preserve identically.
+  const otherEntry: TerminalVisualRestoreEntry = {
+    ...smallEntry,
+    logicalKey: "persistentTerminal/server-local/root-b/term-b",
+    serialized: "other",
+  };
+  const withOther = upsertTerminalVisualRestoreEntryInSnapshot(
+    { [otherEntry.logicalKey]: otherEntry },
+    updatedEntry,
+  );
+  assertDeepEqual(
+    withOther,
+    {
+      [otherEntry.logicalKey]: otherEntry,
+      [updatedEntry.logicalKey]: updatedEntry,
+    },
+    "an unrelated logical key's entry is preserved alongside the newly upserted one",
   );
 }
 
