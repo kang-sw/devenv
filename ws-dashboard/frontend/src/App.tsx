@@ -119,7 +119,7 @@ import {
   resolveClosedWorkRootRefs,
   loadWorkbenchLayoutRestoreSnapshot,
   saveWorkbenchLayoutRestoreSnapshot,
-  pruneWorkbenchLayoutOrder,
+  revalidateWorkbenchLayoutForRoot,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -3423,6 +3423,19 @@ function WorkbenchShell({
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
   const restoredTerminalIntentRoots = useRef<Set<string>>(new Set());
+  // Tracks which roots' `listTerminals` call has resolved (success or
+  // failure) at least once this session. Terminal listing is async
+  // (Phase 4), while a restored `paneOrderByRoot[rootKey]` can be seeded
+  // synchronously the moment a root is opened - so the prune/reconcile
+  // revalidation effect must not treat "not yet loaded" the same as
+  // "genuinely gone" for terminal pane references, or it permanently strips
+  // a restored terminal layout before terminals ever get a chance to load.
+  // Read-only file panes need no equivalent gate: they are seeded
+  // synchronously at mount (App.tsx:379-381) and are always immediately
+  // revalidatable.
+  const [terminalsReadyRootKeys, setTerminalsReadyRootKeys] = useState<
+    ReadonlySet<string>
+  >(new Set());
   const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<
     string | null
   >(null);
@@ -3574,8 +3587,21 @@ function WorkbenchShell({
   // pane) whenever any of the three change, mirroring the App()-level
   // read-only-file-pane save effect's style: a plain effect, no bespoke
   // debounce, since that existing precedent doesn't use one either.
+  //
+  // CONTRACT: this save must never drop a persisted root just because it
+  // wasn't (re)visited this session. `openWorkRootKeys` only ever grows with
+  // roots actually selected this session (App.tsx's selection-seed effect),
+  // so on first render it is `[]` and would otherwise `removeItem` the whole
+  // snapshot before the user opens anything. Saved entries are therefore the
+  // union of (a) live entries for `openWorkRootKeys` (this session's current
+  // state) and (b) untouched entries from the originally-loaded
+  // `initialWorkbenchLayoutRestore` snapshot for every rootKey NOT in
+  // `openWorkRootKeys` this session - mirroring how `readOnlyFilePanes` avoids
+  // the same bug by being seeded at mount from *all* persisted panes
+  // (App.tsx:379-381) before any save happens.
   useEffect(() => {
-    const entries: WorkbenchLayoutRestoreEntry[] = openWorkRootKeys.flatMap(
+    const openWorkRootKeysSet = new Set(openWorkRootKeys);
+    const liveEntries: WorkbenchLayoutRestoreEntry[] = openWorkRootKeys.flatMap(
       (rootKey) => {
         const ref = openWorkRootRefs[rootKey];
         const groups = workbenchGroupsByRoot[rootKey];
@@ -3595,7 +3621,10 @@ function WorkbenchShell({
         ];
       },
     );
-    saveWorkbenchLayoutRestoreSnapshot(entries);
+    const untouchedEntries = Object.entries(initialWorkbenchLayoutRestore)
+      .filter(([rootKey]) => !openWorkRootKeysSet.has(rootKey))
+      .map(([, restoredEntry]) => restoredEntry);
+    saveWorkbenchLayoutRestoreSnapshot([...liveEntries, ...untouchedEntries]);
   }, [
     openWorkRootKeys,
     openWorkRootRefs,
@@ -3603,6 +3632,7 @@ function WorkbenchShell({
     paneOrderByRoot,
     activePaneByRoot,
     groupSizeByRoot,
+    initialWorkbenchLayoutRestore,
   ]);
 
   // Revalidate restored/live pane references against currently-known live
@@ -3612,6 +3642,12 @@ function WorkbenchShell({
   // order, and `reconcileActiveWorkbenchPanes` (already falls back to
   // `group.panes[0]?.id`) repairs any active-pane entry left pointing at a
   // now-pruned pane id.
+  //
+  // The actual prune+reconcile transformation is delegated to
+  // `revalidateWorkbenchLayoutForRoot` (a pure function extracted for unit
+  // testing), gated per-root on `terminalsReadyRootKeys` so a restored
+  // terminal-pane order is never destructively pruned before that root's
+  // `listTerminals` call has resolved at least once.
   useEffect(() => {
     for (const rootKey of openWorkRootKeys) {
       const ref = openWorkRootRefs[rootKey];
@@ -3635,29 +3671,27 @@ function WorkbenchShell({
           )
           .map((pane) => pane.id),
       ]);
-      const prunedOrder = pruneWorkbenchLayoutOrder(orderForRoot, livePaneIds);
+      const groupsForRoot = workbenchGroupsByRoot[rootKey] ?? [];
+      const { prunedOrder, reconciledActivePane } =
+        revalidateWorkbenchLayoutForRoot(
+          groupsForRoot,
+          orderForRoot,
+          activePaneByRoot[rootKey] ?? {},
+          livePaneIds,
+          terminalsReadyRootKeys.has(rootKey),
+        );
       if (JSON.stringify(prunedOrder) !== JSON.stringify(orderForRoot)) {
         onPaneOrderByRootChange((current) => ({
           ...current,
           [rootKey]: prunedOrder,
         }));
       }
-      const groupsForRoot = workbenchGroupsByRoot[rootKey] ?? [];
-      const groupsWithPanes = groupsForRoot.map((group) => ({
-        id: group.id,
-        panes: (prunedOrder[group.id] ?? []).map((paneId) => ({ id: paneId })),
-      }));
       setActivePaneByRoot((current) => {
         const preferred = current[rootKey] ?? {};
-        const reconciled = reconcileActiveWorkbenchPanes(
-          groupsWithPanes,
-          preferred,
-          preferred,
-        );
-        if (JSON.stringify(preferred) === JSON.stringify(reconciled)) {
+        if (JSON.stringify(preferred) === JSON.stringify(reconciledActivePane)) {
           return current;
         }
-        return { ...current, [rootKey]: reconciled };
+        return { ...current, [rootKey]: reconciledActivePane };
       });
     }
   }, [
@@ -3666,7 +3700,9 @@ function WorkbenchShell({
     openWorkRootKeys,
     openWorkRootRefs,
     paneOrderByRoot,
+    activePaneByRoot,
     workbenchGroupsByRoot,
+    terminalsReadyRootKeys,
     onPaneOrderByRootChange,
   ]);
   const activityPaneOpenForSelected = selectedWorkRootId
@@ -3940,7 +3976,12 @@ function WorkbenchShell({
           ),
         );
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        setTerminalsReadyRootKeys((current) =>
+          current.has(rootKey) ? current : new Set(current).add(rootKey),
+        );
+      });
   }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
 
   // Fetch named-agent activity for the selected workRoot through the Phase 1

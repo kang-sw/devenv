@@ -1,6 +1,7 @@
 import {
   loadWorkbenchLayoutRestoreSnapshot,
   pruneWorkbenchLayoutOrder,
+  revalidateWorkbenchLayoutForRoot,
   saveWorkbenchLayoutRestoreSnapshot,
   workbenchLayoutRestoreRootKey,
   type WorkbenchLayoutRestoreEntry,
@@ -187,3 +188,130 @@ assertDeepEqual(
   {},
   "prune of an empty order map stays empty",
 );
+
+// A persisted entry referencing a group id no longer present in `groups[]`
+// (e.g. a group removed in a later session, or a corrupted single field
+// rather than the whole payload) is dropped from `paneOrderByGroup`,
+// `activePaneByGroup`, and `groupSizeById` at parse time, instead of
+// resurrecting a group that no longer exists.
+{
+  const { storage } = fakeStorage();
+  storage.setItem(
+    "ws-dashboard.workbenchLayout.v1",
+    JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          serverRoute: "server-local",
+          workRootId: "root-a",
+          groups: [{ id: "group-1", label: "Group 1" }],
+          paneOrderByGroup: {
+            "group-1": ["pane-a"],
+            "group-gone": ["pane-b"],
+          },
+          activePaneByGroup: {
+            "group-1": "pane-a",
+            "group-gone": "pane-b",
+          },
+          groupSizeById: {
+            "group-1": { width: 480 },
+            "group-gone": { width: 200 },
+          },
+        },
+      ],
+    }),
+  );
+  const loaded = loadWorkbenchLayoutRestoreSnapshot(storage);
+  const rootKey = workbenchLayoutRestoreRootKey({
+    serverRoute: "server-local",
+    workRootId: "root-a",
+  });
+  assertDeepEqual(
+    loaded[rootKey].paneOrderByGroup,
+    { "group-1": ["pane-a"] },
+    "paneOrderByGroup drops references to a group id absent from groups[]",
+  );
+  assertDeepEqual(
+    loaded[rootKey].activePaneByGroup,
+    { "group-1": "pane-a" },
+    "activePaneByGroup drops references to a group id absent from groups[]",
+  );
+  assertDeepEqual(
+    loaded[rootKey].groupSizeById,
+    { "group-1": { width: 480 } },
+    "groupSizeById drops references to a group id absent from groups[]",
+  );
+}
+
+// `revalidateWorkbenchLayoutForRoot` combines prune + active-pane
+// reconciliation into one pure (groups, orderForRoot, activePaneByGroup,
+// livePaneIds, terminalsReady) -> {prunedOrder, reconciledActivePane}
+// transformation, extracted from `WorkbenchShell`'s revalidation effect in
+// App.tsx so the highest-restore-correctness-risk glue logic is unit
+// testable.
+{
+  const groups = [
+    { id: "group-1", label: "Group 1" },
+    { id: "group-2", label: "Group 2" },
+  ];
+  const orderForRoot = {
+    "group-1": ["readonly:pane-a", "readonly:pane-gone"],
+    "group-2": ["terminal:pane-b"],
+  };
+  const activePaneByGroup = {
+    "group-1": "readonly:pane-gone",
+    "group-2": "terminal:pane-b",
+  };
+
+  // With terminals ready, a live-pane-id set missing both `pane-gone` and
+  // the terminal pane prunes both: the file pane because it's genuinely
+  // unavailable, and the terminal pane because its listing has resolved and
+  // it is genuinely gone too. The active pane falls back to the remaining
+  // live pane in each group.
+  {
+    const result = revalidateWorkbenchLayoutForRoot(
+      groups,
+      orderForRoot,
+      activePaneByGroup,
+      new Set(["readonly:pane-a"]),
+      true,
+    );
+    assertDeepEqual(
+      result.prunedOrder,
+      { "group-1": ["readonly:pane-a"] },
+      "terminals-ready: a genuinely-gone terminal pane is pruned like any other",
+    );
+    assertDeepEqual(
+      result.reconciledActivePane,
+      { "group-1": "readonly:pane-a" },
+      "terminals-ready: active pane falls back off a pruned reference, group-2 has no live pane left",
+    );
+  }
+
+  // With terminals NOT ready, the same live-pane-id set (which has no
+  // terminal ids yet, since `listTerminals` hasn't resolved) must not prune
+  // the restored terminal pane reference - only the file pane (seeded
+  // synchronously at mount) is prunable immediately.
+  {
+    const result = revalidateWorkbenchLayoutForRoot(
+      groups,
+      orderForRoot,
+      activePaneByGroup,
+      new Set(["readonly:pane-a"]),
+      false,
+    );
+    assertDeepEqual(
+      result.prunedOrder,
+      {
+        "group-1": ["readonly:pane-a"],
+        "group-2": ["terminal:pane-b"],
+      },
+      "terminals not ready: restored terminal pane reference survives the grace window",
+    );
+    assertDeepEqual(
+      result.reconciledActivePane,
+      { "group-1": "readonly:pane-a", "group-2": "terminal:pane-b" },
+      "terminals not ready: active terminal pane reference is preserved, not reset",
+    );
+  }
+}

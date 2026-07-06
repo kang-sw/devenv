@@ -3,9 +3,10 @@ import {
   serverScopedIdentity,
 } from "../resourceModel.js";
 import { browserStorage } from "../workRootFiles.js";
-import type {
-  WorkbenchActivePaneState,
-  WorkbenchPaneOrder,
+import {
+  reconcileActiveWorkbenchPanes,
+  type WorkbenchActivePaneState,
+  type WorkbenchPaneOrder,
 } from "./editorGroupModel.js";
 
 // CONTRACT: Persists the app-owned dockview layout model (group membership,
@@ -127,6 +128,66 @@ export function pruneWorkbenchLayoutOrder(
       ])
       .filter(([, paneOrder]) => (paneOrder as string[]).length > 0),
   );
+}
+
+// Terminal pane ids are always `terminal:`-prefixed (see
+// `terminals.ts#terminalPaneId`); read-only file pane ids use `readonly:` /
+// `readonly-preview:` prefixes (`workRootFiles.ts#readOnlyFilePaneId`). Used
+// by `revalidateWorkbenchLayoutForRoot` to scope the terminals-ready grace
+// window to terminal pane references only.
+export function isTerminalPaneId(paneId: string): boolean {
+  return paneId.startsWith("terminal:");
+}
+
+// CONTRACT: pure per-root revalidation transformation extracted out of
+// `WorkbenchShell`'s prune/reconcile effect in App.tsx (Phase 5 review
+// Test-partition finding), so the highest-restore-correctness-risk glue logic
+// is unit-testable without a React harness, mirroring `findOpenWorkRoot`
+// (Phase 1), `resolveClosedWorkRootRefs` (Phase 2), and
+// `plan_output_backfill` (Phase 4).
+//
+// `terminalsReady` gates only the terminal-pane portion of the prune: restored
+// file-pane references are seeded synchronously at mount and can be pruned
+// immediately, but restored terminal-pane references must survive until this
+// root's `listTerminals` call has resolved at least once (terminal listing is
+// async, per Phase 4), otherwise the not-yet-loaded race would look identical
+// to a genuinely-gone terminal and get permanently stripped. While
+// `terminalsReady` is false, any `terminal:`-prefixed pane id already present
+// in `orderForRoot` is treated as live (not pruned) even if absent from
+// `livePaneIds`; once `terminalsReady` is true, terminal pane ids are pruned
+// exactly like any other pane id.
+export function revalidateWorkbenchLayoutForRoot(
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  orderForRoot: WorkbenchPaneOrder,
+  activePaneByGroup: WorkbenchActivePaneState,
+  livePaneIds: ReadonlySet<string>,
+  terminalsReady: boolean,
+): {
+  prunedOrder: Record<string, string[]>;
+  reconciledActivePane: Record<string, string>;
+} {
+  const effectiveLivePaneIds = terminalsReady
+    ? livePaneIds
+    : new Set<string>([
+        ...livePaneIds,
+        ...Object.values(orderForRoot)
+          .flat()
+          .filter((paneId) => isTerminalPaneId(paneId)),
+      ]);
+  const prunedOrder = pruneWorkbenchLayoutOrder(
+    orderForRoot,
+    effectiveLivePaneIds,
+  );
+  const groupsWithPanes = groups.map((group) => ({
+    id: group.id,
+    panes: (prunedOrder[group.id] ?? []).map((paneId) => ({ id: paneId })),
+  }));
+  const reconciledActivePane = reconcileActiveWorkbenchPanes(
+    groupsWithPanes,
+    activePaneByGroup,
+    activePaneByGroup,
+  );
+  return { prunedOrder, reconciledActivePane };
 }
 
 function parseWorkbenchLayoutRestoreEntry(
