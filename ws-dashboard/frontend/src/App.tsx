@@ -120,9 +120,11 @@ import {
   resolveClosedWorkRootRefs,
   loadWorkbenchLayoutRestoreSnapshot,
   saveWorkbenchLayoutRestoreSnapshot,
+  mergeWorkbenchLayoutRestoreEntries,
   revalidateWorkbenchLayoutForRoot,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
+  upsertTerminalVisualRestoreEntryInSnapshot,
   resolveTerminalMountWrite,
   terminalVisualRestoreScrollbackLines,
   terminalVisualRestoreDebounceMs,
@@ -131,7 +133,6 @@ import {
   type WorkbenchPaneOrder,
   type DockviewTabCloseRequest,
   type WorkbenchPlacementState,
-  type WorkbenchLayoutRestoreEntry,
   type WorkbenchLayoutRestoreSnapshot,
   type TerminalVisualRestoreEntry,
   type TerminalVisualRestoreSnapshot,
@@ -400,23 +401,29 @@ export function App() {
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
   >({});
-  // Snapshot of persisted per-work-root dockview layouts (group membership,
-  // pane order, active pane, best-effort group size), loaded once at mount.
-  // Consumed lazily by the open-work-root effect below the first time each
-  // rootKey is visited this session, so a root not yet opened keeps its
-  // restore entry available for however long into the session it takes the
-  // user to first visit it.
-  const [initialWorkbenchLayoutRestore] = useState<WorkbenchLayoutRestoreSnapshot>(
-    () => loadWorkbenchLayoutRestoreSnapshot(),
+  // Session-lifetime snapshot of persisted per-work-root dockview layouts
+  // (group membership, pane order, active pane, best-effort group size),
+  // seeded once at mount and kept live for the rest of the browser session
+  // by the layout save effect below (which writes every merged save back
+  // into this ref). Consumed by the open-work-root effect (seeding a root's
+  // layout the first time it is opened this session, including a same-
+  // session reopen after an explicit close) and by
+  // `DockviewWorkbenchLayout`'s `initialGroupSizeById`, both of which need
+  // the ref's current value rather than a value frozen at mount.
+  const workbenchLayoutRestoreRef = useRef<WorkbenchLayoutRestoreSnapshot>(
+    loadWorkbenchLayoutRestoreSnapshot(),
   );
-  // Snapshot of persisted per-terminal visual-buffer restore entries
-  // (serialized scrollback/cursor/styles + scroll viewport), loaded once at
-  // mount alongside `initialWorkbenchLayoutRestore`. Consumed by the
+  // Session-lifetime snapshot of persisted per-terminal visual-buffer
+  // restore entries (serialized scrollback/cursor/styles + scroll
+  // viewport), seeded once at mount alongside `workbenchLayoutRestoreRef`
+  // and kept live for the rest of the browser session by the terminal
+  // visual-capture handler (which writes each captured entry back into this
+  // ref alongside its existing localStorage upsert). Consumed by the
   // `listTerminals` reattach path (to seed a matching pane's `nextSequence`)
   // and by `TerminalPaneBody`'s mount effect (to replace the plain-text
   // `pane.output` replay with the restored serialized buffer).
-  const [initialTerminalVisualRestore] = useState<TerminalVisualRestoreSnapshot>(
-    () => loadTerminalVisualRestoreSnapshot(),
+  const terminalVisualRestoreRef = useRef<TerminalVisualRestoreSnapshot>(
+    loadTerminalVisualRestoreSnapshot(),
   );
   // Work roots the user has visited this session stay mounted (own dockview
   // instance each) instead of being destroyed on selection switch. Ordered,
@@ -707,7 +714,7 @@ export function App() {
     // absence so this never clobbers an in-session live layout (e.g. a root
     // reopened after an explicit close within the same session already has
     // live state by the time this effect re-runs for it).
-    const restoredEntry = initialWorkbenchLayoutRestore[rootKey];
+    const restoredEntry = workbenchLayoutRestoreRef.current[rootKey];
     if (restoredEntry) {
       setWorkbenchGroupsByRoot((current) =>
         current[rootKey]
@@ -720,7 +727,7 @@ export function App() {
           : { ...current, [rootKey]: restoredEntry.paneOrderByGroup },
       );
     }
-  }, [workbenchSelection, initialWorkbenchLayoutRestore]);
+  }, [workbenchSelection]);
   const openWorkRootKeysSet = useMemo(
     () => new Set(openWorkRootKeys),
     [openWorkRootKeys],
@@ -1142,8 +1149,8 @@ export function App() {
             paneOrderByRoot={paneOrderByRoot}
             openWorkRootKeys={openWorkRootKeys}
             openWorkRootRefs={openWorkRootRefs}
-            initialWorkbenchLayoutRestore={initialWorkbenchLayoutRestore}
-            initialTerminalVisualRestore={initialTerminalVisualRestore}
+            workbenchLayoutRestoreRef={workbenchLayoutRestoreRef}
+            terminalVisualRestoreRef={terminalVisualRestoreRef}
             onCommand={executeCommand}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
@@ -3354,8 +3361,8 @@ function WorkbenchShell({
   paneOrderByRoot,
   openWorkRootKeys,
   openWorkRootRefs,
-  initialWorkbenchLayoutRestore,
-  initialTerminalVisualRestore,
+  workbenchLayoutRestoreRef,
+  terminalVisualRestoreRef,
   onWorkbenchGroupsByRootChange,
   onPaneOrderByRootChange,
   onOpenWorkRootKeysChange,
@@ -3381,8 +3388,8 @@ function WorkbenchShell({
   paneOrderByRoot: Record<string, WorkbenchPaneOrder>;
   openWorkRootKeys: string[];
   openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
-  initialWorkbenchLayoutRestore: WorkbenchLayoutRestoreSnapshot;
-  initialTerminalVisualRestore: TerminalVisualRestoreSnapshot;
+  workbenchLayoutRestoreRef: RefObject<WorkbenchLayoutRestoreSnapshot>;
+  terminalVisualRestoreRef: RefObject<TerminalVisualRestoreSnapshot>;
   onWorkbenchGroupsByRootChange: Dispatch<
     SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
   >;
@@ -3415,7 +3422,7 @@ function WorkbenchShell({
   // `DockviewWorkbenchLayout`'s `onLayoutSnapshot` and persisted alongside
   // groups/pane order/active pane. Not seeded eagerly like the other three -
   // `DockviewWorkbenchLayout` applies the restored size itself, once, from
-  // `initialWorkbenchLayoutRestore` directly (see the render below), so this
+  // `workbenchLayoutRestoreRef` directly (see the render below), so this
   // state only needs to track the live/updated values for the save effect.
   const [groupSizeByRoot, setGroupSizeByRoot] = useState<
     Record<string, Record<string, { width?: number; height?: number }>>
@@ -3546,7 +3553,7 @@ function WorkbenchShell({
       (rootKey) => !previousKeys.includes(rootKey),
     );
     for (const rootKey of addedKeys) {
-      const restoredEntry = initialWorkbenchLayoutRestore[rootKey];
+      const restoredEntry = workbenchLayoutRestoreRef.current[rootKey];
       if (!restoredEntry) {
         continue;
       }
@@ -3615,7 +3622,7 @@ function WorkbenchShell({
         return next;
       });
     }
-  }, [openWorkRootKeys, openWorkRootRefs, initialWorkbenchLayoutRestore]);
+  }, [openWorkRootKeys, openWorkRootRefs]);
 
   // Persist each open root's dockview layout (groups, pane order, active
   // pane) whenever any of the three change, mirroring the App()-level
@@ -3628,37 +3635,28 @@ function WorkbenchShell({
   // so on first render it is `[]` and would otherwise `removeItem` the whole
   // snapshot before the user opens anything. Saved entries are therefore the
   // union of (a) live entries for `openWorkRootKeys` (this session's current
-  // state) and (b) untouched entries from the originally-loaded
-  // `initialWorkbenchLayoutRestore` snapshot for every rootKey NOT in
-  // `openWorkRootKeys` this session - mirroring how `readOnlyFilePanes` avoids
-  // the same bug by being seeded at mount from *all* persisted panes
-  // (App.tsx:379-381) before any save happens.
+  // state) and (b) untouched entries from `workbenchLayoutRestoreRef`'s
+  // current value for every rootKey NOT in `openWorkRootKeys` this session -
+  // mirroring how `readOnlyFilePanes` avoids the same bug by being seeded at
+  // mount from *all* persisted panes (App.tsx:379-381) before any save
+  // happens. The merged result is written back into
+  // `workbenchLayoutRestoreRef` every run (not just read from it), so a
+  // just-closed root's untouched-entry fallback on the *next* run reflects
+  // its last live state instead of the frozen mount-time snapshot - fixing
+  // the clobber bug where a close previously caused this effect to write the
+  // mount-time entry back over the closed root's live layout.
   useEffect(() => {
-    const openWorkRootKeysSet = new Set(openWorkRootKeys);
-    const liveEntries: WorkbenchLayoutRestoreEntry[] = openWorkRootKeys.flatMap(
-      (rootKey) => {
-        const ref = openWorkRootRefs[rootKey];
-        const groups = workbenchGroupsByRoot[rootKey];
-        if (!ref || !groups) {
-          return [];
-        }
-        const groupSizeById = groupSizeByRoot[rootKey];
-        return [
-          {
-            serverRoute: ref.serverRoute,
-            workRootId: ref.rootId,
-            groups,
-            paneOrderByGroup: paneOrderByRoot[rootKey] ?? {},
-            activePaneByGroup: activePaneByRoot[rootKey] ?? {},
-            ...(groupSizeById ? { groupSizeById } : {}),
-          },
-        ];
-      },
+    const { mergedEntries, mergedSnapshot } = mergeWorkbenchLayoutRestoreEntries(
+      openWorkRootKeys,
+      openWorkRootRefs,
+      workbenchGroupsByRoot,
+      paneOrderByRoot,
+      activePaneByRoot,
+      groupSizeByRoot,
+      workbenchLayoutRestoreRef.current,
     );
-    const untouchedEntries = Object.entries(initialWorkbenchLayoutRestore)
-      .filter(([rootKey]) => !openWorkRootKeysSet.has(rootKey))
-      .map(([, restoredEntry]) => restoredEntry);
-    saveWorkbenchLayoutRestoreSnapshot([...liveEntries, ...untouchedEntries]);
+    saveWorkbenchLayoutRestoreSnapshot(mergedEntries);
+    workbenchLayoutRestoreRef.current = mergedSnapshot;
   }, [
     openWorkRootKeys,
     openWorkRootRefs,
@@ -3666,7 +3664,6 @@ function WorkbenchShell({
     paneOrderByRoot,
     activePaneByRoot,
     groupSizeByRoot,
-    initialWorkbenchLayoutRestore,
   ]);
 
   // Revalidate restored/live pane references against currently-known live
@@ -3883,15 +3880,21 @@ function WorkbenchShell({
           isActivePane: (pane) =>
             focusedTerminalPaneIdRef.current === pane.paneId,
           onVisualRestoreEntryFor: (pane) =>
-            initialTerminalVisualRestore[pane.logicalKey],
+            terminalVisualRestoreRef.current[pane.logicalKey],
           onVisualCapture: (pane, capture) => {
-            upsertTerminalVisualRestoreEntry({
+            const entry = {
               logicalKey: pane.logicalKey,
               serialized: capture.serialized,
               viewportY: capture.viewportY,
               nextSequence: capture.nextSequence,
               capturedAtMs: Date.now(),
-            });
+            };
+            upsertTerminalVisualRestoreEntry(entry);
+            terminalVisualRestoreRef.current =
+              upsertTerminalVisualRestoreEntryInSnapshot(
+                terminalVisualRestoreRef.current,
+                entry,
+              );
           },
         },
         closedAgentPaneByRoot[root.id] ?? [],
@@ -4007,7 +4010,7 @@ function WorkbenchShell({
               sessions,
               listStartedAtMs,
               serverRoute,
-              initialTerminalVisualRestore,
+              terminalVisualRestoreRef.current,
             ),
             serverRoute,
           ),
@@ -5077,7 +5080,7 @@ function WorkbenchShell({
               activePaneByGroup={activePaneByRoot[rootKey] ?? {}}
               groups={rootGroups}
               initialGroupSizeById={
-                initialWorkbenchLayoutRestore[rootKey]?.groupSizeById
+                workbenchLayoutRestoreRef.current[rootKey]?.groupSizeById
               }
               onMovePane={movePane}
               onRequestClosePane={requestWorkbenchPaneClose}
@@ -6425,7 +6428,7 @@ type TerminalPaneActions = {
   onFocusInput: (pane: TerminalPaneState) => void;
   isActivePane: (pane: TerminalPaneState) => boolean;
   // Looked up once at TerminalPaneBody mount, by `pane.logicalKey`, against
-  // the App-mount-loaded `initialTerminalVisualRestore` snapshot. Returns
+  // the session-lifetime `terminalVisualRestoreRef` snapshot. Returns
   // `undefined` for a brand-new session (restore-intent fallback or a
   // logicalKey never captured before) so the mount effect falls back to the
   // existing plain-text `pane.output` replay.

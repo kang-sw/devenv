@@ -657,6 +657,87 @@ persistence primitive built to fix reload is the same mechanism that makes the
 explicit-close affordance from Phase 2 not feel like a worse regression than
 just leaving the root open (which Phase 1 makes safe by default).
 
+### Result (bb2bbf0a) - 2026-07-06
+
+Implemented on `implement/phase-7-close-reopen-restore-reuse`
+(`8b18b36b..bb2bbf0a`), merged into `ws-dashboard-dev`.
+
+- Survey found that this phase's actual gap was not "no capture-and-restore
+  wiring exists" but that Phases 5-6's snapshot state
+  (`initialWorkbenchLayoutRestore`/`initialTerminalVisualRestore`) was frozen
+  at `App` mount via `useState` with no setter, so every same-session
+  reopen-seed and reattach-lookup site read the page-load snapshot instead of
+  the continuously-updated live one. The survey also found a real regression,
+  not just staleness: the layout save effect re-fired immediately after every
+  close and clobbered `localStorage` for the just-closed root with the stale
+  mount-time entry — so even a plain page *reload* right after an in-session
+  close/edit sequence lost that edit, independent of any new close/reopen
+  affordance.
+- Converted both snapshots to `useRef`s (`workbenchLayoutRestoreRef`,
+  `terminalVisualRestoreRef`) kept live by the existing save/capture effects,
+  and repointed every read/write site (selection-seed effect,
+  `initialGroupSizeById`, `onVisualRestoreEntryFor`/`onVisualCapture`, the
+  `listTerminals` reconcile call) to read `.current`. A grep-for-stale-identifier
+  completeness check caught one site missed by the initial survey (the
+  `activePaneByRoot` seed effect), fixed in the same pass.
+- Fixed the save-effect clobber bug by writing the merged live+untouched
+  result back into the ref on every run, keyed via the existing
+  `workbenchLayoutRestoreRootKey` export, so the ref and `localStorage` never
+  diverge.
+- Review found this merge/clobber-fix computation was itself left as
+  untested inline glue — the same extractable-pure-logic gap this ticket's
+  Test partition has now caught and fixed in six of its seven phases
+  (1/2/4/5/6/7) — plus a smaller duplication of `upsertTerminalVisualRestoreEntry`'s
+  upsert-by-key semantics in the new ref-mirror write. A single fix-relay
+  cycle (`bb2bbf0a`) extracted `mergeWorkbenchLayoutRestoreEntries` into
+  `workbench/layoutRestore.ts` and `upsertTerminalVisualRestoreEntryInSnapshot`
+  into `workbench/terminalVisualRestore.ts`, unit-tested both, and wired
+  App.tsx to delegate to them with no behavior change; re-review confirmed
+  clean with no new issues. Correctness and Fit partitions were clean on the
+  first pass.
+- No spec edit: classified `Contract-first: no` per this ticket's own Spec
+  Impact section — internal lifecycle/session-persistence plumbing, not a new
+  documented contract.
+
+Verification: `npm run build`, `npm run test:workbench`, and
+`npm run test:terminals` all pass in `ws-dashboard/frontend`. Playwright e2e
+remains not runnable in this sandbox (`libasound.so.2` missing, no Chromium
+binary), consistent with every prior phase's disclosure; the close→reopen
+integration itself (no App-level render harness exists in this codebase) was
+verified by structural code trace plus the newly extracted pure functions'
+unit tests, not an end-to-end run.
+
+#### Ticket-wide completeness check
+
+All 7 phases of this ticket now carry `### Result` sections and are merged
+into `ws-dashboard-dev`:
+
+1. Per-work-root workbench instances (no destroy on root switch) — `1ba87971`
+2. Explicit "close work root" action — `d05f5fc0`
+3. Visibility-gated terminal WebSocket lifecycle — `7c7c913c`
+4. Cursor accuracy and gap signaling for reconnect — `6c0d1b3d`
+5. Persist and restore per-work-root dockview layout across reload — `cfcd5a3d`
+6. Capture and restore terminal visual buffer state across reload — `07d14b4d`
+7. Reuse layout/terminal-visual restore for in-session close/reopen — `bb2bbf0a`
+
+The two lines of work this ticket set out to unify — reload-survival (Phases
+3-6) and in-session close/reopen (Phases 1-2, wired to the same primitive in
+Phase 7) — now share one restore mechanism end-to-end: a closed root's
+layout and terminal visual state stay live in the same ref-backed snapshot a
+page reload reads from, so reopening within a session and reloading the page
+restore identically. Every phase's Test-partition review independently
+converged on the same remediation shape (extract pure glue logic out of
+App.tsx effects, unit-test it), which is now a consistent, self-reinforcing
+pattern across `workbench/openRootLookup.ts`, `workbench/layoutRestore.ts`,
+and `workbench/terminalVisualRestore.ts`. The one durable, explicitly-accepted
+gap across the whole ticket is Playwright e2e coverage for the actual
+browser-integration behavior (page reload, socket reconnect, visual restore,
+close/reopen) — not runnable in this sandbox across any phase — mitigated by
+extracting and unit-testing every non-trivial pure computation reachable
+without a browser, plus direct code-reading verification for the remaining
+DOM/xterm/React-effect-coupled wiring. No further phases or follow-up work
+are outstanding for this ticket.
+
 ## Spec Impact
 
 Target spec area: `ai-docs/spec/ws-web-dashboard/index.md`, primarily the
