@@ -783,7 +783,7 @@ function appendDirectoryRows(
 
 const readOnlyFilePaneRestoreStorageKey = "ws-dashboard.readOnlyFilePanes.v1";
 
-function browserStorage(): Storage | null {
+export function browserStorage(): Storage | null {
   try {
     return typeof window === "undefined" ? null : window.localStorage;
   } catch {
