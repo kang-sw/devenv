@@ -40,6 +40,7 @@ export type TerminalWebSocketServerMessage =
       terminalId: string;
       status: TerminalSessionView["status"];
       nextSequence: number;
+      truncated: boolean;
     };
 
 // CONTRACT: xterm onData traffic is forwarded as raw input data over the live
@@ -535,6 +536,23 @@ export function markTerminalPaneVisibilityGated(
   return { ...pane, visibilityGated };
 }
 
+// Advances pane.nextSequence from an individual output frame's own chunk
+// sequence, mirroring the cursor math in appendTerminalWebSocketMessage's
+// output branch. Needed because the live socket's message listener
+// direct-writes "output" frames to xterm and never routes them through
+// appendTerminalWebSocketMessage (see App.tsx applyTerminalSocketMessage),
+// so without this the cursor only advanced on trailing status/exit frames -
+// a race where a socket closed mid-batch left the cursor stale and caused
+// duplicate output on resume.
+export function markTerminalOutputCursor(
+  pane: TerminalPaneState,
+  chunkSequence: number,
+): TerminalPaneState {
+  const nextSequence = Math.max(pane.nextSequence, chunkSequence + 1);
+  if (nextSequence === pane.nextSequence) return pane;
+  return { ...pane, nextSequence, localCreatedAtMs: Date.now() };
+}
+
 export function appendTerminalWebSocketMessage(
   pane: TerminalPaneState,
   message: TerminalWebSocketServerMessage,
@@ -554,6 +572,10 @@ export function appendTerminalWebSocketMessage(
   return {
     ...pane,
     session: { ...pane.session, status: message.status },
+    output: message.truncated
+      ? pane.output +
+        "\r\n[terminal output gap: some history was not retained]\r\n"
+      : pane.output,
     nextSequence: Math.max(pane.nextSequence, message.nextSequence),
     socketStatus: message.type === "exit" ? "fallback" : pane.socketStatus,
     error: null,

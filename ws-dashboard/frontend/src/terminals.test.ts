@@ -9,6 +9,7 @@ import {
   listTerminals,
   resizeTerminal,
   sendTerminalInput,
+  markTerminalOutputCursor,
   markTerminalPaneCloseError,
   markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
@@ -302,6 +303,7 @@ const withSocketExit = appendTerminalWebSocketMessage(withSocketOutput, {
   terminalId: "term_abc",
   status: "exited",
   nextSequence: 5,
+  truncated: false,
 });
 assertEqual(
   withSocketExit.session.status,
@@ -312,6 +314,43 @@ assertEqual(
   withSocketExit.socketStatus,
   "fallback",
   "websocket exit leaves pane in fallback state",
+);
+assertEqual(
+  withSocketExit.output.includes("terminal output gap"),
+  false,
+  "non-truncated exit frame leaves output untouched",
+);
+
+const withTruncatedStatus = appendTerminalWebSocketMessage(withSocketOutput, {
+  type: "status",
+  terminalId: "term_abc",
+  status: "running",
+  nextSequence: 5,
+  truncated: true,
+});
+assertEqual(
+  withTruncatedStatus.output.includes(
+    "[terminal output gap: some history was not retained]",
+  ),
+  true,
+  "truncated status frame appends a visible gap marker to pane output",
+);
+
+const cursorAdvanced = markTerminalOutputCursor(pane, 4);
+assertEqual(
+  cursorAdvanced.nextSequence,
+  5,
+  "markTerminalOutputCursor advances the cursor past a higher chunk sequence",
+);
+assertEqual(
+  markTerminalOutputCursor(cursorAdvanced, 1) === cursorAdvanced,
+  true,
+  "markTerminalOutputCursor is a no-op when the chunk sequence is already covered",
+);
+assertEqual(
+  markTerminalOutputCursor(cursorAdvanced, 4) === cursorAdvanced,
+  true,
+  "markTerminalOutputCursor is a no-op at the exact boundary (chunkSequence === nextSequence - 1)",
 );
 
 const idleOutput = {
