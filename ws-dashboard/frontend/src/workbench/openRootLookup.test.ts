@@ -1,4 +1,7 @@
-import { findOpenWorkRoot } from "./openRootLookup.js";
+import {
+  findOpenWorkRoot,
+  resolveClosedWorkRootRefs,
+} from "./openRootLookup.js";
 import type {
   DashboardResourcesView,
   InstanceView,
@@ -11,6 +14,14 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
     throw new Error(
       `${label}: expected ${String(expected)}, got ${String(actual)}`,
     );
+  }
+}
+
+function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
+  const a = JSON.stringify(actual),
+    e = JSON.stringify(expected);
+  if (a !== e) {
+    throw new Error(`${label}: expected ${e}, got ${a}`);
   }
 }
 
@@ -144,4 +155,42 @@ assertEqual(
   resolvedNoInstance?.mainInstance ?? null,
   null,
   "a root with no main instances resolves mainInstance to null",
+);
+
+// `resolveClosedWorkRootRefs` — pure key-diff step behind the close-triggered
+// cleanup effect in `WorkbenchShell`. Given the previous render's
+// `openWorkRootKeys`/`openWorkRootRefs` snapshot and the current
+// `openWorkRootKeys`, it resolves which rootKeys just closed and their
+// `{rootId, serverRoute}`.
+
+const refA = { rootId: "root-a", serverRoute: "server-local" };
+const refB = { rootId: "root-b", serverRoute: "server-remote-1" };
+const previousRefs = { "key-a": refA, "key-b": refB };
+
+// A key present in `previousKeys` but absent from `currentKeys` resolves via
+// `previousRefs`.
+assertDeepEqual(
+  resolveClosedWorkRootRefs(["key-a", "key-b"], previousRefs, ["key-b"]),
+  [{ rootKey: "key-a", rootId: refA.rootId, serverRoute: refA.serverRoute }],
+  "a key dropped from currentKeys resolves via previousRefs",
+);
+
+// A key still present in `currentKeys` is not included, even though it is
+// also in `previousKeys`.
+assertDeepEqual(
+  resolveClosedWorkRootRefs(
+    ["key-a", "key-b"],
+    previousRefs,
+    ["key-a", "key-b"],
+  ),
+  [],
+  "a key still present in currentKeys is not treated as closed",
+);
+
+// An already-missing `previousRefs` entry (e.g. cleared out of band) is
+// skipped gracefully rather than throwing or producing a partial record.
+assertDeepEqual(
+  resolveClosedWorkRootRefs(["key-a", "key-missing"], { "key-a": refA }, []),
+  [{ rootKey: "key-a", rootId: refA.rootId, serverRoute: refA.serverRoute }],
+  "a closed key with no previousRefs entry is skipped, other closed keys still resolve",
 );

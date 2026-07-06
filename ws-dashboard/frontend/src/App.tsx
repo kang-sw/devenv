@@ -93,6 +93,7 @@ import {
   buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
+  buildWorkRootCloseCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
@@ -115,6 +116,7 @@ import {
   workbenchGroupId,
   DockviewWorkbenchLayout,
   findOpenWorkRoot,
+  resolveClosedWorkRootRefs,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -166,6 +168,7 @@ import {
   loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  removeTerminalPanesForWorkRoot,
   replaceTerminalRestoreIntentsForWorkRoot,
   resizeTerminal,
   sendTerminalInput,
@@ -381,6 +384,17 @@ export function App() {
   >({});
   const [paneOrderByRoot, setPaneOrderByRoot] = useState<
     Record<string, WorkbenchPaneOrder>
+  >({});
+  // Work roots the user has visited this session stay mounted (own dockview
+  // instance each) instead of being destroyed on selection switch. Ordered,
+  // de-duplicated set of `serverScopedIdentity(serverId, rootId)` keys, plus
+  // the raw ids needed to re-resolve each root from `resources` without
+  // depending on the tree-walk `selectedId`/`selection` state. Lifted here
+  // (rather than local to `WorkbenchShell`) so the left panel's close
+  // affordance can read membership and trigger removal.
+  const [openWorkRootKeys, setOpenWorkRootKeys] = useState<string[]>([]);
+  const [openWorkRootRefs, setOpenWorkRootRefs] = useState<
+    Record<string, { rootId: string; serverRoute: string }>
   >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
@@ -637,6 +651,29 @@ export function App() {
     () => resolveWorkbenchSelection(activeResources, selectedId),
     [activeResources, selectedId],
   );
+  useEffect(() => {
+    if (!workbenchSelection) {
+      return;
+    }
+    const rootKey = serverScopedIdentity(
+      workbenchSelection.root.resourcePath.serverId,
+      workbenchSelection.root.id,
+    );
+    const rootId = workbenchSelection.root.id;
+    const serverRoute = workbenchSelection.root.resourcePath.serverId;
+    setOpenWorkRootKeys((current) =>
+      current.includes(rootKey) ? current : [...current, rootKey],
+    );
+    setOpenWorkRootRefs((current) =>
+      current[rootKey]
+        ? current
+        : { ...current, [rootKey]: { rootId, serverRoute } },
+    );
+  }, [workbenchSelection]);
+  const openWorkRootKeysSet = useMemo(
+    () => new Set(openWorkRootKeys),
+    [openWorkRootKeys],
+  );
 
   const openReadOnlyFile = useCallback(
     (
@@ -822,6 +859,45 @@ export function App() {
       } else if (command.payload.type === "gitWorktreeAdd.close") {
         executableHandlers[command.commandId] = () =>
           setGitWorktreeTarget(null);
+      } else if (command.payload.type === "workRoot.close") {
+        const { workRootId, serverRoute } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          const closeServerRoute = serverRoute ?? "server-local";
+          const rootKey = serverScopedIdentity(closeServerRoute, workRootId);
+          // This only stops rendering the root's DockviewWorkbenchLayout
+          // instance (which unmounts its dockview panels and fires their
+          // existing xterm dispose/socket-close cleanup) - it deliberately
+          // does not call closeTerminal()/closeTerminalPane, since the
+          // daemon terminal session must stay alive for a future reopen to
+          // reattach by id.
+          setOpenWorkRootKeys((current) =>
+            current.filter((key) => key !== rootKey),
+          );
+          setOpenWorkRootRefs((current) => {
+            if (!(rootKey in current)) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[rootKey];
+            return next;
+          });
+          setWorkbenchGroupsByRoot((current) => {
+            if (!(rootKey in current)) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[rootKey];
+            return next;
+          });
+          setPaneOrderByRoot((current) => {
+            if (!(rootKey in current)) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[rootKey];
+            return next;
+          });
+        };
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -966,6 +1042,7 @@ export function App() {
             error={error}
             selectedId={selectedId}
             selectedWorkRoot={workbenchSelection?.root ?? null}
+            openWorkRootKeys={openWorkRootKeysSet}
             onOpenWorkRoot={handleWorkRootOpened}
             onOpenAddServer={() => setServerModal({ mode: "add" })}
             onOpenServerAuth={(server) =>
@@ -1012,9 +1089,13 @@ export function App() {
             selection={workbenchSelection}
             workbenchGroupsByRoot={workbenchGroupsByRoot}
             paneOrderByRoot={paneOrderByRoot}
+            openWorkRootKeys={openWorkRootKeys}
+            openWorkRootRefs={openWorkRootRefs}
             onCommand={executeCommand}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
+            onOpenWorkRootKeysChange={setOpenWorkRootKeys}
+            onOpenWorkRootRefsChange={setOpenWorkRootRefs}
             readOnlyFilePanes={Object.values(readOnlyFilePanes)}
             readOnlyFilePaneOrderByGroup={readOnlyFilePaneOrderByGroup}
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
@@ -2499,6 +2580,7 @@ function ResourceNavigation({
   error,
   selectedId,
   selectedWorkRoot,
+  openWorkRootKeys,
   onOpenWorkRoot,
   onOpenAddServer,
   onOpenServerAuth,
@@ -2514,6 +2596,7 @@ function ResourceNavigation({
   error: string | null;
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
+  openWorkRootKeys: ReadonlySet<string>;
   onOpenWorkRoot: (
     view: DashboardResourcesView,
     requestedWorkRootId?: string,
@@ -2580,6 +2663,7 @@ function ResourceNavigation({
             selected={server.id === selectedServerId}
             selectedId={selectedId}
             resources={server.id === selectedServerId ? resources : null}
+            openWorkRootKeys={openWorkRootKeys}
             onCommand={onCommand}
             onOpenWorkRoot={onOpenWorkRoot}
             onOpenServerAuth={onOpenServerAuth}
@@ -2612,6 +2696,7 @@ function ServerRows({
   selected,
   selectedId,
   resources,
+  openWorkRootKeys,
   onCommand,
   onOpenWorkRoot,
   onOpenServerAuth,
@@ -2622,6 +2707,7 @@ function ServerRows({
   selected: boolean;
   selectedId: string | null;
   resources: DashboardResourcesView | null;
+  openWorkRootKeys: ReadonlySet<string>;
   onCommand: DashboardCommandDispatcher;
   onOpenWorkRoot: (
     view: DashboardResourcesView,
@@ -2693,6 +2779,7 @@ function ServerRows({
               workspace={workspace}
               serverId={server.id}
               selectedId={selectedId}
+              openWorkRootKeys={openWorkRootKeys}
               onCommand={onCommand}
             />
           ))}
@@ -3212,8 +3299,12 @@ function WorkbenchShell({
   activeReadOnlyFilePaneRequest,
   workbenchGroupsByRoot,
   paneOrderByRoot,
+  openWorkRootKeys,
+  openWorkRootRefs,
   onWorkbenchGroupsByRootChange,
   onPaneOrderByRootChange,
+  onOpenWorkRootKeysChange,
+  onOpenWorkRootRefsChange,
   onReadOnlyFilePanesChange,
   onReadOnlyFilePaneOrderByGroupChange,
   onDocumentSaved,
@@ -3233,11 +3324,17 @@ function WorkbenchShell({
     ReadonlyArray<{ id: string; label: string }>
   >;
   paneOrderByRoot: Record<string, WorkbenchPaneOrder>;
+  openWorkRootKeys: string[];
+  openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
   onWorkbenchGroupsByRootChange: Dispatch<
     SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
   >;
   onPaneOrderByRootChange: Dispatch<
     SetStateAction<Record<string, WorkbenchPaneOrder>>
+  >;
+  onOpenWorkRootKeysChange: Dispatch<SetStateAction<string[]>>;
+  onOpenWorkRootRefsChange: Dispatch<
+    SetStateAction<Record<string, { rootId: string; serverRoute: string }>>
   >;
   onReadOnlyFilePanesChange: Dispatch<
     SetStateAction<Record<string, ReadOnlyFilePane>>
@@ -3275,15 +3372,6 @@ function WorkbenchShell({
   >(null);
   const [closedAgentPaneByRoot, setClosedAgentPaneByRoot] = useState<
     Record<string, readonly string[]>
-  >({});
-  // Work roots the user has visited this session stay mounted (own dockview
-  // instance each) instead of being destroyed on selection switch. Ordered,
-  // de-duplicated set of `serverScopedIdentity(serverId, rootId)` keys, plus
-  // the raw ids needed to re-resolve each root from `resources` without
-  // depending on the tree-walk `selectedId`/`selection` state.
-  const [openWorkRootKeys, setOpenWorkRootKeys] = useState<string[]>([]);
-  const [openWorkRootRefs, setOpenWorkRootRefs] = useState<
-    Record<string, { rootId: string; serverRoute: string }>
   >({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
@@ -3345,22 +3433,67 @@ function WorkbenchShell({
   const activePaneByGroup = selectedWorkRootId
     ? (activePaneByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ?? {})
     : {};
+  // `openWorkRootKeys`/`openWorkRootRefs` are lifted to `App()` (so the left
+  // panel can read membership and trigger a close), but the state that a
+  // close must clear - `terminalPanes`, `activityPaneOpenByRoot`,
+  // `activePaneByRoot`, `closedAgentPaneByRoot` - stays local to
+  // `WorkbenchShell`. Detect a rootKey dropping out of `openWorkRootKeys`
+  // (vs. the last-seen snapshot) and clear that root's local state; the
+  // rootKey's disappearance from `openWorkRootKeys` is what unmounts the
+  // root's `DockviewWorkbenchLayout` instance and fires the dispose/socket-
+  // close cleanup already wired into `TerminalPaneBody`.
+  // `openWorkRootRefs` is cleared for a rootKey in the same command handler
+  // (and therefore the same React commit/render) that removes it from
+  // `openWorkRootKeys` - so by the time this effect observes the removal,
+  // the incoming `openWorkRootRefs` prop no longer has the entry either.
+  // Snapshot both together, and only update the snapshot from inside the
+  // effect (after use), so the *previous* render's ref is still available
+  // to resolve `{rootId, serverRoute}` for the just-closed key.
+  const lastOpenWorkRootKeysRef = useRef<string[]>(openWorkRootKeys);
+  const lastOpenWorkRootRefsRef = useRef(openWorkRootRefs);
   useEffect(() => {
-    if (!selectedWorkRootStateKey || !selection) {
+    const previousKeys = lastOpenWorkRootKeysRef.current;
+    const previousRefs = lastOpenWorkRootRefsRef.current;
+    lastOpenWorkRootKeysRef.current = openWorkRootKeys;
+    lastOpenWorkRootRefsRef.current = openWorkRootRefs;
+    const closedRefs = resolveClosedWorkRootRefs(
+      previousKeys,
+      previousRefs,
+      openWorkRootKeys,
+    );
+    if (closedRefs.length === 0) {
       return;
     }
-    const rootKey = selectedWorkRootStateKey;
-    const rootId = selection.root.id;
-    const serverRoute = selection.root.resourcePath.serverId;
-    setOpenWorkRootKeys((current) =>
-      current.includes(rootKey) ? current : [...current, rootKey],
-    );
-    setOpenWorkRootRefs((current) =>
-      current[rootKey]
-        ? current
-        : { ...current, [rootKey]: { rootId, serverRoute } },
-    );
-  }, [selectedWorkRootStateKey, selection]);
+    for (const { rootKey, rootId, serverRoute } of closedRefs) {
+      setTerminalPanes((current) =>
+        removeTerminalPanesForWorkRoot(current, rootId, serverRoute),
+      );
+      setActivityPaneOpenByRoot((current) => {
+        if (!(rootKey in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[rootKey];
+        return next;
+      });
+      setActivePaneByRoot((current) => {
+        if (!(rootKey in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[rootKey];
+        return next;
+      });
+      setClosedAgentPaneByRoot((current) => {
+        if (!(rootId in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[rootId];
+        return next;
+      });
+    }
+  }, [openWorkRootKeys, openWorkRootRefs]);
   const activityPaneOpenForSelected = selectedWorkRootId
     ? (activityPaneOpenByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
       false)
@@ -7072,11 +7205,13 @@ function WorkspaceRows({
   workspace,
   serverId,
   selectedId,
+  openWorkRootKeys,
   onCommand,
 }: {
   workspace: WorkspaceView;
   serverId: string;
   selectedId: string | null;
+  openWorkRootKeys: ReadonlySet<string>;
   onCommand: DashboardCommandDispatcher;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
@@ -7113,6 +7248,9 @@ function WorkspaceRows({
             compactRoot.kind === "gitPrimaryRoot" ||
             compactRoot.kind === "gitLinkedWorktree"
           }
+          isOpenWorkRoot={openWorkRootKeys.has(
+            serverScopedIdentity(serverId, compactRoot.id),
+          )}
           debugMeta={[
             "compact workRoot",
             kindLabel(compactRoot.kind),
@@ -7155,9 +7293,13 @@ function WorkspaceRows({
             selected={selectedId === root.id}
             actions={[]}
             actionEntityId={root.id}
+            actionServerId={serverId}
             kind={root.kind}
             availability={root.availability}
             activation={root.activation}
+            isOpenWorkRoot={openWorkRootKeys.has(
+              serverScopedIdentity(serverId, root.id),
+            )}
             debugMeta={[
               "workRoot",
               kindLabel(root.kind),
@@ -7196,6 +7338,7 @@ function ResourceRow({
   availability,
   activation,
   canAddWorktree = false,
+  isOpenWorkRoot = false,
   debugMeta,
   onCommand,
 }: {
@@ -7212,12 +7355,17 @@ function ResourceRow({
   availability?: WorkRootView["availability"];
   activation?: WorkRootView["activation"];
   canAddWorktree?: boolean;
+  isOpenWorkRoot?: boolean;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
 }) {
   const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
+  const canCloseWorkRoot =
+    (presentation === "workRoot" || presentation === "compactWorkRoot") &&
+    isOpenWorkRoot &&
+    !selected;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
@@ -7260,63 +7408,79 @@ function ResourceRow({
           ) : null}
         </span>
       </button>
-      {hasWorkspaceRemove ? (
-        <span
-          className="resource-row-actions workspace-row-menu-wrap"
-          ref={menuRef}
-        >
-          <ChromeIconButton
-            className="resource-row-action"
-            commandId="workspace.menu.open"
-            icon={MoreHorizontal}
-            label={`More actions for ${title}`}
-            onClick={() =>
-              onCommand(buildWorkspaceMenuOpenCommand(actionEntityId), {
-                "workspace.menu.open": () => setMenuOpen((current) => !current),
-              })
-            }
-          />
-          {menuOpen ? (
-            <div
-              className="workbench-overflow-menu workspace-row-menu"
-              role="menu"
-            >
-              {canAddWorktree ? (
-                <button
-                  className="workbench-overflow-item"
-                  data-command-id="gitWorktreeAdd.open"
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onCommand(
-                      buildGitWorktreeAddOpenCommand(
-                        actionEntityId,
-                        actionServerId,
-                      ),
-                    );
-                  }}
+      {hasWorkspaceRemove || canCloseWorkRoot ? (
+        <span className="resource-row-actions">
+          {canCloseWorkRoot ? (
+            <ChromeIconButton
+              className="resource-row-action"
+              commandId="workRoot.close"
+              icon={X}
+              label={`Close ${title}`}
+              onClick={() =>
+                onCommand(buildWorkRootCloseCommand(id, actionServerId))
+              }
+            />
+          ) : null}
+          {hasWorkspaceRemove ? (
+            <span className="workspace-row-menu-wrap" ref={menuRef}>
+              <ChromeIconButton
+                className="resource-row-action"
+                commandId="workspace.menu.open"
+                icon={MoreHorizontal}
+                label={`More actions for ${title}`}
+                onClick={() =>
+                  onCommand(buildWorkspaceMenuOpenCommand(actionEntityId), {
+                    "workspace.menu.open": () =>
+                      setMenuOpen((current) => !current),
+                  })
+                }
+              />
+              {menuOpen ? (
+                <div
+                  className="workbench-overflow-menu workspace-row-menu"
+                  role="menu"
                 >
-                  <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
-                  <span>Add worktree...</span>
-                </button>
+                  {canAddWorktree ? (
+                    <button
+                      className="workbench-overflow-item"
+                      data-command-id="gitWorktreeAdd.open"
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onCommand(
+                          buildGitWorktreeAddOpenCommand(
+                            actionEntityId,
+                            actionServerId,
+                          ),
+                        );
+                      }}
+                    >
+                      <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                      <span>Add worktree...</span>
+                    </button>
+                  ) : null}
+                  <button
+                    className="workbench-overflow-item workbench-overflow-item-danger"
+                    data-command-id="workspace.remove"
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onCommand(
+                        buildWorkspaceRemoveCommand(
+                          actionEntityId,
+                          actionServerId,
+                        ),
+                      );
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <span>Remove workspace...</span>
+                  </button>
+                </div>
               ) : null}
-              <button
-                className="workbench-overflow-item workbench-overflow-item-danger"
-                data-command-id="workspace.remove"
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onCommand(
-                    buildWorkspaceRemoveCommand(actionEntityId, actionServerId),
-                  );
-                }}
-              >
-                <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>Remove workspace...</span>
-              </button>
-            </div>
+            </span>
           ) : null}
         </span>
       ) : null}

@@ -16,6 +16,7 @@ export type DashboardCommandId =
   | "git.branchCreate.submit"
   | "git.branchCreate.close"
   | "workRoot.open"
+  | "workRoot.close"
   | "workRoot.activation.set"
   | "rootPicker.open"
   | "rootPicker.close"
@@ -67,6 +68,7 @@ export type DashboardCommandPayload =
     }
   | { type: "git.branchCreate.close"; workRootId: string }
   | { type: "workRoot.open" }
+  | { type: "workRoot.close"; workRootId: string }
   | {
       type: "workRoot.activation.set";
       workRootId: string;
@@ -350,6 +352,16 @@ export function buildWorkspaceRemoveCommand(
   };
 }
 
+export function buildWorkRootCloseCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "workRoot.close",
+    payload: { type: "workRoot.close", serverRoute, workRootId },
+  };
+}
+
 export function buildWorkRootActivationCommand(
   workRootId: string,
   activation: "online" | "offline",
@@ -587,6 +599,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Close new branch";
     case "workRoot.open":
       return "Open workRoot";
+    case "workRoot.close":
+      return "Close work root";
     case "workRoot.activation.set":
       return payload.activation === "online"
         ? "Bring workRoot online"
