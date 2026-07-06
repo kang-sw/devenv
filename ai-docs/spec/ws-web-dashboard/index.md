@@ -1538,8 +1538,20 @@ state. The daemon persists the owner's opened workRoot paths in local dashboard
 state and seeds the live resource view from that remembered list on startup.
 Remembered roots re-run normal discovery instead of bypassing moved, offline,
 inaccessible, primary-root, or linked-worktree classification. Auth sessions,
-live terminal process survival, Activity acknowledgement state, and exact
-browser workbench arrangement remain outside the restore model.
+live terminal process survival, and Activity acknowledgement state remain
+outside the restore model.
+
+Per-work-root browser workbench arrangement — dockview group membership, tab
+order, active pane per group, and split proportions on a best-effort basis —
+is persisted to browser-local storage keyed by server route and workRoot id,
+and restored on reload (and on reopening a work root closed via the explicit
+close action, per a later phase). Restore never treats persisted layout as
+authoritative over live daemon/resource state: every pane reference in a
+persisted layout is revalidated against currently-available resources, and an
+unavailable reference (a file pane whose file is no longer previewable, or a
+terminal pane with no matching daemon-alive terminal or restore intent) is
+silently dropped from the restored layout rather than shown as an error,
+consistent with this anchor's existing file-pane restore rule.
 
 Browser-visible terminal tab descriptors can restore after daemon restart as
 newly created daemon terminal sessions attached to the remembered workRoot. The

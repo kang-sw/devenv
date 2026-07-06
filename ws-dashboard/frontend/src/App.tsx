@@ -3391,6 +3391,15 @@ function WorkbenchShell({
   const [activePaneByRoot, setActivePaneByRoot] = useState<
     Record<string, Record<string, string>>
   >({});
+  // Best-effort per-root dockview group split sizes, captured from
+  // `DockviewWorkbenchLayout`'s `onLayoutSnapshot` and persisted alongside
+  // groups/pane order/active pane. Not seeded eagerly like the other three -
+  // `DockviewWorkbenchLayout` applies the restored size itself, once, from
+  // `initialWorkbenchLayoutRestore` directly (see the render below), so this
+  // state only needs to track the live/updated values for the save effect.
+  const [groupSizeByRoot, setGroupSizeByRoot] = useState<
+    Record<string, Record<string, { width?: number; height?: number }>>
+  >({});
   const [terminalPanes, setTerminalPanes] = useState<
     Record<string, TerminalPaneState>
   >({});
@@ -3542,6 +3551,14 @@ function WorkbenchShell({
         delete next[rootKey];
         return next;
       });
+      setGroupSizeByRoot((current) => {
+        if (!(rootKey in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[rootKey];
+        return next;
+      });
       setClosedAgentPaneByRoot((current) => {
         if (!(rootId in current)) {
           return current;
@@ -3565,6 +3582,7 @@ function WorkbenchShell({
         if (!ref || !groups) {
           return [];
         }
+        const groupSizeById = groupSizeByRoot[rootKey];
         return [
           {
             serverRoute: ref.serverRoute,
@@ -3572,6 +3590,7 @@ function WorkbenchShell({
             groups,
             paneOrderByGroup: paneOrderByRoot[rootKey] ?? {},
             activePaneByGroup: activePaneByRoot[rootKey] ?? {},
+            ...(groupSizeById ? { groupSizeById } : {}),
           },
         ];
       },
@@ -3583,6 +3602,7 @@ function WorkbenchShell({
     workbenchGroupsByRoot,
     paneOrderByRoot,
     activePaneByRoot,
+    groupSizeByRoot,
   ]);
 
   // Revalidate restored/live pane references against currently-known live
@@ -4969,9 +4989,18 @@ function WorkbenchShell({
             <DockviewWorkbenchLayout
               activePaneByGroup={activePaneByRoot[rootKey] ?? {}}
               groups={rootGroups}
+              initialGroupSizeById={
+                initialWorkbenchLayoutRestore[rootKey]?.groupSizeById
+              }
               onMovePane={movePane}
               onRequestClosePane={requestWorkbenchPaneClose}
               onSelectPane={selectPane}
+              onLayoutSnapshot={(sizeByWorkbenchGroupId) => {
+                setGroupSizeByRoot((current) => ({
+                  ...current,
+                  [rootKey]: sizeByWorkbenchGroupId,
+                }));
+              }}
             />
           </div>
         );
