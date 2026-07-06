@@ -116,6 +116,7 @@ import {
   workbenchGroupId,
   DockviewWorkbenchLayout,
   findOpenWorkRoot,
+  resolveClosedWorkRootRefs,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -3455,18 +3456,17 @@ function WorkbenchShell({
     const previousRefs = lastOpenWorkRootRefsRef.current;
     lastOpenWorkRootKeysRef.current = openWorkRootKeys;
     lastOpenWorkRootRefsRef.current = openWorkRootRefs;
-    const currentKeySet = new Set(openWorkRootKeys);
-    const closedKeys = previousKeys.filter((key) => !currentKeySet.has(key));
-    if (closedKeys.length === 0) {
+    const closedRefs = resolveClosedWorkRootRefs(
+      previousKeys,
+      previousRefs,
+      openWorkRootKeys,
+    );
+    if (closedRefs.length === 0) {
       return;
     }
-    for (const rootKey of closedKeys) {
-      const ref = previousRefs[rootKey];
-      if (!ref) {
-        continue;
-      }
+    for (const { rootKey, rootId, serverRoute } of closedRefs) {
       setTerminalPanes((current) =>
-        removeTerminalPanesForWorkRoot(current, ref.rootId, ref.serverRoute),
+        removeTerminalPanesForWorkRoot(current, rootId, serverRoute),
       );
       setActivityPaneOpenByRoot((current) => {
         if (!(rootKey in current)) {
@@ -3485,11 +3485,11 @@ function WorkbenchShell({
         return next;
       });
       setClosedAgentPaneByRoot((current) => {
-        if (!(ref.rootId in current)) {
+        if (!(rootId in current)) {
           return current;
         }
         const next = { ...current };
-        delete next[ref.rootId];
+        delete next[rootId];
         return next;
       });
     }
@@ -7364,7 +7364,8 @@ function ResourceRow({
   );
   const canCloseWorkRoot =
     (presentation === "workRoot" || presentation === "compactWorkRoot") &&
-    isOpenWorkRoot;
+    isOpenWorkRoot &&
+    !selected;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement | null>(null);
   useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
@@ -7416,9 +7417,7 @@ function ResourceRow({
               icon={X}
               label={`Close ${title}`}
               onClick={() =>
-                onCommand(
-                  buildWorkRootCloseCommand(actionEntityId, actionServerId),
-                )
+                onCommand(buildWorkRootCloseCommand(id, actionServerId))
               }
             />
           ) : null}
