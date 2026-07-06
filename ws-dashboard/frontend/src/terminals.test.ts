@@ -15,6 +15,7 @@ import {
   loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  removeTerminalPanesForWorkRoot,
   replaceTerminalRestoreIntentsForWorkRoot,
   saveTerminalRestoreIntents,
   terminalCloseEndpoint,
@@ -329,6 +330,50 @@ assertEqual(
   ]?.error,
   "close failed",
   "close failure preserves pane state with error",
+);
+
+const otherRootSession: TerminalSessionView = {
+  ...session,
+  terminalId: "term_other_root",
+  workRootId: "root-local-other",
+};
+const otherServerSession: TerminalSessionView = {
+  ...session,
+  terminalId: "term_other_server",
+  serverRoute: "server-remote-1",
+};
+const multiRootPanes = mergeListedTerminalSessions({}, [
+  session,
+  otherRootSession,
+  otherServerSession,
+]);
+assertDeepEqual(
+  Object.keys(
+    removeTerminalPanesForWorkRoot(
+      multiRootPanes,
+      session.workRootId,
+      session.serverRoute,
+    ),
+  ).sort(),
+  [
+    terminalPaneFromSession(otherRootSession).logicalKey,
+    terminalPaneFromSession(otherServerSession).logicalKey,
+  ].sort(),
+  "removeTerminalPanesForWorkRoot removes only matching-root, matching-server entries",
+);
+assertDeepEqual(
+  removeTerminalPanesForWorkRoot(
+    multiRootPanes,
+    otherRootSession.workRootId,
+    "server-remote-1",
+  ),
+  multiRootPanes,
+  "removeTerminalPanesForWorkRoot leaves entries untouched when server route does not match",
+);
+assertDeepEqual(
+  removeTerminalPanesForWorkRoot({}, session.workRootId, session.serverRoute),
+  {},
+  "removeTerminalPanesForWorkRoot is a no-op on an empty pane map",
 );
 
 const restoreIntents = terminalRestoreIntentsFromPanes(

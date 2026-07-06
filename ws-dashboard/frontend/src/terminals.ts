@@ -598,6 +598,32 @@ export function removeClosedTerminalPane(
   return next;
 }
 
+/**
+ * Drop every terminal pane belonging to a specific work root/server pair.
+ * Used when a work root is closed from the left panel: the browser-side
+ * pane map entries are cleared even though the daemon terminal session
+ * itself is left running (no `closeTerminal()` call here) so a future
+ * reopen can reattach by id.
+ */
+export function removeTerminalPanesForWorkRoot(
+  current: Record<string, TerminalPaneState>,
+  rootId: string,
+  serverRoute: string | undefined,
+): Record<string, TerminalPaneState> {
+  const normalizedServerRoute = serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE;
+  const next: Record<string, TerminalPaneState> = {};
+  for (const [key, pane] of Object.entries(current)) {
+    const matches =
+      pane.session.workRootId === rootId &&
+      (pane.session.serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE) ===
+        normalizedServerRoute;
+    if (!matches) {
+      next[key] = pane;
+    }
+  }
+  return next;
+}
+
 export function validateTerminalSize(columns: number, rows: number) {
   if (
     !Number.isInteger(columns) ||

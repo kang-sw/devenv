@@ -35,6 +35,7 @@ import {
   buildWorkbenchOpenActivityCommand,
   buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
+  buildWorkRootCloseCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
@@ -84,6 +85,7 @@ const migratedCommands = [
   buildTerminalCreateCommand(workRootId),
   buildWorkspaceMenuOpenCommand("workspace-local-abc"),
   buildWorkspaceRemoveCommand("workspace-local-abc"),
+  buildWorkRootCloseCommand(workRootId),
   buildGitWorktreeAddOpenCommand("workspace-local-abc"),
   buildGitWorktreeAddCloseCommand("workspace-local-abc"),
   buildGitWorktreeAddSubmitCommand("workspace-local-abc"),
@@ -125,6 +127,7 @@ assertDeepEqual(
     "terminal.create",
     "workspace.menu.open",
     "workspace.remove",
+    "workRoot.close",
     "gitWorktreeAdd.open",
     "gitWorktreeAdd.close",
     "gitWorktreeAdd.submit",
@@ -168,6 +171,7 @@ assertDeepEqual(
     "terminal.create",
     "workspace.menu.open",
     "workspace.remove",
+    "workRoot.close",
     "gitWorktreeAdd.open",
     "gitWorktreeAdd.close",
     "gitWorktreeAdd.submit",
@@ -241,6 +245,11 @@ assertEqual(
     .serverRoute,
   "server-remote",
   "git worktree submit command carries remote server route",
+);
+assertEqual(
+  buildWorkRootCloseCommand("root-same", "server-remote").payload.serverRoute,
+  "server-remote",
+  "workRoot close command carries remote server route",
 );
 assertEqual(
   buildWorkspaceRemoveCommand("workspace-same", "server-remote").payload
@@ -487,6 +496,23 @@ assertNotContains(
   JSON.stringify(workspaceRemoveCommand),
   "/Users/",
   "workspace remove command omits host paths",
+);
+assertEqual(
+  dashboardCommandLabel(buildWorkRootCloseCommand(workRootId)),
+  "Close work root",
+  "workRoot close command label is stable",
+);
+const workRootCloseCommand = buildWorkRootCloseCommand(workRootId);
+assertEqual(
+  workRootCloseCommand.payload.type === "workRoot.close" &&
+    workRootCloseCommand.payload.workRootId,
+  workRootId,
+  "workRoot close command carries the work root id",
+);
+assertEqual(
+  workRootCloseCommand.payload.serverRoute,
+  "server-local",
+  "workRoot close command defaults to the local server route",
 );
 assertEqual(
   dashboardCommandLabel(buildWorkbenchOpenActivityCommand(workRootId)),
