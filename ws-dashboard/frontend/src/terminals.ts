@@ -57,6 +57,13 @@ export type TerminalPaneState = {
   error: string | null;
   localCreatedAtMs: number;
   socketStatus: "disconnected" | "connecting" | "connected" | "fallback";
+  // True while the pane's WebSocket is closed solely because the pane is not
+  // currently visible (background work root, or a backgrounded dockview
+  // tab within the active root) - not a real disconnect/error. Kept distinct
+  // from `socketStatus` so the HTTP output-poll fallback can tell "closed on
+  // purpose because hidden" apart from "closed for a real reason, needs
+  // polling" (see `shouldPollTerminalOutput`).
+  visibilityGated: boolean;
 };
 
 export type TerminalCreateOptions = {
@@ -316,6 +323,7 @@ export function terminalPaneFromSession(
     error: null,
     localCreatedAtMs: Date.now(),
     socketStatus: "disconnected",
+    visibilityGated: false,
   };
 }
 
@@ -519,6 +527,14 @@ export function markTerminalSocketStatus(
   return { ...pane, socketStatus, error, localCreatedAtMs: Date.now() };
 }
 
+export function markTerminalPaneVisibilityGated(
+  pane: TerminalPaneState,
+  visibilityGated: boolean,
+) {
+  if (pane.visibilityGated === visibilityGated) return pane;
+  return { ...pane, visibilityGated };
+}
+
 export function appendTerminalWebSocketMessage(
   pane: TerminalPaneState,
   message: TerminalWebSocketServerMessage,
@@ -548,6 +564,7 @@ export function appendTerminalWebSocketMessage(
 export function shouldPollTerminalOutput(pane: TerminalPaneState) {
   return (
     pane.session.status === "running" &&
+    !pane.visibilityGated &&
     pane.socketStatus !== "connecting" &&
     pane.socketStatus !== "connected"
   );

@@ -164,6 +164,7 @@ import {
   fetchTerminalOutput,
   listTerminals,
   markTerminalPaneCloseError,
+  markTerminalPaneVisibilityGated,
   markTerminalSocketStatus,
   loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
@@ -3631,6 +3632,7 @@ function WorkbenchShell({
           onClose: closeTerminalPane,
           onResize: forwardTerminalResize,
           onSocketStatus: updateTerminalSocketStatus,
+          onVisibilityGated: updateTerminalPaneVisibilityGated,
           onSocketMessage: applyTerminalSocketMessage,
           onSocketResize: acceptTerminalSocketResize,
           onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
@@ -4400,6 +4402,23 @@ function WorkbenchShell({
               current[pane.logicalKey],
               socketStatus,
               error,
+            ),
+          }
+        : current,
+    );
+  }
+
+  function updateTerminalPaneVisibilityGated(
+    pane: TerminalPaneState,
+    visibilityGated: boolean,
+  ) {
+    setTerminalPanes((current) =>
+      current[pane.logicalKey]
+        ? {
+            ...current,
+            [pane.logicalKey]: markTerminalPaneVisibilityGated(
+              current[pane.logicalKey],
+              visibilityGated,
             ),
           }
         : current,
@@ -6112,6 +6131,7 @@ type TerminalPaneActions = {
     socketStatus: TerminalPaneState["socketStatus"],
     error?: string | null,
   ) => void;
+  onVisibilityGated: (pane: TerminalPaneState, visibilityGated: boolean) => void;
   onSocketMessage: (
     pane: TerminalPaneState,
     message: TerminalWebSocketServerMessage,
@@ -6473,8 +6493,14 @@ function TerminalPaneBody({
         "disconnected",
         null,
       );
+      // Mark this closure as "gated because hidden," not a real disconnect,
+      // so the HTTP output-poll fallback does not pick up an idle hidden pane
+      // (see `shouldPollTerminalOutput`) - only genuine socket errors/exits
+      // should fall back to polling.
+      liveRef.current.actions.onVisibilityGated(liveRef.current.pane, true);
       return;
     }
+    liveRef.current.actions.onVisibilityGated(liveRef.current.pane, false);
     let disposed = false;
     const socket = new WebSocket(
       terminalWebSocketUrl(
