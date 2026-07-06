@@ -5,3 +5,4 @@ export * from "./policy.js";
 export * from "./editorGroupModel.js";
 export * from "./dockviewLayout.js";
 export * from "./placementGroups.js";
+export * from "./openRootLookup.js";
