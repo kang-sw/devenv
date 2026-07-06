@@ -160,7 +160,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
-| `260703-feat-dashboard-workroot-session-keepalive` | todo | Keep terminal panes alive across work-root switches with visibility-gated sockets and a reconnect cursor/gap fix |
+| `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
 | `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | ready | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
@@ -214,6 +214,31 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260703-feat-dashboard-workroot-session-keepalive` (`ready`, feat) - single
+  workset covering two related durability problems: (1) work-root switching
+  today destroys every terminal pane of the previously active root via
+  `syncDockviewWorkbench`'s `removePanel` sweep (Phases 1-4: per-root
+  dockview instances kept alive instead of destroyed, an explicit
+  user-triggered "close work root" action, visibility-gated terminal
+  WebSocket lifecycle, and two reconnect-protocol accuracy fixes — frontend
+  cursor update on `output` frames, backend truncation signal when the ring
+  buffer already evicted the requested range); (2) full page reload loses
+  browser presentation state that the current `WorkRoot IO Restore Model`
+  spec already scopes out (dockview layout, terminal scrollback/cursor/scroll
+  position) even though daemon-side terminal reattach-by-id already works
+  correctly (Phases 5-7: persist/restore per-root dockview layout, capture
+  and restore terminal visual buffer state via e.g. `@xterm/addon-serialize`,
+  and reuse that same primitive so explicit close+reopen within one browser
+  session is not worse than a reload). Phases 5-6 are Contract-first: yes
+  (revise the `WorkRoot IO Restore Model` anchor and its terminal-tab-restore
+  sub-anchor in `ai-docs/spec/ws-web-dashboard/index.md`); Phases 1-4 and 7
+  are Contract-first: no. Narrows two "Split Candidates" from
+  `260523-research-ws-dashboard-persistable-ui-state-map` (workbench layout,
+  terminal visual state); that research ticket's other candidates (file
+  explorer tree state, Activity Console local state, command/keybinding
+  preferences, dashboard chrome preferences, root picker history) remain
+  open there. No sage review performed yet — promoted directly from a design
+  discussion, not the usual review-gated ready path.
 - `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`ready`, feat) -
   **all 7 phases complete** (Phase 1 `c72013f5` through Phase 7 `a71162ab`,
   each closed out with a `### Result` section and a clean partitioned

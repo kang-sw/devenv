@@ -87,8 +87,12 @@ than daemon/resource state.
 ## Split Candidates
 
 - Feature: persist selected workRoot/resource and file explorer tree state.
-- Feature: persist sanitized workbench layout and split proportions per
-  workRoot.
+- ~~Feature: persist sanitized workbench layout and split proportions per
+  workRoot.~~ Taken up as Phase 5 of
+  `260703-feat-dashboard-workroot-session-keepalive`, alongside terminal
+  visual-buffer restore (a "Terminal UI affordances" candidate below,
+  narrowed to scrollback/cursor/scroll-position restore on reload rather
+  than font size or shell profile preference).
 - Feature: persist WorkRoot Activity pane, selected item, dirty acknowledgement,
   and transcript scroll state.
 - Feature: persist dashboard command/keybinding preferences.
