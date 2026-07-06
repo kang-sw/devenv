@@ -781,19 +781,38 @@ fn handle_terminal_socket_client_message(
     }
 }
 
+// Pulled out of `send_output_backfill` so the requested-cursor-vs-advanced-
+// cursor ordering (the primary wiring risk this feature was built around -
+// see Phase 4 plan) is exercisable by a plain unit test, without needing a
+// live WebSocket sink. `cursor` is advanced by this function exactly the
+// same way `send_output_backfill` used to advance it inline; `truncated` is
+// always computed from the cursor value as requested at entry, before this
+// function's own loop advances `*cursor`.
+struct OutputBackfillPlan {
+    chunks: Vec<TerminalOutputChunk>,
+    truncated: bool,
+}
+
+fn plan_output_backfill(session: &TerminalSession, cursor: &mut u64) -> OutputBackfillPlan {
+    let requested_after = *cursor;
+    let output = session.output_after(requested_after);
+    let truncated = session.is_range_truncated(requested_after);
+    for chunk in &output.chunks {
+        *cursor = (*cursor).max(chunk.sequence);
+    }
+    OutputBackfillPlan {
+        chunks: output.chunks,
+        truncated,
+    }
+}
+
 async fn send_output_backfill(
     session: &TerminalSession,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     cursor: &mut u64,
 ) -> Result<(), ()> {
-    // Capture the cursor as requested, before the backfill loop below
-    // advances it to the last sent chunk's sequence - the truncation check
-    // must see what the client actually asked for, not where the cursor
-    // ends up after catching up, or it would never fire.
-    let requested_after = *cursor;
-    let output = session.output_after(requested_after);
-    for chunk in output.chunks {
-        *cursor = (*cursor).max(chunk.sequence);
+    let plan = plan_output_backfill(session, cursor);
+    for chunk in plan.chunks {
         send_socket_json(
             sender,
             &TerminalWebSocketServerMessage::Output {
@@ -803,8 +822,7 @@ async fn send_output_backfill(
         )
         .await?;
     }
-    let truncated = session.is_range_truncated(requested_after);
-    send_terminal_socket_status(session, sender, !session.is_live(), truncated).await
+    send_terminal_socket_status(session, sender, !session.is_live(), plan.truncated).await
 }
 
 async fn send_terminal_socket_status(
@@ -1149,6 +1167,69 @@ mod terminal_portability_skeleton_tests {
         // ...but resuming from anything older than that has a real hole
         // between what the client last observed and what remains retained.
         assert!(session.is_range_truncated(oldest_retained - 2));
+    }
+
+    // This is the wiring the plan flagged as the primary risk: the
+    // truncation check must use the cursor *as requested at entry*, not the
+    // cursor after `plan_output_backfill`'s own loop has advanced it to the
+    // last sent chunk's sequence. Exercises `plan_output_backfill` itself
+    // (the real call site `send_output_backfill` delegates to), not just
+    // `is_range_truncated` in isolation, so a regression that moved the
+    // `requested_after` capture below the loop (or reused the
+    // now-advanced `*cursor`) would fail this test: the post-loop cursor
+    // always equals the newest retained chunk's sequence whenever any
+    // chunks are sent, and `is_range_truncated` of that value can never be
+    // true (the oldest retained chunk can never exceed the newest retained
+    // chunk's sequence by more than zero), so the buggy ordering would
+    // silently flip this assertion to `false`.
+    #[test]
+    fn plan_output_backfill_computes_truncation_from_requested_cursor_not_advanced_cursor() {
+        let session = fake_terminal_session();
+        for _ in 0..(MAX_OUTPUT_CHUNKS + 200) {
+            session.append_output("x".to_owned());
+        }
+        let oldest_retained = session
+            .inner
+            .lock()
+            .expect("terminal session lock poisoned")
+            .output
+            .front()
+            .expect("output non-empty after eviction")
+            .sequence;
+        let newest_retained = session
+            .inner
+            .lock()
+            .expect("terminal session lock poisoned")
+            .output
+            .back()
+            .expect("output non-empty after eviction")
+            .sequence;
+
+        // Genuine resume past eviction: the client's cursor is older than
+        // what's still retained, so the backfill loop will send chunks and
+        // advance `cursor` all the way up to `newest_retained` - if the
+        // truncation check used that advanced value instead of the
+        // requested one, it would never see a gap.
+        let mut cursor = oldest_retained - 2;
+        let plan = plan_output_backfill(&session, &mut cursor);
+        assert!(
+            plan.truncated,
+            "genuine resume past eviction must be reported as truncated"
+        );
+        assert_eq!(
+            cursor, newest_retained,
+            "cursor still advances to the newest sent chunk despite the gap"
+        );
+
+        // Normal resume, no gap: cursor equals the boundary right before
+        // the oldest retained chunk, so nothing was missed.
+        let mut cursor = oldest_retained - 1;
+        let plan = plan_output_backfill(&session, &mut cursor);
+        assert!(
+            !plan.truncated,
+            "contiguous resume at the retention boundary must not be reported as truncated"
+        );
+        assert_eq!(cursor, newest_retained);
     }
 }
 

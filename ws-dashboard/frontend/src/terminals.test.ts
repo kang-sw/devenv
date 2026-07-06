@@ -347,6 +347,11 @@ assertEqual(
   true,
   "markTerminalOutputCursor is a no-op when the chunk sequence is already covered",
 );
+assertEqual(
+  markTerminalOutputCursor(cursorAdvanced, 4) === cursorAdvanced,
+  true,
+  "markTerminalOutputCursor is a no-op at the exact boundary (chunkSequence === nextSequence - 1)",
+);
 
 const idleOutput = {
   terminalId: "term_abc",
