@@ -3572,6 +3572,20 @@ function WorkbenchShell({
         delete next[rootKey];
         return next;
       });
+      // Clear the closed root's terminals-ready flag alongside its other
+      // per-root state: it is append-only otherwise, so a same-session
+      // reopen of this root would find the stale flag still set and
+      // immediately prune the freshly re-seeded restored terminal refs
+      // before the re-triggered `listTerminals` call resolves, instead of
+      // re-entering the not-yet-loaded grace window.
+      setTerminalsReadyRootKeys((current) => {
+        if (!current.has(rootKey)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(rootKey);
+        return next;
+      });
       setClosedAgentPaneByRoot((current) => {
         if (!(rootId in current)) {
           return current;
