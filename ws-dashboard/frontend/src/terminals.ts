@@ -4,6 +4,7 @@ import {
   serverScopedIdentity,
 } from "./resourceModel.js";
 import { defaultPtyLogicalSize } from "./workbench/policy.js";
+import type { TerminalVisualRestoreEntry } from "./workbench/terminalVisualRestore.js";
 
 export type TerminalSessionView = {
   serverRoute?: string;
@@ -308,19 +309,37 @@ export function terminalPaneId(
   return `terminal:${encodeURIComponent(serverScopedIdentity(serverRoute, terminalId))}`;
 }
 
+// Lookup consulted by `terminalPaneFromSession` (and its callers below) to
+// seed a freshly reattached pane's `nextSequence` from a matching persisted
+// visual-restore entry instead of `0`. Only `nextSequence` is needed here -
+// the rest of `TerminalVisualRestoreEntry` (serialized buffer, viewport)
+// is consumed directly by the xterm mount effect in App.tsx, not by this
+// pane-state construction.
+export type TerminalVisualRestoreLookup = Record<
+  string,
+  Pick<TerminalVisualRestoreEntry, "nextSequence">
+>;
+
 export function terminalPaneFromSession(
   session: TerminalSessionView,
+  visualRestoreByLogicalKey?: TerminalVisualRestoreLookup,
 ): TerminalPaneState {
+  const logicalKey = terminalPaneLogicalKey(
+    session.workRootId,
+    session.terminalId,
+    session.serverRoute,
+  );
   return {
     session,
-    logicalKey: terminalPaneLogicalKey(
-      session.workRootId,
-      session.terminalId,
-      session.serverRoute,
-    ),
+    logicalKey,
     paneId: terminalPaneId(session.terminalId, session.serverRoute),
     output: "",
-    nextSequence: 0,
+    // A reattached pane with a matching visual-restore entry resumes the
+    // WebSocket cursor (`terminalWebSocketCursor`) from the sequence
+    // captured alongside that entry's serialized buffer, instead of 0 - this
+    // is what makes Phase 4's delta-cursor catch-up line up exactly against
+    // a restored snapshot with no new socket-path code.
+    nextSequence: visualRestoreByLogicalKey?.[logicalKey]?.nextSequence ?? 0,
     error: null,
     localCreatedAtMs: Date.now(),
     socketStatus: "disconnected",
@@ -465,6 +484,7 @@ export function reconcileListedTerminalSessions(
   sessions: TerminalSessionView[],
   pruneStartedAtMs = Number.POSITIVE_INFINITY,
   serverRoute: string | null | undefined = LOCAL_DASHBOARD_SERVER_ROUTE,
+  visualRestoreByLogicalKey?: TerminalVisualRestoreLookup,
 ) {
   const liveKeys = new Set(
     sessions.map((session) =>
@@ -485,12 +505,17 @@ export function reconcileListedTerminalSessions(
         pane.localCreatedAtMs > pruneStartedAtMs,
     ),
   );
-  return mergeListedTerminalSessions(retained, sessions);
+  return mergeListedTerminalSessions(
+    retained,
+    sessions,
+    visualRestoreByLogicalKey,
+  );
 }
 
 export function mergeListedTerminalSessions(
   current: Record<string, TerminalPaneState>,
   sessions: TerminalSessionView[],
+  visualRestoreByLogicalKey?: TerminalVisualRestoreLookup,
 ) {
   const next = { ...current };
   for (const session of sessions) {
@@ -501,7 +526,7 @@ export function mergeListedTerminalSessions(
     );
     next[key] = next[key]
       ? { ...next[key], session }
-      : terminalPaneFromSession(session);
+      : terminalPaneFromSession(session, visualRestoreByLogicalKey);
   }
   return next;
 }

@@ -7,3 +7,4 @@ export * from "./dockviewLayout.js";
 export * from "./placementGroups.js";
 export * from "./openRootLookup.js";
 export * from "./layoutRestore.js";
+export * from "./terminalVisualRestore.js";
