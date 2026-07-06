@@ -47,6 +47,7 @@ import {
 } from "react-aria-components";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
@@ -120,6 +121,10 @@ import {
   loadWorkbenchLayoutRestoreSnapshot,
   saveWorkbenchLayoutRestoreSnapshot,
   revalidateWorkbenchLayoutForRoot,
+  loadTerminalVisualRestoreSnapshot,
+  upsertTerminalVisualRestoreEntry,
+  terminalVisualRestoreScrollbackLines,
+  terminalVisualRestoreDebounceMs,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -127,6 +132,8 @@ import {
   type WorkbenchPlacementState,
   type WorkbenchLayoutRestoreEntry,
   type WorkbenchLayoutRestoreSnapshot,
+  type TerminalVisualRestoreEntry,
+  type TerminalVisualRestoreSnapshot,
 } from "./workbench";
 import {
   applyReadOnlyFilePaneContent,
@@ -400,6 +407,15 @@ export function App() {
   // user to first visit it.
   const [initialWorkbenchLayoutRestore] = useState<WorkbenchLayoutRestoreSnapshot>(
     () => loadWorkbenchLayoutRestoreSnapshot(),
+  );
+  // Snapshot of persisted per-terminal visual-buffer restore entries
+  // (serialized scrollback/cursor/styles + scroll viewport), loaded once at
+  // mount alongside `initialWorkbenchLayoutRestore`. Consumed by the
+  // `listTerminals` reattach path (to seed a matching pane's `nextSequence`)
+  // and by `TerminalPaneBody`'s mount effect (to replace the plain-text
+  // `pane.output` replay with the restored serialized buffer).
+  const [initialTerminalVisualRestore] = useState<TerminalVisualRestoreSnapshot>(
+    () => loadTerminalVisualRestoreSnapshot(),
   );
   // Work roots the user has visited this session stay mounted (own dockview
   // instance each) instead of being destroyed on selection switch. Ordered,
@@ -1126,6 +1142,7 @@ export function App() {
             openWorkRootKeys={openWorkRootKeys}
             openWorkRootRefs={openWorkRootRefs}
             initialWorkbenchLayoutRestore={initialWorkbenchLayoutRestore}
+            initialTerminalVisualRestore={initialTerminalVisualRestore}
             onCommand={executeCommand}
             onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
             onPaneOrderByRootChange={setPaneOrderByRoot}
@@ -3337,6 +3354,7 @@ function WorkbenchShell({
   openWorkRootKeys,
   openWorkRootRefs,
   initialWorkbenchLayoutRestore,
+  initialTerminalVisualRestore,
   onWorkbenchGroupsByRootChange,
   onPaneOrderByRootChange,
   onOpenWorkRootKeysChange,
@@ -3363,6 +3381,7 @@ function WorkbenchShell({
   openWorkRootKeys: string[];
   openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
   initialWorkbenchLayoutRestore: WorkbenchLayoutRestoreSnapshot;
+  initialTerminalVisualRestore: TerminalVisualRestoreSnapshot;
   onWorkbenchGroupsByRootChange: Dispatch<
     SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
   >;
@@ -3862,6 +3881,17 @@ function WorkbenchShell({
           onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
           isActivePane: (pane) =>
             focusedTerminalPaneIdRef.current === pane.paneId,
+          onVisualRestoreEntryFor: (pane) =>
+            initialTerminalVisualRestore[pane.logicalKey],
+          onVisualCapture: (pane, capture) => {
+            upsertTerminalVisualRestoreEntry({
+              logicalKey: pane.logicalKey,
+              serialized: capture.serialized,
+              viewportY: capture.viewportY,
+              nextSequence: capture.nextSequence,
+              capturedAtMs: Date.now(),
+            });
+          },
         },
         closedAgentPaneByRoot[root.id] ?? [],
         isSelectedRoot ? activityPaneOpenByRoot[rootKey] ?? false : false,
@@ -3976,6 +4006,7 @@ function WorkbenchShell({
               sessions,
               listStartedAtMs,
               serverRoute,
+              initialTerminalVisualRestore,
             ),
             serverRoute,
           ),
@@ -6392,6 +6423,21 @@ type TerminalPaneActions = {
   ) => void;
   onFocusInput: (pane: TerminalPaneState) => void;
   isActivePane: (pane: TerminalPaneState) => boolean;
+  // Looked up once at TerminalPaneBody mount, by `pane.logicalKey`, against
+  // the App-mount-loaded `initialTerminalVisualRestore` snapshot. Returns
+  // `undefined` for a brand-new session (restore-intent fallback or a
+  // logicalKey never captured before) so the mount effect falls back to the
+  // existing plain-text `pane.output` replay.
+  onVisualRestoreEntryFor: (
+    pane: TerminalPaneState,
+  ) => TerminalVisualRestoreEntry | undefined;
+  // Fired from the debounced capture effect once per ~900ms of quiet PTY
+  // output. Persists (or replaces) this pane's entry in the browser-local
+  // visual-restore snapshot, keyed by `pane.logicalKey`.
+  onVisualCapture: (
+    pane: TerminalPaneState,
+    capture: { serialized: string; viewportY: number; nextSequence: number },
+  ) => void;
 };
 
 function terminalWorkbenchPane(
@@ -6435,6 +6481,12 @@ function TerminalPaneBody({
     null,
   );
   const socketRef = useRef<WebSocket | null>(null);
+  // Serialize addon instance for this pane's terminal, loaded once at mount
+  // so the debounced visual-buffer capture effect below can call
+  // `.serialize()` without re-creating it on every output frame. Nulled on
+  // mount-effect cleanup so a stray fire cannot reach a disposed terminal.
+  const serializeAddonRef = useRef<SerializeAddon | null>(null);
+  const visualCaptureTimerRef = useRef<number | null>(null);
   const keepTerminalFocusRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Optimistic default matches current always-connect behavior for the
@@ -6481,16 +6533,38 @@ function TerminalPaneBody({
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    const serializeAddon = new SerializeAddon();
+    terminal.loadAddon(serializeAddon);
+    serializeAddonRef.current = serializeAddon;
     terminal.open(container);
     terminalRef.current = terminal;
     writtenLengthRef.current = 0;
 
-    // Replay PTY output buffered before this surface mounted so reselecting a
-    // terminal tab restores its emulator contents.
-    const initialOutput = liveRef.current.pane.output;
-    if (initialOutput.length > 0) {
-      terminal.write(initialOutput);
-      writtenLengthRef.current = initialOutput.length;
+    // A reattached pane with a matching persisted visual-restore snapshot
+    // (id-reattach to a still-alive daemon terminal) writes that serialized
+    // buffer - scrollback, cursor position, styles - plus its scroll
+    // viewport offset, instead of the plain-text `pane.output` replay below.
+    // `writtenLengthRef` stays at 0 in both branches: the delta-write effect
+    // tracks `pane.output` length independent of whichever initial write
+    // happened here, so a restored snapshot's own escape-sequence text is
+    // never diffed against `pane.output` (which starts at "" for a freshly
+    // reattached pane either way). New sessions spawned via the
+    // restore-intent fallback have no matching entry and fall through to the
+    // existing replay path unchanged.
+    const restoreEntry = liveRef.current.actions.onVisualRestoreEntryFor(
+      liveRef.current.pane,
+    );
+    if (restoreEntry) {
+      terminal.write(restoreEntry.serialized);
+      terminal.scrollToLine(restoreEntry.viewportY);
+    } else {
+      // Replay PTY output buffered before this surface mounted so reselecting
+      // a terminal tab restores its emulator contents.
+      const initialOutput = liveRef.current.pane.output;
+      if (initialOutput.length > 0) {
+        terminal.write(initialOutput);
+        writtenLengthRef.current = initialOutput.length;
+      }
     }
 
     // Keyboard input originates from the focused emulator surface and reaches
@@ -6730,8 +6804,16 @@ function TerminalPaneBody({
         true,
       );
       inputDisposable.dispose();
+      // Belt-and-suspenders alongside the debounced capture effect's own
+      // cleanup: guarantees no pending serialize callback can ever fire
+      // against a disposed terminal, even if effect cleanup ordering changed.
+      if (visualCaptureTimerRef.current !== null) {
+        window.clearTimeout(visualCaptureTimerRef.current);
+        visualCaptureTimerRef.current = null;
+      }
       terminal.dispose();
       terminalRef.current = null;
+      serializeAddonRef.current = null;
     };
   }, []);
 
@@ -6837,6 +6919,42 @@ function TerminalPaneBody({
       terminal.write(pane.output);
       writtenLengthRef.current = pane.output.length;
     }
+  }, [pane.output]);
+
+  // Debounced capture of this pane's serialized visual buffer (scrollback,
+  // cursor, styles) plus scroll viewport offset, persisted browser-locally
+  // so a page reload can restore this pane's appearance for an id-reattached
+  // terminal (see the mount effect's restore branch above), rather than only
+  // the plain-text `pane.output` history. Triggered on the same `pane.output`
+  // changes as the delta-write effect above - any new PTY output is a reason
+  // to refresh the snapshot - but coalesced behind an idle timer per the
+  // ticket's "writes debounced" constraint, since output can arrive many
+  // times per second. The timer is owned by this effect's own cleanup, which
+  // React runs on every dependency change and on unmount, so a disposed
+  // terminal can never have a pending serialize callback fire against it.
+  useEffect(() => {
+    visualCaptureTimerRef.current = window.setTimeout(() => {
+      visualCaptureTimerRef.current = null;
+      const serializeAddon = serializeAddonRef.current;
+      const terminal = terminalRef.current;
+      if (!serializeAddon || !terminal) {
+        return;
+      }
+      const serialized = serializeAddon.serialize({
+        scrollback: terminalVisualRestoreScrollbackLines,
+      });
+      liveRef.current.actions.onVisualCapture(liveRef.current.pane, {
+        serialized,
+        viewportY: terminal.buffer.active.viewportY,
+        nextSequence: liveRef.current.pane.nextSequence,
+      });
+    }, terminalVisualRestoreDebounceMs);
+    return () => {
+      if (visualCaptureTimerRef.current !== null) {
+        window.clearTimeout(visualCaptureTimerRef.current);
+        visualCaptureTimerRef.current = null;
+      }
+    };
   }, [pane.output]);
 
   return (
