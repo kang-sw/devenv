@@ -6168,6 +6168,11 @@ function TerminalPaneBody({
   const socketRef = useRef<WebSocket | null>(null);
   const keepTerminalFocusRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
+  // Optimistic default matches current always-connect behavior for the
+  // common case of a newly mounted, actually-visible pane; a pane mounted
+  // while already hidden briefly opens then closes on the first watchdog
+  // tick, an accepted minor inefficiency, not a correctness issue.
+  const [paneVisible, setPaneVisible] = useState(true);
   // Latest pane/actions for emulator callbacks registered once at mount.
   const liveRef = useRef({ pane, actions });
   liveRef.current = { pane, actions };
@@ -6420,6 +6425,8 @@ function TerminalPaneBody({
     observer.observe(container);
     window.addEventListener("resize", scheduleResizeForward);
     const focusWatchdog = window.setInterval(() => {
+      const nowVisible = Boolean(container.offsetParent);
+      setPaneVisible((current) => (current === nowVisible ? current : nowVisible));
       if (!keepTerminalFocusRef.current) {
         return;
       }
@@ -6460,6 +6467,14 @@ function TerminalPaneBody({
   }, []);
 
   useEffect(() => {
+    if (!paneVisible) {
+      liveRef.current.actions.onSocketStatus(
+        liveRef.current.pane,
+        "disconnected",
+        null,
+      );
+      return;
+    }
     let disposed = false;
     const socket = new WebSocket(
       terminalWebSocketUrl(
@@ -6530,7 +6545,7 @@ function TerminalPaneBody({
       if (socketRef.current === socket) socketRef.current = null;
       socket.close();
     };
-  }, [terminalId]);
+  }, [terminalId, paneVisible]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
   // sequences render as terminal behavior rather than raw text.
