@@ -69,7 +69,7 @@ func isLeadOnlyTool(name string) bool {
 
 func workflowPreferenceWriterTool(name string) bool {
 	switch name {
-	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm":
+	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm", "config.doc_coverage_alarm":
 		return true
 	default:
 		return false
@@ -323,6 +323,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferMercenary: "hide",
 		wsconfig.ItemSageReview:              "auto",
 		wsconfig.ItemBootstrapAlarm:          "on",
+		wsconfig.ItemDocCoverageAlarm:        "on",
 	}
 }
 
@@ -639,6 +640,44 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:global]\n", value), nil)
+
+	case "config.doc_coverage_alarm":
+		if _, err := s.requireLeadSessionKey("config.doc_coverage_alarm", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		reset, _ := params.Arguments["reset"].(bool)
+		rawValue, hasValue := params.Arguments["value"]
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if reset {
+			if hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: value and reset are mutually exclusive"))
+				}
+			}
+			// Reset means "drop the global override and fall back to the builtin
+			// default" — distinct from explicitly writing the builtin's current
+			// value, which would still shadow a future builtin default change.
+			if err := resolver.Unset(wsconfig.ItemDocCoverageAlarm, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
+			}
+			resolved, err := resolver.Get("", wsconfig.ItemDocCoverageAlarm)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("doc_coverage_alarm: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
+		}
+		value, _ := rawValue.(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: value must be one of on, off; got %q", value))
+		}
+		if err := resolver.Set(wsconfig.ItemDocCoverageAlarm, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("doc_coverage_alarm: %s [scope:global]\n", value), nil)
 
 	case "config.prompt.set":
 		// Lead-only setter for prompt override-points. The config.* prefix gate in
@@ -1486,6 +1525,15 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 			text += "\n" + warning + "\n"
 		}
 	}
+	{
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		warning := docCoverageWarning(canonical, &resolver, "")
+		if warning != "" {
+			result["doc_coverage_alarm"] = warning
+			text += "\n" + warning + "\n"
+		}
+	}
 	if wantsJSON(arguments) {
 		return toolJSONResponse(id, result, nil)
 	}
@@ -1796,6 +1844,19 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: tuningFieldsFromSchema("config.bootstrap_alarm", "value"),
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
+	})
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "doc_coverage_alarm",
+		Kind:        "workflow_preference",
+		Description: "Select whether the session-bootstrap doc-coverage warning fires when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file.",
+		Writer:      tuningWriter{Tool: "config.doc_coverage_alarm"},
+		Reset: &tuningWriter{
+			Tool:           "config.doc_coverage_alarm",
+			FixedArguments: map[string]string{"reset": "true"},
+		},
+		ValueFields: tuningFieldsFromSchema("config.doc_coverage_alarm", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemDocCoverageAlarm),
 	})
 
 	if noAgentMode {
@@ -3204,6 +3265,17 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "config.doc_coverage_alarm",
+			"description": "Set the global preference for the session-bootstrap doc-coverage warning (fires at ferrule/workflow_manual time when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file), or reset it back to the builtin default (on) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
+					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
+				},
+			},
+		},
+		{
 			"name":        "config.prompt.set",
 			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
@@ -3790,7 +3862,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
 		"mercenary.cancel", "mercenary.print", "mercenary.erase",
-		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm":
+		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm", "config.doc_coverage_alarm":
 		return true
 	default:
 		return false

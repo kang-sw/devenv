@@ -73,6 +73,13 @@ const (
 	// default) or "off". Global-only: this is a cross-project user preference
 	// about warning noise, not a per-project opt-in.
 	ItemBootstrapAlarm = "bootstrap_alarm"
+
+	// ItemDocCoverageAlarm gates the session-bootstrap doc-coverage warning
+	// that fires when a project's ai-docs/spec/ or ai-docs/mental-model/ has no
+	// .md file carrying a frontmatter block. Values: "on" (builtin default) or
+	// "off". Global-only: this is a cross-project user preference about
+	// warning noise, not a per-project opt-in, mirroring ItemBootstrapAlarm.
+	ItemDocCoverageAlarm = "doc_coverage_alarm"
 )
 
 func init() {
@@ -80,6 +87,7 @@ func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferMercenary)
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
+	RegisterGlobalOnly(ItemDocCoverageAlarm)
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
