@@ -1,6 +1,7 @@
 ---
 title: "Reduce implement-branch friction: reuse+rename policy, auto-delete cleanup, and a shorter naming convention"
 sage-review: recommended
+dropped: 2026-07-07
 ---
 
 # Reduce implement-branch friction: reuse+rename policy, auto-delete cleanup, and a shorter naming convention
@@ -85,3 +86,14 @@ future session include (non-exhaustive, not yet decided):
 
 Not yet discussed or designed. Sage review intentionally left at
 `recommended` — still pending.
+
+
+## Resolution (2026-07-07)
+
+Superseded by a fuller design pass in the same discussion thread. The ticket's three items split and evolved as follows:
+
+- Item 1 (reuse+rename branch default) was found to already be covered by the ready ticket `260703-chore-implement-branch-rename-default-allow` (enter.implement's `policy.branch.allow_rename` default-to-yes change) — no separate work needed.
+- The "skip the merge-approval ask during goal-driven drain runs" idea that grew out of item 1 went through two design iterations: first a simpler "leave the ticket unmerged and move to the next ready ticket" approach, then a fuller goal-branch-staging model (single ephemeral `goal/<slug>` branch, per-ticket auto-merge into it, one final confirmed merge into main). The staging-branch model was chosen and directly conflicts with the simpler approach, so the simpler one was dropped entirely rather than implemented first. The staging-branch design is captured fresh as `260707-feat-drain-goal-branch-staging`.
+- Items 2 and 3 (branch auto-delete without asking, `impl/<stem>` naming convention) converged into a single coherent design (naming convention doubles as the trust signal gating auto-delete) and are captured fresh as `260707-feat-impl-branch-convention-autodelete`.
+
+Per ticket-conventions ("if a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `.dropped/`"), this ticket is dropped rather than edited in place, since its framing no longer matches either successor ticket.
