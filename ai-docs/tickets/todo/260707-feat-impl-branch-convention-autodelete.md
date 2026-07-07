@@ -2,7 +2,7 @@
 title: "Adopt impl/<stem> branch naming (max 15 chars) and auto-delete fully-merged impl/* branches without asking"
 related:
   260707-feat-drain-goal-branch-staging: this ticket's impl/ naming + auto-delete is a prerequisite building block for that ticket's per-ticket ephemeral branch churn into a goal-staging branch
-sage-review: required
+sage-review: completed
 ---
 
 # Adopt impl/<stem> branch naming (max 15 chars) and auto-delete fully-merged impl/* branches without asking
@@ -39,6 +39,19 @@ into a goal-staging branch.
   checked-out check, worktree-link check, ambiguous-target check, unreachable-
   commits check all stay exactly as-is); no change to the fresh-branch
   creation logic beyond the naming convention.
+- The `implement/` prefix string is load-bearing for a second purpose beyond
+  naming: `deriveImplementBranchPlan` (`implement_resolver.go`) also uses it
+  to detect whether the *current* branch already is an implementation branch
+  (driving the create/continue/rename/stop branch-plan decision, and gating
+  the `policy.branch.merge_target` warning). A naive rename would make the
+  resolver stop recognizing an in-progress legacy `implement/*` branch as an
+  implementation branch, mis-deriving `Action: create` (spawning a sibling
+  `impl/*` branch next to unfinished work) instead of `continue`/`rename` for
+  any session already on an old-style branch when this ships. Phase 1 must
+  update this detection check to accept **either** prefix (`implement/` or
+  `impl/`) when testing "already on an implementation branch," while only
+  ever constructing new branch names under the `impl/` convention going
+  forward.
 
 ## Deferred to Implementation
 
@@ -60,6 +73,11 @@ into a goal-staging branch.
   it) from `implement/<scope-slug>` to `impl/<stem>`, applying the 15-
   character cap per the deferred truncation scheme chosen during
   implementation.
+- Update the "already on an implementation branch" detection check
+  (currently `strings.HasPrefix(obs.CurrentBranch, "implement/")`) to accept
+  either the legacy `implement/` prefix or the new `impl/` prefix, so
+  in-progress legacy-named branches are still correctly recognized as
+  continue/rename candidates rather than misidentified as fresh-start state.
 - Update `lead-implement`'s Branch Cleanup step (step 8) so that when the
   branch name matches `impl/*` and every existing skip condition is clear,
   deletion proceeds without asking; branches that don't match `impl/*` keep
@@ -75,6 +93,10 @@ into a goal-staging branch.
 `lead-implement`'s branch-naming and Branch Cleanup behavior is documented
 caller-visible workflow-skill contract surface; addressing this at
 ready-promotion time will need a spec update describing the new naming
-convention and the naming-gated auto-delete precondition. Contract-first
-spec: no — this refines existing documented behavior rather than introducing
-a new planned contract.
+convention and the naming-gated auto-delete precondition, including a
+one-line note that the `impl/*` trust boundary is name-based (a hand-created
+`impl/foo` branch not produced by `enter_implement` would also qualify once
+its structural guardrails pass — a narrow, low-blast-radius edge case since
+the guardrails themselves are unchanged). Contract-first spec: no — this
+refines existing documented behavior rather than introducing a new planned
+contract.
