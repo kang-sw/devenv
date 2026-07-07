@@ -149,6 +149,19 @@ entirely in `lead-implement`.
   explicit `skip` proceeds without asking; explicit non-`skip` value (or
   anything else) still asks.
 
+### Result (c8dc46a8)
+
+Added `policy.branch.merge_confirm` (skip/ask/unknown, default `ask`) to
+`enter.implement`'s branch policy input, normalized facts, branch plan
+struct, conditions list, and raw/JSON rendering, plus the `server.go`
+JSON-schema property — a pure passthrough that never alters
+`deriveImplementBranchPlan`'s derived `Action`. `lead-implement`'s Branch
+invariant text updated to describe the caller-opt-out condition with no
+goal-specific language, per Decision 6. Spec entry added inline
+(`ai-docs/spec/mcp-tools.md`) alongside the code commit. Wsflow mirror and
+manifest regenerated and confirmed byte-identical. Review cycle: all three
+partitions (correctness/fit/test) clean on first pass, no fix cycle needed.
+
 ### Phase 2: Make lead-drain-ready-queue goal-aware
 
 - Depends on Phase 1 and on `260707-feat-impl-branch-convention-autodelete`.
