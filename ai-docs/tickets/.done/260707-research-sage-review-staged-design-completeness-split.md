@@ -5,6 +5,7 @@ spec:
   - mcp-tools
 related:
   260707-feat-forge-autonomy-bootstrap-chaining: prior sage-review-gate precedent this design references
+completed: 2026-07-07
 ---
 
 # Split sage review into a staged design/completeness gate across todo and ready
@@ -165,3 +166,39 @@ important, `resolution: autonomous` — missing `related:` link). No
 `related:` added, Background corrected to state the reviewer roles already
 exist and only per-stage gating is new, migration-plan gap added to
 Deferred to Implementation).
+
+### Result (495148bd) - 2026-07-07
+
+Implemented on `implement/sage-review-staged-split` (`65b548e2..495148bd`),
+resolving all four "Deferred to Implementation" items from direct codebase
+precedent rather than a fresh design turn:
+
+- Frontmatter split into `sage-review-design:`/`sage-review-completeness:`,
+  reusing the existing five-value vocabulary (`skipped`/`recommended`/
+  `required`/`completed`/`blocked`) unchanged on both fields.
+- Category exemptions and the never-skippable design-before-completeness
+  invariant implemented Go-side in `prepareSageReviewForUpwardMove`
+  (`agents-plugin-tool/internal/wsdoc/tickets_mutate.go`) and in
+  `TicketCreate` (`ticket_create.go`, for direct-to-`ready` authoring),
+  mirroring the existing spec-address-gate's Go-hard-block +
+  playbook-orchestration split.
+- `lead-write-ticket.md`'s Sage Review Gate section rewritten with
+  `Design Review Stage`/`Completeness Review Stage`/`Ready-promotion
+  Aggregation` subsections and per-stage Blocked templates; mirrored to
+  `agents-plugin-wsflow/`.
+- Completeness reviewer (`ticket-reviewer-completeness.md`) gained a new
+  scope-boundary checklist item per the Decisions section above (raise
+  design-shaped gaps as blocking findings instead of patching them in).
+- Legacy single-`sage-review:` tickets: lazy read-time inference onto both
+  new fields, no bulk migration script.
+- Explicitly out of scope (per plan, unchanged from ticket Decisions): the
+  post-design-pass-edit re-review judgment mechanism.
+
+Review: correctness and fit partitions clean on first pass; test partition
+found 1 important + 2 minor coverage gaps (missing exempt-category
+direct-to-`ready` test, missing `idea/`-fixture ready-promotion variant,
+missing epic-non-terminal-design-blocks case), all fixed and re-reviewed
+clean. `go build ./...`, `go vet ./...`, and `go test ./... -count=1` pass
+across all `agents-plugin-tool` packages. One duplicate spec anchor
+(`{#260624-sage-review-gate}` reused as a mid-prose cross-reference) found
+via `ws/spec_index.verify()` during the doc gate and fixed by lead directly.
