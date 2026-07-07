@@ -173,6 +173,26 @@ func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 	}
 }
 
+func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.Action != "rename" {
+		t.Fatalf("branch action = %q, want rename (allow_rename absent should default to yes)", result.Verdict.BranchPlan.Action)
+	}
+}
+
 func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},

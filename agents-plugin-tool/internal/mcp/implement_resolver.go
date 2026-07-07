@@ -507,7 +507,7 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		DocModePolicy:             factOr(policy.Docs.Mode, "standard"),
 		DocReason:                 strings.TrimSpace(policy.Docs.Reason.Value),
 		MergeTargetPolicy:         strings.TrimSpace(policy.Branch.MergeTarget.Value),
-		AllowRename:               factOr(policy.Branch.AllowRename, "unknown"),
+		AllowRename:               factOr(policy.Branch.AllowRename, "yes"),
 		ScopeSlug:                 strings.TrimSpace(input.Target.ScopeSlug),
 	}
 	if n.ScopeSlug == "" {
