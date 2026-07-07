@@ -214,6 +214,15 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260707-bug-dashboard-e2e-second-test-pairing-token-reuse` (ready, bug) -
+  last remaining blocker to a fully green `npm run test:browser`: the daemon's
+  intentional one-time pairing token (correct, not to be changed) is consumed
+  by the suite's first test, so the second test's fresh isolated browser
+  context fails re-pairing. Single Phase 1: fix the e2e harness/spec only
+  (likely capture+inject the auth cookie/storageState, per sage design
+  review's steer, since `describe.serial` is already set but doesn't share
+  context). Spec addressing via `## Spec Impact` (test-harness-only,
+  Contract-first: no). Sage review completed.
 - `260703-feat-dashboard-workroot-session-keepalive` (`ready`, feat) - single
   workset covering two related durability problems: (1) work-root switching
   today destroys every terminal pane of the previously active root via
