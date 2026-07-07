@@ -416,6 +416,26 @@ dropped tickets live in hidden archive dirs and git history.
   remain the safety net. Spec addressing via Phase 1 (spec update bullet
   added per completeness-reviewer finding, Contract-first: no). Sage
   review completed.
+- `260707-feat-forge-autonomy-bootstrap-chaining` (ready, feat) - narrow
+  `lead-forge-spec`'s per-ambiguous-item classification loop to auto-proceed
+  (inline `<!-- AMBIGUOUS: ... -->` markers, summarized in the final report),
+  leaving the destructive archive gate and one-time domain-list confirmation
+  untouched; add a `lead-forge-spec` wrap-up chaining prompt into
+  `lead-forge-mental-model` (covers all entry paths, since bootstrap has no
+  call/return path back from an indirectly-triggered forge-spec run).
+  Complements `260707-feat-doc-coverage-live-bootstrap-alarm`'s cross-session
+  safety net. Spec addressing via `## Spec Impact` (`workflow-skills.md`,
+  Contract-first: no). Sage review completed.
+- `260707-feat-doc-coverage-live-bootstrap-alarm` (ready, feat) - add a live
+  (non-persisted, no set/clear flag) session-bootstrap check for whether
+  `ai-docs/spec/`/`ai-docs/mental-model/` each contain at least one
+  frontmatter-bearing `.md` file, surfaced via `ferrule`/`workflow_manual`
+  and muted by a single new combined `wsconfig.Item*` entry; reuses
+  `260703-chore-bootstrap-staleness-alarm`'s warning-delivery-channel
+  pattern and rejects a generic `config.set_flag`-shaped setter for the same
+  reason that ticket already rejected one. Spec addressing via
+  `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
+  no). Sage review completed.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
