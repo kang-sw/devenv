@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -68,7 +69,7 @@ func isLeadOnlyTool(name string) bool {
 
 func workflowPreferenceWriterTool(name string) bool {
 	switch name {
-	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm":
 		return true
 	default:
 		return false
@@ -321,6 +322,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent:  "off",
 		wsconfig.ItemWorkflowPreferMercenary: "hide",
 		wsconfig.ItemSageReview:              "auto",
+		wsconfig.ItemBootstrapAlarm:          "on",
 	}
 }
 
@@ -599,6 +601,44 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.workflow_prefer_mercenary: %w", err))
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_mercenary: %s [scope:global]\n", value), nil)
+
+	case "config.bootstrap_alarm":
+		if _, err := s.requireLeadSessionKey("config.bootstrap_alarm", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		reset, _ := params.Arguments["reset"].(bool)
+		rawValue, hasValue := params.Arguments["value"]
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if reset {
+			if hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: value and reset are mutually exclusive"))
+				}
+			}
+			// Reset means "drop the global override and fall back to the builtin
+			// default" — distinct from explicitly writing the builtin's current
+			// value, which would still shadow a future builtin default change.
+			if err := resolver.Unset(wsconfig.ItemBootstrapAlarm, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
+			}
+			resolved, err := resolver.Get("", wsconfig.ItemBootstrapAlarm)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
+		}
+		value, _ := rawValue.(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: value must be one of on, off; got %q", value))
+		}
+		if err := resolver.Set(wsconfig.ItemBootstrapAlarm, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:global]\n", value), nil)
 
 	case "config.prompt.set":
 		// Lead-only setter for prompt override-points. The config.* prefix gate in
@@ -1436,10 +1476,22 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		"session_key": key,
 		"root":        canonical,
 	}
+	skillsRoot, err := wsrsrc.ResolveSkillsRoot()
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: resolve skills root: %w", err))
+	}
+	adapter := sessionConfigAdapter{s: s.sessions}
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+	warning := bootstrapStalenessWarning(canonical, skillsRoot, &resolver, "")
+	text := fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical)
+	if warning != "" {
+		result["bootstrap_alarm"] = warning
+		text += "\n" + warning + "\n"
+	}
 	if wantsJSON(arguments) {
 		return toolJSONResponse(id, result, nil)
 	}
-	return toolTextResponse(id, fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical), nil)
+	return toolTextResponse(id, text, nil)
 }
 
 type sessionChildOutput struct {
@@ -1733,6 +1785,19 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+	})
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "bootstrap_alarm",
+		Kind:        "workflow_preference",
+		Description: "Select whether the session-bootstrap staleness warning fires when this project's AGENTS.md template is behind the shipped lead-bootstrap template.",
+		Writer:      tuningWriter{Tool: "config.bootstrap_alarm"},
+		Reset: &tuningWriter{
+			Tool:           "config.bootstrap_alarm",
+			FixedArguments: map[string]string{"reset": "true"},
+		},
+		ValueFields: tuningFieldsFromSchema("config.bootstrap_alarm", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
 	})
 
 	if noAgentMode {
@@ -3130,6 +3195,17 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "config.bootstrap_alarm",
+			"description": "Set the global preference for the session-bootstrap staleness warning (fires at ferrule/workflow_manual time when this project's AGENTS.md Template Version tag is behind the shipped lead-bootstrap template), or reset it back to the builtin default (on) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
+					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
+				},
+			},
+		},
+		{
 			"name":        "config.prompt.set",
 			"description": "Store a prompt override for a named override-point and harness bucket. The stored text replaces the inline seed at playbook render time for the matching (pointId, harness). Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
@@ -3716,7 +3792,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
 		"mercenary.cancel", "mercenary.print", "mercenary.erase",
-		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm":
 		return true
 	default:
 		return false
