@@ -2,6 +2,7 @@
 title: "Dashboard e2e suite's second test fails: reuses the daemon's one-time pairing URL across an isolated browser context"
 related:
   260707-bug-dashboard-terminal-clears-on-tab-switch: related-area
+sage-review: completed
 ---
 
 # Dashboard e2e suite's second test fails: reuses the daemon's one-time pairing URL across an isolated browser context
@@ -51,7 +52,20 @@ a shared `test.describe.serial` block reusing one `page`/context instead of
 Playwright's default per-test isolated context; (c) have the daemon harness
 expose a way to mint a fresh pairing token or an equivalent authenticated
 entry point per test (e.g. a test-only re-pairing affordance), if the daemon
-already supports something like this for other reasons. Verification: run
+already supports something like this for other reasons.
+
+Note: the spec file already declares
+`test.describe.configure({ mode: "serial" })` (`spec.ts:51`), so approach (b)
+only fixes test ordering, not Playwright's per-test isolated
+page/context — reusing the first test's page would also carry over its
+opened workRoot/terminal state, which could collide with the second test's
+`page.route(...)` mocks and assertions. This nudges toward approach (a)
+(capture the auth cookie/storageState after the first pairing, inject it
+into the second test's fresh context) as the cleaner, isolation-preserving
+option, but the implementer should confirm after inspecting the actual
+session/cookie mechanism.
+
+Verification: run
 the full `e2e/dashboard-acceptance.spec.ts` file (both tests) at least twice
 consecutively and confirm both pass every time.
 
