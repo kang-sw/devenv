@@ -4,6 +4,7 @@ related:
   260523-research-ws-dashboard-persistable-ui-state-map: source of the workbench-layout and terminal-visual-state persistence candidates implemented by this ticket's later phases
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-07-07
 ---
 
 # Durable workbench sessions: keep-alive across work-root switches and layout/terminal-visual restore on reload
@@ -754,3 +755,8 @@ and its `#260523-ws-dashboard-terminal-tab-restore` sub-anchor.
 - Phase 6: Contract-first: yes. Extends the terminal-tab-restore anchor to
   describe visual-buffer restore for id-reattached terminals; spec update
   lands in this phase.
+
+
+## Resolution (2026-07-07)
+
+All 7 phases landed and merged (1ba87971 through bb2bbf0a), each with a clean partitioned review and a `### Result` section; ticket-wide completeness check confirms the reload-survival and in-session close/reopen restore paths converge on one shared mechanism (`workbench/layoutRestore.ts`, `workbench/terminalVisualRestore.ts`). The dogfooding regression this surfaced (terminal clears on tab switch) was fixed separately in `260707-bug-dashboard-terminal-clears-on-tab-switch`, now also closed. Remaining Playwright e2e gap for this ticket's own scenarios (page reload, socket reconnect, visual restore, close/reopen) is accepted as out of scope here; unit coverage plus code-trace verification stand in per every phase's disclosure.

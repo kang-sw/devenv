@@ -214,40 +214,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260707-bug-dashboard-e2e-second-test-pairing-token-reuse` (ready, bug) -
-  last remaining blocker to a fully green `npm run test:browser`: the daemon's
-  intentional one-time pairing token (correct, not to be changed) is consumed
-  by the suite's first test, so the second test's fresh isolated browser
-  context fails re-pairing. Single Phase 1: fix the e2e harness/spec only
-  (likely capture+inject the auth cookie/storageState, per sage design
-  review's steer, since `describe.serial` is already set but doesn't share
-  context). Spec addressing via `## Spec Impact` (test-harness-only,
-  Contract-first: no). Sage review completed.
-- `260703-feat-dashboard-workroot-session-keepalive` (`ready`, feat) - single
-  workset covering two related durability problems: (1) work-root switching
-  today destroys every terminal pane of the previously active root via
-  `syncDockviewWorkbench`'s `removePanel` sweep (Phases 1-4: per-root
-  dockview instances kept alive instead of destroyed, an explicit
-  user-triggered "close work root" action, visibility-gated terminal
-  WebSocket lifecycle, and two reconnect-protocol accuracy fixes — frontend
-  cursor update on `output` frames, backend truncation signal when the ring
-  buffer already evicted the requested range); (2) full page reload loses
-  browser presentation state that the current `WorkRoot IO Restore Model`
-  spec already scopes out (dockview layout, terminal scrollback/cursor/scroll
-  position) even though daemon-side terminal reattach-by-id already works
-  correctly (Phases 5-7: persist/restore per-root dockview layout, capture
-  and restore terminal visual buffer state via e.g. `@xterm/addon-serialize`,
-  and reuse that same primitive so explicit close+reopen within one browser
-  session is not worse than a reload). Phases 5-6 are Contract-first: yes
-  (revise the `WorkRoot IO Restore Model` anchor and its terminal-tab-restore
-  sub-anchor in `ai-docs/spec/ws-web-dashboard/index.md`); Phases 1-4 and 7
-  are Contract-first: no. Narrows two "Split Candidates" from
-  `260523-research-ws-dashboard-persistable-ui-state-map` (workbench layout,
-  terminal visual state); that research ticket's other candidates (file
-  explorer tree state, Activity Console local state, command/keybinding
-  preferences, dashboard chrome preferences, root picker history) remain
-  open there. No sage review performed yet — promoted directly from a design
-  discussion, not the usual review-gated ready path.
 - `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`ready`, feat) -
   **all 7 phases complete** (Phase 1 `c72013f5` through Phase 7 `a71162ab`,
   each closed out with a `### Result` section and a clean partitioned
@@ -263,16 +229,6 @@ dropped tickets live in hidden archive dirs and git history.
   gaps (consolidated in the Phase 7 Result) — closing the ticket status is
   left as a user judgment call, not an automatic consequence of all phases
   landing.
-- `260707-bug-dashboard-terminal-clears-on-tab-switch` (ready, bug) - dogfooding
-  regression found while verifying `260703` Phase 6/7: a workbench terminal
-  pane clears and collapses to `<cols> x 1` after a dockview tab switch or a
-  session/workroot round-trip; likely a resize/`fit()`/visibility-lifecycle
-  bug rather than data loss in the visual-buffer-restore snapshot itself, but
-  not yet root-caused (three candidate layers named). Single Phase 1: repro
-  both modes, root-cause, fix, and add/extend Playwright e2e coverage in
-  `dashboard-acceptance.spec.ts`. Spec addressing via `## Spec Impact`
-  (regression fix, no new contract, Contract-first: no). Sage review
-  completed (clean, no issues).
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
