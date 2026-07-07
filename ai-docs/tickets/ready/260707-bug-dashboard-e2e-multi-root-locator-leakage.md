@@ -189,3 +189,35 @@ fails both full runs at first navigation but passes standalone in 1.5s —
 confirmed pre-existing, sequential-execution-only test-isolation defect in
 an unrelated subsystem (server-pairing/remote-fixture daemon setup), left
 unfixed per this phase's out-of-scope boundary.
+
+#### Edition (b8199eca) - 2026-07-07
+
+Review-fix cycle (partitioned correctness/fit/test review, then a full
+implementer-relay, then a partitioned correctness/test re-review — all
+clean) resolved two Important test findings and two minor correctness
+findings against the `d1639067` implementation above:
+
+- Extracted the pane-order-merge logic into a new
+  `mergeReadOnlyAndTerminalPaneOrder` function and moved the pre-existing
+  `removePanesFromOrder` helper (now exported) into
+  `workbench/layoutRestore.ts`, with unit test coverage in
+  `layoutRestore.test.ts` (merge function, the `?? []` vs
+  `?? initialWorkbenchGroups` regression contrast, a composed
+  merge+reconcile test, and `removePanesFromOrder` itself). Confirmed by
+  re-review as a byte-identical refactor — no behavior change.
+- Corrected the flakiness figures stated above, which did not hold up
+  arithmetically: the actual count is **3/12 (25%) failures pre-fix,
+  0/30 (0%) failures across 30 isolated re-runs post-fix** (not "0/18").
+  The raw run log is transcribed verbatim into fix commit `b8199eca`'s
+  `## AI Context` (the on-disk log path itself is gitignored and has
+  since been overwritten by later test runs).
+- Added an invariant comment above `pendingReadOnlyActivation` (App.tsx)
+  documenting its dependency on `editorGroups` being a fresh reference
+  every render, and corrected the `setActivePaneByRoot` updater's CONTRACT
+  comment, which had overstated that "both reads come from the same
+  truly-current state" — only `preferred` is actually fresh; the comment
+  now explains why the other closures are still safe.
+
+Re-review verdicts: correctness clean, fit clean (unchanged from cycle 1),
+test clean with 1 non-blocking minor (the raw flakiness log isn't
+preserved as a retrievable file outside the commit message text).
