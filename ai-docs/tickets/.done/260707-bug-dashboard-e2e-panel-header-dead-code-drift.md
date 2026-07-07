@@ -1,6 +1,7 @@
 ---
 title: "Playwright acceptance gate fails on dead .panel-header selector; PanelHeader component is unused"
 sage-review: completed
+completed: 2026-07-07
 ---
 
 # Playwright acceptance gate fails on dead .panel-header selector; PanelHeader component is unused
@@ -123,3 +124,8 @@ Playwright deps (`xvfb`, `libasound2`, fonts, etc.) were installed in this
 sandbox during this session for the first time, which is what made this
 whole investigation possible — prior sessions could never run this suite
 at all.
+
+
+## Resolution (2026-07-07)
+
+Phase 1 (only phase) completed and merged to ws-dashboard-dev at merge commit (see git log). Dead PanelHeader removed; e2e assertions re-pointed to Dockview's tabbar; expectDockviewWorkbench multi-root scoping bug fixed as an in-scope extension. Remaining unrelated e2e drift split into a follow-up ticket.
