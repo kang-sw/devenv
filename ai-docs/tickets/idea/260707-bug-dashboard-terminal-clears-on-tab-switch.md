@@ -2,6 +2,7 @@
 title: "Dashboard terminal content clears and collapses to 1 row on tab/session switch"
 related:
   260703-feat-dashboard-workroot-session-keepalive: related-area
+sage-review: completed
 ---
 
 # Dashboard terminal content clears and collapses to 1 row on tab/session switch
