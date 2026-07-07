@@ -229,6 +229,15 @@ dropped tickets live in hidden archive dirs and git history.
   gaps (consolidated in the Phase 7 Result) — closing the ticket status is
   left as a user judgment call, not an automatic consequence of all phases
   landing.
+- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`ready`, chore) -
+  test plan to close `260525`'s live remote-dogfood gap for real: verify SSH
+  connectivity, dogfood the SSH-tunnel linked-server path end to end, and
+  dogfood a reversed-topology direct-endpoint variant (Windows gateway ->
+  WSL remote via `localhost`), since a same-host-topology direct-endpoint +
+  `--bind-mode public` attempt was tried and correctly failed (Host/Origin
+  invariant is intentional, not a bug - see dropped
+  `260707-bug-dashboard-public-bind-host-check-rejects-own-address`). Sage
+  review completed; not yet executed.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`

@@ -8,6 +8,7 @@ spec:
   - 260515-ws-web-daemon-foundation
 sage-review-design: completed
 sage-review-completeness: completed
+sage-review: completed
 ---
 
 # Dogfood the SSH-tunnel and localhost-forwarding linked-server paths across a real WSL/Windows boundary

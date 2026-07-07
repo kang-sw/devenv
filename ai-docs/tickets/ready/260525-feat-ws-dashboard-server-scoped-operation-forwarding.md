@@ -858,3 +858,34 @@ this phase's alone:**
   `serverId`/`actionServerId` frontend prop names don't follow the
   `serverRoute` convention used elsewhere in the same diff, though
   functionally correct.
+
+#### Verification note - 2026-07-07
+
+Attempted the live remote-Windows-daemon dogfood named as the ticket's
+largest outstanding gap: a WSL-side gateway daemon (normal owner-auth,
+`127.0.0.1:8787`) linked to a native-Windows daemon built and run from a
+separate checkout (`D:\dbg-ws-dashboard-dev`, brought current to this
+session's `ws-dashboard-dev` tip), bound non-loopback (`192.168.208.1:4101`,
+the WSL2 host-gateway address) with `--bind-mode public` and normal
+owner-auth (no `--no-auth`).
+
+The link handshake (passphrase exchange) succeeded, but the very next
+forwarded call (`GET /api/dashboard/resources`) failed with a `502`. Root
+cause confirmed via a controlled `curl` A/B test against the live remote
+daemon (identical bearer token, only the `Host` header differed): the
+daemon's own `entrypoint_headers_allowed`/`is_allowed_host` check
+(`auth.rs:274-335`) only ever allows `localhost`/loopback Host values, with
+no awareness of `ServeConfig.bind_mode` — so `--bind-mode public` is accepted
+at startup but every protected route becomes unreachable via the one address
+a real remote client can use to reach it. This is a genuine, previously
+undiscovered daemon bug, not a forwarding-logic defect in this ticket's own
+Phases 1-7, and is not something this ticket's scope should fix.
+
+Filed as `260707-bug-dashboard-public-bind-host-check-rejects-own-address`.
+This ticket's "live dogfood" gap is now **partially resolved**: the
+topology, build, and link-handshake steps are proven to work end-to-end
+across a genuine WSL-Linux-to-native-Windows boundary; the actual
+forwarded-operation exercise (root picker, files, Git, terminal, WebSocket
+relay) remains blocked until the new bug ticket lands a fix, at which point
+the same session/methodology (documented in `ai-docs/_index.local.md`,
+gitignored) can be re-run to close this gap fully.
