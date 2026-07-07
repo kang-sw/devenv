@@ -412,6 +412,38 @@ schema.
     mints a key. Unlike `workflow_manual`, `workflow_state` has no FRESH mode —
     the sentinel simply falls through to this same fail-loud path.
 
+### Bootstrap Staleness Warning {#260703-bootstrap-staleness-warning}
+
+`ferrule` and `workflow_manual` (FRESH-with-root and CONTINUE branches only)
+each surface a one-line staleness banner when the downstream project's root
+`AGENTS.md` carries a `<!-- Template Version: vNNNN -->` tag behind the
+version shipped in the running package's own `lead-bootstrap` skill template
+(`agents-plugin/skills/lead-bootstrap/AGENTS.template.md` for ws,
+`agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md` for wsflow).
+The comparison is package-local: whichever package's MCP binary is running
+resolves its own shipped template via `wsrsrc.ResolveSkillsRoot()`, so there is
+no cross-package (ws vs wsflow) comparison and no separate version manifest to
+hand-maintain. The `workflow_manual` FRESH-without-root branch (no established
+root yet) never checks or warns.
+
+The check is silent by design in three cases: the `bootstrap_alarm` config
+item (see Config Tools) resolves to `off`; the downstream root has no
+`AGENTS.md` or the file has no Template Version tag at all (an untagged
+project never opted into the ws bootstrap contract, so absence is not treated
+as maximal staleness); or the shipped template's own tag is unreadable or
+malformed (fail-safe — the tool never warns off of an unreadable "latest").
+When the warning does fire, its text names both the installed and latest
+version numbers and instructs the caller to run
+`config.bootstrap_alarm(value: "off")` to silence it permanently. The warning
+fires on every `ferrule`/`workflow_manual` call while stale — there is no
+once-per-session suppression state, matching the existing precedent of
+per-call injection (e.g. the mercenary agentId tip) rather than the
+per-`project_tree`-call anti-pattern this repo's Decisions section warns
+against.
+
+Changing `lead-bootstrap`'s own upgrade/migration procedure is out of scope for
+this warning; it only detects and reports staleness.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
@@ -449,6 +481,14 @@ tracks any future change to the builtin default. This mirrors the general
 unset-vs-set distinction in `#260702-unset-means-reset-to-builtin`.
 {#260702-config-unset-reset-to-builtin}
 
+`config.bootstrap_alarm(session_key, value: "on"|"off")` sets the global
+`"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
+bootstrap staleness warning (`#260703-bootstrap-staleness-warning`). It
+requires a lead session key for authority, always writes the global config
+scope (global-only, mirroring `config.workflow_prefer_subagent`), and accepts
+the same mutually-exclusive `reset: true` alternative to `value` with
+identical unset-to-builtin semantics.
+
 ## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
@@ -463,7 +503,8 @@ descriptions from the existing MCP writer tool schema where possible. Prompt
 override entries derive their point ids from the same shipped override-marker
 scan used by `config.prompt`; model-tier entries derive their fields from
 `config.agents_tier`; workflow-preference entries derive their values from
-`config.workflow_prefer_subagent` and `config.workflow_prefer_mercenary`.
+`config.workflow_prefer_subagent`, `config.workflow_prefer_mercenary`, and
+`config.bootstrap_alarm`.
 The shipped `DelegationSection` override marker is removed, so
 `prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
 discovery; orphaned stored prompt keys remain ignored.

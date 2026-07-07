@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // freshOnlyStart and freshOnlyEnd are the dedicated mode-gating marker tokens
@@ -254,6 +255,12 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
+			if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
+				body = injectBootstrapStalenessWarning(body, warning)
+			}
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -269,6 +276,14 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body += "\n\n" + renderSessionState(rec)
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
+		}
+		if rec.Root != "" {
+			if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
+				body = injectBootstrapStalenessWarning(body, warning)
+			}
 		}
 	}
 

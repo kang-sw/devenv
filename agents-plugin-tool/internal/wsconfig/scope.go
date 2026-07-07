@@ -66,12 +66,20 @@ const (
 	// at face value and propagate them without verification.
 	// Values: "on" (default) or "off".
 	ItemWorkflowSkepticalPosture = "workflow.skeptical_posture"
+
+	// ItemBootstrapAlarm gates the session-bootstrap staleness warning that
+	// fires when a downstream project's root AGENTS.md Template Version tag is
+	// behind the shipped lead-bootstrap template's tag. Values: "on" (builtin
+	// default) or "off". Global-only: this is a cross-project user preference
+	// about warning noise, not a per-project opt-in.
+	ItemBootstrapAlarm = "bootstrap_alarm"
 )
 
 func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
 	RegisterGlobalOnly(ItemWorkflowPreferMercenary)
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
+	RegisterGlobalOnly(ItemBootstrapAlarm)
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)
