@@ -1476,17 +1476,15 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		"session_key": key,
 		"root":        canonical,
 	}
-	skillsRoot, err := wsrsrc.ResolveSkillsRoot()
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: resolve skills root: %w", err))
-	}
-	adapter := sessionConfigAdapter{s: s.sessions}
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
-	warning := bootstrapStalenessWarning(canonical, skillsRoot, &resolver, "")
 	text := fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical)
-	if warning != "" {
-		result["bootstrap_alarm"] = warning
-		text += "\n" + warning + "\n"
+	if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		warning := bootstrapStalenessWarning(canonical, skillsRoot, &resolver, "")
+		if warning != "" {
+			result["bootstrap_alarm"] = warning
+			text += "\n" + warning + "\n"
+		}
 	}
 	if wantsJSON(arguments) {
 		return toolJSONResponse(id, result, nil)

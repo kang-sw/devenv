@@ -125,6 +125,45 @@ func TestBootstrapStalenessWarningSilentWithoutTag(t *testing.T) {
 	}
 }
 
+// TestBootstrapStalenessWarningSilentWhenUpToDate verifies the
+// installed-at-or-above-latest boundary: when the downstream AGENTS.md's
+// Template Version tag is equal to, or ahead of, the shipped template's tag,
+// bootstrapStalenessWarning must stay silent (the `installed >= latest`
+// early-return branch).
+func TestBootstrapStalenessWarningSilentWhenUpToDate(t *testing.T) {
+	useLeadProfile(t)
+
+	t.Run("equal versions", func(t *testing.T) {
+		root := t.TempDir()
+		mustWrite(t, root, "AGENTS.md", "# Root\n\n<!-- Template Version: v0002 -->\n")
+		initGit(t, root)
+		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+		t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+		writeTemplateVersionFixture(t, 2)
+
+		s := NewServer(root, "test")
+		resp := callLogin(t, s, 1, root, nil)
+		if strings.Contains(toolText(t, resp), "Bootstrap template is stale") {
+			t.Fatalf("ferrule must stay silent when installed version equals latest: %s", toolText(t, resp))
+		}
+	})
+
+	t.Run("downstream ahead of latest", func(t *testing.T) {
+		root := t.TempDir()
+		mustWrite(t, root, "AGENTS.md", "# Root\n\n<!-- Template Version: v0003 -->\n")
+		initGit(t, root)
+		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+		t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+		writeTemplateVersionFixture(t, 2)
+
+		s := NewServer(root, "test")
+		resp := callLogin(t, s, 1, root, nil)
+		if strings.Contains(toolText(t, resp), "Bootstrap template is stale") {
+			t.Fatalf("ferrule must stay silent when installed version is ahead of latest: %s", toolText(t, resp))
+		}
+	})
+}
+
 // TestBootstrapAlarmTuningKnob verifies config.tuning lists the bootstrap_alarm
 // knob with the resolved current value/scope, and that config.bootstrap_alarm
 // can set and reset it, mirroring
@@ -155,8 +194,23 @@ func TestBootstrapAlarmTuningKnob(t *testing.T) {
 	if !strings.Contains(tuningText, "bootstrap_alarm") {
 		t.Fatalf("config.tuning must list the bootstrap_alarm knob: %s", tuningText)
 	}
-	if !strings.Contains(tuningText, "off") {
-		t.Fatalf("config.tuning must report the resolved off value for bootstrap_alarm: %s", tuningText)
+	// Scope the "off" assertion to the bootstrap_alarm knob's own block: the
+	// catalog also lists workflow.prefer_subagent, whose builtin default is
+	// "off", so a bare substring check on "off" would pass even if
+	// bootstrap_alarm's own current value were wired wrong.
+	knobBlocks := strings.Split(tuningText, "\n\n")
+	var bootstrapAlarmBlock string
+	for _, block := range knobBlocks {
+		if strings.HasPrefix(block, "bootstrap_alarm (") {
+			bootstrapAlarmBlock = block
+			break
+		}
+	}
+	if bootstrapAlarmBlock == "" {
+		t.Fatalf("config.tuning must contain a bootstrap_alarm knob block: %s", tuningText)
+	}
+	if !strings.Contains(bootstrapAlarmBlock, `current: {"value":"off"`) {
+		t.Fatalf("config.tuning must report the resolved off value scoped to bootstrap_alarm's own block: %s", bootstrapAlarmBlock)
 	}
 
 	resetResp := callToolOnce(t, s, 4, "config.bootstrap_alarm", map[string]any{
