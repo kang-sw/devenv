@@ -46,6 +46,62 @@ automatically going forward. Verification: reproduce first (screenshot/trace
 before the fix), then confirm both reproduction modes are fixed via the new
 or extended e2e coverage, run at least twice to rule out flake.
 
+### Result (67fabd77) - 2026-07-07
+
+Root cause differed from the ticket's own working hypothesis and from a
+first, disproven fix attempt. Two rounds of live-repro research were needed:
+
+1. First plan hypothesized the vendor `@xterm/addon-fit` `MINIMUM_ROWS=1`
+   clamp firing while a dockview tab is hidden/detached. Live-repro
+   disproved this: a hidden/detached container's `getComputedStyle` returns
+   `""` (not `0`), so `proposeDimensions()` yields `NaN`, and the vendor
+   `fit()` already has an `isNaN` guard that safely no-ops — this path was
+   never actually broken.
+2. Research live-reproduced the real trigger: a **visible** pane whose
+   container is momentarily too short (e.g. during dockview relayout on a
+   tab/session switch, or a genuinely short window/split) causes
+   `fitAddon.fit()` to propose the degenerate `rows=1` floor and clear the
+   rendered screen. Neither of the ticket's two literally-named repro modes
+   (bare tab switch, session/workroot round-trip) reproduces this at a
+   normal tall viewport — the load-bearing trigger is short *visible* pane
+   height, confirmed via `page.setViewportSize` to a short height.
+
+Fixed in `App.tsx`'s `TerminalPaneBody`: `fitNow()` now checks
+`fitAddon.proposeDimensions()` before applying a fit and skips the
+resize/shrink loop entirely when the result is unmeasurable or floors at 1
+row, preserving the last-good emulator size instead of collapsing. The
+`paneVisible` effect now explicitly re-runs `fitNow()`/`forwardSize()` (via
+new `fitNowRef`/`forwardSizeRef`) so a pane that was skipped-while-short or
+briefly hidden is deterministically re-fitted once genuinely visible/sized,
+rather than relying solely on the next incidental `ResizeObserver` callback.
+No changes to `terminalSizeBounds.minRows` or the Phase 6/7 restore write
+path (`workbench/terminalVisualRestore.ts`), confirmed out of scope and
+untouched.
+
+Added `terminalRows`/`emulatorRowCount` e2e helpers and regression coverage
+in `dashboard-acceptance.spec.ts`: the short-viewport transition (the
+confirmed, load-bearing trigger) asserts exact preservation of the
+tall-viewport row count (not merely "not floored to 1", tightened during
+review), plus the two ticket-named repro modes retained as non-regression
+stability assertions.
+
+Review (partitioned correctness/fit/test, one fix-relay cycle): correctness
+clean with 2 accepted minors, fit clean, test non-clean 1 important
+(assertion under-asserted the fix's contract) fixed and re-reviewed clean.
+
+Verification: pre-fix repro captured the exact `<cols>x1` collapse
+(screenshot); post-fix, the regression test passed twice independently
+(~30-32s each, re-confirmed by reviewers); `npm run test:terminals` (PTY
+bounds + restore-write-path unit tests) stayed green.
+
+Forward note: the suite's second test
+("linked server root picker uses server-scoped local gateway routes") fails
+when run after the main gate test in the same file, due to a pre-existing,
+unrelated single-use-pairing-token/isolated-browser-context issue in the
+e2e harness — confirmed present before this fix on a clean branch tip.
+Worth a follow-up `idea/` ticket on the e2e harness if a second
+cookie-based test is ever added to this file.
+
 ## Spec Impact
 
 No existing spec stem addresses terminal pane resize/visibility-lifecycle
