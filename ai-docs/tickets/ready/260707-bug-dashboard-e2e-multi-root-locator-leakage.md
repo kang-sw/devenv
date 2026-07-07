@@ -118,12 +118,27 @@ by construction — a future edit that changes root-open ordering or gives
 an inactive root a terminal/document pane it doesn't have today could still
 surface a new instance of this class.
 
-### Phase 2: Diagnose and fix the TOML/text language-detection mismatch
+### Phase 2: Diagnose and fix the TOML/text language-detection mismatch (root cause: preview-tab activation, not language detection)
 
 Root-cause why `.document-source-viewer[data-editor-read-only="true"]`
 reports `data-editor-language="text"` instead of the expected `"toml"` for
 the relevant fixture file, and fix the underlying cause (or the test fixture
 if the test's expectation is itself stale). Likely independent of Phase 1;
+
+**Diagnosis update (research, high confidence, live-repro-confirmed):** the
+"language-detection mismatch" framing was wrong. `documentEditorLanguageId`
+and the server-side language-hint mapping are both correct for `.toml` in
+every path. The real defect: single-clicking a file to open a read-only
+preview does not activate the new preview tab when a sibling pinned pane in
+the same Dockview group is currently active — so the assertion observes the
+still-active, previously-pinned pane's (correct) `text` language instead of
+the new toml preview's. This is a preview-tab activation bug in the shared
+pane-sync pipeline (`App.tsx`'s `openReadOnlyFile` / `syncDockviewWorkbench`
+in `workbench/dockviewLayout.tsx`), not a language-detection or test-fixture
+bug. Fix: declare the new pane active synchronously in the same state batch
+that adds it (via the existing `setActivePaneByGroupForSelected` +
+`selectWorkbenchPane` mechanism), rather than editing language-detection
+code or the test's expectation.
 order between phases does not matter, but Phase 1 should land first since
 it's what currently blocks the suite from running far enough to reliably
 observe this one. Verification: re-run `npm run test:browser` twice
