@@ -253,6 +253,58 @@ func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
 	}
 }
 
+func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
+	skip := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	finalAction := requireInstruction(t, todoByKey(t, skip, "final-action-gate"))
+	if !strings.Contains(finalAction, "without asking for approval") {
+		t.Fatalf("final-action-gate instruction with merge_confirm=skip should drop the approval ask: %q", finalAction)
+	}
+	if strings.Contains(finalAction, "before asking for final action approval") {
+		t.Fatalf("final-action-gate instruction with merge_confirm=skip still asks for approval: %q", finalAction)
+	}
+	merge := requireInstruction(t, todoByKey(t, skip, "merge"))
+	if strings.Contains(merge, "After user approval") {
+		t.Fatalf("merge instruction with merge_confirm=skip should not require approval: %q", merge)
+	}
+	if !strings.Contains(merge, "without asking for user approval") {
+		t.Fatalf("merge instruction with merge_confirm=skip missing auto-merge guidance: %q", merge)
+	}
+
+	ask := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo", MergeConfirm: "ask"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	if got := requireInstruction(t, todoByKey(t, ask, "merge")); !strings.Contains(got, "After user approval") {
+		t.Fatalf("merge instruction with merge_confirm=ask should still require approval: %q", got)
+	}
+
+	absent := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	if got := requireInstruction(t, todoByKey(t, absent, "merge")); !strings.Contains(got, "After user approval") {
+		t.Fatalf("merge instruction with merge_confirm absent should default to requiring approval: %q", got)
+	}
+}
+
 func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",

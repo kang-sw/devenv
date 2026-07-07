@@ -2076,8 +2076,8 @@ func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "confirmed spec entries per domain") {
-		t.Errorf("body %q: expected doctrine text 'confirmed spec entries per domain'", body)
+	if !strings.Contains(body, "low-friction throughput per domain") {
+		t.Errorf("body %q: expected doctrine text 'low-friction throughput per domain'", body)
 	}
 	// delegates:true (native exploration-worker spawns) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {

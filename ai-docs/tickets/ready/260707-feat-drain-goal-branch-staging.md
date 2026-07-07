@@ -162,6 +162,23 @@ goal-specific language, per Decision 6. Spec entry added inline
 manifest regenerated and confirmed byte-identical. Review cycle: all three
 partitions (correctness/fit/test) clean on first pass, no fix cycle needed.
 
+#### Edition (362f1133) - 2026-07-07
+
+A pre-merge whole-branch regression audit (requested explicitly, separate
+from the per-ticket reviews above) found that `MergeConfirm` reached the
+verdict's rendered output and `lead-implement.md`'s Branch invariant prose,
+but never reached the actual installed todo instructions the lead executes
+(`implementFinalActionInstruction` / `implementMergeInstruction` in
+`agents-plugin-tool/internal/mcp/session_state.go`) — so `merge_confirm:
+"skip"` was silently a no-op through the operative execution path, and
+Phase 2's entire single-final-confirmation design would have stalled on a
+user ask at every ticket. Fixed both instruction generators to branch on
+`verdict.BranchPlan.MergeConfirm == "skip"` and drop the approval-ask
+wording; added `TestDeriveImplementTodoInstructionsMergeConfirmSkip`
+covering skip/ask/absent. This is exactly the class of gap the per-ticket
+reviews structurally could not catch (each saw one ticket's diff in
+isolation); a whole-branch audit before merge was the right tool for it.
+
 ### Phase 2: Make lead-drain-ready-queue goal-aware
 
 - Depends on Phase 1 and on `260707-feat-impl-branch-convention-autodelete`.
