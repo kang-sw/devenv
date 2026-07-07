@@ -623,6 +623,21 @@ async function terminalColumns(page: Page): Promise<number> {
   return match ? Number(match[1]) : Number.NaN;
 }
 
+// Sibling of `terminalColumns` above, parsing the daemon-confirmed row count
+// from the same `<status> · <columns>x<rows>` footer text.
+async function terminalRows(page: Page): Promise<number> {
+  const text =
+    (await page.locator(".terminal-status-line").first().textContent()) ?? "";
+  const match = text.match(/(\d+)x(\d+)/i);
+  return match ? Number(match[2]) : Number.NaN;
+}
+
+// Independent-of-the-daemon-footer proxy for the emulator's own row count:
+// one `.xterm-rows > div` per rendered emulator row.
+async function emulatorRowCount(page: Page): Promise<number> {
+  return page.locator(".xterm-rows > div").count();
+}
+
 // The terminal output poll cycle is ~120ms; a 900ms settle covers several
 // cycles and proves a tab selection survives the poll-driven `editorGroups`
 // rebuild.
@@ -2746,6 +2761,144 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         "via bounded resize forwarding",
     );
     await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
+  // --- Terminal-clear-on-tab-switch regression gate ------------------------
+  // (260707-bug-dashboard-terminal-clears-on-tab-switch, Phase 1). Live repro
+  // established the actual trigger is a *visible-but-too-short* pane height
+  // reaching `fitNow()` in App.tsx, not the hidden/detached state the
+  // ticket's two named repro modes (dockview tab switch, session/workRoot
+  // round-trip) were originally assumed to hit directly. The short-viewport
+  // transition below is the load-bearing new assertion; the two named modes
+  // are kept as non-regression coverage since they already passed pre-fix.
+  // Reuses the already-paired `page` and already-open `workRoot`/terminal
+  // tab from the steps above instead of a separate `test()`, since the
+  // daemon's owner-pairing URL is single-use and a fresh `test()` would need
+  // to consume it again.
+  let terminalClearFixTallRows = 0;
+  await test.step("short viewport does not collapse the terminal to 1 row", async () => {
+    await terminalTabs(page).nth(0).click();
+    await terminalSurface(page);
+    await runInTerminal(page, commandPlan.scrollLines("CLEAR-FIX-LINE-", 40));
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-LINE-40",
+    );
+    const tallRows = await terminalRows(page);
+    expect(tallRows).toBeGreaterThan(1);
+    terminalClearFixTallRows = tallRows;
+
+    await page.setViewportSize({ width: 1440, height: 160 });
+    // Give the ResizeObserver -> fitNow -> debounced forwardSize cycle time to
+    // settle; pre-fix this drives the footer to `<cols>x1` and clears the
+    // rendered screen within a couple hundred ms.
+    await page.waitForTimeout(800);
+    const shortRows = await terminalRows(page);
+    const shortEmulatorRows = await emulatorRowCount(page);
+    expect(shortRows).toBeGreaterThan(1);
+    expect(shortEmulatorRows).toBeGreaterThan(1);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-LINE-40",
+    );
+    await page.screenshot({
+      path: path.join(artifactsDir, "terminal-short-viewport-guard.png"),
+    });
+    note(
+      `terminal-clear fix: short viewport (160px) preserved ${shortRows} rows ` +
+        `(emulator ${shortEmulatorRows} rows), content not cleared, tall baseline was ${tallRows} rows`,
+    );
+  });
+
+  await test.step("growing the viewport back recovers the full size", async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect
+      .poll(() => terminalRows(page), { timeout: 20_000 })
+      .toBe(terminalClearFixTallRows);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-LINE-40",
+    );
+    note(
+      `terminal-clear fix: growing viewport back recovered ${terminalClearFixTallRows} rows`,
+    );
+  });
+
+  await test.step("dockview tab switch does not collapse the terminal (ticket repro mode 1)", async () => {
+    await page.locator('[data-command-id="terminal.create"]').click();
+    await expect(terminalTabs(page)).toHaveCount(2);
+    await terminalSurface(page);
+    await runInTerminal(page, commandPlan.echo("CLEAR-FIX-SECOND-TAB-MARKER"));
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-SECOND-TAB-MARKER",
+    );
+
+    await terminalTabs(page).nth(0).click();
+    await terminalSurface(page);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-LINE-40",
+    );
+    expect(await terminalRows(page)).toBe(terminalClearFixTallRows);
+
+    await terminalTabs(page).nth(1).click();
+    await terminalSurface(page);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-SECOND-TAB-MARKER",
+    );
+
+    await terminalTabs(page).nth(0).click();
+    await terminalSurface(page);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-LINE-40",
+    );
+    expect(await terminalRows(page)).toBe(terminalClearFixTallRows);
+    note(
+      "terminal-clear fix: repeated dockview tab switches left the first terminal's rows/content intact",
+    );
+
+    // Close the extra tab so it does not affect steps below.
+    await terminalTabs(page).nth(1).click();
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.press("Control+D");
+    const activeTerminalTab = page
+      .locator(
+        '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
+        { hasText: "Terminal" },
+      )
+      .last();
+    await activeTerminalTab.hover();
+    await activeTerminalTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    const closePopover = page.locator(
+      '[data-workbench-close-popover="cursor-near"]',
+    );
+    await expect(closePopover).toBeVisible();
+    await closePopover
+      .locator('[data-command-id="workbench.tab.close.confirm"]')
+      .click();
+    await expect(terminalTabs(page)).toHaveCount(1);
+  });
+
+  await test.step("session/workRoot round-trip does not collapse the terminal (ticket repro mode 2)", async () => {
+    if (!secondWorkRoot) {
+      note(
+        "terminal-clear fix: second workRoot round-trip skipped (not configured for external daemon)",
+      );
+      return;
+    }
+    // The "workspace remove is explicit and dashboard-only" step above
+    // already removed `secondWorkRoot` from the dashboard workspace list, so
+    // it is no longer a selectable resource here; reopen it by path instead
+    // of using `selectWorkRootInBrowser`.
+    await openWorkRootInBrowser(page, secondWorkRoot);
+    await selectWorkRootInBrowser(page, workRoot);
+    await terminalTabs(page).nth(0).click();
+    await terminalSurface(page);
+    await expect(page.locator(".xterm-rows")).toContainText(
+      "CLEAR-FIX-LINE-40",
+    );
+    expect(await terminalRows(page)).toBe(terminalClearFixTallRows);
+    note(
+      "terminal-clear fix: workRoot round-trip (open second root, switch back) left the terminal's rows/content intact",
+    );
   });
 
   await test.step("bounded resource polling runs while mounted and stops after unmount", async () => {

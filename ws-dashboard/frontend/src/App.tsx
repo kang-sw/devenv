@@ -6555,6 +6555,13 @@ function TerminalPaneBody({
     null,
   );
   const socketRef = useRef<WebSocket | null>(null);
+  // Latest fitNow/forwardSize closures from the mount effect below, exposed so
+  // the paneVisible-gated socket effect can trigger a corrective refit on a
+  // false -> true visibility transition without duplicating the fit logic.
+  // Nulled on mount-effect cleanup so a stray call can never reach a disposed
+  // terminal.
+  const fitNowRef = useRef<(() => void) | null>(null);
+  const forwardSizeRef = useRef<(() => void) | null>(null);
   // Serialize addon instance for this pane's terminal, loaded once at mount
   // so the debounced visual-buffer capture effect below can call
   // `.serialize()` without re-creating it on every output frame. Nulled on
@@ -6761,6 +6768,21 @@ function TerminalPaneBody({
     window.addEventListener("keydown", keydownFallback);
 
     const fitNow = () => {
+      // Guard against a degenerate short-container collapse: a *visible* pane
+      // whose usable height momentarily measures too small to host a real
+      // grid (e.g. during dockview relayout on a tab/session switch, or an
+      // actually-short window/split) makes both `fitAddon.fit()` and the
+      // shrink loop below drive `terminal.rows` down to the vendor floor
+      // (`1`), which also clears the rendered screen. `proposeDimensions()`
+      // reports what `fit()` would apply without applying it; when it is
+      // unmeasurable or proposes the degenerate floor, skip the fit/shrink
+      // entirely and preserve the last-good emulator size instead. This is
+      // the fit-relevant *measured* signal, unlike `offsetParent`, which
+      // stays non-null (pane visible) throughout this collapse.
+      const proposed = fitAddon.proposeDimensions();
+      if (!proposed || proposed.rows <= 1) {
+        return;
+      }
       try {
         fitAddon.fit();
       } catch {
@@ -6777,6 +6799,7 @@ function TerminalPaneBody({
         terminal.resize(terminal.cols, terminal.rows - 1);
       }
     };
+    fitNowRef.current = fitNow;
 
     const forwardSize = () => {
       // The emulator grid is already capped to the PTY bounds by fitNow, so
@@ -6832,6 +6855,7 @@ function TerminalPaneBody({
           /* leave lastForwardedSizeRef unchanged so the next fit retries */
         });
     };
+    forwardSizeRef.current = forwardSize;
 
     fitNow();
 
@@ -6899,6 +6923,8 @@ function TerminalPaneBody({
       terminal.dispose();
       terminalRef.current = null;
       serializeAddonRef.current = null;
+      fitNowRef.current = null;
+      forwardSizeRef.current = null;
     };
   }, []);
 
@@ -6917,6 +6943,26 @@ function TerminalPaneBody({
       return;
     }
     liveRef.current.actions.onVisibilityGated(liveRef.current.pane, false);
+    // Deterministic corrective refit: on a false -> true visibility
+    // transition (pane shown again after a tab/session/workRoot switch), the
+    // pane may have been measured short-but-visible for a frame while it was
+    // still transitioning (see fitNow's degenerate-container guard above), or
+    // measured while briefly hidden/detached (no ResizeObserver correction).
+    // Explicitly re-fit now rather than relying solely on the next incidental
+    // ResizeObserver callback, and forward the size only if it actually
+    // changed, reusing the existing fitNow/forwardSize closures.
+    const beforeFit = terminalRef.current
+      ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
+      : null;
+    fitNowRef.current?.();
+    if (
+      beforeFit &&
+      terminalRef.current &&
+      (terminalRef.current.cols !== beforeFit.columns ||
+        terminalRef.current.rows !== beforeFit.rows)
+    ) {
+      forwardSizeRef.current?.();
+    }
     let disposed = false;
     const socket = new WebSocket(
       terminalWebSocketUrl(
