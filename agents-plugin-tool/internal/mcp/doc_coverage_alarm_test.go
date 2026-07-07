@@ -74,6 +74,54 @@ func TestDocCoverageWarningSilentWhenBothAreasCovered(t *testing.T) {
 	}
 }
 
+// TestDocCoverageWarningFiresForSpecOnlyMissing verifies that when only
+// ai-docs/mental-model/ is covered (spec missing), the warning names only
+// ai-docs/spec/ as missing, exercising the `case !hasSpec:` branch of
+// docCoverageWarning's three-way switch.
+func TestDocCoverageWarningFiresForSpecOnlyMissing(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\n---\n# Demo\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	resp := callLogin(t, s, 1, root, nil)
+	text := toolText(t, resp)
+
+	if !strings.Contains(text, "ai-docs/spec/ has no .md file carrying a frontmatter block") {
+		t.Fatalf("warning must name only ai-docs/spec/ as missing: %s", text)
+	}
+	if strings.Contains(text, "ai-docs/mental-model/ has no") || strings.Contains(text, "and ai-docs/mental-model/") {
+		t.Fatalf("warning must not also blame ai-docs/mental-model/ when it is covered: %s", text)
+	}
+}
+
+// TestDocCoverageWarningFiresForMentalModelOnlyMissing verifies that when
+// only ai-docs/spec/ is covered (mental-model missing), the warning names
+// only ai-docs/mental-model/ as missing, exercising the `default:` branch of
+// docCoverageWarning's three-way switch.
+func TestDocCoverageWarningFiresForMentalModelOnlyMissing(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	s := NewServer(root, "test")
+	resp := callLogin(t, s, 1, root, nil)
+	text := toolText(t, resp)
+
+	if !strings.Contains(text, "ai-docs/mental-model/ has no .md file carrying a frontmatter block") {
+		t.Fatalf("warning must name only ai-docs/mental-model/ as missing: %s", text)
+	}
+	if strings.Contains(text, "ai-docs/spec/ has no") || strings.Contains(text, "and ai-docs/mental-model/") {
+		t.Fatalf("warning must not also blame ai-docs/spec/ when it is covered: %s", text)
+	}
+}
+
 // TestDocCoverageWarningSuppressedWhenOff verifies config.doc_coverage_alarm
 // off (global scope, the item is global-only) silences the warning.
 func TestDocCoverageWarningSuppressedWhenOff(t *testing.T) {
