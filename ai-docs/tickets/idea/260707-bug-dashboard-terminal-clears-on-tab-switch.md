@@ -37,4 +37,19 @@ site, or the Phase 6/7 restore/reattach path) owns the regression.
 Reproduce reliably (tab switch within one session vs. full session
 round-trip), identify where the resize/visibility lifecycle interacts with
 xterm's `fit()`/`resize()` and with the Phase 6/7 restore write path, and fix
-without regressing the just-landed visual-buffer-restore behavior.
+without regressing the just-landed visual-buffer-restore behavior. Add or
+extend a Playwright e2e regression test in `e2e/dashboard-acceptance.spec.ts`
+covering both reproduction modes (in-session dockview tab switch, and full
+session/workroot round-trip) so this class of regression is caught
+automatically going forward. Verification: reproduce first (screenshot/trace
+before the fix), then confirm both reproduction modes are fixed via the new
+or extended e2e coverage, run at least twice to rule out flake.
+
+## Spec Impact
+
+No existing spec stem addresses terminal pane resize/visibility-lifecycle
+behavior. This is a regression fix restoring already-shipped Phase 6/7
+restore behavior (terminal content persists and renders at the correct
+size across tab/session switches) — no new caller-visible contract is being
+introduced, only a defect in already-committed behavior being corrected.
+Spec area: none yet identified. Contract-first spec: no.
