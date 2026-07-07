@@ -437,6 +437,13 @@ dropped tickets live in hidden archive dirs and git history.
   re-running the design stage. Not yet discussed or designed beyond the
   initial framing; sage-review left at `recommended` pending next-session
   discussion.
+- `260707-research-drain-queue-default-branch-policy` (todo, research) -
+  agenda to default the implementation branch policy to reuse+rename
+  (instead of creating a fresh `implement/<slug>` branch and separately
+  prompting for merge confirmation) when a ticket is driven end-to-end via
+  `ws:lead-drain-ready-queue` with an explicit up-front goal. Not yet
+  discussed or designed; sage-review left at `recommended` pending
+  next-session discussion.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
