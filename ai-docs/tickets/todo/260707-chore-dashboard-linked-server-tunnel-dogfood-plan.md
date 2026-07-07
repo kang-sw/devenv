@@ -7,6 +7,7 @@ spec:
   - 260525-ws-dashboard-endpoint-linked-server-add
   - 260515-ws-web-daemon-foundation
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Dogfood the SSH-tunnel and localhost-forwarding linked-server paths across a real WSL/Windows boundary
@@ -129,6 +130,10 @@ side, or otherwise not currently working.
 5. If step 2 or step 3 surfaces a genuine bug (not another Host/Origin
    misdiagnosis), file it as its own ticket rather than folding a code fix
    into this verification-only ticket.
+6. **Tear down all test artifacts** once the outcome is recorded: kill every
+   spawned daemon process (remote and gateway, on both hosts), close any
+   active SSH tunnel process, and remove any linked-server entries created
+   solely for this dogfood run from each daemon's persisted state.
 
 ## Escalations
 
