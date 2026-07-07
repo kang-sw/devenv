@@ -253,7 +253,17 @@ Ambiguous classifications (auto-decided, review recommended): <count>
   ...
 ```
 
-### 3. Suggested next steps
+### 3. Chain into lead-forge-mental-model
+
+Ask the user whether to run `lead-forge-mental-model` next, regardless of how
+this `lead-forge-spec` run was reached (a direct standalone invocation,
+`lead-bootstrap`'s fresh-install suggestion, or the index-health-check
+routing table). On a yes answer, call
+`{{.McpNamespace}}/playbook.print(name: "lead-forge-mental-model")` and
+execute the returned procedure inline. On a no answer or no response,
+continue to step 4 without invoking it.
+
+### 4. Suggested next steps
 
 - Spawn a scoped exploration worker with a spec-updater task prompt to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.

@@ -857,6 +857,13 @@ writes anchor-keyed spec entries, verifies the index, and associates planned
 stems with active tickets when required.
 {#260707-forge-spec-autoproceed-classification-2}
 
+At wrap-up, `lead-forge-spec` asks whether to run `lead-forge-mental-model`
+next and invokes it on a yes answer, regardless of how the run was reached
+(standalone invocation, `lead-bootstrap`'s fresh-install suggestion, or the
+index-health-check routing table). This only covers the same-session case;
+`lead-bootstrap` itself is not otherwise changed.
+{#260707-forge-spec-mental-model-chaining}
+
 `lead-forge-mental-model` reconstructs mental-model documents from scratch. It
 surveys operational domains, asks the user to confirm the domain set, writes
 modification-focused domain files from current evidence, runs verification, and
