@@ -3,6 +3,7 @@ title: "Dashboard e2e suite's second test fails: reuses the daemon's one-time pa
 related:
   260707-bug-dashboard-terminal-clears-on-tab-switch: related-area
 sage-review: completed
+completed: 2026-07-07
 ---
 
 # Dashboard e2e suite's second test fails: reuses the daemon's one-time pairing URL across an isolated browser context
@@ -98,3 +99,8 @@ uses server-scoped local gateway routes` green, ~32s per full run).
 Test-harness-only fix; no product-visible behavior changes (the daemon's
 one-time pairing token security behavior is explicitly preserved, not
 altered). Spec area: none. Contract-first spec: no.
+
+
+## Resolution (2026-07-07)
+
+Fixed by capturing the owner session cookie after test 1's pairing and injecting it into test 2's isolated context (commit bfb8e271, merged to ws-dashboard-dev). Fit and test partition reviews both clean. Both tests in `e2e/dashboard-acceptance.spec.ts` pass consistently across repeated runs.
