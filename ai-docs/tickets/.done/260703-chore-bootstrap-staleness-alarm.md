@@ -3,6 +3,7 @@ title: "Warn on stale downstream bootstrap template version at session-bootstrap
 related:
   260605-research-ws-native-subagent-pivot: precedent for tip-injection-point discipline (agentId-continuity tip is action-time-only, not per-call)
 sage-review: completed
+completed: 2026-07-07
 ---
 
 # Warn on stale downstream bootstrap template version at session-bootstrap time
@@ -108,3 +109,39 @@ promotion. Not addressed yet; left for the implementation-survey pass that
 promotes this ticket. Contract-first spec: not yet decided — depends on
 whether the warning shape needs to be stable/documented ahead of
 implementation or can be closed out after.
+
+### Result (e4adbd2b) - 2026-07-07
+
+Merged to `main` (`e4adbd2b`) from `implement/bootstrap-staleness-alarm`
+(commits `3863a86e` feature, `4f43cabb` review fixes).
+
+Implemented per the survey plan at
+`ai-docs/.plans/2026-07/07-1011-bootstrap-staleness-alarm.md`: `ferrule` and
+`workflow_manual` (FRESH-with-root and CONTINUE) surface a one-line
+staleness banner when a downstream project's root `AGENTS.md` Template
+Version tag is behind the running package's own shipped `lead-bootstrap`
+template. Package-local comparison reuses `wsrsrc.ResolveSkillsRoot()`
+instead of a hand-maintained cross-package manifest. New global-only
+`wsconfig.ItemBootstrapAlarm` (builtin default `on`) is exposed via
+`config.bootstrap_alarm` (set/reset) and `config.tuning`/`ws:lead-tune`.
+Silent by design when the alarm is off, the downstream root has no tag, or
+the shipped template's own tag is unreadable (including a
+`ResolveSkillsRoot()` failure at `ferrule` time, fixed during review to
+match `workflow_manual.go`'s fail-safe-silent sibling pattern rather than
+hard-failing the whole call).
+
+Spec updated in the same commit (`ai-docs/spec/mcp-tools.md`,
+`#260703-bootstrap-staleness-warning` plus `config.bootstrap_alarm`
+coverage); `spec_index.verify()` ok. `runtime.json` contract entries added
+in both `agents-plugin` and `agents-plugin-wsflow` (golden-list test
+requirement, not a version-bump edit). Plugin version bumped 0.33.0 ->
+0.33.1 per dev-merge convention (`89f60ac4`).
+
+Review: correctness and test partitions each found 1-2 fixable issues
+(fail-safe-silence inconsistency in `handleLeadLogin`; a non-discriminating
+`config.tuning` test assertion; missing boundary-case test for
+installed-at-or-above-latest) — all fixed and re-reviewed clean. Fit
+partition was clean on the first pass.
+
+All 4 ticket-specified verification assertions have dedicated tests;
+`go test ./...`, `go vet ./...`, `go build ./...` pass on `main` post-merge.

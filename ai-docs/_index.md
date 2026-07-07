@@ -401,13 +401,6 @@ dropped tickets live in hidden archive dirs and git history.
   constraint:** tree-kills scoped
   to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
   because the dogfooding WSL2 host runs a live `claude.exe`.
-- `260703-chore-bootstrap-staleness-alarm` (ready, chore) - warn at
-  session-bootstrap time when a downstream project's `AGENTS.md` template
-  version tag is behind the installed package's (ws/wsflow package-local
-  comparison); new `wsconfig.ItemBootstrapAlarm` config item, silencing
-  instruction in the warning text. Spec addressing via `## Spec Impact`
-  (not yet addressed — left for the implementation-survey pass). Sage
-  review completed.
 - `260703-chore-implement-branch-rename-default-allow` (ready, chore) -
   default `policy.branch.allow_rename` to `yes` in `enter.implement`'s
   branch plan resolver so the lead no longer needs explicit per-invocation
@@ -436,6 +429,14 @@ dropped tickets live in hidden archive dirs and git history.
   reason that ticket already rejected one. Spec addressing via
   `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
   no). Sage review completed.
+- `260707-research-sage-review-staged-design-completeness-split` (todo,
+  research) - agenda to split the Sage Review Gate into a two-stage
+  gate: a tolerant design-sketch review at `todo`, a completeness review
+  (user-policy/decision gaps) at `ready` promotion, plus an agent judgment
+  on whether a post-review design edit is substantial enough to require
+  re-running the design stage. Not yet discussed or designed beyond the
+  initial framing; sage-review left at `recommended` pending next-session
+  discussion.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
