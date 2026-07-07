@@ -197,7 +197,7 @@ func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *
 	if result.Verdict.BranchPlan.MergeTarget != "test/wsflow-smoke" {
 		t.Fatalf("merge target = %q, want derived current branch", result.Verdict.BranchPlan.MergeTarget)
 	}
-	wantWarning := `policy.branch.merge_target "master" ignored (not on an implement/* branch); derived from current branch "test/wsflow-smoke"`
+	wantWarning := `policy.branch.merge_target "master" ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch "test/wsflow-smoke"`
 	if !containsString(result.Warnings, wantWarning) {
 		t.Fatalf("warnings missing ignored merge_target note: %v", result.Warnings)
 	}

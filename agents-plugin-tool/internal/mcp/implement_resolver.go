@@ -434,7 +434,7 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 	branchPlan := deriveImplementBranchPlan(n, obs)
 	warnings = append(warnings, branchPlan.Warnings...)
 	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
-		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implement/* branch); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
+		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
 	}
 	delegation := deriveImplementDelegation(n)
 	planDepth := deriveImplementPlanDepth(n, delegation)
