@@ -177,3 +177,43 @@ fix.
   liveness check as "Credential Exploration." Needs either an explicit
   human-run probe outside this harness, or a narrower probe shape that
   doesn't trip the classifier, before the SSH-tunnel leg can be attempted.
+
+#### Finding (2026-07-07): plain-TCP relay is a viable SSH-tunnel substitute
+
+Prompted by the user's observation that the SSH-tunnel mechanism's only real
+job is making the daemon's own outbound Host header loopback-compatible, not
+providing the transport itself — tested a plain TCP relay in place of SSH as
+a comparison path, separate from (and not blocked by) the still-open SSH
+escalation above.
+
+Setup: Windows daemon bound `192.168.208.1:<port>` (`--bind-mode public`,
+normal owner-auth, same shape as the already-settled non-bug reproduction) +
+a small Python `asyncio` TCP proxy on the WSL side listening on
+`127.0.0.1:18099` and forwarding raw bytes to `192.168.208.1:<port>` (no
+`socat`/`ncat` available in this WSL install; wrote a ~30-line asyncio
+listen-and-pipe script instead) + the WSL gateway daemon (`127.0.0.1`,
+`local` bind mode, normal owner-auth) linking the Windows remote via the
+already-proven direct-endpoint path (`POST /api/dashboard/servers/link`,
+`endpoint: "http://127.0.0.1:18099"`).
+
+Result: link handshake returned `200 connected`; the forwarded
+`GET .../resources` call returned `200` with a real, correctly-shaped body.
+No Host-check `403` — confirms the mechanism generalizes: any loopback-bound
+local forwarder (SSH tunnel, plain TCP relay, or otherwise) satisfies
+`is_allowed_host` identically, because the check only inspects the Host
+header the daemon's own outbound HTTP client sends, which is always
+loopback-literal when the target URL is `127.0.0.1:<port>`.
+
+Caveat: unlike SSH, a plain TCP relay has no transport-level encryption or
+authentication — only the dashboard's own owner-auth (cookie/bearer) protects
+the hop. Acceptable for this local WSL<->Windows-host virtual network
+(same trust boundary as loopback in practice), not a general SSH
+replacement for a genuinely untrusted network path.
+
+Scope: this finding is a comparison/fallback data point, not a completed
+walk of the ticket's SSH-tunnel leg (step 2) — only the link + one
+forwarded-resources call were exercised, not the full forwarded-operation
+set (files, Git, terminal, WebSocket relay). The SSH-tunnel leg itself
+remains blocked on the escalation above; this finding does not resolve it,
+it documents an available fallback if SSH access continues to be
+unreachable in-session.
