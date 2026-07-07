@@ -1894,7 +1894,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     await previewTab.hover();
     await previewClose.click();
-    await expect(page.locator(".readonly-text-pane")).toHaveCount(0);
+    await expect(
+      page.locator('[data-workbench-root-active="true"] .readonly-text-pane'),
+    ).toHaveCount(0);
 
     await fileRow.click();
     await expect(previewTab).toBeVisible();
@@ -2660,7 +2662,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Control+D");
     const activeTerminalTab = page
       .locator(
-        '.dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
+        '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
         { hasText: "Terminal" },
       )
       .last();
