@@ -2794,8 +2794,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.waitForTimeout(800);
     const shortRows = await terminalRows(page);
     const shortEmulatorRows = await emulatorRowCount(page);
-    expect(shortRows).toBeGreaterThan(1);
-    expect(shortEmulatorRows).toBeGreaterThan(1);
+    // Assert the fix's documented contract exactly (fitNow() "preserves the
+    // current (last-good) emulator size and returns without resizing" on a
+    // degenerate proposal), not just "didn't floor to 1" - a regression that
+    // let the guard trip too late and shrink partway (e.g. 54 -> 3 rows)
+    // would still pass a `toBeGreaterThan(1)` check but must fail here.
+    expect(shortRows).toBe(terminalClearFixTallRows);
+    expect(shortEmulatorRows).toBe(terminalClearFixTallRows);
     await expect(page.locator(".xterm-rows")).toContainText(
       "CLEAR-FIX-LINE-40",
     );

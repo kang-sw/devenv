@@ -6556,10 +6556,10 @@ function TerminalPaneBody({
   );
   const socketRef = useRef<WebSocket | null>(null);
   // Latest fitNow/forwardSize closures from the mount effect below, exposed so
-  // the paneVisible-gated socket effect can trigger a corrective refit on a
-  // false -> true visibility transition without duplicating the fit logic.
-  // Nulled on mount-effect cleanup so a stray call can never reach a disposed
-  // terminal.
+  // the paneVisible-gated socket effect can trigger a corrective refit (on a
+  // false -> true visibility transition, or a terminalId change while
+  // already visible) without duplicating the fit logic. Nulled on
+  // mount-effect cleanup so a stray call can never reach a disposed terminal.
   const fitNowRef = useRef<(() => void) | null>(null);
   const forwardSizeRef = useRef<(() => void) | null>(null);
   // Serialize addon instance for this pane's terminal, loaded once at mount
@@ -6943,14 +6943,19 @@ function TerminalPaneBody({
       return;
     }
     liveRef.current.actions.onVisibilityGated(liveRef.current.pane, false);
-    // Deterministic corrective refit: on a false -> true visibility
-    // transition (pane shown again after a tab/session/workRoot switch), the
-    // pane may have been measured short-but-visible for a frame while it was
-    // still transitioning (see fitNow's degenerate-container guard above), or
-    // measured while briefly hidden/detached (no ResizeObserver correction).
-    // Explicitly re-fit now rather than relying solely on the next incidental
-    // ResizeObserver callback, and forward the size only if it actually
-    // changed, reusing the existing fitNow/forwardSize closures.
+    // Deterministic corrective refit: this runs on every effect setup where
+    // `paneVisible` is true (deps `[terminalId, paneVisible]`) - both a
+    // false -> true visibility transition (pane shown again after a
+    // tab/session/workRoot switch) and a `terminalId` change while the pane
+    // stays visible. Either way, the pane may have been measured
+    // short-but-visible for a frame while it was still transitioning (see
+    // fitNow's degenerate-container guard above), or measured while briefly
+    // hidden/detached (no ResizeObserver correction). Explicitly re-fit now
+    // rather than relying solely on the next incidental ResizeObserver
+    // callback, and forward the size only if it actually changed, reusing
+    // the existing fitNow/forwardSize closures. Harmless on the extra
+    // terminalId-change trigger: the refit is idempotent and forwardSize
+    // dedupes via `lastForwardedSizeRef`.
     const beforeFit = terminalRef.current
       ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
       : null;
