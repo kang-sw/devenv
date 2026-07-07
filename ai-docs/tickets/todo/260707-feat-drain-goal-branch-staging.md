@@ -3,7 +3,7 @@ title: "Goal-aware branch staging for lead-drain-ready-queue: single deferred fi
 related:
   260707-feat-impl-branch-convention-autodelete: prerequisite — per-ticket impl/<stem> branches merged into the goal-staging branch rely on that ticket's naming-gated auto-delete to avoid branch clutter
   260703-chore-implement-branch-rename-default-allow: precedent this ticket's new policy.branch.merge_confirm fact directly mirrors (a plain caller-suppliable enter.implement policy fact, not goal-aware logic inside lead-implement)
-sage-review: required
+sage-review: completed
 ---
 
 # Goal-aware branch staging for lead-drain-ready-queue: single deferred final merge instead of per-ticket merge confirmation
@@ -78,12 +78,20 @@ entirely in `lead-implement`.
    that is auto-deleted once fully merged into the goal branch, per that
    ticket's naming-gated Branch Cleanup behavior.
 4. **Completion / final merge.** When the ready queue is empty and the
-   current branch is `goal/<slug>`, drain performs the single final merge
-   from `goal/<slug>` into `main`. This final merge does **not** set
-   `policy.branch.merge_confirm: skip` — it goes through `lead-implement`'s
-   existing, unmodified "wait for user approval before merge" invariant
-   unconditionally. This is the sole human confirmation point for the entire
-   goal-driven run.
+   current branch is `goal/<slug>`, `lead-drain-ready-queue` performs the
+   single final merge from `goal/<slug>` into `main` **directly, in its own
+   skill prose** — it does not invoke `lead-implement`/`enter.implement` for
+   this step. `enter.implement`'s machinery is ticket-scoped
+   (`parseImplementTarget` requires `ticket_stem`/`scope_label`/`scope_slug`),
+   and "merge `goal/<slug>` into `main`" has no associated ticket, so routing
+   it through `lead-implement` would require inventing a ticket-less
+   invocation mode there — which would push goal-staging-specific machinery
+   into the supposedly goal-unaware utility, contradicting Decision 6. Drain's
+   own final-merge prose must ask for explicit user approval before merging,
+   using confirmation wording equivalent in spirit to `lead-implement`'s
+   Branch invariant ("wait for user approval before merge"), so the behavior
+   the user sees is the same even though the code path is separate. This is
+   the sole human confirmation point for the entire goal-driven run.
 5. **Remote/push stays untouched.** This override never extends to
    remote/push actions. Push remains an explicit, always-confirmed action
    regardless of goal-driven state, for both intermediate and final merges;
@@ -114,6 +122,14 @@ entirely in `lead-implement`.
   other harnesses without an equivalent goal-hook feature is unspecified and
   should default to today's non-staging behavior when no equivalent signal
   exists.
+- `/goal` detection and the goal-branch checkout/final-merge steps are only
+  visible to the lead's own turn context, not to a delegated ticket-selection
+  subagent — `lead-drain-ready-queue`'s current norm is to delegate ticket
+  selection to a subagent (per `lead-prefer-subagent`). Implementation should
+  make explicit that the lead itself owns goal-detection, branch
+  checkout/creation, and the final-merge step, while ticket selection stays
+  delegated as today; this is a division of responsibility, not a change to
+  the delegation norm.
 
 ## Phases
 
@@ -140,9 +156,17 @@ entirely in `lead-implement`.
   each ticket with the staging branch as the implicit merge target and
   `policy.branch.merge_confirm: "skip"`; detect completion (ready queue empty
   while on a `goal/*` branch) and perform the single final confirmed merge
-  into `main` with `merge_confirm` left unset.
+  into `main` directly in drain's own prose (per Decision 4), with
+  `merge_confirm` left unset for every dispatched ticket by that point.
 - Preserve today's exact behavior when no `/goal` context is active (no
   staging branch, no `merge_confirm` override).
+- Verification: exercise both branches of the mode switch end-to-end —
+  a goal-driven run (active `/goal` context) correctly creates/checks out
+  `goal/<slug>`, dispatches at least two tickets with `merge_confirm: skip`
+  merging into that branch without an ask, and reaches the single final
+  confirmed `main` merge only once the ready queue is empty; a non-goal run
+  (no `/goal` context) reproduces today's exact per-ticket direct-to-target
+  behavior with no staging branch and no `merge_confirm` override.
 
 ## Spec Impact
 
