@@ -69,6 +69,30 @@ Verification: run
 the full `e2e/dashboard-acceptance.spec.ts` file (both tests) at least twice
 consecutively and confirm both pass every time.
 
+### Result
+
+Implemented approach (a): the first test ("dashboard workRoot UI browser
+acceptance") now captures the owner session cookie via
+`await page.context().cookies(daemon.baseUrl)` immediately after the
+existing "owner pairing" step assertions, storing it in a new module-level
+`ownerCookies` variable declared alongside the file's other shared `let`
+state. The second test ("linked server root picker uses server-scoped local
+gateway routes") injects that cookie into its own fresh, isolated context
+via `await page.context().addCookies(ownerCookies)` (with a defensive
+fail-fast throw if `ownerCookies` is unset, relying on the file's existing
+`test.describe.configure({ mode: "serial" })` ordering), then navigates to
+`daemon.baseUrl` instead of the now-consumed `daemon.pairingUrl` before the
+unchanged `.app-shell` visibility assertion. No changes were made to
+`auth.rs`, `router.rs`, or `daemonHarness.ts` — this is purely spec-file
+state threading between the two tests, confirming the survey's finding that
+`authenticate_headers` accepts the cookie alone (no re-pairing) once
+`pairing_consumed` is `true` for the daemon's lifetime.
+
+Verification: ran `npm run test:browser -- e2e/dashboard-acceptance.spec.ts`
+from `ws-dashboard/frontend` twice consecutively. Both runs: `2 passed` (both
+`dashboard workRoot UI browser acceptance` and `linked server root picker
+uses server-scoped local gateway routes` green, ~32s per full run).
+
 ## Spec Impact
 
 Test-harness-only fix; no product-visible behavior changes (the daemon's

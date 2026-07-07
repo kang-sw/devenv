@@ -42,6 +42,9 @@ let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 let activityFixtureRootId: string | null = null;
 let activityRecentPollRequests = 0;
 let rootPickerPinEvidenceRecorded = false;
+let ownerCookies:
+  | Awaited<ReturnType<import("@playwright/test").BrowserContext["cookies"]>>
+  | undefined;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -828,6 +831,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".app-shell")).toBeVisible();
     expect(new URL(page.url()).pathname).not.toContain("/pair");
     note("pairing: one-time pairing URL installed owner cookie and left /pair");
+    ownerCookies = await page.context().cookies(daemon.baseUrl);
   });
 
   // --- Open a real workRoot through the raw path opener -------------------
@@ -3038,7 +3042,13 @@ test("linked server root picker uses server-scoped local gateway routes", async 
     },
   );
 
-  await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
+  if (!ownerCookies) {
+    throw new Error(
+      "ownerCookies not captured - the owner-pairing test must run first (serial mode) and capture the session cookie before this test can reuse it",
+    );
+  }
+  await page.context().addCookies(ownerCookies);
+  await page.goto(daemon.baseUrl, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".app-shell")).toBeVisible();
 
   const remoteRow = page.locator(".server-row", { hasText: "Remote fixture" });
