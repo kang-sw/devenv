@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.33.3 - 2026-07-07
+
+### Added
+- `impl/<stem>` branch naming convention (15-character stem cap) for
+  implementation branches, replacing the legacy `implement/*` prefix; branch
+  rename now defaults to allowed unless the caller explicitly asks to keep
+  the current branch name.
+- Branch Cleanup auto-delete for merged `impl/*` branches without asking;
+  non-`impl/*` branches (including legacy `implement/*`) still require
+  explicit user approval before deletion.
+- `policy.branch.merge_confirm` fact on `enter.implement`, letting a caller
+  (e.g. a goal-driven queue drain) opt a branch into merging without a
+  final user confirmation gate; default posture remains ask.
+- `lead-drain-ready-queue` goal-branch-staging awareness: detects an active
+  goal context, stages a shared `goal/<slug>` branch across sequentially
+  drained tickets with `merge_confirm: skip` handed to each implementation,
+  and performs its own single confirmed merge into the target branch at the
+  end of the drain.
+- `lead-forge-spec`'s per-item classification pass now proceeds
+  autonomously instead of asking per item, embedding an inline
+  `<!-- AMBIGUOUS: <reason> -->` marker for genuinely unclear cases and
+  summarizing them in the wrap-up report; the wrap-up can now optionally
+  chain directly into `lead-forge-mental-model`.
+- Session-bootstrap staleness warning and `bootstrap_alarm` config item;
+  live doc-coverage session-bootstrap warning and matching mute item.
+- Sage Review Gate now branches by ticket landing status
+  (design/completeness split, staged), including a scope-boundary check
+  added to the completeness reviewer checklist.
+
+### Fixed
+- Honor `policy.branch.merge_confirm=skip` in the actually-installed
+  `enter.implement` todo instructions (final-action gate and merge-step
+  instructions) — previously the skip signal reached only the verdict's
+  rendered prose, not the runtime todo text the lead executes, silently
+  defeating goal-branch-staging's unattended merge behavior.
+- Default `policy.branch.allow_rename` to `yes` when unset, matching the
+  documented default-allow posture.
+- Align the stale `merge_target` warning and docs with the `impl/*` rename.
+- Fail-safe silence and tighter test coverage for the bootstrap-alarm
+  warning path.
+- Stop `echo -e` from reinterpreting dynamic content as shell escapes.
+- Fix a duplicate `sage-review-gate` spec anchor introduced by the staged
+  design/completeness split.
+
 ## v0.33.0 - 2026-07-03
 
 ### Added
