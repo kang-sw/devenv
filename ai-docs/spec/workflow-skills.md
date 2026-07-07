@@ -456,8 +456,9 @@ Route step 3 ("explicit caller policy") consumes this without any
 goal-specific change on that side, and no `merge_target` override is
 needed since the create-path already derives the merge target from the
 checked-out branch. Each ticket still gets its own `impl/<stem>` branch,
-merged into `goal/<slug>` without an approval ask and auto-deleted per
-`{#260707-implement-branch-cleanup-naming-gate}`. When the selection subagent
+merged into `goal/<slug>` without an approval ask and auto-deleted per the
+Branch Cleanup naming-gate behavior (see the `impl/<stem>`-branch section
+above). When the selection subagent
 reports `ready/` empty while the current branch is `goal/<slug>`, the
 skill performs the run's one confirmed final merge itself in its own
 prose — ask the user for explicit approval, then `git merge --no-ff
@@ -848,9 +849,13 @@ force or suppress the subagent inference step.
 `lead-forge-spec` reconstructs spec documents from scratch. It archives stale
 current specs under `ai-docs/.old/spec/` after user confirmation, surveys
 source, tickets, archived specs, and commit history, asks the user to confirm
-behavioral domains and caller-visible classifications, writes anchor-keyed spec
-entries, verifies the index, and associates planned stems with active tickets
-when required.
+the once-per-run behavioral domain list, then classifies per-item
+caller-visibility and implemented/planned status autonomously - ambiguous
+calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
+into the wrap-up summary rather than blocking on a per-item confirmation -
+writes anchor-keyed spec entries, verifies the index, and associates planned
+stems with active tickets when required.
+{#260707-forge-spec-autoproceed-classification-2}
 
 `lead-forge-mental-model` reconstructs mental-model documents from scratch. It
 surveys operational domains, asks the user to confirm the domain set, writes
