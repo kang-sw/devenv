@@ -1,7 +1,9 @@
 import {
   loadWorkbenchLayoutRestoreSnapshot,
+  mergeReadOnlyAndTerminalPaneOrder,
   mergeWorkbenchLayoutRestoreEntries,
   pruneWorkbenchLayoutOrder,
+  removePanesFromOrder,
   revalidateWorkbenchLayoutForRoot,
   saveWorkbenchLayoutRestoreSnapshot,
   workbenchLayoutRestoreRootKey,
@@ -316,6 +318,200 @@ assertDeepEqual(
       "terminals not ready: active terminal pane reference is preserved, not reset",
     );
   }
+}
+
+// `mergeReadOnlyAndTerminalPaneOrder` merges a root's agent/activity pane
+// order (`orderForRoot`) with the flat, cross-root readonly-file and
+// terminal pane-order maps, each filtered to its own live-id set — the
+// Phase 2 (260707-bug-dashboard-e2e-multi-root-locator-leakage) fix for a
+// group whose live panes are only readonly-file/terminal panes looking
+// pane-less to `revalidateWorkbenchLayoutForRoot`.
+{
+  const groups = [{ id: "group-1" }, { id: "group-2" }];
+
+  // A group with no readonly/terminal entries keeps exactly its
+  // `orderForRoot` order, unchanged.
+  {
+    const result = mergeReadOnlyAndTerminalPaneOrder(
+      groups,
+      { "group-1": ["agent-pane"] },
+      {},
+      new Set(),
+      {},
+      new Set(),
+    );
+    assertDeepEqual(
+      result,
+      { "group-1": ["agent-pane"], "group-2": [] },
+      "no readonly/terminal entries: orderForRoot order is preserved as-is",
+    );
+  }
+
+  // Live readonly and terminal panes for a group are appended (readonly
+  // before terminal), on top of that group's own `orderForRoot` entries —
+  // this is what makes a readonly/terminal-only group non-pane-less.
+  {
+    const result = mergeReadOnlyAndTerminalPaneOrder(
+      groups,
+      { "group-1": ["agent-pane"] },
+      { "group-1": ["readonly:a"], "group-2": ["readonly:b"] },
+      new Set(["readonly:a", "readonly:b"]),
+      { "group-1": ["terminal:c"] },
+      new Set(["terminal:c"]),
+    );
+    assertDeepEqual(
+      result,
+      {
+        "group-1": ["agent-pane", "readonly:a", "terminal:c"],
+        "group-2": ["readonly:b"],
+      },
+      "live readonly/terminal panes are merged in per group, readonly before terminal",
+    );
+  }
+
+  // A stale readonly/terminal pane id present in the flat order map but
+  // absent from the corresponding live-id set is dropped, not resurrected —
+  // a closed pane's leftover order-map entry must never reappear in a live
+  // group's pane list.
+  {
+    const result = mergeReadOnlyAndTerminalPaneOrder(
+      groups,
+      {},
+      { "group-1": ["readonly:closed", "readonly:live"] },
+      new Set(["readonly:live"]),
+      { "group-1": ["terminal:closed"] },
+      new Set(),
+    );
+    assertDeepEqual(
+      result,
+      { "group-1": ["readonly:live"], "group-2": [] },
+      "stale readonly/terminal pane ids absent from the live set are dropped, not resurrected",
+    );
+  }
+}
+
+// Regression coverage for the caller-side `?? initialWorkbenchGroups`
+// fallback bug this phase fixed: `revalidateWorkbenchLayoutForRoot`'s
+// `groups` argument determines the `groupsWithPanes` reconstruction that
+// `reconcileActiveWorkbenchPanes` reads — `prunedOrder` itself is
+// group-list-independent (it only prunes by live pane id), but with an empty
+// `groups` list (the old, buggy `workbenchGroupsByRoot[rootKey] ?? []`
+// fallback) every group looks pane-less to the reconciliation step
+// regardless of how many live panes actually exist in `orderForRoot`,
+// silently dropping every group's active-pane entry. Passing the real
+// default two-group list (the fixed `?? initialWorkbenchGroups` fallback)
+// resolves correctly against the exact same order/live-id inputs.
+{
+  const orderForRoot = { "group-1": ["readonly:a"], "group-2": ["terminal:b"] };
+  const activePaneByGroup = {
+    "group-1": "readonly:a",
+    "group-2": "terminal:b",
+  };
+  const livePaneIds = new Set(["readonly:a", "terminal:b"]);
+
+  const buggyEmptyGroups = revalidateWorkbenchLayoutForRoot(
+    [],
+    orderForRoot,
+    activePaneByGroup,
+    livePaneIds,
+    true,
+  );
+  assertDeepEqual(
+    buggyEmptyGroups.reconciledActivePane,
+    {},
+    "old `?? []` fallback: every group's active-pane entry is silently dropped, even though prunedOrder still has live panes",
+  );
+
+  const fixedDefaultGroups = revalidateWorkbenchLayoutForRoot(
+    [
+      { id: "group-1", label: "Group 1" },
+      { id: "group-2", label: "Group 2" },
+    ],
+    orderForRoot,
+    activePaneByGroup,
+    livePaneIds,
+    true,
+  );
+  assertDeepEqual(
+    fixedDefaultGroups.prunedOrder,
+    orderForRoot,
+    "fixed `?? initialWorkbenchGroups` fallback: live panes survive the prune",
+  );
+  assertDeepEqual(
+    fixedDefaultGroups.reconciledActivePane,
+    activePaneByGroup,
+    "fixed `?? initialWorkbenchGroups` fallback: active-pane entries are preserved",
+  );
+}
+
+// Composed regression coverage: a preferred active pane that exists only in
+// the merged (readonly+terminal) order — not in the raw `orderForRoot` a
+// caller might otherwise pass directly — must still be recognized as live by
+// `revalidateWorkbenchLayoutForRoot`'s reconciliation, rather than falling
+// back to `group.panes[0]`. This is the exact shape of the Phase 2 bug: a
+// just-created second terminal pane's activation must resolve correctly once
+// fed through the merge, not just when checked against `orderForRoot` alone.
+{
+  const groups = [{ id: "group-1", label: "Group 1" }];
+  const mergedOrder = mergeReadOnlyAndTerminalPaneOrder(
+    groups,
+    {},
+    {},
+    new Set(),
+    { "group-1": ["terminal:first", "terminal:second"] },
+    new Set(["terminal:first", "terminal:second"]),
+  );
+  assertDeepEqual(
+    mergedOrder,
+    { "group-1": ["terminal:first", "terminal:second"] },
+    "merged order includes both live terminal panes ahead of reconciliation",
+  );
+  const result = revalidateWorkbenchLayoutForRoot(
+    groups,
+    mergedOrder,
+    { "group-1": "terminal:first" },
+    new Set(["terminal:first", "terminal:second"]),
+    true,
+  );
+  assertDeepEqual(
+    result.reconciledActivePane,
+    { "group-1": "terminal:first" },
+    "a preferred pane present only via the merged order (not the caller's raw orderForRoot) is recognized as live and preserved",
+  );
+}
+
+// `removePanesFromOrder` drops the given pane ids from every group's order,
+// leaving unrelated pane ids and groups untouched. Used by the revalidation
+// effect to strip readonly-file/terminal pane ids back out of a merged order
+// before persisting into `paneOrderByRoot`, which must stay agnostic to
+// those (owned separately by the flat order maps).
+{
+  const result = removePanesFromOrder(
+    {
+      "group-1": ["agent-a", "readonly:b", "terminal:c"],
+      "group-2": ["readonly:b", "agent-d"],
+    },
+    ["readonly:b", "terminal:c"],
+  );
+  assertDeepEqual(
+    result,
+    { "group-1": ["agent-a"], "group-2": ["agent-d"] },
+    "removePanesFromOrder drops the given ids from every group, keeping the rest in place",
+  );
+
+  // Removing every pane id from a group leaves an empty array for that
+  // group rather than dropping the group key (unlike `pruneWorkbenchLayoutOrder`,
+  // which drops empty groups) — callers that persist this result rely on
+  // every original group key remaining present.
+  const emptied = removePanesFromOrder(
+    { "group-1": ["agent-a"] },
+    ["agent-a"],
+  );
+  assertDeepEqual(
+    emptied,
+    { "group-1": [] },
+    "removing every pane id from a group empties its array without dropping the group key",
+  );
 }
 
 // `mergeWorkbenchLayoutRestoreEntries` is the layout save effect's

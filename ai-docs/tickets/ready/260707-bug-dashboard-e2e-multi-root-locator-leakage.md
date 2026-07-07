@@ -118,12 +118,27 @@ by construction — a future edit that changes root-open ordering or gives
 an inactive root a terminal/document pane it doesn't have today could still
 surface a new instance of this class.
 
-### Phase 2: Diagnose and fix the TOML/text language-detection mismatch
+### Phase 2: Diagnose and fix the TOML/text language-detection mismatch (root cause: preview-tab activation, not language detection)
 
 Root-cause why `.document-source-viewer[data-editor-read-only="true"]`
 reports `data-editor-language="text"` instead of the expected `"toml"` for
 the relevant fixture file, and fix the underlying cause (or the test fixture
 if the test's expectation is itself stale). Likely independent of Phase 1;
+
+**Diagnosis update (research, high confidence, live-repro-confirmed):** the
+"language-detection mismatch" framing was wrong. `documentEditorLanguageId`
+and the server-side language-hint mapping are both correct for `.toml` in
+every path. The real defect: single-clicking a file to open a read-only
+preview does not activate the new preview tab when a sibling pinned pane in
+the same Dockview group is currently active — so the assertion observes the
+still-active, previously-pinned pane's (correct) `text` language instead of
+the new toml preview's. This is a preview-tab activation bug in the shared
+pane-sync pipeline (`App.tsx`'s `openReadOnlyFile` / `syncDockviewWorkbench`
+in `workbench/dockviewLayout.tsx`), not a language-detection or test-fixture
+bug. Fix: declare the new pane active synchronously in the same state batch
+that adds it (via the existing `setActivePaneByGroupForSelected` +
+`selectWorkbenchPane` mechanism), rather than editing language-detection
+code or the test's expectation.
 order between phases does not matter, but Phase 1 should land first since
 it's what currently blocks the suite from running far enough to reliably
 observe this one. Verification: re-run `npm run test:browser` twice
@@ -131,3 +146,78 @@ consecutively; once both phases have landed, confirm the full suite passes
 green on both runs. If landing this phase alone (before Phase 1), confirm
 at minimum that the TOML assertion itself now passes, even though the
 suite as a whole may still fail later on Phase 1's unfixed locators.
+
+#### Spec Impact
+
+Genuine product-visible behavior change, not a stale-fixture issue:
+single-clicking a read-only preview now activates it as the visible pane
+even when a sibling pinned pane in the same Dockview group was active.
+No existing spec stem describes pane-activation/preview-tab-focus behavior
+for the Dockview workbench; none is retrofitted by this fix. Spec area:
+none yet identified. Contract-first spec: no.
+
+### Result (d1639067) - 2026-07-07
+
+Root cause was two layers deeper than the plan's literal fix location:
+`openReadOnlyFile` (`App()`) and `setActivePaneByGroupForSelected`
+(`WorkbenchShell`) are sibling components, not nested, so the plan's
+proposed same-function fix was unreachable across that scope boundary.
+Fixed by (1) computing the pending preview activation as a render-time
+`useMemo` merged into the `activePaneByGroup` prop instead of an
+effect-driven `setActive()` call, avoiding a race against Dockview's own
+active-panel bookkeeping, and (2) fixing WorkbenchShell's "revalidate
+restored/live pane references" effect, which used
+`workbenchGroupsByRoot[rootKey] ?? []` instead of the established
+`?? initialWorkbenchGroups` fallback and never merged
+`readOnlyFilePaneOrderByGroup`/`terminalPaneOrderByGroup` into its pane-order
+input — silently dropping any readonly-file/terminal-only group's
+active-pane entry on every relevant state change.
+
+Fixing (2) surfaced a third bug in the same effect: it computed
+`reconciledActivePane` from a render-time closure of `activePaneByRoot` and
+wrote it back unconditionally, which could clobber a fresher click-driven
+update landing in the same window (confirmed via live instrumentation, and
+via ~3/12 flaky failures of the pre-existing "terminal tab selection
+isolates sessions" regression test before this was fixed, 0/18 after).
+Fixed by deferring the reconcile computation into the `setActivePaneByRoot`
+updater so both reads come from the same current state.
+
+Verification: `spec.ts:1954` now reads `toml`. Two full `npm run
+test:browser` runs both pass the "dashboard workRoot UI browser
+acceptance" test. The suite's separate "linked server root picker..." test
+fails both full runs at first navigation but passes standalone in 1.5s —
+confirmed pre-existing, sequential-execution-only test-isolation defect in
+an unrelated subsystem (server-pairing/remote-fixture daemon setup), left
+unfixed per this phase's out-of-scope boundary.
+
+#### Edition (b8199eca) - 2026-07-07
+
+Review-fix cycle (partitioned correctness/fit/test review, then a full
+implementer-relay, then a partitioned correctness/test re-review — all
+clean) resolved two Important test findings and two minor correctness
+findings against the `d1639067` implementation above:
+
+- Extracted the pane-order-merge logic into a new
+  `mergeReadOnlyAndTerminalPaneOrder` function and moved the pre-existing
+  `removePanesFromOrder` helper (now exported) into
+  `workbench/layoutRestore.ts`, with unit test coverage in
+  `layoutRestore.test.ts` (merge function, the `?? []` vs
+  `?? initialWorkbenchGroups` regression contrast, a composed
+  merge+reconcile test, and `removePanesFromOrder` itself). Confirmed by
+  re-review as a byte-identical refactor — no behavior change.
+- Corrected the flakiness figures stated above, which did not hold up
+  arithmetically: the actual count is **3/12 (25%) failures pre-fix,
+  0/30 (0%) failures across 30 isolated re-runs post-fix** (not "0/18").
+  The raw run log is transcribed verbatim into fix commit `b8199eca`'s
+  `## AI Context` (the on-disk log path itself is gitignored and has
+  since been overwritten by later test runs).
+- Added an invariant comment above `pendingReadOnlyActivation` (App.tsx)
+  documenting its dependency on `editorGroups` being a fresh reference
+  every render, and corrected the `setActivePaneByRoot` updater's CONTRACT
+  comment, which had overstated that "both reads come from the same
+  truly-current state" — only `preferred` is actually fresh; the comment
+  now explains why the other closures are still safe.
+
+Re-review verdicts: correctness clean, fit clean (unchanged from cycle 1),
+test clean with 1 non-blocking minor (the raw flakiness log isn't
+preserved as a retrievable file outside the commit message text).
