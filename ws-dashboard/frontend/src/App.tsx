@@ -3632,39 +3632,109 @@ function WorkbenchShell({
       if (!ref || !orderForRoot) {
         continue;
       }
-      const livePaneIds = new Set<string>([
-        ...Object.values(terminalPanes)
-          .filter(
-            (pane) =>
-              pane.session.workRootId === ref.rootId &&
-              (pane.session.serverRoute ?? "server-local") === ref.serverRoute,
-          )
-          .map((pane) => pane.paneId),
-        ...readOnlyFilePanes
+      const liveReadOnlyPaneIds = new Set(
+        readOnlyFilePanes
           .filter(
             (pane) =>
               pane.workRootId === ref.rootId &&
               pane.serverRoute === ref.serverRoute,
           )
           .map((pane) => pane.id),
+      );
+      const liveTerminalPaneIds = new Set(
+        Object.values(terminalPanes)
+          .filter(
+            (pane) =>
+              pane.session.workRootId === ref.rootId &&
+              (pane.session.serverRoute ?? "server-local") === ref.serverRoute,
+          )
+          .map((pane) => pane.paneId),
+      );
+      const livePaneIds = new Set<string>([
+        ...liveTerminalPaneIds,
+        ...liveReadOnlyPaneIds,
       ]);
-      const groupsForRoot = workbenchGroupsByRoot[rootKey] ?? [];
-      const { prunedOrder, reconciledActivePane } =
-        revalidateWorkbenchLayoutForRoot(
-          groupsForRoot,
-          orderForRoot,
-          activePaneByRoot[rootKey] ?? {},
-          livePaneIds,
-          terminalsReadyRootKeys.has(rootKey),
-        );
-      if (JSON.stringify(prunedOrder) !== JSON.stringify(orderForRoot)) {
+      const groupsForRoot =
+        workbenchGroupsByRoot[rootKey] ?? initialWorkbenchGroups;
+      // `paneOrderByRoot` only tracks agent/activity pane order for this
+      // root; a dockview group can also host readonly-file panes and
+      // terminal panes, whose order lives separately in (flat, cross-root)
+      // `readOnlyFilePaneOrderByGroup` / `terminalPaneOrderByGroup`. Without
+      // merging those in here, a group whose live panes are only
+      // readonly-file/terminal panes looks pane-less to this revalidation,
+      // and `reconcileActiveWorkbenchPanes` below drops its active-pane
+      // entry entirely on every readOnlyFilePanes/terminalPanes change (e.g.
+      // every file open/preview, or every terminal output poll) — this is
+      // the actual mechanism behind
+      // 260707-bug-dashboard-e2e-multi-root-locator-leakage Phase 2, confirmed
+      // by live instrumentation: a just-computed pane activation (preview-tab
+      // open, or a terminal-tab click) was computed correctly, then wiped by
+      // this effect moments later because its own surface kind's pane order
+      // was invisible to this revalidation's group.panes reconstruction.
+      const mergedOrderForRoot: WorkbenchPaneOrder = Object.fromEntries(
+        groupsForRoot.map((group) => [
+          group.id,
+          [
+            ...(orderForRoot[group.id] ?? []),
+            ...(readOnlyFilePaneOrderByGroup[group.id] ?? []).filter(
+              (paneId) => liveReadOnlyPaneIds.has(paneId),
+            ),
+            ...(terminalPaneOrderByGroup[group.id] ?? []).filter((paneId) =>
+              liveTerminalPaneIds.has(paneId),
+            ),
+          ],
+        ]),
+      );
+      // CONTRACT: `prunedOrder` here only depends on group/order/live-id
+      // inputs already closed over from this render, so it is safe to read
+      // from this render's closure. `reconciledActivePane`, however, is
+      // derived from `activePaneByGroup` (this root's active-pane map) — and
+      // that map can legitimately change between this render committing and
+      // this effect's passive callback flushing (e.g. a user's terminal-tab
+      // click fires a separate, closer-to-the-event `setActivePaneByRoot`
+      // call in that same window). Computing `reconciledActivePane` from the
+      // render-time closure here and then unconditionally writing it back
+      // below would silently clobber that fresher click-driven update with
+      // a stale one — confirmed by live instrumentation (see
+      // 260707-bug-dashboard-e2e-multi-root-locator-leakage Phase 2: a
+      // single `[diag-revalidate-change]` write reverted a just-applied
+      // terminal-tab selection because `preferred` — read fresh inside the
+      // `setActivePaneByRoot` updater below — already reflected the click,
+      // while the outer `reconciledActivePane` did not). Fixed by deferring
+      // the reconcile computation itself into the updater, so both reads
+      // come from the same, truly-current state.
+      const { prunedOrder } = revalidateWorkbenchLayoutForRoot(
+        groupsForRoot,
+        mergedOrderForRoot,
+        activePaneByRoot[rootKey] ?? {},
+        livePaneIds,
+        terminalsReadyRootKeys.has(rootKey),
+      );
+      // Strip the readonly-file/terminal pane ids back out before persisting
+      // into `paneOrderByRoot`, which must stay agnostic to those (their
+      // order is separately owned by `readOnlyFilePaneOrderByGroup` /
+      // `terminalPaneOrderByGroup`).
+      const prunedOrderWithoutMerged = removePanesFromOrder(prunedOrder, [
+        ...liveReadOnlyPaneIds,
+        ...liveTerminalPaneIds,
+      ]);
+      if (
+        JSON.stringify(prunedOrderWithoutMerged) !== JSON.stringify(orderForRoot)
+      ) {
         onPaneOrderByRootChange((current) => ({
           ...current,
-          [rootKey]: prunedOrder,
+          [rootKey]: prunedOrderWithoutMerged,
         }));
       }
       setActivePaneByRoot((current) => {
         const preferred = current[rootKey] ?? {};
+        const { reconciledActivePane } = revalidateWorkbenchLayoutForRoot(
+          groupsForRoot,
+          mergedOrderForRoot,
+          preferred,
+          livePaneIds,
+          terminalsReadyRootKeys.has(rootKey),
+        );
         if (JSON.stringify(preferred) === JSON.stringify(reconciledActivePane)) {
           return current;
         }
@@ -3674,6 +3744,8 @@ function WorkbenchShell({
   }, [
     terminalPanes,
     readOnlyFilePanes,
+    readOnlyFilePaneOrderByGroup,
+    terminalPaneOrderByGroup,
     openWorkRootKeys,
     openWorkRootRefs,
     paneOrderByRoot,
@@ -4483,32 +4555,54 @@ function WorkbenchShell({
     };
   }, [workbenchModel?.root.id, workbenchModel?.root.resourcePath.serverId]);
 
-  useEffect(() => {
+  // A single-clicked preview pane must be the active Dockview panel on the
+  // very first `syncDockviewWorkbench` pass that creates it, not a later
+  // pass: `editorGroups` reflects the just-added pane one render before an
+  // *effect-driven* `activePaneByRoot` update could catch up, so
+  // `DockviewWorkbenchLayout`'s own passive `syncPanels` effect would create
+  // the panel `inactive: true` on that first pass; a later `setActive()`
+  // call then races Dockview's own active-panel bookkeeping and can be
+  // silently reverted (confirmed by live instrumentation — see
+  // 260707-bug-dashboard-e2e-multi-root-locator-leakage Phase 2). Computing
+  // the pending activation as a plain render-time value (rather than via an
+  // effect) means the *first* render that includes the new pane already
+  // reflects the correct active id, so `syncPanels`'s first pass creates the
+  // panel active directly — no deferred `setActive()` call, no race.
+  const pendingReadOnlyActivation = useMemo(() => {
     if (
       !activeReadOnlyFilePaneRequest ||
       focusedReadOnlyRequest.current === activeReadOnlyFilePaneRequest.sequence
     ) {
-      return;
+      return null;
     }
-
     const targetGroup = editorGroups.find((group) =>
       group.panes.some(
         (pane) => pane.id === activeReadOnlyFilePaneRequest.paneId,
       ),
     );
     if (!targetGroup) {
+      return null;
+    }
+    return { groupId: targetGroup.id, paneId: activeReadOnlyFilePaneRequest.paneId };
+  }, [activeReadOnlyFilePaneRequest, editorGroups]);
+
+  // Persists the render-time-only decision above into real
+  // `activePaneByRoot` state (so it survives beyond this one render, e.g.
+  // once the user's next action re-derives `activePaneByGroup` from state
+  // directly), and marks the request handled so this stops recomputing.
+  useEffect(() => {
+    if (!activeReadOnlyFilePaneRequest || !pendingReadOnlyActivation) {
       return;
     }
-
     focusedReadOnlyRequest.current = activeReadOnlyFilePaneRequest.sequence;
     setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(
         current,
-        targetGroup.id,
-        activeReadOnlyFilePaneRequest.paneId,
+        pendingReadOnlyActivation.groupId,
+        pendingReadOnlyActivation.paneId,
       ),
     );
-  }, [activeReadOnlyFilePaneRequest, editorGroups]);
+  }, [activeReadOnlyFilePaneRequest, pendingReadOnlyActivation]);
 
   useEffect(() => {
     // Focus a freshly created terminal exactly once per request. Without the
@@ -5015,6 +5109,14 @@ function WorkbenchShell({
       ) : null}
       {openWorkRootInstances.map(({ rootKey, editorGroups: rootGroups }) => {
         const isActiveRoot = rootKey === selectedWorkRootStateKey;
+        const effectiveActivePaneByGroup =
+          isActiveRoot && pendingReadOnlyActivation
+            ? selectWorkbenchPane(
+                activePaneByRoot[rootKey] ?? {},
+                pendingReadOnlyActivation.groupId,
+                pendingReadOnlyActivation.paneId,
+              )
+            : activePaneByRoot[rootKey] ?? {};
         return (
           <div
             key={rootKey}
@@ -5023,7 +5125,7 @@ function WorkbenchShell({
             style={isActiveRoot ? undefined : { display: "none" }}
           >
             <DockviewWorkbenchLayout
-              activePaneByGroup={activePaneByRoot[rootKey] ?? {}}
+              activePaneByGroup={effectiveActivePaneByGroup}
               groups={rootGroups}
               initialGroupSizeById={
                 workbenchLayoutRestoreRef.current[rootKey]?.groupSizeById
