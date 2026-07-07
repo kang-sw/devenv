@@ -429,18 +429,6 @@ dropped tickets live in hidden archive dirs and git history.
   reason that ticket already rejected one. Spec addressing via
   `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
   no). Sage review completed.
-- `260707-feat-impl-branch-convention-autodelete` (todo, feat) - rename the
-  implement-branch convention to `impl/<stem, max 15 chars>` and auto-delete
-  fully-merged `impl/*` branches without asking (guardrails unchanged;
-  non-`impl/*` branches keep asking). Prerequisite for
-  `260707-feat-drain-goal-branch-staging`; not yet spec-addressed.
-- `260707-feat-drain-goal-branch-staging` (todo, feat) - make
-  `lead-drain-ready-queue` goal-aware: under an active harness `/goal`
-  context, stage per-ticket work into a single `goal/<slug>` branch (each
-  ticket auto-merges via a new `policy.branch.merge_confirm` enter.implement
-  fact, mirroring `allow_rename`'s shape) with exactly one final confirmed
-  merge into `main`; falls back to today's behavior with no active `/goal`.
-  Not yet spec-addressed.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

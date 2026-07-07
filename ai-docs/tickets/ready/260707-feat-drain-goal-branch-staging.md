@@ -4,6 +4,8 @@ related:
   260707-feat-impl-branch-convention-autodelete: prerequisite — per-ticket impl/<stem> branches merged into the goal-staging branch rely on that ticket's naming-gated auto-delete to avoid branch clutter
   260703-chore-implement-branch-rename-default-allow: precedent this ticket's new policy.branch.merge_confirm fact directly mirrors (a plain caller-suppliable enter.implement policy fact, not goal-aware logic inside lead-implement)
 sage-review: completed
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Goal-aware branch staging for lead-drain-ready-queue: single deferred final merge instead of per-ticket merge confirmation

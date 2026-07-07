@@ -3,6 +3,8 @@ title: "Adopt impl/<stem> branch naming (max 15 chars) and auto-delete fully-mer
 related:
   260707-feat-drain-goal-branch-staging: this ticket's impl/ naming + auto-delete is a prerequisite building block for that ticket's per-ticket ephemeral branch churn into a goal-staging branch
 sage-review: completed
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Adopt impl/<stem> branch naming (max 15 chars) and auto-delete fully-merged impl/* branches without asking
