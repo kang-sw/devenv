@@ -3,6 +3,7 @@ title: "Playwright acceptance suite has scattered unscoped locators after multi-
 related:
   260707-bug-dashboard-e2e-panel-header-dead-code-drift: prerequisite
 sage-review: completed
+completed: 2026-07-07
 ---
 
 # Playwright acceptance suite has scattered unscoped locators after multi-root-mount landed, plus an unrelated TOML/text language-detection mismatch
