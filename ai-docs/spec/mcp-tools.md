@@ -240,7 +240,10 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   observed mechanically, such as a merge target while already on an
   implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
   branch rename is allowed; branch rename defaults to allowed unless the
-  caller explicitly withholds consent (`policy.branch.allow_rename: no`). The
+  caller explicitly withholds consent (`policy.branch.allow_rename: no`); and
+  whether the caller's own merge-approval ask may be skipped for this merge;
+  merge confirmation defaults to asking unless the caller explicitly passes
+  `policy.branch.merge_confirm: skip`. The
   resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the

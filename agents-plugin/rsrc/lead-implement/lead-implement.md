@@ -13,7 +13,7 @@ Scope
 - Stop before source edits when direct-edit scope expands into public API or cross-module pattern work.
 
 Branch
-- Wait for user approval before merge or another implementation slice.
+- Wait for user approval before merge or another implementation slice, unless the resolved verdict's merge confirm is `skip`, in which case proceed with that merge without asking.
 - Merge commits follow repository commit rules and include `## AI Context`.
 
 Execution
