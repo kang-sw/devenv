@@ -889,3 +889,59 @@ forwarded-operation exercise (root picker, files, Git, terminal, WebSocket
 relay) remains blocked until the new bug ticket lands a fix, at which point
 the same session/methodology (documented in `ai-docs/_index.local.md`,
 gitignored) can be re-run to close this gap fully.
+
+#### Verification note - 2026-07-07 (SSH-tunnel dogfood plan, Phase 1)
+
+Executed `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 1
+(both linked-server topologies, default `--bind-mode local` + normal
+owner-auth on every daemon, per that ticket's explicit constraint to avoid
+re-litigating the settled `--bind-mode public` Host-check non-bug above).
+
+- **SSH-tunnel leg (WSL gateway -> Windows remote): not exercised.** The
+  session's harness auto-mode classifier denied the very first step (a
+  non-interactive `ssh -o BatchMode=yes ... <windows-host> true`
+  connectivity probe against the re-derived WSL2 gateway IP) as
+  "Credential Exploration" / unauthorized-access-shaped, before any SSH
+  attempt could run. This is an environment/harness-policy blocker, not a
+  daemon or tunnel-code finding — `sshd` was confirmed running on the
+  Windows host (`Get-Service sshd` -> `Running`) but the actual
+  `ssh`/`start_system_ssh_tunnel` path was never driven. A session with SSH
+  probing permitted (or run outside this harness's auto-mode policy) is
+  needed to close this leg.
+- **Reversed-topology direct-endpoint leg (Windows gateway -> WSL remote):
+  link handshake succeeded; forwarded-operation walk blocked by a new,
+  distinct daemon bug.** Both daemons launched at `--bind-mode local`
+  (Windows gateway via direct WSL-interop exec of the native `.exe` — WSL
+  cannot reach a Windows-loopback-bound port at all, confirmed via a direct
+  `curl` connection-refused test, so every owner-facing API call against the
+  Windows-hosted gateway had to be driven from the Windows side via a
+  PowerShell script piped over stdin, never as an on-disk script or with any
+  credential value echoed/persisted). `POST /api/dashboard/servers/link` with
+  `endpoint: "http://localhost:<wsl-port>"` returned `200`
+  `"status":"connected"` — confirming Windows *can* reach the WSL remote's
+  loopback via `localhost` as this leg's rationale assumed, and confirming no
+  Host-check `403` occurred (double-checked: this leg's link and every
+  forwarded call all returned either `200` or the new bug's `404`, never
+  `403`, so the settled public-bind non-bug was not re-triggered). But the
+  very next calls (`GET .../resources`, `GET .../root-picker`,
+  `POST .../work-roots/open`) all returned `404 "unknown server"` on the same
+  still-running gateway process that had just reported the link as
+  connected. Root-caused to a genuine, previously undiscovered bug:
+  `default_state_file()` (`persistent_state.rs:478-491`) has no Windows-native
+  environment-variable fallback, and `HOME` is unset by default on Windows —
+  so `state_file` resolves to `None` and every dashboard-state write (linked
+  servers, opened work roots, root-picker pins) silently no-ops on a native
+  Windows daemon unless one of `WS_DASHBOARD_STATE_FILE`/
+  `WS_DASHBOARD_STATE_HOME`/`XDG_STATE_HOME`/`HOME` is explicitly set. Filed
+  as `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`.
+  Confirmed independently of the link/forwarding path (isolated
+  `root-picker/pins` write with and without `$env:HOME` set).
+
+This ticket's "live dogfood" gap remains only **partially resolved**: the
+reversed-topology link handshake adds further evidence the forwarding
+substrate itself is sound, but the actual forwarded-operation exercise
+(root picker, files, Git, terminal, WebSocket relay) is now blocked by the
+new state-persistence bug rather than the earlier Host-check one, and the
+SSH-tunnel leg still has zero execution evidence in any session. Both gaps
+should be revisited once the new bug ticket lands and SSH probing is
+permitted.

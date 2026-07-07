@@ -136,6 +136,84 @@ side, or otherwise not currently working.
    active SSH tunnel process, and remove any linked-server entries created
    solely for this dogfood run from each daemon's persisted state.
 
+### Result
+
+Partially executed on `implement/phase-1-ssh-tunnel-dogfood` (commits
+`6faff2fa`, `1d2372f3`). Outcome recorded in full as a dated append to
+`260525-feat-ws-dashboard-server-scoped-operation-forwarding`'s ticket.
+
+- Step 1 (SSH connectivity probe): **not run**. The harness's own auto-mode
+  classifier denied the non-interactive `ssh ... true` probe as "Credential
+  Exploration" before any SSH attempt executed. `sshd` was independently
+  confirmed running on the Windows host (`Get-Service sshd` -> Running), but
+  connectivity itself remains unconfirmed. This is a session-tooling
+  limitation, not a daemon or plan defect.
+- Step 2 (SSH-tunnel leg): **not exercised**, blocked by step 1 never
+  running.
+- Step 3 (reversed-topology direct-endpoint leg): link handshake succeeded
+  (`200 connected`, confirming the Host-check non-bug does not resurface for
+  `http://localhost:<port>`), but every subsequent forwarded call 404'd. Root
+  cause is a genuine new bug, not another Host/Origin misdiagnosis: filed as
+  `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
+  (`todo/`).
+- Step 4 (record outcome in 260525): done.
+- Step 5 (file genuine bug separately): done — see above.
+- Step 6 (teardown): done — all daemons killed, scratch state dirs removed,
+  no SSH tunnel process existed (leg never ran), no pre-existing persisted
+  state touched on either host.
+
+Left open rather than closed: the SSH-tunnel leg (this ticket's primary,
+more production-representative topology) is still unverified, and the
+reversed leg cannot be re-walked past the link step until the new state-
+persistence bug is fixed. Re-run this phase (or open a Phase 2) once (a) SSH
+connectivity can be probed in a session without the auto-mode block, and (b)
+`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop` lands a
+fix.
+
 ## Escalations
 
-- None yet.
+- SSH connectivity (Phase 1, step 1) could not be probed in this session:
+  the auto-mode classifier blocks a bare non-interactive `ssh ... true`
+  liveness check as "Credential Exploration." Needs either an explicit
+  human-run probe outside this harness, or a narrower probe shape that
+  doesn't trip the classifier, before the SSH-tunnel leg can be attempted.
+
+#### Finding (2026-07-07): plain-TCP relay is a viable SSH-tunnel substitute
+
+Prompted by the user's observation that the SSH-tunnel mechanism's only real
+job is making the daemon's own outbound Host header loopback-compatible, not
+providing the transport itself — tested a plain TCP relay in place of SSH as
+a comparison path, separate from (and not blocked by) the still-open SSH
+escalation above.
+
+Setup: Windows daemon bound `192.168.208.1:<port>` (`--bind-mode public`,
+normal owner-auth, same shape as the already-settled non-bug reproduction) +
+a small Python `asyncio` TCP proxy on the WSL side listening on
+`127.0.0.1:18099` and forwarding raw bytes to `192.168.208.1:<port>` (no
+`socat`/`ncat` available in this WSL install; wrote a ~30-line asyncio
+listen-and-pipe script instead) + the WSL gateway daemon (`127.0.0.1`,
+`local` bind mode, normal owner-auth) linking the Windows remote via the
+already-proven direct-endpoint path (`POST /api/dashboard/servers/link`,
+`endpoint: "http://127.0.0.1:18099"`).
+
+Result: link handshake returned `200 connected`; the forwarded
+`GET .../resources` call returned `200` with a real, correctly-shaped body.
+No Host-check `403` — confirms the mechanism generalizes: any loopback-bound
+local forwarder (SSH tunnel, plain TCP relay, or otherwise) satisfies
+`is_allowed_host` identically, because the check only inspects the Host
+header the daemon's own outbound HTTP client sends, which is always
+loopback-literal when the target URL is `127.0.0.1:<port>`.
+
+Caveat: unlike SSH, a plain TCP relay has no transport-level encryption or
+authentication — only the dashboard's own owner-auth (cookie/bearer) protects
+the hop. Acceptable for this local WSL<->Windows-host virtual network
+(same trust boundary as loopback in practice), not a general SSH
+replacement for a genuinely untrusted network path.
+
+Scope: this finding is a comparison/fallback data point, not a completed
+walk of the ticket's SSH-tunnel leg (step 2) — only the link + one
+forwarded-resources call were exercised, not the full forwarded-operation
+set (files, Git, terminal, WebSocket relay). The SSH-tunnel leg itself
+remains blocked on the escalation above; this finding does not resolve it,
+it documents an available fallback if SSH access continues to be
+unreachable in-session.
