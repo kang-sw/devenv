@@ -449,6 +449,42 @@ func TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture(t *testing.T)
 	}
 }
 
+// TestTicketsMoveUpwardToReadyFromIdeaBlocksUnresolvedSageReviewPosture is a
+// variant of the "absent-auto" case in
+// TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture, but places
+// the ticket fixture under idea/ instead of todo/ before promoting straight
+// to ready. The ticket's stated hard invariant names "idea->ready" as an
+// entry path that must never skip design review; this makes that coverage
+// self-evident rather than relying on an implicit "curStatus is irrelevant"
+// argument about prepareSageReviewForUpwardMove.
+func TestTicketsMoveUpwardToReadyFromIdeaBlocksUnresolvedSageReviewPosture(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-sage-from-idea"
+	oldRel := filepath.Join("ai-docs", "tickets", "idea", stem+".md")
+	oldAbs := filepath.Join(root, oldRel)
+	mustWrite(t, root, oldRel, "---\ntitle: Sage\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	if _, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "auto",
+	}); err == nil {
+		t.Fatal("TicketsMove idea->ready promoted unresolved sage-review state")
+	} else if !strings.Contains(err.Error(), "sage-review-design: required; run sage review") {
+		t.Fatalf("error = %v, want design-required message", err)
+	}
+	after := readFileString(t, oldAbs)
+	for _, wantLine := range []string{"sage-review-design: required", "sage-review-completeness: required"} {
+		if !strings.Contains(after, wantLine) {
+			t.Fatalf("ticket missing %s after validation:\n%s", wantLine, after)
+		}
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("git called on guard failure: %#v", runner.calls)
+	}
+}
+
 func TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-epic-checked"
@@ -466,6 +502,33 @@ func TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign(t *testing.T) {
 	}
 	if strings.Contains(result.Tip, "completeness") {
 		t.Fatalf("Tip = %q, want no completeness mention for epic", result.Tip)
+	}
+}
+
+// TestTicketsMoveUpwardToReadyEpicBlocksOnUnresolvedDesign complements
+// TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign: that test only covers the
+// terminal/ignore-completeness case (design completed, completeness
+// blocked, promotion succeeds). This asserts the epic-specific gate actually
+// blocks when sage-review-design itself is non-terminal, not just that it
+// ignores completeness once design is resolved.
+func TestTicketsMoveUpwardToReadyEpicBlocksOnUnresolvedDesign(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-epic-unresolved"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Epic\nsage-review-design: recommended\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	if _, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "auto",
+	}); err == nil {
+		t.Fatal("TicketsMove epic ready promotion with unresolved design: expected error, got nil")
+	} else if !strings.Contains(err.Error(), "sage-review-design: recommended; run sage review or skip recommended review") {
+		t.Fatalf("error = %v, want design-recommended message", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("git called on guard failure: %#v", runner.calls)
 	}
 }
 

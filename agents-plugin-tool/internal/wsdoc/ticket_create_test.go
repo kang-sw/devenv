@@ -144,6 +144,28 @@ func TestTicketCreateExemptCategoryStampsNoSageReviewField(t *testing.T) {
 	}
 }
 
+// TestTicketCreateExemptCategoryAtReadyStampsNoSageReviewField exercises the
+// exempt-category branch at direct-to-ready creation (ticket_create.go:60):
+// designRequired must be false for research/workset so the never-skippable
+// design-invariant check on that line does not fire even though state ==
+// "ready", and creation succeeds with no sage-review-* field stamped despite
+// SageReview resolving to a non-terminal posture.
+func TestTicketCreateExemptCategoryAtReadyStampsNoSageReviewField(t *testing.T) {
+	for _, category := range []string{"research", "workset"} {
+		t.Run(category, func(t *testing.T) {
+			root := t.TempDir()
+			res, err := TicketCreate(root, TicketCreateOptions{Stem: category + "-foo", InitialState: "ready", SageReview: "auto", Today: "260101"})
+			if err != nil {
+				t.Fatalf("TicketCreate ready: %v", err)
+			}
+			body := readCreatedTicket(t, root, res)
+			if strings.Contains(body, "sage-review") {
+				t.Fatalf("exempt category stub must not contain sage-review: %q", body)
+			}
+		})
+	}
+}
+
 func TestTicketCreateTerminalState(t *testing.T) {
 	root := t.TempDir()
 	for _, state := range []string{"done", "dropped"} {
