@@ -96,6 +96,15 @@ sketch-level ticket shouldn't need yet.
   exempt from completeness (epics don't reach `lead-implement` directly).
   `research` and `workset` tickets stay exempt from both stages, matching
   today's exemption from the contract-first spec gate.
+- **Design review is never skippable by entry path — hard invariant.**
+  The `sage-review-design:` -> `sage-review-completeness:` ordering is
+  enforced regardless of how a ticket reaches `ready`: a ticket jumping
+  directly from `idea` to `ready`, or authored directly at `ready` status
+  without ever passing through `todo`, must still pass the design-review
+  gate before (or as part of) completeness review — completeness review
+  must refuse to run, or must trigger design review first, if
+  `sage-review-design:` has never completed. No entry path is allowed to
+  produce a `ready` ticket whose design was never reviewed.
 
 ## Deferred to Implementation
 
@@ -109,6 +118,13 @@ sketch-level ticket shouldn't need yet.
   simplified model, or whether both gates are fully owned by existing
   sage-review dispatch points (todo-write time, ready-promotion time)
   with no new judge table.
+- Exact mechanism for enforcing the never-skippable design-review
+  invariant on non-`todo` entry paths (`idea` -> `ready` direct promotion,
+  or a ticket authored directly at `ready`) — likely: the ready-promotion
+  check reads `sage-review-design:`, and if absent/incomplete, runs design
+  review first (or blocks) before completeness review is allowed to run
+  at all, rather than assuming design review already happened because the
+  ticket reached `ready`.
 
 ## Status
 
