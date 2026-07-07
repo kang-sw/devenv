@@ -982,7 +982,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
 		normalized, _ := normalizeImplementFacts(input)
-		targetBranch := "implement/" + normalized.ScopeSlug
+		targetBranch := implementTargetBranchName(normalized.ScopeSlug)
 		obs, err := observeImplementBranch(record.Root, targetBranch)
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))

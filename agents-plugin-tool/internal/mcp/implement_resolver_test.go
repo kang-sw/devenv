@@ -223,7 +223,7 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "implement/tiny-edit", StartCommit: "abc123"})
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/tiny-edit", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("branch action = %q, want continue", result.Verdict.BranchPlan.Action)
 	}
@@ -240,18 +240,20 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 func TestResolveImplementBranchPlanRules(t *testing.T) {
 	base := normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "no"}
 	cases := []struct {
-		name       string
-		facts      normalizedImplementFacts
-		obs        implementBranchObservation
-		wantAction string
-		wantReason string
+		name             string
+		facts            normalizedImplementFacts
+		obs              implementBranchObservation
+		wantAction       string
+		wantReason       string
+		wantTargetBranch string
 	}{
 		{
-			name:       "create outside implement branch",
-			facts:      base,
-			obs:        implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
-			wantAction: "create",
-			wantReason: "not an implementation branch",
+			name:             "create outside implement branch",
+			facts:            base,
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+			wantAction:       "create",
+			wantReason:       "not an implementation branch",
+			wantTargetBranch: "impl/target",
 		},
 		{
 			name:       "stop missing merge target on implement branch",
@@ -261,11 +263,12 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			wantReason: "merge target required",
 		},
 		{
-			name:       "continue matching branch",
-			facts:      base,
-			obs:        implementBranchObservation{CurrentBranch: "implement/target", StartCommit: "abc123"},
-			wantAction: "continue",
-			wantReason: "matches target scope",
+			name:             "continue matching branch",
+			facts:            base,
+			obs:              implementBranchObservation{CurrentBranch: "impl/target", StartCommit: "abc123"},
+			wantAction:       "continue",
+			wantReason:       "matches target scope",
+			wantTargetBranch: "impl/target",
 		},
 		{
 			name:       "rename allowed",
@@ -288,6 +291,36 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			wantAction: "stop",
 			wantReason: "upstream/tracking",
 		},
+		{
+			name:       "legacy implement-prefixed current branch is not misidentified as fresh start",
+			facts:      normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			obs:        implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"},
+			wantAction: "stop",
+			wantReason: "rename is not allowed",
+		},
+		{
+			name:       "new impl-prefixed current branch is recognized as an implementation branch",
+			facts:      normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "yes"},
+			obs:        implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"},
+			wantAction: "rename",
+			wantReason: "rename is allowed",
+		},
+		{
+			name:             "target branch name is truncated to 15 characters",
+			facts:            normalizedImplementFacts{ScopeSlug: "a-very-long-scope-slug-name", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+			wantAction:       "create",
+			wantReason:       "not an implementation branch",
+			wantTargetBranch: "impl/a-very-long-sco",
+		},
+		{
+			name:             "target branch truncation trims trailing dash",
+			facts:            normalizedImplementFacts{ScopeSlug: "abc-defghijklm-nop", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+			wantAction:       "create",
+			wantReason:       "not an implementation branch",
+			wantTargetBranch: "impl/abc-defghijklm",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -297,6 +330,9 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			}
 			if !strings.Contains(got.Reason, tc.wantReason) {
 				t.Fatalf("reason = %q, want containing %q", got.Reason, tc.wantReason)
+			}
+			if tc.wantTargetBranch != "" && got.TargetBranch != tc.wantTargetBranch {
+				t.Fatalf("target branch = %q, want %q", got.TargetBranch, tc.wantTargetBranch)
 			}
 		})
 	}

@@ -597,15 +597,29 @@ func deriveImplementDocMode(n normalizedImplementFacts) string {
 	return "standard"
 }
 
+// implementTargetBranchName builds the canonical implementation branch name
+// for a given scope slug: "impl/" followed by the slug hard-truncated to 15
+// characters with any resulting trailing "-" trimmed. Both branch-plan
+// derivation and enter-implement observation must use this single helper so
+// the two never construct diverging target-branch names.
+func implementTargetBranchName(scopeSlug string) string {
+	stem := scopeSlug
+	if len(stem) > 15 {
+		stem = stem[:15]
+	}
+	stem = strings.TrimRight(stem, "-")
+	return "impl/" + stem
+}
+
 func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchObservation) implementBranchPlan {
-	targetBranch := "implement/" + n.ScopeSlug
+	targetBranch := implementTargetBranchName(n.ScopeSlug)
 	plan := implementBranchPlan{
 		CurrentBranch: obs.CurrentBranch,
 		TargetBranch:  targetBranch,
 		StartCommit:   obs.StartCommit,
 		MergeTarget:   n.MergeTargetPolicy,
 	}
-	if !strings.HasPrefix(obs.CurrentBranch, "implement/") {
+	if !strings.HasPrefix(obs.CurrentBranch, "implement/") && !strings.HasPrefix(obs.CurrentBranch, "impl/") {
 		plan.Action = "create"
 		plan.MergeTarget = obs.CurrentBranch
 		plan.Reason = "current branch is not an implementation branch"

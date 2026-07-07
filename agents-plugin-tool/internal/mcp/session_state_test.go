@@ -1637,10 +1637,10 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	for _, want := range []string{
 		"Implementation Verdict",
 		"Mode: delegated",
-		"Branch Action: create implement/enter-implement-deterministic-verdict-engine",
+		"Branch Action: create impl/enter-implement",
 		"Plan Depth: survey",
 		"Review Allocation: partitioned: correctness, fit, test",
-		"Next: Create implement/enter-implement-deterministic-verdict-engine",
+		"Next: Create impl/enter-implement",
 		"path.generate(kind: \"plan\")",
 		"plan-populator-survey",
 		"[escalate-to-research]",
@@ -1781,6 +1781,43 @@ func TestEnterImplementStopsOnImplementBranchWithoutMergeTarget(t *testing.T) {
 	full := callToolWithKey(t, server, 4, key, "todo.list", map[string]any{"mode": "full"})
 	if !strings.Contains(full, "merge target required while already on an implementation branch") || strings.Contains(full, "Dispatch the delegated implementer with Delegate dispatch") {
 		t.Fatalf("branch-stop full todo list not focused:\n%s", full)
+	}
+}
+
+func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	// The target branch this scenario resolves to is "impl/enter-implement"
+	// (implementTargetBranchName truncates the ready-args scope slug to 15
+	// chars). Pre-create it so observeImplementBranch's TargetExists check
+	// and deriveImplementBranchPlan's target-branch naming both key off the
+	// same shared helper (implementTargetBranchName) instead of drifting.
+	runGit(t, root, "switch", "-c", "impl/enter-implement")
+	runGit(t, root, "switch", "-c", "impl/old-scope")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	args := implementReadyArgs("json")
+	args["policy"].(map[string]any)["branch"].(map[string]any)["allow_rename"] = "yes"
+	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	var result implementResult
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
+	}
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("expected stop branch action when target already exists, got %+v", result.Verdict.BranchPlan)
+	}
+	if result.Verdict.BranchPlan.TargetBranch != "impl/enter-implement" {
+		t.Fatalf("target branch = %q, want impl/enter-implement", result.Verdict.BranchPlan.TargetBranch)
+	}
+	if !strings.Contains(result.Verdict.BranchPlan.Reason, "already exists") {
+		t.Fatalf("expected already-exists reason, got %q", result.Verdict.BranchPlan.Reason)
 	}
 }
 
