@@ -630,6 +630,24 @@ deployable and independently revertible target-history units. A branch that is
 one logical change with noisy or dependent commits squashes.
 {#260523-implement-doc-closeout-compaction}
 
+After a confirmed merge, `lead-implement` runs a Branch Cleanup step to reduce
+implementation-branch accumulation. It first verifies the implementation
+branch is a strict ancestor of the merge target
+(`git merge-base --is-ancestor`); it retains the branch and reports the skip
+reason without deleting when the branch is currently checked out, linked to
+an active worktree, the merge target was ambiguous, or the branch has commits
+unreachable from the merge target. When none of those conditions hold, the
+branch's naming convention gates the remaining flow: a branch named
+`impl/<stem>` (the convention `lead-implement` uses for branches it creates,
+`<stem>` hard-truncated to 15 characters with a trailing `-` trimmed) is
+deleted without asking. A branch under any other name — including the legacy
+`implement/<scope-slug>` convention — keeps the ask-first flow: the user is
+asked before `git branch -d` runs, and the branch is retained if not
+approved. The naming convention is a trust boundary, not a security
+boundary — a hand-created `impl/*` branch this tooling did not produce would
+also qualify for auto-delete once its structural guardrails pass.
+{#260707-implement-branch-cleanup-naming-gate}
+
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
 handles removed spec stems, verifies the spec index, and commits the spec pass.

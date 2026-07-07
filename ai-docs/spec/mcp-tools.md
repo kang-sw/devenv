@@ -237,8 +237,9 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   text|json`. MCP observes Git branch state from the session root, including the
   current branch, HEAD/start commit, target branch existence, and
   upstream/tracking ambiguity; callers provide only policy that cannot be
-  observed mechanically, such as a merge target while already on `implement/*`
-  and whether safe branch rename is allowed. The resolver derives
+  observed mechanically, such as a merge target while already on an
+  implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
+  branch rename is allowed. The resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and
@@ -261,12 +262,17 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   what policy or branch condition needs correction before source edits continue
   without naming unreachable planner or implementer actions. When a caller
   supplies `policy.branch.merge_target` outside its applicability window (the
-  observed current branch is not already `implement/*`, so the branch action
-  is `create`), the verdict adds a one-line warning naming the supplied value
-  and the branch it was derived from instead, e.g. `policy.branch.merge_target
-  "master" ignored (not on an implement/* branch); derived from current branch
-  "test/wsflow-smoke"`, so a caller unfamiliar with the applicability rule sees
-  that the field was read and deliberately not applied.
+  observed current branch is not already an implementation branch, i.e. not
+  prefixed `impl/` or legacy `implement/`, so the branch action is `create`),
+  the verdict adds a one-line warning naming the supplied value and the branch
+  it was derived from instead, e.g. `policy.branch.merge_target "master"
+  ignored (not on an implementation branch: impl/*, or legacy implement/*);
+  derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
+  the applicability rule sees that the field was read and deliberately not
+  applied. Fresh implementation branches are created under the `impl/<stem>`
+  convention, with `<stem>` hard-truncated to 15 characters (trailing `-`
+  trimmed); legacy `implement/<scope-slug>` branches already in progress are
+  still recognized as implementation branches for continue/rename purposes.
 - `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
