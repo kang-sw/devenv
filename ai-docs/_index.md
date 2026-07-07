@@ -230,14 +230,22 @@ dropped tickets live in hidden archive dirs and git history.
   left as a user judgment call, not an automatic consequence of all phases
   landing.
 - `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`ready`, chore) -
-  test plan to close `260525`'s live remote-dogfood gap for real: verify SSH
-  connectivity, dogfood the SSH-tunnel linked-server path end to end, and
-  dogfood a reversed-topology direct-endpoint variant (Windows gateway ->
-  WSL remote via `localhost`), since a same-host-topology direct-endpoint +
-  `--bind-mode public` attempt was tried and correctly failed (Host/Origin
-  invariant is intentional, not a bug - see dropped
-  `260707-bug-dashboard-public-bind-host-check-rejects-own-address`). Sage
-  review completed; not yet executed.
+  test plan to close `260525`'s live remote-dogfood gap for real. Phase 1
+  partially executed 2026-07-07: SSH connectivity probe blocked by this
+  session's own auto-mode classifier (escalation, unresolved); reversed-
+  topology direct-endpoint leg (Windows gateway -> WSL remote via
+  `localhost`) confirmed the link handshake and Host-check non-bug are fine,
+  but surfaced a genuine new bug
+  (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`)
+  that blocks walking the rest of that leg. Left open, not closed - see
+  ticket `### Result`.
+- `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
+  (`todo`, bug) - native-Windows `ws-dashboard` daemon silently drops all
+  persisted state (linked servers, opened work roots, root-picker pins)
+  because `default_state_file()` (`persistent_state.rs:478-491`) has no
+  Windows-native fallback when `HOME` is unset (the Windows default). Found
+  during `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 1
+  dogfood. Not yet sage-reviewed.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`

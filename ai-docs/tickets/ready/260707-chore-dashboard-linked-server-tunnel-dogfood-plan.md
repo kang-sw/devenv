@@ -136,6 +136,44 @@ side, or otherwise not currently working.
    active SSH tunnel process, and remove any linked-server entries created
    solely for this dogfood run from each daemon's persisted state.
 
+### Result
+
+Partially executed on `implement/phase-1-ssh-tunnel-dogfood` (commits
+`6faff2fa`, `1d2372f3`). Outcome recorded in full as a dated append to
+`260525-feat-ws-dashboard-server-scoped-operation-forwarding`'s ticket.
+
+- Step 1 (SSH connectivity probe): **not run**. The harness's own auto-mode
+  classifier denied the non-interactive `ssh ... true` probe as "Credential
+  Exploration" before any SSH attempt executed. `sshd` was independently
+  confirmed running on the Windows host (`Get-Service sshd` -> Running), but
+  connectivity itself remains unconfirmed. This is a session-tooling
+  limitation, not a daemon or plan defect.
+- Step 2 (SSH-tunnel leg): **not exercised**, blocked by step 1 never
+  running.
+- Step 3 (reversed-topology direct-endpoint leg): link handshake succeeded
+  (`200 connected`, confirming the Host-check non-bug does not resurface for
+  `http://localhost:<port>`), but every subsequent forwarded call 404'd. Root
+  cause is a genuine new bug, not another Host/Origin misdiagnosis: filed as
+  `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
+  (`todo/`).
+- Step 4 (record outcome in 260525): done.
+- Step 5 (file genuine bug separately): done — see above.
+- Step 6 (teardown): done — all daemons killed, scratch state dirs removed,
+  no SSH tunnel process existed (leg never ran), no pre-existing persisted
+  state touched on either host.
+
+Left open rather than closed: the SSH-tunnel leg (this ticket's primary,
+more production-representative topology) is still unverified, and the
+reversed leg cannot be re-walked past the link step until the new state-
+persistence bug is fixed. Re-run this phase (or open a Phase 2) once (a) SSH
+connectivity can be probed in a session without the auto-mode block, and (b)
+`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop` lands a
+fix.
+
 ## Escalations
 
-- None yet.
+- SSH connectivity (Phase 1, step 1) could not be probed in this session:
+  the auto-mode classifier blocks a bare non-interactive `ssh ... true`
+  liveness check as "Credential Exploration." Needs either an explicit
+  human-run probe outside this harness, or a narrower probe shape that
+  doesn't trip the classifier, before the SSH-tunnel leg can be attempted.
