@@ -1,5 +1,6 @@
 ---
 title: "Playwright acceptance gate fails on dead .panel-header selector; PanelHeader component is unused"
+sage-review: completed
 ---
 
 # Playwright acceptance gate fails on dead .panel-header selector; PanelHeader component is unused
@@ -35,21 +36,48 @@ this session — this selector check runs before any terminal/restore
 assertions execute, and Phase 6/7 touched only `App.tsx`'s restore
 ref/effect wiring and `workbench/{layoutRestore,terminalVisualRestore}.ts`.
 
-Unresolved question for whoever picks this up: is `.panel-header` actually
-supposed to still exist somewhere in the current Dockview-based hierarchy
-(and the redesign regressed it), or is the test's expectation simply stale
-and should be updated to assert against Dockview's own header markup?
-Needs a look at the redesign history / spec before deciding which side to
-fix.
+Resolved decision (sage-review design pass): `dockviewLayout.tsx`'s
+`DockviewWorkbenchTab` carries explicit CONTRACT comments stating the old
+custom two-row pinned/opened header was intentionally retired in favor of
+Dockview's own tab strip. Restoring `PanelHeader` would contradict that
+documented redesign intent, and Spec Impact below confirms there is no
+product contract requiring it back. Fix direction: remove the dead
+`PanelHeader` component (and its now-unused `.panel-header`/`.ws-toolbar`
+CSS, if not used elsewhere) and update the e2e assertion to match the
+current Dockview-based header DOM, rather than resurrecting the old
+component.
+
+The two dropped assertions at `e2e/dashboard-acceptance.spec.ts:381-382`
+(`panelHeaderBackground !== toolbarBackground` and `panelHeaderMinHeight
+=== toolbarMinHeight`) encoded a real visual-hierarchy invariant. Re-point
+that invariant at the already-queried `.dv-tabs-and-actions-container`
+(Dockview's tabbar) vs `.workbench-toolbar` instead of deleting it outright
+— assert the tabbar's background differs from the toolbar's background and
+compare their min-heights, preserving the same contrast/alignment check the
+original assertions encoded.
+
+## Spec Impact
+
+No existing spec stem addresses this behavior. This ticket removes dead
+code and updates a stale e2e assertion; it introduces no new caller-visible
+product contract (the workbench header surface's actual rendered behavior
+is unchanged either way — only whether an orphaned component/selector
+exists). Spec area: none (internal cleanup, no product contract change).
+Contract-first spec: no.
 
 ## Phases
 
-### Phase 1: Decide and fix the panel-header drift
+### Phase 1: Remove dead PanelHeader component and re-point the e2e hierarchy assertion
 
-Determine whether the current Dockview-based workbench should still expose
-a `.panel-header`-equivalent surface, then either restore it (and wire the
-orphaned `PanelHeader` component back in, if still the right shape) or
-update `expectContextSurfaceHierarchy` in
-`e2e/dashboard-acceptance.spec.ts` to assert against the current header
-DOM. Remove the dead `PanelHeader` component if it turns out to be fully
-superseded.
+Remove the unused `PanelHeader` component and its dead `.panel-header` CSS
+from `App.tsx` (and `styles.css` if the rule becomes fully unused). Update
+`expectContextSurfaceHierarchy` in `e2e/dashboard-acceptance.spec.ts` to
+drop the `.panel-header` query and re-point the
+`panelHeaderBackground`/`panelHeaderMinHeight` comparisons at
+`.dv-tabs-and-actions-container` (Dockview's tabbar) vs
+`.workbench-toolbar`, preserving the same background-contrast and
+min-height-match invariant the original assertions encoded. Verification:
+re-run `npm run test:browser` (`e2e/dashboard-acceptance.spec.ts`) and
+confirm both tests in the suite pass deterministically (run at least twice
+to rule out the flake the ticket's Background explicitly considered and
+ruled out for the original failure).
