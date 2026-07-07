@@ -122,6 +122,8 @@ import {
   saveWorkbenchLayoutRestoreSnapshot,
   mergeWorkbenchLayoutRestoreEntries,
   revalidateWorkbenchLayoutForRoot,
+  mergeReadOnlyAndTerminalPaneOrder,
+  removePanesFromOrder,
   loadTerminalVisualRestoreSnapshot,
   upsertTerminalVisualRestoreEntry,
   upsertTerminalVisualRestoreEntryInSnapshot,
@@ -3670,39 +3672,45 @@ function WorkbenchShell({
       // by live instrumentation: a just-computed pane activation (preview-tab
       // open, or a terminal-tab click) was computed correctly, then wiped by
       // this effect moments later because its own surface kind's pane order
-      // was invisible to this revalidation's group.panes reconstruction.
-      const mergedOrderForRoot: WorkbenchPaneOrder = Object.fromEntries(
-        groupsForRoot.map((group) => [
-          group.id,
-          [
-            ...(orderForRoot[group.id] ?? []),
-            ...(readOnlyFilePaneOrderByGroup[group.id] ?? []).filter(
-              (paneId) => liveReadOnlyPaneIds.has(paneId),
-            ),
-            ...(terminalPaneOrderByGroup[group.id] ?? []).filter((paneId) =>
-              liveTerminalPaneIds.has(paneId),
-            ),
-          ],
-        ]),
-      );
+      // was invisible to this revalidation's group.panes reconstruction. The
+      // merge itself is delegated to `mergeReadOnlyAndTerminalPaneOrder` (a
+      // pure function extracted for unit testing, mirroring
+      // `revalidateWorkbenchLayoutForRoot` below).
+      const mergedOrderForRoot: WorkbenchPaneOrder =
+        mergeReadOnlyAndTerminalPaneOrder(
+          groupsForRoot,
+          orderForRoot,
+          readOnlyFilePaneOrderByGroup,
+          liveReadOnlyPaneIds,
+          terminalPaneOrderByGroup,
+          liveTerminalPaneIds,
+        );
       // CONTRACT: `prunedOrder` here only depends on group/order/live-id
       // inputs already closed over from this render, so it is safe to read
-      // from this render's closure. `reconciledActivePane`, however, is
-      // derived from `activePaneByGroup` (this root's active-pane map) — and
-      // that map can legitimately change between this render committing and
-      // this effect's passive callback flushing (e.g. a user's terminal-tab
-      // click fires a separate, closer-to-the-event `setActivePaneByRoot`
-      // call in that same window). Computing `reconciledActivePane` from the
-      // render-time closure here and then unconditionally writing it back
-      // below would silently clobber that fresher click-driven update with
-      // a stale one — confirmed by live instrumentation (see
+      // from this render's closure — every code path that makes a pane
+      // active also appends it to its order map in the same synchronous
+      // batch (e.g. `openReadOnlyFile` appends to
+      // `readOnlyFilePaneOrderByGroup` before requesting focus; terminal
+      // creation adds to `terminalPaneOrderByGroup` before focusing), so the
+      // render whose closure sees a fresh active-pane id also sees that id
+      // already present in `mergedOrderForRoot`. `reconciledActivePane`,
+      // however, is derived from `activePaneByGroup` (this root's
+      // active-pane map) directly, with no such same-batch-order guarantee —
+      // a user action (e.g. a terminal-tab click) can write a fresher
+      // `activePaneByRoot` update in the same window this effect's render-time
+      // closure predates. Computing `reconciledActivePane` from that
+      // render-time closure here and unconditionally writing it back below
+      // would silently clobber the fresher update with a stale one —
+      // confirmed by live instrumentation (see
       // 260707-bug-dashboard-e2e-multi-root-locator-leakage Phase 2: a
       // single `[diag-revalidate-change]` write reverted a just-applied
       // terminal-tab selection because `preferred` — read fresh inside the
       // `setActivePaneByRoot` updater below — already reflected the click,
       // while the outer `reconciledActivePane` did not). Fixed by deferring
-      // the reconcile computation itself into the updater, so both reads
-      // come from the same, truly-current state.
+      // the reconcile computation itself into the updater, so the
+      // active-pane read (`preferred`) is always truly current at the moment
+      // it's compared/written, instead of racing a stale render-time closure
+      // of the same state.
       const { prunedOrder } = revalidateWorkbenchLayoutForRoot(
         groupsForRoot,
         mergedOrderForRoot,
@@ -4568,6 +4576,20 @@ function WorkbenchShell({
   // effect) means the *first* render that includes the new pane already
   // reflects the correct active id, so `syncPanels`'s first pass creates the
   // panel active directly — no deferred `setActive()` call, no race.
+  //
+  // INVARIANT: this memo's "already handled" guard (comparing
+  // `focusedReadOnlyRequest.current` against the request's `sequence`) is
+  // only re-evaluated when a dependency changes. It relies on `editorGroups`
+  // being a fresh array reference on every render — true today because
+  // `editorGroups` (below, via `buildEditorGroupsForRoot`) is a plain inline
+  // expression, not itself memoized. If `editorGroups` is ever wrapped in its
+  // own `useMemo`, this memo could return a stale cached `{groupId, paneId}`
+  // on renders where nothing else changed, and `effectiveActivePaneByGroup`
+  // would re-force the preview pane active — clobbering a user's subsequent
+  // same-group tab switch (e.g. clicking back to the pinned sibling pane).
+  // Any future memoization of `editorGroups` must add an explicit dependency
+  // here that changes exactly when a *new* activation request is handled
+  // (not merely when `editorGroups`' content is unchanged).
   const pendingReadOnlyActivation = useMemo(() => {
     if (
       !activeReadOnlyFilePaneRequest ||
@@ -7117,19 +7139,6 @@ function removePaneFromOrder(
     Object.entries(orderByGroup).map(([groupId, paneIds]) => [
       groupId,
       paneIds.filter((candidate) => candidate !== paneId),
-    ]),
-  );
-}
-
-function removePanesFromOrder(
-  orderByGroup: WorkbenchPaneOrder,
-  paneIds: readonly string[],
-): WorkbenchPaneOrder {
-  const paneIdSet = new Set(paneIds);
-  return Object.fromEntries(
-    Object.entries(orderByGroup).map(([groupId, orderedPaneIds]) => [
-      groupId,
-      orderedPaneIds.filter((paneId) => !paneIdSet.has(paneId)),
     ]),
   );
 }

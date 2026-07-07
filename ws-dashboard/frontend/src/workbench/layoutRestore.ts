@@ -190,6 +190,70 @@ export function revalidateWorkbenchLayoutForRoot(
   return { prunedOrder, reconciledActivePane };
 }
 
+// CONTRACT: pure pane-order-merge transformation extracted out of
+// `WorkbenchShell`'s revalidation effect in App.tsx (Phase 2 review
+// Test-partition finding,
+// 260707-bug-dashboard-e2e-multi-root-locator-leakage), mirroring
+// `revalidateWorkbenchLayoutForRoot` above and `mergeWorkbenchLayoutRestoreEntries`
+// (Phase 7) below.
+//
+// `orderForRoot` (the caller's `paneOrderByRoot[rootKey]`) only tracks
+// agent/activity pane order for a root; a dockview group can also host
+// readonly-file panes and terminal panes, whose order lives separately in the
+// flat, cross-root `readOnlyFilePaneOrderByGroup` / `terminalPaneOrderByGroup`
+// maps. Without merging those in, a group whose live panes are only
+// readonly-file/terminal panes looks pane-less to
+// `revalidateWorkbenchLayoutForRoot`, and `reconcileActiveWorkbenchPanes`
+// drops that group's active-pane entry entirely (the actual mechanism behind
+// the ticket's Phase 2 bug). Each source is filtered to its own live-id set
+// before merging so a stale/closed readonly or terminal pane id already
+// sitting in one of the flat order maps is never resurrected into a live
+// group's pane list.
+export function mergeReadOnlyAndTerminalPaneOrder(
+  groups: ReadonlyArray<{ id: string }>,
+  orderForRoot: WorkbenchPaneOrder,
+  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
+  liveReadOnlyPaneIds: ReadonlySet<string>,
+  terminalPaneOrderByGroup: WorkbenchPaneOrder,
+  liveTerminalPaneIds: ReadonlySet<string>,
+): WorkbenchPaneOrder {
+  return Object.fromEntries(
+    groups.map((group) => [
+      group.id,
+      [
+        ...(orderForRoot[group.id] ?? []),
+        ...(readOnlyFilePaneOrderByGroup[group.id] ?? []).filter((paneId) =>
+          liveReadOnlyPaneIds.has(paneId),
+        ),
+        ...(terminalPaneOrderByGroup[group.id] ?? []).filter((paneId) =>
+          liveTerminalPaneIds.has(paneId),
+        ),
+      ],
+    ]),
+  );
+}
+
+// CONTRACT: pure helper, moved here from App.tsx (Phase 2 review
+// Test-partition finding) so it is unit-testable alongside the other
+// pane-order transformations in this file. Drops every pane id in `paneIds`
+// from every group's order — used both by the revalidation effect's
+// persisted `paneOrderByRoot` write (which must stay agnostic to
+// readonly-file/terminal pane order, owned separately by the maps above) and
+// by call sites elsewhere in App.tsx that need to drop a closed/removed pane
+// id from every group at once.
+export function removePanesFromOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneIds: readonly string[],
+): WorkbenchPaneOrder {
+  const paneIdSet = new Set(paneIds);
+  return Object.fromEntries(
+    Object.entries(orderByGroup).map(([groupId, orderedPaneIds]) => [
+      groupId,
+      orderedPaneIds.filter((paneId) => !paneIdSet.has(paneId)),
+    ]),
+  );
+}
+
 // CONTRACT: pure merge/clobber-fix transformation extracted out of
 // `WorkbenchShell`'s layout save effect in App.tsx (Phase 7 review
 // Test-partition finding), mirroring `revalidateWorkbenchLayoutForRoot`
