@@ -35,7 +35,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
             "No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict.",
             text,
         )
-        self.assertIn("Wait for user approval before merge or another implementation slice.", text)
+        self.assertIn(
+            "Wait for user approval before merge or another implementation slice, unless the resolved verdict's merge confirm is `skip`, in which case proceed with that merge without asking.",
+            text,
+        )
         self.assertIn("### Implementer spawn prompt", text)
         self.assertIn("### Reviewer table", text)
         self.assertNotIn("## Implementation Verdict", text)
