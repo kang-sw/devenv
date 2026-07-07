@@ -45,7 +45,7 @@ Review
 6. Call `{{.McpNamespace}}/enter.implement` with `session_key`, `target`, `facts`, `policy`, and `format: "json"`.
 
 Policy rules:
-- Set `policy.branch.merge_target` only when already on `implement/*` or the user names it.
+- Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.
 - Set `policy.branch.allow_rename=yes` only when the caller accepts pre-edit branch rename.
 
 `explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
@@ -90,8 +90,8 @@ Run after a confirmed merge to reduce branch accumulation.
 
 1. Verify the implementation branch is a strict ancestor of the merge target: `git merge-base --is-ancestor <branch> <target>`.
 2. Skip deletion and report retained when any of the following hold: the branch is currently checked out, it is linked to an active worktree, the merge target was ambiguous, or the branch has commits not reachable from the merge target.
-3. If no skip condition holds, ask the user whether to delete the branch.
-4. Delete only on explicit user approval: `git branch -d <branch>`.
+3. If no skip condition holds and the branch name matches `impl/*`, delete without asking: `git branch -d <branch>`.
+4. Otherwise (no skip condition held but the branch does not match `impl/*`, including legacy `implement/*`), ask the user whether to delete the branch, and delete only on explicit user approval: `git branch -d <branch>`.
 5. Report each retained branch with its skip reason so cleanup debt stays visible.
 
 ## Templates
