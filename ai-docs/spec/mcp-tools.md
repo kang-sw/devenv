@@ -737,8 +737,8 @@ one staged change set, and the tool never commits. {#260620-ticket-close-tool}
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
 Upward moves stamp or validate the ticket's per-stage sage-review posture from
 the resolved `sage_review` config: `skipped` for `off`, empty, or unset;
-`recommended` for `ask`; and `required` for `auto` (see
-{#260624-sage-review-gate} for the two-field, per-category contract). A move
+`recommended` for `ask`; and `required` for `auto` (see the Sage Review Gate
+section below for the two-field, per-category contract). A move
 into `todo/` may leave `recommended` or `required` as the visible unresolved
 posture on the fields the ticket's category requires. A move into `ready/`
 requires each required field to hold a resolved terminal posture (`completed`
