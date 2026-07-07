@@ -81,3 +81,45 @@ re-run `npm run test:browser` (`e2e/dashboard-acceptance.spec.ts`) and
 confirm both tests in the suite pass deterministically (run at least twice
 to rule out the flake the ticket's Background explicitly considered and
 ruled out for the original failure).
+
+### Result (63b3cf61) - 2026-07-07
+
+Removed the dead `PanelHeader` component and its `.panel-header` CSS
+(including the media-query combinator line, leaving `.detail-heading`
+standalone). Fixed `expectContextSurfaceHierarchy` per plan, with two
+escalation-resolved deviations from the original phase text:
+
+- Dropped the `panelHeaderMinHeight === toolbarMinHeight` equality
+  assertion entirely instead of re-pointing it, once verification showed
+  `.dv-tabs-and-actions-container` never sets `min-height` (Dockview
+  controls tab-strip height via an unset CSS var) — the invariant could
+  never have held even against a live `.panel-header`, so it wasn't a real
+  product contract to restore. Kept only the background-contrast
+  assertion, re-pointed at `tabbarBackground` vs `toolbarBackground`.
+- Extended scope, in the same file/commit, to fix `expectDockviewWorkbench`
+  (a second, unrelated stale-locator drift discovered during verification):
+  scoped its `[data-workbench-layout-owner="dockview"]` locator to
+  `[data-workbench-root-active="true"]` only, since a prior commit
+  (`c7a1f59c`) started persistently mounting one Dockview instance per open
+  work root and the bare locator broke in strict mode once 2+ roots are
+  open.
+
+Verification boundary was redefined mid-implementation (see plan
+Escalations): confirmed the suite runs cleanly past both fixed assertions
+(27.4s into a full run) with no regression, rather than requiring a fully
+green suite. Two further, pre-existing, unrelated failures were found
+deeper in the same suite (a `confirmSessionClose` locator in the same
+multi-root-leakage class, and a TOML/text language-detection mismatch) —
+deliberately not fixed here to avoid unbounded scope creep; captured
+instead in a new follow-up ticket,
+`260707-bug-dashboard-e2e-multi-root-locator-leakage`.
+
+Test-partition review: clean, no issues. Verified the two changed
+assertions are non-tautological and the `expectDockviewWorkbench` locator
+is correctly scoped by tracing it against the actual render code
+(`App.tsx#L5019-5024`, `dockviewLayout.tsx#L300`).
+
+Playwright deps (`xvfb`, `libasound2`, fonts, etc.) were installed in this
+sandbox during this session for the first time, which is what made this
+whole investigation possible — prior sessions could never run this suite
+at all.
