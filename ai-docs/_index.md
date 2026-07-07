@@ -254,6 +254,16 @@ dropped tickets live in hidden archive dirs and git history.
   gaps (consolidated in the Phase 7 Result) — closing the ticket status is
   left as a user judgment call, not an automatic consequence of all phases
   landing.
+- `260707-bug-dashboard-terminal-clears-on-tab-switch` (ready, bug) - dogfooding
+  regression found while verifying `260703` Phase 6/7: a workbench terminal
+  pane clears and collapses to `<cols> x 1` after a dockview tab switch or a
+  session/workroot round-trip; likely a resize/`fit()`/visibility-lifecycle
+  bug rather than data loss in the visual-buffer-restore snapshot itself, but
+  not yet root-caused (three candidate layers named). Single Phase 1: repro
+  both modes, root-cause, fix, and add/extend Playwright e2e coverage in
+  `dashboard-acceptance.spec.ts`. Spec addressing via `## Spec Impact`
+  (regression fix, no new contract, Contract-first: no). Sage review
+  completed (clean, no issues).
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
