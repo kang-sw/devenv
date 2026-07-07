@@ -1,6 +1,7 @@
 ---
 title: "Default-allow branch rename in lead-implement's enter.implement branch plan"
 sage-review: completed
+completed: 2026-07-07
 ---
 
 # Default-allow branch rename in lead-implement's enter.implement branch plan

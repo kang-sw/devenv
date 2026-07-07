@@ -4,6 +4,7 @@ related:
   260703-chore-bootstrap-staleness-alarm: sibling session-bootstrap warning; this ticket reuses its config-item and warning-delivery-channel pattern for a different signal (doc coverage, not template version)
   260707-feat-forge-autonomy-bootstrap-chaining: complementary same-session forge-spec to forge-mental-model chaining; this ticket is the cross-session safety net for the same forgetting risk
 sage-review: completed
+completed: 2026-07-07
 ---
 
 # Live spec/mental-model coverage warning at session-bootstrap time

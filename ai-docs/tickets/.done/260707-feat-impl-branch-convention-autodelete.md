@@ -5,6 +5,7 @@ related:
 sage-review: completed
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-07
 ---
 
 # Adopt impl/<stem> branch naming (max 15 chars) and auto-delete fully-merged impl/* branches without asking
