@@ -2,6 +2,7 @@
 title: "Playwright acceptance suite has scattered unscoped locators after multi-root-mount landed, plus an unrelated TOML/text language-detection mismatch"
 related:
   260707-bug-dashboard-e2e-panel-header-dead-code-drift: prerequisite
+sage-review: completed
 ---
 
 # Playwright acceptance suite has scattered unscoped locators after multi-root-mount landed, plus an unrelated TOML/text language-detection mismatch
@@ -54,6 +55,18 @@ list — the two issues above were observed across two runs during that
 ticket's implementation and may not be the complete set (the suite failed
 at the first-encountered issue each run and never reached the end).
 
+## Spec Impact
+
+No existing spec stem addresses this behavior. Phase 1 is a test-only fix
+(locator scoping in `e2e/dashboard-acceptance.spec.ts`); it introduces no
+caller-visible product contract change. Phase 2 (TOML/text
+language-detection mismatch) may turn out to be a real product bug fix
+(if the app's language detection is actually wrong) or a stale-fixture fix
+(if the test's expectation is wrong) — the diagnosis in Phase 2 itself
+will determine which, and if it turns out to be a genuine product-visible
+behavior change, that phase should add its own `## Spec Impact` addendum
+before landing. Spec area: none yet identified. Contract-first spec: no.
+
 ## Phases
 
 ### Phase 1: Audit and fix multi-root locator scoping across the full spec file
@@ -64,8 +77,13 @@ DOM and confirm each is scoped to the active work root
 (`[data-workbench-root-active="true"]`) where multiple work roots may be
 open simultaneously during the suite's later "git workspace overflow /
 linked worktree" test steps. Fix each unscoped locator found. Verification:
-run `npm run test:browser` to a fully green state across at least two
-consecutive runs.
+since Phase 2's TOML/text failure is a distinct, still-live issue in the
+same suite, a fully green run is not attainable until both phases land —
+re-run `npm run test:browser` twice consecutively and confirm the suite
+reaches at least as far as the TOML assertion (i.e., every multi-root
+locator-scoping failure is gone) with no new failures introduced before
+that point; a fully green two-run confirmation is deferred to after Phase
+2 also lands.
 
 ### Phase 2: Diagnose and fix the TOML/text language-detection mismatch
 
@@ -75,4 +93,8 @@ the relevant fixture file, and fix the underlying cause (or the test fixture
 if the test's expectation is itself stale). Likely independent of Phase 1;
 order between phases does not matter, but Phase 1 should land first since
 it's what currently blocks the suite from running far enough to reliably
-observe this one.
+observe this one. Verification: re-run `npm run test:browser` twice
+consecutively; once both phases have landed, confirm the full suite passes
+green on both runs. If landing this phase alone (before Phase 1), confirm
+at minimum that the TOML assertion itself now passes, even though the
+suite as a whole may still fail later on Phase 1's unfixed locators.
