@@ -3,9 +3,9 @@ title: "ws-dashboard native-Windows daemon silently drops all persisted dashboar
 related:
   260525-feat-ws-dashboard-server-scoped-operation-forwarding: blocks the ticket's stated remote-Windows-daemon dogfood gap
   260707-chore-dashboard-linked-server-tunnel-dogfood-plan: discovered during this ticket's Phase 1 reversed-topology dogfood leg
-spec:
-  - 260516-ws-web-dashboard-protected-frontend-shell
-sage-review: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review: completed
 ---
 
 # ws-dashboard native-Windows daemon silently drops all persisted dashboard state when HOME is unset
@@ -72,10 +72,11 @@ the already-settled `--bind-mode public` Host-check non-bug
 - Extend `default_state_file()` (`persistent_state.rs:478-491`) so a native
   Windows build resolves a real per-user state directory when none of
   `WS_DASHBOARD_STATE_FILE`/`WS_DASHBOARD_STATE_HOME`/`XDG_STATE_HOME`/`HOME`
-  is set — e.g. `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` via
-  `std::env::var_os("LOCALAPPDATA")`, or adopt a small
-  platform-directories crate if one is already an acceptable dependency for
-  this workspace.
+  is set — default to the plain `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json`
+  via `std::env::var_os("LOCALAPPDATA")` (no new dependency). Only reach for a
+  platform-directories crate instead if the workspace already depends on one
+  elsewhere for an equivalent purpose; otherwise the plain env-var approach is
+  the accepted default and does not need further judgment.
 - Preserve the existing fallback order and env var names for Linux/macOS;
   only add the Windows-specific branch (guarded by `cfg(windows)` or as a
   final fallback after `HOME` fails, whichever keeps the non-Windows
@@ -88,14 +89,44 @@ the already-settled `--bind-mode public` Host-check non-bug
 - Re-run `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s
   reversed-topology forwarded-operation walk (resources, root-picker,
   work-roots/open, files read/write, Git status/branches, terminal
-  create/close, terminal WebSocket relay) end to end afterward — this
-  ticket's fix is only confirmed once that full flow works against a
-  genuinely default (no env-var-override) native Windows daemon, not just
-  the isolated pin check.
+  create/close, terminal WebSocket relay) end to end afterward, **if** a real
+  native-Windows host is reachable in the implementing session. If it is not
+  (the sibling dogfood ticket already hit this exact wall: its SSH probe was
+  blocked by session tooling before any cross-machine step ran), the isolated
+  root-picker-pin repro above is sufficient to confirm the fix — do not block
+  this ticket on cross-machine access it doesn't control. Record which of the
+  two verification levels (isolated repro only, vs. full cross-machine walk)
+  was actually achieved in the Result.
 - Consider whether `DashboardStateStore` should surface a warning (e.g. a
   one-time `tracing::warn!`) when `state_file` resolves to `None`, so a
   silently-broken persistence path is at least visible in daemon logs rather
-  than indistinguishable from a working-but-idle daemon.
+  than indistinguishable from a working-but-idle daemon. If pursued, warn
+  once at construction time (e.g. in `default_local()`) rather than adding
+  per-call dedup state, since `DashboardStateStore` is currently
+  `Clone + Default` with no internal shared/mutable state — this is optional
+  ("consider"), not a requirement.
+- Add the new spec entry described in `## Spec Impact` below (Daemon
+  Foundation section, fresh stem via `ws/spec_stem.generate`) as part of this
+  phase's completion, not as a separate untracked follow-up — the fix isn't
+  done until the Windows-native fallback order is documented, not just
+  implemented.
+
+## Spec Impact
+
+No existing spec anchor addresses cross-platform state-file resolution.
+`260515-ws-web-daemon-foundation` and `260525-ws-dashboard-endpoint-linked-server-add`
+(`ai-docs/spec/ws-web-dashboard/index.md`) both describe daemon serving and
+linked-server persistence behavior in OS-neutral terms and never mention
+`HOME`, `XDG_STATE_HOME`, or a Windows-native fallback path — the current spec
+text is accurate for Linux/macOS and silent on Windows, so this bug is a real
+gap in implementation, not a documented behavior this ticket contradicts.
+
+Once fixed, add a new spec entry under the Daemon Foundation section (a fresh
+stem via `ws/spec_stem.generate`) documenting the full state-file resolution
+order including the Windows-native fallback (e.g. `LOCALAPPDATA`), so the
+existing `WS_DASHBOARD_STATE_FILE`/`WS_DASHBOARD_STATE_HOME`/`XDG_STATE_HOME`/
+`HOME` order in `persistent_state.rs:478-491` is fully documented rather than
+only discoverable from source.
 
 ## Escalations
 

@@ -240,12 +240,14 @@ dropped tickets live in hidden archive dirs and git history.
   that blocks walking the rest of that leg. Left open, not closed - see
   ticket `### Result`.
 - `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
-  (`todo`, bug) - native-Windows `ws-dashboard` daemon silently drops all
+  (`ready`, bug) - native-Windows `ws-dashboard` daemon silently drops all
   persisted state (linked servers, opened work roots, root-picker pins)
   because `default_state_file()` (`persistent_state.rs:478-491`) has no
   Windows-native fallback when `HOME` is unset (the Windows default). Found
   during `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 1
-  dogfood. Not yet sage-reviewed.
+  dogfood. Spec-addressed via `## Spec Impact` (no existing anchor covers
+  cross-platform state-file resolution; new entry to be added on fix). Sage
+  review completed.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
