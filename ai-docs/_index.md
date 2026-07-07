@@ -430,12 +430,13 @@ dropped tickets live in hidden archive dirs and git history.
   `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
   no). Sage review completed.
 - `260707-research-drain-queue-default-branch-policy` (todo, research) -
-  agenda to default the implementation branch policy to reuse+rename
-  (instead of creating a fresh `implement/<slug>` branch and separately
-  prompting for merge confirmation) when a ticket is driven end-to-end via
-  `ws:lead-drain-ready-queue` with an explicit up-front goal. Not yet
-  discussed or designed; sage-review left at `recommended` pending
-  next-session discussion.
+  three related implement-branch friction points: (1) default to
+  reuse+rename instead of a fresh branch + merge-confirmation prompt when a
+  ticket is driven end-to-end via `ws:lead-drain-ready-queue` with an
+  explicit up-front goal; (2) auto-delete implement branches after merge
+  without asking; (3) shorten the branch naming convention to
+  `impl/<stem, max 15 chars>`. Not yet discussed or designed; sage-review
+  left at `recommended` pending next-session discussion.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
