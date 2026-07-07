@@ -1300,60 +1300,6 @@ function ToggleIcon({ toggle }: { toggle: WorkbenchToggle }) {
   return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
 }
 
-function PanelHeader({
-  title,
-  state,
-  actions = [],
-  entityId = "panel",
-  onCommand,
-}: {
-  title: string;
-  state?: ViewState;
-  actions?: ActionHint[];
-  entityId?: string;
-  onCommand?: DashboardCommandDispatcher;
-}) {
-  return (
-    <div className="panel-header ws-toolbar">
-      <div className="panel-title-block">
-        <div className="panel-title">{title}</div>
-        {state ? <StateLine state={state} /> : null}
-      </div>
-      {actions.length > 0 && onCommand ? (
-        <div className="action-strip">
-          {actions.map((action) => (
-            <ChromeIconButton
-              commandId={
-                action.id === "refresh"
-                  ? "dashboard.refresh"
-                  : `resource.action.${action.id}`
-              }
-              disabled={!action.enabled}
-              icon={action.id === "refresh" ? RefreshCw : PanelsTopLeft}
-              key={action.id}
-              label={action.label}
-              onClick={() =>
-                onCommand(
-                  action.id === "refresh"
-                    ? buildDashboardRefreshCommand()
-                    : {
-                        commandId: `resource.action.${action.id}`,
-                        payload: {
-                          type: "action",
-                          label: action.label,
-                          entityId,
-                        },
-                      },
-                )
-              }
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function OpenWorkRootControl({
   server,
   onOpened,

@@ -330,17 +330,6 @@ button {
   background: var(--ws-color-panel-subtle);
 }
 
-.panel-header {
-  display: flex;
-  min-height: 56px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
-  background: var(--ws-color-surface-nav-header);
-  padding: 7px 8px 7px 12px;
-}
-
 .panel-title-block {
   min-width: 0;
 }
@@ -1436,7 +1425,6 @@ button {
 }
 
 @media (max-width: 560px) {
-  .panel-header,
   .detail-heading {
     align-items: stretch;
     flex-direction: column;

@@ -315,7 +315,9 @@ function terminalTabs(page: Page) {
 }
 
 async function expectDockviewWorkbench(page: Page) {
-  const owner = page.locator('[data-workbench-layout-owner="dockview"]');
+  const owner = page.locator(
+    '[data-workbench-root-active="true"] [data-workbench-layout-owner="dockview"]',
+  );
   await expect(owner).toBeVisible();
   // CONTRACT: The visible workbench must be backed by Dockview, not the retired
   // custom `.workbench-splits > .workbench-group` tab/split shell.
@@ -332,7 +334,6 @@ async function expectContextSurfaceHierarchy(page: Page) {
     const workbenchStyle = getComputedStyle(
       document.querySelector(".shell-panel-workbench")!,
     );
-    const panelHeaderStyle = getComputedStyle(document.querySelector(".panel-header")!);
     const toolbarStyle = getComputedStyle(document.querySelector(".workbench-toolbar")!);
     const fileExplorerStyle = getComputedStyle(document.querySelector(".file-explorer")!);
     const fileExplorerHeaderStyle = getComputedStyle(
@@ -351,10 +352,7 @@ async function expectContextSurfaceHierarchy(page: Page) {
     return {
       navBackground: navStyle.backgroundColor,
       workbenchBackground: workbenchStyle.backgroundColor,
-      panelHeaderBackground: panelHeaderStyle.backgroundColor,
-      panelHeaderMinHeight: panelHeaderStyle.minHeight,
       toolbarBackground: toolbarStyle.backgroundColor,
-      toolbarMinHeight: toolbarStyle.minHeight,
       toolbarDivider: toolbarStyle.borderBottomColor,
       fileExplorerBackground: fileExplorerStyle.backgroundColor,
       fileExplorerHeaderBackground: fileExplorerHeaderStyle.backgroundColor,
@@ -377,8 +375,7 @@ async function expectContextSurfaceHierarchy(page: Page) {
   });
 
   expect(hierarchy.navBackground).not.toBe(hierarchy.workbenchBackground);
-  expect(hierarchy.panelHeaderBackground).not.toBe(hierarchy.toolbarBackground);
-  expect(hierarchy.panelHeaderMinHeight).toBe(hierarchy.toolbarMinHeight);
+  expect(hierarchy.tabbarBackground).not.toBe(hierarchy.toolbarBackground);
   expect(hierarchy.fileExplorerBackground).not.toBe(hierarchy.navBackground);
   expect(hierarchy.fileExplorerHeaderBackground).not.toBe(
     hierarchy.fileExplorerBackground,
