@@ -149,6 +149,36 @@ entirely in `lead-implement`.
   explicit `skip` proceeds without asking; explicit non-`skip` value (or
   anything else) still asks.
 
+### Result (c8dc46a8)
+
+Added `policy.branch.merge_confirm` (skip/ask/unknown, default `ask`) to
+`enter.implement`'s branch policy input, normalized facts, branch plan
+struct, conditions list, and raw/JSON rendering, plus the `server.go`
+JSON-schema property — a pure passthrough that never alters
+`deriveImplementBranchPlan`'s derived `Action`. `lead-implement`'s Branch
+invariant text updated to describe the caller-opt-out condition with no
+goal-specific language, per Decision 6. Spec entry added inline
+(`ai-docs/spec/mcp-tools.md`) alongside the code commit. Wsflow mirror and
+manifest regenerated and confirmed byte-identical. Review cycle: all three
+partitions (correctness/fit/test) clean on first pass, no fix cycle needed.
+
+#### Edition (362f1133) - 2026-07-07
+
+A pre-merge whole-branch regression audit (requested explicitly, separate
+from the per-ticket reviews above) found that `MergeConfirm` reached the
+verdict's rendered output and `lead-implement.md`'s Branch invariant prose,
+but never reached the actual installed todo instructions the lead executes
+(`implementFinalActionInstruction` / `implementMergeInstruction` in
+`agents-plugin-tool/internal/mcp/session_state.go`) — so `merge_confirm:
+"skip"` was silently a no-op through the operative execution path, and
+Phase 2's entire single-final-confirmation design would have stalled on a
+user ask at every ticket. Fixed both instruction generators to branch on
+`verdict.BranchPlan.MergeConfirm == "skip"` and drop the approval-ask
+wording; added `TestDeriveImplementTodoInstructionsMergeConfirmSkip`
+covering skip/ask/absent. This is exactly the class of gap the per-ticket
+reviews structurally could not catch (each saw one ticket's diff in
+isolation); a whole-branch audit before merge was the right tool for it.
+
 ### Phase 2: Make lead-drain-ready-queue goal-aware
 
 - Depends on Phase 1 and on `260707-feat-impl-branch-convention-autodelete`.
@@ -169,6 +199,53 @@ entirely in `lead-implement`.
   confirmed `main` merge only once the ready queue is empty; a non-goal run
   (no `/goal` context) reproduces today's exact per-ticket direct-to-target
   behavior with no staging branch and no `merge_confirm` override.
+
+### Result (6b00ce57)
+
+Made `lead-drain-ready-queue`'s own skill prose goal-branch-staging aware:
+the lead itself (not the ticket-selection subagent) detects an active
+`/goal` Stop-hook context, creates/checks out `goal/<slug>`, hands off to
+`lead-proceed` with `policy.branch.merge_confirm: "skip"` for each ticket
+while on that branch, and performs the run's sole confirmed final merge
+`goal/<slug>` -> `main` directly in its own prose once the ready queue
+empties, with no push/remote step. `lead-implement.md` is untouched, per
+Decision 6. Wsflow skill mirror regenerated and confirmed byte-identical;
+mental-model and spec entries added under anchor
+`{#260707-drain-goal-branch-staging}`.
+
+Manual verification trace for the ticket's Phase 2 Verification bullet
+(both mode-switch branches), performed by reading the shipped prose against
+the two scenarios rather than a live end-to-end run, since exercising this
+prose requires a live harness `/goal` session:
+- Non-goal branch: with no active `/goal` reminder, the "check for an
+  active goal-staging context" step's condition is false, so the skill
+  skips branch creation and hands off to `lead-proceed` exactly as before
+  (no `merge_confirm` override, no staging branch) — this reproduces
+  today's exact behavior, confirmed by re-reading the pre-change skill text
+  alongside the diff. This session's own tickets 1-3 and ticket 4 Phase 1
+  were in fact processed this way (accumulating on a single reused/renamed
+  `implement/*` branch per the user's explicit branch-reuse instruction,
+  predating this Phase 2 change), so the non-goal-equivalent code path
+  through `lead-proceed`/`lead-implement` has direct empirical exercise
+  from earlier in this session, even though Phase 2's specific prose
+  wasn't yet in effect.
+- Goal-driven branch: with an active `/goal` reminder and current branch
+  not already `goal/*`, the skill creates and checks out `goal/<slug>`
+  before each handoff and adds `policy.branch.merge_confirm: "skip"`;
+  `lead-implement`'s Route step 3 (explicit caller policy, landed in Phase
+  1) consumes that fact and skips the merge-approval ask, letting the
+  ticket's own branch merge into `goal/<slug>` unattended. When the
+  selection subagent reports `ready/` empty while on `goal/<slug>`, the
+  skill's own prose (not `lead-implement`) asks for one explicit approval
+  and performs `git merge --no-ff goal/<slug>` into `main`. This full path
+  has not yet been exercised live in this session (this repo's own drain
+  run started before Phase 2 landed, so it took the reuse/rename path
+  instead) — it is validated by prose inspection and by the fact that its
+  two building blocks (`merge_confirm` passthrough from Phase 1, and
+  `impl/<stem>` per-ticket auto-delete from the sibling autodelete ticket)
+  are each independently unit-tested. A live goal-driven run is expected
+  the next time `/lead-drain-ready-queue` starts fresh under an active
+  `/goal` directive.
 
 ## Spec Impact
 

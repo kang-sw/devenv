@@ -97,6 +97,20 @@ placeholder files.
   suppressed when the mute item is `off`, and that `config.tuning`/
   `ws:lead-tune` lists and can set the new item.
 
+### Result (ff7df4b7)
+
+Added a live, stateless doc-coverage check at `ferrule`/`workflow_manual`
+bootstrap time, reusing `260703-chore-bootstrap-staleness-alarm`'s
+warning-computer/injector plumbing shape and a new combined
+`config.doc_coverage_alarm` mute item (builtin default `on`). New
+`wsdoc.SpecAreaHasFrontmatterFile`/`MentalModelAreaHasFrontmatterFile`
+helpers reuse the existing frontmatter parser. `runtime.json` golden-list
+entries added to both `agents-plugin` and `agents-plugin-wsflow` trees.
+Spec section added inline (`ai-docs/spec/mcp-tools.md`
+`#260707-doc-coverage-warning`). Review cycle 1: correctness/fit clean;
+test flagged a branch-coverage gap (single-area-missing switch arms
+untested), fixed and re-reviewed clean.
+
 ## Spec Impact
 
 New caller-visible session-bootstrap behavior (a warning surfaced to the

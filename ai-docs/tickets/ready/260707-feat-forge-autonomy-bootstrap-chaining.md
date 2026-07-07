@@ -98,6 +98,21 @@ genuinely ambiguous behavior and confirm (a) no per-item prompt blocks
 execution, (b) the resulting spec entry carries the `<!-- AMBIGUOUS: ... -->`
 marker, and (c) the marker's content appears in the final summary report.
 
+### Result (005e9c83)
+
+Rewrote the "User classification loop" into a "Classification pass" that
+decides caller-visibility and implemented/planned status autonomously,
+embedding an inline `<!-- AMBIGUOUS: <reason> -->` marker next to the
+affected spec entry for genuinely ambiguous items and collecting them into
+the wrap-up summary report. Archive gate and once-per-run domain-list
+confirmation are untouched. Doctrine paragraph updated to match. Spec entry
+added (`ai-docs/spec/workflow-skills.md`, anchor
+`{#260707-forge-spec-autoproceed-classification-2}`); incidentally fixed a
+pre-existing duplicate-anchor `spec_index.verify` failure introduced earlier
+this session by a cross-reference that re-emitted an anchor tag instead of
+plain prose. Wsflow rsrc mirror and manifest regenerated and confirmed
+byte-identical. Single review: clean on first pass, no fix cycle needed.
+
 ### Phase 2: lead-forge-spec wrap-up chaining into lead-forge-mental-model
 
 Extend `lead-forge-spec`'s wrap-up ("Suggested next steps",
@@ -112,6 +127,30 @@ Verification: run `lead-forge-spec` to completion via at least two different
 entry paths (direct standalone invocation, and via `lead-bootstrap`'s
 fresh-install suggestion) and confirm the chaining prompt appears after both,
 and that a yes answer actually invokes `lead-forge-mental-model`.
+
+### Result (267abae9)
+
+Added a "Chain into lead-forge-mental-model" wrap-up step to
+`lead-forge-spec`: asks the user whether to run `lead-forge-mental-model`
+next, and invokes it via `{{.McpNamespace}}/playbook.print` on a yes
+answer, uniformly regardless of entry path (standalone invocation,
+`lead-bootstrap`'s fresh-install suggestion, or the index-health-check
+routing table). `lead-bootstrap` itself is unchanged, per Decision 6's
+call/return-plumbing rationale. "Suggested next steps" renumbered
+accordingly. Spec entry added
+(`{#260707-forge-spec-mental-model-chaining}`). Wsflow rsrc mirror and
+manifest regenerated and confirmed byte-identical. Single review: clean on
+first pass, no fix cycle needed.
+
+Verification note (prose-only skill change, no unit-testable interface, same
+class of gap as `260707-feat-drain-goal-branch-staging` Phase 2): the
+ticket's Verification bullet calls for exercising two live entry paths
+end-to-end. This has not been live-exercised this session — validated
+instead by direct prose inspection confirming the new step's ask/invoke
+wording is entry-path-agnostic (it does not branch on how `lead-forge-spec`
+was reached), matching the review's explicit confirmation of this property.
+A live run through both entry paths is expected the next time
+`lead-forge-spec` completes a real domain survey.
 
 ## Spec Impact
 

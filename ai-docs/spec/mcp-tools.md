@@ -237,8 +237,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   text|json`. MCP observes Git branch state from the session root, including the
   current branch, HEAD/start commit, target branch existence, and
   upstream/tracking ambiguity; callers provide only policy that cannot be
-  observed mechanically, such as a merge target while already on `implement/*`
-  and whether safe branch rename is allowed. The resolver derives
+  observed mechanically, such as a merge target while already on an
+  implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
+  branch rename is allowed; branch rename defaults to allowed unless the
+  caller explicitly withholds consent (`policy.branch.allow_rename: no`); and
+  whether the caller's own merge-approval ask may be skipped for this merge;
+  merge confirmation defaults to asking unless the caller explicitly passes
+  `policy.branch.merge_confirm: skip`. The
+  resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and
@@ -261,12 +267,17 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   what policy or branch condition needs correction before source edits continue
   without naming unreachable planner or implementer actions. When a caller
   supplies `policy.branch.merge_target` outside its applicability window (the
-  observed current branch is not already `implement/*`, so the branch action
-  is `create`), the verdict adds a one-line warning naming the supplied value
-  and the branch it was derived from instead, e.g. `policy.branch.merge_target
-  "master" ignored (not on an implement/* branch); derived from current branch
-  "test/wsflow-smoke"`, so a caller unfamiliar with the applicability rule sees
-  that the field was read and deliberately not applied.
+  observed current branch is not already an implementation branch, i.e. not
+  prefixed `impl/` or legacy `implement/`, so the branch action is `create`),
+  the verdict adds a one-line warning naming the supplied value and the branch
+  it was derived from instead, e.g. `policy.branch.merge_target "master"
+  ignored (not on an implementation branch: impl/*, or legacy implement/*);
+  derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
+  the applicability rule sees that the field was read and deliberately not
+  applied. Fresh implementation branches are created under the `impl/<stem>`
+  convention, with `<stem>` hard-truncated to 15 characters (trailing `-`
+  trimmed); legacy `implement/<scope-slug>` branches already in progress are
+  still recognized as implementation branches for continue/rename purposes.
 - `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
@@ -444,6 +455,33 @@ against.
 Changing `lead-bootstrap`'s own upgrade/migration procedure is out of scope for
 this warning; it only detects and reports staleness.
 
+### Doc Coverage Warning {#260707-doc-coverage-warning}
+
+`ferrule` and `workflow_manual` (FRESH-with-root and CONTINUE branches only)
+each surface a one-line warning when the project's `ai-docs/spec/` or
+`ai-docs/mental-model/` directory has no `.md` file carrying a parsed YAML
+frontmatter block. The check is live and stateless: it re-scans both
+directories on every call rather than reading a stored coverage flag. The
+`workflow_manual` FRESH-without-root branch (no established root yet) never
+checks or warns, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+The check is silent by design in two cases: the `doc_coverage_alarm` config
+item (see Config Tools) resolves to `off`; or both `ai-docs/spec/` and
+`ai-docs/mental-model/` already contain at least one frontmatter-bearing `.md`
+file. A missing directory counts as uncovered, not an error — fresh projects
+legitimately lack these directories before `lead-forge-spec`/
+`lead-forge-mental-model` has run. When the warning does fire, its text names
+which area(s) are missing coverage and instructs the caller to run
+`config.doc_coverage_alarm(value: "off")` to silence it permanently. The
+warning fires on every `ferrule`/`workflow_manual` call while uncovered —
+there is no once-per-session suppression state, mirroring
+`#260703-bootstrap-staleness-warning`.
+
+Whether a project's spec/mental-model authoring is otherwise complete is out
+of scope for this warning; it only detects the presence-of-any-frontmatter-file
+floor.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
@@ -489,6 +527,14 @@ scope (global-only, mirroring `config.workflow_prefer_subagent`), and accepts
 the same mutually-exclusive `reset: true` alternative to `value` with
 identical unset-to-builtin semantics.
 
+`config.doc_coverage_alarm(session_key, value: "on"|"off")` sets the global
+`"doc_coverage_alarm"` item, whose builtin default is `on`; it gates the doc
+coverage warning (`#260707-doc-coverage-warning`). It requires a lead session
+key for authority, always writes the global config scope (global-only,
+mirroring `config.bootstrap_alarm`), and accepts the same mutually-exclusive
+`reset: true` alternative to `value` with identical unset-to-builtin
+semantics.
+
 ## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
@@ -503,8 +549,8 @@ descriptions from the existing MCP writer tool schema where possible. Prompt
 override entries derive their point ids from the same shipped override-marker
 scan used by `config.prompt`; model-tier entries derive their fields from
 `config.agents_tier`; workflow-preference entries derive their values from
-`config.workflow_prefer_subagent`, `config.workflow_prefer_mercenary`, and
-`config.bootstrap_alarm`.
+`config.workflow_prefer_subagent`, `config.workflow_prefer_mercenary`,
+`config.bootstrap_alarm`, and `config.doc_coverage_alarm`.
 The shipped `DelegationSection` override marker is removed, so
 `prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
 discovery; orphaned stored prompt keys remain ignored.

@@ -593,8 +593,15 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
+	skipConfirm := strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip")
 	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
+		if skipConfirm {
+			return fmt.Sprintf("Verify source, tests, review disposition, and skipped documentation policy, then proceed to merge without asking for approval (caller merge confirm is skip): %s.", firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
+		}
 		return fmt.Sprintf("Verify source, tests, review disposition, and skipped documentation policy before asking for final action approval: %s.", firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
+	}
+	if skipConfirm {
+		return "Verify source, tests, review disposition, and standard documentation closeout, then proceed to merge without asking for approval (caller merge confirm is skip)."
 	}
 	return "Verify source, tests, review disposition, and standard documentation closeout before asking for final action approval."
 }
@@ -602,6 +609,9 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 func implementMergeInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not merge while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
+	}
+	if strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip") {
+		return "Caller merge confirm is skip: perform the selected final action against the verdict merge target without asking for user approval, and preserve the workflow-owned merge record."
 	}
 	return "After user approval, perform the selected final action against the verdict merge target and preserve the workflow-owned merge record."
 }
@@ -982,7 +992,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 		}
 		normalized, _ := normalizeImplementFacts(input)
-		targetBranch := "implement/" + normalized.ScopeSlug
+		targetBranch := implementTargetBranchName(normalized.ScopeSlug)
 		obs, err := observeImplementBranch(record.Root, targetBranch)
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))

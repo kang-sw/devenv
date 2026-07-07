@@ -443,6 +443,35 @@ inlined as static text directly in
 into `agents-plugin-wsflow`.
 {#260703-drain-ready-queue-skill}
 
+`lead-drain-ready-queue` adds goal-branch staging on top of the base
+single-cycle shim above, activated only when the lead itself observes both
+an active `/goal` Stop-hook reminder in the current turn and a current
+branch that is not already `goal/*`; the ticket-selection subagent stays
+unaware of this and is not asked to detect it. When active, the lead
+derives a branch-safe slug from the goal text and creates/checks out
+`goal/<slug>` with plain `git` commands before dispatching the selected
+ticket, then hands off to `lead-proceed` with `policy.branch.merge_confirm:
+"skip"` supplied as explicit caller policy — `lead-implement`'s existing
+Route step 3 ("explicit caller policy") consumes this without any
+goal-specific change on that side, and no `merge_target` override is
+needed since the create-path already derives the merge target from the
+checked-out branch. Each ticket still gets its own `impl/<stem>` branch,
+merged into `goal/<slug>` without an approval ask and auto-deleted per the
+Branch Cleanup naming-gate behavior (see the `impl/<stem>`-branch section
+above). When the selection subagent
+reports `ready/` empty while the current branch is `goal/<slug>`, the
+skill performs the run's one confirmed final merge itself in its own
+prose — ask the user for explicit approval, then `git merge --no-ff
+goal/<slug>` into `main` — rather than routing through
+`lead-proceed`/`lead-implement`, because `enter.implement` requires a
+ticket target this ticket-less step has none of. This override never
+extends to push or remote actions for either the per-ticket or the final
+merge. Outside an active `/goal` context, or once off a `goal/*` branch,
+the skill reproduces the pre-staging behavior exactly: no branch creation,
+no `merge_confirm` override, and no new persisted state — "currently
+checked out on `goal/<slug>`" is the entire signal.
+{#260707-drain-goal-branch-staging}
+
 `lead-verify-design` gives users a premise-gated design verification checkpoint
 for discussed designs. It first runs discussion verification so false or blocker
 premises do not seed the review, then writes a neutral temporary brief that
@@ -630,6 +659,24 @@ deployable and independently revertible target-history units. A branch that is
 one logical change with noisy or dependent commits squashes.
 {#260523-implement-doc-closeout-compaction}
 
+After a confirmed merge, `lead-implement` runs a Branch Cleanup step to reduce
+implementation-branch accumulation. It first verifies the implementation
+branch is a strict ancestor of the merge target
+(`git merge-base --is-ancestor`); it retains the branch and reports the skip
+reason without deleting when the branch is currently checked out, linked to
+an active worktree, the merge target was ambiguous, or the branch has commits
+unreachable from the merge target. When none of those conditions hold, the
+branch's naming convention gates the remaining flow: a branch named
+`impl/<stem>` (the convention `lead-implement` uses for branches it creates,
+`<stem>` hard-truncated to 15 characters with a trailing `-` trimmed) is
+deleted without asking. A branch under any other name — including the legacy
+`implement/<scope-slug>` convention — keeps the ask-first flow: the user is
+asked before `git branch -d` runs, and the branch is retained if not
+approved. The naming convention is a trust boundary, not a security
+boundary — a hand-created `impl/*` branch this tooling did not produce would
+also qualify for auto-delete once its structural guardrails pass.
+{#260707-implement-branch-cleanup-naming-gate}
+
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
 handles removed spec stems, verifies the spec index, and commits the spec pass.
@@ -802,9 +849,20 @@ force or suppress the subagent inference step.
 `lead-forge-spec` reconstructs spec documents from scratch. It archives stale
 current specs under `ai-docs/.old/spec/` after user confirmation, surveys
 source, tickets, archived specs, and commit history, asks the user to confirm
-behavioral domains and caller-visible classifications, writes anchor-keyed spec
-entries, verifies the index, and associates planned stems with active tickets
-when required.
+the once-per-run behavioral domain list, then classifies per-item
+caller-visibility and implemented/planned status autonomously - ambiguous
+calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
+into the wrap-up summary rather than blocking on a per-item confirmation -
+writes anchor-keyed spec entries, verifies the index, and associates planned
+stems with active tickets when required.
+{#260707-forge-spec-autoproceed-classification-2}
+
+At wrap-up, `lead-forge-spec` asks whether to run `lead-forge-mental-model`
+next and invokes it on a yes answer, regardless of how the run was reached
+(standalone invocation, `lead-bootstrap`'s fresh-install suggestion, or the
+index-health-check routing table). This only covers the same-session case;
+`lead-bootstrap` itself is not otherwise changed.
+{#260707-forge-spec-mental-model-chaining}
 
 `lead-forge-mental-model` reconstructs mental-model documents from scratch. It
 surveys operational domains, asks the user to confirm the domain set, writes

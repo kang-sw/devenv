@@ -63,8 +63,9 @@ type implementPolicyInput struct {
 }
 
 type implementBranchPolicyInput struct {
-	MergeTarget factString `json:"merge_target,omitempty"`
-	AllowRename factString `json:"allow_rename,omitempty"`
+	MergeTarget  factString `json:"merge_target,omitempty"`
+	AllowRename  factString `json:"allow_rename,omitempty"`
+	MergeConfirm factString `json:"merge_confirm,omitempty"`
 }
 
 type implementReviewPolicyInput struct {
@@ -112,6 +113,7 @@ type implementBranchPlan struct {
 	CurrentBranch string   `json:"current_branch"`
 	TargetBranch  string   `json:"target_branch,omitempty"`
 	MergeTarget   string   `json:"merge_target,omitempty"`
+	MergeConfirm  string   `json:"merge_confirm,omitempty"`
 	StartCommit   string   `json:"start_commit,omitempty"`
 	Reason        string   `json:"reason"`
 	Warnings      []string `json:"warnings"`
@@ -163,6 +165,7 @@ type normalizedImplementFacts struct {
 	DocReason                 string
 	MergeTargetPolicy         string
 	AllowRename               string
+	MergeConfirmPolicy        string
 	ScopeSlug                 string
 }
 
@@ -373,6 +376,9 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 		if out.Branch.AllowRename, err = parseEnumFact(gm, "allow_rename", []string{"yes", "no", "unknown"}); err != nil {
 			return out, fmt.Errorf("policy.branch.%w", err)
 		}
+		if out.Branch.MergeConfirm, err = parseEnumFact(gm, "merge_confirm", []string{"skip", "ask", "unknown"}); err != nil {
+			return out, fmt.Errorf("policy.branch.%w", err)
+		}
 	}
 	if group, ok := m["review"]; ok && group != nil {
 		gm, ok := group.(map[string]any)
@@ -434,7 +440,7 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 	branchPlan := deriveImplementBranchPlan(n, obs)
 	warnings = append(warnings, branchPlan.Warnings...)
 	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
-		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implement/* branch); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
+		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
 	}
 	delegation := deriveImplementDelegation(n)
 	planDepth := deriveImplementPlanDepth(n, delegation)
@@ -507,7 +513,8 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		DocModePolicy:             factOr(policy.Docs.Mode, "standard"),
 		DocReason:                 strings.TrimSpace(policy.Docs.Reason.Value),
 		MergeTargetPolicy:         strings.TrimSpace(policy.Branch.MergeTarget.Value),
-		AllowRename:               factOr(policy.Branch.AllowRename, "unknown"),
+		AllowRename:               factOr(policy.Branch.AllowRename, "yes"),
+		MergeConfirmPolicy:        factOr(policy.Branch.MergeConfirm, "ask"),
 		ScopeSlug:                 strings.TrimSpace(input.Target.ScopeSlug),
 	}
 	if n.ScopeSlug == "" {
@@ -597,15 +604,30 @@ func deriveImplementDocMode(n normalizedImplementFacts) string {
 	return "standard"
 }
 
+// implementTargetBranchName builds the canonical implementation branch name
+// for a given scope slug: "impl/" followed by the slug hard-truncated to 15
+// characters with any resulting trailing "-" trimmed. Both branch-plan
+// derivation and enter-implement observation must use this single helper so
+// the two never construct diverging target-branch names.
+func implementTargetBranchName(scopeSlug string) string {
+	stem := scopeSlug
+	if len(stem) > 15 {
+		stem = stem[:15]
+	}
+	stem = strings.TrimRight(stem, "-")
+	return "impl/" + stem
+}
+
 func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchObservation) implementBranchPlan {
-	targetBranch := "implement/" + n.ScopeSlug
+	targetBranch := implementTargetBranchName(n.ScopeSlug)
 	plan := implementBranchPlan{
 		CurrentBranch: obs.CurrentBranch,
 		TargetBranch:  targetBranch,
 		StartCommit:   obs.StartCommit,
 		MergeTarget:   n.MergeTargetPolicy,
+		MergeConfirm:  n.MergeConfirmPolicy,
 	}
-	if !strings.HasPrefix(obs.CurrentBranch, "implement/") {
+	if !strings.HasPrefix(obs.CurrentBranch, "implement/") && !strings.HasPrefix(obs.CurrentBranch, "impl/") {
 		plan.Action = "create"
 		plan.MergeTarget = obs.CurrentBranch
 		plan.Reason = "current branch is not an implementation branch"
@@ -683,6 +705,7 @@ func implementConditions(n normalizedImplementFacts) []string {
 		"security-or-contract-risk=" + n.SecurityOrContractRisk,
 		"review-override=" + n.ReviewOverride,
 		"doc-mode-policy=" + n.DocModePolicy,
+		"merge-confirm=" + n.MergeConfirmPolicy,
 	}
 	if n.DocModePolicy == "skip-with-reason" {
 		conditions = append(conditions, "doc-reason="+n.DocReason)
@@ -705,6 +728,7 @@ func renderImplementRaw(result implementResult) string {
 		fmt.Fprintf(&b, "Branch Action: %s %s\n", v.BranchPlan.Action, firstNonEmpty(v.BranchPlan.TargetBranch, v.BranchPlan.CurrentBranch))
 	}
 	fmt.Fprintf(&b, "Merge Target: %s\n", firstNonEmpty(v.BranchPlan.MergeTarget, "n/a"))
+	fmt.Fprintf(&b, "Merge Confirm: %s\n", firstNonEmpty(v.BranchPlan.MergeConfirm, "ask"))
 	fmt.Fprintf(&b, "Plan Depth: %s\n", v.PlanDepth)
 	fmt.Fprintf(&b, "Review Allocation: %s\n", v.ReviewAlloc)
 	fmt.Fprintf(&b, "Doc Mode: %s\n\n", v.DocMode)
@@ -729,6 +753,7 @@ func renderImplementRaw(result implementResult) string {
 	fmt.Fprintf(&b, "- branch_plan.action: %s\n", result.Agenda.BranchPlan.Action)
 	fmt.Fprintf(&b, "- branch_plan.target_branch: %s\n", firstNonEmpty(result.Agenda.BranchPlan.TargetBranch, "n/a"))
 	fmt.Fprintf(&b, "- merge_target: %s\n", firstNonEmpty(result.Agenda.BranchPlan.MergeTarget, "n/a"))
+	fmt.Fprintf(&b, "- merge_confirm: %s\n", firstNonEmpty(result.Agenda.BranchPlan.MergeConfirm, "ask"))
 	fmt.Fprintf(&b, "- plan_depth: %s\n", result.Agenda.PlanDepth)
 	fmt.Fprintf(&b, "- review_alloc: %s\n", result.Agenda.ReviewAlloc)
 	fmt.Fprintf(&b, "- need_review: %t\n", result.Agenda.NeedReview)

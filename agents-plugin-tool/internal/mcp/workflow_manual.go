@@ -261,6 +261,12 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
+			{
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := docCoverageWarning(canonical, &warningResolver, mintedKey)
+				body = injectDocCoverageWarning(body, warning)
+			}
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -283,6 +289,12 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
 				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
 				body = injectBootstrapStalenessWarning(body, warning)
+			}
+			{
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := docCoverageWarning(rec.Root, &warningResolver, key)
+				body = injectDocCoverageWarning(body, warning)
 			}
 		}
 	}

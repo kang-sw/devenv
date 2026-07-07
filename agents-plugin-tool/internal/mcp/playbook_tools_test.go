@@ -1792,6 +1792,9 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Rendered review relay prompt: <prompt-path>",
 		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
+		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
+		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
+		"the branch does not match `impl/*`, including legacy `implement/*`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
@@ -1870,6 +1873,15 @@ func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("wsflow lead-implement render contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	for _, want := range []string{
+		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
+		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
+		"the branch does not match `impl/*`, including legacy `implement/*`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow lead-implement render missing %q:\n%s", want, body)
 		}
 	}
 }
@@ -2064,8 +2076,8 @@ func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "confirmed spec entries per domain") {
-		t.Errorf("body %q: expected doctrine text 'confirmed spec entries per domain'", body)
+	if !strings.Contains(body, "low-friction throughput per domain") {
+		t.Errorf("body %q: expected doctrine text 'low-friction throughput per domain'", body)
 	}
 	// delegates:true (native exploration-worker spawns) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {

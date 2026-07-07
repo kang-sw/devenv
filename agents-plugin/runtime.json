@@ -31,6 +31,7 @@
     "config.workflow_prefer_subagent": ">=0.33.2-dev <0.34.0",
     "config.workflow_prefer_mercenary": ">=0.33.2-dev <0.34.0",
     "config.bootstrap_alarm": ">=0.33.2-dev <0.34.0",
+    "config.doc_coverage_alarm": ">=0.33.2-dev <0.34.0",
     "config.prompt.set": ">=0.33.2-dev <0.34.0",
     "config.prompt.unset": ">=0.33.2-dev <0.34.0",
     "config.prompt": ">=0.33.2-dev <0.34.0",

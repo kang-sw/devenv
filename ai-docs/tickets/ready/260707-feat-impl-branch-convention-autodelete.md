@@ -90,6 +90,22 @@ into a goal-staging branch.
   unreachable commits); non-`impl/*` branch (e.g. legacy `implement/*`) still
   asks before deleting even when guardrails pass.
 
+### Result (7aa5bd96)
+
+Implemented via a shared `implementTargetBranchName` helper used by both
+`deriveImplementBranchPlan` and `handleEnterImplement` (closing a
+duplicate-construction drift risk found during survey), producing `impl/<stem>`
+target branches hard-truncated to 15 characters with a trimmed trailing `-`.
+The "already on an implementation branch" gate accepts either `impl/` or
+legacy `implement/`. `lead-implement`'s Branch Cleanup step 8 auto-deletes
+`impl/*` branches when all existing guardrails pass, and keeps the ask-first
+flow for any other branch name. Review cycle 1 (correctness/fit/test
+partitions) surfaced a stale warning-string wording, a stale mental-model
+claim, and a missing golden-render coverage gap; all three were fixed and
+re-reviewed clean. Spec updated in `ai-docs/spec/mcp-tools.md` and a new
+`ai-docs/spec/workflow-skills.md` entry
+(`#260707-implement-branch-cleanup-naming-gate`).
+
 ## Spec Impact
 
 `lead-implement`'s branch-naming and Branch Cleanup behavior is documented
