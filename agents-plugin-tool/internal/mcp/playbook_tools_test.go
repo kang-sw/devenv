@@ -1720,10 +1720,10 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	}
 	for _, want := range []string{
 		"If posture is `recommended`, ask the user",
-		"If posture is `required`, run sage review without asking",
-		"add `sage-review: skipped`",
-		"add or update `sage-review: completed`",
-		"add or update `sage-review: blocked`",
+		"If posture is `required`, run design review without asking",
+		"add `sage-review-design: skipped`",
+		"add or update `sage-review-design: completed`",
+		"add or update `sage-review-design: blocked`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing sage review gate language %q:\n%s", want, body)
