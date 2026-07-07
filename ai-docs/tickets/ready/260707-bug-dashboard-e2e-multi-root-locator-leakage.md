@@ -146,3 +146,46 @@ consecutively; once both phases have landed, confirm the full suite passes
 green on both runs. If landing this phase alone (before Phase 1), confirm
 at minimum that the TOML assertion itself now passes, even though the
 suite as a whole may still fail later on Phase 1's unfixed locators.
+
+#### Spec Impact
+
+Genuine product-visible behavior change, not a stale-fixture issue:
+single-clicking a read-only preview now activates it as the visible pane
+even when a sibling pinned pane in the same Dockview group was active.
+No existing spec stem describes pane-activation/preview-tab-focus behavior
+for the Dockview workbench; none is retrofitted by this fix. Spec area:
+none yet identified. Contract-first spec: no.
+
+### Result (d1639067) - 2026-07-07
+
+Root cause was two layers deeper than the plan's literal fix location:
+`openReadOnlyFile` (`App()`) and `setActivePaneByGroupForSelected`
+(`WorkbenchShell`) are sibling components, not nested, so the plan's
+proposed same-function fix was unreachable across that scope boundary.
+Fixed by (1) computing the pending preview activation as a render-time
+`useMemo` merged into the `activePaneByGroup` prop instead of an
+effect-driven `setActive()` call, avoiding a race against Dockview's own
+active-panel bookkeeping, and (2) fixing WorkbenchShell's "revalidate
+restored/live pane references" effect, which used
+`workbenchGroupsByRoot[rootKey] ?? []` instead of the established
+`?? initialWorkbenchGroups` fallback and never merged
+`readOnlyFilePaneOrderByGroup`/`terminalPaneOrderByGroup` into its pane-order
+input — silently dropping any readonly-file/terminal-only group's
+active-pane entry on every relevant state change.
+
+Fixing (2) surfaced a third bug in the same effect: it computed
+`reconciledActivePane` from a render-time closure of `activePaneByRoot` and
+wrote it back unconditionally, which could clobber a fresher click-driven
+update landing in the same window (confirmed via live instrumentation, and
+via ~3/12 flaky failures of the pre-existing "terminal tab selection
+isolates sessions" regression test before this was fixed, 0/18 after).
+Fixed by deferring the reconcile computation into the `setActivePaneByRoot`
+updater so both reads come from the same current state.
+
+Verification: `spec.ts:1954` now reads `toml`. Two full `npm run
+test:browser` runs both pass the "dashboard workRoot UI browser
+acceptance" test. The suite's separate "linked server root picker..." test
+fails both full runs at first navigation but passes standalone in 1.5s —
+confirmed pre-existing, sequential-execution-only test-isolation defect in
+an unrelated subsystem (server-pairing/remote-fixture daemon setup), left
+unfixed per this phase's out-of-scope boundary.
