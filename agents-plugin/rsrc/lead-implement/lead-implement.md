@@ -46,7 +46,7 @@ Review
 
 Policy rules:
 - Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.
-- Set `policy.branch.allow_rename=yes` only when the caller accepts pre-edit branch rename.
+- `policy.branch.allow_rename` defaults to `yes`; set it to `no` only when the caller has explicitly asked to keep the current branch name.
 
 `explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
 

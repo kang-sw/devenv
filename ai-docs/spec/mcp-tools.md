@@ -239,7 +239,9 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   upstream/tracking ambiguity; callers provide only policy that cannot be
   observed mechanically, such as a merge target while already on an
   implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
-  branch rename is allowed. The resolver derives
+  branch rename is allowed; branch rename defaults to allowed unless the
+  caller explicitly withholds consent (`policy.branch.allow_rename: no`). The
+  resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and

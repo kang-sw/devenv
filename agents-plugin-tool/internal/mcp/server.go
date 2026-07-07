@@ -2854,7 +2854,7 @@ func tools() []map[string]any {
 								"type": "object",
 								"properties": map[string]any{
 									"merge_target": nullableStringProperty("Required when already on an implementation branch."),
-									"allow_rename": nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict.", []string{"yes", "no", "unknown"}),
+									"allow_rename": nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict (defaults to yes).", []string{"yes", "no", "unknown"}),
 								},
 							},
 							"review": map[string]any{
