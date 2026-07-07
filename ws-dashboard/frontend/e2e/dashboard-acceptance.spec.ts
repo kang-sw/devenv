@@ -460,7 +460,7 @@ async function expectDurableDockviewSplitDrop(
 
 async function visibleWorkbenchGroupIds(page: Page): Promise<string[]> {
   return page
-    .locator(".dockview-workbench-tab")
+    .locator('[data-workbench-root-active="true"] .dockview-workbench-tab')
     .evaluateAll((tabs) =>
       Array.from(
         new Set(
@@ -1071,10 +1071,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       '[data-command-id="workbench.openActivity"].workbench-activity-badge',
     );
     const activityPane = page.locator(
-      '[data-surface-kind="workRootActivity"]',
+      '[data-workbench-root-active="true"] [data-surface-kind="workRootActivity"]',
     );
     const activityTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
     );
     await expect(opener).toHaveCount(1);
 
@@ -1745,7 +1745,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // --- Agent tab close uses the same session confirmation contract ---------
   await test.step("agent tab close confirmation when a live agent tab exists", async () => {
     const agentTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
       { hasText: "Agent" },
     );
     if (daemon.mode === "external" && (await agentTab.count()) === 0) {
@@ -1825,7 +1825,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await fileRow.click();
 
-    const pane = page.locator(".readonly-text-pane");
+    const pane = page.locator('[data-workbench-root-active="true"] .readonly-text-pane');
     await expect(pane).toBeVisible();
     const sourceViewer = pane.locator('.document-source-viewer[data-editor-read-only="true"]');
     await expect(sourceViewer).toBeVisible();
@@ -1839,7 +1839,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "preview",
     );
     const previewTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
     );
     await expect(previewTab).toBeVisible();
     await expect(previewTab).toHaveAttribute(
@@ -1894,13 +1894,15 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     await previewTab.hover();
     await previewClose.click();
-    await expect(page.locator(".readonly-text-pane")).toHaveCount(0);
+    await expect(
+      page.locator('[data-workbench-root-active="true"] .readonly-text-pane'),
+    ).toHaveCount(0);
 
     await fileRow.click();
     await expect(previewTab).toBeVisible();
     await fileRow.dblclick();
     const pinnedTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
     );
     await expect(pinnedTab).toBeVisible();
     await expect(previewTab).toHaveCount(0);
@@ -1946,7 +1948,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
 
     await tomlRow.click();
-    const pane = page.locator(".document-pane");
+    const pane = page.locator('[data-workbench-root-active="true"] .document-pane');
     const sourceViewer = pane.locator('.document-source-viewer[data-editor-read-only="true"]');
     await expect(sourceViewer).toBeVisible();
     await expect(sourceViewer).toHaveAttribute("data-editor-language", "toml");
@@ -2015,10 +2017,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
 
     await markdownRow.click();
-    const pane = page.locator(".document-pane");
+    const pane = page.locator('[data-workbench-root-active="true"] .document-pane');
     await expect(pane).toBeVisible();
     const previewTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
     );
     await expect(previewTab).toBeVisible();
     const previewTabIdBeforeEdit = await previewTab.getAttribute("data-workbench-pane-id");
@@ -2117,7 +2119,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(previewTab).toBeVisible();
     await markdownRow.dblclick();
     const markdownPinnedTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"][title="gate-document.md"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly:"][title="gate-document.md"]',
     );
     await expect(markdownPinnedTab).toBeVisible();
     await markdownPinnedTab.hover();
@@ -2138,7 +2140,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await longFileRow.click();
     await expectDockviewWorkbench(page);
 
-    const viewer = page.locator('.document-source-viewer[data-editor-read-only="true"]');
+    const viewer = page.locator(
+      '[data-workbench-root-active="true"] .document-source-viewer[data-editor-read-only="true"]',
+    );
     await expect(viewer).toHaveAttribute("data-editor-language", "text");
     await expect(viewer.locator(".cm-content")).toContainText(
       "readonly scroll containment line 1",
@@ -2202,7 +2206,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       .locator('[data-command-id="workbench.openActivity"].workbench-activity-badge')
       .click();
     const secondActivityPane = page.locator(
-      '[data-surface-kind="workRootActivity"]',
+      '[data-workbench-root-active="true"] [data-surface-kind="workRootActivity"]',
     );
     await expect(secondActivityPane).toHaveCount(1);
     await expect(
@@ -2213,7 +2217,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(secondActivityPane).not.toContainText("selected transcript alpha");
     await expect(secondActivityPane).not.toContainText("$ echo browser-gate");
     const secondActivityTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
     );
     await secondActivityTab.hover();
     await secondActivityTab
@@ -2229,19 +2233,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "fileExplorer.openFile",
     );
     await secondFileRow.click();
-    await expect(page.locator(".readonly-text-pane")).toContainText(
+    await expect(
+      page.locator('[data-workbench-root-active="true"] .readonly-text-pane'),
+    ).toContainText(
       "second ws-dashboard browser gate fixture",
     );
     await expect(
       page.locator(
-        '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+        '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
       ),
     ).toHaveAttribute("data-workbench-group-id", "group-2");
     expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-1", "group-2"]);
 
     await selectWorkRootInBrowser(page, workRoot);
     const pinnedReadOnlyTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
     );
     await expect(pinnedReadOnlyTab).toHaveAttribute(
       "data-workbench-group-id",
@@ -2253,7 +2259,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // preserved by design), so activate the pinned tab before inspecting the
     // pinned file content.
     await pinnedReadOnlyTab.click();
-    await expect(page.locator(".readonly-text-pane")).toContainText(
+    await expect(
+      page.locator('[data-workbench-root-active="true"] .readonly-text-pane'),
+    ).toContainText(
       "ws-dashboard browser gate fixture",
     );
     await page.unroute(/\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/);
@@ -2654,7 +2662,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Control+D");
     const activeTerminalTab = page
       .locator(
-        '.dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
+        '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
         { hasText: "Terminal" },
       )
       .last();
@@ -2695,11 +2703,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await terminalTabs(page).nth(0).click();
     await terminalSurface(page);
     const restoredPinnedReadOnlyTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+      '[data-workbench-root-active="true"] .dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
     );
     await expect(restoredPinnedReadOnlyTab).toBeVisible();
     await restoredPinnedReadOnlyTab.click();
-    await expect(page.locator(".readonly-text-pane")).toContainText(
+    await expect(
+      page.locator('[data-workbench-root-active="true"] .readonly-text-pane'),
+    ).toContainText(
       "ws-dashboard browser gate fixture",
     );
     await page.screenshot({

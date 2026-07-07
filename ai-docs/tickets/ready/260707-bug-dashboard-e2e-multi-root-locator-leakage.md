@@ -85,6 +85,39 @@ locator-scoping failure is gone) with no new failures introduced before
 that point; a fully green two-run confirmation is deferred to after Phase
 2 also lands.
 
+### Result (026b1b8c) - 2026-07-07
+
+Audited the full spec file and scoped ~15 previously-bare locators (tab,
+pane, activity, and document-viewer selectors inside the per-work-root
+Dockview-mounted DOM) to `[data-workbench-root-active="true"] ` prefixes,
+matching the pattern established by the prerequisite ticket's
+`expectDockviewWorkbench` fix. Traced each work root's (`workRoot`,
+`gitWorkRoot`, `secondWorkRoot`) full open/select/close lifecycle to judge
+genuine collision risk rather than blanket-scoping every dockview-adjacent
+selector; deliberately left toolbar/file-explorer/git-toolbar/terminal-
+surface/close-popover locators unscoped after confirming they live outside
+the per-root map or no other root ever produces a colliding element for
+them. `expectDurableDockviewSplitDrop()`'s internals were left unscoped —
+it has zero call sites (dead code), out of scope.
+
+Review (single, full) found 2 Important misses on the first pass — a
+`.readonly-text-pane` `toHaveCount(0)` assertion (spec:1897) and a
+`confirmSessionClose` tab locator filtered `{hasText:"Terminal"}`
+(spec:2663, the exact locator class this ticket's Background names as the
+trigger bug — the `{hasText:"Agent"}` sibling had already been scoped but
+this variant was missed). Fixed both in a follow-up commit; re-review
+confirmed clean.
+
+Verification: `npm run test:browser` run twice after each commit (4 runs
+total across both cycles). Every run reached the identical, single,
+already-known Phase 2 TOML failure point (spec:1954 after the final fix)
+with no locator-scoping/strict-mode-violation failures before it, matching
+the redefined verification boundary above. Per the implementer's own
+honesty note: this was a manual audit of a ~3000-line file, not exhaustive
+by construction — a future edit that changes root-open ordering or gives
+an inactive root a terminal/document pane it doesn't have today could still
+surface a new instance of this class.
+
 ### Phase 2: Diagnose and fix the TOML/text language-detection mismatch
 
 Root-cause why `.document-source-viewer[data-editor-read-only="true"]`
