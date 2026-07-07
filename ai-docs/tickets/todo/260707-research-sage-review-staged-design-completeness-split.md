@@ -1,6 +1,10 @@
 ---
 title: "Split sage review into a staged design/completeness gate across todo and ready"
-sage-review: recommended
+sage-review: completed
+spec:
+  - mcp-tools
+related:
+  260707-feat-forge-autonomy-bootstrap-chaining: prior sage-review-gate precedent this design references
 ---
 
 # Split sage review into a staged design/completeness gate across todo and ready
@@ -12,11 +16,18 @@ implementation dispatch), as a workflow-process agenda item, not yet discussed
 or designed. Captured verbatim from the user's framing so the next session
 can pick it up without re-deriving intent:
 
-The current Sage Review Gate (two-reviewer design + completeness verdict,
-`pass`/`concern`/`block`, described in prior ticket precedent e.g.
-`260707-feat-forge-autonomy-bootstrap-chaining`) runs as a single pass at
-ticket-write time. The user wants to explore splitting it into two stages
-gated by ticket status:
+The current Sage Review Gate (spec: `ai-docs/spec/mcp-tools.md#260624-sage-review-gate`,
+prior ticket precedent e.g. `260707-feat-forge-autonomy-bootstrap-chaining`)
+already dispatches two distinct reviewer roles — `ticket-reviewer-design` and
+`ticket-reviewer-completeness` — aggregated into one `pass`/`concern`/`block`
+verdict under a single shared `sage-review:` posture field. Both reviewers
+already run together at both `todo`-write and `ready`-promotion time today;
+the actual gap this ticket targets is not introducing a design/completeness
+split (it already exists as two reviewer roles), but adding **per-stage
+gating** — running only the design reviewer at `todo` and only the
+completeness reviewer at `ready` promotion, instead of both together at
+every write. The user wants to explore splitting the *gating*, not the
+reviewer roles, into two stages keyed to ticket status:
 
 - At `todo`: only a design-level sketch review runs. This stage should
   tolerate a rougher, sketch-level design — it is meant to catch
@@ -125,6 +136,16 @@ sketch-level ticket shouldn't need yet.
   review first (or blocks) before completeness review is allowed to run
   at all, rather than assuming design review already happened because the
   ticket reached `ready`.
+- Migration plan for existing tickets that already carry the single
+  `sage-review:` field (live and load-bearing today via native
+  `tickets.move`/`tickets.create` posture stamping, per
+  `ai-docs/spec/mcp-tools.md#260624-sage-review-gate` — this ticket's own
+  frontmatter is one such case). Options to weigh at implementation time:
+  bulk-migrate existing values onto the new split fields (e.g. treat an
+  existing `completed`/`skipped` single-field value as satisfying both new
+  fields), leave old tickets on the legacy single field as a grandfathered
+  posture, or force a fresh design review pass. Not addressed here because
+  it depends on the exact value vocabulary chosen for the split fields.
 
 ## Status
 
@@ -133,5 +154,14 @@ including one mid-discussion revision (dropped an initial reset-loop
 proposal for the simpler two-gate model above, after comparing it against
 `lead-check-blockers`'s existing blocking/non-blocking framing). Not yet
 phased into an actionable ticket, and no empirical validation done yet
-against a real sage-review case. Sage review intentionally left at
-`recommended` — still pending.
+against a real sage-review case.
+
+Sage review ran 2026-07-07: design verdict `concern` (2 important,
+`resolution: autonomous` — missing `spec:` link, missing migration plan for
+the legacy single `sage-review:` field), completeness verdict `concern` (1
+important, `resolution: autonomous` — missing `related:` link). No
+`resolution: missing` issues on either side, so aggregation resolves to
+`pass`; all three findings applied autonomously (frontmatter `spec:`/
+`related:` added, Background corrected to state the reviewer roles already
+exist and only per-stage gating is new, migration-plan gap added to
+Deferred to Implementation).
