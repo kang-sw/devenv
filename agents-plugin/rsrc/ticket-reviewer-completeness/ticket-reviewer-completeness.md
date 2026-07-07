@@ -42,6 +42,19 @@ Alias model for this role: {{.RoleModel}}.
    have open-ended scope?
 5. **Verification expectations**: Each phase has at least one explicit test, probe,
    or acceptance check?
+6. **Scope-boundary check**: For each gap you would otherwise fill as a
+   completeness issue, judge whether it is a genuine completeness/readiness
+   gap or a design-shaped gap in disguise. A genuine gap is missing
+   structure, fields, clarity, phase boundaries, or verification detail that
+   you or an implementer can supply without deciding new product or
+   architecture shape — emit it with `resolution: autonomous`. A
+   design-shaped gap introduces a new public interface, a cross-module
+   interaction change, or an architecture reshaping that the ticket has not
+   already settled — emit it with `resolution: missing` and do not fill it
+   in under cover of a completeness fix, even if you could technically write
+   the missing text. This mirrors the same blocking-question-vs-autonomous-
+   hygiene-gap distinction used elsewhere in the workflow: a design question
+   needs a user decision; hygiene and capture gaps do not.
 
 ## Output
 
