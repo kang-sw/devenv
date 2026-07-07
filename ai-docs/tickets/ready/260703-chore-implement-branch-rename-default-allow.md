@@ -82,6 +82,17 @@ skip-condition set, only decide whether the *default value* of the
   posture) alongside the code change; this phase is not complete until
   that spec update lands.
 
+### Result (5f442651)
+
+Flipped `normalizeImplementFacts`'s `AllowRename` fallback from `unknown` to
+`yes` (single consumer, confirmed via survey); an explicit `no` still stops
+the rename, unaffected. Updated `lead-implement`'s Policy rules bullet, the
+`allow_rename` tool-schema description, and the `enter.implement` spec entry
+in `ai-docs/spec/mcp-tools.md` to describe the new default-yes posture.
+Wsflow rsrc mirror and manifest hashes regenerated and confirmed
+byte-identical to canonical. Correctness/fit/test review: all three
+partitions clean on first pass, no fix cycle needed.
+
 ## Spec Impact
 
 `enter.implement`'s branch-plan behavior is documented caller-visible
