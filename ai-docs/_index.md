@@ -429,14 +429,6 @@ dropped tickets live in hidden archive dirs and git history.
   reason that ticket already rejected one. Spec addressing via
   `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
   no). Sage review completed.
-- `260707-research-sage-review-staged-design-completeness-split` (todo,
-  research) - agenda to split the Sage Review Gate into a two-stage
-  gate: a tolerant design-sketch review at `todo`, a completeness review
-  (user-policy/decision gaps) at `ready` promotion, plus an agent judgment
-  on whether a post-review design edit is substantial enough to require
-  re-running the design stage. Not yet discussed or designed beyond the
-  initial framing; sage-review left at `recommended` pending next-session
-  discussion.
 - `260707-research-drain-queue-default-branch-policy` (todo, research) -
   agenda to default the implementation branch policy to reuse+rename
   (instead of creating a fresh `implement/<slug>` branch and separately

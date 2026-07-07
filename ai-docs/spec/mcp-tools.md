@@ -735,27 +735,41 @@ one staged change set, and the tool never commits. {#260620-ticket-close-tool}
 
 `tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
-Upward moves stamp or validate the ticket's `sage-review:` posture from the
-resolved `sage_review` config: `skipped` for `off`, empty, or unset;
-`recommended` for `ask`; and `required` for `auto`. A move into `todo/` may
-leave `recommended` or `required` as the visible unresolved posture. A move into
-`ready/` requires a resolved terminal posture (`completed` or `skipped`);
-`recommended`, `required`, and `blocked` stop with an action-oriented message.
-A move into `ready/` for a non-`epic`/`research`/`workset` ticket with no
-detected spec addressing (no confirmed `spec:`/`spec-remove:` frontmatter entry
-and no `## Spec Impact` section) additionally returns a soft, non-blocking tip
-noting that the ready gate is normally enforced by `lead-write-ticket`; the
-move still succeeds. The move stages atomically and never commits.
+Upward moves stamp or validate the ticket's per-stage sage-review posture from
+the resolved `sage_review` config: `skipped` for `off`, empty, or unset;
+`recommended` for `ask`; and `required` for `auto` (see the Sage Review Gate
+section below for the two-field, per-category contract). A move
+into `todo/` may leave `recommended` or `required` as the visible unresolved
+posture on the fields the ticket's category requires. A move into `ready/`
+requires each required field to hold a resolved terminal posture (`completed`
+or `skipped`); `recommended`, `required`, and `blocked` on any required field
+stop with an action-oriented message naming that field. When both stages apply,
+`sage-review-design` is checked before `sage-review-completeness`, so a ticket
+that reaches `ready/` without a terminal design posture is always blocked on
+the design field first, regardless of entry path. A move into `ready/` for a
+non-`epic`/`research`/`workset` ticket with no detected spec addressing (no
+confirmed `spec:`/`spec-remove:` frontmatter entry and no `## Spec Impact`
+section) additionally returns a soft, non-blocking tip noting that the ready
+gate is normally enforced by `lead-write-ticket`; the move still succeeds. The
+move stages atomically and never commits.
 {#260620-ticket-move-tool}
 
 `tickets.create` creates a dated ticket stub at a caller-specified initial state
 (`idea`, `todo`, or `ready`). It auto-prefixes today's date to form the full
 ticket stem, writes a minimal frontmatter stub (`title: ""` placeholder;
-resolved `sage-review:` posture for `todo/+` states), and returns the created
-path and a caller-facing tip that names the posture. Terminal states (`done`,
-`dropped`) and an empty stem are rejected with errors. The tool is not
-idempotent: a duplicate path returns an error. The `idea/` tip directs the
-caller to promote through `todo/` so the resolved posture can be stamped.
+resolved `sage-review-design:` posture for `todo/+` states when the ticket's
+category requires design review), and returns the created path and a
+caller-facing tip that names the posture. It does not stamp
+`sage-review-completeness` at creation time, even for `state: "ready"` —
+completeness is evaluated only at ready-promotion time via `tickets.move`,
+which has a "from" state to validate against. Creating directly at `ready/`
+for a category requiring design review still enforces the never-skippable
+design invariant: if the freshly resolved design posture is not terminal
+(`completed` or `skipped`), the call is rejected with an action-oriented error
+instead of silently stamping a non-terminal posture and succeeding. Terminal
+states (`done`, `dropped`) and an empty stem are rejected with errors. The tool
+is not idempotent: a duplicate path returns an error. The `idea/` tip directs
+the caller to promote through `todo/` so the resolved posture can be stamped.
 {#260622-create-ticket-tool}
 
 `tickets.template` returns the typed body skeleton for a given ticket type.
@@ -769,19 +783,71 @@ into a new ticket body. An unknown or empty `type` is rejected with an error
 listing valid types. Capability range: `>=0.30.6-dev <0.31.0`.
 {#260624-tickets-template-tool}
 
-The Sage Review Gate runs after `lead-write-ticket` commits a ticket to `todo/` or
-`ready/`. It reads the ticket's `sage-review:` posture. `skipped` bypasses the
-gate, `recommended` requires a run-or-skip decision, and `required` runs review
-without asking. If the user skips a `recommended` review, the gate writes
-`sage-review: skipped` and commits. If review runs, the gate dispatches two
-delegate playbooks in parallel: `ticket-reviewer-design` (tier: large) and
-`ticket-reviewer-completeness` (tier: medium). Each reviewer emits a structured
-verdict (`pass`, `concern`, or `block`) with an issues list. The gate aggregates
-the pair and writes `sage-review: completed` or `sage-review: blocked` into the
-ticket frontmatter and commits. A `blocked` result also appends a
-`## Blocked (YYYY-MM-DD)` summary section to the ticket body. `concern` elevated
-from design reviewer resolves to `completed` by default unless the lead
-escalates to `block`. `idea/` tickets bypass the gate.
+The Sage Review Gate is split into two sequential, non-looping stage gates
+keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
+ticket: a design-sketch review at `todo/` landing (tolerant of missing detail;
+catches wrong direction) and a completeness review at `ready/` promotion
+(checks implementation-readiness, undecided user-policy points, and capture
+gaps). Frontmatter carries two independent stage-scoped fields —
+`sage-review-design:` and `sage-review-completeness:` — each using the same
+five-value vocabulary as before: `skipped`, `recommended`, `required`,
+`completed`, `blocked`. Both fields resolve independently from the same
+`sage_review` config value via the same posture-resolution rule (`skipped` for
+`off`/empty/unset, `recommended` for `ask`, `required` for `auto`); the config
+axis itself is not split, only which stage(s) a given ticket category stamps.
+
+Category exemptions (mirroring the existing spec-address-gate category
+detection): `feat`/`bug`/`refactor`/`chore` (default/actionable categories)
+require both stages; `epic` requires only `sage-review-design` (epics never
+reach `lead-implement`, so completeness never applies); `research` and
+`workset` are exempt from both stages, matching their existing blanket
+spec-address-gate exemption.
+
+Hard invariant: design review is never skippable regardless of entry path. A
+ticket that reaches `ready/` without ever passing `todo/` design review must
+still pass design review before or as part of completeness review. Concretely:
+`tickets.move`'s promotion validation checks `sage-review-design` before
+`sage-review-completeness` and blocks on the design field first if it is not
+terminal; the `lead-write-ticket` playbook, when landing at `ready/`, checks
+`sage-review-design` before dispatching the completeness reviewer and runs
+`ticket-reviewer-design` inline first if the design field is not yet terminal.
+This covers `idea/` → `ready/` direct promotion and tickets authored directly
+at `ready/`, since both layers check the same field rather than traversal
+history.
+
+At `todo/` landing (category requires design), the gate dispatches only
+`ticket-reviewer-design` (tier: large) and writes the result to
+`sage-review-design:` only. At `ready/` landing (category requires
+completeness), after the design-invariant check above passes, the gate
+dispatches only `ticket-reviewer-completeness` (tier: medium) and writes the
+result to `sage-review-completeness:` only. Each reviewer emits a structured
+verdict (`pass`, `concern`, or `block`) with an issues list; since each landing
+dispatches at most one reviewer, that reviewer's own verdict directly becomes
+the stage's result (no cross-reviewer aggregation), except the
+inline-design-then-completeness ready-promotion case, which applies the
+existing pairwise aggregation across the two sequential results. A `block`
+result appends a `## Blocked (YYYY-MM-DD)` summary section to the ticket body
+and writes `blocked` to the corresponding stage field. `idea/` tickets and
+`research`/`workset` tickets bypass the gate at every landing; `epic` tickets
+bypass only the completeness stage.
+
+The completeness reviewer's checklist includes a scope-boundary check that
+distinguishes a genuine completeness/readiness gap (`resolution: autonomous`,
+fill it) from a design-shaped gap in disguise — a new public interface,
+cross-module interaction change, or architecture reshaping — which must be
+raised as `resolution: missing` and left unfilled rather than patched under
+cover of a completeness fix.
+
+Legacy migration: a ticket carrying only the old single `sage-review:` field
+(no new fields) is read lazily at the first `tickets.move` or
+`lead-write-ticket` gate touch. A legacy `completed` migrates to both new
+fields as `completed`; legacy `skipped` migrates to both as `skipped`; legacy
+`blocked` migrates to both as `blocked` (still must be addressed); any other
+legacy value (`recommended`, `required`, missing, or `pending`) is treated as
+absent for both new fields and each is resolved fresh, the same as new-ticket
+stamping. The migration write persists both new fields on that first touch
+(self-healing, no bulk-rewrite script) and leaves the old `sage-review:` field
+in place.
 {#260624-sage-review-gate}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}

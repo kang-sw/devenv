@@ -114,7 +114,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	if isUpwardMove(curStatus, to) {
-		if _, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), opts.SageReview, to); err != nil {
+		if _, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), stem, opts.SageReview, to); err != nil {
 			return TicketMutateResult{}, err
 		}
 	}
@@ -126,8 +126,9 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 
 	result := TicketMutateResult{OldPath: oldPath, NewPath: newPath}
 	if isUpwardMove(curStatus, to) {
-		if posture, err := currentSageReviewPosture(filepath.Join(root, filepath.FromSlash(newPath))); err == nil {
-			result.Tip = appendTip(result.Tip, sageReviewPostureTip(posture))
+		postures := currentSageReviewPostures(filepath.Join(root, filepath.FromSlash(newPath)), stem)
+		if tip := sageReviewPostureTip(postures); tip != "" {
+			result.Tip = appendTip(result.Tip, tip)
 		}
 	}
 	if curStatus == "ready" && (to == "todo" || to == "idea") {
@@ -228,60 +229,191 @@ func ResolvedSageReviewPosture(sageReview string) string {
 	}
 }
 
-func prepareSageReviewForUpwardMove(ticketAbsPath, sageReview, to string) (string, error) {
-	resolved := ResolvedSageReviewPosture(sageReview)
-	fm := frontmatter(ticketAbsPath)
-	value, _ := fm["sage-review"].(string)
-	posture := strings.TrimSpace(value)
-	if posture == "" || posture == "pending" {
-		if err := writeFrontmatterField(ticketAbsPath, map[string]string{"sage-review": resolved}); err != nil {
-			return "", err
-		}
-		posture = resolved
+// sageReviewStageRequirement reports whether a ticket category requires the
+// design and/or completeness sage-review stage. It reuses the same
+// ticketCategoryRE category-detection mechanism as exemptReadyGateCategories
+// rather than inventing a new one: `research`/`workset` are exempt from both
+// stages (mirroring their blanket spec-address-gate exemption), `epic` needs
+// only design (epics never reach lead-implement so completeness never
+// applies), and every other category (the default/actionable categories)
+// needs both.
+func sageReviewStageRequirement(stem string) (design, completeness bool) {
+	category := ""
+	if match := ticketCategoryRE.FindStringSubmatch(stem); len(match) == 2 {
+		category = match[1]
+	}
+	switch category {
+	case "research", "workset":
+		return false, false
+	case "epic":
+		return true, false
+	default:
+		return true, true
+	}
+}
+
+// sageReviewPostures carries the effective per-stage posture for a ticket;
+// a stage's field is empty when that stage does not apply to the ticket's
+// category.
+type sageReviewPostures struct {
+	Design       string
+	Completeness string
+}
+
+// effectiveSageReviewPostures reads the new two-field sage-review state from
+// frontmatter. When neither new field is present, it lazily migrates the
+// legacy single sage-review: field: a completed/skipped/blocked legacy value
+// is authoritative for both new fields (a ticket that already finished sage
+// review under the old model had both existing reviewer roles run against
+// it); any other legacy value (recommended/required/pending, or missing) is
+// treated as absent for both fields so each is resolved fresh, same as new
+// ticket stamping. This keeps migration self-healing without a bulk rewrite
+// of existing ticket files.
+func effectiveSageReviewPostures(fm map[string]any) (design, completeness string) {
+	designValue, _ := fm["sage-review-design"].(string)
+	completenessValue, _ := fm["sage-review-completeness"].(string)
+	design = strings.TrimSpace(designValue)
+	completeness = strings.TrimSpace(completenessValue)
+	if design != "" || completeness != "" {
+		return design, completeness
 	}
 
-	if posture == "blocked" {
-		return posture, fmt.Errorf("sage-review: blocked; address blocked review before promoting")
+	legacyValue, _ := fm["sage-review"].(string)
+	switch strings.TrimSpace(legacyValue) {
+	case "completed":
+		return "completed", "completed"
+	case "skipped":
+		return "skipped", "skipped"
+	case "blocked":
+		return "blocked", "blocked"
+	default:
+		return "", ""
+	}
+}
+
+// sageReviewStageError builds the ready-promotion posture error for a single
+// stage field, mirroring the original single-field error wording.
+func sageReviewStageError(field, posture string) error {
+	switch posture {
+	case "recommended":
+		return fmt.Errorf("%s: recommended; run sage review or skip recommended review before promoting to ready", field)
+	case "required":
+		return fmt.Errorf("%s: required; run sage review before promoting to ready", field)
+	default:
+		return fmt.Errorf("%s: %s; review must complete or be skipped before promoting to ready", field, posture)
+	}
+}
+
+func sageReviewBlockedError(field string) error {
+	return fmt.Errorf("%s: blocked; address blocked review before promoting", field)
+}
+
+// prepareSageReviewForUpwardMove resolves and validates up to two
+// frontmatter fields (sage-review-design, sage-review-completeness) for an
+// upward move, gated by which stages the ticket's category requires. For
+// to == "ready", design is checked before completeness so a ticket that
+// reaches ready without ever passing design review is always blocked here
+// first, regardless of entry path (idea->ready direct, or a ticket authored
+// directly at ready) — this is the hard, never-skippable design-review
+// invariant; there is no Go-side auto-run, only an actionable error that
+// directs the caller (the lead-write-ticket playbook) to run design review
+// first.
+func prepareSageReviewForUpwardMove(ticketAbsPath, stem, sageReview, to string) (sageReviewPostures, error) {
+	designRequired, completenessRequired := sageReviewStageRequirement(stem)
+	fm := frontmatter(ticketAbsPath)
+	design, completeness := effectiveSageReviewPostures(fm)
+	resolved := ResolvedSageReviewPosture(sageReview)
+
+	if designRequired && (design == "" || design == "pending") {
+		design = resolved
+	}
+	if completenessRequired && (completeness == "" || completeness == "pending") {
+		completeness = resolved
+	}
+
+	// Always (re)persist the effective value for each required field. This
+	// is a no-op write when the new field already held that value, and is
+	// the self-healing migration write for a ticket that only had the
+	// legacy single sage-review: field (see effectiveSageReviewPostures) —
+	// the migration replaces the read-time inference with a persisted
+	// value on first touch, without a separate bulk-rewrite script.
+	writes := map[string]string{}
+	if designRequired {
+		writes["sage-review-design"] = design
+	}
+	if completenessRequired {
+		writes["sage-review-completeness"] = completeness
+	}
+	if len(writes) > 0 {
+		if err := writeFrontmatterField(ticketAbsPath, writes); err != nil {
+			return sageReviewPostures{}, err
+		}
+	}
+	if !designRequired {
+		design = ""
+	}
+	if !completenessRequired {
+		completeness = ""
+	}
+
+	result := sageReviewPostures{Design: design, Completeness: completeness}
+
+	if designRequired && design == "blocked" {
+		return result, sageReviewBlockedError("sage-review-design")
+	}
+	if completenessRequired && completeness == "blocked" {
+		return result, sageReviewBlockedError("sage-review-completeness")
 	}
 	if to != "ready" {
-		return posture, nil
+		return result, nil
 	}
 
-	switch posture {
-	case "completed", "skipped":
-		return posture, nil
-	case "recommended":
-		return posture, fmt.Errorf("sage-review: recommended; run sage review or skip recommended review before promoting to ready")
-	case "required":
-		return posture, fmt.Errorf("sage-review: required; run sage review before promoting to ready")
-	default:
-		return posture, fmt.Errorf("sage-review: %s; review must complete or be skipped before promoting to ready", posture)
+	if designRequired {
+		switch design {
+		case "completed", "skipped":
+		default:
+			return result, sageReviewStageError("sage-review-design", design)
+		}
 	}
+	if completenessRequired {
+		switch completeness {
+		case "completed", "skipped":
+		default:
+			return result, sageReviewStageError("sage-review-completeness", completeness)
+		}
+	}
+	return result, nil
 }
 
-func currentSageReviewPosture(ticketAbsPath string) (string, error) {
+// currentSageReviewPostures returns the effective per-stage posture for a
+// ticket after a move, applying the same category gating and legacy
+// migration read as prepareSageReviewForUpwardMove so the post-move tip
+// reflects the correct value even for a legacy-only ticket.
+func currentSageReviewPostures(ticketAbsPath, stem string) sageReviewPostures {
+	designRequired, completenessRequired := sageReviewStageRequirement(stem)
 	fm := frontmatter(ticketAbsPath)
-	value, _ := fm["sage-review"].(string)
-	posture := strings.TrimSpace(value)
-	if posture == "" {
-		return "", fmt.Errorf("sage-review missing")
+	design, completeness := effectiveSageReviewPostures(fm)
+	if !designRequired {
+		design = ""
 	}
-	return posture, nil
+	if !completenessRequired {
+		completeness = ""
+	}
+	return sageReviewPostures{Design: design, Completeness: completeness}
 }
 
-func sageReviewPostureTip(posture string) string {
-	switch posture {
-	case "skipped":
-		return "sage review posture: skipped."
-	case "recommended":
-		return "sage review posture: recommended; run sage review or skip it before ready."
-	case "required":
-		return "sage review posture: required; sage review must run before ready."
-	case "completed":
-		return "sage review posture: completed."
-	default:
-		return "sage review posture: " + posture + "."
+func sageReviewPostureTip(postures sageReviewPostures) string {
+	var parts []string
+	if postures.Design != "" {
+		parts = append(parts, "design "+postures.Design)
 	}
+	if postures.Completeness != "" {
+		parts = append(parts, "completeness "+postures.Completeness)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "sage review posture: " + strings.Join(parts, ", ") + "."
 }
 
 func ticketRelPath(statusDir, stem string) string {

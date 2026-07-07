@@ -31,7 +31,7 @@
     "lead-verify-design/lead-verify-design.md": "f77a2c013877e4dfdcc0b3edc7ff4e08c81c41da013cdfd30d275c26055174a9",
     "lead-workflow-manual/lead-workflow-manual.md": "188bbe98a8819f4add5acee65c7beb979eae3cde08bcc22b99ac9109b6e18c86",
     "lead-write-spec/lead-write-spec.md": "e0d0f049ba74e22f09cc4b40bb3f4de2526cadb10f2c625384f24f1cc0bbaec2",
-    "lead-write-ticket/lead-write-ticket.md": "413a7a3b72be5cb07721626ad83b9404e547d062b40645d06e551bd27b6ba7ae",
+    "lead-write-ticket/lead-write-ticket.md": "c7987a2f3b678ffd07b8f1c16a3871bab88cb6d124d0aea3904ae9d0e213c715",
     "lead-write-ticket/task-list.codex.md": "38f0935195f1d1c3890eb1a820dcc4698d633952f3ee0f41f23fa01e8bb84125",
     "lead-write-ticket/task-list.md": "cf6dc859bd643eecd3a032dd74dc58637a779645ab8aa174a165985b90594a53",
     "mental-model-updater/mental-model-updater.md": "798df6e233552f151c8565ec95bd83115dd90eb808cdbdf16abf5a486a2c41d5",
@@ -43,7 +43,7 @@
     "sample-playbook/sample-playbook.codex.md": "ce77a56088246fcaf1996e0fb45c5a4da2d1f7122653862fe6742fc4f5cf1df5",
     "sample-playbook/sample-playbook.md": "f813e57e9c3af21a911072c992f19afa7e8fd63b085d7527c315665543762673",
     "subagent-rules.md": "ef426a9d54e63ac8325c6ab7d3f65b1a57ef0174239df9fcb9c28c081135d2c5",
-    "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "230d5c1d12e0039cef4931a48d9092d12702c33f99c18a19e12f1f8e7682d053",
+    "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "e2dfef58ec66cd6758d3f9ed830532f7bce260d7dee004a9949bd3fb5d792564",
     "ticket-reviewer-design/ticket-reviewer-design.md": "c3d3c37ec241bf686b8e4606c8467d02c54268b16260f763df685fcc4e9558b7"
   }
 }

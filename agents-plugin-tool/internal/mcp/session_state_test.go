@@ -1819,7 +1819,7 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 		t.Fatalf("read created ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review: recommended") {
+	if !strings.Contains(body, "sage-review-design: recommended") {
 		t.Fatalf("created ticket missing recommended posture:\n%s", body)
 	}
 }
@@ -1855,7 +1855,7 @@ func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
 		t.Fatalf("read created ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review: required") {
+	if !strings.Contains(body, "sage-review-design: required") {
 		t.Fatalf("created ticket missing required posture (builtin default should now be required):\n%s", body)
 	}
 }
@@ -1904,7 +1904,7 @@ func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
 		t.Fatalf("read moved ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review: required") {
+	if !strings.Contains(body, "sage-review-design: required") {
 		t.Fatalf("moved ticket missing required posture (builtin default should now be required):\n%s", body)
 	}
 }
@@ -1957,7 +1957,7 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 		t.Fatalf("read moved ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review: recommended") {
+	if !strings.Contains(body, "sage-review-design: recommended") {
 		t.Fatalf("moved ticket missing recommended posture (explicit project-scope override should win over builtin default):\n%s", body)
 	}
 }
