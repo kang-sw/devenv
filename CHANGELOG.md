@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.33.4 - 2026-07-07
+
+### Fixed
+- Regenerate `agents-plugin/skills/manifest.json`, which had drifted from
+  `lead-drain-ready-queue/SKILL.md`'s content (v0.33.3's release CI caught
+  this before any release assets were published; v0.33.3 stays tagged but
+  has no corresponding GitHub release).
+
 ## v0.33.3 - 2026-07-07
 
 ### Added
