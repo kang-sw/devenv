@@ -2,7 +2,7 @@
 title: "Narrow forge-spec confirmation loop to auto-proceed; add bootstrap same-session forge chaining"
 related:
   260707-feat-doc-coverage-live-bootstrap-alarm: complementary cross-session safety net for the same forgetting risk this ticket's Phase 2 addresses within a single session
-sage-review: required
+sage-review: completed
 ---
 
 # Narrow forge-spec confirmation loop to auto-proceed; add bootstrap same-session forge chaining
@@ -55,12 +55,25 @@ the session.
 - `lead-forge-mental-model`'s existing auto-apply/soft-gate behavior is
   reference precedent for this change, not itself modified by this ticket.
 - `lead-bootstrap` gains a same-session chaining step: immediately after
-  `lead-forge-spec` completes (in a session where bootstrap or the user
-  initiated it), autonomously ask whether to run `lead-forge-mental-model`
-  next, and invoke it on a yes answer. This only covers the same-session
-  case; the cross-session "forgot entirely, or session ended in between"
-  case is handled separately by
+  `lead-forge-spec` completes, autonomously ask whether to run
+  `lead-forge-mental-model` next, and invoke it on a yes answer. This only
+  covers the same-session case; the cross-session "forgot entirely, or
+  session ended in between" case is handled separately by
   `260707-feat-doc-coverage-live-bootstrap-alarm`.
+- The chaining hook lives in `lead-forge-spec`'s own wrap-up step
+  (`agents-plugin/rsrc/lead-forge-spec/lead-forge-spec.md:253-257`,
+  "Suggested next steps"), not in `lead-bootstrap`. All three skills involved
+  (`lead-bootstrap`, `lead-forge-spec`, `lead-forge-mental-model`) are
+  `kind: print` prompts with no call/return semantics between them, so
+  `lead-bootstrap` cannot reliably regain control after a
+  `lead-forge-spec` run it did not directly and synchronously invoke —
+  in particular the index-health-check routing-table path
+  (`lead-bootstrap.md:86-96`) only *suggests* `lead-forge-spec` as a
+  separate top-level skill action, with no return path back to bootstrap.
+  Putting the ask in `lead-forge-spec`'s own wrap-up covers every invocation
+  path uniformly (direct fresh-install suggestion, routing-table suggestion,
+  or a user running `lead-forge-spec` standalone) without needing
+  call/return plumbing.
 
 ## Phases
 
@@ -69,20 +82,36 @@ the session.
 Rewrite the "User classification loop"
 (`agents-plugin/rsrc/lead-forge-spec/lead-forge-spec.md:178-186`) and its
 invariant (`:15`) so caller-visible/implemented-or-planned classification for
-ambiguous items is decided autonomously, with an inline marker written into
-the spec entry for each ambiguous classification, and all markers surfaced in
-the final summary report. Leave the archive gate (`:14, 35-36`) and
-domain-list confirmation (`:97-101`, invariant `:15`) untouched. Update the
-skill doctrine section if it references the removed per-item gate.
+ambiguous items is decided autonomously. Mark each autonomously-classified
+ambiguous item with an inline HTML-comment marker adjacent to the affected
+spec-entry line, e.g. `<!-- AMBIGUOUS: <one-line reason> -->` (same
+comment-marker mechanism `lead-bootstrap` already uses for
+`<!-- CONFLICT: ... -->`, invisible in rendered Markdown, and confirm it does
+not violate `spec-conventions.md`'s allowed entry format before landing).
+Collect all such markers into the final summary report. Leave the archive
+gate (`:14, 35-36`) and domain-list confirmation (`:97-101`, invariant `:15`)
+untouched. Update the skill doctrine section if it references the removed
+per-item gate.
 
-### Phase 2: lead-bootstrap same-session forge-spec → forge-mental-model chaining
+Verification: run the rewritten loop against a domain with at least one
+genuinely ambiguous behavior and confirm (a) no per-item prompt blocks
+execution, (b) the resulting spec entry carries the `<!-- AMBIGUOUS: ... -->`
+marker, and (c) the marker's content appears in the final summary report.
 
-Extend `lead-bootstrap` so that when it runs or triggers `lead-forge-spec` in
-a session (not limited to the fresh-install path — cover upgrade/adopt paths
-too, consistent with the existing index-health-check routing table at
-`agents-plugin/rsrc/lead-bootstrap/lead-bootstrap.md:86-96`), it asks after
-`lead-forge-spec` completes whether to also run `lead-forge-mental-model`,
-and invokes it on a yes answer.
+### Phase 2: lead-forge-spec wrap-up chaining into lead-forge-mental-model
+
+Extend `lead-forge-spec`'s wrap-up ("Suggested next steps",
+`agents-plugin/rsrc/lead-forge-spec/lead-forge-spec.md:253-257`) so that,
+after writing spec entries, it asks whether to run
+`lead-forge-mental-model` next, and invokes it on a yes answer. This fires
+regardless of how `lead-forge-spec` was reached (bootstrap's direct
+fresh-install suggestion, the index-health-check routing table, or a
+standalone user invocation).
+
+Verification: run `lead-forge-spec` to completion via at least two different
+entry paths (direct standalone invocation, and via `lead-bootstrap`'s
+fresh-install suggestion) and confirm the chaining prompt appears after both,
+and that a yes answer actually invokes `lead-forge-mental-model`.
 
 ## Spec Impact
 
