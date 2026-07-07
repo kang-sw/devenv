@@ -98,6 +98,21 @@ genuinely ambiguous behavior and confirm (a) no per-item prompt blocks
 execution, (b) the resulting spec entry carries the `<!-- AMBIGUOUS: ... -->`
 marker, and (c) the marker's content appears in the final summary report.
 
+### Result (005e9c83)
+
+Rewrote the "User classification loop" into a "Classification pass" that
+decides caller-visibility and implemented/planned status autonomously,
+embedding an inline `<!-- AMBIGUOUS: <reason> -->` marker next to the
+affected spec entry for genuinely ambiguous items and collecting them into
+the wrap-up summary report. Archive gate and once-per-run domain-list
+confirmation are untouched. Doctrine paragraph updated to match. Spec entry
+added (`ai-docs/spec/workflow-skills.md`, anchor
+`{#260707-forge-spec-autoproceed-classification-2}`); incidentally fixed a
+pre-existing duplicate-anchor `spec_index.verify` failure introduced earlier
+this session by a cross-reference that re-emitted an anchor tag instead of
+plain prose. Wsflow rsrc mirror and manifest regenerated and confirmed
+byte-identical. Single review: clean on first pass, no fix cycle needed.
+
 ### Phase 2: lead-forge-spec wrap-up chaining into lead-forge-mental-model
 
 Extend `lead-forge-spec`'s wrap-up ("Suggested next steps",
