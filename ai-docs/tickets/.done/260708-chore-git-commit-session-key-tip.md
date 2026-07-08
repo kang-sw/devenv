@@ -5,6 +5,7 @@ related:
 spec: 260626-post-compaction-session-restoration
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-08
 ---
 
 # Add a session-key preservation tip to git.commit responses
@@ -58,3 +59,16 @@ improving the odds a compaction summary actually carries it forward.
   through `git.commit` itself to test against.
 - Append the tip trailer after the existing TODO-summary trailer (key line
   last), so it lands closest to the end of the response for salience.
+
+### Result (6f75670) - 2026-07-08
+
+Added `appendSessionKeyTip` in `agents-plugin-tool/internal/mcp/workflow_manual.go`
+and wired it into the `git.commit` handler in `server.go`, appended after the
+existing TODO-summary trailer. Unit-tested directly (non-empty key appends the
+tip, empty key is a no-op) and via `TestWorkflowManualGitCommitReinjection`
+asserting the trailer's presence, content, and position in both the with-todos
+and no-todos cases. Single correctness review: clean. Spec entry added at
+`260708-git-commit-session-key-tip` in `ai-docs/spec/mcp-tools.md`; mental-model
+bullet added at `260708-git-commit-session-key-tip` in
+`ai-docs/mental-model/git-workflow-tools.md` documenting the fixed trailer
+order as modification guidance.
