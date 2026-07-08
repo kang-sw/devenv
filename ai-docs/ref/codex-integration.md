@@ -182,7 +182,26 @@ but `model_instructions_file` is simpler.
 
 ## Hook Configuration
 
-Enable via `-c features.codex_hooks=true`.
+Per official docs (`developers.openai.com/codex/hooks`, checked 2026-07-08):
+hooks are **enabled by default**; disable via `[features] hooks = false` in
+`config.toml` (admins can force this via `requirements.toml`). The
+`-c features.codex_hooks=true` flag documented below was empirically required
+on Codex CLI 0.128.0 (2026-05-04) and may be stale for current CLI versions —
+re-verify the enablement flag against the installed CLI version before relying
+on either form.
+
+Hooks can be bundled at multiple layers, loaded together (higher-precedence
+layers do not replace lower ones):
+
+- User-level: `~/.codex/hooks.json` or inline `[hooks]` in `~/.codex/config.toml`
+- Project-level: `<repo>/.codex/hooks.json` or inline `[hooks]` in `<repo>/.codex/config.toml`
+- **Plugin-bundled**: `hooks/hooks.json` inside the plugin root (or a path named
+  in the plugin manifest) — same shape as Claude's plugin-level hook bundling.
+- Managed (Enterprise): `requirements.toml` `[hooks]` tables
+
+`SessionStart` runs at thread (main-session) scope; subagent/sub-process
+initialization fires a separate `SubagentStart` event instead — mirroring the
+Claude-side split where `SessionStart` never reaches Task-tool subagents.
 
 Update from 2026-05-04 on Codex CLI 0.128.0 / WSL2 Linux: the inline
 `hooks.PostToolUse` form below fires during `codex exec --json`. The important

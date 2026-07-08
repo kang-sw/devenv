@@ -67,26 +67,30 @@ complying with a plain-English trigger condition.
 
 ## Open question: Codex-side plugin bundling
 
-`ai-docs/ref/codex-integration.md` documents a Codex `SessionStart` hook
-("fires on session start and resume... developer context injection"),
-gated behind `-c features.codex_hooks=true`. Unresolved before
-implementation:
+Resolved (2026-07-08) against the official Codex hooks doc
+(`developers.openai.com/codex/hooks`, recorded in
+`ai-docs/ref/codex-integration.md`): Codex hooks are enabled by default and
+explicitly support plugin-bundled configuration via `hooks/hooks.json` inside
+the plugin root, the same shape as Claude's plugin-level hook manifest. No
+per-invocation `-c` flag injection by the ws Codex launcher is needed for
+enablement or bundling. The prior `-c features.codex_hooks=true` requirement
+recorded from a 2026-05-04 CLI 0.128.0 smoke test may be stale for current
+CLI versions — re-verify the exact enablement state (default-on vs. flag-gated)
+against the installed CLI version during Phase 2 implementation, since a wrong
+assumption here would silently no-op the hook rather than error.
 
-- Can `features.codex_hooks=true` and the `SessionStart` hook config be
-  bundled inside a Codex-facing plugin artifact (`agents-plugin`'s
-  `.codex-plugin/` tree, or `agents-plugin-tool`'s Codex adapter), or does
-  it require a per-invocation `-c` flag the ws Codex launcher would need
-  to inject on every `codex exec` call?
+`SessionStart` fires at thread (main-session) scope; subagent/sub-process
+starts fire a separate `SubagentStart` event instead, mirroring the
+Claude-side split — so the existing "no subagent leak" conclusion holds
+structurally on Codex too, not just via `workflow_manual`'s gating.
+
+Still open before implementation:
+
 - Whether a "known session key" is resolvable at all from inside a hook's
   shell command context on either host (e.g. by querying ws's session
   store for the current root's most recent lead key), or whether the hook
   can only ever emit a generic reminder and must leave key resolution to
   the model's own next turn.
-
-If no clean Codex-side plugin-bundled option exists, decide whether to
-(a) require a per-invocation `-c` flag injected by the ws Codex launcher
-wrapper instead, or (b) accept a temporary host asymmetry and track the
-Codex gap as a follow-up.
 
 ## Phases
 
@@ -106,10 +110,11 @@ Codex gap as a follow-up.
 
 ### Phase 2: Codex-side hook, installed unconditionally
 
-- Resolve the plugin-bundling open question above against actual Codex CLI
-  behavior (test `-c features.codex_hooks=true` plus a `SessionStart` hook
-  either bundled in the Codex plugin artifact or injected by the ws Codex
-  launcher wrapper).
+- Bundle `hooks/hooks.json` in the Codex plugin artifact per the confirmed
+  default-enabled, plugin-bundlable mechanism; re-verify the exact enablement
+  state (default-on vs. flag-gated) against the installed Codex CLI version
+  before relying on it, and resolve the still-open session-key-resolvability
+  question above.
 - Wire the Codex `SessionStart` hook unconditionally (every start/resume,
   no compaction-only gating) to the same `workflow_manual(<session-key-if-
   known>)`-shaped call as Phase 1, relying on the existing session-key
