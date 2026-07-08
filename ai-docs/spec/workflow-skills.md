@@ -24,6 +24,7 @@ workflow-reference roles:
 lead-add-rule
 lead-bootstrap
 lead-discuss
+lead-drain-ready-queue
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
@@ -49,11 +50,11 @@ derived-stage triggers so Codex reliably invokes workflow entry points without
 overmatching internal pipeline stages.
 {#260508-skill-description-attention-policy}
 
-The directly invocable surface is narrowed to 13 entry skills the user invokes as
+The directly invocable surface is narrowed to 14 entry skills the user invokes as
 `/ws:<name>` — `lead-discuss`, `lead-sprint`, `lead-proceed`, `lead-review`,
 `lead-ship`, `lead-salvage`, `lead-bootstrap`, `lead-skill-authoring`,
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
-`lead-verify-discussion`, and `lead-tune`. The remaining
+`lead-verify-discussion`, `lead-tune`, and `lead-drain-ready-queue`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
 `lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
@@ -91,12 +92,15 @@ workflow skills. It defines host-neutral notation: `ws/<tool-name>` means an MCP
 tool on the `ws` server, while `ws:` names plugin skills.
 
 When global `"workflow.prefer_subagent"` is `on`, loading
-`lead-workflow-manual` also loads the rendered `lead-prefer-subagent` posture
-inside an XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
-boundary. The appended posture is rendered through the normal playbook pipeline
-so harness-specific defaults, including Codex invocation guidance, remain
-harness-scoped. Explicitly invoking `lead-prefer-subagent` may duplicate this
-short posture text; that duplication is accepted.
+`lead-workflow-manual` also loads the `lead-prefer-subagent` posture inside an
+XML-style `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`
+boundary. The appended text is the static body of
+`agents-plugin/skills/lead-prefer-subagent/SKILL.md`, read directly via
+`LoadSkillBody` with no override-marker pass and no per-harness runtime
+branch: Claude and Codex both see the same host-conditional prose, including
+the literal Codex `spawn_agent` fallback wording. Explicitly invoking
+`lead-prefer-subagent` may duplicate this short posture text; that
+duplication is accepted.
 
 Shared skill text uses ws MCP primitives for agent orchestration, scoped
 queries, generated artifact paths, runtime metadata, workflow discovery, Git
@@ -406,6 +410,68 @@ must not force full workflow-skill ceremony onto this checkpoint unless its
 actual output or end state is unclear.
 {#260512-discussion-verification-skill}
 
+`lead-drain-ready-queue` pulls one item from the `ready/` ticket queue and
+hands it to `lead-proceed` as an explicit target, so the caller does not
+depend on `lead-proceed`'s own target-from-conversation routing to guess
+which ticket is meant. It is a single-cycle shim, not a loop: one
+invocation resolves at most one ready ticket and stops — it does not poll
+or repeat internally. Repeated draining across the whole `ready/` backlog
+is the caller's responsibility (for example, a standing `/goal` directive
+whose Stop-hook re-invokes this skill each turn until the queue is empty).
+
+Ticket selection is itself delegated, not done by the lead: the skill
+spawns a light-tier Explore-style subagent to list `ready/`, prefer a
+candidate named as a prerequisite in another ready ticket's
+`related:`/`parent:` frontmatter when that referenced ticket is also in
+`ready/`, otherwise default to the oldest date-prefix ticket (FIFO), and
+return exactly one ticket path (or report the queue empty). The lead never
+lists `ready/` or reads ticket files itself for this step. If the
+subagent reports `ready/` empty, the lead stops with no handoff. This
+inspects only existing free-text `related:`/`parent:` annotations — no new
+structured dependency field is introduced.
+
+Deliberately kept minimal: this is a purely user/`/goal`-invoked shim, not
+a heavier discussable workflow skill, so beyond delegating selection its
+body also directs the lead to delegate everything else for the
+invocation — including simple tasks like commits — to a subagent per
+`lead-prefer-subagent`, conserving lead context across a long-running
+goal, rather than restating that posture's body. The skill's body is
+inlined as static text directly in
+`agents-plugin/skills/lead-drain-ready-queue/SKILL.md` (no rsrc playbook, no
+`playbook.print` indirection), matching the `lead-verify-discussion`/
+`lead-prefer-subagent` inline-body shape, and is mirrored byte-identically
+into `agents-plugin-wsflow`.
+{#260703-drain-ready-queue-skill}
+
+`lead-drain-ready-queue` adds goal-branch staging on top of the base
+single-cycle shim above, activated only when the lead itself observes both
+an active `/goal` Stop-hook reminder in the current turn and a current
+branch that is not already `goal/*`; the ticket-selection subagent stays
+unaware of this and is not asked to detect it. When active, the lead
+derives a branch-safe slug from the goal text and creates/checks out
+`goal/<slug>` with plain `git` commands before dispatching the selected
+ticket, then hands off to `lead-proceed` with `policy.branch.merge_confirm:
+"skip"` supplied as explicit caller policy — `lead-implement`'s existing
+Route step 3 ("explicit caller policy") consumes this without any
+goal-specific change on that side, and no `merge_target` override is
+needed since the create-path already derives the merge target from the
+checked-out branch. Each ticket still gets its own `impl/<stem>` branch,
+merged into `goal/<slug>` without an approval ask and auto-deleted per the
+Branch Cleanup naming-gate behavior (see the `impl/<stem>`-branch section
+above). When the selection subagent
+reports `ready/` empty while the current branch is `goal/<slug>`, the
+skill performs the run's one confirmed final merge itself in its own
+prose — ask the user for explicit approval, then `git merge --no-ff
+goal/<slug>` into `main` — rather than routing through
+`lead-proceed`/`lead-implement`, because `enter.implement` requires a
+ticket target this ticket-less step has none of. This override never
+extends to push or remote actions for either the per-ticket or the final
+merge. Outside an active `/goal` context, or once off a `goal/*` branch,
+the skill reproduces the pre-staging behavior exactly: no branch creation,
+no `merge_confirm` override, and no new persisted state — "currently
+checked out on `goal/<slug>`" is the entire signal.
+{#260707-drain-goal-branch-staging}
+
 `lead-verify-design` gives users a premise-gated design verification checkpoint
 for discussed designs. It first runs discussion verification so false or blocker
 premises do not seed the review, then writes a neutral temporary brief that
@@ -593,6 +659,24 @@ deployable and independently revertible target-history units. A branch that is
 one logical change with noisy or dependent commits squashes.
 {#260523-implement-doc-closeout-compaction}
 
+After a confirmed merge, `lead-implement` runs a Branch Cleanup step to reduce
+implementation-branch accumulation. It first verifies the implementation
+branch is a strict ancestor of the merge target
+(`git merge-base --is-ancestor`); it retains the branch and reports the skip
+reason without deleting when the branch is currently checked out, linked to
+an active worktree, the merge target was ambiguous, or the branch has commits
+unreachable from the merge target. When none of those conditions hold, the
+branch's naming convention gates the remaining flow: a branch named
+`impl/<stem>` (the convention `lead-implement` uses for branches it creates,
+`<stem>` hard-truncated to 15 characters with a trailing `-` trimmed) is
+deleted without asking. A branch under any other name — including the legacy
+`implement/<scope-slug>` convention — keeps the ask-first flow: the user is
+asked before `git branch -d` runs, and the branch is retained if not
+approved. The naming convention is a trust boundary, not a security
+boundary — a hand-created `impl/*` branch this tooling did not produce would
+also qualify for auto-delete once its structural guardrails pass.
+{#260707-implement-branch-cleanup-naming-gate}
+
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
 handles removed spec stems, verifies the spec index, and commits the spec pass.
@@ -765,9 +849,20 @@ force or suppress the subagent inference step.
 `lead-forge-spec` reconstructs spec documents from scratch. It archives stale
 current specs under `ai-docs/.old/spec/` after user confirmation, surveys
 source, tickets, archived specs, and commit history, asks the user to confirm
-behavioral domains and caller-visible classifications, writes anchor-keyed spec
-entries, verifies the index, and associates planned stems with active tickets
-when required.
+the once-per-run behavioral domain list, then classifies per-item
+caller-visibility and implemented/planned status autonomously - ambiguous
+calls carry an inline `<!-- AMBIGUOUS: <reason> -->` marker and are collected
+into the wrap-up summary rather than blocking on a per-item confirmation -
+writes anchor-keyed spec entries, verifies the index, and associates planned
+stems with active tickets when required.
+{#260707-forge-spec-autoproceed-classification-2}
+
+At wrap-up, `lead-forge-spec` asks whether to run `lead-forge-mental-model`
+next and invokes it on a yes answer, regardless of how the run was reached
+(standalone invocation, `lead-bootstrap`'s fresh-install suggestion, or the
+index-health-check routing table). This only covers the same-session case;
+`lead-bootstrap` itself is not otherwise changed.
+{#260707-forge-spec-mental-model-chaining}
 
 `lead-forge-mental-model` reconstructs mental-model documents from scratch. It
 surveys operational domains, asks the user to confirm the domain set, writes

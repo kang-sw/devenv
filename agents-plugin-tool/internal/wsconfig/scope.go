@@ -34,7 +34,8 @@ const (
 	// ItemSageReview is the layered config key for the sage review gate on ticket
 	// writes. Value "auto" runs reviewers unconditionally after a todo/ready commit;
 	// "ask" prompts the user first; absent/empty/"off" disables the gate entirely.
-	// Builtin default: off (absent = disabled).
+	// Builtin default: auto (gate runs unless a project/session/global override
+	// disables it).
 	ItemSageReview = "sage_review"
 
 	// ItemSageReviewDesignTier is the model capability tier for the design reviewer
@@ -65,12 +66,28 @@ const (
 	// at face value and propagate them without verification.
 	// Values: "on" (default) or "off".
 	ItemWorkflowSkepticalPosture = "workflow.skeptical_posture"
+
+	// ItemBootstrapAlarm gates the session-bootstrap staleness warning that
+	// fires when a downstream project's root AGENTS.md Template Version tag is
+	// behind the shipped lead-bootstrap template's tag. Values: "on" (builtin
+	// default) or "off". Global-only: this is a cross-project user preference
+	// about warning noise, not a per-project opt-in.
+	ItemBootstrapAlarm = "bootstrap_alarm"
+
+	// ItemDocCoverageAlarm gates the session-bootstrap doc-coverage warning
+	// that fires when a project's ai-docs/spec/ or ai-docs/mental-model/ has no
+	// .md file carrying a frontmatter block. Values: "on" (builtin default) or
+	// "off". Global-only: this is a cross-project user preference about
+	// warning noise, not a per-project opt-in, mirroring ItemBootstrapAlarm.
+	ItemDocCoverageAlarm = "doc_coverage_alarm"
 )
 
 func init() {
 	RegisterGlobalOnly(ItemWorkflowPreferSubagent)
 	RegisterGlobalOnly(ItemWorkflowPreferMercenary)
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
+	RegisterGlobalOnly(ItemBootstrapAlarm)
+	RegisterGlobalOnly(ItemDocCoverageAlarm)
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // freshOnlyStart and freshOnlyEnd are the dedicated mode-gating marker tokens
@@ -147,6 +148,19 @@ func injectSessionKeyLine(body, key string) string {
 	return strings.Join(result, "\n")
 }
 
+// appendSessionKeyTip appends a session-key preservation trailer to text.
+// It repeats injectSessionKeyLine's "preserve verbatim" reminder on a
+// high-frequency, lead-scoped tool response so the key stays recent in the
+// transcript near the point compaction is likely to trigger, rather than
+// relying solely on workflow_manual's single near-the-top placement. No-op
+// when key is empty.
+func appendSessionKeyTip(text, key string) string {
+	if key == "" {
+		return text
+	}
+	return text + fmt.Sprintf("\ntip: preserve this session key: %s during compaction\n", key)
+}
+
 // handleWorkflowState implements the ws.workflow_state tool: a cheap,
 // lead-only view of just the Session State section (agenda/todos) for a
 // session_key, with no manual reference/primitives text. It reuses
@@ -254,6 +268,18 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
+			if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
+				body = injectBootstrapStalenessWarning(body, warning)
+			}
+			{
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := docCoverageWarning(canonical, &warningResolver, mintedKey)
+				body = injectDocCoverageWarning(body, warning)
+			}
 			return toolTextResponse(id, body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
@@ -269,6 +295,20 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body += "\n\n" + renderSessionState(rec)
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
+		}
+		if rec.Root != "" {
+			if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
+				body = injectBootstrapStalenessWarning(body, warning)
+			}
+			{
+				warningAdapter := sessionConfigAdapter{s: s.sessions}
+				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warning := docCoverageWarning(rec.Root, &warningResolver, key)
+				body = injectDocCoverageWarning(body, warning)
+			}
 		}
 	}
 

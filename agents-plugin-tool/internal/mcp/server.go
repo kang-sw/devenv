@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -68,7 +69,7 @@ func isLeadOnlyTool(name string) bool {
 
 func workflowPreferenceWriterTool(name string) bool {
 	switch name {
-	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+	case "config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm", "config.doc_coverage_alarm":
 		return true
 	default:
 		return false
@@ -320,6 +321,9 @@ func builtinConfigDefaults() map[string]string {
 	return map[string]string{
 		wsconfig.ItemWorkflowPreferSubagent:  "off",
 		wsconfig.ItemWorkflowPreferMercenary: "hide",
+		wsconfig.ItemSageReview:              "auto",
+		wsconfig.ItemBootstrapAlarm:          "on",
+		wsconfig.ItemDocCoverageAlarm:        "on",
 	}
 }
 
@@ -599,6 +603,82 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("workflow.prefer_mercenary: %s [scope:global]\n", value), nil)
 
+	case "config.bootstrap_alarm":
+		if _, err := s.requireLeadSessionKey("config.bootstrap_alarm", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		reset, _ := params.Arguments["reset"].(bool)
+		rawValue, hasValue := params.Arguments["value"]
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if reset {
+			if hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: value and reset are mutually exclusive"))
+				}
+			}
+			// Reset means "drop the global override and fall back to the builtin
+			// default" — distinct from explicitly writing the builtin's current
+			// value, which would still shadow a future builtin default change.
+			if err := resolver.Unset(wsconfig.ItemBootstrapAlarm, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
+			}
+			resolved, err := resolver.Get("", wsconfig.ItemBootstrapAlarm)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
+		}
+		value, _ := rawValue.(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: value must be one of on, off; got %q", value))
+		}
+		if err := resolver.Set(wsconfig.ItemBootstrapAlarm, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.bootstrap_alarm: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("bootstrap_alarm: %s [scope:global]\n", value), nil)
+
+	case "config.doc_coverage_alarm":
+		if _, err := s.requireLeadSessionKey("config.doc_coverage_alarm", params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		reset, _ := params.Arguments["reset"].(bool)
+		rawValue, hasValue := params.Arguments["value"]
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		if reset {
+			if hasValue {
+				if v, _ := rawValue.(string); strings.TrimSpace(v) != "" {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: value and reset are mutually exclusive"))
+				}
+			}
+			// Reset means "drop the global override and fall back to the builtin
+			// default" — distinct from explicitly writing the builtin's current
+			// value, which would still shadow a future builtin default change.
+			if err := resolver.Unset(wsconfig.ItemDocCoverageAlarm, wsconfig.SetOptions{}); err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
+			}
+			resolved, err := resolver.Get("", wsconfig.ItemDocCoverageAlarm)
+			if err != nil {
+				return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
+			}
+			return toolTextResponse(req.ID, fmt.Sprintf("doc_coverage_alarm: %s [scope:%s]\n", resolved.Value, resolved.Scope), nil)
+		}
+		value, _ := rawValue.(string)
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch value {
+		case "on", "off":
+		default:
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: value must be one of on, off; got %q", value))
+		}
+		if err := resolver.Set(wsconfig.ItemDocCoverageAlarm, value, wsconfig.SetOptions{}); err != nil {
+			return toolTextResponse(req.ID, "", fmt.Errorf("config.doc_coverage_alarm: %w", err))
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("doc_coverage_alarm: %s [scope:global]\n", value), nil)
+
 	case "config.prompt.set":
 		// Lead-only setter for prompt override-points. The config.* prefix gate in
 		// roleAllowsTool already blocks delegate and leaf keys, so no extra role
@@ -836,6 +916,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
 			}
 		}
+		commitText = appendSessionKeyTip(commitText, commitKey)
 		return toolTextResponse(req.ID, commitText, err)
 	case "project_tree":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1060,7 +1141,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		stem, _ := params.Arguments["stem"].(string)
 		to, _ := params.Arguments["to"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
 			TicketStem: stem,
@@ -1083,7 +1164,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		initialState, _ := params.Arguments["initial_state"].(string)
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		adapter := sessionConfigAdapter{s: s.sessions}
-		r := wsconfig.NewResolver(wsconfig.Options{}, nil, adapter, adapter)
+		r := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
 		resolved, _ := r.Get(sessionKey, wsconfig.ItemSageReview)
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
 			Stem:         stem,
@@ -1435,10 +1516,29 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 		"session_key": key,
 		"root":        canonical,
 	}
+	text := fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical)
+	if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		warning := bootstrapStalenessWarning(canonical, skillsRoot, &resolver, "")
+		if warning != "" {
+			result["bootstrap_alarm"] = warning
+			text += "\n" + warning + "\n"
+		}
+	}
+	{
+		adapter := sessionConfigAdapter{s: s.sessions}
+		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		warning := docCoverageWarning(canonical, &resolver, "")
+		if warning != "" {
+			result["doc_coverage_alarm"] = warning
+			text += "\n" + warning + "\n"
+		}
+	}
 	if wantsJSON(arguments) {
 		return toolJSONResponse(id, result, nil)
 	}
-	return toolTextResponse(id, fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical), nil)
+	return toolTextResponse(id, text, nil)
 }
 
 type sessionChildOutput struct {
@@ -1732,6 +1832,32 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: tuningFieldsFromSchema("config.workflow_prefer_subagent", "value"),
 		Current:     currentWorkflowPreference(resolver, wsconfig.ItemWorkflowPreferSubagent),
+	})
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "bootstrap_alarm",
+		Kind:        "workflow_preference",
+		Description: "Select whether the session-bootstrap staleness warning fires when this project's AGENTS.md template is behind the shipped lead-bootstrap template.",
+		Writer:      tuningWriter{Tool: "config.bootstrap_alarm"},
+		Reset: &tuningWriter{
+			Tool:           "config.bootstrap_alarm",
+			FixedArguments: map[string]string{"reset": "true"},
+		},
+		ValueFields: tuningFieldsFromSchema("config.bootstrap_alarm", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemBootstrapAlarm),
+	})
+
+	catalog.Knobs = append(catalog.Knobs, tuningKnob{
+		ID:          "doc_coverage_alarm",
+		Kind:        "workflow_preference",
+		Description: "Select whether the session-bootstrap doc-coverage warning fires when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file.",
+		Writer:      tuningWriter{Tool: "config.doc_coverage_alarm"},
+		Reset: &tuningWriter{
+			Tool:           "config.doc_coverage_alarm",
+			FixedArguments: map[string]string{"reset": "true"},
+		},
+		ValueFields: tuningFieldsFromSchema("config.doc_coverage_alarm", "value"),
+		Current:     currentWorkflowPreference(resolver, wsconfig.ItemDocCoverageAlarm),
 	})
 
 	if noAgentMode {
@@ -2752,13 +2878,13 @@ func tools() []map[string]any {
 							"scope": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"span":                        nullableEnumStringProperty("Implementation span.", []string{"single-file", "multi-file", "unknown"}),
-									"surface":                     nullableEnumStringProperty("Touched surface.", []string{"internal", "public-interface", "cross-module", "unknown"}),
-									"new_public_symbol":           nullableEnumStringProperty("Whether work introduces a public symbol.", []string{"yes", "no", "unknown"}),
-									"new_type_contract":           nullableEnumStringProperty("Whether work introduces or changes a type/schema contract.", []string{"yes", "no", "unknown"}),
-									"test_surface":                nullableEnumStringProperty("Test surface affected by the work.", []string{"none", "existing", "new-files", "unknown"}),
-									"explicit_delegation_request":   nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
-										"explicit_direct_edit_request": nullableEnumStringProperty("When yes, overrides all other predicates and forces direct-edit verdict regardless of span/scope/surface facts. Encodes an explicit human instruction to skip delegation. Accepted: yes, no, unknown.", []string{"yes", "no", "unknown"}),
+									"span":                         nullableEnumStringProperty("Implementation span.", []string{"single-file", "multi-file", "unknown"}),
+									"surface":                      nullableEnumStringProperty("Touched surface.", []string{"internal", "public-interface", "cross-module", "unknown"}),
+									"new_public_symbol":            nullableEnumStringProperty("Whether work introduces a public symbol.", []string{"yes", "no", "unknown"}),
+									"new_type_contract":            nullableEnumStringProperty("Whether work introduces or changes a type/schema contract.", []string{"yes", "no", "unknown"}),
+									"test_surface":                 nullableEnumStringProperty("Test surface affected by the work.", []string{"none", "existing", "new-files", "unknown"}),
+									"explicit_delegation_request":  nullableEnumStringProperty("Whether the caller explicitly requested delegated implementation.", []string{"yes", "no", "unknown"}),
+									"explicit_direct_edit_request": nullableEnumStringProperty("When yes, overrides all other predicates and forces direct-edit verdict regardless of span/scope/surface facts. Encodes an explicit human instruction to skip delegation. Accepted: yes, no, unknown.", []string{"yes", "no", "unknown"}),
 								},
 							},
 							"complexity": map[string]any{
@@ -2789,8 +2915,9 @@ func tools() []map[string]any {
 							"branch": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"merge_target": nullableStringProperty("Required when already on an implementation branch."),
-									"allow_rename": nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict.", []string{"yes", "no", "unknown"}),
+									"merge_target":  nullableStringProperty("Required when already on an implementation branch."),
+									"allow_rename":  nullableEnumStringProperty("Whether MCP may choose a safe branch rename verdict (defaults to yes).", []string{"yes", "no", "unknown"}),
+									"merge_confirm": nullableEnumStringProperty("Whether lead-implement may skip the ask-before-merge confirmation for this merge (defaults to ask).", []string{"skip", "ask", "unknown"}),
 								},
 							},
 							"review": map[string]any{
@@ -3126,6 +3253,28 @@ func tools() []map[string]any {
 					"value": enumStringProperty("Desired mode: on, off, or hide.", []string{"on", "off", "hide"}),
 				},
 				"required": []string{"value"},
+			},
+		},
+		{
+			"name":        "config.bootstrap_alarm",
+			"description": "Set the global preference for the session-bootstrap staleness warning (fires at ferrule/workflow_manual time when this project's AGENTS.md Template Version tag is behind the shipped lead-bootstrap template), or reset it back to the builtin default (on) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
+					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
+				},
+			},
+		},
+		{
+			"name":        "config.doc_coverage_alarm",
+			"description": "Set the global preference for the session-bootstrap doc-coverage warning (fires at ferrule/workflow_manual time when ai-docs/spec/ or ai-docs/mental-model/ has no frontmatter-bearing .md file), or reset it back to the builtin default (on) with reset: true. reset and value are mutually exclusive; exactly one must be provided.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": enumStringProperty("Desired mode: on or off. Omit when reset is true.", []string{"on", "off"}),
+					"reset": boolProperty("When true, drop the global override and fall back to the builtin default instead of writing an explicit value."),
+				},
 			},
 		},
 		{
@@ -3715,7 +3864,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"mercenary.interrupt", "mercenary.tail", "mercenary.debug.tail", "mercenary.debug.stdout",
 		"mercenary.debug.stderr", "mercenary.debug.runtime_log", "mercenary.debug.events",
 		"mercenary.cancel", "mercenary.print", "mercenary.erase",
-		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary":
+		"config.workflow_prefer_subagent", "config.workflow_prefer_mercenary", "config.bootstrap_alarm", "config.doc_coverage_alarm":
 		return true
 	default:
 		return false

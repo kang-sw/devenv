@@ -35,7 +35,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
             "No Edit or Write tool call is permitted until `enter.implement` returns a `direct-edit` verdict.",
             text,
         )
-        self.assertIn("Wait for user approval before merge or another implementation slice.", text)
+        self.assertIn(
+            "Wait for user approval before merge or another implementation slice, unless the resolved verdict's merge confirm is `skip`, in which case proceed with that merge without asking.",
+            text,
+        )
         self.assertIn("### Implementer spawn prompt", text)
         self.assertIn("### Reviewer table", text)
         self.assertNotIn("## Implementation Verdict", text)
@@ -51,13 +54,28 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("Write prompts sent to `mercenary.call` in English.", text)
         self.assertIn("<!-- ws:full-only:end -->", text)
 
-    def test_verify_discussion_is_entry_shim(self):
-        shim = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
-        text = (RSRC_DIR / "lead-verify-discussion" / "lead-verify-discussion.md").read_text(encoding="utf-8")
+    def test_verify_discussion_is_inlined_static_body(self):
+        # lead-verify-discussion's body is inlined directly in SKILL.md (no
+        # rsrc playbook, no playbook.print indirection) since the
+        # substitution-mirrored inline-mirror work landed.
+        text = (SKILLS_DIR / "lead-verify-discussion" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn('ws/playbook.print(name: "lead-verify-discussion")', shim)
+        self.assertNotIn('ws/playbook.print(name: "lead-verify-discussion")', text)
         self.assertIn("Treat user preference as input, not evidence.", text)
         self.assertIn("Build the strongest concise countercase", text)
+
+    def test_drain_ready_queue_is_inlined_static_body(self):
+        # lead-drain-ready-queue's body is inlined directly in SKILL.md (no
+        # rsrc playbook, no playbook.print indirection), mirroring the
+        # lead-verify-discussion inline-body shape.
+        text = (SKILLS_DIR / "lead-drain-ready-queue" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertNotIn('ws/playbook.print(name: "lead-drain-ready-queue")', text)
+        self.assertIn("light-tier Explore-style subagent", text)
+        self.assertIn("(FIFO)", text)
+        self.assertIn("prerequisite", text)
+        self.assertIn("lead-prefer-subagent", text)
+        self.assertIn("Do not list", text)
 
 
 if __name__ == "__main__":

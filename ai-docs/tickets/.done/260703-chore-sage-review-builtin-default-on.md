@@ -3,6 +3,7 @@ title: "Flip sage_review plugin builtin default from unset to auto"
 related:
   260626-bug-sage-review-config-setter-missing: adjacent gap in the sage_review config surface (missing lead-facing setter/tuning knob); this ticket only changes the shipped builtin default value, not the setter surface
 sage-review: completed
+completed: 2026-07-03
 ---
 
 # Flip sage_review plugin builtin default from unset to auto
@@ -108,4 +109,25 @@ spec edit. Contract-first spec: no.
   `skipped`-by-default behavior are updated to the new expectation, and that
   a test asserts an explicit project-scope `sage_review` override still wins
   over the new builtin default.
+
+### Result
+
+Implemented on `implement/sage-review-builtin-default-auto`
+(`58dd7a66..d62474c5`, 3 commits). Added `wsconfig.ItemSageReview: "auto"` to
+`builtinConfigDefaults()`, updated its doc comment, and swapped `nil` →
+`builtinConfigDefaults()` at both `tickets.move`/`tickets.create`
+`NewResolver` call sites (`server.go:1063`, `1086`) — survey confirmed no
+other `NewResolver` nil-passing site was in scope. Added tests confirming
+no-override resolves to `required` for both tools and that an explicit
+project-scope override still wins.
+
+Partitioned review: fit clean, test non-clean (1 critical) — the two
+"defaults-to-required" tests set `WS_CACHE_HOME` but not `WS_CONFIG_HOME`,
+so they leaked the real `~/.ws/config.json` global scope on the review
+machine and passed for the wrong reason rather than exercising the nil-swap
+fix. Fixed in `d62474c5` by isolating `WS_CONFIG_HOME` per the repo's
+existing test pattern; verified with an explicit revert experiment (tests
+correctly FAIL without the production fix, PASS with it restored).
+
+Plugin version bumped 0.32.1 → 0.32.2 (dev-merge rule) in `aebc4d68`.
 

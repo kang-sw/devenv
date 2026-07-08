@@ -31,6 +31,12 @@
 
 input=$(cat)
 
+# Real ESC byte, built once via ANSI-C quoting — never routed through an
+# escape-interpreting emitter (echo -e), so backslash sequences that show up
+# in dynamic content (e.g. literal "\n" inside a Windows-style directory
+# name) can never be misread as control codes.
+ESC=$'\033'
+
 # Single jq call to extract all fields (17 → 1 subprocess)
 IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
   DURATION_MS API_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
@@ -183,7 +189,7 @@ pct_color() {
     printf "\033[%d;5;%dm", m, steps[idx]
   }'
 }
-PCT_COLOR="\033[48;5;${L2_BG}m$(pct_color "$PCT_RAW")"
+PCT_COLOR="${ESC}[48;5;${L2_BG}m$(pct_color "$PCT_RAW")"
 PCT_COLOR_FWD="$(pct_color "$PCT_RAW")"
 PCT_COLOR_BG="$(pct_color "$PCT_RAW" 48)"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
@@ -222,6 +228,11 @@ RATE_5HR_RESET_FMT=$(_fmt_epoch "$RATE_5HR_RESETS" "+%HH")
 
 # 7d rate limit reset weekday
 RATE_7D_TTL=$(_fmt_epoch "$RATE_7D_RESETS" "+%a")
+
+# Normalize Windows-style separators so basename/relative-path splitting
+# below (which only recognizes "/") works on backslash paths too.
+DIR="${DIR//\\//}"
+PROJECT_DIR="${PROJECT_DIR//\\//}"
 
 # Relative path: current_dir relative to project_dir
 DIR_REL=""
@@ -269,8 +280,8 @@ RCAP=$'\xee\x82\xb4' # U+E0B4 (right round cap)
 COST_FMT=$(printf '$%.2f' "$COST")
 
 # Pill helpers
-po() { printf "\033[38;5;%dm${LCAP}\033[48;5;%dm" "$1" "$1"; }
-pc() { printf "\033[0m\033[38;5;%dm${RCAP}\033[0m" "$1"; }
+po() { printf "${ESC}[38;5;%dm${LCAP}${ESC}[48;5;%dm" "$1" "$1"; }
+pc() { printf "${ESC}[0m${ESC}[38;5;%dm${RCAP}${ESC}[0m" "$1"; }
 
 # ───────────────────────────────────────────────────────────
 # Layout engine: build pills, compute widths, pad to RCOL
@@ -304,7 +315,7 @@ _layout() {
     [ $i -gt 0 ] && line+=" "
     line+="$(po $bg)${c}${fill}$(pc $bg)"
   done
-  echo -e "\033[0m${line}\033[0m"
+  printf '%s\n' "${ESC}[0m${line}${ESC}[0m"
 }
 
 # ── Pill content + visible width for each segment ──
@@ -312,15 +323,15 @@ _layout() {
 # (emoji 📁🌿🤔 = 2 cols / 1 char → +1; ⌛️ = 2 cols / 2 chars → +0)
 
 # === L1: [Model] [Dir] ===
-_PC0="\033[38;5;${FG};1m ${MODEL} \033[22m"
+_PC0="${ESC}[38;5;${FG};1m ${MODEL} ${ESC}[22m"
 _PW0=$((${#MODEL} + 2))
 _PBG0=$MODEL_BG
 
 _dir_name="${DIR##*/}"
-_PC1="\033[38;5;${FG}m 📁 ${_dir_name}"
+_PC1="${ESC}[38;5;${FG}m 📁 ${_dir_name}"
 _PW1=$((5 + ${#_dir_name})) # " 📁(2col) name "
 [[ -n $DIR_REL ]] && {
-  _PC1+=" \033[38;5;${FG_DIM}m${DIR_REL}"
+  _PC1+=" ${ESC}[38;5;${FG_DIM}m${DIR_REL}"
   _PW1=$((_PW1 + 1 + ${#DIR_REL}))
 }
 _PC1+=" "
@@ -331,14 +342,14 @@ L1=$(_layout 2)
 # === L_GIT: [Branch] [Changes] (optional) ===
 L_GIT=""
 if [[ -n $BRANCH_NAME ]]; then
-  _PC0="\033[38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
+  _PC0="${ESC}[38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
   _PW0=$((5 + ${#BRANCH_NAME})) # " 🌿(2col) branch "
   [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && {
-    _PC0+=" \033[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
+    _PC0+=" ${ESC}[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
     _PW0=$((_PW0 + 2 + ${#GIT_AHEAD}))
   }
   [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && {
-    _PC0+=" \033[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
+    _PC0+=" ${ESC}[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
     _PW0=$((_PW0 + 2 + ${#GIT_BEHIND}))
   }
   _PC0+=" "
@@ -346,19 +357,19 @@ if [[ -n $BRANCH_NAME ]]; then
 
   _gc="" _gcw=1 # leading space
   [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && {
-    _gc+="\033[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
+    _gc+="${ESC}[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
     _gcw=$((_gcw + 2 + ${#GIT_ADDED}))
   }
   [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && {
-    _gc+="\033[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
+    _gc+="${ESC}[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
     _gcw=$((_gcw + 2 + ${#GIT_DELETED}))
   }
   [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && {
-    _gc+="\033[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
+    _gc+="${ESC}[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
     _gcw=$((_gcw + 2 + ${#GIT_MODIFIED}))
   }
   [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && {
-    _gc+="\033[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
+    _gc+="${ESC}[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
     _gcw=$((_gcw + 2 + ${#GIT_UNTRACKED}))
   }
   if [[ -n $_gc ]]; then
@@ -366,7 +377,7 @@ if [[ -n $BRANCH_NAME ]]; then
     _PW1=$_gcw
     _PBG1=$GIT_CHANGES_BG
   else
-    _PC1="\033[38;5;${FG_MUTED}m working tree clean "
+    _PC1="${ESC}[38;5;${FG_MUTED}m working tree clean "
     _PW1=20
     _PBG1=$L_GIT_BG
   fi
@@ -408,32 +419,32 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
   }
   printf "%s", out
 }')
-L2="\033[0m${PCT_COLOR_FWD}${LCAP}\033[48;5;${L2_BG}m${BAR} $(pc $L2_BG)\033[0m"
+L2="${ESC}[0m${PCT_COLOR_FWD}${LCAP}${ESC}[48;5;${L2_BG}m${BAR} $(pc $L2_BG)${ESC}[0m"
 
 # === L2b: [Tokens] [5h Rate] [7d Rate] [TotalOut] ===
-_PC0="${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} "
+_PC0="${PCT_COLOR_FWD} ${TOKENS_USED_FMT} ${ESC}[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} "
 _PW0=$((${#TOKENS_USED_FMT} + ${#CTX_MAX_FMT} + 5)) # " TOK / MAX "
 _PBG0=$TOKENS_BG
 
-_PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%\033[38;5;${FG_DIM}m/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
+_PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%${ESC}[38;5;${FG_DIM}m/${ESC}[38;5;${FG}m${RATE_5HR_RESET_FMT}"
 _PW1=$((4 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/NNH "
 [[ -n $DELTA_5HR ]] && {
-  _PC1+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"
+  _PC1+=" ${ESC}[38;5;${_DC_5HR}m(${DELTA_5HR})"
   _PW1=$((_PW1 + 3 + ${#DELTA_5HR}))
 }
 _PC1+=" "
 _PBG1=$RATE_5H_BG
 
-_PC2=" ${RATE_7D_COLOR}${RATE_7D}%\033[38;5;${FG_DIM}m/\033[38;5;${FG}m${RATE_7D_TTL}"
+_PC2=" ${RATE_7D_COLOR}${RATE_7D}%${ESC}[38;5;${FG_DIM}m/${ESC}[38;5;${FG}m${RATE_7D_TTL}"
 _PW2=$((4 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/Day "
 [[ -n $DELTA_7D ]] && {
-  _PC2+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"
+  _PC2+=" ${ESC}[38;5;${_DC_7D}m(${DELTA_7D})"
   _PW2=$((_PW2 + 3 + ${#DELTA_7D}))
 }
 _PC2+=" "
 _PBG2=$RATE_7D_BG
 
-_PC3="\033[38;5;${OUTPUT_TOK_FG}m ↑${OUTPUT_TOKENS_FMT} "
+_PC3="${ESC}[38;5;${OUTPUT_TOK_FG}m ↑${OUTPUT_TOKENS_FMT} "
 _PW3=$((3 + ${#OUTPUT_TOKENS_FMT})) # " ↑OUT "
 _PBG3=$TOKENS_BG
 
@@ -442,12 +453,12 @@ L2b=$(_layout 4)
 # === L3: [Time] [API] [Delta?] [Cost] ===
 _n3=0
 
-_PC0="\033[38;5;${FG}m ⌛️ ${TIME_FMT} "
+_PC0="${ESC}[38;5;${FG}m ⌛️ ${TIME_FMT} "
 _PW0=$((5 + ${#TIME_FMT})) # " ⌛️ TIME " (⌛️: 2col/2char → no adj)
 _PBG0=$TIME_BG
 _n3=1
 
-_PC1="\033[38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s"
+_PC1="${ESC}[38;5;${FG}m 🤔 ${API_TIME_FMT} ${ESC}[38;5;${FG_DIM}m${TOK_SEC}t/s"
 _PW1=$((8 + ${#API_TIME_FMT} + ${#TOK_SEC})) # " 🤔(+1) APITIME TOKt/s"
 if [[ -n $CACHE_HIT ]]; then
   _ch_pct="${CACHE_HIT}%"
@@ -461,11 +472,11 @@ _n3=2
 
 _dl="" _dlw=1
 [ "$LINES_ADDED" -gt 0 ] 2>/dev/null && {
-  _dl+="\033[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "
+  _dl+="${ESC}[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "
   _dlw=$((_dlw + 2 + ${#LINES_ADDED}))
 }
 [ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && {
-  _dl+="\033[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "
+  _dl+="${ESC}[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "
   _dlw=$((_dlw + 2 + ${#LINES_REMOVED}))
 }
 if [[ -n $_dl ]]; then
@@ -475,21 +486,22 @@ if [[ -n $_dl ]]; then
   _n3=$((_n3 + 1))
 fi
 
-eval "_PC${_n3}=\"\033[38;5;\${COST_FG};1m \${COST_FMT} \033[22m\""
+eval "_PC${_n3}=\"${ESC}[38;5;\${COST_FG};1m \${COST_FMT} ${ESC}[22m\""
 eval "_PW${_n3}=\$((${#COST_FMT} + 2))"
 eval "_PBG${_n3}=\$COST_BG"
 _n3=$((_n3 + 1))
 
 L3=$(_layout $_n3)
 
-LSEP="\033[38;5;${FG_HSEP}m $(printf "%$((RCOL - 2))s" | tr ' ' '·')"
+LSEP="${ESC}[38;5;${FG_HSEP}m $(printf "%$((RCOL - 2))s" | tr ' ' '·')"
 
 # Emit
-echo -e "$L2"
-# echo -e "$LSEP"
-echo -e "$L2b"
-echo -e "$L3"
-# echo -e "\033 "
-echo -e "$L1"
-[[ -n $L_GIT ]] && echo -e "$L_GIT"
-# echo -e "\033 "
+# printf '%s\n' (not echo -e) so backslash sequences inside dynamic content
+# (directory names, branch names) are never reinterpreted as escapes — the
+# ESC bytes above are already real control characters, not literal text.
+printf '%s\n' "$L2"
+# printf '%s\n' "$LSEP"
+printf '%s\n' "$L2b"
+printf '%s\n' "$L3"
+printf '%s\n' "$L1"
+[[ -n $L_GIT ]] && printf '%s\n' "$L_GIT"

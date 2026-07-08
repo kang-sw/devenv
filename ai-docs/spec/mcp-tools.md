@@ -237,8 +237,14 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   text|json`. MCP observes Git branch state from the session root, including the
   current branch, HEAD/start commit, target branch existence, and
   upstream/tracking ambiguity; callers provide only policy that cannot be
-  observed mechanically, such as a merge target while already on `implement/*`
-  and whether safe branch rename is allowed. The resolver derives
+  observed mechanically, such as a merge target while already on an
+  implementation branch (`impl/*`, or legacy `implement/*`) and whether safe
+  branch rename is allowed; branch rename defaults to allowed unless the
+  caller explicitly withholds consent (`policy.branch.allow_rename: no`); and
+  whether the caller's own merge-approval ask may be skipped for this merge;
+  merge confirmation defaults to asking unless the caller explicitly passes
+  `policy.branch.merge_confirm: skip`. The
+  resolver derives
   `delegation`, `branch_plan`, `plan_depth`, `review_alloc`, `need_review`, and
   `doc_mode`, stores the implement agenda, and replaces the todo list with the
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and
@@ -261,12 +267,17 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   what policy or branch condition needs correction before source edits continue
   without naming unreachable planner or implementer actions. When a caller
   supplies `policy.branch.merge_target` outside its applicability window (the
-  observed current branch is not already `implement/*`, so the branch action
-  is `create`), the verdict adds a one-line warning naming the supplied value
-  and the branch it was derived from instead, e.g. `policy.branch.merge_target
-  "master" ignored (not on an implement/* branch); derived from current branch
-  "test/wsflow-smoke"`, so a caller unfamiliar with the applicability rule sees
-  that the field was read and deliberately not applied.
+  observed current branch is not already an implementation branch, i.e. not
+  prefixed `impl/` or legacy `implement/`, so the branch action is `create`),
+  the verdict adds a one-line warning naming the supplied value and the branch
+  it was derived from instead, e.g. `policy.branch.merge_target "master"
+  ignored (not on an implementation branch: impl/*, or legacy implement/*);
+  derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
+  the applicability rule sees that the field was read and deliberately not
+  applied. Fresh implementation branches are created under the `impl/<stem>`
+  convention, with `<stem>` hard-truncated to 15 characters (trailing `-`
+  trimmed); legacy `implement/<scope-slug>` branches already in progress are
+  still recognized as implementation branches for continue/rename purposes.
 - `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /
@@ -412,6 +423,65 @@ schema.
     mints a key. Unlike `workflow_manual`, `workflow_state` has no FRESH mode —
     the sentinel simply falls through to this same fail-loud path.
 
+### Bootstrap Staleness Warning {#260703-bootstrap-staleness-warning}
+
+`ferrule` and `workflow_manual` (FRESH-with-root and CONTINUE branches only)
+each surface a one-line staleness banner when the downstream project's root
+`AGENTS.md` carries a `<!-- Template Version: vNNNN -->` tag behind the
+version shipped in the running package's own `lead-bootstrap` skill template
+(`agents-plugin/skills/lead-bootstrap/AGENTS.template.md` for ws,
+`agents-plugin-wsflow/skills/lead-bootstrap/AGENTS.template.md` for wsflow).
+The comparison is package-local: whichever package's MCP binary is running
+resolves its own shipped template via `wsrsrc.ResolveSkillsRoot()`, so there is
+no cross-package (ws vs wsflow) comparison and no separate version manifest to
+hand-maintain. The `workflow_manual` FRESH-without-root branch (no established
+root yet) never checks or warns.
+
+The check is silent by design in three cases: the `bootstrap_alarm` config
+item (see Config Tools) resolves to `off`; the downstream root has no
+`AGENTS.md` or the file has no Template Version tag at all (an untagged
+project never opted into the ws bootstrap contract, so absence is not treated
+as maximal staleness); or the shipped template's own tag is unreadable or
+malformed (fail-safe — the tool never warns off of an unreadable "latest").
+When the warning does fire, its text names both the installed and latest
+version numbers and instructs the caller to run
+`config.bootstrap_alarm(value: "off")` to silence it permanently. The warning
+fires on every `ferrule`/`workflow_manual` call while stale — there is no
+once-per-session suppression state, matching the existing precedent of
+per-call injection (e.g. the mercenary agentId tip) rather than the
+per-`project_tree`-call anti-pattern this repo's Decisions section warns
+against.
+
+Changing `lead-bootstrap`'s own upgrade/migration procedure is out of scope for
+this warning; it only detects and reports staleness.
+
+### Doc Coverage Warning {#260707-doc-coverage-warning}
+
+`ferrule` and `workflow_manual` (FRESH-with-root and CONTINUE branches only)
+each surface a one-line warning when the project's `ai-docs/spec/` or
+`ai-docs/mental-model/` directory has no `.md` file carrying a parsed YAML
+frontmatter block. The check is live and stateless: it re-scans both
+directories on every call rather than reading a stored coverage flag. The
+`workflow_manual` FRESH-without-root branch (no established root yet) never
+checks or warns, matching the bootstrap-staleness precedent
+(`#260703-bootstrap-staleness-warning`).
+
+The check is silent by design in two cases: the `doc_coverage_alarm` config
+item (see Config Tools) resolves to `off`; or both `ai-docs/spec/` and
+`ai-docs/mental-model/` already contain at least one frontmatter-bearing `.md`
+file. A missing directory counts as uncovered, not an error — fresh projects
+legitimately lack these directories before `lead-forge-spec`/
+`lead-forge-mental-model` has run. When the warning does fire, its text names
+which area(s) are missing coverage and instructs the caller to run
+`config.doc_coverage_alarm(value: "off")` to silence it permanently. The
+warning fires on every `ferrule`/`workflow_manual` call while uncovered —
+there is no once-per-session suppression state, mirroring
+`#260703-bootstrap-staleness-warning`.
+
+Whether a project's spec/mental-model authoring is otherwise complete is out
+of scope for this warning; it only detects the presence-of-any-frontmatter-file
+floor.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
@@ -449,6 +519,22 @@ tracks any future change to the builtin default. This mirrors the general
 unset-vs-set distinction in `#260702-unset-means-reset-to-builtin`.
 {#260702-config-unset-reset-to-builtin}
 
+`config.bootstrap_alarm(session_key, value: "on"|"off")` sets the global
+`"bootstrap_alarm"` item, whose builtin default is `on`; it gates the
+bootstrap staleness warning (`#260703-bootstrap-staleness-warning`). It
+requires a lead session key for authority, always writes the global config
+scope (global-only, mirroring `config.workflow_prefer_subagent`), and accepts
+the same mutually-exclusive `reset: true` alternative to `value` with
+identical unset-to-builtin semantics.
+
+`config.doc_coverage_alarm(session_key, value: "on"|"off")` sets the global
+`"doc_coverage_alarm"` item, whose builtin default is `on`; it gates the doc
+coverage warning (`#260707-doc-coverage-warning`). It requires a lead session
+key for authority, always writes the global config scope (global-only,
+mirroring `config.bootstrap_alarm`), and accepts the same mutually-exclusive
+`reset: true` alternative to `value` with identical unset-to-builtin
+semantics.
+
 ## Tuning Catalog {#260625-tuning-catalog}
 
 `config.tuning` is a read-only discovery surface for workflow-tuning knobs used
@@ -463,7 +549,8 @@ descriptions from the existing MCP writer tool schema where possible. Prompt
 override entries derive their point ids from the same shipped override-marker
 scan used by `config.prompt`; model-tier entries derive their fields from
 `config.agents_tier`; workflow-preference entries derive their values from
-`config.workflow_prefer_subagent` and `config.workflow_prefer_mercenary`.
+`config.workflow_prefer_subagent`, `config.workflow_prefer_mercenary`,
+`config.bootstrap_alarm`, and `config.doc_coverage_alarm`.
 The shipped `DelegationSection` override marker is removed, so
 `prompt.DelegationSection` is absent from `config.tuning` and `config.prompt`
 discovery; orphaned stored prompt keys remain ignored.
@@ -694,27 +781,41 @@ one staged change set, and the tool never commits. {#260620-ticket-close-tool}
 
 `tickets.move` moves a ticket along the `idea ↔ todo ↔ ready` axis. Downward
 moves from `ready/` return a tip to clear spec frontmatter before re-promoting.
-Upward moves stamp or validate the ticket's `sage-review:` posture from the
-resolved `sage_review` config: `skipped` for `off`, empty, or unset;
-`recommended` for `ask`; and `required` for `auto`. A move into `todo/` may
-leave `recommended` or `required` as the visible unresolved posture. A move into
-`ready/` requires a resolved terminal posture (`completed` or `skipped`);
-`recommended`, `required`, and `blocked` stop with an action-oriented message.
-A move into `ready/` for a non-`epic`/`research`/`workset` ticket with no
-detected spec addressing (no confirmed `spec:`/`spec-remove:` frontmatter entry
-and no `## Spec Impact` section) additionally returns a soft, non-blocking tip
-noting that the ready gate is normally enforced by `lead-write-ticket`; the
-move still succeeds. The move stages atomically and never commits.
+Upward moves stamp or validate the ticket's per-stage sage-review posture from
+the resolved `sage_review` config: `skipped` for `off`, empty, or unset;
+`recommended` for `ask`; and `required` for `auto` (see the Sage Review Gate
+section below for the two-field, per-category contract). A move
+into `todo/` may leave `recommended` or `required` as the visible unresolved
+posture on the fields the ticket's category requires. A move into `ready/`
+requires each required field to hold a resolved terminal posture (`completed`
+or `skipped`); `recommended`, `required`, and `blocked` on any required field
+stop with an action-oriented message naming that field. When both stages apply,
+`sage-review-design` is checked before `sage-review-completeness`, so a ticket
+that reaches `ready/` without a terminal design posture is always blocked on
+the design field first, regardless of entry path. A move into `ready/` for a
+non-`epic`/`research`/`workset` ticket with no detected spec addressing (no
+confirmed `spec:`/`spec-remove:` frontmatter entry and no `## Spec Impact`
+section) additionally returns a soft, non-blocking tip noting that the ready
+gate is normally enforced by `lead-write-ticket`; the move still succeeds. The
+move stages atomically and never commits.
 {#260620-ticket-move-tool}
 
 `tickets.create` creates a dated ticket stub at a caller-specified initial state
 (`idea`, `todo`, or `ready`). It auto-prefixes today's date to form the full
 ticket stem, writes a minimal frontmatter stub (`title: ""` placeholder;
-resolved `sage-review:` posture for `todo/+` states), and returns the created
-path and a caller-facing tip that names the posture. Terminal states (`done`,
-`dropped`) and an empty stem are rejected with errors. The tool is not
-idempotent: a duplicate path returns an error. The `idea/` tip directs the
-caller to promote through `todo/` so the resolved posture can be stamped.
+resolved `sage-review-design:` posture for `todo/+` states when the ticket's
+category requires design review), and returns the created path and a
+caller-facing tip that names the posture. It does not stamp
+`sage-review-completeness` at creation time, even for `state: "ready"` —
+completeness is evaluated only at ready-promotion time via `tickets.move`,
+which has a "from" state to validate against. Creating directly at `ready/`
+for a category requiring design review still enforces the never-skippable
+design invariant: if the freshly resolved design posture is not terminal
+(`completed` or `skipped`), the call is rejected with an action-oriented error
+instead of silently stamping a non-terminal posture and succeeding. Terminal
+states (`done`, `dropped`) and an empty stem are rejected with errors. The tool
+is not idempotent: a duplicate path returns an error. The `idea/` tip directs
+the caller to promote through `todo/` so the resolved posture can be stamped.
 {#260622-create-ticket-tool}
 
 `tickets.template` returns the typed body skeleton for a given ticket type.
@@ -728,19 +829,71 @@ into a new ticket body. An unknown or empty `type` is rejected with an error
 listing valid types. Capability range: `>=0.30.6-dev <0.31.0`.
 {#260624-tickets-template-tool}
 
-The Sage Review Gate runs after `lead-write-ticket` commits a ticket to `todo/` or
-`ready/`. It reads the ticket's `sage-review:` posture. `skipped` bypasses the
-gate, `recommended` requires a run-or-skip decision, and `required` runs review
-without asking. If the user skips a `recommended` review, the gate writes
-`sage-review: skipped` and commits. If review runs, the gate dispatches two
-delegate playbooks in parallel: `ticket-reviewer-design` (tier: large) and
-`ticket-reviewer-completeness` (tier: medium). Each reviewer emits a structured
-verdict (`pass`, `concern`, or `block`) with an issues list. The gate aggregates
-the pair and writes `sage-review: completed` or `sage-review: blocked` into the
-ticket frontmatter and commits. A `blocked` result also appends a
-`## Blocked (YYYY-MM-DD)` summary section to the ticket body. `concern` elevated
-from design reviewer resolves to `completed` by default unless the lead
-escalates to `block`. `idea/` tickets bypass the gate.
+The Sage Review Gate is split into two sequential, non-looping stage gates
+keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
+ticket: a design-sketch review at `todo/` landing (tolerant of missing detail;
+catches wrong direction) and a completeness review at `ready/` promotion
+(checks implementation-readiness, undecided user-policy points, and capture
+gaps). Frontmatter carries two independent stage-scoped fields —
+`sage-review-design:` and `sage-review-completeness:` — each using the same
+five-value vocabulary as before: `skipped`, `recommended`, `required`,
+`completed`, `blocked`. Both fields resolve independently from the same
+`sage_review` config value via the same posture-resolution rule (`skipped` for
+`off`/empty/unset, `recommended` for `ask`, `required` for `auto`); the config
+axis itself is not split, only which stage(s) a given ticket category stamps.
+
+Category exemptions (mirroring the existing spec-address-gate category
+detection): `feat`/`bug`/`refactor`/`chore` (default/actionable categories)
+require both stages; `epic` requires only `sage-review-design` (epics never
+reach `lead-implement`, so completeness never applies); `research` and
+`workset` are exempt from both stages, matching their existing blanket
+spec-address-gate exemption.
+
+Hard invariant: design review is never skippable regardless of entry path. A
+ticket that reaches `ready/` without ever passing `todo/` design review must
+still pass design review before or as part of completeness review. Concretely:
+`tickets.move`'s promotion validation checks `sage-review-design` before
+`sage-review-completeness` and blocks on the design field first if it is not
+terminal; the `lead-write-ticket` playbook, when landing at `ready/`, checks
+`sage-review-design` before dispatching the completeness reviewer and runs
+`ticket-reviewer-design` inline first if the design field is not yet terminal.
+This covers `idea/` → `ready/` direct promotion and tickets authored directly
+at `ready/`, since both layers check the same field rather than traversal
+history.
+
+At `todo/` landing (category requires design), the gate dispatches only
+`ticket-reviewer-design` (tier: large) and writes the result to
+`sage-review-design:` only. At `ready/` landing (category requires
+completeness), after the design-invariant check above passes, the gate
+dispatches only `ticket-reviewer-completeness` (tier: medium) and writes the
+result to `sage-review-completeness:` only. Each reviewer emits a structured
+verdict (`pass`, `concern`, or `block`) with an issues list; since each landing
+dispatches at most one reviewer, that reviewer's own verdict directly becomes
+the stage's result (no cross-reviewer aggregation), except the
+inline-design-then-completeness ready-promotion case, which applies the
+existing pairwise aggregation across the two sequential results. A `block`
+result appends a `## Blocked (YYYY-MM-DD)` summary section to the ticket body
+and writes `blocked` to the corresponding stage field. `idea/` tickets and
+`research`/`workset` tickets bypass the gate at every landing; `epic` tickets
+bypass only the completeness stage.
+
+The completeness reviewer's checklist includes a scope-boundary check that
+distinguishes a genuine completeness/readiness gap (`resolution: autonomous`,
+fill it) from a design-shaped gap in disguise — a new public interface,
+cross-module interaction change, or architecture reshaping — which must be
+raised as `resolution: missing` and left unfilled rather than patched under
+cover of a completeness fix.
+
+Legacy migration: a ticket carrying only the old single `sage-review:` field
+(no new fields) is read lazily at the first `tickets.move` or
+`lead-write-ticket` gate touch. A legacy `completed` migrates to both new
+fields as `completed`; legacy `skipped` migrates to both as `skipped`; legacy
+`blocked` migrates to both as `blocked` (still must be addressed); any other
+legacy value (`recommended`, `required`, missing, or `pending`) is treated as
+absent for both new fields and each is resolved fresh, the same as new-ticket
+stamping. The migration write persists both new fields on that first touch
+(self-healing, no bulk-rewrite script) and leaves the old `sage-review:` field
+in place.
 {#260624-sage-review-gate}
 
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
@@ -820,6 +973,15 @@ commit doubles as a todo restoration point. The injection is text-mode only and 
 skipped when the session holds no todos or when structured JSON output is requested;
 it does not change todo status — `git.commit` never auto-marks items done.
 {#260626-git-commit-todo-reinjection}
+After the todo re-injection (if any), `git.commit`'s text-mode response appends a
+trailer line — `tip: preserve this session key: <key> during compaction` — naming
+the calling session's key. The trailer repeats the reminder `workflow_manual`
+already places near the top of a manual reload, on a high-frequency, lead-scoped
+call that tends to land near the end of a working turn, so the key stays recent in
+the transcript at the point context compaction is likely to trigger. The trailer
+is omitted only when no session key is present; structured JSON output is
+unaffected.
+{#260708-git-commit-session-key-tip}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 

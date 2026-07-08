@@ -253,6 +253,58 @@ func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
 	}
 }
 
+func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
+	skip := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	finalAction := requireInstruction(t, todoByKey(t, skip, "final-action-gate"))
+	if !strings.Contains(finalAction, "without asking for approval") {
+		t.Fatalf("final-action-gate instruction with merge_confirm=skip should drop the approval ask: %q", finalAction)
+	}
+	if strings.Contains(finalAction, "before asking for final action approval") {
+		t.Fatalf("final-action-gate instruction with merge_confirm=skip still asks for approval: %q", finalAction)
+	}
+	merge := requireInstruction(t, todoByKey(t, skip, "merge"))
+	if strings.Contains(merge, "After user approval") {
+		t.Fatalf("merge instruction with merge_confirm=skip should not require approval: %q", merge)
+	}
+	if !strings.Contains(merge, "without asking for user approval") {
+		t.Fatalf("merge instruction with merge_confirm=skip missing auto-merge guidance: %q", merge)
+	}
+
+	ask := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo", MergeConfirm: "ask"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	if got := requireInstruction(t, todoByKey(t, ask, "merge")); !strings.Contains(got, "After user approval") {
+		t.Fatalf("merge instruction with merge_confirm=ask should still require approval: %q", got)
+	}
+
+	absent := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "implement/demo"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "standard",
+		NeedDoc:     true,
+	})
+	if got := requireInstruction(t, todoByKey(t, absent, "merge")); !strings.Contains(got, "After user approval") {
+		t.Fatalf("merge instruction with merge_confirm absent should default to requiring approval: %q", got)
+	}
+}
+
 func TestDeriveImplementTodoInstructionsBranchStop(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
@@ -1637,10 +1689,10 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	for _, want := range []string{
 		"Implementation Verdict",
 		"Mode: delegated",
-		"Branch Action: create implement/enter-implement-deterministic-verdict-engine",
+		"Branch Action: create impl/enter-implement",
 		"Plan Depth: survey",
 		"Review Allocation: partitioned: correctness, fit, test",
-		"Next: Create implement/enter-implement-deterministic-verdict-engine",
+		"Next: Create impl/enter-implement",
 		"path.generate(kind: \"plan\")",
 		"plan-populator-survey",
 		"[escalate-to-research]",
@@ -1784,6 +1836,43 @@ func TestEnterImplementStopsOnImplementBranchWithoutMergeTarget(t *testing.T) {
 	}
 }
 
+func TestEnterImplementNewImplPrefixBranchTargetExists(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	// The target branch this scenario resolves to is "impl/enter-implement"
+	// (implementTargetBranchName truncates the ready-args scope slug to 15
+	// chars). Pre-create it so observeImplementBranch's TargetExists check
+	// and deriveImplementBranchPlan's target-branch naming both key off the
+	// same shared helper (implementTargetBranchName) instead of drifting.
+	runGit(t, root, "switch", "-c", "impl/enter-implement")
+	runGit(t, root, "switch", "-c", "impl/old-scope")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+	args := implementReadyArgs("json")
+	args["policy"].(map[string]any)["branch"].(map[string]any)["allow_rename"] = "yes"
+	text := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	var result implementResult
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, text)
+	}
+	if result.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("expected stop branch action when target already exists, got %+v", result.Verdict.BranchPlan)
+	}
+	if result.Verdict.BranchPlan.TargetBranch != "impl/enter-implement" {
+		t.Fatalf("target branch = %q, want impl/enter-implement", result.Verdict.BranchPlan.TargetBranch)
+	}
+	if !strings.Contains(result.Verdict.BranchPlan.Reason, "already exists") {
+		t.Fatalf("expected already-exists reason, got %q", result.Verdict.BranchPlan.Reason)
+	}
+}
+
 func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -1819,8 +1908,146 @@ func TestServeStdioTicketsCreateUsesResolvedSageReviewConfig(t *testing.T) {
 		t.Fatalf("read created ticket: %v", err)
 	}
 	body := string(raw)
-	if !strings.Contains(body, "sage-review: recommended") {
+	if !strings.Contains(body, "sage-review-design: recommended") {
 		t.Fatalf("created ticket missing recommended posture:\n%s", body)
+	}
+}
+
+func TestServeStdioTicketsCreateDefaultsToRequiredSageReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902601, root, nil))
+
+	resp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-create-default",
+		"initial_state": "todo",
+	})
+	if !strings.Contains(resp, "Created ai-docs/tickets/todo/") || !strings.Contains(resp, "required") {
+		t.Fatalf("tickets.create response missing created path or posture: %s", resp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-create-default.md"))
+	if err != nil {
+		t.Fatalf("glob created ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("created ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read created ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review-design: required") {
+		t.Fatalf("created ticket missing required posture (builtin default should now be required):\n%s", body)
+	}
+}
+
+func TestServeStdioTicketsMoveDefaultsToRequiredSageReview(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902602, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-move-default",
+		"initial_state": "idea",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
+		t.Fatalf("tickets.create response missing created path: %s", createResp)
+	}
+	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-default.md"))
+	if err != nil || len(createdMatches) != 1 {
+		t.Fatalf("glob created ticket: matches=%v err=%v", createdMatches, err)
+	}
+	datedStem := strings.TrimSuffix(filepath.Base(createdMatches[0]), ".md")
+
+	moveResp := callToolWithKey(t, server, 2, key, "tickets.move", map[string]any{
+		"stem": datedStem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "required") {
+		t.Fatalf("tickets.move response missing required posture tip (builtin default should now be required): %s", moveResp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-move-default.md"))
+	if err != nil {
+		t.Fatalf("glob moved ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("moved ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read moved ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review-design: required") {
+		t.Fatalf("moved ticket missing required posture (builtin default should now be required):\n%s", body)
+	}
+}
+
+func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheHome)
+
+	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+	if err := resolver.Set(wsconfig.ItemSageReview, "ask", wsconfig.SetOptions{}); err != nil {
+		t.Fatalf("set sage_review: %v", err)
+	}
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902603, root, nil))
+
+	createResp := callToolWithKey(t, server, 1, key, "tickets.create", map[string]any{
+		"stem":          "feat-sage-move-override",
+		"initial_state": "idea",
+	})
+	if !strings.Contains(createResp, "Created ai-docs/tickets/idea/") {
+		t.Fatalf("tickets.create response missing created path: %s", createResp)
+	}
+	createdMatches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "idea", "*-feat-sage-move-override.md"))
+	if err != nil || len(createdMatches) != 1 {
+		t.Fatalf("glob created ticket: matches=%v err=%v", createdMatches, err)
+	}
+	datedStem := strings.TrimSuffix(filepath.Base(createdMatches[0]), ".md")
+
+	moveResp := callToolWithKey(t, server, 2, key, "tickets.move", map[string]any{
+		"stem": datedStem,
+		"to":   "todo",
+	})
+	if !strings.Contains(moveResp, "recommended") {
+		t.Fatalf("tickets.move response missing recommended posture tip (explicit override should win): %s", moveResp)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "ai-docs", "tickets", "todo", "*-feat-sage-move-override.md"))
+	if err != nil {
+		t.Fatalf("glob moved ticket: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("moved ticket matches = %v, want exactly one", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read moved ticket: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "sage-review-design: recommended") {
+		t.Fatalf("moved ticket missing recommended posture (explicit project-scope override should win over builtin default):\n%s", body)
 	}
 }
 
@@ -2657,6 +2884,16 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		if !strings.Contains(commitResp, "Route") && !strings.Contains(commitResp, "- [") {
 			t.Errorf("git.commit re-injection: todo summary absent from response:\n%s", commitResp)
 		}
+
+		// The session-key tip trailer must land after the TODO summary (key
+		// line last, for maximal recency/salience).
+		wantTip := fmt.Sprintf("tip: preserve this session key: %s during compaction", key)
+		if !strings.Contains(commitResp, wantTip) {
+			t.Errorf("git.commit re-injection: session-key tip absent from response:\n%s", commitResp)
+		}
+		if idx := strings.Index(commitResp, "## TODO("); idx == -1 || strings.Index(commitResp, wantTip) < idx {
+			t.Errorf("git.commit re-injection: session-key tip must follow the TODO summary trailer:\n%s", commitResp)
+		}
 	}
 
 	// Also assert: a commit with no todos appends nothing extra.
@@ -2697,6 +2934,28 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		if strings.Contains(commitResp, "Todo (post-commit)") || strings.Contains(commitResp, "TODO(ws reminder: update this if stale)") {
 			t.Errorf("git.commit(no-todo): unexpected Todo section:\n%s", commitResp)
 		}
+		// The session-key tip still appends even with no todos.
+		wantTip := fmt.Sprintf("tip: preserve this session key: %s during compaction", key2)
+		if !strings.Contains(commitResp, wantTip) {
+			t.Errorf("git.commit(no-todo): session-key tip absent from response:\n%s", commitResp)
+		}
+	}
+}
+
+func TestAppendSessionKeyTip(t *testing.T) {
+	const key = "scarily-imminent-ploy-plated-84"
+	withKey := appendSessionKeyTip("commit ok", key)
+	wantTip := fmt.Sprintf("tip: preserve this session key: %s during compaction", key)
+	if !strings.Contains(withKey, wantTip) {
+		t.Errorf("appendSessionKeyTip: tip absent for non-empty key:\n%s", withKey)
+	}
+	if !strings.HasPrefix(withKey, "commit ok") {
+		t.Errorf("appendSessionKeyTip: original text not preserved:\n%s", withKey)
+	}
+
+	noKey := appendSessionKeyTip("commit ok", "")
+	if noKey != "commit ok" {
+		t.Errorf("appendSessionKeyTip: expected no-op for empty key, got:\n%s", noKey)
 	}
 }
 

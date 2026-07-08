@@ -601,6 +601,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envNamespace, "wsflow")
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
 	s := newTestServerWithHarness(t, "codex")
 	configOpts := isolatedPlaybookConfigOptions(t)
 
@@ -1609,22 +1610,27 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadVerifyDiscussion verifies lead-verify-discussion
-// resolves and is marked delegates:true (tip must appear).
-func TestPlaybookPrintGoldenLeadVerifyDiscussion(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
+// TestSkillBodyGoldenLeadVerifyDiscussion verifies lead-verify-discussion
+// resolves from the real skills tree as a static inlined SKILL.md body.
+// lead-verify-discussion is no longer a playbook.print-backed rsrc playbook
+// (its procedure body was inlined directly into SKILL.md), so this reads
+// through wsrsrc.LoadSkillBody rather than printPlaybook. The former
+// delegates:true continuity-tip and mercenary-path paragraphs were removed
+// (see 864902a3): they were a poor fit for this checkpoint's conditional
+// delegation, and their removal makes the source eligible for
+// substitution-mirrored wsflow generation (no product-specific content).
+func TestSkillBodyGoldenLeadVerifyDiscussion(t *testing.T) {
+	skillsRoot := filepath.Join("..", "..", "..", "agents-plugin", "skills")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-discussion", nil, wsconfig.Options{}, "", nil)
+	body, err := wsrsrc.LoadSkillBody(skillsRoot, "lead-verify-discussion")
 	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
+		t.Fatalf("LoadSkillBody: %v", err)
 	}
 	if !strings.Contains(body, "Re-objectify the discussion") {
 		t.Errorf("body %q: expected procedure text 'Re-objectify the discussion'", body)
 	}
-	// delegates:true — continuity tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
+	if strings.Contains(body, "mercenary") {
+		t.Errorf("body %q: must not contain mercenary-path content (removed in 864902a3)", body)
 	}
 }
 
@@ -1714,10 +1720,10 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	}
 	for _, want := range []string{
 		"If posture is `recommended`, ask the user",
-		"If posture is `required`, run sage review without asking",
-		"add `sage-review: skipped`",
-		"add or update `sage-review: completed`",
-		"add or update `sage-review: blocked`",
+		"If posture is `required`, run design review without asking",
+		"add `sage-review-design: skipped`",
+		"add or update `sage-review-design: completed`",
+		"add or update `sage-review-design: blocked`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing sage review gate language %q:\n%s", want, body)
@@ -1786,6 +1792,9 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"Rendered review relay prompt: <prompt-path>",
 		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
+		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
+		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
+		"the branch does not match `impl/*`, including legacy `implement/*`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lead-implement full ws render missing %q:\n%s", want, body)
@@ -1864,6 +1873,15 @@ func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("wsflow lead-implement render contains forbidden %q:\n%s", forbidden, body)
+		}
+	}
+	for _, want := range []string{
+		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
+		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
+		"the branch does not match `impl/*`, including legacy `implement/*`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wsflow lead-implement render missing %q:\n%s", want, body)
 		}
 	}
 }
@@ -2058,8 +2076,8 @@ func TestPlaybookPrintGoldenLeadForgeSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "confirmed spec entries per domain") {
-		t.Errorf("body %q: expected doctrine text 'confirmed spec entries per domain'", body)
+	if !strings.Contains(body, "low-friction throughput per domain") {
+		t.Errorf("body %q: expected doctrine text 'low-friction throughput per domain'", body)
 	}
 	// delegates:true (native exploration-worker spawns) — tip must appear.
 	if !strings.Contains(body, "Continuity tip") {

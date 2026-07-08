@@ -282,6 +282,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
@@ -340,10 +341,20 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	}
 }
 
-func TestWorkflowPreferSubagentWorkflowManualClaudeOmitsCodexGuidance(t *testing.T) {
+// TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody verifies
+// that the lead-prefer-subagent append is now a static SKILL.md body loaded
+// via wsrsrc.LoadSkillBody, identical across harnesses. This replaces the
+// prior per-harness override-marker divergence test
+// (TestWorkflowPreferSubagentWorkflowManualClaudeOmitsCodexGuidance): the
+// PreferSubagentInvocationGuidance override point and its Codex-only builtin
+// default were retired when the skill body was inlined, so Claude and Codex
+// now both see the same host-conditional prose, including the literal
+// spawn_agent fallback wording.
+func TestWorkflowPreferSubagentWorkflowManualClaudeGetsStaticSkillBody(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	t.Setenv("WS_SKILLS_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "skills"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
@@ -369,13 +380,14 @@ func TestWorkflowPreferSubagentWorkflowManualClaudeOmitsCodexGuidance(t *testing
 	if !strings.Contains(text, `<playbook name="lead-prefer-subagent" title="Prefer Subagent">`) {
 		t.Fatalf("prefer-subagent manual render must append wrapper for Claude:\n%s", text)
 	}
-	for _, forbidden := range []string{
+	for _, want := range []string{
+		"Maximum-delegation posture for this session",
 		"spawn_agent(fork_context:true, message:<prompt>)",
 		"`agent_type: explorer`",
 		"`agent_type: worker`",
 	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("Claude appended playbook must not include Codex binding %q:\n%s", forbidden, text)
+		if !strings.Contains(text, want) {
+			t.Fatalf("Claude appended playbook must include static skill body %q:\n%s", want, text)
 		}
 	}
 }

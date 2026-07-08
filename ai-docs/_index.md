@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.32.1`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.32.1`).
+Active plugin package: `agents-plugin/` (`ws@0.33.5`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.5`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -446,25 +446,54 @@ dropped tickets live in hidden archive dirs and git history.
   constraint:** tree-kills scoped
   to the spawned subtree by PID/job — never image-name (`taskkill /IM`) —
   because the dogfooding WSL2 host runs a live `claude.exe`.
-- `260703-chore-prefer-subagent-verify-discussion-inline-mirror` (ready, chore)
-  - inline `lead-prefer-subagent`/`lead-verify-discussion` bodies into `SKILL.md`
-  directly (dropping `ws/playbook.print` indirection) to fix call-skip risk on
-  reminder-style prose skills; Phase 1 repoints the `lead-workflow-manual`
-  keyless embed consumer via new `LoadSkillBody`/skills-tree manifest plumbing
-  before deleting the rsrc playbooks, and deletes the now-dead override-marker
-  Go plumbing. Phase 2 adds a hard-gated "substitution-mirrored skill"
-  generation mechanism (curated list lives in `ai-docs/ref/wsflow-mirroring.md`)
-  scoped only to these two skills. Spec addressing via `## Spec Impact`
-  (`workflow-skills.md` `{#260505-workflow-primitive-reference}`,
+- `260703-chore-implement-branch-rename-default-allow` (ready, chore) -
+  default `policy.branch.allow_rename` to `yes` in `enter.implement`'s
+  branch plan resolver so the lead no longer needs explicit per-invocation
+  user consent before a rename verdict is reachable; existing
+  `TargetExists`/`Upstream`/`Ahead`/`Behind` guardrails are unchanged and
+  remain the safety net. Spec addressing via Phase 1 (spec update bullet
+  added per completeness-reviewer finding, Contract-first: no). Sage
+  review completed.
+- `260707-feat-forge-autonomy-bootstrap-chaining` (ready, feat) - narrow
+  `lead-forge-spec`'s per-ambiguous-item classification loop to auto-proceed
+  (inline `<!-- AMBIGUOUS: ... -->` markers, summarized in the final report),
+  leaving the destructive archive gate and one-time domain-list confirmation
+  untouched; add a `lead-forge-spec` wrap-up chaining prompt into
+  `lead-forge-mental-model` (covers all entry paths, since bootstrap has no
+  call/return path back from an indirectly-triggered forge-spec run).
+  Complements `260707-feat-doc-coverage-live-bootstrap-alarm`'s cross-session
+  safety net. Spec addressing via `## Spec Impact` (`workflow-skills.md`,
   Contract-first: no). Sage review completed.
-- `260703-chore-sage-review-builtin-default-on` (ready, chore) - add
-  `wsconfig.ItemSageReview: "auto"` to `builtinConfigDefaults()` so fresh
-  projects default to running the sage-review gate; also fixes the
-  `tickets.move`/`tickets.create` call sites (`server.go:1063`, `1086`)
-  passing a literal `nil` resolver builtin-defaults map, which made the new
-  default structurally unreachable without the fix. Spec addressing via
-  `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
-  completed.
+- `260707-feat-doc-coverage-live-bootstrap-alarm` (ready, feat) - add a live
+  (non-persisted, no set/clear flag) session-bootstrap check for whether
+  `ai-docs/spec/`/`ai-docs/mental-model/` each contain at least one
+  frontmatter-bearing `.md` file, surfaced via `ferrule`/`workflow_manual`
+  and muted by a single new combined `wsconfig.Item*` entry; reuses
+  `260703-chore-bootstrap-staleness-alarm`'s warning-delivery-channel
+  pattern and rejects a generic `config.set_flag`-shaped setter for the same
+  reason that ticket already rejected one. Spec addressing via
+  `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
+  no). Sage review completed.
+- `260708-feat-lead-revive-hook-replacement` (todo, feat, prerequisite
+  260708-research-lead-revive-low-salience) - delete `lead-revive` and
+  replace post-compaction session-key reload with a plugin-bundled
+  `SessionStart`/`compact` hook (Claude) and an unconditional `SessionStart`
+  hook (Codex), both shaped as `workflow_manual(<session-key-if-known>)`
+  calls relying on the tool's existing lead-only/sentinel gating for
+  safety. Deliberately demoted from `ready` back to `todo`: this is a
+  bigger update (skill deletion, cross-doc reference cleanup, two-host
+  hook wiring) the user wants to schedule properly rather than ship now.
+  The independently valuable `git.commit`-tip continuity improvement was
+  split out as `260708-chore-git-commit-session-key-tip` (follow-up) so it
+  can proceed on its own without waiting on this larger ticket. Not
+  currently implementation-ready; needs a fresh sage design review before
+  its next `ready` promotion (frontmatter reset to `required`). The
+  independently shippable `git.commit`-tip piece
+  (`260708-chore-git-commit-session-key-tip`) shipped and closed to `.done/`:
+  `git.commit`'s text-mode response now appends a `tip: preserve this
+  session key: <key> during compaction` trailer after the todo-reinjection
+  block (spec `260708-git-commit-session-key-tip` in `mcp-tools.md`;
+  mental-model bullet in `git-workflow-tools.md`).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

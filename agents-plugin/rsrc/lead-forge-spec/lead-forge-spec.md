@@ -12,7 +12,7 @@ Target: user request
 - Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
 - All survey queries spawn host-native broad-scope exploration workers directly with the listed query blocks as task prompts; ticket-association checks spawn a scoped exploration worker with a ticket-association prompt and cited evidence.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
-- No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
+- Caller-visible status and implemented/planned classification for ambiguous items are decided autonomously using best judgment; each autonomously-classified ambiguous item carries an inline `<!-- AMBIGUOUS: <reason> -->` marker and is collected into the final summary report. Confirmation is still required for the archive gate and the once-per-run domain list.
 - Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `{{.McpNamespace}}/spec_index.verify()` after every spec file write or update.
 - Domain todo items use the key and title prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`); the key is derivable from the domain name for status mutation.
@@ -175,24 +175,24 @@ Combine the four returns into one bullet per distinct caller-visible behavior:
 description, evidence source (code / ticket / old-spec / commit), candidate
 classification (implemented / planned), and uncertainty flags.
 
-### 4. User classification loop
+### 4. Classification pass
 
-Present the behavior brief to the user. For each item, establish:
+For each item in the behavior brief, decide autonomously using best judgment:
 
-1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`. Ask on every ambiguous item.
+1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`.
 2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Contract-first planned implementation behavior -> `## 🚧 Feature {#slug}` only when backed by a non-`epic`, non-`research`, non-`workset` `ready/` ticket. Epic, research, or workset tickets may back only planned decomposition, investigation text, or operating context. Other planned work stays in ticket `## Spec Impact` or the survey report.
 
-Ask on every ambiguous item. Do not classify without confirmation. Collect the
-confirmed list before writing anything.
+When an item is genuinely ambiguous on either axis, classify it with the best-judgment call and record a one-line reason; step 5 embeds this as an inline `<!-- AMBIGUOUS: <reason> -->` marker next to the affected entry, and step 5's writeup collects every such marker for the final summary report. Do not stop to ask per item. Collect the classified list before writing anything.
 
 ### 5. Write spec entries
 
 1. Determine the target spec file path. Apply `judge: directory-vs-flat`.
 2. Call `{{.McpNamespace}}/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
-3. For each confirmed behavior:
+3. For each classified behavior:
    a. Call `{{.McpNamespace}}/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
    c. Place `🚧` after the heading marker if planned; omit if implemented.
+   d. If step 4's classification pass flagged this item ambiguous, add `<!-- AMBIGUOUS: <reason> -->` on the line directly beneath the entry heading, and record the stem + reason for the wrap-up summary.
 4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
 5. Call `{{.McpNamespace}}/spec_index.verify()`.
 6. Apply `judge: directory-vs-flat` - if the written file warrants a directory split, note it as a split candidate for a follow-up lead-write-spec procedure invocation. Do not perform the split inline.
@@ -248,9 +248,22 @@ Spec files created: <list of paths>
 Total stems generated: <count>
   Implemented: <count>
   🚧 Planned: <count>
+Ambiguous classifications (auto-decided, review recommended): <count>
+  <stem> - <reason>
+  ...
 ```
 
-### 3. Suggested next steps
+### 3. Chain into lead-forge-mental-model
+
+Ask the user whether to run `lead-forge-mental-model` next, regardless of how
+this `lead-forge-spec` run was reached (a direct standalone invocation,
+`lead-bootstrap`'s fresh-install suggestion, or the index-health-check
+routing table). On a yes answer, call
+`{{.McpNamespace}}/playbook.print(name: "lead-forge-mental-model")` and
+execute the returned procedure inline. On a no answer or no response,
+continue to step 4 without invoking it.
+
+### 4. Suggested next steps
 
 - Spawn a scoped exploration worker with a spec-updater task prompt to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research`, non-`workset` `ready/` ticket, or that epic/research/workset backing documents only planned decomposition, investigation text, or operating context; otherwise drop the marker.
@@ -285,6 +298,8 @@ No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once 
 
 ## Doctrine
 
-Forge-spec optimizes for **confirmed spec entries per domain** - every produced
-entry reflects an explicit user decision on caller-visibility and implementation
-status. When ambiguous, require confirmation before writing spec content.
+Forge-spec optimizes for **low-friction throughput per domain** while keeping the
+two high-leverage decisions - the archive gate and the once-per-run domain list -
+explicitly user-confirmed. Per-item caller-visibility and implementation-status
+classification is decided autonomously; ambiguous calls are marked inline and
+surfaced in the wrap-up summary for review rather than blocking on a per-item ask.

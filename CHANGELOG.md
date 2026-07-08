@@ -1,5 +1,104 @@
 # Changelog
 
+## v0.33.5 - 2026-07-08
+
+### Changed
+- `git.commit`'s text-mode response now appends a `tip: preserve this session
+  key: <key> during compaction` trailer after the todo-reinjection block,
+  repeating `workflow_manual`'s session-key reminder on a high-frequency,
+  lead-scoped call to improve the odds a compaction summary carries the key
+  forward.
+
+## v0.33.4 - 2026-07-07
+
+### Fixed
+- Regenerate `agents-plugin/skills/manifest.json`, which had drifted from
+  `lead-drain-ready-queue/SKILL.md`'s content (v0.33.3's release CI caught
+  this before any release assets were published; v0.33.3 stays tagged but
+  has no corresponding GitHub release).
+
+## v0.33.3 - 2026-07-07
+
+### Added
+- `impl/<stem>` branch naming convention (15-character stem cap) for
+  implementation branches, replacing the legacy `implement/*` prefix; branch
+  rename now defaults to allowed unless the caller explicitly asks to keep
+  the current branch name.
+- Branch Cleanup auto-delete for merged `impl/*` branches without asking;
+  non-`impl/*` branches (including legacy `implement/*`) still require
+  explicit user approval before deletion.
+- `policy.branch.merge_confirm` fact on `enter.implement`, letting a caller
+  (e.g. a goal-driven queue drain) opt a branch into merging without a
+  final user confirmation gate; default posture remains ask.
+- `lead-drain-ready-queue` goal-branch-staging awareness: detects an active
+  goal context, stages a shared `goal/<slug>` branch across sequentially
+  drained tickets with `merge_confirm: skip` handed to each implementation,
+  and performs its own single confirmed merge into the target branch at the
+  end of the drain.
+- `lead-forge-spec`'s per-item classification pass now proceeds
+  autonomously instead of asking per item, embedding an inline
+  `<!-- AMBIGUOUS: <reason> -->` marker for genuinely unclear cases and
+  summarizing them in the wrap-up report; the wrap-up can now optionally
+  chain directly into `lead-forge-mental-model`.
+- Session-bootstrap staleness warning and `bootstrap_alarm` config item;
+  live doc-coverage session-bootstrap warning and matching mute item.
+- Sage Review Gate now branches by ticket landing status
+  (design/completeness split, staged), including a scope-boundary check
+  added to the completeness reviewer checklist.
+
+### Fixed
+- Honor `policy.branch.merge_confirm=skip` in the actually-installed
+  `enter.implement` todo instructions (final-action gate and merge-step
+  instructions) — previously the skip signal reached only the verdict's
+  rendered prose, not the runtime todo text the lead executes, silently
+  defeating goal-branch-staging's unattended merge behavior.
+- Default `policy.branch.allow_rename` to `yes` when unset, matching the
+  documented default-allow posture.
+- Align the stale `merge_target` warning and docs with the `impl/*` rename.
+- Fail-safe silence and tighter test coverage for the bootstrap-alarm
+  warning path.
+- Stop `echo -e` from reinterpreting dynamic content as shell escapes.
+- Fix a duplicate `sage-review-gate` spec anchor introduced by the staged
+  design/completeness split.
+
+## v0.33.0 - 2026-07-03
+
+### Added
+- `lead-drain-ready-queue` entry skill: delegates ticket selection to a
+  light-tier Explore-style subagent that lists `ai-docs/tickets/ready/`,
+  prefers a candidate named as a prerequisite in another ready ticket's
+  `related:`/`parent:` frontmatter (falling back to oldest-first FIFO), and
+  returns exactly one ticket path — then hands that path to `lead-proceed`
+  as an explicit target. A minimal, delegate-only shim intended for
+  standing `/goal` directives that repeatedly drain the `ready/` backlog;
+  mirrored byte-identically into `agents-plugin-wsflow`.
+
+## v0.32.4 - 2026-07-03
+
+### Changed
+- Inline `lead-prefer-subagent` and `lead-verify-discussion` bodies directly
+  into their `SKILL.md` files instead of routing through the `rsrc`
+  playbook-print indirection; `agents-plugin-wsflow` mirrors both via a new
+  substitution-mirrored skill generation mechanism (literal `ws:`/`ws/` ->
+  `wsflow:`/`wsflow/` namespace substitution over a curated, guarded skill
+  list).
+- Drop the unconditional `delegates:true` continuity-tip/mercenary-path
+  paragraph from `lead-verify-discussion`, since that skill's delegation is
+  conditional ("when investigation is useful"), not guaranteed.
+- Flip the `sage_review` builtin default from off to `auto` (required
+  posture) for `tickets.create`/`tickets.move`, so downstream sessions get a
+  review gate by default unless explicitly overridden at project, session, or
+  global scope.
+
+### Fixed
+- Fix the substitution-mirrored skill generator (`GenerateWsflowSkillBody`)
+  matching `ws:`/`ws/` as raw substrings, which could corrupt unrelated words
+  containing those characters as a tail (e.g. "shows:" -> "showsflow:",
+  "draws/" -> "drawsflow/"); anchor both patterns to a left-side word
+  boundary instead.
+- Fix a stale test asserting the pre-inlining `playbook.print` shim contract
+  for `lead-verify-discussion` after its rsrc tree was deleted.
+
 ## v0.32.0 - 2026-07-02
 
 ### Added

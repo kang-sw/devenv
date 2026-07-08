@@ -48,13 +48,26 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		return TicketCreateResult{}, err
 	}
 
+	designRequired, _ := sageReviewStageRequirement(fullStem)
+	resolved := ResolvedSageReviewPosture(opts.SageReview)
+
+	// Never-skippable design-review invariant: a ticket created directly at
+	// ready has no "from" state that could have already run a design-review
+	// gate against it, so a fresh, non-terminal resolved posture must block
+	// creation here the same way prepareSageReviewForUpwardMove blocks a
+	// tickets.move promotion — otherwise tickets.create(status: "ready")
+	// would be a silent bypass of the invariant.
+	if state == "ready" && designRequired && resolved != "completed" && resolved != "skipped" {
+		return TicketCreateResult{}, sageReviewStageError("sage-review-design", resolved)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(destAbs), 0o755); err != nil {
 		return TicketCreateResult{}, err
 	}
 
 	stub := "---\ntitle: \"\"\n"
-	if state == "todo" || state == "ready" {
-		stub += "sage-review: " + ResolvedSageReviewPosture(opts.SageReview) + "\n"
+	if (state == "todo" || state == "ready") && designRequired {
+		stub += "sage-review-design: " + resolved + "\n"
 	}
 	stub += "---\n"
 
@@ -62,9 +75,14 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 		return TicketCreateResult{}, err
 	}
 
-	tip := "sage review posture: " + ResolvedSageReviewPosture(opts.SageReview) + "."
-	if state == "idea" {
-		tip = "promoting to 'todo/' stamps the resolved sage-review posture."
+	var tip string
+	switch {
+	case state == "idea":
+		tip = "promoting to 'todo/' stamps the resolved sage-review-design posture."
+	case !designRequired:
+		tip = "sage review is exempt for this ticket category."
+	default:
+		tip = "sage review posture: design " + resolved + "."
 	}
 
 	return TicketCreateResult{Path: relPath, Tip: tip}, nil

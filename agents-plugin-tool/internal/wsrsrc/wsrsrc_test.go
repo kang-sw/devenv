@@ -943,6 +943,39 @@ func TestResolveRootFallsBackToExecutablePath(t *testing.T) {
 	}
 }
 
+// ResolveSkillsRoot requires WS_SKILLS_ROOT; exercise the path-returns-env-value branch.
+func TestResolveSkillsRootEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(envSkillsRoot, root)
+	got, err := ResolveSkillsRoot()
+	if err != nil {
+		t.Fatalf("ResolveSkillsRoot: %v", err)
+	}
+	if got != root {
+		t.Errorf("ResolveSkillsRoot = %q, want %q", got, root)
+	}
+}
+
+func TestResolveSkillsRootFallsBackToExecutablePath(t *testing.T) {
+	// With WS_SKILLS_ROOT unset, ResolveSkillsRoot must succeed and return a
+	// path derived from os.Executable(). The returned path may not exist on
+	// disk (the test environment does not have a <bin>/../skills layout), but
+	// ResolveSkillsRoot itself must not error; missing-file failures happen
+	// later in LoadSkillBody.
+	t.Setenv(envSkillsRoot, "")
+	got, err := ResolveSkillsRoot()
+	if err != nil {
+		t.Fatalf("ResolveSkillsRoot: %v", err)
+	}
+	if got == "" {
+		t.Fatal("ResolveSkillsRoot returned empty path")
+	}
+	// The derived path should end in "skills" (the plugin-cache layout).
+	if filepath.Base(got) != "skills" {
+		t.Errorf("ResolveSkillsRoot = %q, expected base to be 'skills'", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // errors.As helper
 // ---------------------------------------------------------------------------

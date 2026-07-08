@@ -173,6 +173,92 @@ func TestResolveImplementBranchStopOmitsPlannerInstructions(t *testing.T) {
 	}
 }
 
+func TestResolveImplementBranchRenameDefaultsToAllowedWhenUnset(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.Action != "rename" {
+		t.Fatalf("branch action = %q, want rename (allow_rename absent should default to yes)", result.Verdict.BranchPlan.Action)
+	}
+}
+
+func TestResolveImplementMergeConfirmDefaultsToAskWhenUnset(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "main", Present: true}},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.MergeConfirm != "ask" {
+		t.Fatalf("merge confirm = %q, want ask (absent should default to ask)", result.Verdict.BranchPlan.MergeConfirm)
+	}
+}
+
+func TestResolveImplementMergeConfirmSkipHonored(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{
+				MergeTarget:  factString{Value: "main", Present: true},
+				MergeConfirm: factString{Value: "skip", Present: true},
+			},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.MergeConfirm != "skip" {
+		t.Fatalf("merge confirm = %q, want skip (explicit skip should be honored)", result.Verdict.BranchPlan.MergeConfirm)
+	}
+}
+
+func TestResolveImplementMergeConfirmNonSkipStillAsks(t *testing.T) {
+	input := implementInput{
+		Target: implementTargetInput{Kind: "ticket", Label: "feature", ScopeLabel: "Phase 1", ScopeSlug: "feature"},
+		Facts: implementFactsInput{
+			Scope: implementScopeFactsInput{
+				Span:                      factString{Value: "multi-file", Present: true},
+				Surface:                   factString{Value: "public-interface", Present: true},
+				ExplicitDelegationRequest: factString{Value: "yes", Present: true},
+			},
+		},
+		Policy: implementPolicyInput{
+			Branch: implementBranchPolicyInput{
+				MergeTarget:  factString{Value: "main", Present: true},
+				MergeConfirm: factString{Value: "ask", Present: true},
+			},
+		},
+	}
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"})
+	if result.Verdict.BranchPlan.MergeConfirm != "ask" {
+		t.Fatalf("merge confirm = %q, want ask (explicit non-skip value should still ask)", result.Verdict.BranchPlan.MergeConfirm)
+	}
+}
+
 func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *testing.T) {
 	input := implementInput{
 		Target: implementTargetInput{Kind: "inline", Label: "tiny edit", ScopeLabel: "tiny edit", ScopeSlug: "tiny-edit"},
@@ -197,7 +283,7 @@ func TestResolveImplementMergeTargetPolicyIgnoredOutsideImplementBranchWarns(t *
 	if result.Verdict.BranchPlan.MergeTarget != "test/wsflow-smoke" {
 		t.Fatalf("merge target = %q, want derived current branch", result.Verdict.BranchPlan.MergeTarget)
 	}
-	wantWarning := `policy.branch.merge_target "master" ignored (not on an implement/* branch); derived from current branch "test/wsflow-smoke"`
+	wantWarning := `policy.branch.merge_target "master" ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch "test/wsflow-smoke"`
 	if !containsString(result.Warnings, wantWarning) {
 		t.Fatalf("warnings missing ignored merge_target note: %v", result.Warnings)
 	}
@@ -223,7 +309,7 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 			Branch: implementBranchPolicyInput{MergeTarget: factString{Value: "master", Present: true}},
 		},
 	}
-	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "implement/tiny-edit", StartCommit: "abc123"})
+	result := resolveImplement(input, implementBranchObservation{CurrentBranch: "impl/tiny-edit", StartCommit: "abc123"})
 	if result.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("branch action = %q, want continue", result.Verdict.BranchPlan.Action)
 	}
@@ -240,18 +326,20 @@ func TestResolveImplementMergeTargetPolicyHonoredOnImplementBranchNoWarning(t *t
 func TestResolveImplementBranchPlanRules(t *testing.T) {
 	base := normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "no"}
 	cases := []struct {
-		name       string
-		facts      normalizedImplementFacts
-		obs        implementBranchObservation
-		wantAction string
-		wantReason string
+		name             string
+		facts            normalizedImplementFacts
+		obs              implementBranchObservation
+		wantAction       string
+		wantReason       string
+		wantTargetBranch string
 	}{
 		{
-			name:       "create outside implement branch",
-			facts:      base,
-			obs:        implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
-			wantAction: "create",
-			wantReason: "not an implementation branch",
+			name:             "create outside implement branch",
+			facts:            base,
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+			wantAction:       "create",
+			wantReason:       "not an implementation branch",
+			wantTargetBranch: "impl/target",
 		},
 		{
 			name:       "stop missing merge target on implement branch",
@@ -261,11 +349,12 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			wantReason: "merge target required",
 		},
 		{
-			name:       "continue matching branch",
-			facts:      base,
-			obs:        implementBranchObservation{CurrentBranch: "implement/target", StartCommit: "abc123"},
-			wantAction: "continue",
-			wantReason: "matches target scope",
+			name:             "continue matching branch",
+			facts:            base,
+			obs:              implementBranchObservation{CurrentBranch: "impl/target", StartCommit: "abc123"},
+			wantAction:       "continue",
+			wantReason:       "matches target scope",
+			wantTargetBranch: "impl/target",
 		},
 		{
 			name:       "rename allowed",
@@ -288,6 +377,36 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			wantAction: "stop",
 			wantReason: "upstream/tracking",
 		},
+		{
+			name:       "legacy implement-prefixed current branch is not misidentified as fresh start",
+			facts:      normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			obs:        implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"},
+			wantAction: "stop",
+			wantReason: "rename is not allowed",
+		},
+		{
+			name:       "new impl-prefixed current branch is recognized as an implementation branch",
+			facts:      normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "yes"},
+			obs:        implementBranchObservation{CurrentBranch: "impl/old", StartCommit: "abc123"},
+			wantAction: "rename",
+			wantReason: "rename is allowed",
+		},
+		{
+			name:             "target branch name is truncated to 15 characters",
+			facts:            normalizedImplementFacts{ScopeSlug: "a-very-long-scope-slug-name", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+			wantAction:       "create",
+			wantReason:       "not an implementation branch",
+			wantTargetBranch: "impl/a-very-long-sco",
+		},
+		{
+			name:             "target branch truncation trims trailing dash",
+			facts:            normalizedImplementFacts{ScopeSlug: "abc-defghijklm-nop", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+			wantAction:       "create",
+			wantReason:       "not an implementation branch",
+			wantTargetBranch: "impl/abc-defghijklm",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -297,6 +416,46 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			}
 			if !strings.Contains(got.Reason, tc.wantReason) {
 				t.Fatalf("reason = %q, want containing %q", got.Reason, tc.wantReason)
+			}
+			if tc.wantTargetBranch != "" && got.TargetBranch != tc.wantTargetBranch {
+				t.Fatalf("target branch = %q, want %q", got.TargetBranch, tc.wantTargetBranch)
+			}
+		})
+	}
+}
+
+func TestDeriveImplementBranchPlanMergeConfirmPassthrough(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts normalizedImplementFacts
+		obs   implementBranchObservation
+	}{
+		{
+			name:  "create action carries merge confirm",
+			facts: normalizedImplementFacts{ScopeSlug: "target", MergeConfirmPolicy: "ask"},
+			obs:   implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
+		},
+		{
+			name:  "continue action carries merge confirm",
+			facts: normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", MergeConfirmPolicy: "skip"},
+			obs:   implementBranchObservation{CurrentBranch: "impl/target", StartCommit: "abc123"},
+		},
+		{
+			name:  "stop action carries merge confirm",
+			facts: normalizedImplementFacts{ScopeSlug: "target", MergeConfirmPolicy: "skip"},
+			obs:   implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"},
+		},
+		{
+			name:  "rename action carries merge confirm",
+			facts: normalizedImplementFacts{ScopeSlug: "target", MergeTargetPolicy: "feature/base", AllowRename: "yes", MergeConfirmPolicy: "ask"},
+			obs:   implementBranchObservation{CurrentBranch: "implement/old", StartCommit: "abc123"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveImplementBranchPlan(tc.facts, tc.obs)
+			if got.MergeConfirm != tc.facts.MergeConfirmPolicy {
+				t.Fatalf("merge confirm = %q, want %q (verbatim passthrough regardless of action %q)", got.MergeConfirm, tc.facts.MergeConfirmPolicy, got.Action)
 			}
 		})
 	}
