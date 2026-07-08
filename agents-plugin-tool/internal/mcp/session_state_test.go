@@ -2884,6 +2884,16 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		if !strings.Contains(commitResp, "Route") && !strings.Contains(commitResp, "- [") {
 			t.Errorf("git.commit re-injection: todo summary absent from response:\n%s", commitResp)
 		}
+
+		// The session-key tip trailer must land after the TODO summary (key
+		// line last, for maximal recency/salience).
+		wantTip := fmt.Sprintf("tip: preserve this session key: %s during compaction", key)
+		if !strings.Contains(commitResp, wantTip) {
+			t.Errorf("git.commit re-injection: session-key tip absent from response:\n%s", commitResp)
+		}
+		if idx := strings.Index(commitResp, "## TODO("); idx == -1 || strings.Index(commitResp, wantTip) < idx {
+			t.Errorf("git.commit re-injection: session-key tip must follow the TODO summary trailer:\n%s", commitResp)
+		}
 	}
 
 	// Also assert: a commit with no todos appends nothing extra.
@@ -2924,6 +2934,28 @@ func TestWorkflowManualGitCommitReinjection(t *testing.T) {
 		if strings.Contains(commitResp, "Todo (post-commit)") || strings.Contains(commitResp, "TODO(ws reminder: update this if stale)") {
 			t.Errorf("git.commit(no-todo): unexpected Todo section:\n%s", commitResp)
 		}
+		// The session-key tip still appends even with no todos.
+		wantTip := fmt.Sprintf("tip: preserve this session key: %s during compaction", key2)
+		if !strings.Contains(commitResp, wantTip) {
+			t.Errorf("git.commit(no-todo): session-key tip absent from response:\n%s", commitResp)
+		}
+	}
+}
+
+func TestAppendSessionKeyTip(t *testing.T) {
+	const key = "scarily-imminent-ploy-plated-84"
+	withKey := appendSessionKeyTip("commit ok", key)
+	wantTip := fmt.Sprintf("tip: preserve this session key: %s during compaction", key)
+	if !strings.Contains(withKey, wantTip) {
+		t.Errorf("appendSessionKeyTip: tip absent for non-empty key:\n%s", withKey)
+	}
+	if !strings.HasPrefix(withKey, "commit ok") {
+		t.Errorf("appendSessionKeyTip: original text not preserved:\n%s", withKey)
+	}
+
+	noKey := appendSessionKeyTip("commit ok", "")
+	if noKey != "commit ok" {
+		t.Errorf("appendSessionKeyTip: expected no-op for empty key, got:\n%s", noKey)
 	}
 }
 
