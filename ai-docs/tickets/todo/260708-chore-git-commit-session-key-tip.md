@@ -1,9 +1,10 @@
 ---
 title: "Add a session-key preservation tip to git.commit responses"
 related:
-  260708-feat-lead-revive-hook-replacement: prerequisite
+  260708-feat-lead-revive-hook-replacement: split-from (independently shippable, not blocking or blocked by it)
 spec: 260626-post-compaction-session-restoration
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Add a session-key preservation tip to git.commit responses
