@@ -443,6 +443,15 @@ dropped tickets live in hidden archive dirs and git history.
   can proceed on its own without waiting on this larger ticket. Not
   currently implementation-ready; needs a fresh sage design review before
   its next `ready` promotion (frontmatter reset to `required`).
+- `260708-chore-git-commit-session-key-tip` (ready, chore, split-from
+  260708-feat-lead-revive-hook-replacement, independently shippable) - add
+  an `appendSessionKeyTip` helper in `agents-plugin-tool/internal/mcp` and
+  wire it into the `git.commit` handler to append a `tip: preserve this
+  session key: <key> during compaction` trailer, improving the odds the
+  session key survives into a compaction summary. Spec addressing via
+  confirmed stem `260626-post-compaction-session-restoration`
+  (`plugin-runtime.md`). Sage review completed (completeness concern on
+  the `related:` direction, resolved in-ticket).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
