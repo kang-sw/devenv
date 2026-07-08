@@ -64,6 +64,16 @@ complying with a plain-English trigger condition.
   cause; the worst case is a redundant reminder on ordinary starts, which
   is harmless, versus the real risk of missing the compaction case if
   Codex cannot signal it distinctly.
+- No pre-compaction ("remember the session key") hook is needed on the
+  Claude side. Confirmed against the hooks reference: `PreCompact` fires
+  before compaction (matchers `manual`/`auto`, plugin-bundlable) but its
+  output is limited to the top-level `decision: block`/allow pattern — it
+  is not in the documented set of events that support
+  `additionalContext`, so it cannot inject a "preserve this key" reminder
+  into the compaction process. This is moot anyway: the design does not
+  depend on the compaction summary reliably preserving the session key —
+  an unrecoverable key already falls back to the `obsidian-latch`
+  sentinel, which `workflow_manual` accepts to bootstrap fresh state.
 
 ## Open question: Codex-side plugin bundling
 
