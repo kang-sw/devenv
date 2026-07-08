@@ -429,18 +429,20 @@ dropped tickets live in hidden archive dirs and git history.
   reason that ticket already rejected one. Spec addressing via
   `## Spec Impact` (likely shared with `260703`'s spec area, Contract-first:
   no). Sage review completed.
-- `260708-feat-lead-revive-hook-replacement` (ready, feat, prerequisite
+- `260708-feat-lead-revive-hook-replacement` (todo, feat, prerequisite
   260708-research-lead-revive-low-salience) - delete `lead-revive` and
   replace post-compaction session-key reload with a plugin-bundled
   `SessionStart`/`compact` hook (Claude) and an unconditional `SessionStart`
   hook (Codex), both shaped as `workflow_manual(<session-key-if-known>)`
   calls relying on the tool's existing lead-only/sentinel gating for
-  safety; Phase 0 adds a `git.commit`-response session-key tip to reduce
-  how often the key is lost into a compaction summary in the first place.
-  Spec addressing via confirmed stem `260626-post-compaction-session-restoration`
-  (`plugin-runtime.md`). Sage review completed (design concern on Phase 1's
-  removal-scope accuracy and Phase 0/Decisions framing, both resolved
-  in-ticket before promotion).
+  safety. Deliberately demoted from `ready` back to `todo`: this is a
+  bigger update (skill deletion, cross-doc reference cleanup, two-host
+  hook wiring) the user wants to schedule properly rather than ship now.
+  The independently valuable `git.commit`-tip continuity improvement was
+  split out as `260708-chore-git-commit-session-key-tip` (follow-up) so it
+  can proceed on its own without waiting on this larger ticket. Not
+  currently implementation-ready; needs a fresh sage design review before
+  its next `ready` promotion (frontmatter reset to `required`).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

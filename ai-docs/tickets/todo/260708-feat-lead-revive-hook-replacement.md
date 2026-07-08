@@ -2,9 +2,10 @@
 title: "Replace lead-revive skill with a plugin-bundled post-compaction hook"
 related:
   260708-research-lead-revive-low-salience: prerequisite
+  260708-chore-git-commit-session-key-tip: follow-up
 spec: 260626-post-compaction-session-restoration
-sage-review-design: completed
-sage-review-completeness: completed
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Replace lead-revive skill with a plugin-bundled post-compaction hook
@@ -79,9 +80,12 @@ complying with a plain-English trigger condition.
   safely without leaking state. It is not moot for *continuity*, though:
   that fallback mints a fresh key and discards the prior session's
   agenda/todo state rather than truly restoring it, so reducing how often
-  the key is actually lost is still worth doing — see Phase 0, which is a
-  continuity improvement layered on top of an already-safe fallback, not a
-  fix for a safety gap.
+  the key is actually lost is still worth doing. Tracked separately as
+  `260708-chore-git-commit-session-key-tip` (a `git.commit`-response
+  session-key tip) rather than as a phase here — it is a smaller,
+  independently shippable continuity improvement layered on top of an
+  already-safe fallback, not a fix for a safety gap, and does not need to
+  land together with the larger hook-replacement work in this ticket.
 
 ## Open question: Codex-side plugin bundling
 
@@ -111,39 +115,6 @@ Still open before implementation:
   the model's own next turn.
 
 ## Phases
-
-### Phase 0: Session-key preservation tip on `git.commit` responses
-
-Complements the hook-based detection in Phases 1-2 by improving the odds the
-session key itself survives into the compaction summary, reducing reliance on
-the `obsidian-latch` sentinel fallback — which mints a fresh key and discards
-the prior session's agenda/todo state rather than truly restoring it.
-`workflow_manual`'s existing `injectSessionKeyLine` (`agents-plugin-tool/internal/mcp/workflow_manual.go:137-144`)
-places the "preserve verbatim" reminder once, near the top of a manual reload;
-that single placement loses attention salience as the transcript grows past it.
-
-- Add a small shared helper (e.g. `appendSessionKeyTip(text, sessionKey
-  string) string`) in `agents-plugin-tool/internal/mcp`, mirroring
-  `injectSessionKeyLine`'s phrasing, that appends a trailer line — e.g. `tip:
-  preserve this session key: <key> during compaction` — to a tool response.
-- Wire it into the `git.commit` handler only (`server.go`, the `"git.commit"`
-  case around line 895-919, where `commitKey` is already extracted in scope
-  for the existing TODO-summary trailer). `git.commit` is a high-frequency,
-  lead-scoped call that tends to land near the natural end of a working
-  turn, keeping the key recent in the transcript at the point compaction is
-  likely to trigger.
-- Do not wire this into other lead-scoped tools (`tickets.move`,
-  `agenda.set`, etc.) in this phase; there is no existing shared
-  post-processing hook across tool formatters (each has its own `format*`
-  function), so broader adoption is a separate, explicitly deferred
-  follow-up rather than an implicit expansion of this phase's scope.
-- Verify: a test asserting `git.commit`'s returned text contains the tip
-  line with the correct session key (a `session_key` is always present at
-  this point — `resolveToolRoot` already makes it mandatory before the
-  handler produces commit text, so there is no reachable no-key path
-  through `git.commit` itself). Unit-test `appendSessionKeyTip`'s own
-  empty-key no-op behavior directly instead of through the `git.commit`
-  handler.
 
 ### Phase 1: Claude-side hook + lead-revive removal
 
