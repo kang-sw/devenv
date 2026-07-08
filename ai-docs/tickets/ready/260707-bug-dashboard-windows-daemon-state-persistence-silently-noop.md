@@ -128,6 +128,49 @@ existing `WS_DASHBOARD_STATE_FILE`/`WS_DASHBOARD_STATE_HOME`/`XDG_STATE_HOME`/
 `HOME` order in `persistent_state.rs:478-491` is fully documented rather than
 only discoverable from source.
 
+### Result
+
+- Extended `default_state_file()` in
+  `ws-dashboard/crates/daemon/src/persistent_state.rs` with a `cfg(windows)`
+  fallback: after the existing `HOME` branch fails, a native Windows build now
+  reads `LOCALAPPDATA` and, if set, returns
+  `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json`. The four existing
+  branches (`WS_DASHBOARD_STATE_FILE`, `WS_DASHBOARD_STATE_HOME`,
+  `XDG_STATE_HOME`, `HOME`) and their order are unchanged; on non-Windows
+  targets the new branch does not compile in, so Linux/macOS behavior is
+  byte-for-byte identical to before.
+- Also added a one-time `tracing::warn!` in `default_local()` when
+  `default_state_file()` resolves to `None`, so a daemon run with no
+  resolvable state file surfaces the silent-persistence-disabled condition in
+  its startup logs (per the ticket's "consider" item; no new shared/mutable
+  state was added — `DashboardStateStore` remains `Clone + Default`).
+- Added `default_state_file_falls_back_to_local_app_data_on_windows`
+  (`persistent_state.rs`, `#[cfg(windows)]`-gated) following the existing
+  save/set/restore env-var idiom, asserting the `LOCALAPPDATA` fallback
+  resolves correctly when `WS_DASHBOARD_STATE_FILE`,
+  `WS_DASHBOARD_STATE_HOME`, `XDG_STATE_HOME`, and `HOME` are all unset.
+- **Verification level achieved: isolated unit-test repro only, escape-hatch
+  applied.** No real native-Windows host was reachable in this implementing
+  session, so the full cross-machine reversed-topology walk from the sibling
+  ticket was not re-run (consistent with the ticket's stated escape hatch).
+  The new Windows-only test cannot execute on this Linux development host
+  either, since it is intentionally `#[cfg(windows)]`-gated per the plan (to
+  avoid asserting Windows-only behavior on Linux CI); a cross-compile
+  type-check toward `x86_64-pc-windows-gnu` was attempted to at least confirm
+  the new code compiles for that target, but it failed for an unrelated
+  reason — the sandbox lacks the `x86_64-w64-mingw32-gcc` linker needed by a
+  transitive dependency (`libsqlite3-sys`) — so compilation for Windows was
+  not independently confirmed in this session. The full non-Windows test
+  suite (`cargo test -p ws-dashboard-daemon persistent_state::`, 5 tests) and
+  a full `cargo build -p ws-dashboard-daemon` both pass with no warnings,
+  confirming Linux/macOS behavior is unaffected.
+- Added spec entry `{#260708-dashboard-state-file-resolution-order}` under
+  `## Daemon Foundation {#260515-ws-web-daemon-foundation}` in
+  `ai-docs/spec/ws-web-dashboard/index.md`, documenting the full state-file
+  resolution order including the new Windows fallback and the
+  silent-disable-on-no-candidate behavior. `ws/spec_index.verify` reports the
+  index healthy after the addition.
+
 ## Escalations
 
 - None yet.

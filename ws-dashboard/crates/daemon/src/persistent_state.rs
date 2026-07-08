@@ -30,7 +30,14 @@ impl DashboardStateStore {
     pub fn default_local() -> Self {
         match default_state_file() {
             Some(path) => Self::at_path(path),
-            None => Self::disabled(),
+            None => {
+                warn!(
+                    "no dashboard state file could be resolved (WS_DASHBOARD_STATE_FILE, \
+                     WS_DASHBOARD_STATE_HOME, XDG_STATE_HOME, HOME, and on Windows \
+                     LOCALAPPDATA are all unset); persistence is disabled for this run"
+                );
+                Self::disabled()
+            }
         }
     }
 
@@ -485,9 +492,14 @@ fn default_state_file() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
         return Some(PathBuf::from(path).join("ws-dashboard/opened-workroots.json"));
     }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".local/state/ws-dashboard/opened-workroots.json"))
+    if let Some(path) = std::env::var_os("HOME").map(PathBuf::from) {
+        return Some(path.join(".local/state/ws-dashboard/opened-workroots.json"));
+    }
+    #[cfg(windows)]
+    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
+        return Some(PathBuf::from(path).join("ws-dashboard/opened-workroots.json"));
+    }
+    None
 }
 
 #[cfg(test)]
@@ -648,6 +660,53 @@ mod tests {
 
         assert!(store.load_opened_work_roots().await.is_empty());
         remove_temp(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn default_state_file_falls_back_to_local_app_data_on_windows() {
+        // Save every var `default_state_file` reads, so this test stays
+        // self-contained regardless of run order or CI environment state.
+        let saved_state_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
+        let saved_state_home = std::env::var_os("WS_DASHBOARD_STATE_HOME");
+        let saved_xdg_state_home = std::env::var_os("XDG_STATE_HOME");
+        let saved_home = std::env::var_os("HOME");
+        let saved_local_app_data = std::env::var_os("LOCALAPPDATA");
+
+        std::env::remove_var("WS_DASHBOARD_STATE_FILE");
+        std::env::remove_var("WS_DASHBOARD_STATE_HOME");
+        std::env::remove_var("XDG_STATE_HOME");
+        std::env::remove_var("HOME");
+        std::env::set_var("LOCALAPPDATA", r"C:\Users\example\AppData\Local");
+
+        assert_eq!(
+            default_state_file(),
+            Some(
+                PathBuf::from(r"C:\Users\example\AppData\Local")
+                    .join("ws-dashboard/opened-workroots.json")
+            )
+        );
+
+        match saved_state_file {
+            Some(value) => std::env::set_var("WS_DASHBOARD_STATE_FILE", value),
+            None => std::env::remove_var("WS_DASHBOARD_STATE_FILE"),
+        }
+        match saved_state_home {
+            Some(value) => std::env::set_var("WS_DASHBOARD_STATE_HOME", value),
+            None => std::env::remove_var("WS_DASHBOARD_STATE_HOME"),
+        }
+        match saved_xdg_state_home {
+            Some(value) => std::env::set_var("XDG_STATE_HOME", value),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
+        match saved_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        match saved_local_app_data {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
     }
 
     fn temp_path(label: &str) -> PathBuf {
