@@ -38,33 +38,55 @@ complying with a plain-English trigger condition.
   to "harness hook fires structurally at the compaction-resume boundary,"
   per this repo's general preference for structural correctness over
   attention-dependent conventions.
-- The hook only needs to fire for the main/lead session. Confirmed
-  `SessionStart` never fires for subagents, so no subagent-side
-  suppression logic is needed on the Claude side.
+- The hook only needs to fire for the main/lead session on Claude.
+  Confirmed `SessionStart` never fires for subagents there, so no
+  subagent-side suppression logic is needed on the Claude side.
+- **`workflow_manual`'s existing session-key gating already provides all
+  the safety this design needs — no new "safe manual" or delegation-only
+  variant is required.** Confirmed in
+  `agents-plugin-tool/internal/mcp/workflow_manual.go` and `server.go`:
+  a resolvable delegate/leaf key is rejected pre-handler as
+  `workflow_manual` is on the lead-only tool list (`isLeadOnlyTool`); an
+  unresolvable/unknown key gets a quiet "no restorable state" notice with
+  no manual body; only a valid lead key or the `obsidian-latch` sentinel
+  renders the real manual. This means the hook (or the model acting on the
+  hook's reminder) can shape its call as `workflow_manual(<session-key-if-
+  known>)` and simply let the existing gate decide the outcome — no branch
+  logic needs to live in the hook itself.
+- This closes the subagent-leak question for Codex too: since Codex uses
+  the same `workflow_manual` handler, firing the hook unconditionally
+  (main session or any Codex sub-process) is safe by construction — a
+  subagent/child context either has no resolvable lead key (quiet notice)
+  or a non-lead key (rejected), never a leaked manual.
+- Codex-side hook does not need to distinguish "resumed after compaction"
+  from a plain session start/resume. Install the `SessionStart` hook
+  unconditionally on every Codex session start/resume regardless of
+  cause; the worst case is a redundant reminder on ordinary starts, which
+  is harmless, versus the real risk of missing the compaction case if
+  Codex cannot signal it distinctly.
 
-## Open question: Codex-side equivalent
+## Open question: Codex-side plugin bundling
 
-`ai-docs/ref/codex-integration.md` already documents a Codex `SessionStart`
-hook ("fires on session start and resume... developer context injection"),
-gated behind `-c features.codex_hooks=true`. Unresolved before implementation:
+`ai-docs/ref/codex-integration.md` documents a Codex `SessionStart` hook
+("fires on session start and resume... developer context injection"),
+gated behind `-c features.codex_hooks=true`. Unresolved before
+implementation:
 
-- Does Codex's `SessionStart` distinguish a post-compaction resume from a
-  plain fresh start/resume the way Claude Code's `compact` matcher does, or
-  is compaction invisible at the hook layer on Codex?
-- Can `features.codex_hooks=true` and the hook config be bundled inside a
-  Codex-facing plugin artifact (`agents-plugin`'s `.codex-plugin/` tree,
-  or `agents-plugin-tool`'s Codex adapter), or does it require a
-  per-invocation `-c` flag the ws Codex launcher would need to inject on
-  every `codex exec` call?
-- Whether Codex subagents (however Codex models sub-work — exec
-  sub-processes, not necessarily a Task-tool equivalent) could receive a
-  `SessionStart`-fired reminder unintentionally, and how to detect/suppress
-  that if so.
+- Can `features.codex_hooks=true` and the `SessionStart` hook config be
+  bundled inside a Codex-facing plugin artifact (`agents-plugin`'s
+  `.codex-plugin/` tree, or `agents-plugin-tool`'s Codex adapter), or does
+  it require a per-invocation `-c` flag the ws Codex launcher would need
+  to inject on every `codex exec` call?
+- Whether a "known session key" is resolvable at all from inside a hook's
+  shell command context on either host (e.g. by querying ws's session
+  store for the current root's most recent lead key), or whether the hook
+  can only ever emit a generic reminder and must leave key resolution to
+  the model's own next turn.
 
-If no clean Codex-side equivalent exists, decide whether to (a) keep a
-thin host-neutral fallback skill for Codex only while fully retiring
-`lead-revive` on Claude, or (b) accept a temporary host asymmetry and track
-the Codex gap as a follow-up.
+If no clean Codex-side plugin-bundled option exists, decide whether to
+(a) require a per-invocation `-c` flag injected by the ws Codex launcher
+wrapper instead, or (b) accept a temporary host asymmetry and track the
+Codex gap as a follow-up.
 
 ## Phases
 
@@ -82,11 +104,18 @@ the Codex gap as a follow-up.
   reminder text actually surfaces before the next model turn, without
   manual invocation of any skill.
 
-### Phase 2: Codex-side research and parity decision
+### Phase 2: Codex-side hook, installed unconditionally
 
-- Resolve the open questions above against the actual Codex CLI behavior
-  (test `-c features.codex_hooks=true` plus a `SessionStart` hook against a
-  real compaction-equivalent resume, if Codex has one).
-- Implement the Codex-side equivalent if feasible, or document the
-  accepted asymmetry and close the gap as a tracked follow-up if not.
+- Resolve the plugin-bundling open question above against actual Codex CLI
+  behavior (test `-c features.codex_hooks=true` plus a `SessionStart` hook
+  either bundled in the Codex plugin artifact or injected by the ws Codex
+  launcher wrapper).
+- Wire the Codex `SessionStart` hook unconditionally (every start/resume,
+  no compaction-only gating) to the same `workflow_manual(<session-key-if-
+  known>)`-shaped call as Phase 1, relying on the existing session-key
+  gate for safety rather than any new host-specific branch logic.
+- Verify: a Codex session resume (with and without a resolvable lead key)
+  produces the expected outcome for each case — full manual, quiet
+  no-restore notice, or lead-only rejection — matching the behavior
+  already confirmed for `workflow_manual` in Phase 1's research.
 
