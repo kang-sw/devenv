@@ -128,6 +128,63 @@ existing `WS_DASHBOARD_STATE_FILE`/`WS_DASHBOARD_STATE_HOME`/`XDG_STATE_HOME`/
 `HOME` order in `persistent_state.rs:478-491` is fully documented rather than
 only discoverable from source.
 
+### Result
+
+- Extended `default_state_file()` in
+  `ws-dashboard/crates/daemon/src/persistent_state.rs` with a `cfg(windows)`
+  fallback: after the existing `HOME` branch fails, a native Windows build now
+  reads `LOCALAPPDATA` and, if set, returns
+  `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json`. The four existing
+  branches (`WS_DASHBOARD_STATE_FILE`, `WS_DASHBOARD_STATE_HOME`,
+  `XDG_STATE_HOME`, `HOME`) and their order are unchanged; on non-Windows
+  targets the new branch does not compile in, so Linux/macOS behavior is
+  byte-for-byte identical to before.
+- Also added a one-time `tracing::warn!` in `default_local()` when
+  `default_state_file()` resolves to `None`, so a daemon run with no
+  resolvable state file surfaces the silent-persistence-disabled condition in
+  its startup logs (per the ticket's "consider" item; no new shared/mutable
+  state was added — `DashboardStateStore` remains `Clone + Default`).
+- Added `default_state_file_falls_back_to_local_app_data_on_windows`
+  (`persistent_state.rs`, `#[cfg(windows)]`-gated) following the existing
+  save/set/restore env-var idiom, asserting the `LOCALAPPDATA` fallback
+  resolves correctly when `WS_DASHBOARD_STATE_FILE`,
+  `WS_DASHBOARD_STATE_HOME`, `XDG_STATE_HOME`, and `HOME` are all unset.
+- **Verification level achieved (updated): real native-Windows compile +
+  unit-test execution.** The implementer's own session had no reachable
+  Windows host and only confirmed the non-Windows side (`cargo test -p
+  ws-dashboard-daemon persistent_state::`, 5 tests, plus a full `cargo build`)
+  — a Linux-side cross-compile type-check toward `x86_64-pc-windows-gnu` was
+  also attempted there but blocked by a missing `x86_64-w64-mingw32-gcc`
+  linker (unrelated to this change). This dev box, however, does have a
+  reachable native Windows host: WSL2 interop exposes a native Windows Rust
+  toolchain (`powershell.exe -NoProfile -Command "cargo ..."`) and a separate
+  Windows-native checkout of this repo at `D:\dbg-ws-dashboard-dev` (recorded
+  in `ai-docs/_index.local.md`). Using a disposable detached worktree fetched
+  from this branch's tip (`144a150e`) into that checkout, `cargo test -p
+  ws-dashboard-daemon persistent_state::` was run through native Windows
+  `cargo.exe`: the crate compiled cleanly on the real `x86_64-pc-windows-*`
+  target (resolving the Linux-side cross-compile gap above) and all 6
+  `persistent_state` tests passed, including the new
+  `default_state_file_falls_back_to_local_app_data_on_windows` test actually
+  executing (not just compiling) on Windows. The worktree was removed after
+  the check; no files under `D:\dbg-ws-dashboard-dev`'s primary checkout were
+  touched.
+- **Still not done:** the daemon-level HTTP repro (`HOME` unset, `POST
+  /api/dashboard/root-picker/pins`, confirm a real
+  `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` appears) and the sibling
+  ticket's full cross-machine reversed-topology walk (resources, root-picker,
+  work-roots/open, files, Git, terminals) were not re-run in this pass — the
+  unit-test-level confirmation above is a strictly stronger version of the
+  ticket's own stated escape hatch (isolated repro), not a substitute for
+  those two end-to-end checks. Flagging as still-open verification, not
+  claiming full closure.
+- Added spec entry `{#260708-dashboard-state-file-resolution-order}` under
+  `## Daemon Foundation {#260515-ws-web-daemon-foundation}` in
+  `ai-docs/spec/ws-web-dashboard/index.md`, documenting the full state-file
+  resolution order including the new Windows fallback and the
+  silent-disable-on-no-candidate behavior. `ws/spec_index.verify` reports the
+  index healthy after the addition.
+
 ## Escalations
 
 - None yet.

@@ -80,6 +80,22 @@ authentication. Health output is the exact minimal body `ok\n`; host paths,
 cache paths, Git roots, pairing tokens, session values, diagnostics, and wsstate
 internals are not URL identity and are not exposed by the health surface.
 
+The daemon resolves its persisted state file (opened work roots, root-picker
+pins, linked servers) through an ordered fallback: an explicit
+`WS_DASHBOARD_STATE_FILE` path wins outright; otherwise
+`WS_DASHBOARD_STATE_HOME` (joined with `opened-workroots.json`), then
+`XDG_STATE_HOME` (joined with `ws-dashboard/opened-workroots.json`), then
+`HOME` (joined with `.local/state/ws-dashboard/opened-workroots.json`) are
+tried in order. On a native Windows build, if none of the above resolve, the
+daemon falls back to `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` via
+`LOCALAPPDATA`; this Windows fallback does not change the Linux/macOS
+resolution order or its env var names. If no candidate resolves, state
+persistence is disabled for the run: every load returns empty and every
+persist call reports success without writing, so a daemon started this way
+loses all opened work roots, root-picker pins, and linked-server links across
+requests, with only a startup log warning surfaced to the operator.
+{#260708-dashboard-state-file-resolution-order}
+
 ## Core Resource Vocabulary {#260516-ws-web-dashboard-core-resource-vocabulary}
 
 The dashboard core crate exposes opaque ids and resource path vocabulary for

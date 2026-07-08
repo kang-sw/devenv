@@ -242,14 +242,19 @@ dropped tickets live in hidden archive dirs and git history.
   back to `todo` pending the unresolved SSH-probe escalation; re-promote
   after clearing `spec:`/reviewing `## Spec Impact` per the move tool's tip.
 - `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
-  (`ready`, bug) - native-Windows `ws-dashboard` daemon silently drops all
-  persisted state (linked servers, opened work roots, root-picker pins)
-  because `default_state_file()` (`persistent_state.rs:478-491`) has no
-  Windows-native fallback when `HOME` is unset (the Windows default). Found
-  during `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 1
-  dogfood. Spec-addressed via `## Spec Impact` (no existing anchor covers
-  cross-platform state-file resolution; new entry to be added on fix). Sage
-  review completed.
+  (`ready`, bug, Phase 1 implemented 2026-07-08) - added a `cfg(windows)`
+  `LOCALAPPDATA` fallback to `default_state_file()`
+  (`persistent_state.rs:478-491`) plus a one-time startup warning when no
+  state file resolves; new spec entry
+  `260708-dashboard-state-file-resolution-order` added under Daemon
+  Foundation. Verification upgraded same day: ran `cargo test -p
+  ws-dashboard-daemon persistent_state::` through the real native-Windows
+  toolchain (`D:\dbg-ws-dashboard-dev` via WSL interop, see
+  `_index.local.md`) - the crate compiles and all 6 tests pass on actual
+  Windows, including the new fallback test executing (not just
+  cross-compile-checking). Daemon-level HTTP repro and the sibling ticket's
+  full cross-machine walk still not re-run. Reviews (correctness, test) both
+  clean.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
