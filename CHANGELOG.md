@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.33.5 - 2026-07-08
+
+### Changed
+- `git.commit`'s text-mode response now appends a `tip: preserve this session
+  key: <key> during compaction` trailer after the todo-reinjection block,
+  repeating `workflow_manual`'s session-key reminder on a high-frequency,
+  lead-scoped call to improve the odds a compaction summary carries the key
+  forward.
+
 ## v0.33.4 - 2026-07-07
 
 ### Fixed
