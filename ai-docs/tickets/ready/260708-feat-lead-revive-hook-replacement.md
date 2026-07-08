@@ -2,7 +2,9 @@
 title: "Replace lead-revive skill with a plugin-bundled post-compaction hook"
 related:
   260708-research-lead-revive-low-salience: prerequisite
-sage-review-design: required
+spec: 260626-post-compaction-session-restoration
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Replace lead-revive skill with a plugin-bundled post-compaction hook
@@ -70,10 +72,16 @@ complying with a plain-English trigger condition.
   output is limited to the top-level `decision: block`/allow pattern — it
   is not in the documented set of events that support
   `additionalContext`, so it cannot inject a "preserve this key" reminder
-  into the compaction process. This is moot anyway: the design does not
-  depend on the compaction summary reliably preserving the session key —
-  an unrecoverable key already falls back to the `obsidian-latch`
-  sentinel, which `workflow_manual` accepts to bootstrap fresh state.
+  into the compaction process. This is moot for *correctness*: the hook
+  design does not depend on the compaction summary reliably preserving the
+  session key — an unrecoverable key already falls back to the
+  `obsidian-latch` sentinel, which `workflow_manual` accepts to bootstrap
+  safely without leaking state. It is not moot for *continuity*, though:
+  that fallback mints a fresh key and discards the prior session's
+  agenda/todo state rather than truly restoring it, so reducing how often
+  the key is actually lost is still worth doing — see Phase 0, which is a
+  continuity improvement layered on top of an already-safe fallback, not a
+  fix for a safety gap.
 
 ## Open question: Codex-side plugin bundling
 
@@ -104,6 +112,39 @@ Still open before implementation:
 
 ## Phases
 
+### Phase 0: Session-key preservation tip on `git.commit` responses
+
+Complements the hook-based detection in Phases 1-2 by improving the odds the
+session key itself survives into the compaction summary, reducing reliance on
+the `obsidian-latch` sentinel fallback — which mints a fresh key and discards
+the prior session's agenda/todo state rather than truly restoring it.
+`workflow_manual`'s existing `injectSessionKeyLine` (`agents-plugin-tool/internal/mcp/workflow_manual.go:137-144`)
+places the "preserve verbatim" reminder once, near the top of a manual reload;
+that single placement loses attention salience as the transcript grows past it.
+
+- Add a small shared helper (e.g. `appendSessionKeyTip(text, sessionKey
+  string) string`) in `agents-plugin-tool/internal/mcp`, mirroring
+  `injectSessionKeyLine`'s phrasing, that appends a trailer line — e.g. `tip:
+  preserve this session key: <key> during compaction` — to a tool response.
+- Wire it into the `git.commit` handler only (`server.go`, the `"git.commit"`
+  case around line 895-919, where `commitKey` is already extracted in scope
+  for the existing TODO-summary trailer). `git.commit` is a high-frequency,
+  lead-scoped call that tends to land near the natural end of a working
+  turn, keeping the key recent in the transcript at the point compaction is
+  likely to trigger.
+- Do not wire this into other lead-scoped tools (`tickets.move`,
+  `agenda.set`, etc.) in this phase; there is no existing shared
+  post-processing hook across tool formatters (each has its own `format*`
+  function), so broader adoption is a separate, explicitly deferred
+  follow-up rather than an implicit expansion of this phase's scope.
+- Verify: a test asserting `git.commit`'s returned text contains the tip
+  line with the correct session key (a `session_key` is always present at
+  this point — `resolveToolRoot` already makes it mandatory before the
+  handler produces commit text, so there is no reachable no-key path
+  through `git.commit` itself). Unit-test `appendSessionKeyTip`'s own
+  empty-key no-op behavior directly instead of through the `git.commit`
+  handler.
+
 ### Phase 1: Claude-side hook + lead-revive removal
 
 - Add `agents-plugin/hooks/hooks.json` (or the correct plugin-level hook
@@ -111,9 +152,32 @@ Still open before implementation:
   reminds the lead to call `ws/workflow_manual(session_key: <preserved
   key>)` before continuing.
 - Delete `agents-plugin/skills/lead-revive/` and its `agents-plugin-wsflow`
-  mirror; remove references to `lead-revive` from
-  `ai-docs/spec/workflow-skills.md` and any skill routing docs that name it.
-- Regenerate the wsflow skill/manifest mirrors as needed.
+  mirror; regenerate `agents-plugin/skills/manifest.json` and the wsflow
+  mirrors afterward.
+- Update every actual reference site (verified by design review; the
+  Background's original "`ai-docs/spec/workflow-skills.md`" guess was wrong —
+  that file has zero mentions). Reword each to point at the hook mechanism
+  or at `ws/workflow_manual(session_key: ...)` directly instead of naming
+  `lead-revive`:
+  - `agents-plugin-tool/internal/mcp/workflow_manual.go` (the fail-loud
+    no-restore notice text, e.g. around lines 173 and 210, currently tells
+    the user to "re-run lead-revive to restore your session").
+  - `agents-plugin-tool/internal/mcp/server.go` (the `workflow_state` tool
+    description, around line 3647).
+  - Tests `session_state_test.go` and `playbook_tools_test.go` (string
+    assertions on the notice text above).
+  - `ai-docs/spec/mcp-tools.md` and `ai-docs/spec/plugin-runtime.md` (the
+    `260626-post-compaction-session-restoration` anchor and the sibling
+    `workflow_state` spec entry both name `lead-revive` as the recovery
+    mechanism).
+  - `ai-docs/mental-model/mcp-runtime.md` and
+    `ai-docs/mental-model/workflow-skills.md`.
+  - `ai-docs/_index.md`.
+  - The six rsrc skill-prose files that mention it: `lead-proceed`,
+    `lead-discuss`, `lead-salvage`, `lead-sprint`, `lead-forge-mental-model`,
+    `lead-forge-spec`.
+  - Run a final `grep -ri lead-revive` sweep across the repo before closing
+    this phase to confirm no reference site was missed.
 - Verify: trigger `/compact` in a live session and confirm the hook's
   reminder text actually surfaces before the next model turn, without
   manual invocation of any skill.
