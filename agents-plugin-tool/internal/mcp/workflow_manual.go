@@ -148,6 +148,19 @@ func injectSessionKeyLine(body, key string) string {
 	return strings.Join(result, "\n")
 }
 
+// appendSessionKeyTip appends a session-key preservation trailer to text.
+// It repeats injectSessionKeyLine's "preserve verbatim" reminder on a
+// high-frequency, lead-scoped tool response so the key stays recent in the
+// transcript near the point compaction is likely to trigger, rather than
+// relying solely on workflow_manual's single near-the-top placement. No-op
+// when key is empty.
+func appendSessionKeyTip(text, key string) string {
+	if key == "" {
+		return text
+	}
+	return text + fmt.Sprintf("\ntip: preserve this session key: %s during compaction\n", key)
+}
+
 // handleWorkflowState implements the ws.workflow_state tool: a cheap,
 // lead-only view of just the Session State section (agenda/todos) for a
 // session_key, with no manual reference/primitives text. It reuses

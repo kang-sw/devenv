@@ -973,6 +973,15 @@ commit doubles as a todo restoration point. The injection is text-mode only and 
 skipped when the session holds no todos or when structured JSON output is requested;
 it does not change todo status — `git.commit` never auto-marks items done.
 {#260626-git-commit-todo-reinjection}
+After the todo re-injection (if any), `git.commit`'s text-mode response appends a
+trailer line — `tip: preserve this session key: <key> during compaction` — naming
+the calling session's key. The trailer repeats the reminder `workflow_manual`
+already places near the top of a manual reload, on a high-frequency, lead-scoped
+call that tends to land near the end of a working turn, so the key stays recent in
+the transcript at the point context compaction is likely to trigger. The trailer
+is omitted only when no session key is present; structured JSON output is
+unaffected.
+{#260708-git-commit-session-key-tip}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 

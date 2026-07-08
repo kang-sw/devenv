@@ -916,6 +916,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
 			}
 		}
+		commitText = appendSessionKeyTip(commitText, commitKey)
 		return toolTextResponse(req.ID, commitText, err)
 	case "project_tree":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
