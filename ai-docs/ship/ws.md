@@ -139,6 +139,8 @@ Expected GitHub Actions behavior:
 
 ## Post-ship
 
+### Lead-verifiable (run these)
+
 1. Confirm the GitHub Actions workflow succeeds for `v<version>`.
 2. Confirm the GitHub release contains:
    - `SHA256SUMS`
@@ -148,8 +150,16 @@ Expected GitHub Actions behavior:
    - `ws-mcp-linux-arm64`
    - `ws-mcp-windows-amd64.exe`
    - `ws-mcp-windows-arm64.exe`
-3. Dogfood Codex GitHub plugin install from `kang-sw/devenv`.
-4. In a fresh Codex session, confirm:
+3. Keep the Claude package untouched unless a separate Claude compatibility ship
+   is requested.
+
+### User-performed (interactive; report as pending, do not attempt)
+
+The lead has no interactive Codex UI or fresh-session access, so these are the
+user's steps, not the lead's. Report them as outstanding for the user, then stop.
+
+4. Dogfood Codex GitHub plugin install from `kang-sw/devenv`.
+5. In a fresh Codex session, confirm:
    - `ws` plugin is installed from the GitHub marketplace entry
    - `wsflow` plugin is installed from the GitHub marketplace entry when the
      agentless derivative is part of the release
@@ -160,8 +170,6 @@ Expected GitHub Actions behavior:
      named-agent or subquery tools
    - `runtime.info` reports the shipped version and matching prompt bundle hash
    - `project_tree` returns `ai-docs/` as its first non-empty line
-5. Optional local dogfood: if a Windows host is available, build the Windows
+6. Optional local dogfood: if a Windows host is available, build the Windows
    executable and run `ws-mcp-windows-amd64.exe smoke --root <repo>` before
    relying on the GitHub Actions result.
-6. Keep the Claude package untouched unless a separate Claude compatibility ship
-   is requested.
