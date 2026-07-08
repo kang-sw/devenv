@@ -3,7 +3,7 @@ title: "Add a session-key preservation tip to git.commit responses"
 related:
   260708-feat-lead-revive-hook-replacement: prerequisite
 spec: 260626-post-compaction-session-restoration
-sage-review-design: required
+sage-review-design: completed
 ---
 
 # Add a session-key preservation tip to git.commit responses
@@ -55,3 +55,5 @@ improving the odds a compaction summary actually carries it forward.
   `git.commit` produces commit text — `resolveToolRoot` already makes it
   mandatory earlier in the handler — so there is no reachable no-key path
   through `git.commit` itself to test against.
+- Append the tip trailer after the existing TODO-summary trailer (key line
+  last), so it lands closest to the end of the response for salience.
