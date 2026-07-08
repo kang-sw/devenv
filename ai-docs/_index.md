@@ -247,12 +247,14 @@ dropped tickets live in hidden archive dirs and git history.
   (`persistent_state.rs:478-491`) plus a one-time startup warning when no
   state file resolves; new spec entry
   `260708-dashboard-state-file-resolution-order` added under Daemon
-  Foundation. Verification level: isolated `#[cfg(windows)]` unit-test repro
-  only (escape hatch applied - no real Windows host reachable this session;
-  Windows cross-compile type-check also blocked by a missing mingw linker,
-  unrelated to this change). Full cross-machine reversed-topology walk from
-  the sibling dogfood ticket still pending a reachable Windows host. Reviews
-  (correctness, test) both clean.
+  Foundation. Verification upgraded same day: ran `cargo test -p
+  ws-dashboard-daemon persistent_state::` through the real native-Windows
+  toolchain (`D:\dbg-ws-dashboard-dev` via WSL interop, see
+  `_index.local.md`) - the crate compiles and all 6 tests pass on actual
+  Windows, including the new fallback test executing (not just
+  cross-compile-checking). Daemon-level HTTP repro and the sibling ticket's
+  full cross-machine walk still not re-run. Reviews (correctness, test) both
+  clean.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`

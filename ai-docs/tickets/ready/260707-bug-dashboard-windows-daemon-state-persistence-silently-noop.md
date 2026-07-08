@@ -149,21 +149,35 @@ only discoverable from source.
   save/set/restore env-var idiom, asserting the `LOCALAPPDATA` fallback
   resolves correctly when `WS_DASHBOARD_STATE_FILE`,
   `WS_DASHBOARD_STATE_HOME`, `XDG_STATE_HOME`, and `HOME` are all unset.
-- **Verification level achieved: isolated unit-test repro only, escape-hatch
-  applied.** No real native-Windows host was reachable in this implementing
-  session, so the full cross-machine reversed-topology walk from the sibling
-  ticket was not re-run (consistent with the ticket's stated escape hatch).
-  The new Windows-only test cannot execute on this Linux development host
-  either, since it is intentionally `#[cfg(windows)]`-gated per the plan (to
-  avoid asserting Windows-only behavior on Linux CI); a cross-compile
-  type-check toward `x86_64-pc-windows-gnu` was attempted to at least confirm
-  the new code compiles for that target, but it failed for an unrelated
-  reason — the sandbox lacks the `x86_64-w64-mingw32-gcc` linker needed by a
-  transitive dependency (`libsqlite3-sys`) — so compilation for Windows was
-  not independently confirmed in this session. The full non-Windows test
-  suite (`cargo test -p ws-dashboard-daemon persistent_state::`, 5 tests) and
-  a full `cargo build -p ws-dashboard-daemon` both pass with no warnings,
-  confirming Linux/macOS behavior is unaffected.
+- **Verification level achieved (updated): real native-Windows compile +
+  unit-test execution.** The implementer's own session had no reachable
+  Windows host and only confirmed the non-Windows side (`cargo test -p
+  ws-dashboard-daemon persistent_state::`, 5 tests, plus a full `cargo build`)
+  — a Linux-side cross-compile type-check toward `x86_64-pc-windows-gnu` was
+  also attempted there but blocked by a missing `x86_64-w64-mingw32-gcc`
+  linker (unrelated to this change). This dev box, however, does have a
+  reachable native Windows host: WSL2 interop exposes a native Windows Rust
+  toolchain (`powershell.exe -NoProfile -Command "cargo ..."`) and a separate
+  Windows-native checkout of this repo at `D:\dbg-ws-dashboard-dev` (recorded
+  in `ai-docs/_index.local.md`). Using a disposable detached worktree fetched
+  from this branch's tip (`144a150e`) into that checkout, `cargo test -p
+  ws-dashboard-daemon persistent_state::` was run through native Windows
+  `cargo.exe`: the crate compiled cleanly on the real `x86_64-pc-windows-*`
+  target (resolving the Linux-side cross-compile gap above) and all 6
+  `persistent_state` tests passed, including the new
+  `default_state_file_falls_back_to_local_app_data_on_windows` test actually
+  executing (not just compiling) on Windows. The worktree was removed after
+  the check; no files under `D:\dbg-ws-dashboard-dev`'s primary checkout were
+  touched.
+- **Still not done:** the daemon-level HTTP repro (`HOME` unset, `POST
+  /api/dashboard/root-picker/pins`, confirm a real
+  `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` appears) and the sibling
+  ticket's full cross-machine reversed-topology walk (resources, root-picker,
+  work-roots/open, files, Git, terminals) were not re-run in this pass — the
+  unit-test-level confirmation above is a strictly stronger version of the
+  ticket's own stated escape hatch (isolated repro), not a substitute for
+  those two end-to-end checks. Flagging as still-open verification, not
+  claiming full closure.
 - Added spec entry `{#260708-dashboard-state-file-resolution-order}` under
   `## Daemon Foundation {#260515-ws-web-daemon-foundation}` in
   `ai-docs/spec/ws-web-dashboard/index.md`, documenting the full state-file
