@@ -229,7 +229,7 @@ dropped tickets live in hidden archive dirs and git history.
   gaps (consolidated in the Phase 7 Result) — closing the ticket status is
   left as a user judgment call, not an automatic consequence of all phases
   landing.
-- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`ready`, chore) -
+- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`todo`, chore) -
   test plan to close `260525`'s live remote-dogfood gap for real. Phase 1
   partially executed 2026-07-07: SSH connectivity probe blocked by this
   session's own auto-mode classifier (escalation, unresolved); reversed-
@@ -237,8 +237,10 @@ dropped tickets live in hidden archive dirs and git history.
   `localhost`) confirmed the link handshake and Host-check non-bug are fine,
   but surfaced a genuine new bug
   (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`)
-  that blocks walking the rest of that leg. Left open, not closed - see
-  ticket `### Result`.
+  that blocks walking the rest of that leg. A plain-TCP-relay fallback for
+  the SSH leg was found and documented (see ticket Escalations). Demoted
+  back to `todo` pending the unresolved SSH-probe escalation; re-promote
+  after clearing `spec:`/reviewing `## Spec Impact` per the move tool's tip.
 - `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
   (`ready`, bug) - native-Windows `ws-dashboard` daemon silently drops all
   persisted state (linked servers, opened work roots, root-picker pins)
