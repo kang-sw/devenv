@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.33.6`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.6`).
+Active plugin package: `agents-plugin/` (`ws@0.33.7`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.7`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -223,27 +223,31 @@ dropped tickets live in hidden archive dirs and git history.
   and dot-free linked-server route segments (dot reserved for a future
   multi-hop separator). Spec addressed incrementally into
   `ai-docs/spec/ws-web-dashboard/index.md` across the phases (contract-first:
-  yes). The ticket was deliberately **not** moved to `.done/`: the API
-  Inventory is fully covered by landed code, but live remote-Windows dogfood
-  and thin-Playwright e2e execution remain outstanding, verification-only
-  gaps (consolidated in the Phase 7 Result) — closing the ticket status is
-  left as a user judgment call, not an automatic consequence of all phases
-  landing.
-- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`ready`, chore) -
+  yes). Live remote-Windows dogfood of the reversed-topology direct-endpoint
+  leg is now confirmed end to end (2026-07-10, via
+  `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 2 - full
+  forwarded-operation set including the WS terminal relay). The
+  SSH-tunnel leg and thin-Playwright e2e execution remain outstanding,
+  verification-only gaps. The ticket was deliberately **not** moved to
+  `.done/`: closing the ticket status is left as a user judgment call, not
+  an automatic consequence of all phases landing.
+- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`todo`, chore) -
   test plan to close `260525`'s live remote-dogfood gap for real. Phase 1
   partially executed 2026-07-07: SSH connectivity probe blocked by this
   session's own auto-mode classifier (escalation, still unresolved -
   needs a human-run probe outside this harness); reversed-topology
-  direct-endpoint leg (Windows gateway -> WSL remote via `localhost`)
-  confirmed the link handshake and Host-check non-bug are fine, but
-  surfaced a genuine new bug (`260707-bug-dashboard-windows-daemon-state-
-  persistence-silently-noop`, now `.done/` - both phases landed) that
-  blocked walking the rest of that leg. A plain-TCP-relay fallback for the
-  SSH leg was found and documented (see ticket Escalations). Re-promoted to
-  `ready` 2026-07-10 with a new Phase 2 scoped to just the
-  reversed-topology re-walk, unblocked now that the bug's fix is confirmed
-  end to end (no SSH dependency) - the SSH-tunnel leg (Phase 1 steps 1-2)
-  stays out of scope for Phase 2 and remains parked on the escalation.
+  direct-endpoint leg surfaced a genuine new bug
+  (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`,
+  now `.done/` - both phases landed) that blocked walking the rest of that
+  leg. A plain-TCP-relay fallback for the SSH leg was found and documented
+  (see ticket Escalations). Phase 2 (2026-07-10) fully re-walked the
+  reversed-topology leg past the fix: all forwarded operations (resources,
+  root-picker, work-roots/open, files, Git, terminal create + WS relay)
+  confirmed working, recorded as a dated append to `260525`. Demoted back
+  to `todo` since the only remaining scope is the SSH-tunnel leg (Phase 1
+  steps 1-2), still parked on the unresolved SSH-probe escalation - clear
+  `spec:`/review `## Spec Impact` before re-promoting per the move tool's
+  tip.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
