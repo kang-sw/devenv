@@ -89,3 +89,25 @@ above. No `dunce` crate dependency exists in this workspace.
    already running, `--no-auth`): re-open the previously-corrupted workRoot,
    confirm the displayed path and the spawned terminal's cwd are both plain
    (no `\\?\` prefix), without needing to remove/re-add the workRoot by hand.
+
+### Result
+
+Implemented items 1-6 in commit `20cabdb9` on
+`implement/windows-verbatim-path-normalize`: added
+`pub(crate) fn normalize_display_path` in `work_root_activity.rs` (reusing
+the existing `canonical_path_bytes` strip-prefix logic, no new crate
+dependency), refactored `canonical_path_bytes` to delegate to it on the
+Windows branch, and applied it at every path-display/persist boundary —
+`root_picker_view`, `entry_for_directory`, `push_place`, `push_pin_place`,
+`open_work_root`'s `requested_path`, and
+`resolve_online_available_work_root`'s returned path (self-healing pass).
+Confirmed `resolve_online_available_work_root` is the single funnel for
+`terminal.rs`'s `resolve_terminal_cwd`/`TerminalSession::spawn`, so item 5
+needed no independent fix. Added unit tests
+(`normalize_display_path_strips_windows_verbatim_prefix`,
+`normalize_display_path_is_noop_on_non_windows`) alongside the existing
+`canonical_path_bytes` tests. `cargo test -p ws-dashboard-daemon` (159
+tests) and `cargo build`/`cargo clippy -p ws-dashboard-daemon` pass clean;
+no new clippy warnings introduced. Item 7 (native Windows dogfood
+live-verification) remains an outstanding manual step, as scoped by the
+plan — could not be exercised from this Linux environment.
