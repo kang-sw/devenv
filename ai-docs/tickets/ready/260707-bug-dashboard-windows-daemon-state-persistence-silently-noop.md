@@ -185,6 +185,50 @@ only discoverable from source.
   silent-disable-on-no-candidate behavior. `ws/spec_index.verify` reports the
   index healthy after the addition.
 
+#### Edition (55dfb0a6) - 2026-07-10
+
+- **Daemon-level HTTP repro executed and confirms the existing fix; no
+  behavior gap found.** Using the same WSL2-interop recipe as the prior
+  Edition (disposable detached worktree fetched from this branch's tip
+  `55dfb0a6` into `D:\dbg-ws-dashboard-dev`'s native checkout, built via
+  `powershell.exe -NoProfile -Command "cargo build -p ws-dashboard-daemon"`),
+  launched the built `ws-dashboard.exe serve --host 127.0.0.1 --bind-mode
+  local --no-auth --port 47811` as a child process of a `powershell.exe`
+  session with `HOME`/`WS_DASHBOARD_STATE_FILE`/`WS_DASHBOARD_STATE_HOME`/
+  `XDG_STATE_HOME` explicitly removed from that process's environment
+  (verified via `$env:...` echo immediately before launch: all four empty,
+  only `LOCALAPPDATA=C:\Users\user\AppData\Local` present) — the stock
+  Windows-default env shape this ticket describes.
+- `POST /api/dashboard/root-picker/pins` with `{"path":"C:\Users\user\Desktop"}`
+  (issued via `Invoke-WebRequest` through `powershell.exe`, since WSL could
+  not reach the Windows-loopback-bound port directly — consistent with the
+  loopback-reachability caveat already recorded in `ai-docs/_index.local.md`)
+  returned `200` with a `places` array containing the new
+  `pin-c--users-user-desktop` entry.
+- Confirmed on disk: `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` was
+  created by the daemon (did not exist before this run) with
+  `"rootPickerPins": [{"path": "C:\\Users\\user\\Desktop"}]` — a real
+  filesystem side effect, not just the `200` response.
+- Confirmed round-trip: a follow-up `GET /api/dashboard/root-picker` (fresh
+  request, not the `POST` response) reflects the same `pin-c--users-user-desktop`
+  entry in its `places` array.
+- Confirmed the one-time `tracing::warn!("no dashboard state file could be
+  resolved ...")` in `default_local()` did **not** fire: grepping the
+  daemon's captured stdout/stderr logs for that exact string returned no
+  match; stdout showed only the normal `listening bound_addr=...` startup
+  line and stderr only the pairing-URL/no-auth/remote-link-passphrase debug
+  lines. The warn path does not false-positive on this success case.
+- Teardown completed: daemon process (`PID 14140`) stopped via
+  `Stop-Process -Force` and confirmed gone via a separate `Get-Process`
+  check; the scratch `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json`
+  and its now-empty parent directory were deleted; the disposable worktree
+  was removed via `command git worktree remove --force`, leaving `git
+  worktree list` clean on the `/mnt/d/dbg-ws-dashboard-dev` side.
+- This closes the "Still not done" gap the base Phase 1 Result left open —
+  the daemon-level HTTP + filesystem repro is now confirmed on real native
+  Windows, not just the unit-test level. No new bug ticket opened; no
+  source edits made in this phase (verification-only, as scoped).
+
 ### Phase 2: Daemon-level HTTP repro of the Windows fallback fix
 
 - Using a real native-Windows daemon run (this box's WSL2 interop path is
