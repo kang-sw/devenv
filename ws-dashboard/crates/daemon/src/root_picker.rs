@@ -13,7 +13,7 @@ use ws_dashboard_core::{
 };
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
-use crate::resources::{live_dashboard_resources, DashboardResourcesProvider};
+use crate::resources::{local_dashboard_resources_view, DashboardResourcesProvider};
 use crate::router::AppState;
 use crate::work_root_activity::normalize_display_path;
 use crate::work_root_files::RegisteredWorkRoot;
@@ -120,7 +120,14 @@ pub async fn list_root_picker(
         .unwrap_or_else(default_picker_path);
     let pins = state.dashboard_state.load_root_picker_pins().await;
 
-    match root_picker_view(&path, pins) {
+    // Listing runs synchronous filesystem work (canonicalize/metadata/read_dir
+    // across the target dir, home, drive letters, mounts, and pins), so keep
+    // it off the async worker threads.
+    let view = tokio::task::spawn_blocking(move || root_picker_view(&path, pins))
+        .await
+        .expect("root picker listing task panicked");
+
+    match view {
         Ok(view) => Json(view).into_response(),
         Err(error) => picker_error(StatusCode::BAD_REQUEST, error),
     }
@@ -215,7 +222,11 @@ pub async fn open_work_root(
     let provider = LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(
         requested_path.clone(),
     )]);
-    let view = provider.dashboard_resources();
+    // Discovery runs synchronous filesystem and `git` subprocess work, so
+    // keep it off the async worker threads.
+    let view = tokio::task::spawn_blocking(move || provider.dashboard_resources())
+        .await
+        .expect("workRoot discovery task panicked");
     let Some(work_root) = view
         .workspaces
         .first()
@@ -267,7 +278,7 @@ pub async fn open_work_root(
     // CONTRACT: return the aggregated live view of every opened workRoot so the
     // immediate open response is consistent with later GET /api/dashboard/resources
     // refreshes. The single-candidate `view` above is only the Online gate.
-    let aggregated = live_dashboard_resources(&state.opened_work_roots);
+    let aggregated = local_dashboard_resources_view(&state).await;
     (
         [(
             "x-ws-dashboard-opened-work-root-id",
@@ -305,7 +316,7 @@ pub async fn set_work_root_activation(
             "persist activation failed",
         );
     }
-    Json::<DashboardResourcesView>(live_dashboard_resources(&state.opened_work_roots))
+    Json::<DashboardResourcesView>(local_dashboard_resources_view(&state).await)
         .into_response()
 }
 
@@ -315,7 +326,7 @@ pub async fn remove_workspace(
 ) -> Response {
     let workspace_id = WorkspaceId::from(workspace_id);
     let _persist_guard = state.registry_persist_lock.lock().await;
-    let current = live_dashboard_resources(&state.opened_work_roots);
+    let current = local_dashboard_resources_view(&state).await;
     let Some(workspace) = current
         .workspaces
         .iter()
@@ -354,7 +365,7 @@ pub async fn remove_workspace(
         );
     }
     state.terminals.remove_for_work_roots(&work_root_ids);
-    Json::<DashboardResourcesView>(live_dashboard_resources(&state.opened_work_roots))
+    Json::<DashboardResourcesView>(local_dashboard_resources_view(&state).await)
         .into_response()
 }
 
