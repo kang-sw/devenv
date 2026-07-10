@@ -1,0 +1,91 @@
+---
+title: "ws dashboard exposes unnormalized Windows verbatim (\\\\?\\) paths to the browser and PTY cwd"
+sage-review: required
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
+related-mental-model:
+  - ws-web-dashboard
+---
+
+# ws dashboard exposes unnormalized Windows verbatim (\\?\) paths to the browser and PTY cwd
+
+## Background
+
+Found live during Windows-native dogfood (2026-07-10, native `ws-dashboard.exe`
+built from `D:\dbg-ws-dashboard-dev`, `--no-auth`, `127.0.0.1:4100`): opening a
+directory through the root-picker on native Windows surfaced a path that,
+once used, made a spawned PowerShell terminal show its prompt as
+`Microsoft.PowerShell.Core\FileSystem::\\?\D:\Workspace\Repos\...` instead of
+a plain `D:\Workspace\Repos\...` path.
+
+Root cause chain, confirmed by direct source read (no reproduction script
+needed beyond the live dogfood observation):
+
+1. `crates/daemon/src/root_picker.rs:359-388` (`root_picker_view`) calls
+   `path.canonicalize()` (line 361) and builds `current_path`/`parent_path`/
+   every `entries[].path` straight from `path.display().to_string()`
+   (lines 383-384, and `entry_for_directory` at 390-409). On Windows,
+   `std::path::Path::canonicalize()` returns an extended-length **verbatim**
+   path prefixed with `\\?\` — this raw prefixed string is sent to the
+   browser unstripped.
+2. `crates/daemon/src/root_picker.rs:208-245` (`open_work_root`) takes the
+   client-supplied path (which round-tripped from step 1's unstripped
+   `current_path`) and stores it verbatim into `RegisteredWorkRoot.path`
+   (line 241), then persists it — the corruption becomes durable.
+3. `crates/daemon/src/work_root_files.rs:776-790`
+   (`resolve_online_available_work_root`) returns `root.path` unchanged
+   (line 789).
+4. `crates/daemon/src/terminal.rs:480-499` (`TerminalSession::spawn`) and
+   `resolve_terminal_cwd` (889-924) pass that still-`\\?\`-prefixed path
+   straight into `command.cwd(spawn_cwd)` for the PTY child process — this is
+   why a shell started (or `cd`'d) into that directory shows the
+   provider-qualified prompt.
+
+A private strip-prefix helper already exists —
+`canonical_path_bytes` in `crates/daemon/src/work_root_activity.rs:2325-2337`
+(tests at 2580-2594) — but it is narrowly scoped to wsstate SHA-256
+short-hash key derivation and is not called from any of the four sites
+above. No `dunce` crate dependency exists in this workspace.
+
+## Constraints
+
+- Fix on the daemon side (path ingestion/normalization), not by asking the
+  frontend to guess or strip prefixes — the browser should never see a
+  `\\?\`-prefixed path in the first place.
+- Any already-persisted `RegisteredWorkRoot.path` values captured before this
+  fix should self-heal on next open/resolve rather than requiring a manual
+  migration step or state-file edit.
+- Non-Windows platforms must be unaffected (`canonicalize()` does not add a
+  verbatim prefix on Linux/macOS; the normalization helper should be a no-op
+  there).
+
+## Phases
+
+### Phase 1: Shared path-normalization helper and call-site fixes
+
+1. Extract a shared `normalize_display_path(&Path) -> String` (or similar)
+   helper — reuse/generalize the verbatim-prefix-stripping logic already in
+   `canonical_path_bytes` (`work_root_activity.rs`) rather than duplicating
+   it, or introduce the `dunce` crate if that proves cleaner. Keep it a
+   no-op on non-Windows.
+2. Apply it in `root_picker_view`/`entry_for_directory` (and any sibling
+   `push_place`/`push_pin_place`-style helpers that turn a `canonicalize()`
+   result into a display/API string) so the browser never receives a
+   `\\?\`-prefixed path.
+3. Apply it defensively in `open_work_root` before persisting
+   `RegisteredWorkRoot.path`, so a client-supplied path is normalized before
+   it becomes durable state.
+4. Apply it in `resolve_online_available_work_root` (or wherever persisted
+   `root.path` values are read back) as a self-healing normalization pass,
+   so paths persisted by a pre-fix daemon build recover without a manual
+   migration.
+5. Confirm `terminal.rs`'s `resolve_terminal_cwd`/`TerminalSession::spawn`
+   receive an already-normalized path through the above and need no
+   independent fix, or add one if a path can still reach `command.cwd()`
+   unnormalized through some other route.
+6. Add unit test coverage for the normalization helper (verbatim-prefixed
+   input -> plain path; already-plain input -> unchanged; non-Windows
+   no-op) alongside the existing `canonical_path_bytes` tests.
+7. Live-verify on the native Windows dogfood daemon (`D:\dbg-ws-dashboard-dev`,
+   already running, `--no-auth`): re-open the previously-corrupted workRoot,
+   confirm the displayed path and the spawned terminal's cwd are both plain
+   (no `\\?\` prefix), without needing to remove/re-add the workRoot by hand.
