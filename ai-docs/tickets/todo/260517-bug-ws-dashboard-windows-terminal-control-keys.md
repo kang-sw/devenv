@@ -1,6 +1,6 @@
 ---
 title: ws dashboard Windows terminal control keys
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260516-bug-ws-web-terminal-cross-platform-portability: native Windows dogfood reached real cmd.exe and PowerShell terminals but Ctrl-C did not interrupt long-running command fixtures
 spec:

@@ -1,7 +1,8 @@
 ---
 title: Research ws dashboard visual design system refresh
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
-  260514-epic-ws-web-dashboard-mvp: dashboard MVP board that needs a coherent visual quality pass
+  260514-epic-ws-web-dashboard-mvp: retired predecessor board that first raised the need for a coherent visual quality pass
   260524-research-ws-dashboard-react-aria-ui-primitives: primitive adoption research showed accessibility primitives do not solve visual design quality
   260524-feat-ws-dashboard-document-viewer-editor-substrate: future document/editor surfaces should not inherit the current rough visual language
 related-mental-model:

@@ -17,6 +17,7 @@ related-mental-model:
   - named-agent-runtime
   - mcp-runtime
   - plugin-runtime
+completed: 2026-07-10
 ---
 
 # ws web dashboard MVP
@@ -343,3 +344,8 @@ ticket only when they become implementation-ready.
 - Deferred: multi-user access, full public deployment hardening, desktop shell
   packaging, complete IDE/editor features, and broad multi-owner server
   federation belong to later epics.
+
+
+## Resolution (2026-07-10)
+
+Split into two successor boards per user direction (2026-07-10): `260622-epic-ws-dashboard-session-key-realignment` absorbs the agent-harness/session-key direction, and the new `260710-epic-ws-dashboard-terminal-ux-polishing` absorbs the dashboard-centric UX/terminal-polish backlog (terminal control-key fidelity, persisted UI state map, document/WorkRoot polishing backlogs, visual design system and React Aria research, agent-tab close-confirmation bug). This board's own Completion Criteria ("child tickets deliver a usable authenticated local/tunnel web dashboard with PTY terminals, document viewing/raw-text editing, workspace and workRoot management, and ws named-agent visibility") were already met by its completed child milestones (260515/260516 x2/260518 and their follow-up clusters) before the split. All remaining open children have been re-parented to one of the two successor epics; none are orphaned.

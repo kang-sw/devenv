@@ -1,6 +1,6 @@
 ---
 title: ws dashboard WorkRoot polishing backlog
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 spec:
   - 260524-ws-dashboard-git-worktree-creation
   - 260524-ws-dashboard-git-aware-workroot-toolbar

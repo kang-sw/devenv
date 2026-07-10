@@ -1,6 +1,6 @@
 ---
 title: ws dashboard agent tab close confirmation stays open
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260525-feat-ws-dashboard-markdown-renderer-polish: repeated browser gate blocker while verifying Markdown viewer polish
 spec:

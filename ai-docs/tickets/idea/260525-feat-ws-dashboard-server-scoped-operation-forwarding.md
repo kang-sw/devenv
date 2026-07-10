@@ -1,6 +1,6 @@
 ---
 title: ws dashboard server-scoped operation forwarding
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260622-epic-ws-dashboard-session-key-realignment
 related:
   260525-feat-ws-dashboard-multi-server-gateway: introduced linked-server registry, link-auth, selected-server resource forwarding, and server-first navigation
   260525-feat-ws-dashboard-endpoint-linked-server-add: exposed endpoint-first linked server add flow and revealed non-resource API locality during Windows dogfood

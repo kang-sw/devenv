@@ -1,6 +1,6 @@
 ---
 title: Map persistable ws dashboard UI state
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260523-feat-ws-dashboard-persist-open-workroots: first daemon-local persisted resource seed
   260523-feat-ws-dashboard-workroot-registry-activation: durable workspace/workRoot spine for later UI persistence

@@ -1,7 +1,8 @@
 ---
 title: ws dashboard session-key realignment
 related:
-  260514-epic-ws-web-dashboard-mvp: predecessor dashboard MVP board whose direction and child tickets need migration after the session-key pivot
+  260514-epic-ws-web-dashboard-mvp: retired predecessor dashboard MVP board; this epic absorbs its agent-harness/session-key direction
+  260710-epic-ws-dashboard-terminal-ux-polishing: sibling successor board that absorbs the dashboard-centric UX/terminal-polish backlog from the same split
   260605-epic-ws-playbook-factory-pivot: epic that changed ws delegation, root authority, actor removal, and mercenary/session-key behavior
   260605-research-ws-native-subagent-pivot: research anchor that briefly deprecated the dashboard before later retention decisions
   260620-feat-ws-dashboard-agent-client-activity-sources: deferred Activity adapter ticket that now routes through this realignment epic
@@ -67,13 +68,17 @@ session-key-aware model:
   back to idea-level Activity adapter work until the managed CLI path is
   dogfoodable; future provider adapters must build on the session-binding model
   instead of the pre-pivot named-agent/SQLite authority assumptions.
-- Existing: `260525-feat-ws-dashboard-server-scoped-operation-forwarding`
-  remains the linked-server forwarding ticket; this epic should treat Server
-  Route scoping as an identity constraint rather than a separate remote session
-  model.
-- Existing: `260514-epic-ws-web-dashboard-mvp` remains the predecessor board for
-  reusable workbench, PTY, document, WorkRoot, Activity, and server gateway
-  surfaces; session-key-aware agent/harness work now routes through this epic.
+- `260525-feat-ws-dashboard-server-scoped-operation-forwarding` - now an
+  explicit child of this epic (re-parented from the retired MVP board); this
+  epic should treat Server Route scoping as an identity constraint rather than
+  a separate remote session model.
+- `260514-epic-ws-web-dashboard-mvp` is retired (`.done/`), split into this
+  epic (agent-harness/session-key direction) and
+  `260710-epic-ws-dashboard-terminal-ux-polishing` (dashboard-centric
+  UX/terminal-polish direction). Reusable workbench, PTY, document, WorkRoot,
+  Activity, and server gateway surfaces the old board delivered remain
+  available to build on; this epic owns only the session-key-aware agent/
+  harness direction over them.
 
 ## Cross-Child Decisions
 

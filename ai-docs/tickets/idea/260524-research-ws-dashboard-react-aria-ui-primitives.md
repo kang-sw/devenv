@@ -1,5 +1,6 @@
 ---
 title: Research ws dashboard React Aria UI primitives
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260524-feat-ws-dashboard-react-aria-root-picker-pilot: root picker pilot should provide the first concrete evidence before broader adoption
   260524-feat-ws-dashboard-document-viewer-editor-substrate: future document/editor surfaces may need shared dialog, toggle, menu, tooltip, and collection primitives

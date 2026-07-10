@@ -1,6 +1,6 @@
 ---
 title: ws dashboard document polishing backlog
-parent: 260514-epic-ws-web-dashboard-mvp
+parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 spec:
   - 260524-ws-dashboard-document-viewer-mode
   - 260524-ws-dashboard-document-translation-overlay

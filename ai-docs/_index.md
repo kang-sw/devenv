@@ -152,8 +152,8 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260622-epic-ws-dashboard-session-key-realignment` | todo | Coordinate dashboard migration onto ferrule-backed top-level harness sessions |
+| `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
@@ -161,7 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
-| `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | ready | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
+| `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | idea | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -214,40 +214,52 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`ready`, feat) -
-  **all 7 phases complete** (Phase 1 `c72013f5` through Phase 7 `a71162ab`,
-  each closed out with a `### Result` section and a clean partitioned
-  correctness/fit/test review). All daemon-scoped operation routes are now
-  server-aware through the local gateway under the **Server Route** /
-  `serverRoute` naming, with `server-local` compatibility aliases preserved
-  and dot-free linked-server route segments (dot reserved for a future
-  multi-hop separator). Spec addressed incrementally into
+- `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`idea`, feat,
+  child of `260622`) - **all 7 phases complete** (Phase 1 `c72013f5` through
+  Phase 7 `a71162ab`, each closed out with a `### Result` section and a clean
+  partitioned correctness/fit/test review). All daemon-scoped operation
+  routes are now server-aware through the local gateway under the **Server
+  Route** / `serverRoute` naming, with `server-local` compatibility aliases
+  preserved and dot-free linked-server route segments (dot reserved for a
+  future multi-hop separator). Spec addressed incrementally into
   `ai-docs/spec/ws-web-dashboard/index.md` across the phases (contract-first:
   yes). Live remote-Windows dogfood of the reversed-topology direct-endpoint
   leg is now confirmed end to end (2026-07-10, via
   `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 2 - full
-  forwarded-operation set including the WS terminal relay). The
-  SSH-tunnel leg and thin-Playwright e2e execution remain outstanding,
-  verification-only gaps. The ticket was deliberately **not** moved to
-  `.done/`: closing the ticket status is left as a user judgment call, not
-  an automatic consequence of all phases landing.
-- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`todo`, chore) -
-  test plan to close `260525`'s live remote-dogfood gap for real. Phase 1
-  partially executed 2026-07-07: SSH connectivity probe blocked by this
-  session's own auto-mode classifier (escalation, still unresolved -
-  needs a human-run probe outside this harness); reversed-topology
-  direct-endpoint leg surfaced a genuine new bug
+  forwarded-operation set including the WS terminal relay). Demoted to
+  `idea` (2026-07-10) and re-parented from the retired `260514` to `260622`:
+  the remaining SSH-tunnel leg and thin-Playwright e2e execution are not
+  urgent verification gaps. Closing the ticket status remains a user
+  judgment call, not an automatic consequence of all phases landing.
+- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`idea`, chore) -
+  test plan for `260525`'s live remote-dogfood gap. Phase 1 partially
+  executed 2026-07-07: SSH connectivity probe blocked by this session's own
+  auto-mode classifier (escalation, still unresolved - needs a human-run
+  probe outside this harness); reversed-topology direct-endpoint leg
+  surfaced a genuine new bug
   (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`,
   now `.done/` - both phases landed) that blocked walking the rest of that
   leg. A plain-TCP-relay fallback for the SSH leg was found and documented
   (see ticket Escalations). Phase 2 (2026-07-10) fully re-walked the
   reversed-topology leg past the fix: all forwarded operations (resources,
   root-picker, work-roots/open, files, Git, terminal create + WS relay)
-  confirmed working, recorded as a dated append to `260525`. Demoted back
-  to `todo` since the only remaining scope is the SSH-tunnel leg (Phase 1
-  steps 1-2), still parked on the unresolved SSH-probe escalation - clear
-  `spec:`/review `## Spec Impact` before re-promoting per the move tool's
-  tip.
+  confirmed working, recorded as a dated append to `260525`. Demoted to
+  `idea` (2026-07-10, not urgent) with a note added to reconsider promoting
+  plain-TCP forwarding to a first-tier WSL<->Windows-native interop
+  mechanism rather than treating it only as an SSH-unreachable fallback -
+  still parked on the unresolved SSH-probe escalation for the original leg.
+- **Dashboard MVP epic split (2026-07-10):** `260514-epic-ws-web-dashboard-mvp`
+  closed to `.done/` - its own Completion Criteria were already met by
+  completed child milestones. Split into two successor boards: `260622-epic-
+  ws-dashboard-session-key-realignment` (agent-harness/session-key direction;
+  gained `260525-feat-ws-dashboard-server-scoped-operation-forwarding` as an
+  explicit child) and the new `260710-epic-ws-dashboard-terminal-ux-polishing`
+  (dashboard-centric UX/terminal-polish backlog: `260517` control-key bug,
+  `260523-research-persistable-ui-state-map`, `260525-bug-agent-tab-close-
+  confirmation-sticky`, `260525-feat-document/workroot-polishing-backlog`,
+  `260524-research-visual-design-system-refresh`,
+  `260524-research-react-aria-ui-primitives`). No remaining open child of the
+  old epic was left orphaned.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`

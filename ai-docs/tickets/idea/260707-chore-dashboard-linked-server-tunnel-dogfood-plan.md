@@ -291,3 +291,18 @@ set (files, Git, terminal, WebSocket relay). The SSH-tunnel leg itself
 remains blocked on the escalation above; this finding does not resolve it,
 it documents an available fallback if SSH access continues to be
 unreachable in-session.
+
+#### Note (2026-07-10): reconsider relative priority — TCP forwarding as first-tier
+
+Demoted this whole ticket to `idea/` — the SSH-tunnel leg is not an urgent
+verification gap. Separately, the user raised a direction worth exploring
+before re-attempting the SSH leg: given the 2026-07-07 finding above, a
+plain-TCP (or otherwise SSH-independent) loopback forwarder may be worth
+promoting from "fallback if SSH is unreachable" to a first-tier, officially
+supported WSL<->Windows-native interop mechanism in its own right — not
+merely a workaround for this session's SSH-probing block. That would need
+its own design pass (transport trust-boundary story beyond "same trust
+boundary as loopback in practice", lifecycle/teardown of the relay process,
+whether it belongs in-product vs. as a dev/dogfood-only tool) rather than
+folding it into this dogfood-plan ticket. Revisit as a research/idea ticket
+of its own before deciding whether to still pursue the original SSH leg.
