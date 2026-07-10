@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.33.7 - 2026-07-10
+
+### Fixed
+- Align `lead-write-ticket`'s `tickets.create` example with the public MCP
+  schema (`stem` and `initial_state`), regenerate the wsflow rsrc mirror and
+  manifests, and add a rendered-playbook regression assertion.
+
 ## v0.33.6 - 2026-07-10
 
 ### Changed
