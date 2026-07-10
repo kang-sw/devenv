@@ -2,6 +2,8 @@
 title: lead-write-ticket playbook uses a stale tickets.create schema
 related:
   260605-epic-ws-playbook-factory-pivot: playbooks are runtime-distributed contracts and must match their exposed MCP schemas
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # lead-write-ticket playbook uses a stale tickets.create schema
