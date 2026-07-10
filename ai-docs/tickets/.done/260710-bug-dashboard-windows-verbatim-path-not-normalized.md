@@ -4,6 +4,7 @@ sage-review: required
 parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-07-10
 ---
 
 # ws dashboard exposes unnormalized Windows verbatim (\\?\) paths to the browser and PTY cwd
@@ -133,3 +134,36 @@ now relies on the already-normalized `get()` result instead of its own
 (full suite, 45 unit + 144 route + 15 server tests) passes clean. The
 test partition's 2 Minor findings were accepted as pre-scoped-out per the
 ticket/plan; no action taken.
+
+#### Edition (fdb4a57d) - 2026-07-10
+
+Item 7 (native Windows dogfood live-verification) completed after merge to
+`ws-dashboard-dev`, on the real native-Windows daemon
+(`D:\dbg-ws-dashboard-dev`, rebuilt at the merge tip, `--no-auth`,
+`127.0.0.1:4100`), against a workRoot (`InspectTGV_AIDriven`) that was
+originally registered by the pre-fix binary and had shown the
+`\\?\`-prefixed corruption live during the initial dogfood that surfaced
+this bug:
+
+- `GET /api/dashboard/root-picker?path=D:\Workspace\Repos` returned every
+  entry (including `InspectTGV_AIDriven`) with a plain path, no `\\?\`
+  prefix.
+- `POST /api/dashboard/work-roots/open` with that path resolved to the
+  same already-registered `workRootId`, confirming the persisted registry
+  entry self-healed rather than creating a duplicate.
+- `GET .../git/status` for that workRoot succeeded (previously errored
+  `"unknown workRoot"` before the workRoot was opened this session, then
+  returned real branch/sync data once opened), confirming
+  `git_toolbar.rs`'s accessor-driven path resolution works end-to-end.
+- A live terminal spawned for that workRoot showed prompt
+  `PS D:\Workspace\Repos\InspectTGV_AIDriven>` — plain path, no
+  `Microsoft.PowerShell.Core\FileSystem::\\?\` provider-qualified prefix,
+  confirming the exact original symptom is gone. Terminal closed after
+  verification.
+
+All Phase 1 items are now verified complete.
+
+
+## Resolution (2026-07-10)
+
+Fixed and merged (implement/windows-verbatim-path-normalize -> ws-dashboard-dev, merge commit at HEAD). Item 7 native-Windows live verification completed post-merge against the actual originally-corrupted workRoot: root-picker listing, self-healing re-open, git status, and a live terminal prompt all confirmed plain paths with no \\?\ prefix.
