@@ -89,3 +89,47 @@ above. No `dunce` crate dependency exists in this workspace.
    already running, `--no-auth`): re-open the previously-corrupted workRoot,
    confirm the displayed path and the spawned terminal's cwd are both plain
    (no `\\?\` prefix), without needing to remove/re-add the workRoot by hand.
+
+### Result
+
+Implemented items 1-6 in commit `20cabdb9` on
+`implement/windows-verbatim-path-normalize`: added
+`pub(crate) fn normalize_display_path` in `work_root_activity.rs` (reusing
+the existing `canonical_path_bytes` strip-prefix logic, no new crate
+dependency), refactored `canonical_path_bytes` to delegate to it on the
+Windows branch, and applied it at every path-display/persist boundary —
+`root_picker_view`, `entry_for_directory`, `push_place`, `push_pin_place`,
+`open_work_root`'s `requested_path`, and
+`resolve_online_available_work_root`'s returned path (self-healing pass).
+Confirmed `resolve_online_available_work_root` is the single funnel for
+`terminal.rs`'s `resolve_terminal_cwd`/`TerminalSession::spawn`, so item 5
+needed no independent fix. Added unit tests
+(`normalize_display_path_strips_windows_verbatim_prefix`,
+`normalize_display_path_is_noop_on_non_windows`) alongside the existing
+`canonical_path_bytes` tests. `cargo test -p ws-dashboard-daemon` (159
+tests) and `cargo build`/`cargo clippy -p ws-dashboard-daemon` pass clean;
+no new clippy warnings introduced. Item 7 (native Windows dogfood
+live-verification) remains an outstanding manual step, as scoped by the
+plan — could not be exercised from this Linux environment.
+
+#### Edition (89283667) - 2026-07-10
+
+Review-cycle-1 fix: the correctness partition flagged that
+`OpenedWorkRoots::resolve()`/`get()`/`candidate_paths()`/
+`candidate_roots()`/`owner_candidate_roots()` (`work_root_files.rs`)
+returned `RegisteredWorkRoot.path` verbatim, unlike
+`resolve_online_available_work_root`. `git_worktree.rs`'s
+`resolve_workspace_git`/`git_worktree_add_submit` and `git_toolbar.rs`'s
+`git_context` read the registry through `OpenedWorkRoots::resolve` and fed
+the unnormalized path into `git` subprocess `-C` args and
+`valid_branch_name`. Fixed by normalizing inside the shared accessor layer
+(`OpenedWorkRoots::get`, via a new `normalize_registered_root` helper
+reused by `candidate_paths`/`candidate_roots`/`owner_candidate_roots`) so
+every reader is normalized uniformly; `resolve_online_available_work_root`
+now relies on the already-normalized `get()` result instead of its own
+`normalize_display_path` call. Added unit tests for
+`resolve`/`get`/`candidate_paths`/`candidate_roots`/
+`owner_candidate_roots` normalization. `cargo test -p ws-dashboard-daemon`
+(full suite, 45 unit + 144 route + 15 server tests) passes clean. The
+test partition's 2 Minor findings were accepted as pre-scoped-out per the
+ticket/plan; no action taken.

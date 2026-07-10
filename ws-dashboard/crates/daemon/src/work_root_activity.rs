@@ -2313,6 +2313,33 @@ fn git_output(repo: &Path, args: &[&str]) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+/// Displayable form of `path` with the Windows `\\?\` / `\\?\UNC\` verbatim
+/// prefix stripped, if present.
+///
+/// `std::fs::canonicalize` on Windows emits verbatim-prefixed paths (e.g.
+/// `\\?\C:\repo`, `\\?\UNC\server\share`). Those prefixes are an
+/// implementation detail of the Windows API and must never reach the
+/// browser or be persisted as a work-root path: strip them here so all
+/// display and storage call sites see the plain form. A no-op on
+/// non-Windows targets.
+pub(crate) fn normalize_display_path(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            rest.to_owned()
+        } else {
+            raw.into_owned()
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        path.display().to_string()
+    }
+}
+
 /// Byte representation of a canonical path used as the SHA-256 hashing input
 /// for wsstate project/worktree keys.
 ///
@@ -2325,15 +2352,7 @@ fn git_output(repo: &Path, args: &[&str]) -> Option<String> {
 fn canonical_path_bytes(path: &Path) -> Vec<u8> {
     #[cfg(windows)]
     {
-        let raw = path.to_string_lossy();
-        let normalized = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
-            format!(r"\\{rest}")
-        } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
-            rest.to_owned()
-        } else {
-            raw.into_owned()
-        };
-        normalized.into_bytes()
+        normalize_display_path(path).into_bytes()
     }
     #[cfg(not(windows))]
     {
@@ -2590,6 +2609,30 @@ mod tests {
         assert_eq!(
             canonical_path_bytes(Path::new(r"\\?\UNC\server\share")),
             br"\\server\share".to_vec()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_display_path_strips_windows_verbatim_prefix() {
+        assert_eq!(
+            normalize_display_path(Path::new(r"\\?\C:\repo")),
+            r"C:\repo"
+        );
+        assert_eq!(
+            normalize_display_path(Path::new(r"\\?\UNC\server\share")),
+            r"\\server\share"
+        );
+        // Already-plain input passes through unchanged.
+        assert_eq!(normalize_display_path(Path::new(r"C:\repo")), r"C:\repo");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_display_path_is_noop_on_non_windows() {
+        assert_eq!(
+            normalize_display_path(Path::new("/tmp/ws-root")),
+            "/tmp/ws-root"
         );
     }
 
