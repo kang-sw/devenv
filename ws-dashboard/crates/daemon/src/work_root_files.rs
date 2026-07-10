@@ -96,6 +96,20 @@ pub struct DocumentEventView {
     pub changed_at_ms: u128,
 }
 
+/// Normalizes a registered workRoot's path for every reader of the shared
+/// registry, so no accessor (`resolve`, `get`, `candidate_paths`,
+/// `candidate_roots`, `owner_candidate_roots`) can leak a Windows
+/// `\\?\`-verbatim-prefixed path to callers such as `git_worktree.rs`'s
+/// `resolve_workspace_git`/`git_worktree_add_submit` or `git_toolbar.rs`'s
+/// `git_context`, which feed the path into `git` subprocess `-C` args and
+/// branch-name validation. This is a self-healing pass: it normalizes
+/// whatever was persisted, regardless of whether it went through
+/// `open_work_root`'s own defensive normalization at write time.
+fn normalize_registered_root(mut root: RegisteredWorkRoot) -> RegisteredWorkRoot {
+    root.path = PathBuf::from(normalize_display_path(&root.path));
+    root
+}
+
 impl OpenedWorkRoots {
     pub fn from_paths(paths: Vec<PathBuf>) -> Self {
         let opened = Self::default();
@@ -159,6 +173,7 @@ impl OpenedWorkRoots {
             .expect("opened workRoots lock poisoned")
             .get(work_root_id)
             .cloned()
+            .map(normalize_registered_root)
     }
 
     pub fn set_activation(
@@ -186,7 +201,9 @@ impl OpenedWorkRoots {
             .read()
             .expect("opened workRoots lock poisoned")
             .values()
-            .map(|root| root.path.clone())
+            .cloned()
+            .map(normalize_registered_root)
+            .map(|root| root.path)
             .collect();
         paths.sort();
         paths
@@ -199,6 +216,7 @@ impl OpenedWorkRoots {
             .expect("opened workRoots lock poisoned")
             .values()
             .cloned()
+            .map(normalize_registered_root)
             .collect();
         roots.sort_by(|left, right| left.path.cmp(&right.path));
         roots
@@ -212,6 +230,7 @@ impl OpenedWorkRoots {
             .values()
             .filter(|root| root.provenance == WorkRootProvenance::Opened)
             .cloned()
+            .map(normalize_registered_root)
             .collect();
         roots.sort_by(|left, right| left.path.cmp(&right.path));
         roots
@@ -788,11 +807,13 @@ pub fn resolve_online_available_work_root(
         return Err(WorkRootAccessError::Unavailable);
     }
     // Self-healing: a pre-fix daemon build may have persisted a Windows
-    // verbatim-prefixed path (`\\?\...`) into the registry. Normalize on
-    // every read so terminal spawns and file operations never see the
-    // verbatim form again, without requiring a manual re-add of the
-    // workRoot.
-    Ok(PathBuf::from(normalize_display_path(&root.path)))
+    // verbatim-prefixed path (`\\?\...`) into the registry. `OpenedWorkRoots::get`
+    // already normalizes every reader of the shared registry (see
+    // `normalize_registered_root`), so `root.path` here is already plain;
+    // returning it directly keeps terminal spawns and file operations from
+    // ever seeing the verbatim form again, without requiring a manual
+    // re-add of the workRoot.
+    Ok(root.path)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -822,4 +843,76 @@ enum ListError {
     NotDirectory,
     NotFound,
     Unavailable,
+}
+
+#[cfg(test)]
+mod opened_work_roots_normalization_tests {
+    use super::*;
+
+    #[cfg(windows)]
+    fn verbatim_path() -> PathBuf {
+        PathBuf::from(r"\\?\C:\repo")
+    }
+
+    #[cfg(windows)]
+    fn expected_plain_path() -> PathBuf {
+        PathBuf::from(r"C:\repo")
+    }
+
+    #[cfg(not(windows))]
+    fn verbatim_path() -> PathBuf {
+        PathBuf::from("/tmp/ws-root")
+    }
+
+    #[cfg(not(windows))]
+    fn expected_plain_path() -> PathBuf {
+        PathBuf::from("/tmp/ws-root")
+    }
+
+    fn opened_with_one_root() -> (OpenedWorkRoots, WorkRootId) {
+        let opened = OpenedWorkRoots::default();
+        let work_root_id = WorkRootId::from("test-work-root");
+        opened.register(work_root_id.clone(), verbatim_path());
+        (opened, work_root_id)
+    }
+
+    // Every shared-registry accessor must normalize a persisted verbatim
+    // path uniformly, since git_worktree.rs's resolve_workspace_git/
+    // git_worktree_add_submit and git_toolbar.rs's git_context read the
+    // registry through OpenedWorkRoots::resolve/get and feed the result
+    // into `git` subprocess `-C` args and valid_branch_name.
+    #[test]
+    fn resolve_returns_normalized_path() {
+        let (opened, work_root_id) = opened_with_one_root();
+        assert_eq!(opened.resolve(&work_root_id), Some(expected_plain_path()));
+    }
+
+    #[test]
+    fn get_returns_registered_root_with_normalized_path() {
+        let (opened, work_root_id) = opened_with_one_root();
+        let root = opened.get(&work_root_id).expect("root registered");
+        assert_eq!(root.path, expected_plain_path());
+    }
+
+    #[test]
+    fn candidate_paths_returns_normalized_paths() {
+        let (opened, _work_root_id) = opened_with_one_root();
+        assert_eq!(opened.candidate_paths(), vec![expected_plain_path()]);
+    }
+
+    #[test]
+    fn candidate_roots_returns_normalized_paths() {
+        let (opened, _work_root_id) = opened_with_one_root();
+        let roots = opened.candidate_roots();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, expected_plain_path());
+    }
+
+    #[test]
+    fn owner_candidate_roots_returns_normalized_paths() {
+        let (opened, _work_root_id) = opened_with_one_root();
+        let roots = opened.owner_candidate_roots();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, expected_plain_path());
+    }
 }
