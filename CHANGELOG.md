@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.33.8 - 2026-07-10
+
+### Fixed
+- Export the packaged plugin `skills/` tree through `WS_SKILLS_ROOT` from both
+  launchers before handing off to runtimes installed under
+  `.runtime/<platform>/`, restoring maximum-delegation workflow-manual loading
+  for downstream ws and wsflow installations. Add helper and launcher-main
+  regression coverage.
+
 ## v0.33.7 - 2026-07-10
 
 ### Fixed
