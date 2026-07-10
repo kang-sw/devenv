@@ -427,12 +427,31 @@ struct GitDiscovery {
 
 impl GitDiscovery {
     fn discover(path: &Path) -> Option<Self> {
-        let worktree_dir = git_path(path, &["rev-parse", "--show-toplevel"])?;
-        let common_dir = git_path(
-            path,
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )?;
-        let git_dir = git_path(path, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
+        // Single `git rev-parse` invocation queries all three values at once
+        // (one output line per query flag, in flag order) instead of
+        // spawning three separate `git` processes per work root.
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args([
+                "rev-parse",
+                "--show-toplevel",
+                "--path-format=absolute",
+                "--git-common-dir",
+                "--git-dir",
+            ])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let stdout = String::from_utf8(output.stdout).ok()?;
+        let mut lines = stdout.lines();
+        let worktree_dir = non_empty_path(lines.next()?)?;
+        let common_dir = non_empty_path(lines.next()?)?;
+        let git_dir = non_empty_path(lines.next()?)?;
         let kind = if common_dir == git_dir {
             WorkRootKind::GitPrimaryRoot
         } else {
@@ -458,20 +477,8 @@ impl GitDiscovery {
     }
 }
 
-fn git_path(path: &Path, args: &[&str]) -> Option<PathBuf> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(args)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let value = String::from_utf8(output.stdout).ok()?;
-    let trimmed = value.trim();
+fn non_empty_path(line: &str) -> Option<PathBuf> {
+    let trimmed = line.trim();
     (!trimmed.is_empty()).then(|| normalize_candidate_path(Path::new(trimmed)))
 }
 
