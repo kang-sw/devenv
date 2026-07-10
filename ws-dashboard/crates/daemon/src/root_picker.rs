@@ -15,6 +15,7 @@ use ws_dashboard_core::{
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
 use crate::resources::{live_dashboard_resources, DashboardResourcesProvider};
 use crate::router::AppState;
+use crate::work_root_activity::normalize_display_path;
 use crate::work_root_files::RegisteredWorkRoot;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -210,6 +211,7 @@ pub async fn open_work_root(
     Json(request): Json<OpenWorkRootRequest>,
 ) -> Response {
     let requested_path = PathBuf::from(request.path);
+    let requested_path = PathBuf::from(normalize_display_path(&requested_path));
     let provider = LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(
         requested_path.clone(),
     )]);
@@ -380,8 +382,8 @@ fn root_picker_view(path: &Path, root_picker_pins: Vec<PathBuf>) -> Result<RootP
     entries.sort_by(|left, right| left.name.cmp(&right.name));
 
     Ok(RootPickerView {
-        current_path: path.display().to_string(),
-        parent_path: path.parent().map(|parent| parent.display().to_string()),
+        current_path: normalize_display_path(&path),
+        parent_path: path.parent().map(normalize_display_path),
         places: known_picker_places(root_picker_pins),
         entries,
     })
@@ -395,7 +397,7 @@ fn entry_for_directory(path: &Path) -> RootPickerEntry {
             .and_then(|name| name.to_str())
             .unwrap_or("")
             .to_owned(),
-        path: path.display().to_string(),
+        path: normalize_display_path(path),
         entry_type: RootPickerEntryType::Directory,
         selectable: true,
         kind_label: Some("Folder".to_owned()),
@@ -478,7 +480,7 @@ fn push_place(
     if !canonical.is_dir() {
         return;
     }
-    let display_path = canonical.display().to_string();
+    let display_path = normalize_display_path(&canonical);
     if !seen.insert(display_path.clone()) {
         return;
     }
@@ -494,8 +496,8 @@ fn push_place(
 
 fn push_pin_place(places: &mut Vec<RootPickerPlace>, seen: &mut BTreeSet<String>, path: PathBuf) {
     let (display_path, available) = match path.canonicalize() {
-        Ok(canonical) if canonical.is_dir() => (canonical.display().to_string(), true),
-        _ => (path.display().to_string(), false),
+        Ok(canonical) if canonical.is_dir() => (normalize_display_path(&canonical), true),
+        _ => (normalize_display_path(&path), false),
     };
     let seen_key = format!("pin:{display_path}");
     if !seen.insert(seen_key) {

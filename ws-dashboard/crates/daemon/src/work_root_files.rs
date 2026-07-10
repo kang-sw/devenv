@@ -19,6 +19,7 @@ use ws_dashboard_core::{WorkRootActivation, WorkRootId};
 
 use crate::discovery::local_work_root_id_for_path;
 use crate::router::AppState;
+use crate::work_root_activity::normalize_display_path;
 
 const MAX_READ_ONLY_TEXT_BYTES: u64 = 512 * 1024;
 
@@ -786,7 +787,12 @@ pub fn resolve_online_available_work_root(
     if !root.path.is_dir() || std::fs::read_dir(&root.path).is_err() {
         return Err(WorkRootAccessError::Unavailable);
     }
-    Ok(root.path)
+    // Self-healing: a pre-fix daemon build may have persisted a Windows
+    // verbatim-prefixed path (`\\?\...`) into the registry. Normalize on
+    // every read so terminal spawns and file operations never see the
+    // verbatim form again, without requiring a manual re-add of the
+    // workRoot.
+    Ok(PathBuf::from(normalize_display_path(&root.path)))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
