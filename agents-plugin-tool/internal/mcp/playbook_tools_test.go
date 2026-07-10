@@ -1718,6 +1718,9 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	if !strings.Contains(body, "recoverability of intent") {
 		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
 	}
+	if !strings.Contains(body, `tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`) {
+		t.Errorf("body missing tickets.create public schema call:\n%s", body)
+	}
 	for _, want := range []string{
 		"If posture is `recommended`, ask the user",
 		"If posture is `required`, run design review without asking",

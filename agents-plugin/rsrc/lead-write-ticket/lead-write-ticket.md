@@ -44,7 +44,7 @@ Movement
 
 ### 3. Populate
 
-1. New ticket: call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, type: "<category>", title: "<title>", status: "<initial-status>")`; fall back to manual file creation only when the tool is unavailable or errors.
+1. New ticket: call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`; fall back to manual file creation only when the tool is unavailable or errors.
 2. Existing ticket: apply the requested change — phase update, content update, or status move — directly to the loaded body.
 3. Fill the loaded skeleton with a clear problem/goal statement per **Apply Ticket Content**.
 4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
