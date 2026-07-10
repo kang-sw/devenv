@@ -129,7 +129,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
                 r"---\n\n"
                 rf"# {re.escape(title)}\n\n"
                 r"Call in parallel:\n"
-                rf"- `wsflow/playbook\.print\(name: \"{re.escape(skill)}\", session_key: <your key>\)`\n"
+                rf"- `wsflow/playbook\.print\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
                 r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
                 r"After both return, execute the procedure returned by `wsflow/playbook\.print`\.\n",
                 text,
