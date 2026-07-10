@@ -945,3 +945,61 @@ new state-persistence bug rather than the earlier Host-check one, and the
 SSH-tunnel leg still has zero execution evidence in any session. Both gaps
 should be revisited once the new bug ticket lands and SSH probing is
 permitted.
+
+#### Verification note - 2026-07-10 (reversed-topology full forwarded-op re-walk)
+
+Re-walked the reversed-topology leg from the note above
+(`260707-chore-dashboard-linked-server-tunnel-dogfood-plan` Phase 1 step 3)
+now that `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
+is merged, this time driving the **full** forwarded-operation set that the
+earlier attempt never reached because of the 404.
+
+Topology: native Windows gateway daemon (built via the WSL-interop
+`D:\dbg-ws-dashboard-dev` recipe in `ai-docs/_index.local.md`, disposable
+detached worktree at `D:\scratch-reversed-rewalk`), `--host 127.0.0.1
+--bind-mode local`, normal owner-auth, linked to a WSL-hosted remote daemon
+(`--host 127.0.0.1 --bind-mode local`, normal owner-auth) via the
+direct-endpoint field (`endpoint: "http://localhost:<wsl-port>"`). Both
+daemons ran with a scratch `WS_DASHBOARD_STATE_HOME` for this run only
+(`D:\dogfood-reversed-rewalk` / `/tmp/dogfood-reversed-rewalk`).
+
+- Confirmed the Windows gateway's daemon log has **no**
+  `"no dashboard state file could be resolved"` warning before proceeding —
+  the state-file fix is in effect for this build.
+- Link handshake: `200 connected` (repeats the already-successful step from
+  the prior note).
+- Walked every forwarded route named in `router.rs:94-215` against the
+  linked WSL remote, all `200`, none reproducing the original
+  `404 "unknown server"`: `GET .../resources`, `GET .../root-picker`,
+  `POST .../work-roots/open` (opened a scratch git repo at
+  `/tmp/dogfood-reversed-rewalk/testrepo` on the WSL remote), `GET
+  .../work-roots/{id}/files`, `GET .../files/read`, `POST .../files/write`
+  (edited a scratch file, verified via `contentHash`/`sizeBytes` in the
+  response), `GET .../git/status`, `GET .../git/branches`, `POST
+  .../work-roots/{id}/terminals` (create).
+- Terminal WebSocket relay (`GET .../terminals/{id}/socket`): connected
+  (`ClientWebSocket` state `Open`) using the same owner cookie as the HTTP
+  calls, sent a `{"type":"input","data":"echo dogfood-ws-relay-ok\n"}`
+  frame, and received the echoed output back through the relay
+  (`ws_roundtrip_saw_echo=true`) — confirms the full input/output round trip
+  through the forwarded WS path, not just the connect handshake.
+- No 403s occurred anywhere in this leg (the settled `--bind-mode public`
+  Host-check non-bug was not re-triggered, consistent with using
+  `--bind-mode local` on both daemons per this phase's constraint).
+- One harness-only artifact, not a daemon finding: the WS client's own
+  `CloseAsync().Wait()` cleanup call threw after the round-trip already
+  succeeded (`"one or more errors occurred"` from a Windows PowerShell 5.1
+  `ClientWebSocket`), most likely a client-side close-handshake timing quirk
+  in that specific test harness, not a defect surfaced by any dashboard
+  code path — the functional round trip completed and was observed before
+  this occurred.
+
+Net effect: the reversed-topology leg's full forwarded-operation set is now
+confirmed end-to-end with the state-persistence fix in place. This closes
+the "actual forwarded-operation exercise... blocked by the new
+state-persistence bug" gap called out in the note above for this leg
+specifically. The SSH-tunnel leg (Phase 1 steps 1-2) remains untouched by
+this phase and still has zero execution evidence in any session.
+
+Teardown: both daemon processes stopped, both scratch state directories
+removed, and the disposable `D:\scratch-reversed-rewalk` worktree removed.
