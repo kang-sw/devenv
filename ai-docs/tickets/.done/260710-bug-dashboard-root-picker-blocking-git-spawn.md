@@ -4,6 +4,7 @@ sage-review: required
 parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260710-bug-dashboard-windows-verbatim-path-not-normalized: prior fix in the same call-site cluster (path normalization); this ticket fixes a distinct blocking-execution defect
+completed: 2026-07-10
 ---
 
 # Dashboard root-picker routes block the async runtime with synchronous git spawns
@@ -145,3 +146,8 @@ verdict). In `root_picker.rs`:
 None. This is an internal execution-model fix (dispatch onto the blocking
 thread pool); it changes no observable HTTP contract, request/response
 shape, or route behavior covered by existing specs.
+
+
+## Resolution (2026-07-10)
+
+Fixed and merged (implement/git-discovery-combined-rev-parse-hotfix -> ws-dashboard-dev, merge commit at HEAD, stacked with the sibling combined-rev-parse fix). Live-verified against the native-Windows daemon: a concurrent lightweight root-picker request completed in ~101ms while an 8s open_work_root call was in flight, confirming the daemon no longer stalls entirely during folder-open.

@@ -4,6 +4,7 @@ sage-review: required
 parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260710-bug-dashboard-root-picker-blocking-git-spawn: sibling perf fix in the same call-site cluster; that ticket fixed blocking-on-async-runtime, this one fixes redundant process-spawn count
+completed: 2026-07-10
 ---
 
 # Combine GitDiscovery::discover's three rev-parse spawns into one
@@ -130,3 +131,8 @@ verdict, stacked on the sibling `spawn_blocking` fix branch, renamed to
 
 None. Internal process-spawn-count reduction; no observable HTTP contract,
 response shape, or discovered `kind`/path values change.
+
+
+## Resolution (2026-07-10)
+
+Fixed and merged (implement/git-discovery-combined-rev-parse-hotfix -> ws-dashboard-dev, merge commit at HEAD). Live-verified against the native-Windows daemon: GET /api/dashboard/resources over 4 registered work roots dropped from ~1.1-1.4s (3 roots, pre-fix) to ~619ms (4 roots, post-fix), confirming the per-work-root spawn-count halving translated into a real wall-clock improvement.
