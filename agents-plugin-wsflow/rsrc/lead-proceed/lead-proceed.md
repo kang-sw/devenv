@@ -16,7 +16,10 @@ Target: user request
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` and `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
+1. If `workflow_manual` was already loaded this session and no compaction or
+   continuation occurred since, call only `{{.McpNamespace}}/git.status(session_key: <key>)`.
+   Otherwise call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` and
+   `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
 2. If the target references a ticket, read it. Apply judgments and resolve facts.
 3. Scope resolution before calling:
    - Unfinished phase = first phase with no `### Result` section; use it when the user names none.
