@@ -791,6 +791,19 @@ def apply_rsrc_root_env(plugin_dir: Path, env: dict) -> None:
         env["WS_RSRC_ROOT"] = str(rsrc_root)
 
 
+def apply_skills_root_env(plugin_dir: Path, env: dict) -> None:
+    """Point the runtime at the staged skills tree through WS_SKILLS_ROOT.
+
+    The runtime binary lives under <plugin>/.runtime/<platform>/, so its
+    executable-relative fallback resolves to <plugin>/.runtime/skills instead
+    of the plugin-root <plugin>/skills tree. Set the seam unless the caller
+    already provided it.
+    """
+    skills_root = plugin_dir / "skills"
+    if skills_root.is_dir() and not env.get("WS_SKILLS_ROOT"):
+        env["WS_SKILLS_ROOT"] = str(skills_root)
+
+
 def main() -> int:
     launcher_path = Path(__file__).resolve()
     plugin_dir = launcher_path.parent.parent
@@ -849,6 +862,7 @@ def main() -> int:
     os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
     wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
+    apply_skills_root_env(plugin_dir, os.environ)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":
         return subprocess.call(args)
