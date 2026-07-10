@@ -122,13 +122,16 @@ Keep unrelated untracked files out of commits. `.codex` may exist locally; do
 not stage it unless explicitly requested.
 
 **Version bump on dev-merge.** Every merge of an implementation branch into an
-integration/epic branch or `main` bumps the plugin patch version through
-`agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>`. Never hand-edit the
-version edition points (both `plugin.json` pairs, both `runtime.json`, `main.go`,
-release assets, `_index.md`); the script is the single bump surface. Claude Code
-keys plugin-cache invalidation on the `version` string, so an unchanged version
-serves stale builds even across branch-pin reinstalls. Bump per dev-merge, not
-per ship.
+integration/epic branch or `main` that changes `agents-plugin/`,
+`agents-plugin-tool/`, or `agents-plugin-wsflow/` bumps the plugin patch version
+through `agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>`. Never hand-edit
+the version edition points (both `plugin.json` pairs, both `runtime.json`,
+`main.go`, release assets, `_index.md`); the script is the single bump surface.
+Claude Code keys plugin-cache invalidation on the `version` string, so an
+unchanged version serves stale builds even across branch-pin reinstalls. Bump
+per dev-merge, not per ship. Merges that touch only downstream application
+material (e.g. `ws-dashboard/`, its tickets, specs, or plans) with no change
+under the three plugin/tool trees above do not bump the version.
 
 ### Context Window Discipline
 
