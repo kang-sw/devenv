@@ -32,3 +32,15 @@ follow-up flow that fills the generated ticket body and commits it through
 Verify the rendered playbook against the installed `tickets.create` tool
 schema and add or update a drift-focused regression test where the project
 has an established playbook/schema contract test surface.
+
+### Result (24fd055) - 2026-07-10
+
+Updated the canonical `lead-write-ticket` playbook to invoke
+`tickets.create` with `stem` and `initial_state`, regenerated the manifest and
+byte-identical wsflow rsrc mirror, and added a rendered-playbook assertion to
+the existing MCP golden test. Targeted MCP and rsrc tests plus the wsflow
+package test suite passed.
+
+The user explicitly approved this hotfix without the normal Sage review and
+ready-promotion path. The ticket remains in `todo/` for later workflow
+reconciliation.
