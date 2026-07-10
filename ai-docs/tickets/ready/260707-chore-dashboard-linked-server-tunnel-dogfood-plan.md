@@ -170,6 +170,39 @@ connectivity can be probed in a session without the auto-mode block, and (b)
 `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop` lands a
 fix.
 
+### Phase 2: Re-walk the reversed-topology leg now that the state-persistence bug has a fix
+
+Depends on `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
+(the fix is merged to `ws-dashboard-dev`; its own Phase 2 HTTP repro may still
+be in flight — this phase can proceed in parallel, it only needs the code
+fix present, not that ticket's full closure). Does **not** depend on SSH
+connectivity — this phase covers only Phase 1's step 3 leg, not steps 1/2.
+
+1. Launch the reversed topology from Phase 1 step 3 again: Windows-hosted
+   gateway daemon (normal owner-auth) linking a WSL-hosted remote daemon
+   bound to `127.0.0.1` (default `local` bind mode, normal owner-auth), added
+   via the endpoint field as `http://localhost:<port>`.
+2. Confirm the link handshake still succeeds (`200 connected`), then walk the
+   **full** forwarded-operation set that Phase 1 step 3 never reached because
+   of the bug: resources listing, root picker, work-roots/open, file
+   read/write, Git status/branches, terminal create, and the terminal
+   WebSocket relay (typed input round-trips).
+3. Confirm none of the above 404 the way the original Phase 1 attempt did —
+   this is the direct end-to-end confirmation that the state-persistence fix
+   resolves the originally discovered symptom, not just the unit-test-level
+   verification already recorded on the bug ticket.
+4. Record the outcome as a further dated append to
+   `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (same target
+   as Phase 1 step 4), noting this is the reversed-topology leg's first full
+   forwarded-operation confirmation.
+5. If anything beyond the already-fixed 404 symptom surfaces, file it as its
+   own ticket rather than folding a code fix into this verification-only
+   ticket (same rule as Phase 1 step 5).
+6. Tear down all test artifacts per Phase 1 step 6's discipline.
+
+The SSH-tunnel leg (Phase 1 steps 1-2) remains blocked on the escalation
+below and is out of scope for this phase.
+
 ## Escalations
 
 - SSH connectivity (Phase 1, step 1) could not be probed in this session:
