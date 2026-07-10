@@ -185,6 +185,28 @@ only discoverable from source.
   silent-disable-on-no-candidate behavior. `ws/spec_index.verify` reports the
   index healthy after the addition.
 
+### Phase 2: Daemon-level HTTP repro of the Windows fallback fix
+
+- Using a real native-Windows daemon run (this box's WSL2 interop path is
+  sufficient: a disposable detached worktree built and run through the
+  native `cargo.exe`, per `ai-docs/_index.local.md`), launch the daemon with
+  `$env:HOME` unset and no `WS_DASHBOARD_STATE_FILE`/
+  `WS_DASHBOARD_STATE_HOME`/`XDG_STATE_HOME` set — the stock Windows default
+  where only `LOCALAPPDATA` is present.
+- `POST /api/dashboard/root-picker/pins` against that daemon, then confirm a
+  real `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` file is created on
+  disk (not just a `200` response) and that a follow-up read reflects the
+  persisted pin — closing the gap the unit-test-level verification in
+  Phase 1's Result explicitly left open.
+- Also confirm the one-time `tracing::warn!` in `default_local()` does **not**
+  fire in this run (a resolvable state file exists), to check the warning
+  path doesn't false-positive on the success case.
+- Tear down: stop the daemon, remove any scratch worktree/state file created
+  solely for this repro.
+- Record the outcome as an Edition under Phase 1 (not a new Result on this
+  phase) if it simply confirms the existing fix; open a new bug ticket
+  instead if the repro surfaces a genuine behavior gap.
+
 ## Escalations
 
 - None yet.

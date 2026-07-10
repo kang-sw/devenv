@@ -229,18 +229,21 @@ dropped tickets live in hidden archive dirs and git history.
   gaps (consolidated in the Phase 7 Result) — closing the ticket status is
   left as a user judgment call, not an automatic consequence of all phases
   landing.
-- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`todo`, chore) -
+- `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`ready`, chore) -
   test plan to close `260525`'s live remote-dogfood gap for real. Phase 1
   partially executed 2026-07-07: SSH connectivity probe blocked by this
-  session's own auto-mode classifier (escalation, unresolved); reversed-
-  topology direct-endpoint leg (Windows gateway -> WSL remote via
-  `localhost`) confirmed the link handshake and Host-check non-bug are fine,
-  but surfaced a genuine new bug
+  session's own auto-mode classifier (escalation, still unresolved -
+  needs a human-run probe outside this harness); reversed-topology
+  direct-endpoint leg (Windows gateway -> WSL remote via `localhost`)
+  confirmed the link handshake and Host-check non-bug are fine, but
+  surfaced a genuine new bug
   (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`)
-  that blocks walking the rest of that leg. A plain-TCP-relay fallback for
-  the SSH leg was found and documented (see ticket Escalations). Demoted
-  back to `todo` pending the unresolved SSH-probe escalation; re-promote
-  after clearing `spec:`/reviewing `## Spec Impact` per the move tool's tip.
+  that blocked walking the rest of that leg. A plain-TCP-relay fallback for
+  the SSH leg was found and documented (see ticket Escalations). Re-promoted
+  to `ready` 2026-07-10 with a new Phase 2 scoped to just the
+  reversed-topology re-walk (now unblocked by the bug fix, no SSH
+  dependency) - the SSH-tunnel leg (Phase 1 steps 1-2) stays out of scope
+  for Phase 2 and remains parked on the escalation.
 - `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
   (`ready`, bug, Phase 1 implemented 2026-07-08) - added a `cfg(windows)`
   `LOCALAPPDATA` fallback to `default_state_file()`
@@ -252,9 +255,10 @@ dropped tickets live in hidden archive dirs and git history.
   toolchain (`D:\dbg-ws-dashboard-dev` via WSL interop, see
   `_index.local.md`) - the crate compiles and all 6 tests pass on actual
   Windows, including the new fallback test executing (not just
-  cross-compile-checking). Daemon-level HTTP repro and the sibling ticket's
-  full cross-machine walk still not re-run. Reviews (correctness, test) both
-  clean.
+  cross-compile-checking). Reviews (correctness, test) both clean. Added a
+  Phase 2 2026-07-10 for the still-open daemon-level HTTP repro (does not
+  need SSH); the sibling ticket's full cross-machine walk is now tracked as
+  that ticket's own Phase 2 instead.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
