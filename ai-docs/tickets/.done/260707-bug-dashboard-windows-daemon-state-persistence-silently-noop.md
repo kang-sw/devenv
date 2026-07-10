@@ -6,6 +6,7 @@ related:
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review: completed
+completed: 2026-07-10
 ---
 
 # ws-dashboard native-Windows daemon silently drops all persisted dashboard state when HOME is unset
@@ -254,3 +255,8 @@ only discoverable from source.
 ## Escalations
 
 - None yet.
+
+
+## Resolution (2026-07-10)
+
+Both phases complete: Phase 1 added the `cfg(windows)` `LOCALAPPDATA` fallback to `default_state_file()` plus a startup warning, with spec entry `260708-dashboard-state-file-resolution-order`. Phase 2 (2026-07-10) confirmed the fix end-to-end on a real native-Windows daemon: `POST /api/dashboard/root-picker/pins` persists to `%LOCALAPPDATA%\ws-dashboard\opened-workroots.json` and a follow-up `GET` round-trips it, with the no-state-file warning correctly absent. No genuine gap found. The sibling ticket's full cross-machine reversed-topology walk is now tracked as `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s own Phase 2, not this ticket's scope.

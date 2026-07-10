@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.33.5`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.5`).
+Active plugin package: `agents-plugin/` (`ws@0.33.6`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.6`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -236,29 +236,14 @@ dropped tickets live in hidden archive dirs and git history.
   needs a human-run probe outside this harness); reversed-topology
   direct-endpoint leg (Windows gateway -> WSL remote via `localhost`)
   confirmed the link handshake and Host-check non-bug are fine, but
-  surfaced a genuine new bug
-  (`260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`)
-  that blocked walking the rest of that leg. A plain-TCP-relay fallback for
-  the SSH leg was found and documented (see ticket Escalations). Re-promoted
-  to `ready` 2026-07-10 with a new Phase 2 scoped to just the
-  reversed-topology re-walk (now unblocked by the bug fix, no SSH
-  dependency) - the SSH-tunnel leg (Phase 1 steps 1-2) stays out of scope
-  for Phase 2 and remains parked on the escalation.
-- `260707-bug-dashboard-windows-daemon-state-persistence-silently-noop`
-  (`ready`, bug, Phase 1 implemented 2026-07-08) - added a `cfg(windows)`
-  `LOCALAPPDATA` fallback to `default_state_file()`
-  (`persistent_state.rs:478-491`) plus a one-time startup warning when no
-  state file resolves; new spec entry
-  `260708-dashboard-state-file-resolution-order` added under Daemon
-  Foundation. Verification upgraded same day: ran `cargo test -p
-  ws-dashboard-daemon persistent_state::` through the real native-Windows
-  toolchain (`D:\dbg-ws-dashboard-dev` via WSL interop, see
-  `_index.local.md`) - the crate compiles and all 6 tests pass on actual
-  Windows, including the new fallback test executing (not just
-  cross-compile-checking). Reviews (correctness, test) both clean. Added a
-  Phase 2 2026-07-10 for the still-open daemon-level HTTP repro (does not
-  need SSH); the sibling ticket's full cross-machine walk is now tracked as
-  that ticket's own Phase 2 instead.
+  surfaced a genuine new bug (`260707-bug-dashboard-windows-daemon-state-
+  persistence-silently-noop`, now `.done/` - both phases landed) that
+  blocked walking the rest of that leg. A plain-TCP-relay fallback for the
+  SSH leg was found and documented (see ticket Escalations). Re-promoted to
+  `ready` 2026-07-10 with a new Phase 2 scoped to just the
+  reversed-topology re-walk, unblocked now that the bug's fix is confirmed
+  end to end (no SSH dependency) - the SSH-tunnel leg (Phase 1 steps 1-2)
+  stays out of scope for Phase 2 and remains parked on the escalation.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
