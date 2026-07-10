@@ -203,6 +203,47 @@ connectivity — this phase covers only Phase 1's step 3 leg, not steps 1/2.
 The SSH-tunnel leg (Phase 1 steps 1-2) remains blocked on the escalation
 below and is out of scope for this phase.
 
+### Result
+
+Executed on `implement/reversed-topology-rewalk` (commit range after
+`55eba9ed`). Full outcome recorded as a dated append to
+`260525-feat-ws-dashboard-server-scoped-operation-forwarding` (see
+"Verification note - 2026-07-10 (reversed-topology full forwarded-op
+re-walk)").
+
+- Step 1 (relaunch the reversed topology): done. Native Windows gateway
+  daemon (WSL-interop build recipe, disposable detached worktree) linked to
+  a WSL-hosted remote daemon via the direct-endpoint field
+  (`http://localhost:<port>`), both `--bind-mode local` with normal
+  owner-auth, both on a scratch `WS_DASHBOARD_STATE_HOME` for this run.
+- Step 2 (confirm link handshake, walk the full forwarded-operation set):
+  done. Link `200 connected`; every route in `router.rs:94-215` walked
+  (resources, root-picker, work-roots/open, files read/write, git
+  status/branches, terminal create) returned `200`; the terminal WebSocket
+  relay connected with the same owner cookie and the input/output round
+  trip was observed directly (`echo dogfood-ws-relay-ok` sent, echoed output
+  received back through the relay).
+- Step 3 (confirm no 404 recurrence): done. None of the forwarded calls
+  reproduced the original `404 "unknown server"` symptom; the Windows
+  gateway's log had no `"no dashboard state file could be resolved"`
+  warning before the walk began, confirming the state-persistence fix was
+  in effect for this build.
+- Step 4 (record outcome in 260525): done — see the dated append above.
+- Step 5 (file a new ticket if a genuine gap surfaces): not needed. The only
+  anomaly was a client-side `ClientWebSocket.CloseAsync().Wait()` exception
+  in the Windows PowerShell 5.1 test harness itself, thrown *after* the
+  functional round trip already succeeded — a test-tooling artifact, not a
+  daemon-side finding, so no new ticket was filed.
+- Step 6 (teardown): done — both daemon processes stopped, both scratch
+  state directories removed, and the disposable
+  `D:\scratch-reversed-rewalk` worktree removed.
+
+Net effect: the reversed-topology leg's full forwarded-operation set is now
+confirmed end-to-end with the state-persistence fix in place, closing this
+ticket's remaining gap for that leg specifically. The SSH-tunnel leg (Phase
+1 steps 1-2) is unchanged by this phase and remains blocked on the
+escalation below.
+
 ## Escalations
 
 - SSH connectivity (Phase 1, step 1) could not be probed in this session:
