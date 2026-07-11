@@ -5,6 +5,7 @@ related:
   260624-feat-ws-dashboard-managed-cli-terminal: future follow-up after the first managed CLI surface is dogfoodable
   260620-feat-ws-dashboard-agent-client-activity-sources: shares the cross-provider common interactive subset and the Claude/Codex/OpenCode resume primitives this ticket's collapsed history list dispatches through (2026-07-11, tightened from "adjacent but separate")
 related-mental-model:
+  - ws-dashboard-agent-harness
   - ws-web-dashboard
 ---
 

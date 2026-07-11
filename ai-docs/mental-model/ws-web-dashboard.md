@@ -6,6 +6,7 @@ sources:
 related:
   mcp-runtime: "Dashboard code may consume ws runtime state through daemon-owned view models, but it must not become ws MCP session authority."
   named-agent-runtime: "Activity Console reads wsstate named-agent metadata/output/session records as daemon-private compatibility projection inputs."
+  ws-dashboard-agent-harness: "Interactive Codex app-server/OpenCode ACP/Claude CLI provider and capability-tiering rules split out here so this file stays scoped to the general dashboard web-app/read-model surface."
 ---
 
 # ws Web Dashboard
@@ -110,6 +111,11 @@ related:
 - Instance events carry stream and resource identity on each event, not only on an outer transcript, so future streaming routes can emit individual events without an out-of-band identity envelope. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 - Unknown cursors do not replay a full transcript; fixture backfill returns an empty event set for unrecognized cursors and reserves missing-stream behavior for unknown stream ids. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 - The instance event route is authenticated and fixture-backed; it must not bind the daemon to live PTY, named-agent, exec, diagnostic, viewer, translation, ws MCP, or named-agent session authority until later source-specific tickets add those producers. {#260516-ws-web-dashboard-authenticated-instance-event-stream-scaffold}
+- Interactive agent-harness provider/session work (Codex app-server, OpenCode
+  ACP, Claude CLI headless stream-json duplex — resume, session control,
+  capability tiering, opinionated-subset adapters) is documented in the
+  dedicated `ws-dashboard-agent-harness` mental model, not here; this file
+  keeps the general dashboard web-app/read-model rules.
 
 ## Coupling
 

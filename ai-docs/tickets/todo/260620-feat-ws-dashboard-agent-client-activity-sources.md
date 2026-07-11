@@ -11,6 +11,7 @@ spec:
   - 260521-ws-dashboard-activity-console-read-model
   - 260521-ws-dashboard-activity-console-ui-shell
 related-mental-model:
+  - ws-dashboard-agent-harness
   - ws-web-dashboard
   - mcp-runtime
   - named-agent-runtime
@@ -345,6 +346,20 @@ read-only observation mechanism orthogonal to this control-risk tiering.
 | Skill/capability listing | Passthrough (`skills/list`) | *Unverified* | Unavailable (session-start `tools`/`capabilities` metadata only, not on-demand project-skill listing) |
 | Subagent list + per-subagent transcript | Unavailable (fixed "Guardian" role only, not a general registry) | Overlay candidate (if child sessions are ordinary ACP sessions, list/relate them via existing session primitives — pending fixture check) | Unavailable (no documented CLI-level introspection surface) |
 | Goal/loop (repeat-until-condition) | Overlay (dashboard-built on top of `send`) | Overlay (same) | Overlay (same) |
+
+**Claude `/compact`-in-headless research (2026-07-11)**: checked whether
+sending literal `/compact` as headless/`stream-json` input text reproduces
+interactive-mode compaction. No direct confirmation either way exists in
+Anthropic's docs or public issues. Official headless docs
+(`code.claude.com/docs/en/headless`) enumerate every supported built-in slash
+command for `-p` mode (`/model`, `/effort`, `/fast`, `/color`, `/rename`,
+`/mcp`, `/config`) and explicitly note terminal-only commands like `/login`
+are unavailable there — `/compact` appears in neither list, which is
+suggestive (not conclusive) that it falls through as inert literal text
+rather than triggering compaction. The cell stays **Unavailable**, not
+reclassified, until a real fixture spike (send `/compact` via stream-json to
+an installed `claude` binary and check for a compaction/system event)
+settles it.
 
 **Standing classification rule**: a capability with no officially-documented
 protocol/CLI method for a given harness defaults to Unavailable, not
