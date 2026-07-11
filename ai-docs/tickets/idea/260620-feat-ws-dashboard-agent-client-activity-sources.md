@@ -136,13 +136,27 @@ as host-owned agent-client data.
   its harness technically supports if the extra surface has no dashboard
   consumer yet. This keeps adapter scope bounded and avoids the "recreate
   harness development" risk this ticket already guards against.
-- Define an ACP-shaped internal subset instead of adopting any provider wire
+- **Cross-provider common interactive subset** (elevated 2026-07-11 as the
+  explicit shared design object spanning all three confirmed duplex-capable
+  harnesses — Codex app-server, OpenCode ACP, Claude CLI stream-json):
+  define an ACP-shaped internal subset instead of adopting any provider wire
   protocol as the dashboard API. The subset should cover provider
   initialization/capabilities, session list/create/resume, prompt/send,
   assistant/user messages, tool activity, permission/blocked states,
   interruption/cancellation status, file-change summaries, transcript backfill,
   and provider metadata. Codex-specific or OpenCode-specific fields remain
   adapter-private unless a browser-facing dashboard contract needs them.
+  **Known asymmetry**: "session list" is not uniform across the three —
+  Codex app-server and OpenCode ACP are expected to expose a live
+  list-stored-sessions call, but Claude's CLI has no equivalent live list
+  method (only `--resume <session_id>` against a known id); Claude session
+  discovery can only come from reading its on-disk history store directly
+  (see `260624-feat-ws-dashboard-managed-cli-recent-sessions`). This is why
+  the cross-harness "recent sessions" collapse should be built on
+  vendor-history-file scraping as the discovery mechanism for all three
+  (uniform, works even with no live provider process running), while this
+  subset's `resume` capability is what actually reopens a selected entry
+  live once chosen — the two tickets are complementary, not redundant.
 - Treat OpenCode serve as an optional observation/read-only supplement. It can
   help discover sessions or stream HTTP/OpenAPI/SSE state, but the first
   OpenCode counterpart to Codex app-server is `opencode acp`, not `opencode
