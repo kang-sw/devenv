@@ -39,8 +39,10 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
+use ws_dashboard_core::claude_projection::ClaudeProjector;
 use ws_dashboard_core::codex_projection::CodexProjector;
 use ws_dashboard_core::{ServerId, ServerKind, WorkRootId};
+use ws_dashboard_daemon::claude_cli::{ClaudeConnection, ClaudeProviderRegistry};
 use ws_dashboard_daemon::codex_app_server::{CodexConnection, CodexProviderRegistry};
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
@@ -154,6 +156,7 @@ fn app_state_with_opened_and_store(
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
+        claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
@@ -175,6 +178,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
+        claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
@@ -400,6 +404,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
+        claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
@@ -7335,6 +7340,7 @@ fn app_state_with_activity_cache_and_codex_home(
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
+        claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
@@ -13013,6 +13019,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         })),
         terminals: TerminalRegistry::default(),
         codex_sessions: ws_dashboard_daemon::codex_app_server::CodexProviderRegistry::default(),
+        claude_sessions: ws_dashboard_daemon::claude_cli::ClaudeProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
         document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
@@ -14110,6 +14117,294 @@ async fn work_root_activity_route_merges_codex_session_into_items() {
         "Codex row must not be forced into the agents projection"
     );
     for forbidden in ["thread-secret", "item-secret", "turn-secret", "threadId", "sessionId"] {
+        assert!(!body.contains(forbidden), "feed leaked {forbidden}: {body}");
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+// ---------------------------------------------------------------------------
+// Claude CLI stream-json interactive-session routes (Phase 4)
+//
+// CONTRACT: mirrors the Codex route-test pattern above. Sessions are seeded
+// into a shared `ClaudeProviderRegistry` via `insert_session_for_tests`
+// (backed by an in-process scripted stream-json peer) so the write/read
+// wiring, request parsing, status-code mapping, LOCAL_SERVER_ID short-circuit
+// vs forward branch, and projection privacy are exercised without spawning a
+// real `claude` binary.
+// ---------------------------------------------------------------------------
+
+/// Spawn an in-process stream-json peer that answers every `user`-typed line
+/// with an `assistant` text event followed by a terminal `result` event, and
+/// answers `control_request` lines with a matching `control_response`.
+/// Returns the client-side `ClaudeConnection`.
+fn spawn_claude_reply_peer(assistant_text: &str) -> Arc<ClaudeConnection> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let (client_side, mut server_side) = tokio::io::duplex(8192);
+    let (client_read, client_write) = tokio::io::split(client_side);
+    let (connection, _events) =
+        ClaudeConnection::from_io(client_read, client_write, Duration::from_secs(5));
+    let assistant_text = assistant_text.to_owned();
+    tokio::spawn(async move {
+        let (server_read, mut server_write) = tokio::io::split(&mut server_side);
+        let mut lines = BufReader::new(server_read).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            match message.get("type").and_then(|value| value.as_str()) {
+                Some("user") => {
+                    let assistant = serde_json::json!({
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": assistant_text}],
+                        },
+                    });
+                    let result = serde_json::json!({"type": "result", "subtype": "success"});
+                    let mut reply = serde_json::to_string(&assistant).expect("serialize assistant");
+                    reply.push('\n');
+                    reply.push_str(&serde_json::to_string(&result).expect("serialize result"));
+                    reply.push('\n');
+                    if server_write.write_all(reply.as_bytes()).await.is_err() {
+                        break;
+                    }
+                    let _ = server_write.flush().await;
+                }
+                Some("control_request") => {
+                    let request_id = message
+                        .get("request_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_owned();
+                    let response = serde_json::json!({
+                        "type": "control_response",
+                        "response": {"subtype": "success", "request_id": request_id},
+                    });
+                    let mut reply = serde_json::to_string(&response).expect("serialize control response");
+                    reply.push('\n');
+                    if server_write.write_all(reply.as_bytes()).await.is_err() {
+                        break;
+                    }
+                    let _ = server_write.flush().await;
+                }
+                _ => {}
+            }
+        }
+    });
+    connection
+}
+
+#[tokio::test]
+async fn claude_session_prompt_and_transcript_round_trip_local() {
+    let registry = ClaudeProviderRegistry::default();
+    // Pre-populate the projector so the transcript route has projected content.
+    let mut projector = ClaudeProjector::new();
+    projector.ingest_line(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello from claude"}]}}"#,
+    );
+    let connection = spawn_claude_reply_peer("ack");
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "claude:roundtrip",
+            WorkRootId::from("claude-wr"),
+            "019f5040-secret-session-id",
+            PathBuf::from("/tmp/claude-route-test-cwd"),
+            connection,
+            projector,
+        )
+        .expect("seed claude session");
+
+    let mut state = app_state();
+    state.claude_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    // POST prompt -> the scripted peer acknowledges with an assistant + result.
+    let prompt_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:roundtrip/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "text": "do a thing" }).to_string(),
+                ))
+                .expect("prompt request"),
+        )
+        .await
+        .expect("prompt response");
+    assert_eq!(prompt_response.status(), StatusCode::OK);
+    let prompt_body = axum::body::to_bytes(prompt_response.into_body(), 16 * 1024)
+        .await
+        .expect("prompt body bytes");
+    let prompt_json: serde_json::Value =
+        serde_json::from_slice(&prompt_body).expect("prompt JSON");
+    assert_eq!(prompt_json["accepted"], true);
+
+    // GET transcript -> projected blocks; no provider ids/paths.
+    let (status, body) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        "/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:roundtrip/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("transcript JSON");
+    assert_eq!(transcript["activityId"], "claude:roundtrip");
+    assert!(body.contains("hello from claude"), "projected block text missing: {body}");
+    for forbidden in [
+        "019f5040-secret-session-id",
+        "claude-route-test-cwd",
+        "sessionId",
+        "cwd",
+    ] {
+        assert!(!body.contains(forbidden), "transcript leaked {forbidden}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn claude_session_prompt_unknown_session_maps_not_found() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:missing/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "text": "hi" }).to_string()))
+                .expect("prompt request"),
+        )
+        .await
+        .expect("prompt response");
+    // provider_error_response maps claude.unknown_session -> 404.
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 8 * 1024)
+        .await
+        .expect("error body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("error JSON");
+    assert_eq!(value["code"], "claude.unknown_session");
+}
+
+#[tokio::test]
+async fn server_scoped_claude_prompt_short_circuits_local_and_forwards_remote() {
+    let registry = ClaudeProviderRegistry::default();
+    let connection = spawn_claude_reply_peer("ack");
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "claude:scoped",
+            WorkRootId::from("claude-wr"),
+            "019f5040-secret-session-id",
+            PathBuf::from("/tmp/claude-route-test-cwd"),
+            connection,
+            ClaudeProjector::new(),
+        )
+        .expect("seed claude session");
+
+    let mut state = app_state();
+    state.claude_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    // LOCAL_SERVER_ID short-circuits to the in-process local handler.
+    let local = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-local/work-roots/claude-wr/activity/claude-sessions/claude:scoped/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "text": "hi" }).to_string()))
+                .expect("local prompt request"),
+        )
+        .await
+        .expect("local prompt response");
+    assert_eq!(local.status(), StatusCode::OK);
+
+    // A non-local, unlinked server takes the forward branch and is refused.
+    let forwarded = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/does-not-exist/work-roots/claude-wr/activity/claude-sessions/claude:scoped/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "text": "hi" }).to_string()))
+                .expect("forward prompt request"),
+        )
+        .await
+        .expect("forward prompt response");
+    assert_eq!(forwarded.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_merges_claude_session_into_items() {
+    if skip_without_git("work_root_activity_route_merges_claude_session_into_items") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-claude-merge");
+    let cache_home = temp_fixture_path("work-root-activity-claude-merge-cache");
+    fs::create_dir_all(&root).expect("create workRoot");
+    init_git_repo(&root);
+
+    let registry = ClaudeProviderRegistry::default();
+    let mut state = app_state_with_activity_cache_home(cache_home.clone());
+    state.claude_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    // Seed a live Claude session for the opened work root.
+    let mut projector = ClaudeProjector::new();
+    projector.ingest_line(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"claude says hi"}]}}"#,
+    );
+    let connection = spawn_claude_reply_peer("ack");
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "claude:feedmerge",
+            WorkRootId::from(work_root_id.clone()),
+            "019f5040-secret-session-id",
+            PathBuf::from("/tmp/claude-route-test-cwd"),
+            connection,
+            projector,
+        )
+        .expect("seed claude session");
+
+    let (status, body) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let feed: serde_json::Value = serde_json::from_str(&body).expect("feed JSON");
+    let items = feed["items"].as_array().expect("items array");
+    let claude_item = items
+        .iter()
+        .find(|item| item["id"] == "claude:feedmerge")
+        .expect("Claude session must appear in the unified feed items");
+    assert_eq!(claude_item["kind"], "agent.claude");
+    // CONTRACT: Claude rows land in `items`, never the legacy `agents` projection.
+    let agents = feed["agents"].as_array().expect("agents array");
+    assert!(
+        !agents
+            .iter()
+            .any(|agent| serde_json::to_string(agent).unwrap_or_default().contains("claude:feedmerge")),
+        "Claude row must not be forced into the agents projection"
+    );
+    for forbidden in ["019f5040-secret-session-id", "claude-route-test-cwd", "sessionId"] {
         assert!(!body.contains(forbidden), "feed leaked {forbidden}: {body}");
     }
 

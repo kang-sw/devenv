@@ -209,6 +209,16 @@ pub async fn work_root_activity(
     )
     .await;
     merge_activity_items(&mut feed, codex_items);
+    // Step 6 (Claude): merge live Claude CLI stream-json sessions into the
+    // same unified feed's `items` (never `agents`), mirroring the Codex merge
+    // above.
+    let claude_items = crate::claude_cli::claude_activity_items(
+        &state.claude_sessions,
+        crate::claude_routes::LOCAL_SERVER_ID,
+        &work_root_id,
+    )
+    .await;
+    merge_activity_items(&mut feed, claude_items);
     Json(feed).into_response()
 }
 

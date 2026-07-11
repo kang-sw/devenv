@@ -32,9 +32,9 @@ pub async fn local_dashboard_resources_view(state: &AppState) -> DashboardResour
             .await
             .expect("dashboard resources discovery task panicked");
     if !pruned_work_root_ids.is_empty() {
-        state
-            .terminals
-            .remove_for_work_roots(&pruned_work_root_ids.into_iter().collect());
+        let pruned: std::collections::BTreeSet<_> = pruned_work_root_ids.into_iter().collect();
+        state.terminals.remove_for_work_roots(&pruned);
+        state.claude_sessions.remove_for_work_roots(&pruned);
     }
     view
 }

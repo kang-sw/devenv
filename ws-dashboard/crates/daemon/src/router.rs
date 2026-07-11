@@ -40,6 +40,8 @@ use crate::servers::{
     server_scoped_git_worktree_add_submit, server_scoped_open_work_root,
     server_scoped_read_work_root_file, server_scoped_remove_workspace, server_scoped_root_picker,
     server_scoped_root_picker_pins, server_scoped_set_work_root_activation,
+    server_scoped_claude_session_interrupt, server_scoped_claude_session_prompt,
+    server_scoped_claude_session_transcript, server_scoped_claude_sessions,
     server_scoped_codex_session_control, server_scoped_codex_session_interrupt,
     server_scoped_codex_session_prompt, server_scoped_codex_session_transcript,
     server_scoped_codex_sessions, server_scoped_terminal_input, server_scoped_terminal_output,
@@ -48,6 +50,10 @@ use crate::servers::{
     server_scoped_work_root_activity_transcript,
     server_scoped_work_root_files, server_scoped_write_work_root_file, start_ssh_dashboard_server,
     LinkedServerSessions, LinkedServerTunnels,
+};
+use crate::claude_routes::{
+    claude_session_interrupt, claude_session_prompt, claude_session_transcript,
+    create_claude_session, list_claude_sessions,
 };
 use crate::codex_routes::{
     codex_session_control, codex_session_interrupt, codex_session_prompt,
@@ -75,6 +81,7 @@ pub struct AppState {
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
     pub codex_sessions: crate::codex_app_server::CodexProviderRegistry,
+    pub claude_sessions: crate::claude_cli::ClaudeProviderRegistry,
     pub work_root_activity: WorkRootActivityProjector,
     pub document_events: DocumentEventHub,
     pub document_write_locks: DocumentWriteLocks,
@@ -194,6 +201,22 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/control",
             post(server_scoped_codex_session_control),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/claude-sessions",
+            get(server_scoped_claude_sessions).post(server_scoped_claude_sessions),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/claude-sessions/{activity_id}/transcript",
+            get(server_scoped_claude_session_transcript),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/claude-sessions/{activity_id}/prompt",
+            post(server_scoped_claude_session_prompt),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/claude-sessions/{activity_id}/interrupt",
+            post(server_scoped_claude_session_interrupt),
         )
         .route(
             "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/status",
@@ -380,6 +403,22 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/control",
             post(codex_session_control),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/claude-sessions",
+            get(list_claude_sessions).post(create_claude_session),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/claude-sessions/{activity_id}/transcript",
+            get(claude_session_transcript),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/claude-sessions/{activity_id}/prompt",
+            post(claude_session_prompt),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/claude-sessions/{activity_id}/interrupt",
+            post(claude_session_interrupt),
         )
         .route("/assets/{*asset_path}", get(static_asset))
         .route("/servers", get(index))

@@ -366,6 +366,7 @@ pub async fn remove_workspace(
     }
     state.terminals.remove_for_work_roots(&work_root_ids);
     state.codex_sessions.remove_for_work_roots(&work_root_ids);
+    state.claude_sessions.remove_for_work_roots(&work_root_ids);
     Json::<DashboardResourcesView>(local_dashboard_resources_view(&state).await)
         .into_response()
 }

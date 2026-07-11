@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod claude_cli;
+pub mod claude_routes;
 pub mod cli;
 pub mod codex_app_server;
 pub mod codex_routes;

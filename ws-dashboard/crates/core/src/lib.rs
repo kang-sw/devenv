@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod agent_client_provider;
+pub mod claude_projection;
 pub mod codex_projection;
 pub mod events;
 pub mod ids;
@@ -23,6 +24,7 @@ pub use agent_client_provider::{
     AgentClientToolActivityEvent, AgentClientTranscriptBackfillRequest,
     AgentClientTranscriptBackfillResult,
 };
+pub use claude_projection::{ClaudeIngestOutcome, ClaudeProjector, ClaudeUsage};
 pub use codex_projection::{CodexIngestOutcome, CodexProjector, CodexUsage};
 pub use events::{
     InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
