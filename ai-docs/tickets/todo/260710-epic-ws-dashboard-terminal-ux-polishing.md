@@ -37,6 +37,10 @@ it can proceed independently of `260622`.
 
 ## Child Tickets
 
+- `260711-idea-dashboard-readonly-file-pane-order-split-registry-bug` -
+  idea; checks whether `readOnlyFilePaneOrderByGroup` has the same
+  drag-move snap-back bug that was just fixed for
+  `terminalPaneOrderByGroup` (commit `bc566a78`).
 - `260517-bug-ws-dashboard-windows-terminal-control-keys` - todo; native
   Windows Ctrl-C/control-key interrupt gap in PTY-backed terminals.
 - `260523-research-ws-dashboard-persistable-ui-state-map` - idea; backlog

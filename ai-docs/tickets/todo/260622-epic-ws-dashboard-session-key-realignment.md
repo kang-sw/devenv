@@ -53,6 +53,13 @@ session-key-aware model:
 
 ## Child Tickets
 
+- `260711-idea-dashboard-agent-facing-mcp-control-surface` - idea;
+  direction-recording for a dashboard-owned MCP server exposing
+  agent-callable dashboard control (open-file-and-show, worktree
+  management, and — flagged high-tension, deferred — execution
+  approval). Distinct from `260620`'s read-only Activity direction; see
+  that ticket's own Tension-to-surface section before promoting this to
+  ready.
 - `260622-research-ws-dashboard-ferrule-session-binding` - captures the
   ferrule-backed dashboard session-binding model, terminology, history evidence,
   linked-server boundary, and current implementation impact.
