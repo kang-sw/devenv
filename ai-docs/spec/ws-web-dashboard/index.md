@@ -837,16 +837,30 @@ availability, bounded diagnostics, selected item hint, feed cursor, and update
 mode. Ordering favors active, live, attention, blocked, failed, and recently
 updated activity before using alphabetical order as a tie-breaker.
 
-> [!note] Implementation Gap · 2026-06-20
+> [!note] Implementation Gap · 2026-07-11 (supersedes 2026-06-20 note)
 > Missing behavior: the Activity Console read model is source-neutral, but the
 > dashboard does not yet expose dashboard-owned Activity source adapters for
 > host-owned agent-client surfaces such as Codex app-server or OpenCode ACP.
-> OpenCode serve may later supplement observation/discovery, but it is not the
-> primary interactive provider counterpart. Current projection remains centered
-> on ws named-agent / mercenary compatibility state. Future adapters should
-> normalize provider thread, turn, message, tool, and status events into Activity
-> Items and Transcript Blocks without exposing provider session ids, ws session
-> keys, cache paths, process ids, or raw provider event ids as browser authority.
+> `260620-feat-ws-dashboard-agent-client-activity-sources` Phase 1 formalizes
+> the intended source split without implementing any adapter: legacy
+> ws-mercenary/named-agent state stays a compatibility source (see
+> `#260525-ws-dashboard-sqlite-agent-activity-source` below); Codex app-server
+> and OpenCode ACP are the interactive provider sources; OpenCode serve is an
+> optional observation-only source (it supplements discovery, but is not the
+> primary interactive provider counterpart); and the dashboard Activity model
+> — `ActivityFeed`/`ActivityItem`/`ActivityTranscript`/`TranscriptBlock` — stays
+> the only shape the browser ever sees, regardless of source. New Codex/
+> OpenCode activity must flow through `ActivityFeed.items`, never forced into
+> the legacy `agents` compatibility projection. See
+> `#260620-ws-dashboard-agent-client-provider-contract` below for the
+> dashboard-owned `AgentClientProvider` contract module this split adapts to.
+> Current projection remains centered on ws named-agent / mercenary
+> compatibility state; no adapter is implemented yet (Phase 2 is Codex
+> app-server, Phase 3 is OpenCode ACP, Phase 4 is Claude CLI stream-json
+> duplex). Future adapters should normalize provider thread, turn, message,
+> tool, and status events into Activity Items and Transcript Blocks without
+> exposing provider session ids, ws session keys, cache paths, process ids, or
+> raw provider event ids as browser authority.
 
 Transcript backfill returns bounded normalized blocks rather than backend-native
 cache records, raw session JSON, stdout/stderr paths, or file contents. Each
@@ -909,6 +923,57 @@ stdout/stderr, and native transcript files. Registry-only updates can produce
 Activity item upserts, removals, transcript invalidations, and snapshot
 invalidations through the existing event vocabulary, while payload-only
 transcript changes continue to update transcript availability.
+
+### Agent-Client Provider Contract And Interactive Source Split {#260620-ws-dashboard-agent-client-provider-contract}
+
+`ws-dashboard-core`'s `agent_client_provider` module (`crates/core/src/agent_client_provider.rs`)
+defines a dashboard-owned, ACP-shaped `AgentClientProvider` contract: inert
+request/response types and a non-runtime trait covering initialization/
+capabilities, session list/create/resume, prompt/send, assistant/user message
+and tool-activity events, permission/blocked states, interruption/
+cancellation, file-change summaries, transcript backfill, and provider
+metadata. As of `260620-feat-ws-dashboard-agent-client-activity-sources`
+Phase 1 this module has no implementation and no route wires to it; it exists
+so Phase 2 (Codex app-server), Phase 3 (OpenCode ACP), and Phase 4 (Claude CLI
+stream-json duplex) adapters conform to one reviewed shape instead of each
+inventing its own. `AgentClientCapabilities` (`compact`, `steer`, `goal`,
+`rewind`, `fork`, `skills`) lets a concrete adapter report which per-harness
+capabilities it supports; see
+`ai-docs/mental-model/ws-dashboard-agent-harness.md` for the Passthrough/
+Overlay/Hack/Unavailable tiering behind each flag.
+
+This module normalizes into the same `items`/`agents` split the read model
+above already uses: legacy ws-mercenary/named-agent state remains the
+`agents` compatibility projection
+(`#260525-ws-dashboard-sqlite-agent-activity-source`); Codex app-server and
+OpenCode ACP are interactive `AgentClientProvider` sources whose normalized
+output must land in `ActivityFeed.items`; OpenCode serve is an optional
+observation-only source, not an interactive provider; and the browser only
+ever sees the existing source-neutral `ActivityItem`/`ActivityTranscript`/
+`TranscriptBlock` shapes regardless of which source produced a row.
+
+`ActivityItem.kind` / `ActivitySourceDisplay.kind` gain the additive string
+values `agent.codex`, `agent.opencode`, and `agent.claude` alongside the
+existing `namedAgent`/`exec` values, and `TranscriptBlock.render_kind` gains
+`thinking` — extractable reasoning/thinking content (Claude `assistant`
+stream thinking segments, Codex reasoning item stream) kept distinct from
+ordinary `assistant` text blocks. All three fields stay plain strings, not
+closed enums; parsers and tests must keep tolerating unrecognized future
+values.
+
+The Phase-1 frontend interaction-API draft
+(`ws-dashboard/frontend/src/activitySessionApi.ts`) records illustrative
+method-shape names — not a final route contract — for the common interactive
+subset (`activity.history.list`, `activity.session.start/create/send`,
+`activity.session.usage` read-only usage display) and the per-harness-gated
+methods (`activity.session.compact/steer/goal.set|get|clear/rewind/fork/skills`),
+which a caller must hide/disable unless the active harness's adapter reports
+the matching `AgentClientCapabilities` flag. No route is registered for these
+yet; Phase 2+ will register them under the same dual server-scoped/
+local-gateway pattern
+(`#remote-activity-git-workspace-operations`) the existing read routes
+already use, keeping the same `workRootId`/`activityId` identity model rather
+than introducing a new one.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
@@ -1035,6 +1100,13 @@ activity transcripts by opaque workRoot and activity ids; they never receive
 backend session paths, cache paths, host paths, pids, session ids,
 stdout/stderr paths, stream paths, native transcript paths, or backend-native
 record formats.
+
+`TranscriptBlock.render_kind` gained a `thinking` value in
+`260620-feat-ws-dashboard-agent-client-activity-sources` Phase 1
+(see `#260620-ws-dashboard-agent-client-provider-contract`) for extractable
+reasoning/thinking content, distinct from ordinary `assistant` text blocks;
+Phase 1 only adds this vocabulary value, it does not add a Claude transcript
+parser.
 
 Native backend transcript parsing starts only from fixture-backed formats whose
 shape can be verified without invoking a live backend. Codex native session

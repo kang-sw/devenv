@@ -114,13 +114,29 @@ related:
 
 ## Coupling
 
-- The frontend interaction-API surface (`activity.history.list`,
-  `activity.session.start/create/send`, `activity.session.usage`, and the
-  per-harness-gated `activity.session.compact/rewind/fork/skills`) couples
-  directly to the tiering above: only Passthrough/Overlay cells may back a
-  shipped API method in the normal adapter phases; Hack cells require a
-  separate ticket with explicit experimental UI labeling and owner risk
-  sign-off before they can back any method at all.
+- The concrete contract module for this coupling is `ws-dashboard-core`'s
+  `agent_client_provider` (`ws-dashboard/crates/core/src/agent_client_provider.rs`,
+  added `260620-feat-ws-dashboard-agent-client-activity-sources` Phase 1): an
+  inert, non-runtime `AgentClientProvider` trait plus
+  `AgentClientCapabilities` (`compact`, `steer`, `goal`, `rewind`, `fork`,
+  `skills`) that a concrete Phase 2-4 adapter reports at `initialize` time so
+  a caller can hide/disable per-harness-gated controls. See
+  `ai-docs/spec/ws-web-dashboard/index.md#260620-ws-dashboard-agent-client-provider-contract`
+  for the read-model-facing half of this same contract (source-kind/
+  render-kind vocabulary, `items`/`agents` split).
+- Frontend interaction-API method-name coupling (illustrative, not a final
+  route contract; drafted in
+  `ws-dashboard/frontend/src/activitySessionApi.ts`):
+
+  | API surface | Methods | Gating |
+  | --- | --- | --- |
+  | Common subset | `activity.history.list`, `activity.session.start/create/send`, `activity.session.usage` (read-only usage display) | Always available once any interactive provider source exists; no per-harness gate. |
+  | Per-harness-gated | `activity.session.compact`, `activity.session.steer`, `activity.session.goal.set/get/clear`, `activity.session.rewind`, `activity.session.fork`, `activity.session.skills` | Hidden/disabled unless the active harness's adapter reports the matching `AgentClientCapabilities` flag. Codex-native for all of these today per the tiering above. |
+
+  Only Passthrough/Overlay cells may back a shipped API method in the normal
+  adapter phases; Hack cells require a separate ticket with explicit
+  experimental UI labeling and owner risk sign-off before they can back any
+  method at all.
 - This file's tiering is the shared classification surface for `ws-web-dashboard`'s
   WorkRoot Activity read model once provider adapters start feeding
   `items`/transcripts: adapter work must not treat SQLite/wsstate named-agent
