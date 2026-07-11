@@ -19,7 +19,8 @@ pub use agent_client_provider::{
     AgentClientProviderError, AgentClientProviderMetadata, AgentClientSessionCreateRequest,
     AgentClientSessionCreateResult, AgentClientSessionListRequest, AgentClientSessionListResult,
     AgentClientSessionResumeRequest, AgentClientSessionSummary,
-    AgentClientTranscriptBackfillRequest, AgentClientTranscriptBackfillResult,
+    AgentClientToolActivityEvent, AgentClientTranscriptBackfillRequest,
+    AgentClientTranscriptBackfillResult,
 };
 pub use events::{
     InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
