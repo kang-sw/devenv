@@ -89,6 +89,14 @@ pub struct WorkRootActivitySummary {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityItem {
     pub id: String,
+    // CONTRACT: open string vocabulary, not a closed enum — adding a value is
+    // additive, doc-comment-only. Known values as of
+    // `260620-feat-ws-dashboard-agent-client-activity-sources` Phase 1:
+    // `namedAgent` (legacy ws-mercenary/named-agent compatibility source),
+    // `exec`, `agent.codex` (Codex app-server interactive source),
+    // `agent.opencode` (OpenCode ACP interactive source), and
+    // `agent.claude` (Claude CLI headless stream-json duplex interactive
+    // source). Parsers/tests must tolerate unrecognized future values.
     pub kind: String,
     pub label: String,
     pub status: String,
@@ -106,6 +114,9 @@ pub struct ActivityItem {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySourceDisplay {
+    // CONTRACT: same open string vocabulary and known-value set as
+    // `ActivityItem::kind` above; kept a separate field rather than a shared
+    // type alias to match the existing struct shape.
     pub kind: String,
     pub label: String,
     pub backend: Option<String>,
@@ -142,6 +153,13 @@ pub struct ActivityTranscript {
 pub struct TranscriptBlock {
     pub cursor: String,
     pub timestamp: Option<String>,
+    // CONTRACT: open string vocabulary, not a closed enum. Known values as
+    // of `260620-feat-ws-dashboard-agent-client-activity-sources` Phase 1:
+    // `markdown`, `text`, `json`, and `thinking` — extractable
+    // reasoning/thinking content (Claude `assistant` stream "thinking"
+    // segments, Codex reasoning item stream), kept distinct from ordinary
+    // `assistant`-role text blocks. Parsers/tests must tolerate
+    // unrecognized future values.
     pub render_kind: String,
     pub title: Option<String>,
     pub text: Option<String>,
@@ -390,5 +408,56 @@ mod tests {
         .expect("serialize invalidation event");
         assert_eq!(invalidation["type"], "snapshotInvalidated");
         assert_eq!(invalidation["reason"], "watchReset");
+    }
+
+    #[test]
+    fn new_source_and_render_kinds_are_additive_not_a_schema_break() {
+        let item = ActivityItem {
+            id: "codex:thread-1".to_owned(),
+            kind: "agent.codex".to_owned(),
+            label: "codex session".to_owned(),
+            status: "running".to_owned(),
+            live: true,
+            attention: false,
+            started_at: None,
+            updated_at: Some("2026-07-11T00:00:00Z".to_owned()),
+            finished_at: None,
+            source: ActivitySourceDisplay {
+                kind: "agent.codex".to_owned(),
+                label: "codex".to_owned(),
+                backend: Some("codex".to_owned()),
+                harness: Some("codex".to_owned()),
+                tier: Some("core".to_owned()),
+                model: Some("gpt-5.3-codex".to_owned()),
+            },
+            transcript: ActivityTranscriptAvailability {
+                status: "available".to_owned(),
+                available: true,
+                cursor: Some("0".to_owned()),
+            },
+            diagnostics: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+        let value = serde_json::to_value(&item).expect("serialize agent.codex item");
+        assert_eq!(value["kind"], "agent.codex");
+        assert_eq!(value["source"]["kind"], "agent.codex");
+        let round_tripped: ActivityItem =
+            serde_json::from_value(value).expect("deserialize agent.codex item");
+        assert_eq!(round_tripped, item);
+
+        let block = TranscriptBlock {
+            cursor: "1".to_owned(),
+            timestamp: Some("2026-07-11T00:00:01Z".to_owned()),
+            render_kind: "thinking".to_owned(),
+            title: Some("Reasoning".to_owned()),
+            text: Some("weighing two approaches".to_owned()),
+            data: None,
+            degraded: false,
+        };
+        let block_value = serde_json::to_value(&block).expect("serialize thinking block");
+        assert_eq!(block_value["renderKind"], "thinking");
+        let round_tripped_block: TranscriptBlock =
+            serde_json::from_value(block_value).expect("deserialize thinking block");
+        assert_eq!(round_tripped_block, block);
     }
 }

@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod agent_client_provider;
 pub mod events;
 pub mod ids;
 pub mod resources;
@@ -9,6 +10,16 @@ pub use activity::{
     ActivitySourceDisplay, ActivityTranscript, ActivityTranscriptAvailability, ActivityUpdateMode,
     NamedAgentActivityView, NamedAgentCallActivityView, TranscriptBlock, WorkRootActivitySummary,
     WorkRootActivityView,
+};
+pub use agent_client_provider::{
+    AgentClientCapabilities, AgentClientFileChangeSummary, AgentClientInitializeRequest,
+    AgentClientInitializeResult, AgentClientInterruptRequest, AgentClientMessageEvent,
+    AgentClientMessageRole, AgentClientPermissionEvent, AgentClientPermissionState,
+    AgentClientPromptSendRequest, AgentClientPromptSendResult, AgentClientProvider,
+    AgentClientProviderError, AgentClientProviderMetadata, AgentClientSessionCreateRequest,
+    AgentClientSessionCreateResult, AgentClientSessionListRequest, AgentClientSessionListResult,
+    AgentClientSessionResumeRequest, AgentClientSessionSummary,
+    AgentClientTranscriptBackfillRequest, AgentClientTranscriptBackfillResult,
 };
 pub use events::{
     InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
