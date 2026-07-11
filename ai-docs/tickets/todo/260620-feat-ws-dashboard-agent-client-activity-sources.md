@@ -23,12 +23,23 @@ related-mental-model:
 The dashboard was briefly marked for deprecation during the native-subagent
 pivot, then explicitly retained as a usable web-tmux-style surface. The retained
 surface should not restart direct harness development. As of the 2026-06-24
-dashboard direction discussion, this structured Activity adapter track is
+dashboard direction discussion, this structured Activity adapter track had been
 deferred back to idea level under
-`260622-epic-ws-dashboard-session-key-realignment`. The nearer todo milestone is
-`260624-feat-ws-dashboard-managed-cli-terminal`, which provides a terminal-first
-managed vendor CLI surface and browser-side composer without treating provider
-protocol adapters as the first milestone.
+`260622-epic-ws-dashboard-session-key-realignment`, with
+`260624-feat-ws-dashboard-managed-cli-terminal`'s terminal-first managed vendor
+CLI surface treated as the nearer milestone instead.
+
+**Superseded 2026-07-11** (owner): that ordering is reversed. Now that this
+session has confirmed Codex app-server, OpenCode ACP, and the Claude CLI's
+headless stream-json duplex mode are all viable structured, duplex-capable
+substrates (see Decisions below and `260620` Phase 4's research), the
+terminal-first PTY approach is no longer the pragmatic near-term path — the
+structured provider-adapter track this ticket owns is now the priority
+implementation direction, ahead of `260624-feat-ws-dashboard-managed-cli-terminal`.
+The terminal-first milestone remains valid future work (a plain shell terminal
+still has its own use), but it is no longer positioned as unblocking a
+too-far-off structured milestone; both `260624-feat-ws-dashboard-managed-cli-terminal`
+and this ticket should reflect the new ordering.
 
 When this idea is revisited, the dashboard still needs a small, source-neutral
 activity bridge that can read host-owned agent surfaces such as Codex app-server

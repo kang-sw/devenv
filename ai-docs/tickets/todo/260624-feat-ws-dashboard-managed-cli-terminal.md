@@ -5,7 +5,7 @@ related:
   260514-epic-ws-web-dashboard-mvp: predecessor dashboard MVP board whose reusable PTY/workbench surface this ticket extends
   260525-feat-ws-dashboard-server-scoped-operation-forwarding: Server Route substrate and identity prerequisite for new terminal-like operations
   260622-research-ws-dashboard-ferrule-session-binding: settled ferrule-backed top-level harness binding model this ticket must follow
-  260620-feat-ws-dashboard-agent-client-activity-sources: deferred structured Activity adapter track; this ticket provides the nearer terminal-first milestone
+  260620-feat-ws-dashboard-agent-client-activity-sources: now the priority structured provider-adapter track (2026-07-11, reversed from "deferred; this ticket is nearer")
   260517-bug-ws-dashboard-windows-terminal-control-keys: existing Windows control-key risk for PTY-backed dashboard terminal surfaces
   260605-research-ws-native-subagent-pivot: ferrule/session-key and mercenary boundary context
   260624-feat-ws-dashboard-managed-cli-recent-sessions: deferred vendor-history-backed recent sessions follow-up
@@ -27,6 +27,20 @@ surface. The nearer accepted backlog is a terminal-first layer for vendor agent
 CLIs: the dashboard daemon starts and owns PTY-backed Codex, Claude, OpenCode, or
 similar CLI sessions, while the browser renders the output as a terminal and adds
 a web-native prompt composition affordance.
+
+**Priority superseded 2026-07-11** (owner): the "structured provider adapters
+are too far off" premise above no longer holds — this session confirmed Codex
+app-server, OpenCode ACP, and the Claude CLI's headless stream-json duplex mode
+are all viable structured, duplex-capable substrates now
+(`260620-feat-ws-dashboard-agent-client-activity-sources`, promoted idea ->
+todo the same day). The structured provider-adapter track is now the priority
+implementation direction ahead of this ticket. This ticket's terminal-first
+managed CLI surface remains valid future work — a plain managed-shell surface
+still has its own use, independent of structured Activity/session parsing —
+but it is no longer the thing standing between the dashboard and a usable
+interactive agent surface, so it should not be assumed as a hard prerequisite
+for `260620`'s or the seamless cross-harness history collapse
+(`260624-feat-ws-dashboard-managed-cli-recent-sessions`) work.
 
 The long-text input surface is a browser-side composer, not an editor embedded
 inside the PTY. It may use a React/CodeMirror-style floating editor, snippets,

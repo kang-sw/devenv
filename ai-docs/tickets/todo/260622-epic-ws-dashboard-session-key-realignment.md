@@ -67,14 +67,20 @@ session-key-aware model:
   importing this board into the active dashboard branch, routing existing
   dashboard tickets through the session-key-aware direction, and later cleaning
   stale spec/mental-model text.
-- `260624-feat-ws-dashboard-managed-cli-terminal` - first concrete todo child
-  after the 2026-06-24 direction adjustment: shared PTY text I/O, managed
+- `260624-feat-ws-dashboard-managed-cli-terminal` - todo child from the
+  2026-06-24 direction adjustment: shared PTY text I/O, managed
   Codex/Claude/OpenCode-style CLI terminal surface, browser-side long-text
-  composer, and explicit ferrule/bootstrap submit policy.
-- Existing: `260620-feat-ws-dashboard-agent-client-activity-sources` is deferred
-  back to idea-level Activity adapter work until the managed CLI path is
-  dogfoodable; future provider adapters must build on the session-binding model
-  instead of the pre-pivot named-agent/SQLite authority assumptions.
+  composer, and explicit ferrule/bootstrap submit policy. **No longer the
+  priority near-term milestone** as of 2026-07-11 (see below); remains valid
+  future work for a plain managed-shell surface.
+- `260620-feat-ws-dashboard-agent-client-activity-sources` - promoted
+  idea -> todo and **now the priority implementation direction** (owner,
+  2026-07-11), reversing the 2026-06-24 ordering: with Codex app-server,
+  OpenCode ACP, and the Claude CLI's stream-json duplex mode all confirmed
+  viable structured substrates, the terminal-first PTY path is no longer
+  needed to unblock a too-far-off structured milestone. Future provider
+  adapters must build on the session-binding model instead of the pre-pivot
+  named-agent/SQLite authority assumptions.
 - `260525-feat-ws-dashboard-server-scoped-operation-forwarding` - now an
   explicit child of this epic (re-parented from the retired MVP board); this
   epic should treat Server Route scoping as an identity constraint rather than
