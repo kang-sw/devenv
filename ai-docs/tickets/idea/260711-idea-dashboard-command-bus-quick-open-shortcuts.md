@@ -1,7 +1,9 @@
 ---
 title: "Unify dashboard quick-open command bar, custom command buttons, and keyboard shortcuts on one command bus"
+parent: 260711-epic-ws-dashboard-command-surface
 related:
-  260710-epic-ws-dashboard-terminal-ux-polishing: sibling UX-polish board; this idea introduces new product surface rather than pure polish, so its eventual epic parent needs an explicit lead decision (see Open Points)
+  260710-epic-ws-dashboard-terminal-ux-polishing: sibling UX-polish board; this idea's parent epic was split out from it because its Non-Scope excludes new product surfaces
+  260711-idea-dashboard-agent-facing-mcp-control-surface: agent/MCP-facing half of custom commands, kept under 260622 instead of this epic
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -96,14 +98,10 @@ Notes relevant to our design:
 
 ## Open Points
 
-- Epic ownership: `260710-epic-ws-dashboard-terminal-ux-polishing`'s
-  Non-Scope explicitly excludes "new product surfaces or features beyond
-  polishing what the retired MVP epic already delivered." A quick-open
-  palette and custom command buttons plausibly count as new surface, not
-  polish, even though the keyboard-shortcut piece (item 3) reads more like
-  polish. The lead should decide: split this into a shortcuts-only child
-  of `260710` plus a separate palette/buttons epic, or accept it whole
-  under a new or existing epic.
+- ~~Epic ownership~~ — resolved 2026-07-11: split out as its own epic,
+  `260711-epic-ws-dashboard-command-surface`, sibling to `260710` and
+  `260622`, since bundling agent-harness/session-key concerns with
+  human-facing command-bar UX was judged too broad a stretch.
 - Whether `%` full-text search and `!` arbitrary-exec need daemon API
   work up front, or whether a first version should ship `@`/`:` only
   (client-side, no new backend surface) and defer `%`/`!` to a phase 2

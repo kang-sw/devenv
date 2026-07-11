@@ -3,6 +3,7 @@ title: "Dashboard-owned MCP surface for agent-driven dashboard control (open-fil
 parent: 260622-epic-ws-dashboard-session-key-realignment
 related:
   260620-feat-ws-dashboard-agent-client-activity-sources: read-only Activity/agent-client provider track this idea's write/control direction sits next to and must not be confused with
+  260711-epic-ws-dashboard-command-surface: sibling epic owning the human-facing command bus/custom-button UI this control surface would let agents trigger; kept separate from this ticket's 260622 parent by owner decision (2026-07-11)
   260711-idea-dashboard-command-bus-quick-open-shortcuts: human-facing command bus/custom-button UI this control surface would let agents trigger
   260605-research-ws-native-subagent-pivot: migration anchor; distinguishes this from ws's own agents.*/mercenary subprocess-spawn MCP surface
 related-mental-model:
@@ -85,6 +86,22 @@ worktree-management first (lower tension) and treat execution-approval as
 a separate, explicitly-flagged high-friction child once the read-only
 Activity track (`260620`) and the command-bus UI
 (`260711-idea-dashboard-command-bus-quick-open-shortcuts`) have landed.
+
+## Decisions
+
+- Owner policy (2026-07-11), a hard floor, not a per-implementation
+  judgment call: any agent-initiated **registration** of a new persistent
+  custom command, and any agent-initiated **execution** of a custom
+  command (human- or agent-registered) through this MCP surface, always
+  requires explicit human approval before taking effect. This directly
+  narrows the "custom command buttons" slice of the execution-approval
+  tension above — it does not resolve the broader question of whether
+  the dashboard is an approval *relay* or *authority* for other kinds of
+  execution (e.g. arbitrary shell commands typed by an agent outside the
+  registered-custom-command mechanism), which remains open. This decision
+  is mirrored in `260711-epic-ws-dashboard-command-surface`'s
+  Cross-Child Decisions so it is visible from either side of the
+  UI/MCP split.
 
 ## Open Points
 
