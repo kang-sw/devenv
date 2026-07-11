@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod agent_client_provider;
+pub mod codex_projection;
 pub mod events;
 pub mod ids;
 pub mod resources;
@@ -22,6 +23,7 @@ pub use agent_client_provider::{
     AgentClientToolActivityEvent, AgentClientTranscriptBackfillRequest,
     AgentClientTranscriptBackfillResult,
 };
+pub use codex_projection::{CodexIngestOutcome, CodexProjector, CodexUsage};
 pub use events::{
     InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
     InstanceEventTranscript,
