@@ -42,7 +42,11 @@ static layout/shell work can proceed in parallel against a stub provider.
     `260624-feat-ws-dashboard-managed-cli-recent-sessions`), showing
     per-entry alias/title (best-effort extraction), last-accessed time, and
     length/size. Selecting an entry starts/resumes that conversation in the
-    tab.
+    tab. **Scope of the list (owner, 2026-07-11, interview)**: filtered to
+    the current work root/worktree only, not a global cross-work-root list —
+    consistent with the existing dashboard pattern of scoping surfaces to
+    the currently-open work root rather than showing everything the daemon
+    knows about.
   - Below that, an empty tab shows three large per-harness tiles (Codex,
     OpenCode, Claude), each starting a brand-new conversation with that
     harness directly — no path/work-root picker here, since work-root and
@@ -60,15 +64,50 @@ static layout/shell work can proceed in parallel against a stub provider.
     detail; the exact summarization depth is implemented at a reasonable
     common-sense default for the first pass and left as an explicit TBD for
     refinement, not a blocking design question.
-  - Each user chat bubble carries a "resume from here / fork from here"
-    affordance (dispatches through `activity.session.rewind`/`fork` per
-    `260620` Phase 1/2, gated by the Cross-Harness Feature Matrix —
-    Unavailable/Hack cells hide or disable this affordance rather than
-    attempting it).
+  - **"resume from here" vs "fork from here" — distinct semantics (owner,
+    2026-07-11, interview)**: these are two separate buttons, not two labels
+    for the same action.
+    - **resume from here**: in-place rewind. Mutates the *current* session —
+      the conversation is rewound to that user bubble and everything after
+      it is discarded, and the current tab is replaced in place with the
+      rewound state (no new tab). Dispatches through
+      `activity.session.rewind`.
+    - **fork from here**: branches to a *new* session, preserving the
+      original conversation untouched, and opens the result in a **new
+      tab**. Dispatches through `activity.session.fork`.
+    - Both remain gated by the Cross-Harness Feature Matrix — an
+      Unavailable/Hack cell hides or disables its button rather than
+      attempting it. **Known risk, flagged not resolved**: "resume from
+      here"'s in-place-rewind-to-an-exact-point semantics assumes a
+      point-based rewind primitive, but per `260620`'s fixture spike, no
+      harness cleanly offers that today — Codex's only rewind primitive
+      (`thread/rollback`) is confirmed **deprecated for removal** and drops
+      N turns from the *end*, not an arbitrary point (coarser than this
+      button implies, and wrong if turns were forked/reordered); OpenCode's
+      equivalent is unverified; Claude's only reachable path is a
+      transcript-truncation Hack. This means "resume from here" may not be
+      implementable as a clean per-harness Passthrough/Overlay action for
+      any of the three today — Phase 3 must re-check this against `260620`'s
+      matrix before wiring the button live, and may need to ship "resume
+      from here" disabled/hidden everywhere at first while only "fork from
+      here" (backed by the confirmed-real `thread/fork`) ships in the first
+      pass.
   - If the user submits a message while an agent turn is still in progress,
-    it is queued and injected into the next agent tool-call batch rather
-    than rejected or requiring the human to wait (Codex: via `turn/steer`
-    where available; other harnesses queue for the next turn boundary).
+    it is queued rather than rejected or requiring the human to wait
+    (**owner, 2026-07-11, interview**):
+    - The message immediately appears as its own user chat bubble carrying a
+      "pending/queued" badge, and is actually delivered on the next agent
+      tool-call batch (Codex: via `turn/steer` where available; other
+      harnesses queue for the next turn boundary), at which point the badge
+      clears.
+    - The prompt input box supports up/down-arrow history traversal across
+      previously sent messages, the same as a normal shell/REPL input
+      history.
+    - The pending bubble itself renders a revert/되돌리기 (undo) button to
+      its right. Pressing it — or reaching that pending bubble via the
+      prompt box's up-arrow history traversal — pulls its text back into the
+      prompt input in an editable state and cancels the queued submission
+      (the pending bubble is removed; nothing is sent for it).
   - Every chat bubble (user, agent-turn, and tool-use) has a copy button.
 - **Open, not-yet-decided**: whether the dashboard should maintain its own
   skill/capability layer instead of relaying each harness's native skill
@@ -125,14 +164,28 @@ evidence for a live streamed turn rendering incrementally.
 
 ### Phase 3: Resume/fork and mid-turn submission queuing
 
-Wire the per-user-bubble "resume from here / fork from here" affordance to
-`activity.session.rewind`/`fork`, gated by the Cross-Harness Feature Matrix,
-and implement mid-turn user-submission queuing (Codex `turn/steer` where
-available; queue-for-next-turn elsewhere).
+Wire the per-user-bubble "resume from here" (in-place rewind,
+`activity.session.rewind`, replaces the current tab) and "fork from here"
+(new session, `activity.session.fork`, opens a new tab) buttons, gated by
+the Cross-Harness Feature Matrix. Per the Decisions above, re-check
+"resume from here" against `260620`'s matrix before enabling it live per
+harness — it may need to ship disabled/hidden everywhere in the first pass
+if no harness's rewind primitive cleanly supports exact-point rewind by
+then, shipping only "fork from here" first.
+
+Implement mid-turn user-submission queuing: an immediately-rendered pending
+user bubble with a "pending/queued" badge that clears once delivered next
+batch (Codex `turn/steer` where available; queue-for-next-turn elsewhere),
+prompt-box up/down-arrow history traversal, and a revert/되돌리기 control
+that pulls a still-pending bubble back into the editable prompt input and
+cancels its queued submission.
 
 Verification boundary: frontend integration tests for gating logic per
-harness capability; browser-level acceptance evidence for a queued
-mid-turn submission actually landing in the next tool-call batch.
+harness capability (including a test asserting "resume from here" stays
+disabled wherever the underlying rewind cell isn't a clean Passthrough/
+Overlay match); browser-level acceptance evidence for a queued mid-turn
+submission landing in the next tool-call batch, and for the revert/undo
+flow removing a pending bubble without sending it.
 
 ### Phase 4: Server-scoped integration
 
