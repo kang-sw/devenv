@@ -1,5 +1,7 @@
 pub mod auth;
 pub mod cli;
+pub mod codex_app_server;
+pub mod codex_routes;
 pub mod config;
 pub mod discovery;
 pub mod document_translation;

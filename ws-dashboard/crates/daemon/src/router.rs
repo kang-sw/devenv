@@ -40,11 +40,18 @@ use crate::servers::{
     server_scoped_git_worktree_add_submit, server_scoped_open_work_root,
     server_scoped_read_work_root_file, server_scoped_remove_workspace, server_scoped_root_picker,
     server_scoped_root_picker_pins, server_scoped_set_work_root_activation,
-    server_scoped_terminal_input, server_scoped_terminal_output, server_scoped_terminal_resize,
-    server_scoped_terminal_websocket, server_scoped_terminals, server_scoped_work_root_activity,
-    server_scoped_work_root_activity_events, server_scoped_work_root_activity_transcript,
+    server_scoped_codex_session_control, server_scoped_codex_session_interrupt,
+    server_scoped_codex_session_prompt, server_scoped_codex_session_transcript,
+    server_scoped_codex_sessions, server_scoped_terminal_input, server_scoped_terminal_output,
+    server_scoped_terminal_resize, server_scoped_terminal_websocket, server_scoped_terminals,
+    server_scoped_work_root_activity, server_scoped_work_root_activity_events,
+    server_scoped_work_root_activity_transcript,
     server_scoped_work_root_files, server_scoped_write_work_root_file, start_ssh_dashboard_server,
     LinkedServerSessions, LinkedServerTunnels,
+};
+use crate::codex_routes::{
+    codex_session_control, codex_session_interrupt, codex_session_prompt,
+    codex_session_transcript, create_codex_session, list_codex_sessions,
 };
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
@@ -67,6 +74,7 @@ pub struct AppState {
     pub dashboard_state: DashboardStateStore,
     pub document_translation: DocumentTranslationService,
     pub terminals: TerminalRegistry,
+    pub codex_sessions: crate::codex_app_server::CodexProviderRegistry,
     pub work_root_activity: WorkRootActivityProjector,
     pub document_events: DocumentEventHub,
     pub document_write_locks: DocumentWriteLocks,
@@ -166,6 +174,26 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/events",
             get(server_scoped_work_root_activity_events),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/codex-sessions",
+            get(server_scoped_codex_sessions).post(server_scoped_codex_sessions),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/transcript",
+            get(server_scoped_codex_session_transcript),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/prompt",
+            post(server_scoped_codex_session_prompt),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/interrupt",
+            post(server_scoped_codex_session_interrupt),
+        )
+        .route(
+            "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/control",
+            post(server_scoped_codex_session_control),
         )
         .route(
             "/api/dashboard/servers/{server_route}/work-roots/{work_root_id}/git/status",
@@ -332,6 +360,26 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activity/events",
             get(work_root_activity_events),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions",
+            get(list_codex_sessions).post(create_codex_session),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/transcript",
+            get(codex_session_transcript),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/prompt",
+            post(codex_session_prompt),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/interrupt",
+            post(codex_session_interrupt),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/control",
+            post(codex_session_control),
         )
         .route("/assets/{*asset_path}", get(static_asset))
         .route("/servers", get(index))

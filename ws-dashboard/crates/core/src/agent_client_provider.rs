@@ -222,44 +222,53 @@ pub struct AgentClientProviderError {
     pub message: String,
 }
 
-/// Non-runtime contract a Phase 2-4 adapter (Codex app-server, OpenCode ACP,
-/// Claude CLI stream-json duplex) implements. No implementation exists yet
-/// in this phase; the trait exists only to pin method signatures for review.
-/// Method bodies are intentionally synchronous placeholders — adapters will
-/// almost certainly need async transport, but choosing an async runtime is
-/// out of scope for a documentation/type-only phase.
+/// Contract a Phase 2-4 adapter (Codex app-server, OpenCode ACP, Claude CLI
+/// stream-json duplex) implements. Phase 1 pinned the DTO shapes with
+/// synchronous placeholder methods and explicitly deferred the async-ness
+/// decision to Phase 2.
+///
+/// PHASE-2 DECISION (async): methods are `async fn`. The Codex transport is an
+/// inherently async duplex over a tokio child process (piped stdio, per-request
+/// `oneshot` correlation, notification fan-out), and all callers are async axum
+/// handlers. Async methods let an adapter `.await` its transport directly
+/// rather than `block_on`/`block_in_place` inside an async worker (which the
+/// plan rejects and which risks starving the multi-thread runtime). The DTO
+/// shapes are unchanged from Phase 1. The trait is consumed as a concrete type
+/// (the daemon's `CodexProviderRegistry` owns a concrete adapter), so
+/// async-fn-in-trait's lack of `dyn` compatibility does not apply here.
+#[allow(async_fn_in_trait)]
 pub trait AgentClientProvider {
-    fn initialize(
+    async fn initialize(
         &self,
         request: AgentClientInitializeRequest,
     ) -> Result<AgentClientInitializeResult, AgentClientProviderError>;
 
-    fn list_sessions(
+    async fn list_sessions(
         &self,
         request: AgentClientSessionListRequest,
     ) -> Result<AgentClientSessionListResult, AgentClientProviderError>;
 
-    fn create_session(
+    async fn create_session(
         &self,
         request: AgentClientSessionCreateRequest,
     ) -> Result<AgentClientSessionCreateResult, AgentClientProviderError>;
 
-    fn resume_session(
+    async fn resume_session(
         &self,
         request: AgentClientSessionResumeRequest,
     ) -> Result<(), AgentClientProviderError>;
 
-    fn send_prompt(
+    async fn send_prompt(
         &self,
         request: AgentClientPromptSendRequest,
     ) -> Result<AgentClientPromptSendResult, AgentClientProviderError>;
 
-    fn interrupt(
+    async fn interrupt(
         &self,
         request: AgentClientInterruptRequest,
     ) -> Result<(), AgentClientProviderError>;
 
-    fn backfill_transcript(
+    async fn backfill_transcript(
         &self,
         request: AgentClientTranscriptBackfillRequest,
     ) -> Result<AgentClientTranscriptBackfillResult, AgentClientProviderError>;

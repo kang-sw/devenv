@@ -91,6 +91,7 @@ where
         dashboard_state,
         document_translation: crate::document_translation::DocumentTranslationService::from_env(),
         terminals: TerminalRegistry::default(),
+        codex_sessions: crate::codex_app_server::CodexProviderRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: crate::work_root_files::DocumentEventHub::default(),
         document_write_locks: crate::work_root_files::DocumentWriteLocks::default(),

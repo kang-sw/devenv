@@ -51,6 +51,11 @@ use crate::terminal::{
     terminal_resize, terminal_websocket, CreateTerminalRequest, TerminalInputRequest,
     TerminalOutputQuery, TerminalResizeRequest, TerminalWebSocketQuery,
 };
+use crate::codex_routes::{
+    codex_session_control, codex_session_interrupt, codex_session_prompt,
+    codex_session_transcript, create_codex_session, list_codex_sessions, CodexControlRequest,
+    CodexPromptRequest, CreateCodexSessionRequest,
+};
 use crate::work_root_activity::{
     work_root_activity, work_root_activity_events, work_root_activity_transcript,
     ActivityEventsQuery, ActivityTranscriptQuery, WorkRootActivityQuery,
@@ -668,6 +673,56 @@ impl ServerScopedForwardOperation {
         }
     }
 
+    fn codex_sessions(work_root_id: &str, method: Method) -> Option<Self> {
+        matches!(method, Method::GET | Method::POST).then(|| Self {
+            method,
+            legacy_path: format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        })
+    }
+
+    fn codex_session_transcript(work_root_id: &str, activity_id: &str) -> Self {
+        Self {
+            method: Method::GET,
+            legacy_path: format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/transcript"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn codex_session_prompt(work_root_id: &str, activity_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/prompt"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn codex_session_interrupt(work_root_id: &str, activity_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/interrupt"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
+    fn codex_session_control(work_root_id: &str, activity_id: &str) -> Self {
+        Self {
+            method: Method::POST,
+            legacy_path: format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/codex-sessions/{activity_id}/control"
+            ),
+            rewrite: ForwardResponseRewrite::None,
+        }
+    }
+
     fn git_status(work_root_id: &str) -> Self {
         Self {
             method: Method::GET,
@@ -1023,6 +1078,102 @@ pub async fn server_scoped_work_root_activity_events(
         return work_root_activity_events(State(state), AxumPath(work_root_id), Query(query)).await;
     }
     forward_server_scoped_activity_events(state, server_route, operation).await
+}
+
+pub async fn server_scoped_codex_sessions(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id)): AxumPath<(String, String)>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(operation) =
+        ServerScopedForwardOperation::codex_sessions(&work_root_id, method.clone())
+    else {
+        return server_error(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "unsupported server-scoped operation",
+        );
+    };
+    if server_route == LOCAL_SERVER_ID {
+        if method == Method::GET {
+            return list_codex_sessions(State(state), AxumPath(work_root_id)).await;
+        }
+        return match parse_json_alias_body::<CreateCodexSessionRequest>(&headers, &body) {
+            Ok(request) => {
+                create_codex_session(State(state), AxumPath(work_root_id), Json(request)).await
+            }
+            Err(response) => response,
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_codex_session_transcript(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id, activity_id)): AxumPath<(String, String, String)>,
+) -> Response {
+    let operation =
+        ServerScopedForwardOperation::codex_session_transcript(&work_root_id, &activity_id);
+    if server_route == LOCAL_SERVER_ID {
+        return codex_session_transcript(State(state), AxumPath((work_root_id, activity_id))).await;
+    }
+    forward_server_scoped_operation(state, server_route, operation, HeaderMap::new(), Bytes::new())
+        .await
+}
+
+pub async fn server_scoped_codex_session_prompt(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id, activity_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation =
+        ServerScopedForwardOperation::codex_session_prompt(&work_root_id, &activity_id);
+    if server_route == LOCAL_SERVER_ID {
+        return match parse_json_alias_body::<CodexPromptRequest>(&headers, &body) {
+            Ok(request) => {
+                codex_session_prompt(State(state), AxumPath((work_root_id, activity_id)), Json(request))
+                    .await
+            }
+            Err(response) => response,
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_codex_session_interrupt(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id, activity_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation =
+        ServerScopedForwardOperation::codex_session_interrupt(&work_root_id, &activity_id);
+    if server_route == LOCAL_SERVER_ID {
+        return codex_session_interrupt(State(state), AxumPath((work_root_id, activity_id))).await;
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
+}
+
+pub async fn server_scoped_codex_session_control(
+    State(state): State<AppState>,
+    AxumPath((server_route, work_root_id, activity_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let operation =
+        ServerScopedForwardOperation::codex_session_control(&work_root_id, &activity_id);
+    if server_route == LOCAL_SERVER_ID {
+        return match parse_json_alias_body::<CodexControlRequest>(&headers, &body) {
+            Ok(request) => {
+                codex_session_control(State(state), AxumPath((work_root_id, activity_id)), Json(request))
+                    .await
+            }
+            Err(response) => response,
+        };
+    }
+    forward_server_scoped_operation(state, server_route, operation, headers, body).await
 }
 
 pub async fn server_scoped_git_status(
