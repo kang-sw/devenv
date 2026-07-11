@@ -7,6 +7,7 @@ related:
 related-mental-model:
   - ws-dashboard-agent-harness
   - ws-web-dashboard
+sage-review: pending
 ---
 
 # ws dashboard agent activity chat UI
