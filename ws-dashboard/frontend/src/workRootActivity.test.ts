@@ -1196,3 +1196,44 @@ assertEqual(
   "terminal",
   "exec transcript blocks render with terminal mode",
 );
+
+// Phase 1 (260620-feat-ws-dashboard-agent-client-activity-sources): new
+// Codex/OpenCode/Claude source kinds and the `thinking` render kind must
+// still type-check and flow through the existing `| string`-tolerant
+// unions and Activity routes, never a parallel identity scheme.
+const codexItem = activityItem({
+  id: "agent.codex:thread-1",
+  kind: "agent.codex",
+  updatedAt: "2026-07-11T00:00:00Z",
+  source: {
+    kind: "agent.codex",
+    label: "codex",
+    backend: "codex",
+    harness: "codex",
+    tier: null,
+    model: "gpt-5.3-codex",
+  },
+});
+assertEqual(
+  codexItem.kind,
+  "agent.codex",
+  "a new agent.codex source kind still type-checks against the string-tolerant ActivityItem.kind union",
+);
+assertDeepEqual(
+  orderActivityItems([codexItem]).map((item) => item.id),
+  ["agent.codex:thread-1"],
+  "mixed-source rows keep flowing through the existing ordering/projection helpers",
+);
+assertEqual(
+  transcriptBlockView(
+    block({ renderKind: "thinking", title: "Reasoning", text: "weighing options" }),
+    "agent.codex",
+  ).mode,
+  "expanded",
+  "a new thinking render kind still type-checks and renders through the existing block-view helper",
+);
+assertEqual(
+  workRootActivityEndpoint("root-local-abc"),
+  "/api/dashboard/work-roots/root-local-abc/activity",
+  "existing Activity route helpers stay unchanged for mixed-source rows",
+);

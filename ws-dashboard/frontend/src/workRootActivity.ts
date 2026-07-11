@@ -25,8 +25,24 @@ export type NamedAgentCallActivityView = {
   error: string | null;
 };
 
+// CONTRACT: open string union, not a closed literal set — new values are
+// additive and must keep the `| string` fallback so unknown future source
+// kinds still type-check. Known values as of
+// `260620-feat-ws-dashboard-agent-client-activity-sources` Phase 1:
+// `namedAgent` (legacy ws-mercenary/named-agent compatibility source),
+// `exec`, `agent.codex`, `agent.opencode`, `agent.claude` (interactive
+// provider sources; see `activitySessionApi.ts` and
+// `ai-docs/mental-model/ws-dashboard-agent-harness.md`).
+export type ActivitySourceKind =
+  | "namedAgent"
+  | "exec"
+  | "agent.codex"
+  | "agent.opencode"
+  | "agent.claude"
+  | string;
+
 export type ActivitySourceDisplay = {
-  kind: "namedAgent" | "exec" | string;
+  kind: ActivitySourceKind;
   label: string;
   backend: string | null;
   harness: string | null;
@@ -42,7 +58,7 @@ export type ActivityTranscriptAvailability = {
 
 export type ActivityItem = {
   id: string;
-  kind: "namedAgent" | "exec" | string;
+  kind: ActivitySourceKind;
   label: string;
   status: string;
   live: boolean;
@@ -56,10 +72,22 @@ export type ActivityItem = {
   metadata: Record<string, unknown>;
 };
 
+// CONTRACT: open string union, not a closed literal set — same tolerance
+// rule as `ActivitySourceKind` above. `thinking` (added Phase 1) is
+// extractable reasoning/thinking content (Claude `assistant` stream
+// "thinking" segments, Codex reasoning item stream), kept distinct from
+// ordinary `assistant`-role text blocks.
+export type TranscriptBlockRenderKind =
+  | "markdown"
+  | "text"
+  | "json"
+  | "thinking"
+  | string;
+
 export type TranscriptBlock = {
   cursor: string;
   timestamp: string | null;
-  renderKind: "markdown" | "text" | "json" | string;
+  renderKind: TranscriptBlockRenderKind;
   title: string | null;
   text: string | null;
   data: unknown | null;
