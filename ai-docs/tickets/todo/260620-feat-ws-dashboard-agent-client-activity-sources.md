@@ -7,6 +7,7 @@ related:
   260605-research-ws-native-subagent-pivot: supersedes dashboard deprecation and preserves the web dashboard while moving agent visibility away from removed agents.* surfaces
   260523-feat-ws-dashboard-main-session-activity-source: prior main-session freshness gap that must be re-grounded on host-owned agent/client activity
   260525-feat-ws-dashboard-server-scoped-operation-forwarding: serverId forwarding must carry Activity source identity before remote provider streams are transparent
+  260711-feat-ws-dashboard-agent-activity-chat-ui: interactive chat UI/UX split out of this ticket's Phase 5 to keep provider-adapter scope and UI/UX scope separately reviewable
 spec:
   - 260521-ws-dashboard-activity-console-read-model
   - 260521-ws-dashboard-activity-console-ui-shell
@@ -357,6 +358,20 @@ as host-owned agent-client data.
     (a): this ticket's scope explicitly includes interactive session
     control, superseding the read-only decision rather than splitting it
     into a separate ticket.
+- **UI/UX design and implementation split out to its own ticket** (owner,
+  2026-07-11): the interactive Activity chat surface's layout and
+  interaction design (tab entry points, conversation view, resume/fork
+  affordances, mid-turn submission queuing) is specified in
+  `260711-feat-ws-dashboard-agent-activity-chat-ui`, not here — split out
+  once the UI/UX detail grew large enough to crowd this ticket's
+  provider-adapter scope. This ticket stays scoped to the
+  `AgentClientProvider` contract, per-harness adapters, and the Activity
+  interaction-API methods that UI dispatches through. That ticket also
+  raises an open, not-yet-decided question relevant to this ticket's Phase 1
+  `activity.session.skills` method: whether the dashboard should maintain
+  its own skill/capability layer instead of relaying each harness's native
+  (and observed-unreliable) skill listing as-is — resolve before
+  implementing that method as a thin passthrough.
 
 ## Cross-Harness Feature Matrix (owner + research, 2026-07-11)
 
@@ -744,12 +759,18 @@ constraints as the Codex and OpenCode adapters.
 ### Phase 5: Activity UI and server-scoped integration
 
 Lift the visible Activity UI from named-agent wording to source-neutral
-agent-client activity. Preserve the existing Activity Console ergonomics: dense
-ribbon, selected transcript, local dirty acknowledgement, bounded tail/backfill,
-and read-only behavior. Thread `serverId` through Activity source selection and
-stream keys before linked remote providers are considered transparent.
+agent-client activity. Thread `serverId` through Activity source selection
+and stream keys before linked remote providers are considered transparent.
 
-Verification boundary: frontend route/model tests for source-neutral labels and
-identity keys, browser-level acceptance evidence for mixed source rows and
-transcript rendering, and server-scoped route tests showing local compatibility
-aliases still map to `server-local`.
+The detailed interactive chat UI/UX design and implementation (tab entry
+points, conversation view, resume/fork affordances, mid-turn submission
+queuing) is specified in its own ticket,
+`260711-feat-ws-dashboard-agent-activity-chat-ui` — split out once that
+detail grew large enough to crowd this ticket's provider-adapter scope. This
+phase covers only the source-neutral labeling/identity-key groundwork that
+ticket's UI builds on top of.
+
+Verification boundary: frontend route/model tests for source-neutral labels
+and identity keys, browser-level acceptance evidence for mixed source rows
+and transcript rendering, and server-scoped route tests showing local
+compatibility aliases still map to `server-local`.
