@@ -836,6 +836,67 @@ be driven from the dashboard Activity Console without requiring dashboard
 owner pairing when the daemon is explicitly started through the
 loopback-only no-auth debug profile.
 
+### Result (2026-07-11, `impl/codex-app-serve`, commits `53661668..2a3bde19`)
+
+Research pass first resolved the two open unknowns via a live spike against
+the installed `codex-cli 0.144.1` binary: NDJSON (not LSP `Content-Length`)
+framing, the real `item/*` notification ordering for one turn (`turn/completed`
+never carries items — the projector must accumulate from the stream), and
+confirmation that `codex plugin list --json` is a genuine no-session
+plugin-listing surface (parity with `claude plugin list`).
+
+Implemented:
+- `crates/core/src/codex_projection.rs`: a pure, runtime-free projector
+  (`item/*` stream → ordered `TranscriptBlock`s + `CodexUsage`), fixture-tested
+  against a real captured turn (`crates/core/tests/fixtures/codex-app-server-turn.ndjson`).
+- `crates/daemon/src/codex_app_server.rs`: async JSON-RPC-over-stdio transport
+  (`tokio::process::Command` + `AsyncBufReadExt::lines()` + `serde_json`, zero
+  new crate dependencies), three-way message classification
+  (response/notification/server-request), `CodexProviderRegistry`
+  (mirrors `TerminalRegistry`'s lifecycle shape, keyed by `(server_id,
+  activity_id)`), the ws/wsflow plugin-presence spawn gate
+  (`codex plugin list --json`), and the `AgentClientProvider` impl for Codex
+  (trait made `async fn`, DTO shapes unchanged from Phase 1).
+- `crates/daemon/src/codex_routes.rs` + `router.rs`/`servers.rs` wiring: six
+  new local + server-scoped routes (create/list/prompt/interrupt/control/
+  transcript), keyed by `serverId` per the existing dual-registration pattern.
+- `crates/daemon/src/work_root_activity.rs`: `merge_activity_items` folds live
+  Codex sessions into the existing `GET /activity` route's `ActivityFeed.items`
+  (never `agents`), satisfying the ticket's Public Interface Briefing
+  requirement directly rather than deferring it to Phase 5.
+
+Tests: `cargo test -p ws-dashboard-core` (22 passed) and
+`-p ws-dashboard-daemon` (57 lib + 149 routes passed, 1 ignored = real-binary
+manual smoke, which was run manually and passed with no stray process left).
+
+Reviewed (partitioned correctness/fit/test), one fix cycle, then re-reviewed
+clean across all three partitions:
+- First pass: correctness non-clean (2) — Critical: `skills/list` returned raw
+  provider JSON verbatim to the browser, bypassing projection; Important:
+  `create_session` orphaned a session + live child process on initial
+  `turn/start` failure. Fit non-clean (1 Important): the plan's step-6
+  unified-feed merge was left unwired, deferred to Phase 5 only via a
+  commit-message note, not ticket-recorded owner sign-off. Test non-clean (1
+  Important): none of the six new HTTP routes had a route-level test through
+  `tower::ServiceExt::oneshot`, unlike every other daemon resource.
+- Fix cycle (commit `2a3bde19`): added `project_skills_list`/`bound_display`
+  (bounded, path-free skills shape); `CodexProviderRegistry::remove` +
+  rollback on initial-prompt failure; implemented the step-6 merge now
+  instead of deferring further; added 5 new route tests covering the
+  create+prompt+transcript round-trip, the `LOCAL_SERVER_ID` short-circuit vs.
+  forward branch, and `provider_error_response` status-code mapping.
+- Re-review: all three partitions accepted the fixes as correct and
+  complete; clean across correctness/fit/test.
+
+Deviations from plan: none of substance — the step-6 merge was completed in
+Phase 2 rather than left for Phase 5 as the implementer initially (and
+incorrectly) deferred it; this is now the settled state, not an open item.
+The live SSE `/activity/events` diff stream still surfaces Codex sessions only
+via the dedicated `codex-sessions` routes, not the diff stream itself — noted
+as a forward item for whichever phase wires live streaming updates, not a
+Phase 2 gap (the `GET /activity` snapshot route is what the ticket's
+Public Interface Briefing names).
+
 ### Phase 3: OpenCode ACP provider adapter
 
 **Blocked pending install (owner, 2026-07-11)**: OpenCode is not installed in
