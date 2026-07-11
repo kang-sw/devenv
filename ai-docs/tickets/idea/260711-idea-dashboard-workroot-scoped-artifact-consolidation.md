@@ -132,23 +132,26 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   `260525-feat-ws-dashboard-workroot-polishing-backlog` Phase 1's real
   delete-operation work, not as a standalone migration — owner judged
   migration risk low since no worktree-path assumption has ever shipped.
+- **Link creation timing** (owner, 2026-07-11): the `.ws-dashboard-shared`
+  link is created at two points — (1) dashboard-driven worktree creation
+  time, as part of the create flow, and (2) worktree *first-access* time
+  from the dashboard frontend (i.e. the first time the dashboard opens/
+  attaches to an existing worktree that lacks the link, e.g. one created
+  outside the dashboard via a plain `git worktree add`), so pre-existing
+  worktrees get backfilled lazily rather than requiring a proactive scan.
+- **Linking-failure policy** (owner, 2026-07-11): best-effort, silent skip
+  on failure — if the link cannot be created, that worktree simply does
+  not get `.ws-dashboard-shared` (no blocking error, no copy-then-diverge
+  fallback). Cross-volume placement, the main scenario that would break a
+  Windows junction, is not considered in-scope in the first place: default
+  worktree placement now lands under `<root>/.ws-dashboard/worktrees/`
+  (same-volume, same-repo-root by construction per the placement decision
+  above), so a worktree ending up on a different volume than its root
+  clone is an unsupported configuration, not a case this mechanism needs
+  to handle gracefully.
 
 ## Open Questions (owner flagged this needs more UX/policy discussion — not decided yet)
 
-- **When** does the `.ws-dashboard-shared` link get created: at
-  dashboard-driven worktree creation time (daemon controls the whole
-  flow, simplest), at worktree *discovery* time (covers worktrees created
-  outside the dashboard, e.g. by a plain `git worktree add` in a terminal
-  — more robust but requires the daemon to detect and backfill missing
-  links whenever it discovers a worktree), or both?
-- What happens on a linking failure (cross-volume worktree, missing
-  Windows privilege, filesystem without symlink support)? Silently skip
-  (worktree just doesn't get `.ws-dashboard-shared`, falls back to
-  nothing or a local-only stub) vs. surface a blocking error vs.
-  copy-then-diverge?
-- Does "shared" for `.ws-dashboard-shared` mean strictly read/write-
-  through the same files (a real link), or would a sync/replicate model
-  be acceptable/preferable for cross-volume cases?
 - What, concretely, needs to live in `.ws-dashboard-shared` rather than
   being daemon-resolved? No confirmed consumer needs physical linking
   yet — `scripts/` (the only concrete consumer so far) turned out not to
