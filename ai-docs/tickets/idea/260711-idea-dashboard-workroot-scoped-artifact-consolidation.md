@@ -70,9 +70,9 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   junction creation failure — the blocker-code schema would need a new
   variant if this is surfaced as a user-facing error during worktree
   creation.
-- **Flagged, not decided** (2026-07-11): today's default worktree
-  placement, `<root>/.git/ws-worktree/<name>`, puts real working-tree
-  files inside `.git/`. Many tools treat `.git/` as opaque
+- **Flagged 2026-07-11, resolved 2026-07-11** (see Decisions below): today's
+  default worktree placement, `<root>/.git/ws-worktree/<name>`, puts real
+  working-tree files inside `.git/`. Many tools treat `.git/` as opaque
   git-internal-only storage and skip or exclude it by default — file
   search/indexing (ripgrep/fd/IDE watchers), backup/sync tooling,
   antivirus/DLP scanners, and "reset/clean git internals" scripts that
@@ -80,9 +80,7 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   independent of the `.ws-dashboard/` sharing question, but the owner
   chose to leave the bare-repo edge case (`common_dir.parent()` not being
   a real working directory for a bare root) intentionally out of scope as
-  too uncommon a setup to design around right now. Whether to also move
-  the default worktree placement itself out of `.git/` is a separate,
-  still-open decision, not resolved in this ticket.
+  too uncommon a setup to design around right now.
 
 ## Decisions
 
@@ -98,20 +96,46 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   daemon* must see at a normal relative path inside the worktree itself
   — e.g. a human browsing the worktree in a plain file explorer/editor,
   or a non-dashboard-aware script/tool running with that worktree as its
-  cwd. That subset should live under its own dedicated path, proposed as
-  `.ws-dashboard/shared/`, and only `.ws-dashboard/shared/` is what
-  actually needs the fragile Windows symlink-vs-junction-vs-cross-volume
-  handling from the Findings above. This substantially shrinks the risk
-  surface: `scripts/` and similar daemon-only-read data need zero link
-  machinery at all.
+  cwd.
+- **Collapsed top-level name for the physically-linked subset** (owner,
+  2026-07-11): the physically-linked content is named `.ws-dashboard-shared`
+  at the worktree root, a sibling of `.ws-dashboard/`, rather than nesting it
+  as `.ws-dashboard/shared/`. Reasoning: `.ws-dashboard/` itself never
+  needs to physically exist inside a non-root worktree (everything under it
+  is daemon-resolved via `common_dir`), so nesting the one physically-linked
+  path under it would force the daemon to also create an otherwise-pointless
+  empty `.ws-dashboard/` container directory in every worktree just to hold
+  the `shared/` link target — pure overhead with no content behind it. A
+  flat `.ws-dashboard-shared` entry avoids that: it is the only
+  dashboard-managed entry that physically exists per-worktree, and it exists
+  standalone. Only `.ws-dashboard-shared` needs the fragile Windows
+  symlink-vs-junction-vs-cross-volume handling from the Findings above;
+  `scripts/` and similar daemon-only-read data under `.ws-dashboard/` need
+  zero link machinery at all.
 - Room should be left for a third category later: per-worktree,
   intentionally *not* shared dashboard metadata (name TBD, e.g.
   `.ws-dashboard/worktree-local/` or similar) — distinct from both the
-  daemon-resolved shared data and the physically-linked shared data.
+  daemon-resolved shared data and the physically-linked `.ws-dashboard-shared`
+  data. Since this category (like `scripts/`) is daemon-read only, it stays
+  nested under `.ws-dashboard/` without needing the flat-naming treatment
+  above.
+- **Default worktree placement moves under `.ws-dashboard/`** (owner,
+  2026-07-11): long-term direction is to move default worktree placement
+  from `<root>/.git/ws-worktree/<name>` to `<root>/.ws-dashboard/worktrees/<name>`,
+  resolving the `.git/`-placement tooling risk flagged in Findings above.
+  This keeps worktrees out of `.git/` entirely while staying inside a
+  dashboard-owned, daemon-resolved namespace (worktrees themselves are not
+  something a non-dashboard-aware tool needs to find at a fixed relative
+  path — `git worktree list` is the actual discovery mechanism — so this
+  location needs no physical link either, consistent with the `scripts/`
+  pattern). Sequencing: land as part of
+  `260525-feat-ws-dashboard-workroot-polishing-backlog` Phase 1's real
+  delete-operation work, not as a standalone migration — owner judged
+  migration risk low since no worktree-path assumption has ever shipped.
 
 ## Open Questions (owner flagged this needs more UX/policy discussion — not decided yet)
 
-- **When** does the `.ws-dashboard/shared/` link get created: at
+- **When** does the `.ws-dashboard-shared` link get created: at
   dashboard-driven worktree creation time (daemon controls the whole
   flow, simplest), at worktree *discovery* time (covers worktrees created
   outside the dashboard, e.g. by a plain `git worktree add` in a terminal
@@ -119,22 +143,17 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   links whenever it discovers a worktree), or both?
 - What happens on a linking failure (cross-volume worktree, missing
   Windows privilege, filesystem without symlink support)? Silently skip
-  (worktree just doesn't get `.ws-dashboard/shared/`, falls back to
+  (worktree just doesn't get `.ws-dashboard-shared`, falls back to
   nothing or a local-only stub) vs. surface a blocking error vs.
   copy-then-diverge?
-- Does "shared" for `.ws-dashboard/shared/` mean strictly read/write-
+- Does "shared" for `.ws-dashboard-shared` mean strictly read/write-
   through the same files (a real link), or would a sync/replicate model
   be acceptable/preferable for cross-volume cases?
-- What, concretely, needs to live in `.ws-dashboard/shared/` rather than
+- What, concretely, needs to live in `.ws-dashboard-shared` rather than
   being daemon-resolved? No confirmed consumer needs physical linking
   yet — `scripts/` (the only concrete consumer so far) turned out not to
-  need it. This subdirectory may stay empty/reserved until a real
+  need it. This directory may stay empty/reserved until a real
   use case appears.
-- Whether to also move the default worktree placement out of `.git/`
-  (see the Findings note above) — separate decision, not required for
-  this ticket to proceed, but should probably be resolved before or
-  alongside implementing the linking mechanism since it changes where
-  `.ws-dashboard/shared/` would even need to be reachable from.
 
 ## Non-Goals
 

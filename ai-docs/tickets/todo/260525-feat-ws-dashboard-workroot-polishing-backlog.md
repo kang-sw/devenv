@@ -50,6 +50,16 @@ worktree lifecycle edge cases.
   uncommitted/untracked changes) and clean up the dashboard registry entry
   together, and must account for active terminal sessions still using that
   worktree.
+- **Long-term worktree placement direction** (owner, 2026-07-11): once this
+  phase's real delete operation lands, move default worktree placement out
+  of `<root>/.git/ws-worktree/<name>` and into `<root>/.ws-dashboard/worktrees/`
+  (see `260711-idea-dashboard-workroot-scoped-artifact-consolidation`'s
+  Decisions for the naming rationale). Owner judged migration risk low:
+  worktree discovery is not path-bound today (worktrees are found via `git
+  worktree list`, not a hardcoded expected path) and no placement under
+  `.git/ws-worktree/` has ever shipped, so there is no compatibility clutter
+  to carry forward. This should be sequenced as part of implementing this
+  phase's delete/create path changes, not as a separate migration.
 
 Verification should include resource model tests where possible plus browser
 coverage for any visible navigation or lifecycle behavior changed.
