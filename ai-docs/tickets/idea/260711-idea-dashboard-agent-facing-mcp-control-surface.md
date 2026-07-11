@@ -103,6 +103,25 @@ Activity track (`260620`) and the command-bus UI
   Cross-Child Decisions so it is visible from either side of the
   UI/MCP split.
 
+- Owner clarification (2026-07-11) on the broader execution-approval
+  question: individual harnesses (Codex, Claude, etc.) likely already
+  have their own permission systems, and an ACP-style integration would
+  surface approval prompts to the user directly anyway. So the settled
+  direction is: execution-approval requests themselves always stay
+  human-relay-based (the dashboard does not decide on its own — the
+  "authority" branch of the tension above is rejected as a general
+  policy, not just for custom commands). The safe way to reduce prompt
+  fatigue is a **frontend-side "auto-approve macro"** convenience
+  feature: a human explicitly authors a pattern/rule ahead of time (e.g.
+  "auto-approve `npm test`"), and the dashboard applies *that
+  human-authored rule* to skip a redundant prompt. This keeps the
+  decision-maker human (whoever wrote the macro), so it does not turn the
+  dashboard into an autonomous approval authority — the macro is a
+  recorded human decision applied ahead of time, not the dashboard
+  deciding for itself. This is a distinct, later idea (UI for authoring
+  and managing these macros, scoping them per-workroot or per-command
+  pattern, auditability of which macro fired) and is not designed here.
+
 ## Open Points
 
 - What transport: does the dashboard daemon host an MCP server directly

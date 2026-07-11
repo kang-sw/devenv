@@ -4,6 +4,7 @@ parent: 260711-epic-ws-dashboard-command-surface
 related:
   260710-epic-ws-dashboard-terminal-ux-polishing: sibling UX-polish board; this idea's parent epic was split out from it because its Non-Scope excludes new product surfaces
   260711-idea-dashboard-agent-facing-mcp-control-surface: agent/MCP-facing half of custom commands, kept under 260622 instead of this epic
+  260711-idea-dashboard-workroot-scoped-artifact-consolidation: storage substrate this ticket's custom command definitions depend on (.ws-dashboard/scripts/)
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -95,6 +96,21 @@ Notes relevant to our design:
   (`workRootFiles.ts`, `documentRawEditor.tsx`, `documentViewer.tsx`), but
   go-to-line support inside those viewers was not confirmed and needs a
   follow-up check before committing to the `:` suffix design.
+
+## Decisions
+
+- Custom command definitions are stored per-workroot at
+  `<workroot>/.ws-dashboard/scripts/` (owner, 2026-07-11), not in the
+  global `DashboardStateStore`. Files are conditionally git-tracked: a
+  `*.local.*`-style filename marker means local-only (gitignored),
+  everything else tracks normally in the repo — mirroring the
+  `.env`/`.env.local` convention, so team-shareable custom commands can
+  be committed while personal overrides stay local. The `.ws-dashboard/`
+  top-level directory itself, its cross-worktree sharing mechanism, and
+  related open questions (symlink/junction timing, Windows fallback,
+  failure handling) are tracked in
+  `260711-idea-dashboard-workroot-scoped-artifact-consolidation`, a
+  sibling ticket this one now depends on for the storage substrate.
 
 ## Open Points
 
