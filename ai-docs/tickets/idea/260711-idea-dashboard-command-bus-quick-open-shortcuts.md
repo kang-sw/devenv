@@ -105,10 +105,15 @@ Notes relevant to our design:
   `*.local.*`-style filename marker means local-only (gitignored),
   everything else tracks normally in the repo — mirroring the
   `.env`/`.env.local` convention, so team-shareable custom commands can
-  be committed while personal overrides stay local. The `.ws-dashboard/`
-  top-level directory itself, its cross-worktree sharing mechanism, and
-  related open questions (symlink/junction timing, Windows fallback,
-  failure handling) are tracked in
+  be committed while personal overrides stay local. `scripts/` turns out
+  to need **no physical symlink/junction at all**: since only the
+  dashboard daemon itself reads these files, it can resolve the root
+  workroot path pragmatically (via `git rev-parse --git-common-dir`'s
+  parent) from any worktree and read `.ws-dashboard/scripts/` there
+  directly — it never needs the directory to physically exist inside
+  each worktree. The `.ws-dashboard/` top-level directory, the separate
+  `shared/` subpath reserved for content that *does* need a physical
+  link (none identified yet), and related open questions are tracked in
   `260711-idea-dashboard-workroot-scoped-artifact-consolidation`, a
   sibling ticket this one now depends on for the storage substrate.
 

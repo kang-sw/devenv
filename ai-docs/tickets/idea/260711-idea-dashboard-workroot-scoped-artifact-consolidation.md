@@ -70,27 +70,71 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   junction creation failure — the blocker-code schema would need a new
   variant if this is surfaced as a user-facing error during worktree
   creation.
+- **Flagged, not decided** (2026-07-11): today's default worktree
+  placement, `<root>/.git/ws-worktree/<name>`, puts real working-tree
+  files inside `.git/`. Many tools treat `.git/` as opaque
+  git-internal-only storage and skip or exclude it by default — file
+  search/indexing (ripgrep/fd/IDE watchers), backup/sync tooling,
+  antivirus/DLP scanners, and "reset/clean git internals" scripts that
+  assume anything under `.git/` is disposable. This is a real design risk
+  independent of the `.ws-dashboard/` sharing question, but the owner
+  chose to leave the bare-repo edge case (`common_dir.parent()` not being
+  a real working directory for a bare root) intentionally out of scope as
+  too uncommon a setup to design around right now. Whether to also move
+  the default worktree placement itself out of `.git/` is a separate,
+  still-open decision, not resolved in this ticket.
+
+## Decisions
+
+- **Narrowed symlink/junction scope** (owner, 2026-07-11): not everything
+  under `.ws-dashboard/` needs a physical link into each worktree.
+  Anything the dashboard daemon itself reads (e.g.
+  `.ws-dashboard/scripts/` for custom commands) can be resolved
+  pragmatically at read time via the `common_dir`-anchored root path —
+  the daemon always knows how to find the root workroot from any
+  worktree, so it never needs the file to physically exist inside the
+  worktree's own directory tree. A physical symlink/junction is only
+  needed for the subset of content that something *other than the
+  daemon* must see at a normal relative path inside the worktree itself
+  — e.g. a human browsing the worktree in a plain file explorer/editor,
+  or a non-dashboard-aware script/tool running with that worktree as its
+  cwd. That subset should live under its own dedicated path, proposed as
+  `.ws-dashboard/shared/`, and only `.ws-dashboard/shared/` is what
+  actually needs the fragile Windows symlink-vs-junction-vs-cross-volume
+  handling from the Findings above. This substantially shrinks the risk
+  surface: `scripts/` and similar daemon-only-read data need zero link
+  machinery at all.
+- Room should be left for a third category later: per-worktree,
+  intentionally *not* shared dashboard metadata (name TBD, e.g.
+  `.ws-dashboard/worktree-local/` or similar) — distinct from both the
+  daemon-resolved shared data and the physically-linked shared data.
 
 ## Open Questions (owner flagged this needs more UX/policy discussion — not decided yet)
 
-- **When** does the link get created: at dashboard-driven worktree
-  creation time (daemon controls the whole flow, simplest), at worktree
-  *discovery* time (covers worktrees created outside the dashboard, e.g.
-  by a plain `git worktree add` in a terminal — more robust but requires
-  the daemon to detect and backfill missing links whenever it discovers
-  a worktree), or both?
+- **When** does the `.ws-dashboard/shared/` link get created: at
+  dashboard-driven worktree creation time (daemon controls the whole
+  flow, simplest), at worktree *discovery* time (covers worktrees created
+  outside the dashboard, e.g. by a plain `git worktree add` in a terminal
+  — more robust but requires the daemon to detect and backfill missing
+  links whenever it discovers a worktree), or both?
 - What happens on a linking failure (cross-volume worktree, missing
   Windows privilege, filesystem without symlink support)? Silently skip
-  (worktree just doesn't get the shared directory, falls back to nothing
-  or a local-only stub) vs. surface a blocking error vs. copy-then-diverge?
-- Does "shared across worktrees" mean strictly read/write-through the
-  same files (a real link), or would a sync/replicate model be
-  acceptable/preferable for cross-volume cases?
-- Should `.ws-dashboard/` have an internal structure decided now (e.g.
-  `scripts/`, and whatever future MCP-surface or workroot-config data
-  needs), or should this ticket only settle the top-level consolidation +
-  sharing mechanism and let each consumer (starting with the command-bus
-  ticket) claim its own subdirectory independently?
+  (worktree just doesn't get `.ws-dashboard/shared/`, falls back to
+  nothing or a local-only stub) vs. surface a blocking error vs.
+  copy-then-diverge?
+- Does "shared" for `.ws-dashboard/shared/` mean strictly read/write-
+  through the same files (a real link), or would a sync/replicate model
+  be acceptable/preferable for cross-volume cases?
+- What, concretely, needs to live in `.ws-dashboard/shared/` rather than
+  being daemon-resolved? No confirmed consumer needs physical linking
+  yet — `scripts/` (the only concrete consumer so far) turned out not to
+  need it. This subdirectory may stay empty/reserved until a real
+  use case appears.
+- Whether to also move the default worktree placement out of `.git/`
+  (see the Findings note above) — separate decision, not required for
+  this ticket to proceed, but should probably be resolved before or
+  alongside implementing the linking mechanism since it changes where
+  `.ws-dashboard/shared/` would even need to be reachable from.
 
 ## Non-Goals
 
