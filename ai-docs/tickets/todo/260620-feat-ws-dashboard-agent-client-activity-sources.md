@@ -287,6 +287,25 @@ as host-owned agent-client data.
   adapter shape, but exposing start, interrupt, cancel, retry, erase, permission
   approval, or provider-specific steering controls in the dashboard UI requires
   later high-friction control tickets.
+  - **Tension flagged, not resolved (2026-07-11)**: Phase 1's
+    "frontend interaction-API draft" below — `activity.session.create`,
+    `activity.session.start`, `activity.session.send`, and the
+    per-harness-gated compact/rewind/skills controls — is explicitly
+    interactive/write, not read-only. This directly contradicts the
+    read-only decision stated in this same bullet and in Constraints
+    below ("the browser must not expose those controls in this track").
+    Today's session drove the API-list design as if interactive control
+    were in scope for this ticket, which is a real shift from the
+    original read-only Activity Console framing, not a clarification of
+    it. This is not silently resolved here — the owner should explicitly
+    decide whether this ticket's scope now includes interactive
+    session control (superseding the read-only decision), or whether the
+    interactive API draft belongs in a split-off ticket that inherits
+    this one's provider/subset work but is gated as its own
+    higher-friction control surface, consistent with how
+    `260711-idea-dashboard-agent-facing-mcp-control-surface` already
+    treats execution-approval as higher-tension than read/display
+    actions.
 
 ## Prior Art
 
@@ -367,6 +386,78 @@ legacy/ws mercenary state is one compatibility source, Codex app-server is one
 interactive provider source, OpenCode ACP is one interactive provider source,
 OpenCode serve is an optional observation source, and the browser sees only the
 dashboard Activity model.
+
+**Frontend interaction-API draft** (owner + capability-matrix research,
+2026-07-11; consolidates the owner's initial list against the per-harness
+grounding in Decisions above — names are illustrative, not a final route
+contract):
+
+- `activity.history.list(workRootId)` — cross-harness collapsed conversation
+  history in one call (see `260624-feat-ws-dashboard-managed-cli-recent-sessions`
+  for the discovery-via-history-file mechanism this dispatches over); common
+  subset, safe now.
+- `activity.session.start(workRootId, activityId)` — resume a specific
+  history entry; the entry is bound to whichever harness produced it, so this
+  call resumes through that harness's own mechanism (Claude `--resume`, Codex
+  thread resume, OpenCode ACP session resume/load). Common subset, safe now.
+- `activity.session.create(workRootId, harness, profile?)` — start a new
+  conversation with an explicit harness choice; per-harness setup itself
+  (auth, CLI install) is assumed already done by the user outside the
+  dashboard. Common subset, safe now.
+- `activity.session.send(activityId, message)` plus the existing streamed
+  Activity event path for receiving — turn-by-turn message exchange. Common
+  subset, safe now.
+  - Ticket/spec-stem detection in rendered message text, converting a
+    recognized stem into a clickable link that opens the existing document
+    viewer/file popup — pure frontend text-parsing against already-rendered
+    transcript content, no harness/provider dependency, no new backend
+    method needed.
+  - Composer input: `Enter` inserts a newline, `Ctrl+Enter` submits — pure
+    frontend behavior, mirrors the already-decided
+    `260624-feat-ws-dashboard-managed-cli-terminal` Phase 2 composer
+    contract exactly, so this should reuse rather than re-decide that
+    behavior.
+- `activity.session.usage(activityId)` — read-only context-window/token
+  usage display (used/size). Common subset, safe now: all three harnesses
+  expose some token-count signal (ACP's standardized `usage_update`, Codex's
+  `turn/completed` stats, Claude's `result` event counts), even though only
+  Codex additionally supports triggering compaction.
+- **Per-harness-gated, not common-subset** (expose only when the active
+  harness's adapter reports the capability; degrade to hidden/disabled
+  control otherwise, not a uniform method):
+  - `activity.session.compact(activityId)` — manual compaction trigger.
+    Codex-native (`thread/compact/start`); no confirmed equivalent for
+    OpenCode or Claude (auto-only).
+  - `activity.session.rewind(activityId, atPoint)` /
+    `activity.session.fork(activityId, atPoint)` — Codex-native
+    (`thread/rollback` / `thread/fork`); Claude has no native method and
+    would need a dashboard-owned workaround (copy + truncate the
+    `~/.claude/projects/.../*.jsonl` transcript, then `--resume` against the
+    copy — unverified whether the CLI accepts a hand-truncated transcript);
+    OpenCode unverified in core ACP.
+  - `activity.session.skills(activityId)` — list invokable
+    skills/commands/plugins. Codex-native (`skills/list`); OpenCode and
+    Claude have no confirmed on-demand listing call (Claude only reports
+    `tools`/`capabilities` at session-start, not project-local skills).
+- **Deliberately not modeled as a bespoke API**: subagent
+  listing-plus-per-subagent-transcript-streaming. No harness has clean
+  native support for this shape. Pending an OpenCode fixture check of its
+  child-session-as-ordinary-session behavior, the dashboard should consider
+  modeling a subagent as an ordinary nested Activity/session row under its
+  parent `activityId` (reusing `activity.session.start`-shaped access to
+  that child row for the "click bubble to open its transcript" UX) instead
+  of inventing a dedicated subagent RPC surface.
+- **Deliberately dashboard-built, not harness-native**: `/goal`-style
+  repeat-until-condition looping. No harness exposes a client-driven loop
+  primitive (ACP's `Plan`/`PlanEntry` is the agent reporting its own plan,
+  not the client commanding repetition) — if built, this should be
+  dashboard-side orchestration that re-sends prompts/turns based on a
+  dashboard-evaluated condition, not a provider-contract method.
+
+All per-harness verdicts above are directional (WebSearch/WebFetch research,
+not fixture-verified); the Codex/OpenCode/Claude verification spikes noted in
+Decisions must confirm or revise this list's per-harness gating before it
+becomes a route contract.
 
 Verification boundary: documentation and type-level tests or fixtures are enough
 for this phase; no provider process needs to run. The result must make it clear
