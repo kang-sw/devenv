@@ -736,6 +736,49 @@ assert that mixed source rows keep using the existing Activity routes and that
 browser payloads tolerate unknown future source/provider kinds without treating
 them as named agents.
 
+### Result (2026-07-11, `impl/activity-source`, commits `83b85afe..2762848`)
+
+Implemented as an inert, doc-comment-heavy contract with no runtime wiring,
+matching the stated verification boundary:
+
+- New `ws-dashboard/crates/core/src/agent_client_provider.rs`: the
+  `AgentClientProvider` trait (initialize/list/create/resume/send/interrupt/
+  transcript-backfill), an `AgentClientCapabilities` flag struct
+  (`compact`/`steer`/`goal`/`rewind`/`fork`/`skills`), and request/response/
+  event DTOs, all `Serialize`/`Deserialize` with `camelCase` wire names and
+  serde round-trip tests. Confirmed inert: no `impl AgentClientProvider`
+  anywhere in the tree, no daemon reference, no route registered.
+- Additive `kind`/`render_kind` string vocabulary in `activity.rs`
+  (`agent.codex`, `agent.opencode`, `agent.claude`, `thinking`), mirrored in
+  `frontend/src/workRootActivity.ts`'s `| string`-tolerant unions — no schema
+  break, existing `namedAgent`/`exec`/`markdown`/`text` values unaffected.
+- Phase-1 method-shape draft for the frontend interaction API in new
+  `frontend/src/activitySessionApi.ts` (types only, no fetch/handler
+  implementation, no route wiring).
+- Spec (`ai-docs/spec/ws-web-dashboard/index.md`): superseded the 2026-06-20
+  Implementation Gap note in place, added
+  `### Agent-Client Provider Contract And Interactive Source Split
+  {#260620-ws-dashboard-agent-client-provider-contract}`.
+- Mental model (`ai-docs/mental-model/ws-dashboard-agent-harness.md`):
+  `## Coupling` now names the concrete module and includes a common-subset/
+  per-harness-gated method table.
+- Tests: `cargo test -p ws-dashboard-core` (13 passed) and
+  `npm run test:work-root-activity` (frontend, green) both cover the new
+  types/vocabulary; verified `router.rs`/`servers.rs` untouched.
+- Reviewed (partitioned correctness/fit/test): fit clean; correctness clean
+  with 1 minor (a missing `AgentClientToolActivityEvent` re-export from
+  `crates/core/src/lib.rs`, fixed directly in `2762848`); test clean with 2
+  minor, recorded not fixed — `activitySessionApi.test.ts`'s assertions are
+  compile-time-only signal (tautological at runtime, since the file exports
+  pure type aliases) and the new `activity.rs` additive-kind test doesn't
+  re-run the forbidden-substring privacy loop against its own fixture data.
+  Both are low-severity, non-blocking for a docs/type-only phase with no real
+  provider ids yet; worth a look if Phase 2-4 adapters start reusing these
+  test patterns with real ids.
+- Deviation: `AgentClientProvider` trait methods are synchronous, not
+  `async fn`, since `ws-dashboard-core` has no async runtime dependency and
+  picking one is left to the Phase 2-4 adapter that actually needs it.
+
 ### Phase 2: Codex app-server read/write adapter
 
 The dashboard daemon spawns Codex app-server as a child process per the
