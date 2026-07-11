@@ -112,13 +112,26 @@ to diverge from for anything meant to be workroot-scoped and shareable.
   symlink-vs-junction-vs-cross-volume handling from the Findings above;
   `scripts/` and similar daemon-only-read data under `.ws-dashboard/` need
   zero link machinery at all.
+- **Primary intended use for `.ws-dashboard-shared`** (owner, 2026-07-11):
+  build outputs and dependency artifacts that are expensive/slow to
+  regenerate per worktree but change rarely — e.g. `node_modules`-style
+  dependency trees, compiled build caches (`target/`-style directories) —
+  so a fresh worktree doesn't have to reinstall/rebuild from scratch and
+  instead shares the root workroot's copy. This answers the "what
+  concretely needs to live here" Open Question below for the primary case;
+  the directory's internal layout for these artifact types is not designed
+  in this ticket.
 - Room should be left for a third category later: per-worktree,
   intentionally *not* shared dashboard metadata (name TBD, e.g.
-  `.ws-dashboard/worktree-local/` or similar) — distinct from both the
-  daemon-resolved shared data and the physically-linked `.ws-dashboard-shared`
-  data. Since this category (like `scripts/`) is daemon-read only, it stays
-  nested under `.ws-dashboard/` without needing the flat-naming treatment
-  above.
+  `.ws-dashboard/worktree-local/` or similar) — data that must differ
+  per worktree and must never be pulled up to the root or shared across
+  worktrees, as opposed to both the daemon-resolved shared data
+  (`scripts/`) and the physically-shared `.ws-dashboard-shared` data.
+  Example candidates: a worktree's own terminal-session/PID state, its
+  own last-opened-file/layout cache, or its own git-status polling cache.
+  Since this category (like `scripts/`) is daemon-read only and keyed by
+  the specific worktree rather than resolved up to root, it stays nested
+  under `.ws-dashboard/` without needing the flat-naming treatment above.
 - **Default worktree placement moves under `.ws-dashboard/`** (owner,
   2026-07-11): long-term direction is to move default worktree placement
   from `<root>/.git/ws-worktree/<name>` to `<root>/.ws-dashboard/worktrees/<name>`,
@@ -152,11 +165,15 @@ to diverge from for anything meant to be workroot-scoped and shareable.
 
 ## Open Questions (owner flagged this needs more UX/policy discussion — not decided yet)
 
-- What, concretely, needs to live in `.ws-dashboard-shared` rather than
-  being daemon-resolved? No confirmed consumer needs physical linking
-  yet — `scripts/` (the only concrete consumer so far) turned out not to
-  need it. This directory may stay empty/reserved until a real
-  use case appears.
+- The primary `.ws-dashboard-shared` use case (build/dependency artifacts,
+  see Decisions above) is settled, but the internal layout — one shared
+  tree per repo vs. per-toolchain subpaths, how the dashboard detects
+  which build outputs are safe to share as opposed to worktree-specific
+  (e.g. build outputs that embed an absolute path or worktree-specific
+  config would NOT be safe to share) — is not designed yet.
+- Naming and shape of the third, non-shared per-worktree metadata
+  category (see Decisions above) — no concrete consumer yet, so this
+  stays a reserved placeholder.
 
 ## Non-Goals
 
