@@ -307,6 +307,67 @@ as host-owned agent-client data.
     treats execution-approval as higher-tension than read/display
     actions.
 
+## Cross-Harness Feature Matrix (owner + research, 2026-07-11)
+
+Tier is decided **per (harness, capability) cell**, never inherited from
+another harness's classification — a capability being Codex-only-native does
+not demote it to Hack; it is simply Unavailable elsewhere.
+
+- **Passthrough**: the dashboard calls a capability the harness itself
+  documents/exposes officially for third-party programmatic use.
+- **Overlay**: the dashboard composes officially-exposed primitives (e.g.
+  repeated `send` calls) into behavior the harness doesn't natively provide;
+  no vendor-private state is touched.
+- **Hack**: the only reachable path mutates a harness's private/undocumented
+  on-disk state, or relies on reverse-engineered/unofficial protocol messages
+  not documented for third-party use.
+- **Unavailable**: no known path (official or hack) as of this research pass.
+  Treated as not-implemented, not silently downgraded to Hack — a workaround
+  is only classified Hack once someone actually attempts and ships one.
+- *Italic* = unverified this pass (WebSearch/WebFetch research only, not
+  fixture-checked against an installed binary).
+
+Session discovery/history-listing is intentionally excluded from this table:
+it is already handled uniformly for all three via vendor-history-file
+scraping (see `260624-feat-ws-dashboard-managed-cli-recent-sessions`), a
+read-only observation mechanism orthogonal to this control-risk tiering.
+
+| Capability | Codex app-server | OpenCode ACP | Claude CLI |
+|---|---|---|---|
+| Resume existing session | Passthrough | Passthrough | Passthrough (`--resume`) |
+| Create new session | Passthrough | Passthrough | Passthrough |
+| Send/receive message (turn) | Passthrough | Passthrough | Passthrough (documented event subset only — `system`/`assistant`/`stream_event`/`result`; the unverified `control`/`control_request` shape stays out of scope until fixture-confirmed) |
+| Permission/approval interception | *Unverified* | *Unverified* | Passthrough (`PreToolUse` hooks) |
+| Context usage display (read-only) | Passthrough (`turn/completed`) | Passthrough (`usage_update`) | Passthrough (`result` token counts) |
+| Manual compaction trigger | Passthrough (`thread/compact/start`) | *Unverified* | Unavailable (auto-only; would become Hack if a workaround were attempted) |
+| Rewind/rollback to a point | Passthrough (`thread/rollback`) | *Unverified*, likely Unavailable | Hack (transcript-file truncation workaround; no officially-documented method) |
+| Fork new branch from a point | Passthrough (`thread/fork`) | *Unverified*, likely Unavailable | Hack (same workaround as rewind) |
+| Skill/capability listing | Passthrough (`skills/list`) | *Unverified* | Unavailable (session-start `tools`/`capabilities` metadata only, not on-demand project-skill listing) |
+| Subagent list + per-subagent transcript | Unavailable (fixed "Guardian" role only, not a general registry) | Overlay candidate (if child sessions are ordinary ACP sessions, list/relate them via existing session primitives — pending fixture check) | Unavailable (no documented CLI-level introspection surface) |
+| Goal/loop (repeat-until-condition) | Overlay (dashboard-built on top of `send`) | Overlay (same) | Overlay (same) |
+
+**Standing classification rule**: a capability with no officially-documented
+protocol/CLI method for a given harness defaults to Unavailable, not
+attempted. If a workaround is later implemented anyway, it must be
+classified Hack for that harness regardless of how many other harnesses
+support the capability natively. Because Codex app-server was purpose-built
+as a third-party integration surface and OpenCode ACP is a purpose-built
+standard, while Claude's headless stream-json surface is documented but not
+purpose-fit for this exact use case, new capabilities should default to
+stricter scrutiny on the Claude column specifically.
+
+**Phase implication** (not yet restructured into the Phases section below):
+Passthrough cells belong in each harness's existing Phase 2/3/4 adapter work.
+Overlay cells should land in a later, dedicated phase once passthrough is
+stable, since they need dashboard-side state/condition design but carry no
+vendor-side risk. Hack cells should not ship inside this ticket's normal
+phases at all — they need a separate idea ticket with explicit
+experimental/unsupported UI labeling and owner risk sign-off, mirroring the
+"dangerously bypass" opt-in pattern already used for execution approval.
+Unavailable cells are simply not implemented unless a future vendor update
+adds an official method, which would re-trigger this matrix's classification
+rather than being assumed.
+
 ## Prior Art
 
 - `ActivityFeed.items`, `ActivityTranscript`, and `TranscriptBlock` are already
