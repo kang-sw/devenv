@@ -122,6 +122,28 @@ Activity track (`260620`) and the command-bus UI
   and managing these macros, scoping them per-workroot or per-command
   pattern, auditability of which macro fired) and is not designed here.
 
+- **Execution-approval prompt shape** (owner, 2026-07-11): keep the
+  first implementation simple and aligned with what current mainstream
+  harnesses already do — a 3-way choice per prompt: **allow once** /
+  **allow this command pattern going forward** (the concrete mechanism
+  behind "allow this command pattern" is exactly the auto-approve-macro
+  concept above — choosing it authors a macro on the spot rather than
+  requiring the human to pre-author one) / **deny**. Separately, a
+  **"dangerously bypass"** mode exists as an explicit, human-toggled
+  frontend switch that auto-approves everything for a session/workroot
+  without per-prompt relay — distinct from the per-pattern macro
+  mechanism, and named/framed as a deliberately risky opt-in (mirroring
+  existing harness conventions for this kind of blanket bypass), not a
+  default.
+- **Future stretch, explicitly deferred** (owner, 2026-07-11): an
+  independent-LLM risk pre-assessment step — a separate model call
+  evaluates a pending command/approval request and produces a yes/no
+  verdict before (or instead of) relaying to the human, similar to
+  Claude Code's own auto-approve-style mode. Owner judged this as
+  something that can be slotted in later without disturbing the 3-way +
+  bypass shape above (it would sit as an optional pre-filter ahead of the
+  human relay, not replace it), so it is not designed further here.
+
 ## Open Points
 
 - What transport: does the dashboard daemon host an MCP server directly

@@ -54,11 +54,31 @@ as host-owned agent-client data.
   ACP-shaped `AgentClientProvider` contract plus Activity projection, not a new
   model loop, edit engine, permission runtime, MCP authority, or ws MCP agent
   runtime.
-- Use Codex app-server and OpenCode ACP as the primary interactive provider
-  sources. Codex app-server supplies JSON-RPC thread/turn/item/event data over
-  its own protocol; OpenCode ACP supplies editor-agent JSON-RPC over stdio.
-  Adapters translate both into the dashboard provider contract before projecting
-  Activity rows and transcript blocks.
+- Use Codex app-server, OpenCode ACP, and Claude (via Claude Agent SDK) as the
+  primary interactive provider sources. Codex app-server supplies JSON-RPC
+  thread/turn/item/event data over its own protocol; OpenCode ACP supplies
+  editor-agent JSON-RPC over stdio. Adapters translate all three into the
+  dashboard provider contract before projecting Activity rows and transcript
+  blocks.
+- **Claude Agent SDK as the Claude provider substrate** (owner, 2026-07-11):
+  Claude has no native app-server-style duplex protocol the way Codex does, so
+  the dashboard builds its own duplex bridge on top of the Claude Agent SDK,
+  shaped to fit the same ACP-shaped internal provider subset the Codex and
+  OpenCode adapters already target. This keeps Claude a peer provider source
+  rather than a special case — same Activity projection, same identity and
+  privacy constraints, same degrade-unknown-events behavior — while
+  acknowledging the underlying transport is dashboard-built rather than
+  vendor-supplied.
+- **Opinionated subset per provider, not feature parity across harnesses**
+  (owner, 2026-07-11): each provider adapter (Codex app-server, OpenCode ACP,
+  Claude Agent SDK) should implement only the slice of that harness's
+  capabilities the dashboard actually needs to project through the shared
+  ACP-shaped contract — not attempt to mirror every feature a given harness
+  exposes. Harnesses differ in what they offer natively; the dashboard's
+  provider contract is the ceiling, and any one adapter may cover less than
+  its harness technically supports if the extra surface has no dashboard
+  consumer yet. This keeps adapter scope bounded and avoids the "recreate
+  harness development" risk this ticket already guards against.
 - Define an ACP-shaped internal subset instead of adopting any provider wire
   protocol as the dashboard API. The subset should cover provider
   initialization/capabilities, session list/create/resume, prompt/send,
@@ -206,7 +226,23 @@ bounded degradation tests for missing binary/auth, subprocess startup failure,
 unreachable or incompatible ACP server state, and version drift, plus route tests
 matching the same privacy and identity constraints as the Codex adapter.
 
-### Phase 4: Activity UI and server-scoped integration
+### Phase 4: Claude Agent SDK provider adapter
+
+Add a Claude provider built on the Claude Agent SDK, implementing a dashboard-
+owned duplex bridge (no native Codex-app-server-equivalent protocol exists for
+Claude, so this phase builds the bridge rather than adapting an existing one).
+Map Claude Agent SDK session/turn/message/tool/permission events into the same
+ACP-shaped provider subset the Codex and OpenCode adapters use, and project the
+result into the same Activity model. Per the opinionated-subset decision above,
+implement only the slice of Agent SDK capability the dashboard's provider
+contract actually needs; do not attempt full Agent SDK feature coverage.
+
+Verification boundary: fixture projection tests for Claude Agent SDK
+session/turn/message/tool sequences, bounded degradation tests for missing
+SDK/auth or unreachable/incompatible SDK state, and route tests matching the
+same privacy and identity constraints as the Codex and OpenCode adapters.
+
+### Phase 5: Activity UI and server-scoped integration
 
 Lift the visible Activity UI from named-agent wording to source-neutral
 agent-client activity. Preserve the existing Activity Console ergonomics: dense
