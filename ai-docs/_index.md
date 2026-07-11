@@ -210,6 +210,14 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260711-feat-current-branch-low-ceremony` (ready, feat) - let an inline
+  implementation stay on the current non-implementation branch and omit merge
+  work only when raw facts independently satisfy automatic direct-edit and
+  lead-only-review safety predicates and documentation is explicitly skipped
+  with a reason. Caller overrides do not satisfy eligibility; all near-miss and
+  existing `impl/*` cases preserve the standard isolated branch path. Specs:
+  `260505-implementation-workflow-skills`, `260625-session-state-tools`. Sage
+  design and completeness reviews completed.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
