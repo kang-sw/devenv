@@ -130,16 +130,74 @@ Notes relevant to our design:
   v1. If cross-workroot search is ever wanted, it should be a distinct,
   later idea, not baked into this ticket's baseline.
 
+## Phases
+
+Owner decision (2026-07-11): `%`/`!` are an implementation goal, not
+deferred indefinitely, but land through a phased frontend → backend →
+frontend split rather than all at once, since the daemon has no
+supporting endpoints yet (see Findings above) and shipping the
+client-only-supportable prefixes first avoids blocking on backend design.
+
+### Phase 1: Frontend shell, client-only prefixes, shortcut layer
+
+- Quick-open modal and prefix parser, dispatching through the existing
+  `DashboardCommand`/`executeCommand` bus (`commands.ts`, `App.tsx:884`).
+- No-prefix go-to-file and `:` go-to-line, the two prefixes Findings above
+  confirm have a plausible existing surface
+  (`workRootFiles.ts`/`documentRawEditor.tsx`/`documentViewer.tsx`) —
+  confirm go-to-line support in those viewers as part of this phase, not
+  before.
+- New global keyboard-shortcut-capture layer, coexisting with the
+  terminal input-forwarding fallback's guard pattern (`App.tsx:6711-6768`)
+  per the Background note above. Used both to invoke the command bar
+  itself and for other dashboard shortcuts (e.g. `Ctrl+`` `` to
+  open/focus a terminal).
+- Custom command button UI shell (registration form, sidebar/topbar
+  placement, click-to-execute wiring) for commands already expressible
+  through the existing `DashboardCommand` bus — this phase does not yet
+  require `.ws-dashboard/scripts/`-backed custom scripts to exist.
+- `@`/`@:`/`#` symbol search are deferred past this phase: no existing
+  symbol-indexing surface was found in Findings, so they need their own
+  design (whether via an existing viewer's language support or new
+  daemon-side indexing), not just a UI slot.
+
+### Phase 2: Backend — daemon endpoints for `%` and `!`
+
+- `%`: new daemon endpoint for full-text search across the single
+  currently-viewed work root (per the single-workroot scope Decision
+  above). Backend choice (e.g. shelling out to `ripgrep` vs. an in-process
+  search) is an implementation detail for this phase, not decided here.
+- `!`: new support for running an arbitrary command in the current work
+  root and capturing its output — either by reusing the existing
+  PTY-backed terminal-session mechanism (spawn a session scoped to that
+  work root and feed it the command) or a new bounded one-shot exec
+  endpoint if a quick command shouldn't need a full PTY session. Decide
+  based on whether the quick-open UX wants streaming output or a
+  fire-and-capture result.
+- Daemon-side list/read support for `.ws-dashboard/scripts/` custom
+  command definitions, per the sibling storage ticket
+  (`260711-idea-dashboard-workroot-scoped-artifact-consolidation`).
+
+### Phase 3: Frontend — wire `%`/`!` and ship custom commands end-to-end
+
+- Wire the `%` and `!` prefixes into the quick-open bar against the Phase
+  2 endpoints.
+- Wire custom-command button execution against `.ws-dashboard/scripts/`-
+  backed definitions (human-click-triggered only; the agent/MCP-facing
+  path stays out of scope for this epic per Non-Goals below).
+- Re-evaluate `@`/`@:`/`#` symbol search once Phase 1-3 ship; treat as a
+  stretch/later phase if it still needs its own indexing design.
+
 ## Open Points
 
 - ~~Epic ownership~~ — resolved 2026-07-11: split out as its own epic,
   `260711-epic-ws-dashboard-command-surface`, sibling to `260710` and
   `260622`, since bundling agent-harness/session-key concerns with
   human-facing command-bar UX was judged too broad a stretch.
-- Whether `%` full-text search and `!` arbitrary-exec need daemon API
-  work up front, or whether a first version should ship `@`/`:` only
-  (client-side, no new backend surface) and defer `%`/`!` to a phase 2
-  once the daemon endpoints are scoped.
+- ~~Whether `%`/`!` need daemon API work up front~~ — resolved 2026-07-11:
+  yes, both are implementation goals, sequenced via the Phases above
+  (frontend-first, then backend, then frontend wiring) rather than
+  deferred indefinitely.
 - Whether the command-bar UI on this large (8000+ line) `App.tsx` should
   be extracted into its own module from the start, given the existing
   file's size and the "Responsibility check" code standard.

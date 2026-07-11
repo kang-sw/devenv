@@ -48,10 +48,11 @@ agent.
 
 ## Child Tickets
 
-- `260711-idea-dashboard-command-bus-quick-open-shortcuts` - idea;
+- `260711-idea-dashboard-command-bus-quick-open-shortcuts` - todo;
   background research (VSCode Quick Open prefix reference, existing
-  `DashboardCommand` bus, existing shortcut-guard precedent) and open
-  design points for all three front-ends.
+  `DashboardCommand` bus, existing shortcut-guard precedent) plus a
+  3-phase implementation plan (frontend shell → backend `%`/`!` endpoints
+  → frontend wiring) approved 2026-07-11.
 
 ## Cross-Child Decisions
 
