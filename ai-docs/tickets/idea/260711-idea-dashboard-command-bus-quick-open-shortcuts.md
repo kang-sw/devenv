@@ -112,10 +112,23 @@ Notes relevant to our design:
   parent) from any worktree and read `.ws-dashboard/scripts/` there
   directly — it never needs the directory to physically exist inside
   each worktree. The `.ws-dashboard/` top-level directory, the separate
-  `shared/` subpath reserved for content that *does* need a physical
-  link (none identified yet), and related open questions are tracked in
+  `.ws-dashboard-shared` path reserved for content that *does* need a
+  physical link (currently reserved for build/dependency artifacts, not
+  custom commands), and related open questions are tracked in
   `260711-idea-dashboard-workroot-scoped-artifact-consolidation`, a
   sibling ticket this one now depends on for the storage substrate.
+- **Scope baseline: mirror VSCode Quick Open UX, but single-workroot only**
+  (owner, 2026-07-11): the command bar's prefix grammar and behavior
+  should follow the VSCode reference table above as the starting shape
+  (no prefix = go to file, `@` = go to symbol, `#` = go to symbol in
+  workspace, `:` = go to line, `%` = text search, etc.), but every one of
+  these operates scoped to **the single work root currently being
+  viewed** — not across all work roots the dashboard has open. This
+  matches VSCode's own single-workspace-folder Quick Open behavior (multi-
+  root workspace search is a separate, heavier VSCode feature we are not
+  adopting) and avoids designing a cross-workroot index/search fan-out for
+  v1. If cross-workroot search is ever wanted, it should be a distinct,
+  later idea, not baked into this ticket's baseline.
 
 ## Open Points
 
