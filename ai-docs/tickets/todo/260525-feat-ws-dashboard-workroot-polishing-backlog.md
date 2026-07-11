@@ -71,6 +71,15 @@ include branch dropdown ergonomics, new-branch flow feedback, status polling
 load, push/pull/fetch progress affordances, long branch names, and stale status
 recovery.
 
+- **Status polling risks `.git/index.lock` contention** (found 2026-07-11
+  dogfood, Windows): the 5s interval timer (`gitToolbar.ts:231-253`) plus
+  focus/visibility-triggered refreshes have no in-flight/single-flight
+  guard, client- or server-side, so overlapping `git status`/`git branch`
+  invocations against the same repo can race on the index lock. See
+  `260711-idea-dashboard-git-status-polling-index-lock-contention` for the
+  full investigation and candidate fix directions (single-flight guard,
+  `--no-optional-locks`, and/or a longer-term watch-based rearchitecture).
+
 This phase should preserve the current safety decision that dashboard-triggered
 pulls use `git pull --ff-only` and never attempt conflict resolution.
 
