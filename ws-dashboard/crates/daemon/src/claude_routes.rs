@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use ws_dashboard_core::agent_client_provider::{
     AgentClientInterruptRequest, AgentClientProvider, AgentClientProviderError,
     AgentClientPromptSendRequest, AgentClientSessionCreateRequest, AgentClientSessionListRequest,
-    AgentClientSessionResumeRequest,
 };
 use ws_dashboard_core::WorkRootId;
 
@@ -162,17 +161,13 @@ pub async fn claude_session_transcript(
     State(state): State<AppState>,
     AxumPath((work_root_id, activity_id)): AxumPath<(String, String)>,
 ) -> Response {
-    let provider = local_provider(&state, state.claude_sessions.clone());
-    // resume_session validates the session exists (and lazily respawns a
-    // killed child, Finding B) without introducing separate side effects.
-    if let Err(error) = provider
-        .resume_session(AgentClientSessionResumeRequest {
-            activity_id: activity_id.clone(),
-        })
-        .await
-    {
-        return provider_error_response(error);
-    }
+    // CONTRACT: a transcript read is not input (plan lifecycle: sessions are
+    // "transparently respawned ... on the next input"), so this handler must
+    // NOT call `resume_session`/`ensure_live` — that would respawn a child
+    // for every poll of a killed/idle session. The in-memory projector
+    // already holds the full accumulated transcript (Finding B lifecycle
+    // consequence 1), so existence-check the session in the registry only,
+    // without touching its connection.
     let Some(session) = state
         .claude_sessions
         .session_for(LOCAL_SERVER_ID, &activity_id)

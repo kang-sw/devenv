@@ -216,6 +216,16 @@ impl ClaudeConnection {
             Ok(Err(_)) => Err(ClaudeTransportError::Closed),
             Err(_) => {
                 self.pending_turn.lock().expect("claude turn lock poisoned").take();
+                // CONTRACT: the CLI turn is still running past our client-side
+                // deadline. Turns are serialized under `send_lock` precisely
+                // so a later `send_prompt` never writes a new user-message
+                // line into a still-active turn; simply abandoning the
+                // pending turn here (without stopping the CLI) would let the
+                // next `send_user_message` call release this guard and
+                // interleave into the live stream. Issue an interrupt
+                // (best-effort) before releasing `send_lock` so the CLI turn
+                // is actually stopped first.
+                let _ = self.interrupt().await;
                 Err(ClaudeTransportError::Timeout)
             }
         }
@@ -303,10 +313,21 @@ async fn reader_loop<R>(
                         }
                     }
                     "result" => {
+                        // CONTRACT: a `result` with `subtype:"error_during_execution"`
+                        // (interrupt or in-turn error, Finding A5/B) is a
+                        // failed/interrupted turn, not a successful one —
+                        // surface it as a `TurnError` so `send_prompt` never
+                        // reports `accepted:true` for it.
+                        let subtype = value.get("subtype").and_then(Value::as_str).unwrap_or("");
                         if let Some(sender) =
                             pending_turn.lock().expect("claude turn lock poisoned").take()
                         {
-                            let _ = sender.send(Ok(value.clone()));
+                            let outcome = if subtype == "error_during_execution" {
+                                Err(ClaudeTransportError::TurnError(subtype.to_owned()))
+                            } else {
+                                Ok(value.clone())
+                            };
+                            let _ = sender.send(outcome);
                         }
                         let _ = events.send(value);
                     }
@@ -408,9 +429,19 @@ pub fn evaluate_claude_plugin_gate(plugin_list_json: &str) -> Result<(), ClaudeP
 
 /// Run `claude plugin list --json` and evaluate the gate. No-session CLI
 /// surface (no `claude` conversation is started to check this).
-pub async fn check_claude_plugin_gate(claude_bin: &str) -> Result<(), ClaudePluginGateRefusal> {
+///
+/// CONTRACT: `claude plugin list --json` reports per-scope (user/project)
+/// enablement (Finding C), so this MUST run with `current_dir(cwd)` pinned to
+/// the target work-root — otherwise project-scoped enablement is judged
+/// against the daemon's own process cwd instead of the project actually being
+/// gated, and the gate can pass or refuse for the wrong project.
+pub async fn check_claude_plugin_gate(
+    claude_bin: &str,
+    cwd: &std::path::Path,
+) -> Result<(), ClaudePluginGateRefusal> {
     let output = Command::new(claude_bin)
         .args(["plugin", "list", "--json"])
+        .current_dir(cwd)
         .output()
         .await
         .map_err(|error| ClaudePluginGateRefusal {
@@ -905,9 +936,13 @@ fn spawn_projector_pump(
 impl AgentClientProvider for ClaudeCliProvider {
     async fn initialize(
         &self,
-        _request: AgentClientInitializeRequest,
+        request: AgentClientInitializeRequest,
     ) -> Result<AgentClientInitializeResult, AgentClientProviderError> {
-        check_claude_plugin_gate(&self.config.claude_bin).await?;
+        // CONTRACT: resolve the target work-root cwd BEFORE gating so the
+        // gate is judged against the right project (Finding C project-scoped
+        // enablement), not the daemon's own process cwd.
+        let cwd = self.resolver.resolve_cwd(&request.work_root_id)?;
+        check_claude_plugin_gate(&self.config.claude_bin, &cwd).await?;
         Ok(AgentClientInitializeResult {
             metadata: AgentClientProviderMetadata {
                 provider: CLAUDE_PROVIDER.to_owned(),
@@ -946,9 +981,12 @@ impl AgentClientProvider for ClaudeCliProvider {
         &self,
         request: AgentClientSessionCreateRequest,
     ) -> Result<AgentClientSessionCreateResult, AgentClientProviderError> {
-        // Enforce the plugin gate before spawning any process.
-        check_claude_plugin_gate(&self.config.claude_bin).await?;
+        // CONTRACT: resolve the work-root cwd BEFORE gating (Finding C
+        // project-scoped enablement) so `claude plugin list --json` is
+        // evaluated against the actual target project, then enforce the
+        // plugin gate before spawning any process.
         let cwd = self.resolver.resolve_cwd(&request.work_root_id)?;
+        check_claude_plugin_gate(&self.config.claude_bin, &cwd).await?;
 
         let session_id = new_session_id();
         let (connection, events) = self.spawn_connection(&cwd, &session_id, false).await?;
