@@ -1,6 +1,6 @@
 ---
 title: "Allow low-ceremony direct edits to stay on the current branch"
-sage-review-design: required
+sage-review-design: blocked
 related:
   260630-epic-skill-playbook-diet: preserve the dieted playbook boundary by keeping deterministic routing in enter.implement
   260703-chore-implement-branch-rename-default-allow: adjacent branch-plan policy work whose isolation behavior remains the standard path
@@ -80,3 +80,13 @@ playbook rule set.
 - Verify matching and near-miss resolver cases, todo ordering/omission, standard
   branch behavior preservation, rendered canonical/wsflow playbooks, manifests,
   and the wsflow package test suite.
+
+## Blocked (2026-07-11)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Verdict conjunction does not enforce safety | critical | missing |
+| 2 | Existing implementation-branch behavior is undefined | important | missing |
+| 3 | MCP contract spec is omitted | important | autonomous |
