@@ -54,24 +54,81 @@ as host-owned agent-client data.
   ACP-shaped `AgentClientProvider` contract plus Activity projection, not a new
   model loop, edit engine, permission runtime, MCP authority, or ws MCP agent
   runtime.
-- Use Codex app-server, OpenCode ACP, and Claude (via Claude Agent SDK) as the
-  primary interactive provider sources. Codex app-server supplies JSON-RPC
-  thread/turn/item/event data over its own protocol; OpenCode ACP supplies
-  editor-agent JSON-RPC over stdio. Adapters translate all three into the
-  dashboard provider contract before projecting Activity rows and transcript
-  blocks.
-- **Claude Agent SDK as the Claude provider substrate** (owner, 2026-07-11):
-  Claude has no native app-server-style duplex protocol the way Codex does, so
-  the dashboard builds its own duplex bridge on top of the Claude Agent SDK,
-  shaped to fit the same ACP-shaped internal provider subset the Codex and
-  OpenCode adapters already target. This keeps Claude a peer provider source
-  rather than a special case — same Activity projection, same identity and
-  privacy constraints, same degrade-unknown-events behavior — while
-  acknowledging the underlying transport is dashboard-built rather than
-  vendor-supplied.
+- Use Codex app-server, OpenCode ACP, and Claude (via the `claude` CLI's
+  headless stream-json duplex mode) as the primary interactive provider
+  sources. Codex app-server supplies JSON-RPC thread/turn/item/event data over
+  its own protocol; OpenCode ACP supplies editor-agent JSON-RPC over stdio.
+  Adapters translate all three into the dashboard provider contract before
+  projecting Activity rows and transcript blocks.
+- **CLI stream-json duplex, not the Claude Agent SDK, as the Claude provider
+  substrate** (owner, 2026-07-11, revised from the 2026-07-11 Agent SDK
+  decision same day after research): the Claude Agent SDK is itself just a
+  wrapper that spawns the `claude` CLI as a subprocess per `query()` call, so
+  the dashboard drives the CLI binary directly instead of adding an SDK
+  dependency. The CLI supports a headless duplex-shaped mode via
+  `--input-format stream-json --output-format stream-json` (NDJSON over
+  stdin/stdout, kept alive across multiple turns rather than exiting per
+  turn) — conceptually the same shape as Codex's app-server JSON-RPC duplex.
+  Documented event kinds include `system` (init: `session_id`, model, tools,
+  capabilities), `assistant` (content blocks: text/tool_use/thinking),
+  `stream`/`stream_event` (partial deltas), and `result` (`session_id`, cost,
+  token counts). **Unverified**: the finer-grained bidirectional
+  `control`/`control_request`/`control_response` message shape (used for
+  in-band permission prompts and MCP calls) is only documented in a
+  third-party reverse-engineered reference
+  (Roasbeef/claude-agent-sdk-go's `cli-protocol.md`), not Anthropic's official
+  docs (confirmed via `code.claude.com/docs/en/headless` and open GitHub
+  issue #24594 noting stream-json input is undocumented beyond the flags
+  table) — this needs direct fixture verification against an installed
+  `claude` binary before Phase 4 implementation, not assumed from that
+  third-party doc.
+- **Permission/approval interception mechanism** (owner direction via
+  `260711-idea-dashboard-agent-facing-mcp-control-surface`'s 3-way
+  allow-once/allow-pattern/deny + separate dangerously-bypass design,
+  grounded 2026-07-11): do not drive Claude via
+  `--dangerously-skip-permissions`/`--permission-mode bypassPermissions` for
+  the relay-based approval path — that flag is confirmed to have known
+  headless failure modes when a prompt still needs to surface (GitHub
+  #54850: process halts with no way for a human to respond in a TTY-less
+  stream-json context) and refuses to start entirely under root/sudo. The
+  officially-supported interception point instead is CLI-level **hooks**
+  (`PreToolUse` etc., configured via `.claude/settings.json`, not an
+  SDK-only feature — confirmed working the same way when driving the raw
+  CLI binary): a hook can return an allow/block/ask decision per invocation,
+  which is the mechanism the dashboard's approval relay should hook into.
+  The dangerously-bypass mode maps directly to
+  `--permission-mode bypassPermissions` when the human has explicitly
+  opted into it for that session.
+- **Process lifecycle: kill-and-respawn via `--resume`, opaque
+  running/idle rendering** (owner, 2026-07-11): a Claude CLI provider
+  process only needs to stay alive while a turn or an active shell
+  subprocess it spawned is running; otherwise-idle sessions should be
+  killed after a timeout and transparently respawned via
+  `claude --resume <session_id>` on the next input, rather than held open
+  indefinitely. The browser should render a "running" and a
+  "killed-but-resumable" session as visually indistinguishable/opaque
+  states, so a human naturally experiences resuming an old chat rather than
+  perceiving a restart. This fits ws-mcp's existing stateless design (low
+  contradiction risk) and turns the SDK's per-`query()`-respawn behavior
+  (flagged as a downside in the original SDK research) into a non-issue,
+  since respawn is the intended steady state between turns anyway.
+  `--resume` session lookup is confirmed scoped to the current project
+  directory and its git worktrees (official docs); the precise disk/
+  transcript dependency and resume-after-mid-turn-kill failure modes remain
+  **unverified** and need direct testing before this phase ships.
+- **Quota/ToS risk: proceed now, revisit if it becomes a problem** (owner,
+  2026-07-11): whether driving Claude via subscription OAuth from an
+  embedded dashboard provider is inside Anthropic's ToS for
+  product-embedded SDK/CLI use is unresolved upstream (conflicting signals
+  found in research: a separate SDK-specific credit pool was reportedly
+  introduced and then reportedly paused/merged back into subscription
+  quota around the same date). Owner explicitly accepts this as a known,
+  deferred risk given immediate personal-use urgency — implement now,
+  address ToS/quota fallout later if it actually surfaces, rather than
+  blocking on upstream policy clarity that may not resolve soon.
 - **Opinionated subset per provider, not feature parity across harnesses**
   (owner, 2026-07-11): each provider adapter (Codex app-server, OpenCode ACP,
-  Claude Agent SDK) should implement only the slice of that harness's
+  Claude CLI stream-json) should implement only the slice of that harness's
   capabilities the dashboard actually needs to project through the shared
   ACP-shaped contract — not attempt to mirror every feature a given harness
   exposes. Harnesses differ in what they offer natively; the dashboard's
@@ -226,21 +283,45 @@ bounded degradation tests for missing binary/auth, subprocess startup failure,
 unreachable or incompatible ACP server state, and version drift, plus route tests
 matching the same privacy and identity constraints as the Codex adapter.
 
-### Phase 4: Claude Agent SDK provider adapter
+### Phase 4: Claude CLI stream-json duplex adapter
 
-Add a Claude provider built on the Claude Agent SDK, implementing a dashboard-
-owned duplex bridge (no native Codex-app-server-equivalent protocol exists for
-Claude, so this phase builds the bridge rather than adapting an existing one).
-Map Claude Agent SDK session/turn/message/tool/permission events into the same
-ACP-shaped provider subset the Codex and OpenCode adapters use, and project the
-result into the same Activity model. Per the opinionated-subset decision above,
-implement only the slice of Agent SDK capability the dashboard's provider
-contract actually needs; do not attempt full Agent SDK feature coverage.
+Add a Claude provider that drives the `claude` CLI binary directly in headless
+`--input-format stream-json --output-format stream-json` mode (no Agent SDK
+dependency), implementing a dashboard-owned duplex bridge (no native
+Codex-app-server-equivalent protocol exists for Claude, so this phase builds
+the bridge rather than adapting an existing one). Map the CLI's `system`/
+`assistant`/`stream_event`/`result` NDJSON events into the same ACP-shaped
+provider subset the Codex and OpenCode adapters use, and project the result
+into the same Activity model. Approval/permission interception goes through
+CLI hooks (`PreToolUse` via `.claude/settings.json`), not
+`--dangerously-skip-permissions`, so the dashboard's own approval-relay UX
+(`260711-idea-dashboard-agent-facing-mcp-control-surface`) stays the
+decision-maker; the dangerously-bypass mode maps to
+`--permission-mode bypassPermissions` only when a human has explicitly opted
+in for that session. Process lifecycle follows the kill-and-respawn-via-
+`--resume` model from the Decisions above: idle sessions (no running turn or
+child shell process) may be killed after a timeout and transparently resumed
+on next input, rendered opaquely as the same ongoing conversation. Per the
+opinionated-subset decision above, implement only the slice of CLI capability
+the dashboard's provider contract actually needs; do not attempt full CLI
+feature coverage.
 
-Verification boundary: fixture projection tests for Claude Agent SDK
-session/turn/message/tool sequences, bounded degradation tests for missing
-SDK/auth or unreachable/incompatible SDK state, and route tests matching the
-same privacy and identity constraints as the Codex and OpenCode adapters.
+Before implementation, first spend a short fixture-verification spike against
+an installed `claude` binary to confirm: the exact stream-json event shapes
+actually emitted (the bidirectional `control`/`control_request` shape is only
+documented in an unofficial third-party reference and must not be assumed),
+`--resume` behavior across process kill vs. clean exit and across working-
+directory changes, and hook-based permission interception actually firing in
+headless stream-json mode. This spike's findings should update this ticket's
+event-shape assumptions before the fixture/projection tests below are
+written.
+
+Verification boundary: fixture projection tests for Claude CLI
+session/turn/message/tool sequences (captured from the verification spike
+above, not handwritten from unofficial docs), bounded degradation tests for
+missing binary/auth, hook-misconfiguration, or unreachable/incompatible CLI
+version state, and route tests matching the same privacy and identity
+constraints as the Codex and OpenCode adapters.
 
 ### Phase 5: Activity UI and server-scoped integration
 

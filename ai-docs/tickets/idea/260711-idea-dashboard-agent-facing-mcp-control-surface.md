@@ -143,6 +143,17 @@ Activity track (`260620`) and the command-bus UI
   something that can be slotted in later without disturbing the 3-way +
   bypass shape above (it would sit as an optional pre-filter ahead of the
   human relay, not replace it), so it is not designed further here.
+- **Confirmed technical grounding for the Claude provider** (research,
+  2026-07-11, see `260620-feat-ws-dashboard-agent-client-activity-sources`
+  Phase 4): the `claude` CLI's `PreToolUse` hooks (`.claude/settings.json`,
+  confirmed to work when driving the raw CLI binary, not an SDK-only
+  feature) are the officially-supported interception point for this
+  3-way relay — a hook returns allow/block/ask per invocation. The
+  dangerously-bypass mode maps to `--permission-mode bypassPermissions`,
+  which is confirmed to have known headless failure modes when a prompt
+  still needs to surface (process halts with no human-response surface in
+  TTY-less stream-json contexts) — reinforcing that bypass should stay an
+  explicit, rare opt-in rather than a normal relay path.
 
 ## Open Points
 
