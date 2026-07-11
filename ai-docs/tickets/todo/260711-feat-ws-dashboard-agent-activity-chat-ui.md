@@ -92,6 +92,17 @@ static layout/shell work can proceed in parallel against a stub provider.
       from here" disabled/hidden everywhere at first while only "fork from
       here" (backed by the confirmed-real `thread/fork`) ships in the first
       pass.
+    - **Build "resume from here" for cheap removal/disabling (owner,
+      2026-07-11)**: given the risk above, implement "resume from here" as
+      an isolated, independently toggleable feature from day one — its own
+      component/module, its own feature flag or config gate, and its own
+      per-harness capability check — not inlined into the shared bubble/
+      turn rendering path. It should be removable or disabled per-harness (or
+      entirely) by flipping one flag/removing one module, without touching
+      "fork from here" or the rest of the conversation view. Treat it as an
+      experimental affordance likely to need iteration or outright removal,
+      not a committed permanent feature, until a harness's rewind primitive
+      is confirmed solid enough to build on.
   - If the user submits a message while an agent turn is still in progress,
     it is queued rather than rejected or requiring the human to wait
     (**owner, 2026-07-11, interview**):
@@ -171,7 +182,12 @@ the Cross-Harness Feature Matrix. Per the Decisions above, re-check
 "resume from here" against `260620`'s matrix before enabling it live per
 harness — it may need to ship disabled/hidden everywhere in the first pass
 if no harness's rewind primitive cleanly supports exact-point rewind by
-then, shipping only "fork from here" first.
+then, shipping only "fork from here" first. Implement "resume from here" as
+its own isolated component/module behind its own feature flag/capability
+gate, separate from "fork from here" and the shared bubble/turn rendering —
+it must be removable or disable-able (globally or per harness) by flipping
+one flag or deleting one module, since it is expected to need experimental
+iteration or outright removal as harness rewind primitives evolve.
 
 Implement mid-turn user-submission queuing: an immediately-rendered pending
 user bubble with a "pending/queued" badge that clears once delivered next
