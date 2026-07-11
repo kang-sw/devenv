@@ -1,6 +1,7 @@
 ---
 title: "Allow low-ceremony direct edits to stay on the current branch"
 sage-review-design: completed
+sage-review-completeness: completed
 related:
   260630-epic-skill-playbook-diet: preserve the dieted playbook boundary by keeping deterministic routing in enter.implement
   260703-chore-implement-branch-rename-default-allow: adjacent branch-plan policy work whose isolation behavior remains the standard path
