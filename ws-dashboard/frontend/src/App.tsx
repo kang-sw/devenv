@@ -5002,6 +5002,20 @@ function WorkbenchShell({
         ...currentByRoot,
         [workbenchModel.root.id]: result.paneOrderByGroup,
       }));
+      // `terminalPaneOrderByGroup` is a separate registry from
+      // `paneOrderByRoot` (see the CONTRACT note near its declaration), so a
+      // drag/drop move must be mirrored into it for terminal panes or
+      // `terminalWorkbenchPanesByGroup` snaps them back to their original
+      // group on the next render.
+      setTerminalPaneOrderByGroup((current) => {
+        const next = { ...current };
+        for (const [groupId, paneIds] of Object.entries(
+          result.paneOrderByGroup,
+        )) {
+          next[groupId] = paneIds.filter((id) => id in terminalPanes);
+        }
+        return next;
+      });
     }
     setActivePaneByGroupForSelected(result.activePaneByGroup);
   };
