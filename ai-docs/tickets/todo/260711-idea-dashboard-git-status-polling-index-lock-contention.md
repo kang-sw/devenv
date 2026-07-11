@@ -79,9 +79,43 @@ resulting contention/stale-lock symptom more visibly than POSIX would.
   watchers can surface spurious/duplicate events during git's own
   lock-rename sequence, so debouncing is required either way.
 
+## Decisions
+
+- **Near-term fix** (owner, 2026-07-11): apply `--no-optional-locks`
+  (equivalently, `GIT_OPTIONAL_LOCKS=0` on the subprocess environment) to
+  the specific polling invocations that touch the index while looking
+  read-only — `status --porcelain` (`git_toolbar.rs:455`) and `diff
+  --numstat`. Judged the best near-term cost/benefit: it removes the
+  actual lock-taking behavior from routine polling directly, rather than
+  just narrowing the collision window like a queue/guard would. No
+  correctness risk identified: the only cost is that git skips writing
+  back its refreshed index stat-cache on these specific calls, so each
+  poll may re-stat working-tree files instead of reusing a cached mtime
+  snapshot — a minor, bounded perf cost, not a correctness concern, and it
+  does not touch any real git operation a human runs (commit, add, etc.),
+  since those are separate invocations outside the polling path. Calls
+  that never touch the index (`branch --show-current`, `rev-parse`,
+  `rev-list`) don't need the flag and are unaffected.
+- **Long-term direction** (owner, 2026-07-11): the `notify`-crate-based
+  watch approach (see Findings/Candidate fix directions above) is the
+  target architecture — replace fixed-interval polling with
+  change-triggered refresh on `.git/index`/`.git/HEAD`/`.git/refs/**`.
+  Not scheduled yet; the near-term flag fix ships first since it is
+  independent, small, and lower-risk, and does not block or get
+  superseded by the later watch-based work (the watch-triggered refresh
+  would still want `--no-optional-locks` on its own status calls).
+- The per-repo single-flight guard (candidate direction 1) is no longer
+  the primary target now that the near-term fix removes the lock-taking
+  mechanism directly rather than just reducing collision odds. It may
+  still be worth revisiting later purely to cut redundant polling load
+  (CPU/subprocess churn), but that is a performance concern distinct from
+  the lock-contention bug this ticket was filed for, and is not an
+  immediate priority.
+
 ## Non-Goals
 
-- Deciding the final fix (single-flight guard vs. `--no-optional-locks`
-  vs. watch-based rearchitecture vs. some combination) — this ticket
-  records the investigation and candidate directions; a follow-up
-  implementation-ready ticket should pick and scope one.
+- Scheduling or scoping the long-term watch-based rearchitecture as its
+  own implementation-ready ticket — tracked here as the accepted target
+  direction only; a follow-up ticket should pick this up when prioritized.
+- Revisiting the single-flight guard as a load-reduction optimization —
+  separate concern, not blocking the near-term fix.
