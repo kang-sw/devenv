@@ -17,7 +17,7 @@ related-mental-model:
   - mcp-runtime
   - named-agent-runtime
   - plugin-runtime
-sage-review: pending
+sage-review: completed
 ---
 
 # ws dashboard agent-client activity sources
@@ -518,9 +518,17 @@ rather than being assumed.
   agent pane; new provider activity should flow through `items`.
 - The current event vocabulary already supports item upserts/removals,
   transcript updates, snapshot invalidation, mode changes, and heartbeats.
-- The dashboard daemon is explicitly not ws MCP root, harness, model-backend, or
-  agent-session authority. It consumes provider state through daemon-owned view
-  models and provider adapters.
+- The dashboard daemon is explicitly not ws MCP root, harness, or
+  model-backend authority. **Note (2026-07-11): "agent-session authority"
+  here means ws MCP session-key/root authority specifically, not a
+  read-only restriction on harness-native session control** — the scope
+  supersession in Decisions above has the dashboard driving harness-native
+  session create/resume/send/compact/fork/goal primitives directly. This
+  line predates that decision and is retained only for the narrower ws-MCP-
+  authority point; do not read it as re-imposing the old read-only framing.
+  The dashboard consumes provider state through daemon-owned view models
+  and provider adapters, and drives provider-native session control through
+  the same adapters — never through ws MCP session-key minting.
 
 ## Constraints
 
@@ -588,9 +596,20 @@ current variants.
 Transcript payloads continue to use `TranscriptBlock` as the only browser
 backfill format. Codex app-server item/notification records and OpenCode ACP
 messages/events must normalize into bounded user, assistant, tool/command,
-file-change, approval-needed, status, and diagnostic blocks. Unknown provider
-records degrade to bounded diagnostic/status blocks rather than leaking raw
-provider JSON.
+file-change, approval-needed, status, diagnostic, and **thinking** blocks.
+Unknown provider records degrade to bounded diagnostic/status blocks rather
+than leaking raw provider JSON.
+
+**`thinking` block kind added 2026-07-11** (fixture-review follow-up): both
+Claude's `assistant` stream event (per Decisions above) and Codex's item
+stream (reasoning/thinking content, distinct from `assistant` text) carry
+extractable thinking/reasoning content where the harness exposes it. This is
+its own `renderKind: "thinking"` `TranscriptBlock`, not a sub-field buried
+inside an `assistant` block — `260711-feat-ws-dashboard-agent-activity-chat-ui`'s
+collapsible-thinking-block UI (default collapsed, interleaved between
+surrounding agent content) renders directly against this kind. A harness
+that exposes no such content simply never emits this kind; the UI has
+nothing to collapse for it.
 
 ## Phases
 
@@ -733,6 +752,17 @@ and in Decisions/the Feature Matrix above. `thread/rollback` exists but is
 deprecated for removal and should not be designed around. Unknown event
 types must degrade without breaking the whole Activity feed.
 
+Before spawning, this adapter must also enforce the ws/wsflow
+plugin-presence precondition from the Decisions section above: check
+whether Codex exposes a no-session plugin-listing CLI surface analogous to
+`claude plugin list`/`claude plugin details` (unverified as of 2026-07-11 —
+do not assume it exists; this is this phase's own fixture check to run, not
+an already-answered question), and refuse to spawn with install guidance if
+neither `ws` nor `wsflow` is installed/enabled for the target project. If no
+such CLI surface exists for Codex, fall back to whatever detection method
+the fixture check turns up (e.g. reading Codex's own config/MCP-registration
+file) rather than skipping the precondition.
+
 **Fixture-verification spike: completed (2026-07-11)**. Exact invocation:
 `codex app-server [--listen stdio://|unix://[PATH]|ws://IP:PORT|off]`,
 default `stdio://`; `--stdio` is shorthand for `--listen stdio://`. Rather
@@ -753,13 +783,15 @@ written, since schema shape alone does not capture real event *sequencing*.
 
 Verification boundary: fixture projection tests for representative Codex
 thread/turn/item sequences (captured from the spike above), route tests
-proving browser payloads omit provider session ids and raw paths, and a local
-smoke path that can be run when Codex app-server is available. The WSL smoke
-should run against the locally installed `codex app-server --stdio` binary
-and prove that a real turn — including a Codex-native compact/rewind/fork/
-skills call — can appear in and be driven from the dashboard Activity Console
-without requiring dashboard owner pairing when the daemon is explicitly
-started through the loopback-only no-auth debug profile.
+proving browser payloads omit provider session ids and raw paths, a test
+proving spawn is refused with install guidance when the ws/wsflow
+plugin-presence check fails, and a local smoke path that can be run when
+Codex app-server is available. The WSL smoke should run against the locally
+installed `codex app-server --stdio` binary and prove that a real turn —
+including a Codex-native compact/rewind/fork/skills call — can appear in and
+be driven from the dashboard Activity Console without requiring dashboard
+owner pairing when the daemon is explicitly started through the
+loopback-only no-auth debug profile.
 
 ### Phase 3: OpenCode ACP provider adapter
 
@@ -779,10 +811,19 @@ Activity projection, not either provider's wire protocol. OpenCode serve may
 be used only as an optional observation/discovery supplement if a concrete
 gap appears that ACP does not cover cheaply.
 
+This adapter must also enforce the ws/wsflow plugin-presence spawn
+precondition from the Decisions section above: check whether OpenCode
+exposes a no-session plugin-listing CLI surface (unverified as of
+2026-07-11 — this is part of this phase's own future fixture spike, not an
+already-answered question), and refuse to spawn with install guidance if
+neither `ws` nor `wsflow` is installed/enabled for the target project.
+
 Verification boundary: fixture projection tests for OpenCode ACP messages/events,
 bounded degradation tests for missing binary/auth, subprocess startup failure,
-unreachable or incompatible ACP server state, and version drift, plus route tests
-matching the same privacy and identity constraints as the Codex adapter.
+unreachable or incompatible ACP server state, and version drift, a test
+proving spawn is refused with install guidance when the ws/wsflow
+plugin-presence check fails, plus route tests matching the same privacy and
+identity constraints as the Codex adapter.
 
 ### Phase 4: Claude CLI stream-json duplex adapter
 
@@ -807,6 +848,14 @@ opinionated-subset decision above, implement only the slice of CLI capability
 the dashboard's provider contract actually needs; do not attempt full CLI
 feature coverage.
 
+This adapter must also enforce the ws/wsflow plugin-presence spawn
+precondition from the Decisions section above: `claude plugin list` /
+`claude plugin details <plugin>` are already confirmed as a no-session CLI
+surface for this (see the skill-listing fixture spike), so this phase can
+implement the check directly rather than treating it as unverified; refuse
+to spawn with install guidance if neither `ws` nor `wsflow` is
+installed/enabled for the target project.
+
 Before implementation, first spend a short fixture-verification spike against
 an installed `claude` binary to confirm: the exact stream-json event shapes
 actually emitted (the bidirectional `control`/`control_request` shape is only
@@ -821,8 +870,10 @@ Verification boundary: fixture projection tests for Claude CLI
 session/turn/message/tool sequences (captured from the verification spike
 above, not handwritten from unofficial docs), bounded degradation tests for
 missing binary/auth, hook-misconfiguration, or unreachable/incompatible CLI
-version state, and route tests matching the same privacy and identity
-constraints as the Codex and OpenCode adapters.
+version state, a test proving spawn is refused with install guidance when
+`claude plugin list` shows neither `ws` nor `wsflow` installed/enabled, and
+route tests matching the same privacy and identity constraints as the Codex
+and OpenCode adapters.
 
 ### Phase 5: Activity UI and server-scoped integration
 

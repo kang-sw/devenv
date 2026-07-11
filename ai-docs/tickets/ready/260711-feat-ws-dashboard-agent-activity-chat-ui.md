@@ -7,7 +7,7 @@ related:
 related-mental-model:
   - ws-dashboard-agent-harness
   - ws-web-dashboard
-sage-review: pending
+sage-review: completed
 ---
 
 # ws dashboard agent activity chat UI
@@ -162,11 +162,19 @@ static layout/shell work can proceed in parallel against a stub provider.
 Implement the top-right "open new agent tab" button, the empty-tab
 "current conversation" resume popup wired to the cross-harness history list,
 and the three per-harness "start fresh" tiles. This phase can proceed against
-a stub/mock provider ahead of `260620`'s adapters landing.
+a stub/mock provider ahead of `260620`'s adapters landing. **Tile-launch
+semantics (fixture-review follow-up, 2026-07-11)**: clicking a tile actually
+calls `activity.session.create`/`start` against whatever provider is wired
+in (the real adapter once available, a stub that returns a synthetic
+session/transcript in the meantime) — it is not a UI-only state transition
+that waits for Phase 3/4 wiring to do anything. This keeps Phase 1
+independently testable end-to-end against the stub before real adapters
+land.
 
 Verification boundary: frontend route/model tests for tab creation and the
 resume-popup list rendering; browser-level acceptance evidence for the tile
-launch flow.
+launch flow actually invoking `activity.session.create`/`start` and
+rendering the (stubbed or real) resulting session.
 
 ### Phase 2: Streaming conversation rendering
 
