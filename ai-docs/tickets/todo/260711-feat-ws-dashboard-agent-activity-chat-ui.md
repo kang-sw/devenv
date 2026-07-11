@@ -120,15 +120,20 @@ static layout/shell work can proceed in parallel against a stub provider.
       prompt input in an editable state and cancels the queued submission
       (the pending bubble is removed; nothing is sent for it).
   - Every chat bubble (user, agent-turn, and tool-use) has a copy button.
-- **Open, not-yet-decided**: whether the dashboard should maintain its own
-  skill/capability layer instead of relaying each harness's native skill
-  listing as-is, given observed unreliability in per-harness native skill
-  discovery (see `260620` Decisions). This affects whether
-  `activity.session.skills` ships as a thin per-harness passthrough or a
-  dashboard-owned aggregation/override layer, and in turn whether this UI's
-  skill-invocation affordance needs its own dashboard-owned picker rather
-  than relaying a harness's native list. Resolve before implementing that
-  affordance.
+- **Skill-layer question narrowed, not fully resolved (2026-07-11 update)**:
+  `260620`'s follow-up fixture check against the installed Claude CLI found
+  Claude's skill listing is not uniformly Unavailable after all — it splits
+  into a real Passthrough surface for plugin-provided skills (`claude
+  plugin list` + `claude plugin details <plugin>`, no session needed) plus
+  an Overlay filesystem scan for loose/project `SKILL.md` skills that have
+  no CLI listing surface at all. This means `activity.session.skills` for
+  Claude is inherently a small dashboard-owned union/aggregation (two
+  sources merged into one list) even in the "thin passthrough" case — the
+  open question narrows to whether this UI's skill-invocation affordance
+  needs anything *beyond* that union (e.g. dashboard-side caching, manual
+  overrides, cross-harness skill-name normalization) or whether the union
+  itself is a sufficient dashboard-owned skill layer. Resolve the narrowed
+  question before implementing the skill-invocation affordance.
 - **Broader dashboard layout adjustment** (owner concern raised 2026-07-11,
   not yet detailed): the owner flagged that fitting this interactive chat
   surface well may require adjusting the dashboard's existing layout beyond

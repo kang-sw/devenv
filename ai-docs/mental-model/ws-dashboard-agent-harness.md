@@ -51,7 +51,16 @@ related:
   silent on `/compact` — that enumeration gap is inference, not proof, so
   the cell stays Unavailable until a real fixture spike (send literal
   `/compact` via stream-json to an installed `claude` binary and check for a
-  compaction/system event) settles it; subagent listing has no clean
+  compaction/system event) settles it; skill/capability listing for Claude
+  is **split, fixture-verified directly against installed `claude` 2.1.207**
+  (2026-07-11): plugin-provided skills are Passthrough via `claude plugin
+  list` + `claude plugin details <plugin>` (no session needed, real skill
+  names per enabled plugin), while loose/project `SKILL.md` skills not
+  packaged as a plugin have no CLI listing surface at all (confirmed:
+  `plugin details <name>`/`<name>@skills-dir` both report "not found" for a
+  real loose skill the running session resolves) and stay Overlay via a
+  dashboard-owned filesystem scan of `~/.claude/skills/**/SKILL.md` and
+  project-local `.claude/skills/**/SKILL.md`; subagent listing has no clean
   harness-native surface anywhere and should default to modeling a subagent
   as an ordinary nested Activity/session row rather than inventing a bespoke
   API; goal/loop (repeat-until-condition) has no harness-native primitive on

@@ -275,6 +275,36 @@ as host-owned agent-client data.
     **Verdict**: not safe as a uniform common-subset call yet; Codex has the
     clearest native support, the other two are unverified-or-absent —
     revisit after a fixture pass rather than assuming parity.
+    - **Claude column split into two mechanisms, fixture-verified directly
+      against the installed `claude` CLI 2.1.207 (2026-07-11, owner-prompted
+      follow-up)**: there is no dedicated `claude skills list`/`claude
+      --skills` command, but a genuine no-session CLI-native surface does
+      exist for **plugin-provided** skills: `claude plugin list` (resolved,
+      per-scope user/project, enabled/disabled state, no session needed) and
+      `claude plugin details <plugin>` (per-plugin "Component inventory"
+      including exact skill names, e.g. `document-skills` → `docx, pdf,
+      pptx, xlsx`) — confirmed real by running both commands directly.
+      Enable/disable state for these is authoritative in
+      `settings.json`'s `enabledPlugins` map. **Gap**: standalone/loose
+      skills dropped directly under `~/.claude/skills/<name>/` or a
+      project's `.claude/skills/<name>/` (not packaged as a plugin) do
+      **not** appear in `plugin list`/`plugin details` on this installed
+      version, despite `plugin init --help` text mentioning
+      "skills-dir plugins" — confirmed by testing against a real loose skill
+      directory present in this environment (`~/.claude/skills/typst/`,
+      which the running session lists as available but which `plugin
+      details typst`/`typst@skills-dir` both reported "not found"). Getting
+      a fully resolved list therefore requires **two mechanisms combined**:
+      Passthrough `plugin list`/`plugin details` for plugin-provided skills,
+      plus a dashboard-owned filesystem scan of `~/.claude/skills/**/
+      SKILL.md` and project-local `.claude/skills/**/SKILL.md`
+      frontmatter (name/description) for loose/project skills, gated on
+      whether the spawn used `--safe-mode`/`--disable-slash-commands` (both
+      disable all skills globally). **Verdict**: reclassify from a flat
+      Unavailable — plugin-skill listing is Passthrough (real CLI surface,
+      confirmed), loose/project-skill listing stays Overlay (dashboard
+      filesystem scan), and the union of both is what backs
+      `activity.session.skills` for the Claude column.
   - **"Goal"/loop native support — revised, Codex column wrong before the
     fixture spike**: the original WebSearch-only pass missed Codex's native
     `thread/goal/set` / `thread/goal/get` / `thread/goal/clear` RPC family
@@ -408,7 +438,7 @@ read-only observation mechanism orthogonal to this control-risk tiering.
 | Manual compaction trigger | Passthrough (`thread/compact/start`, params `{threadId}`, empty `{}` response — result arrives async via `thread/compacted`; the older `ContextCompactedNotification` is deprecated — **fixture-verified**) | *Unverified* | Unavailable (auto-only; would become Hack if a workaround were attempted; headless `/compact`-as-text research below stays inconclusive) |
 | Rewind/rollback (turn-count-from-end, not point-based) | Passthrough **but deprecated for removal** (`thread/rollback`, params `{threadId, numTurns}`, drops N turns from the end, does not revert file changes — **fixture-verified**; do not design new functionality around this RPC) | *Unverified*, likely Unavailable | Hack (transcript-file truncation workaround; no officially-documented method) |
 | Fork new branch from a point | Passthrough (`thread/fork`, by threadId or path — **fixture-verified**) | *Unverified*, likely Unavailable | Hack (same workaround as rewind) |
-| Skill/capability listing | Passthrough (`skills/list`, params `{cwds?, forceReload?}`, response `{data: SkillsListEntry[]}`, current/not deprecated — **fixture-verified**) | *Unverified* | Unavailable (session-start `tools`/`capabilities` metadata only, not on-demand project-skill listing) |
+| Skill/capability listing | Passthrough (`skills/list`, params `{cwds?, forceReload?}`, response `{data: SkillsListEntry[]}`, current/not deprecated — **fixture-verified**) | *Unverified* | **Split, fixture-verified**: Passthrough for plugin-provided skills (`claude plugin list` + `claude plugin details <plugin>`, no session needed); Overlay for loose/project `SKILL.md` skills not packaged as a plugin (dashboard filesystem scan — no CLI surface lists these) |
 | Subagent list + per-subagent transcript | Unavailable (fixed "Guardian" role only, not a general registry) | Overlay candidate (if child sessions are ordinary ACP sessions, list/relate them via existing session primitives — pending fixture check) | Unavailable (no documented CLI-level introspection surface) |
 | Goal state tracking (objective/status/token budget) | Passthrough (`thread/goal/set`/`get`/`clear`, `{threadId, objective?, status?, tokenBudget?}`, with `thread/goal/updated`/`thread/goal/cleared` notifications — **fixture-verified**; missed entirely by the original WebSearch-only pass) | Unavailable (no confirmed equivalent) | Unavailable (no confirmed equivalent) |
 | Goal/loop (repeat-until-condition auto-looping) | Overlay (no evidence the server itself auto-loops turns to satisfy a goal objective — dashboard must still drive re-sends, optionally informed by native goal state above) | Overlay (dashboard-built on top of `send`) | Overlay (same) |
@@ -613,9 +643,16 @@ contract):
   - `activity.session.skills(activityId)` — list invokable
     skills/commands/plugins. Codex-native (`skills/list`, params
     `{cwds?, forceReload?}`, response `{data: SkillsListEntry[]}` —
-    **fixture-verified**, current/not deprecated); OpenCode and Claude have
-    no confirmed on-demand listing call (Claude only reports
-    `tools`/`capabilities` at session-start, not project-local skills).
+    **fixture-verified**, current/not deprecated); OpenCode has no confirmed
+    on-demand listing call. Claude's adapter must union two sources
+    (**fixture-verified against the installed `claude` CLI 2.1.207**): run
+    `claude plugin list` then `claude plugin details <plugin>` for each
+    enabled plugin (Passthrough, no session needed, returns real skill
+    names per plugin) plus a filesystem scan of `~/.claude/skills/**/
+    SKILL.md` and project-local `.claude/skills/**/SKILL.md` frontmatter for
+    loose/project skills not packaged as a plugin (Overlay — confirmed no
+    CLI surface lists these; `plugin details <loose-skill-name>` reports
+    "not found" even for a skill the running session actually resolves).
 - **Deliberately not modeled as a bespoke API**: subagent
   listing-plus-per-subagent-transcript-streaming. No harness has clean
   native support for this shape. Pending an OpenCode fixture check of its
