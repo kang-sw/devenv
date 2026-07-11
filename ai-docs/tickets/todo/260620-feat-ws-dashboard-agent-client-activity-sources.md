@@ -148,6 +148,24 @@ as host-owned agent-client data.
   its harness technically supports if the extra surface has no dashboard
   consumer yet. This keeps adapter scope bounded and avoids the "recreate
   harness development" risk this ticket already guards against.
+- **Dashboard is the spawn authority for all three harnesses; ws session-key
+  injection happens at spawn time** (owner, 2026-07-11): consistent with how
+  the dashboard already manages terminal PTY child processes, the dashboard
+  daemon is the process owner for Codex app-server, OpenCode ACP, and the
+  Claude CLI alike — it spawns each harness subprocess itself (Codex via
+  `codex app-server --stdio` or the verified equivalent invocation, OpenCode
+  via `opencode acp`, Claude via the headless stream-json CLI invocation),
+  not merely attaching to an externally-started process. Per the epic's
+  ferrule-backed session-binding model, the daemon calls `ws.ferrule(root)`
+  in its local ws environment before spawning, then injects the returned key
+  into the child process's launch context (CLI arg or environment variable,
+  whichever each harness's own invocation supports) and keeps it only in
+  daemon-private binding state alongside the provider-native session id and
+  the browser-facing `activityId` — never as three interchangeable ids. This
+  applies uniformly to Phase 2/3/4; per-harness setup a user must do outside
+  the dashboard (installing the CLI, logging in / authenticating that CLI)
+  is a precondition for spawn succeeding, not a reason the dashboard itself
+  doesn't own the spawn.
 - **Cross-provider common interactive subset** (elevated 2026-07-11 as the
   explicit shared design object spanning all three confirmed duplex-capable
   harnesses — Codex app-server, OpenCode ACP, Claude CLI stream-json):
@@ -283,30 +301,31 @@ as host-owned agent-client data.
   `workRootId`, `activityId`, and transcript cursors. Do not expose provider
   session ids, ws `session_key` values, cache paths, transcript paths, process
   ids, or raw provider event ids as browser authority.
-- Keep browser Activity read-only for this track. The provider contract may model
-  interactive capabilities so Codex app-server and OpenCode ACP can share one
-  adapter shape, but exposing start, interrupt, cancel, retry, erase, permission
-  approval, or provider-specific steering controls in the dashboard UI requires
-  later high-friction control tickets.
-  - **Tension flagged, not resolved (2026-07-11)**: Phase 1's
-    "frontend interaction-API draft" below — `activity.session.create`,
-    `activity.session.start`, `activity.session.send`, and the
-    per-harness-gated compact/rewind/skills controls — is explicitly
-    interactive/write, not read-only. This directly contradicts the
-    read-only decision stated in this same bullet and in Constraints
-    below ("the browser must not expose those controls in this track").
-    Today's session drove the API-list design as if interactive control
-    were in scope for this ticket, which is a real shift from the
-    original read-only Activity Console framing, not a clarification of
-    it. This is not silently resolved here — the owner should explicitly
-    decide whether this ticket's scope now includes interactive
-    session control (superseding the read-only decision), or whether the
-    interactive API draft belongs in a split-off ticket that inherits
-    this one's provider/subset work but is gated as its own
-    higher-friction control surface, consistent with how
-    `260711-idea-dashboard-agent-facing-mcp-control-surface` already
-    treats execution-approval as higher-tension than read/display
-    actions.
+- **Scope supersedes prior read-only framing: full-spec interactive agent
+  harness interface (owner, 2026-07-11, resolves the tension flagged
+  below)**: this ticket's scope now explicitly includes interactive session
+  control — start, create, resume, send/receive, and the per-harness-gated
+  compact/rewind/fork/skills controls from Phase 1's frontend
+  interaction-API draft — not just read-only Activity projection. The
+  browser is meant to become a genuine full-spec agent-harness client
+  surface across Codex app-server, OpenCode ACP, and the Claude CLI, not a
+  read-only observation pane over harness-owned state. The prior "Keep
+  browser Activity read-only for this track" decision and the matching
+  Constraints language are superseded by this decision, not merely
+  clarified. What still stays out of scope (per the epic's Non-Scope and
+  this ticket's own Decisions above): the dashboard does not become ws MCP
+  root/session authority, does not run its own model loop or edit/permission
+  engine, and does not attempt Hack-tier capabilities inside these normal
+  phases (those still need a separate, explicitly-labeled ticket per the
+  Cross-Harness Feature Matrix's Phase-implication guidance below).
+  - **Resolved tension (2026-07-11)**: Phase 1's "frontend interaction-API
+    draft" — `activity.session.create`, `activity.session.start`,
+    `activity.session.send`, and the per-harness-gated compact/rewind/skills
+    controls — was flagged as directly contradicting the read-only decision
+    and Constraints text as of the same date. The owner has now confirmed
+    (a): this ticket's scope explicitly includes interactive session
+    control, superseding the read-only decision rather than splitting it
+    into a separate ticket.
 
 ## Cross-Harness Feature Matrix (owner + research, 2026-07-11)
 
@@ -403,30 +422,44 @@ rather than being assumed.
 - Adapter contracts must be fixture-backed by captured provider events or schema
   snapshots because Codex app-server, OpenCode ACP, and OpenCode serve surfaces
   can drift by installed version.
-- The first implemented subset is limited to read/list/stream/render behavior:
-  source connection state, thread/session/activity rows, turn lifecycle,
-  assistant/user messages, tool or command summaries, file-change summaries,
-  blocked/approval-needed state, model/cwd/git metadata, and transcript backfill.
-  Interactive provider methods may exist in the internal contract only when
-  needed to represent the shared Codex app-server/OpenCode ACP lifecycle; the
-  browser must not expose those controls in this track.
-- Provider-specific controls remain out of scope. Adding UI controls before the
-  read model and provider lifecycle mapping are stable would recreate the
-  discarded harness-development problem.
-- Server-scoped dashboard operation is a dependency for linked remote hosts.
-  Activity source ids, stream subscriptions, transcript routes, and persisted UI
-  state must include or derive `serverId` before remote Codex/OpenCode activity
-  can be transparent.
+- **Superseded 2026-07-11**: the subset is no longer read/list/stream/render
+  only. Interactive session control (start/create/resume/send, plus the
+  per-harness-gated compact/rewind/fork/skills controls) is now in scope per
+  the Decisions supersession above. What must still be avoided is *harness
+  development* itself — a new model loop, edit engine, or permission runtime
+  owned by the dashboard — not interactive control of the existing harnesses'
+  own official session/turn primitives. Hack-tier capabilities (per the
+  Cross-Harness Feature Matrix) still stay out of these normal phases and
+  need a separate, explicitly-labeled ticket with owner risk sign-off.
+- Server-scoped dashboard operation is not special design work for this
+  ticket — it is the same existing Server Route pattern every other
+  dashboard resource (terminal, git worktree, file routes) already follows
+  (`ws-web-dashboard` Domain Rules: every non-local-gateway API lives under
+  `/api/dashboard/servers/{serverRoute}/...`). The reminder here exists only
+  because a brand-new subsystem is an easy place to accidentally regress
+  that pattern (e.g. keying a new provider-process registry by `workRootId`
+  alone and forgetting `serverId`) — not because remote agent-harness
+  sessions need a new or different design. Activity source ids, stream
+  subscriptions, transcript routes, and persisted UI state must include or
+  derive `serverId` the same way existing resources already do.
 
 ## Public Interface Briefing
 
 This track intentionally touches the dashboard's browser-facing Activity
-interface, but the first implementation should keep the route set stable.
-Existing routes remain the public entrypoints:
+interface. The existing read routes remain stable entrypoints:
 
 - `GET /api/dashboard/work-roots/{workRootId}/activity`
 - `GET /api/dashboard/work-roots/{workRootId}/activity/items/{activityId}/transcript`
 - `GET /api/dashboard/work-roots/{workRootId}/activity/events`
+
+**Superseded 2026-07-11**: since interactive session control is now in scope
+(see Decisions supersession above), Phase 1 also needs new write routes
+backing `activity.session.create/start/send` and the per-harness-gated
+compact/rewind/fork/skills methods from the frontend interaction-API draft
+below. These are new authenticated routes under the same
+`/api/dashboard/servers/{serverRoute}/...`-scoped, `workRootId`/`activityId`
+identity model as the existing read routes — not a parallel identity or
+routing scheme.
 
 The public change is inside the source-neutral payload contract. `ActivityFeed`
 continues to expose `items` as the primary Activity list and `agents` as the
@@ -545,36 +578,58 @@ assert that mixed source rows keep using the existing Activity routes and that
 browser payloads tolerate unknown future source/provider kinds without treating
 them as named agents.
 
-### Phase 2: Codex app-server read adapter
+### Phase 2: Codex app-server read/write adapter
 
-Add a Codex app-server provider that can connect through a local transport, read
-or subscribe to thread/turn/item state, map Codex lifecycle concepts into the
-ACP-shaped provider subset, and project native Codex activity into `ActivityItem`
-rows and `TranscriptBlock` backfill. Prefer generated or captured schema
-fixtures over handwritten assumptions. For the first dogfood path, prefer the
-default stdio transport and a minimal JSON-RPC subset: initialize, read/list
-stored threads when available, start a thread/turn for smoke verification, and
-consume thread/turn/item notifications into Activity rows and transcript blocks.
-Unknown event types must degrade without breaking the whole Activity feed.
+The dashboard daemon spawns `codex app-server --stdio` (or the verified
+equivalent invocation for the installed version) as a child process per the
+spawn-authority decision above, speaks its JSON-RPC stdio protocol, maps
+Codex lifecycle concepts into the ACP-shaped provider subset, and projects
+native Codex activity into `ActivityItem` rows and `TranscriptBlock` backfill.
+Prefer generated or captured schema fixtures over handwritten assumptions.
+Now that interactive control is in scope (see Decisions supersession above),
+this phase covers both the read/project path and the Passthrough write
+capabilities from the Cross-Harness Feature Matrix that are Codex-native:
+session create/resume/send, `thread/compact/start`, `thread/rollback`,
+`thread/fork`, and `skills/list`. Unknown event types must degrade without
+breaking the whole Activity feed.
+
+Before implementation, run a short fixture-verification spike against the
+installed `codex` binary (already installed and logged in, per owner
+confirmation 2026-07-11) to confirm: the exact CLI invocation and JSON-RPC
+handshake/capability shape, real thread/turn/item event shapes, and whether
+`thread/compact/start`/`thread/rollback`/`thread/fork`/`skills/list` actually
+exist and their real request/response field names — replacing this ticket's
+current WebSearch-only claims with captured fixtures. This spike's findings
+must update this phase's event-shape assumptions before the projection tests
+below are written (mirrors the spike requirement already stated for Phase 4).
 
 Verification boundary: fixture projection tests for representative Codex
-thread/turn/item sequences, route tests proving browser payloads omit provider
-session ids and raw paths, and a local smoke path that can be run when Codex
-app-server is available. The WSL smoke should run against the locally installed
-`codex app-server --stdio` binary and prove that a real turn can appear in the
-dashboard Activity Console without requiring dashboard owner pairing when the
-daemon is explicitly started through the loopback-only no-auth debug profile.
+thread/turn/item sequences (captured from the spike above), route tests
+proving browser payloads omit provider session ids and raw paths, and a local
+smoke path that can be run when Codex app-server is available. The WSL smoke
+should run against the locally installed `codex app-server --stdio` binary
+and prove that a real turn — including a Codex-native compact/rewind/fork/
+skills call — can appear in and be driven from the dashboard Activity Console
+without requiring dashboard owner pairing when the daemon is explicitly
+started through the loopback-only no-auth debug profile.
 
 ### Phase 3: OpenCode ACP provider adapter
 
-Add an OpenCode ACP provider that starts or attaches to `opencode acp`, speaks
-the ACP stdio JSON-RPC flow, maps OpenCode sessions/messages/tool activity and
-permission states into the same ACP-shaped provider subset, and projects the
-result into the same Activity model as Codex app-server. Keep this adapter
-independent of Codex-specific assumptions; the common contract is the dashboard
-provider subset and Activity projection, not either provider's wire protocol.
-OpenCode serve may be used only as an optional observation/discovery supplement
-if a concrete gap appears that ACP does not cover cheaply.
+**Blocked pending install (owner, 2026-07-11)**: OpenCode is not installed in
+this environment, so its fixture-verification spike cannot run yet. This
+phase's design intent below stands, but implementation should wait until
+OpenCode is installed and a spike (mirroring Phase 2/4) can capture real ACP
+event shapes; do not implement against WebSearch-only assumptions.
+
+The dashboard daemon spawns `opencode acp` as a child process per the
+spawn-authority decision above, speaks the ACP stdio JSON-RPC flow, maps
+OpenCode sessions/messages/tool activity and permission states into the same
+ACP-shaped provider subset, and projects the result into the same Activity
+model as Codex app-server. Keep this adapter independent of Codex-specific
+assumptions; the common contract is the dashboard provider subset and
+Activity projection, not either provider's wire protocol. OpenCode serve may
+be used only as an optional observation/discovery supplement if a concrete
+gap appears that ACP does not cover cheaply.
 
 Verification boundary: fixture projection tests for OpenCode ACP messages/events,
 bounded degradation tests for missing binary/auth, subprocess startup failure,
