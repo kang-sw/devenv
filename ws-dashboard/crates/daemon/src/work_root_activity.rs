@@ -195,13 +195,39 @@ pub async fn work_root_activity(
         Err(error) => return activity_access_error(error),
     };
 
-    Json(
-        state
-            .work_root_activity
-            .project_with_recent_limit(work_root_id, &root_path, query.recent_limit)
-            .await,
+    let mut feed = state
+        .work_root_activity
+        .project_with_recent_limit(work_root_id.clone(), &root_path, query.recent_limit)
+        .await;
+    // Step 6: merge live Codex app-server sessions into the unified feed's
+    // `items` (never `agents`) so Codex activity is visible through this same
+    // route, not only the dedicated codex-sessions routes.
+    let codex_items = crate::codex_app_server::codex_activity_items(
+        &state.codex_sessions,
+        crate::codex_routes::LOCAL_SERVER_ID,
+        &work_root_id,
     )
-    .into_response()
+    .await;
+    merge_activity_items(&mut feed, codex_items);
+    Json(feed).into_response()
+}
+
+/// Merge externally-projected activity items (e.g. live Codex app-server
+/// sessions) into a feed's `items`, re-sorting and recomputing the selected
+/// item and feed cursor. CONTRACT: extra items join `items`, never `agents`;
+/// the named-agent `summary` is left untouched (it counts named agents only).
+pub fn merge_activity_items(feed: &mut ActivityFeed, extra: Vec<ActivityItem>) {
+    if extra.is_empty() {
+        return;
+    }
+    let degraded_extra = extra.iter().any(|item| !item.diagnostics.is_empty());
+    feed.items.extend(extra);
+    feed.items.sort_by(activity_item_ordering);
+    feed.selected_item_id = feed.items.first().map(|item| item.id.clone());
+    feed.feed_cursor = Some(feed_cursor(&feed.items));
+    if degraded_extra && feed.status == "ok" {
+        feed.status = "degraded".to_owned();
+    }
 }
 
 pub async fn work_root_activity_transcript(

@@ -39,7 +39,9 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
-use ws_dashboard_core::{ServerId, ServerKind};
+use ws_dashboard_core::codex_projection::CodexProjector;
+use ws_dashboard_core::{ServerId, ServerKind, WorkRootId};
+use ws_dashboard_daemon::codex_app_server::{CodexConnection, CodexProviderRegistry};
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::document_translation::{
@@ -13787,4 +13789,330 @@ fn drain_document_sse_events(buffer: &mut String, events: &mut Vec<serde_json::V
             .expect("document SSE frame data field");
         events.push(serde_json::from_str(data).expect("document SSE data JSON"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Codex app-server interactive-session routes (Phase 2)
+//
+// CONTRACT: These drive the six new HTTP endpoints through
+// `tower::ServiceExt::oneshot` against a real Router/AppState, matching the
+// established route-test pattern. Sessions are seeded into a shared
+// `CodexProviderRegistry` via `insert_session_for_tests` (backed by an
+// in-process scripted NDJSON peer) so the write/read wiring, request parsing,
+// status-code mapping, LOCAL_SERVER_ID short-circuit vs forward branch, and
+// projection privacy are exercised without spawning a real `codex app-server`.
+// ---------------------------------------------------------------------------
+
+/// Spawn an in-process NDJSON peer that answers every JSON-RPC request line
+/// with the supplied `result`. Returns the client-side `CodexConnection`.
+fn spawn_codex_reply_peer(result: serde_json::Value) -> Arc<CodexConnection> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let (client_side, mut server_side) = tokio::io::duplex(8192);
+    let (client_read, client_write) = tokio::io::split(client_side);
+    let (connection, _notifications) =
+        CodexConnection::from_io(client_read, client_write, Duration::from_secs(5));
+    tokio::spawn(async move {
+        let (server_read, mut server_write) = tokio::io::split(&mut server_side);
+        let mut lines = BufReader::new(server_read).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            // Reply only to requests (those carrying an integer id).
+            if let Some(id) = message.get("id").and_then(|value| value.as_i64()) {
+                let mut reply =
+                    serde_json::to_string(&serde_json::json!({ "id": id, "result": result.clone() }))
+                        .expect("serialize codex peer reply");
+                reply.push('\n');
+                if server_write.write_all(reply.as_bytes()).await.is_err() {
+                    break;
+                }
+                let _ = server_write.flush().await;
+            }
+        }
+    });
+    connection
+}
+
+#[tokio::test]
+async fn codex_session_prompt_and_transcript_round_trip_local() {
+    let registry = CodexProviderRegistry::default();
+    // Pre-populate the projector so the transcript route has projected content.
+    let mut projector = CodexProjector::new();
+    projector.ingest_line(
+        r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"assistant-secret-item","text":"hello from codex"}}}"#,
+    );
+    let connection = spawn_codex_reply_peer(serde_json::json!({ "turn": { "id": "turn-secret" } }));
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:roundtrip",
+            WorkRootId::from("codex-wr"),
+            "thread-secret-id",
+            connection,
+            projector,
+        )
+        .expect("seed codex session");
+
+    let mut state = app_state();
+    state.codex_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    // POST prompt -> the scripted peer acknowledges turn/start.
+    let prompt_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:roundtrip/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "text": "do a thing" }).to_string(),
+                ))
+                .expect("prompt request"),
+        )
+        .await
+        .expect("prompt response");
+    assert_eq!(prompt_response.status(), StatusCode::OK);
+    let prompt_body = axum::body::to_bytes(prompt_response.into_body(), 16 * 1024)
+        .await
+        .expect("prompt body bytes");
+    let prompt_json: serde_json::Value =
+        serde_json::from_slice(&prompt_body).expect("prompt JSON");
+    assert_eq!(prompt_json["accepted"], true);
+
+    // GET transcript -> projected blocks; no provider ids/paths.
+    let (status, body) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        "/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:roundtrip/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("transcript JSON");
+    assert_eq!(transcript["activityId"], "codex:roundtrip");
+    assert!(body.contains("hello from codex"), "projected block text missing: {body}");
+    for forbidden in [
+        "thread-secret-id",
+        "assistant-secret-item",
+        "turn-secret",
+        "threadId",
+        "sessionId",
+    ] {
+        assert!(!body.contains(forbidden), "transcript leaked {forbidden}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn codex_session_control_skills_projects_without_raw_json() {
+    let registry = CodexProviderRegistry::default();
+    let connection = spawn_codex_reply_peer(serde_json::json!({
+        "data": [{
+            "name": "do-thing",
+            "description": "does a thing",
+            "source": "/home/x/.codex/skills/do-thing/SKILL.md",
+            "cwd": "/private/host"
+        }]
+    }));
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:skills",
+            WorkRootId::from("codex-wr"),
+            "thread-secret-id",
+            connection,
+            CodexProjector::new(),
+        )
+        .expect("seed codex session");
+
+    let mut state = app_state();
+    state.codex_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:skills/control")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "action": "skills" }).to_string()))
+                .expect("skills control request"),
+        )
+        .await
+        .expect("skills control response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .expect("skills control body bytes");
+    let body_text = String::from_utf8(body.to_vec()).expect("skills body UTF-8");
+    let value: serde_json::Value = serde_json::from_str(&body_text).expect("skills control JSON");
+    assert_eq!(value["applied"], true);
+    assert_eq!(value["data"]["count"], 1);
+    assert!(body_text.contains("do-thing"));
+    assert!(body_text.contains("does a thing"));
+    // CONTRACT: raw provider paths / private fields never cross the boundary.
+    for forbidden in [
+        "/home/x/.codex",
+        "SKILL.md",
+        "/private/host",
+        "source",
+        "cwd",
+    ] {
+        assert!(
+            !body_text.contains(forbidden),
+            "skills control response leaked {forbidden}: {body_text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn codex_session_prompt_unknown_session_maps_not_found() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:missing/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "text": "hi" }).to_string()))
+                .expect("prompt request"),
+        )
+        .await
+        .expect("prompt response");
+    // provider_error_response maps codex.unknown_session -> 404.
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 8 * 1024)
+        .await
+        .expect("error body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("error JSON");
+    assert_eq!(value["code"], "codex.unknown_session");
+}
+
+#[tokio::test]
+async fn server_scoped_codex_prompt_short_circuits_local_and_forwards_remote() {
+    let registry = CodexProviderRegistry::default();
+    let connection = spawn_codex_reply_peer(serde_json::json!({ "turn": { "id": "t" } }));
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:scoped",
+            WorkRootId::from("codex-wr"),
+            "thread-secret-id",
+            connection,
+            CodexProjector::new(),
+        )
+        .expect("seed codex session");
+
+    let mut state = app_state();
+    state.codex_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    // LOCAL_SERVER_ID short-circuits to the in-process local handler.
+    let local = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/server-local/work-roots/codex-wr/activity/codex-sessions/codex:scoped/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "text": "hi" }).to_string()))
+                .expect("local prompt request"),
+        )
+        .await
+        .expect("local prompt response");
+    assert_eq!(local.status(), StatusCode::OK);
+
+    // A non-local, unlinked server takes the forward branch and is refused.
+    let forwarded = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/servers/does-not-exist/work-roots/codex-wr/activity/codex-sessions/codex:scoped/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "text": "hi" }).to_string()))
+                .expect("forward prompt request"),
+        )
+        .await
+        .expect("forward prompt response");
+    assert_eq!(forwarded.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_merges_codex_session_into_items() {
+    if skip_without_git("work_root_activity_route_merges_codex_session_into_items") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-codex-merge");
+    let cache_home = temp_fixture_path("work-root-activity-codex-merge-cache");
+    fs::create_dir_all(&root).expect("create workRoot");
+    init_git_repo(&root);
+
+    let registry = CodexProviderRegistry::default();
+    let mut state = app_state_with_activity_cache_home(cache_home.clone());
+    state.codex_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    // Seed a live Codex session for the opened work root.
+    let mut projector = CodexProjector::new();
+    projector.ingest_line(r#"{"method":"turn/started","params":{"turn":{"id":"turn-secret"}}}"#);
+    projector.ingest_line(
+        r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"item-secret","text":"codex says hi"}}}"#,
+    );
+    let connection = spawn_codex_reply_peer(serde_json::json!({}));
+    registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:feedmerge",
+            WorkRootId::from(work_root_id.clone()),
+            "thread-secret",
+            connection,
+            projector,
+        )
+        .expect("seed codex session");
+
+    let (status, body) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let feed: serde_json::Value = serde_json::from_str(&body).expect("feed JSON");
+    let items = feed["items"].as_array().expect("items array");
+    let codex_item = items
+        .iter()
+        .find(|item| item["id"] == "codex:feedmerge")
+        .expect("Codex session must appear in the unified feed items");
+    assert_eq!(codex_item["kind"], "agent.codex");
+    assert_eq!(codex_item["live"], true);
+    // Live Codex session ranks first and is the selected item.
+    assert_eq!(feed["selectedItemId"], "codex:feedmerge");
+    // CONTRACT: Codex rows land in `items`, never the legacy `agents` projection.
+    let agents = feed["agents"].as_array().expect("agents array");
+    assert!(
+        !agents
+            .iter()
+            .any(|agent| serde_json::to_string(agent).unwrap_or_default().contains("codex:feedmerge")),
+        "Codex row must not be forced into the agents projection"
+    );
+    for forbidden in ["thread-secret", "item-secret", "turn-secret", "threadId", "sessionId"] {
+        assert!(!body.contains(forbidden), "feed leaked {forbidden}: {body}");
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
 }

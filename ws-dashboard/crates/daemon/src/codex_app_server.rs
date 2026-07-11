@@ -648,6 +648,17 @@ impl CodexProviderRegistry {
             .collect()
     }
 
+    /// Remove a single session by key, returning it if present. Dropping the
+    /// returned `Arc` (and any other holders) releases the connection, whose
+    /// `Child` is killed on drop. Used to roll back a partially-created session
+    /// whose initial turn failed so no orphaned child leaks against the cap.
+    fn remove(&self, server_id: &str, activity_id: &str) -> Option<Arc<CodexSession>> {
+        self.sessions
+            .write()
+            .expect("codex registry lock poisoned")
+            .remove(&Self::key(server_id, activity_id))
+    }
+
     /// Drop sessions for closed work roots (mirrors
     /// `TerminalRegistry::remove_for_work_roots`).
     pub fn remove_for_work_roots(
@@ -658,6 +669,34 @@ impl CodexProviderRegistry {
         let before = sessions.len();
         sessions.retain(|_, session| !work_root_ids.contains(&session.work_root_id));
         before - sessions.len()
+    }
+
+    /// Test-support: insert a session backed by an arbitrary connection and a
+    /// pre-populated projector so route/integration tests can drive the
+    /// session-lookup and projection paths through the real HTTP handlers
+    /// without spawning a real `codex app-server`. Mirrors the crate's other
+    /// `*_for_tests` constructors.
+    pub fn insert_session_for_tests(
+        &self,
+        server_id: impl Into<String>,
+        activity_id: impl Into<String>,
+        work_root_id: WorkRootId,
+        thread_id: impl Into<String>,
+        connection: Arc<CodexConnection>,
+        projector: CodexProjector,
+    ) -> Result<Arc<CodexSession>, AgentClientProviderError> {
+        let session = Arc::new(CodexSession {
+            activity_id: activity_id.into(),
+            server_id: server_id.into(),
+            work_root_id,
+            thread_id: thread_id.into(),
+            connection,
+            projector: Arc::new(AsyncMutex::new(projector)),
+            created_at_ms: now_ms(),
+        });
+        let handle = session.clone();
+        self.insert(session)?;
+        Ok(handle)
     }
 }
 
@@ -862,6 +901,69 @@ pub async fn codex_activity_transcript(
     }
 }
 
+const MAX_SKILLS_PROJECTED: usize = 256;
+const MAX_SKILL_FIELD_LEN: usize = 280;
+
+/// Project a raw Codex `skills/list` response into a bounded, path-free display
+/// shape. CONTRACT: only per-skill display `name`/`title`/`description` cross
+/// the browser boundary; provider `source`/`cwd`/filesystem paths and every
+/// other field are dropped, and the entry count is capped.
+fn project_skills_list(raw: &Value) -> Value {
+    let entries = raw
+        .get("data")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let skills = entries
+        .iter()
+        .take(MAX_SKILLS_PROJECTED)
+        .map(|entry| {
+            let mut projected = serde_json::Map::new();
+            for field in ["name", "title", "description"] {
+                if let Some(text) = entry.get(field).and_then(Value::as_str) {
+                    projected.insert(
+                        field.to_owned(),
+                        Value::String(bound_display(text, MAX_SKILL_FIELD_LEN)),
+                    );
+                }
+            }
+            Value::Object(projected)
+        })
+        .collect::<Vec<_>>();
+    json!({ "count": skills.len(), "skills": skills })
+}
+
+/// Bounded, char-boundary-safe truncation for projected display strings.
+fn bound_display(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut bounded = text[..end].to_owned();
+    bounded.push('…');
+    bounded
+}
+
+/// Collect browser-facing Codex `ActivityItem`s for the sessions of one work
+/// root under a server, for merging into the unified `ActivityFeed.items`.
+/// CONTRACT: these rows belong in `items`, never the legacy `agents`
+/// projection, and carry no provider ids/paths (see `codex_activity_item`).
+pub async fn codex_activity_items(
+    registry: &CodexProviderRegistry,
+    server_id: &str,
+    work_root_id: &WorkRootId,
+) -> Vec<ActivityItem> {
+    let sessions = registry.list_for_work_root(server_id, work_root_id);
+    let mut items = Vec::with_capacity(sessions.len());
+    for session in sessions {
+        items.push(codex_activity_item(&session).await);
+    }
+    items
+}
+
 /// Spawn the projector-updating task: drain notifications into the session's
 /// projector under its lock.
 fn spawn_projector_pump(
@@ -969,7 +1071,7 @@ impl AgentClientProvider for CodexAppServerProvider {
                 let mut projector = projector.lock().await;
                 projector.suppress_local_prompt(prompt.clone());
             }
-            connection
+            if let Err(error) = connection
                 .request(
                     "turn/start",
                     json!({
@@ -977,7 +1079,16 @@ impl AgentClientProvider for CodexAppServerProvider {
                         "input": [{ "type": "text", "text": prompt }],
                     }),
                 )
-                .await?;
+                .await
+            {
+                // CONTRACT: the initial-turn failure must not leave an orphaned
+                // session + live child registered against MAX_CODEX_SESSIONS.
+                // Roll the registry insert back; dropping the session (and the
+                // local connection Arc on return) kills the child on drop.
+                self.registry
+                    .remove(&self.config.server_id, &activity_id);
+                return Err(error.into());
+            }
         }
 
         Ok(AgentClientSessionCreateResult { activity_id })
@@ -1052,16 +1163,20 @@ impl CodexAppServerProvider {
     }
 
     /// Codex-native `skills/list` control (Passthrough capability). Bounded
-    /// display data only.
+    /// display data only. CONTRACT: the raw `skills/list` response may carry
+    /// per-skill filesystem sources, cwds, and other provider-private fields;
+    /// only projected, path-free display names/descriptions cross the browser
+    /// boundary (see `project_skills_list`).
     pub async fn skills_list(
         &self,
         activity_id: &str,
     ) -> Result<Value, AgentClientProviderError> {
         let session = self.session(activity_id)?;
-        Ok(session
+        let raw = session
             .connection
             .request("skills/list", json!({}))
-            .await?)
+            .await?;
+        Ok(project_skills_list(&raw))
     }
 
     /// Codex-native `thread/compact/start` control.
@@ -1219,6 +1334,78 @@ mod tests {
         let refusal = evaluate_plugin_gate("not json").unwrap_err();
         let error: AgentClientProviderError = refusal.into();
         assert_eq!(error.code, "codex.plugin_gate");
+    }
+
+    #[test]
+    fn skills_list_projection_omits_paths_and_extra_fields() {
+        let raw = json!({
+            "data": [
+                {
+                    "name": "do-thing",
+                    "description": "does a thing",
+                    "source": "/home/x/.codex/skills/do-thing/SKILL.md",
+                    "cwd": "/private/host"
+                },
+                {
+                    "name": "other",
+                    "title": "Other",
+                    "extra": {"secret": "/home/x/.codex/leak.jsonl"}
+                }
+            ]
+        });
+        let projected = project_skills_list(&raw);
+        assert_eq!(projected["count"], 2);
+        let body = serde_json::to_string(&projected).expect("serialize projected skills");
+        // Display fields cross.
+        assert!(body.contains("do-thing"));
+        assert!(body.contains("does a thing"));
+        assert!(body.contains("Other"));
+        // Provider paths / private fields never cross.
+        for forbidden in [
+            "/home/x/.codex",
+            "SKILL.md",
+            "/private/host",
+            "leak.jsonl",
+            "source",
+            "cwd",
+            "extra",
+            "secret",
+        ] {
+            assert!(!body.contains(forbidden), "skills projection leaked {forbidden}: {body}");
+        }
+    }
+
+    #[test]
+    fn skills_list_projection_bounds_field_length() {
+        let long = "x".repeat(MAX_SKILL_FIELD_LEN + 100);
+        let raw = json!({ "data": [{ "name": long }] });
+        let projected = project_skills_list(&raw);
+        let name = projected["skills"][0]["name"].as_str().expect("name string");
+        assert!(name.chars().count() <= MAX_SKILL_FIELD_LEN + 1);
+        assert!(name.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn registry_remove_frees_session_slot() {
+        let registry = CodexProviderRegistry::default();
+        let (client_side, _server_side) = duplex(1024);
+        let (client_read, client_write) = tokio::io::split(client_side);
+        let (connection, _notifications) =
+            CodexConnection::from_io(client_read, client_write, Duration::from_secs(1));
+        registry
+            .insert_session_for_tests(
+                "server-local",
+                "codex:slot",
+                WorkRootId::from("wr-slot"),
+                "thread-private",
+                connection,
+                CodexProjector::new(),
+            )
+            .expect("seed session");
+        assert!(registry.session_for("server-local", "codex:slot").is_some());
+        assert!(registry.remove("server-local", "codex:slot").is_some());
+        assert!(registry.session_for("server-local", "codex:slot").is_none());
+        assert!(registry.remove("server-local", "codex:slot").is_none());
     }
 
     fn test_session(projector: CodexProjector) -> Arc<CodexSession> {
