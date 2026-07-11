@@ -2,7 +2,7 @@
 title: "Dashboard-owned MCP surface for agent-driven dashboard control (open-file, execution approval, worktree management)"
 parent: 260622-epic-ws-dashboard-session-key-realignment
 related:
-  260620-feat-ws-dashboard-agent-client-activity-sources: read-only Activity/agent-client provider track this idea's write/control direction sits next to and must not be confused with
+  260620-feat-ws-dashboard-agent-client-activity-sources: interactive Activity/agent-client provider track this idea's write/control direction sits next to and must not be confused with (scope revised 2026-07-11 from read-only to full-spec interactive control; this idea remains the separate dashboard-as-MCP-server direction); also raises a candidate future use for this idea's MCP surface — forwarding/gating ws-mcp commands directly instead of per-harness plugin-install detection
   260711-epic-ws-dashboard-command-surface: sibling epic owning the human-facing command bus/custom-button UI this control surface would let agents trigger; kept separate from this ticket's 260622 parent by owner decision (2026-07-11)
   260711-idea-dashboard-command-bus-quick-open-shortcuts: human-facing command bus/custom-button UI this control surface would let agents trigger
   260605-research-ws-native-subagent-pivot: migration anchor; distinguishes this from ws's own agents.*/mercenary subprocess-spawn MCP surface
@@ -177,6 +177,18 @@ Activity track (`260620`) and the command-bus UI
   mechanism exists to define *what* an agent can trigger, so treating this
   as a later phase of that work (or a shared backend) may be more
   efficient than building it standalone first.
+- **Candidate future replacement for `260620`'s ws/wsflow spawn-precondition
+  check** (owner, 2026-07-11, not chosen yet): `260620` currently requires
+  the dashboard to verify the `ws`/`wsflow` plugin is installed in each
+  spawned harness via that harness's own native plugin-list CLI surface,
+  refusing to spawn otherwise. Once this ticket's dashboard-hosted MCP
+  surface exists, an alternative becomes possible: harnesses connect to the
+  dashboard's own MCP server directly, and the dashboard forwards/gates
+  `ws-mcp` commands itself rather than depending on per-harness native
+  plugin detection — which would also sidestep needing to verify a
+  plugin-list CLI surface for Codex/OpenCode at all. Not designed here;
+  `260620`'s per-harness precondition check should not be over-built as a
+  permanent mechanism given this may supersede it later.
 
 ## Non-Goals (for this idea ticket itself)
 

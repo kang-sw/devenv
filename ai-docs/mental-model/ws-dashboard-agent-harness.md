@@ -7,6 +7,7 @@ related:
   ws-web-dashboard: "Shares the Server Route/workRoot/Activity Feed browser-facing identity model; this file owns the interactive-provider-specific rules layered on top of that read model."
   mcp-runtime: "Provider adapters must not become ws MCP session/root authority; the same non-authority boundary from ws-web-dashboard applies here."
   named-agent-runtime: "The legacy wsstate named-agent projection is a compatibility source, not the future authority for provider-adapter sessions."
+  plugin-runtime: "Defines the ws/wsflow plugin packages and shared agents-plugin-tool MCP surface whose presence is a hard spawn precondition for dashboard-managed harness sessions."
 ---
 
 # ws Dashboard Agent Harness Integration
@@ -96,6 +97,20 @@ related:
   TTY-less stream-json contexts and to refuse to start under root/sudo, so it
   may only back a deliberately-risky, human-toggled "dangerously bypass" opt-in
   mode, never the default per-prompt approval path.
+- **ws/wsflow plugin presence is a hard spawn precondition** (owner,
+  2026-07-11): before spawning a Codex/OpenCode/Claude subprocess, the
+  dashboard checks whether the `ws` or `wsflow` plugin (see `plugin-runtime`
+  — same `agents-plugin-tool` MCP surface, `ws.*`/`wsflow.*` namespace, same
+  ferrule/session-key storage, so either satisfies the check) is installed
+  and enabled for that harness in that project, using each harness's own
+  no-session plugin-listing CLI surface (confirmed for Claude via `claude
+  plugin list`/`claude plugin details`; unverified for Codex/OpenCode).
+  Missing plugin means the dashboard refuses to spawn and surfaces install
+  guidance — it does not fall back to injecting an external MCP-server
+  registration/skill list itself. Rejected alternative, explicitly: having
+  the dashboard inject a substitute MCP config/skill list when the plugin is
+  missing — the owner chose the harder enforcement floor to avoid
+  maintaining two divergent code paths for the same ws-tooling capability.
 
 ## Coupling
 

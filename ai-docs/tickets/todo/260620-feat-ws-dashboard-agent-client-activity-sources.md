@@ -16,6 +16,7 @@ related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
   - named-agent-runtime
+  - plugin-runtime
 ---
 
 # ws dashboard agent-client activity sources
@@ -167,6 +168,35 @@ as host-owned agent-client data.
   the dashboard (installing the CLI, logging in / authenticating that CLI)
   is a precondition for spawn succeeding, not a reason the dashboard itself
   doesn't own the spawn.
+- **ws/wsflow plugin presence is a hard spawn precondition, enforced by the
+  dashboard, not worked around** (owner, 2026-07-11): a dashboard-spawned
+  Codex/OpenCode/Claude session is expected to have the `ws` or `wsflow`
+  plugin (see `plugin-runtime` mental model — same underlying
+  `agents-plugin-tool` MCP surface, `ws.*` vs `wsflow.*` namespace, same
+  ferrule/session-key storage so either satisfies this check) installed and
+  enabled for that harness in that project. Before spawning, the daemon
+  checks install status the same way the Claude skill-listing spike did
+  (`claude plugin list`-equivalent, no session needed); if neither plugin is
+  present, the dashboard **refuses to spawn** and surfaces install guidance
+  to the human instead of silently degrading or auto-injecting an external
+  MCP config as a substitute. Rejected alternative: having the dashboard
+  itself inject an external MCP-server registration + skill list into the
+  harness's launch context when the plugin is missing — owner explicitly
+  chose the harder install-enforcement floor over this softer fallback, to
+  avoid two divergent code paths (native plugin vs. dashboard-injected) for
+  the same capability. **Unverified**: whether Codex and OpenCode expose an
+  equivalent no-session plugin-list CLI surface analogous to `claude plugin
+  list`/`claude plugin details` needs its own fixture check per harness
+  before this precondition can be implemented for them; do not assume
+  parity with Claude's confirmed surface. **Future direction, not chosen
+  now** (owner, 2026-07-11): a later alternative to per-harness plugin-list
+  checking is the dashboard hosting its own MCP surface (per
+  `260711-idea-dashboard-agent-facing-mcp-control-surface`) that harnesses
+  connect to directly, letting the dashboard forward/gate ws-mcp commands
+  itself rather than depending on each harness's native plugin-install
+  detection. Not designed further here — recorded so this precondition
+  check isn't over-built as a permanent mechanism if that direction lands
+  first.
 - **Cross-provider common interactive subset** (elevated 2026-07-11 as the
   explicit shared design object spanning all three confirmed duplex-capable
   harnesses — Codex app-server, OpenCode ACP, Claude CLI stream-json):
