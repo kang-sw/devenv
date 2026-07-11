@@ -168,6 +168,112 @@ as host-owned agent-client data.
   (uniform, works even with no live provider process running), while this
   subset's `resume` capability is what actually reopens a selected entry
   live once chosen — the two tickets are complementary, not redundant.
+- **Per-harness capability grounding for the frontend interaction-API draft**
+  (research, 2026-07-11, requested to vet the owner's draft frontend
+  interaction-API list against Claude's unusually rich baseline before
+  committing to a common subset): findings below per capability, each flagged
+  confirmed/unverified since none were fixture-verified this pass (WebSearch/
+  WebFetch only, no installed-binary spike).
+  - **Rewind/fork-from-a-point**: Codex app-server has explicit native
+    support — `thread/fork` (branch a new thread from an earlier point in a
+    parent thread's rollout history) and `thread/rollback` (undo to a
+    specific point in the same thread), tracked server-side via
+    `thread_spawn_edges`; exact fork-point granularity (message vs. turn
+    level) is unverified. ACP (OpenCode) has `session/load` (resume with
+    full history replay) but no documented fork-a-new-branch-from-an-
+    earlier-point method in the core spec — unverified whether OpenCode
+    exposes one outside core ACP. Claude CLI has no documented native
+    fork/rewind method at all; only `--resume <session_id>` replays a whole
+    session from its last state, so rewind-to-a-point would need a
+    dashboard-owned workaround (copy the `~/.claude/projects/.../*.jsonl`
+    transcript file, truncate it at the desired point, then `--resume`
+    against the truncated copy) — unverified whether the CLI accepts a
+    hand-truncated transcript on resume. **Not safe as a common-subset
+    primitive**; treat as Codex-native / OpenCode-partial / Claude-workaround
+    per-harness, not a shared frontend contract method.
+  - **Context-window/token introspection and compaction control**: ACP has a
+    standardized, *recently finalized* (2026-06-05) `session/update`
+    notification variant (`sessionUpdate: "usage_update"`, fields `used`/
+    `size`/optional `cost`) — a real, versioned protocol feature, so this is
+    the strongest candidate for a common-subset field, but only if the other
+    two harnesses expose an equivalent. Codex app-server emits token usage
+    statistics on `turn/completed` (confirmed to exist, exact metric fields
+    unverified) and has an explicit `thread/compact/start` RPC (client-
+    triggered compaction, not just automatic) — good support. Claude CLI's
+    `result` event includes token counts per the existing Phase-4 note in
+    this ticket, but compaction triggering is not documented as
+    client-controllable at all (auto-compact only) — no equivalent to
+    `thread/compact/start`. **Verdict**: context-window *display* (used/size)
+    is safe to standardize as a common-subset field (all three have some
+    token-count signal); *compaction-timing control* is not — Codex supports
+    it, OpenCode's ACP-level story is unclear, Claude has no known client-
+    side trigger, so this should degrade to "read-only usage display,
+    Codex-only manual-compact button" rather than a universal control.
+  - **Subagent introspection with per-subagent transcript streaming**: no
+    harness documents a clean listing/streaming RPC for this. Codex mentions
+    a "Guardian subagent" as a fixed built-in reviewer role, not a general
+    listable/streamable subagent registry. OpenCode's subagent model spawns
+    child sessions with `context: "fork"` that are themselves ordinary ACP
+    sessions (a child runs in its own ACP harness session on the same
+    background lane as native sub-agent spawns) — meaning a subagent may be
+    representable as just another `session/*`-addressable session rather
+    than a distinct concept, which is actually a reasonably strong signal
+    for the dashboard's own model (treat subagents as regular child
+    sessions, not a separate subagent RPC surface). Claude Code's subagents
+    have no documented CLI-level (non-SDK) introspection/listing surface in
+    the stream-json duplex mode researched so far. **Verdict**: unverified/
+    weak across all three; do not commit to a dedicated "subagent list +
+    per-subagent transcript stream" common-subset API yet — if OpenCode's
+    child-session-is-just-a-session model holds up under a real fixture
+    check, the dashboard could model subagents as ordinary nested
+    Activity/session rows instead of inventing a new capability, which
+    would sidestep the parity problem entirely.
+  - **Skill/capability listing**: Codex app-server has a confirmed
+    `skills/list` RPC (response shape unverified). OpenCode/ACP has no
+    documented skills-list method in the core protocol so far (`Agents` docs
+    describe configuring agents/modes, not a runtime capability-listing
+    call) — unverified. Claude CLI's `system` init event reports `tools`
+    and `capabilities` at session start (from this ticket's existing Phase-4
+    grounding) but that is session-start metadata, not an on-demand listing
+    RPC, and does not obviously cover project-local `SKILL.md`-style skills.
+    **Verdict**: not safe as a uniform common-subset call yet; Codex has the
+    clearest native support, the other two are unverified-or-absent —
+    revisit after a fixture pass rather than assuming parity.
+  - **"Goal"/loop native support**: no harness researched has a native
+    goal/repeat-until-condition primitive. Codex's app-server surface is
+    organized around Threads/Turns/Items with no looping/goal-state RPC.
+    ACP's closest concept is `Plan`/`PlanEntry` (the agent reports its own
+    task breakdown/strategy as it works) plus `CurrentModeUpdate` (mode
+    switching, e.g. ask/architect/code) — neither is a client-driven
+    "keep going until X" loop; both are the *agent* reporting its own
+    plan, not the client commanding a loop. No evidence found of a
+    Claude-CLI-native equivalent to Claude Code's own `/goal`-style
+    behavior at the headless stream-json layer. **Verdict**: calibrated to
+    OpenCode's ACP-standard level as the owner requested, the ceiling is
+    "the agent can expose its own plan," not "the client can command a
+    repeat-until-condition loop" — so goal/loop functionality should be
+    dashboard-built (drive it by re-sending prompts/turns from the dashboard
+    side based on the dashboard's own condition-check), not attempted as a
+    harness-native common-subset feature for any of the three.
+  - **Overall recommendation**: of the owner's draft list, safe to commit to
+    the shared frontend interaction API now: workroot history list-up,
+    start/resume a specific conversation, start a new conversation with
+    harness choice, send/receive messages, ticket/spec-stem link detection
+    (pure frontend text-parsing, no harness dependency), the Enter/Ctrl+Enter
+    input box (pure frontend), and read-only context-window usage display.
+    Needing explicit per-harness degradation or later phases: compaction-
+    timing control (Codex-only control, others read-only-at-best),
+    rewind/fork-from-a-point (Codex-native, Claude-workaround-only,
+    OpenCode-unverified), skill-listing (Codex-native only so far). Needing
+    a design rethink rather than a shared API: subagent introspection —
+    consider modeling subagents as ordinary nested sessions/Activity rows
+    instead of a bespoke subagent-list-and-stream capability, pending a
+    fixture check of OpenCode's child-session behavior. Should stay
+    dashboard-built rather than harness-native: goal/loop functionality.
+    None of this pass's findings were fixture-verified against installed
+    binaries; treat all three per-harness verdicts above as directional,
+    not final, until a spike (already planned for Claude in Phase 4) is
+    run for Codex app-server and OpenCode ACP too.
 - Treat OpenCode serve as an optional observation/read-only supplement. It can
   help discover sessions or stream HTTP/OpenAPI/SSE state, but the first
   OpenCode counterpart to Codex app-server is `opencode acp`, not `opencode
