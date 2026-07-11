@@ -193,12 +193,18 @@ as host-owned agent-client data.
   committing to a common subset): findings below per capability, each flagged
   confirmed/unverified since none were fixture-verified this pass (WebSearch/
   WebFetch only, no installed-binary spike).
-  - **Rewind/fork-from-a-point**: Codex app-server has explicit native
-    support — `thread/fork` (branch a new thread from an earlier point in a
-    parent thread's rollout history) and `thread/rollback` (undo to a
-    specific point in the same thread), tracked server-side via
-    `thread_spawn_edges`; exact fork-point granularity (message vs. turn
-    level) is unverified. ACP (OpenCode) has `session/load` (resume with
+  - **Rewind/fork-from-a-point — superseded by the Codex fixture spike below**:
+    `thread/fork` is confirmed real (by threadId or path). `thread/rollback`
+    is confirmed real but **deprecated for removal** ("DEPRECATED:
+    `thread/rollback` will be removed soon", per the actual shipped schema),
+    and its granularity is coarser than assumed: params are
+    `{threadId, numTurns}` — it drops N turns from the *end* of the thread,
+    not rewind-to-an-arbitrary-point, and it explicitly does not revert file
+    changes the agent made (caller's responsibility). Do not build new
+    dashboard functionality on `thread/rollback`; treat it as
+    Passthrough-but-sunsetting, not a stable primitive to design around.
+    `thread/fork` and `thread/resume` (3 modes: by threadId, in-memory
+    history, or by path) remain the sound native primitives here. ACP (OpenCode) has `session/load` (resume with
     full history replay) but no documented fork-a-new-branch-from-an-
     earlier-point method in the core spec — unverified whether OpenCode
     exposes one outside core ACP. Claude CLI has no documented native
@@ -210,15 +216,24 @@ as host-owned agent-client data.
     hand-truncated transcript on resume. **Not safe as a common-subset
     primitive**; treat as Codex-native / OpenCode-partial / Claude-workaround
     per-harness, not a shared frontend contract method.
-  - **Context-window/token introspection and compaction control**: ACP has a
+  - **Context-window/token introspection and compaction control — Codex
+    findings confirmed by fixture spike**: ACP has a
     standardized, *recently finalized* (2026-06-05) `session/update`
     notification variant (`sessionUpdate: "usage_update"`, fields `used`/
     `size`/optional `cost`) — a real, versioned protocol feature, so this is
     the strongest candidate for a common-subset field, but only if the other
-    two harnesses expose an equivalent. Codex app-server emits token usage
-    statistics on `turn/completed` (confirmed to exist, exact metric fields
-    unverified) and has an explicit `thread/compact/start` RPC (client-
-    triggered compaction, not just automatic) — good support. Claude CLI's
+    two harnesses expose an equivalent. Codex app-server has its own
+    **dedicated** `thread/tokenUsage/updated` notification
+    (`{threadId, turnId, tokenUsage}`), separate from and more granular than
+    `turn/completed` — the ticket's original "token usage on `turn/completed`"
+    claim undersold this; there is a purpose-built usage notification.
+    `thread/compact/start` is confirmed real: params `{threadId}` only,
+    response is an empty `{}` acknowledgement, with the actual compaction
+    result arriving asynchronously via a `thread/compacted` notification (the
+    older `ContextCompactedNotification` is explicitly deprecated in favor of
+    a `ContextCompaction` item type) — good support, but the dashboard must
+    consume `thread/compacted`, not assume the RPC response itself carries
+    the result. Claude CLI's
     `result` event includes token counts per the existing Phase-4 note in
     this ticket, but compaction triggering is not documented as
     client-controllable at all (auto-compact only) — no equivalent to
@@ -247,8 +262,9 @@ as host-owned agent-client data.
     check, the dashboard could model subagents as ordinary nested
     Activity/session rows instead of inventing a new capability, which
     would sidestep the parity problem entirely.
-  - **Skill/capability listing**: Codex app-server has a confirmed
-    `skills/list` RPC (response shape unverified). OpenCode/ACP has no
+  - **Skill/capability listing — confirmed by fixture spike**: Codex
+    app-server's `skills/list` is real and current (not deprecated): params
+    `{cwds?, forceReload?}`, response `{data: SkillsListEntry[]}`. OpenCode/ACP has no
     documented skills-list method in the core protocol so far (`Agents` docs
     describe configuring agents/modes, not a runtime capability-listing
     call) — unverified. Claude CLI's `system` init event reports `tools`
@@ -258,22 +274,28 @@ as host-owned agent-client data.
     **Verdict**: not safe as a uniform common-subset call yet; Codex has the
     clearest native support, the other two are unverified-or-absent —
     revisit after a fixture pass rather than assuming parity.
-  - **"Goal"/loop native support**: no harness researched has a native
-    goal/repeat-until-condition primitive. Codex's app-server surface is
-    organized around Threads/Turns/Items with no looping/goal-state RPC.
-    ACP's closest concept is `Plan`/`PlanEntry` (the agent reports its own
-    task breakdown/strategy as it works) plus `CurrentModeUpdate` (mode
-    switching, e.g. ask/architect/code) — neither is a client-driven
-    "keep going until X" loop; both are the *agent* reporting its own
-    plan, not the client commanding a loop. No evidence found of a
-    Claude-CLI-native equivalent to Claude Code's own `/goal`-style
-    behavior at the headless stream-json layer. **Verdict**: calibrated to
-    OpenCode's ACP-standard level as the owner requested, the ceiling is
-    "the agent can expose its own plan," not "the client can command a
-    repeat-until-condition loop" — so goal/loop functionality should be
-    dashboard-built (drive it by re-sending prompts/turns from the dashboard
-    side based on the dashboard's own condition-check), not attempted as a
-    harness-native common-subset feature for any of the three.
+  - **"Goal"/loop native support — revised, Codex column wrong before the
+    fixture spike**: the original WebSearch-only pass missed Codex's native
+    `thread/goal/set` / `thread/goal/get` / `thread/goal/clear` RPC family
+    entirely (confirmed real by the fixture spike: `ThreadGoalSetParams
+    {threadId, objective?, status?, tokenBudget?}`, with `thread/goal/updated`
+    / `thread/goal/cleared` notifications). This is a genuine
+    client-settable, structured goal-tracking primitive — an objective
+    string plus status plus a token budget the server tracks — not nothing,
+    as the ticket previously claimed for every harness including Codex.
+    It is **not** confirmed to be a full repeat-until-condition auto-loop:
+    no evidence the server itself re-sends turns to satisfy the objective,
+    only that it tracks/reports goal state alongside turns the client still
+    drives. ACP's closest concept remains `Plan`/`PlanEntry` (agent-reported
+    plan, not client-commanded) plus `CurrentModeUpdate`. No evidence of a
+    Claude-CLI-native equivalent. **Revised verdict**: Codex has a real
+    Passthrough goal-*tracking* primitive (objective/status/budget bookkeeping)
+    that the dashboard should surface and use where available, but the
+    repeat-until-condition *looping* behavior itself still has no confirmed
+    harness-native driver on any of the three — that part should stay
+    dashboard-built (re-send prompts/turns based on a dashboard-evaluated
+    condition), optionally informed by Codex's native goal state when
+    present rather than duplicating it blindly.
   - **Overall recommendation**: of the owner's draft list, safe to commit to
     the shared frontend interaction API now: workroot history list-up,
     start/resume a specific conversation, start a new conversation with
@@ -287,12 +309,21 @@ as host-owned agent-client data.
     a design rethink rather than a shared API: subagent introspection —
     consider modeling subagents as ordinary nested sessions/Activity rows
     instead of a bespoke subagent-list-and-stream capability, pending a
-    fixture check of OpenCode's child-session behavior. Should stay
-    dashboard-built rather than harness-native: goal/loop functionality.
-    None of this pass's findings were fixture-verified against installed
-    binaries; treat all three per-harness verdicts above as directional,
-    not final, until a spike (already planned for Claude in Phase 4) is
-    run for Codex app-server and OpenCode ACP too.
+    fixture check of OpenCode's child-session behavior. The looping half of
+    goal/loop functionality should stay dashboard-built rather than
+    harness-native, though Codex's native `thread/goal/*` tracking primitive
+    (confirmed by the fixture spike) should be surfaced/used where available
+    rather than duplicated. Codex's `turn/steer` (inject input into an
+    *active* turn, gated on an `expectedTurnId` precondition) was not in the
+    original draft at all and should be considered as a Codex-native
+    addition to the interaction-API list below, gated the same way as
+    compact/rewind/skills. None of this pass's non-Codex findings were
+    fixture-verified against installed binaries; treat the OpenCode/Claude
+    per-harness verdicts above as directional, not final, until their own
+    spikes run (Claude's is planned for Phase 4; OpenCode's is blocked
+    pending install). The **Codex column above is now fixture-verified**,
+    not WebSearch-only — see the spike results folded in above and in the
+    matrix below.
 - Treat OpenCode serve as an optional observation/read-only supplement. It can
   help discover sessions or stream HTTP/OpenAPI/SSE state, but the first
   OpenCode counterpart to Codex app-server is `opencode acp`, not `opencode
@@ -354,17 +385,18 @@ read-only observation mechanism orthogonal to this control-risk tiering.
 
 | Capability | Codex app-server | OpenCode ACP | Claude CLI |
 |---|---|---|---|
-| Resume existing session | Passthrough | Passthrough | Passthrough (`--resume`) |
-| Create new session | Passthrough | Passthrough | Passthrough |
-| Send/receive message (turn) | Passthrough | Passthrough | Passthrough (documented event subset only — `system`/`assistant`/`stream_event`/`result`; the unverified `control`/`control_request` shape stays out of scope until fixture-confirmed) |
-| Permission/approval interception | *Unverified* | *Unverified* | Passthrough (`PreToolUse` hooks) |
-| Context usage display (read-only) | Passthrough (`turn/completed`) | Passthrough (`usage_update`) | Passthrough (`result` token counts) |
-| Manual compaction trigger | Passthrough (`thread/compact/start`) | *Unverified* | Unavailable (auto-only; would become Hack if a workaround were attempted) |
-| Rewind/rollback to a point | Passthrough (`thread/rollback`) | *Unverified*, likely Unavailable | Hack (transcript-file truncation workaround; no officially-documented method) |
-| Fork new branch from a point | Passthrough (`thread/fork`) | *Unverified*, likely Unavailable | Hack (same workaround as rewind) |
-| Skill/capability listing | Passthrough (`skills/list`) | *Unverified* | Unavailable (session-start `tools`/`capabilities` metadata only, not on-demand project-skill listing) |
+| Resume existing session | Passthrough (`thread/resume`, 3 modes: threadId/in-memory/path — **fixture-verified**) | Passthrough | Passthrough (`--resume`) |
+| Create new session | Passthrough (`thread/start` — **fixture-verified**) | Passthrough | Passthrough |
+| Send/receive message (turn) | Passthrough (`turn/start`; `turn/steer` for mid-active-turn injection, gated on `expectedTurnId`; `turn/interrupt` — **fixture-verified**, `turn/steer` was not in the original draft) | Passthrough | Passthrough (documented event subset only — `system`/`assistant`/`stream_event`/`result`; the unverified `control`/`control_request` shape stays out of scope until fixture-confirmed) |
+| Permission/approval interception | Passthrough (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/permissions/requestApproval`, `item/tool/requestUserInput`, plus legacy `execCommandApproval`/`applyPatchApproval` — **fixture-verified**) | *Unverified* | Passthrough (`PreToolUse` hooks) |
+| Context usage display (read-only) | Passthrough — dedicated `thread/tokenUsage/updated` notification (`{threadId, turnId, tokenUsage}`), separate from and more granular than `turn/completed` — **fixture-verified** | Passthrough (`usage_update`) | Passthrough (`result` token counts) |
+| Manual compaction trigger | Passthrough (`thread/compact/start`, params `{threadId}`, empty `{}` response — result arrives async via `thread/compacted`; the older `ContextCompactedNotification` is deprecated — **fixture-verified**) | *Unverified* | Unavailable (auto-only; would become Hack if a workaround were attempted; headless `/compact`-as-text research below stays inconclusive) |
+| Rewind/rollback (turn-count-from-end, not point-based) | Passthrough **but deprecated for removal** (`thread/rollback`, params `{threadId, numTurns}`, drops N turns from the end, does not revert file changes — **fixture-verified**; do not design new functionality around this RPC) | *Unverified*, likely Unavailable | Hack (transcript-file truncation workaround; no officially-documented method) |
+| Fork new branch from a point | Passthrough (`thread/fork`, by threadId or path — **fixture-verified**) | *Unverified*, likely Unavailable | Hack (same workaround as rewind) |
+| Skill/capability listing | Passthrough (`skills/list`, params `{cwds?, forceReload?}`, response `{data: SkillsListEntry[]}`, current/not deprecated — **fixture-verified**) | *Unverified* | Unavailable (session-start `tools`/`capabilities` metadata only, not on-demand project-skill listing) |
 | Subagent list + per-subagent transcript | Unavailable (fixed "Guardian" role only, not a general registry) | Overlay candidate (if child sessions are ordinary ACP sessions, list/relate them via existing session primitives — pending fixture check) | Unavailable (no documented CLI-level introspection surface) |
-| Goal/loop (repeat-until-condition) | Overlay (dashboard-built on top of `send`) | Overlay (same) | Overlay (same) |
+| Goal state tracking (objective/status/token budget) | Passthrough (`thread/goal/set`/`get`/`clear`, `{threadId, objective?, status?, tokenBudget?}`, with `thread/goal/updated`/`thread/goal/cleared` notifications — **fixture-verified**; missed entirely by the original WebSearch-only pass) | Unavailable (no confirmed equivalent) | Unavailable (no confirmed equivalent) |
+| Goal/loop (repeat-until-condition auto-looping) | Overlay (no evidence the server itself auto-loops turns to satisfy a goal objective — dashboard must still drive re-sends, optionally informed by native goal state above) | Overlay (dashboard-built on top of `send`) | Overlay (same) |
 
 **Claude `/compact`-in-headless research (2026-07-11)**: checked whether
 sending literal `/compact` as headless/`stream-json` input text reproduces
@@ -535,18 +567,39 @@ contract):
   harness's adapter reports the capability; degrade to hidden/disabled
   control otherwise, not a uniform method):
   - `activity.session.compact(activityId)` — manual compaction trigger.
-    Codex-native (`thread/compact/start`); no confirmed equivalent for
-    OpenCode or Claude (auto-only).
+    Codex-native (`thread/compact/start`, params `{threadId}`, result via
+    async `thread/compacted` notification — **fixture-verified**); no
+    confirmed equivalent for OpenCode or Claude (auto-only).
+  - `activity.session.steer(activityId, message)` — inject input into an
+    *active* turn (Codex-native `turn/steer`, gated on `expectedTurnId`
+    matching the currently active turn — **fixture-verified**, not in the
+    original draft). No confirmed equivalent for OpenCode or Claude; degrade
+    to hidden/disabled for those.
+  - `activity.session.goal.set/get/clear(activityId, {objective?, status?,
+    tokenBudget?})` — Codex-native structured goal-state tracking
+    (`thread/goal/set`/`get`/`clear`, notifications
+    `thread/goal/updated`/`thread/goal/cleared` — **fixture-verified**, not
+    in the original draft; missed by the initial WebSearch-only pass). This
+    is bookkeeping the server tracks, not an auto-looping primitive — see
+    the dashboard-built goal/loop item below for the actual repeat-until-
+    condition behavior. No confirmed equivalent for OpenCode or Claude.
   - `activity.session.rewind(activityId, atPoint)` /
-    `activity.session.fork(activityId, atPoint)` — Codex-native
-    (`thread/rollback` / `thread/fork`); Claude has no native method and
-    would need a dashboard-owned workaround (copy + truncate the
+    `activity.session.fork(activityId, atPoint)` — Codex's `thread/fork` is
+    solid (by threadId or path — **fixture-verified**), but `thread/rollback`
+    is **confirmed deprecated for removal** and coarser than assumed (params
+    `{threadId, numTurns}`, drops N turns from the end, not an arbitrary
+    point, and does not revert file changes — **fixture-verified**); do not
+    design new dashboard functionality around `thread/rollback` specifically,
+    even though it is technically callable today. Claude has no native
+    method and would need a dashboard-owned workaround (copy + truncate the
     `~/.claude/projects/.../*.jsonl` transcript, then `--resume` against the
     copy — unverified whether the CLI accepts a hand-truncated transcript);
     OpenCode unverified in core ACP.
   - `activity.session.skills(activityId)` — list invokable
-    skills/commands/plugins. Codex-native (`skills/list`); OpenCode and
-    Claude have no confirmed on-demand listing call (Claude only reports
+    skills/commands/plugins. Codex-native (`skills/list`, params
+    `{cwds?, forceReload?}`, response `{data: SkillsListEntry[]}` —
+    **fixture-verified**, current/not deprecated); OpenCode and Claude have
+    no confirmed on-demand listing call (Claude only reports
     `tools`/`capabilities` at session-start, not project-local skills).
 - **Deliberately not modeled as a bespoke API**: subagent
   listing-plus-per-subagent-transcript-streaming. No harness has clean
@@ -557,9 +610,12 @@ contract):
   that child row for the "click bubble to open its transcript" UX) instead
   of inventing a dedicated subagent RPC surface.
 - **Deliberately dashboard-built, not harness-native**: `/goal`-style
-  repeat-until-condition looping. No harness exposes a client-driven loop
-  primitive (ACP's `Plan`/`PlanEntry` is the agent reporting its own plan,
-  not the client commanding repetition) — if built, this should be
+  repeat-until-condition looping. No harness exposes a client-driven
+  auto-loop primitive — Codex's `thread/goal/set` family (see above) tracks
+  goal *state* (objective/status/token budget) but does not itself re-send
+  turns to satisfy the objective, and ACP's `Plan`/`PlanEntry` is the agent
+  reporting its own plan, not the client commanding repetition — if built,
+  the looping behavior itself should be
   dashboard-side orchestration that re-sends prompts/turns based on a
   dashboard-evaluated condition, not a provider-contract method.
 
@@ -580,28 +636,37 @@ them as named agents.
 
 ### Phase 2: Codex app-server read/write adapter
 
-The dashboard daemon spawns `codex app-server --stdio` (or the verified
-equivalent invocation for the installed version) as a child process per the
+The dashboard daemon spawns Codex app-server as a child process per the
 spawn-authority decision above, speaks its JSON-RPC stdio protocol, maps
 Codex lifecycle concepts into the ACP-shaped provider subset, and projects
 native Codex activity into `ActivityItem` rows and `TranscriptBlock` backfill.
-Prefer generated or captured schema fixtures over handwritten assumptions.
 Now that interactive control is in scope (see Decisions supersession above),
 this phase covers both the read/project path and the Passthrough write
 capabilities from the Cross-Harness Feature Matrix that are Codex-native:
-session create/resume/send, `thread/compact/start`, `thread/rollback`,
-`thread/fork`, and `skills/list`. Unknown event types must degrade without
-breaking the whole Activity feed.
+`thread/start`/`thread/resume`/`thread/fork`, `turn/start`/`turn/steer`/
+`turn/interrupt`, `thread/compact/start`, `skills/list`, and the native
+`thread/goal/set`/`get`/`clear` family — see the fixture spike results below
+and in Decisions/the Feature Matrix above. `thread/rollback` exists but is
+deprecated for removal and should not be designed around. Unknown event
+types must degrade without breaking the whole Activity feed.
 
-Before implementation, run a short fixture-verification spike against the
-installed `codex` binary (already installed and logged in, per owner
-confirmation 2026-07-11) to confirm: the exact CLI invocation and JSON-RPC
-handshake/capability shape, real thread/turn/item event shapes, and whether
-`thread/compact/start`/`thread/rollback`/`thread/fork`/`skills/list` actually
-exist and their real request/response field names — replacing this ticket's
-current WebSearch-only claims with captured fixtures. This spike's findings
-must update this phase's event-shape assumptions before the projection tests
-below are written (mirrors the spike requirement already stated for Phase 4).
+**Fixture-verification spike: completed (2026-07-11)**. Exact invocation:
+`codex app-server [--listen stdio://|unix://[PATH]|ws://IP:PORT|off]`,
+default `stdio://`; `--stdio` is shorthand for `--listen stdio://`. Rather
+than capture a live handshake, the spike used
+`codex app-server generate-json-schema --out <dir> --experimental`, which
+dumps the literal JSON Schema bundle shipped with the installed
+`codex-cli 0.144.1` — a stronger source of truth than one sampled
+interaction. This confirmed real request/response field names for every
+Codex RPC referenced in this ticket (folded into Decisions and the Feature
+Matrix above) and surfaced two capabilities the original WebSearch-only pass
+missed entirely: `turn/steer` and the `thread/goal/*` family. It also
+corrected the `thread/rollback` assumption (deprecated, turn-count-based, not
+point-based, does not revert file changes). No live thread/turn was
+exercised and no app-server process was left running; a live-session
+projection-fixture pass (capturing real `item/*`/`turn/*` event sequences
+from an actual turn) is still needed before the projection tests below are
+written, since schema shape alone does not capture real event *sequencing*.
 
 Verification boundary: fixture projection tests for representative Codex
 thread/turn/item sequences (captured from the spike above), route tests

@@ -26,16 +26,25 @@ related:
   silently becoming a Hack). A capability native to only one harness stays
   Passthrough for that harness — cross-harness commonality (common subset vs.
   per-harness-gated) is a separate, orthogonal axis, never conflated with
-  tier. Confirmed/directional tiering as of 2026-07-11 (WebSearch-only,
-  pending fixture verification): session resume/create/send, permission
+  tier. Tiering as of 2026-07-11: session resume/create/send, permission
   interception (Claude `PreToolUse` hooks), and read-only context-usage
-  display are Passthrough across all three; Codex app-server additionally
-  offers Passthrough manual compaction (`thread/compact/start`),
-  rewind/rollback (`thread/rollback`), fork (`thread/fork`), and skill
-  listing (`skills/list`) with no confirmed equivalents elsewhere; Claude's
-  only reachable rewind/fork path is a Hack (transcript-file truncation, not
-  officially supported) while Claude's compaction control stays Unavailable
-  (auto-only; no workaround attempted). A dedicated 2026-07-11 research pass
+  display are Passthrough across all three. **Codex's column is
+  fixture-verified** (2026-07-11, via `codex app-server generate-json-schema
+  --out <dir> --experimental` against the installed `codex-cli 0.144.1`, not
+  WebSearch-only): Codex additionally offers Passthrough manual compaction
+  (`thread/compact/start`, result arrives async via `thread/compacted`), fork
+  (`thread/fork`), skill listing (`skills/list`), mid-turn steering
+  (`turn/steer`), and a native goal-state-tracking family
+  (`thread/goal/set`/`get`/`clear` — bookkeeping only, not an auto-looping
+  primitive) with no confirmed equivalents elsewhere. `thread/rollback`
+  (rewind) is Passthrough but **confirmed deprecated for removal** and
+  coarser than originally assumed (drops N turns from the end, not
+  point-based, does not revert file changes) — do not design new
+  functionality around it. OpenCode's column remains WebSearch-only/
+  unverified (OpenCode not installed in this environment as of 2026-07-11).
+  Claude's only reachable rewind/fork path is a Hack (transcript-file
+  truncation, not officially supported) while Claude's compaction control
+  stays Unavailable (auto-only; no workaround attempted). A dedicated 2026-07-11 research pass
   on whether headless `/compact` input text reproduces interactive-mode
   compaction found no direct confirmation either way, but official headless
   docs enumerate every other supported built-in slash command and stay
