@@ -150,6 +150,61 @@ or whether a different rendering bug (positioning/z-index/interaction, not
 missing chrome) is the real cause — then fix whatever is actually observed,
 or close this phase as a no-op if the popover already renders correctly.
 
+### Result (no-op) - 2026-07-13
+
+Closed as a no-op with respect to code: no CSS/JSX changes were made.
+
+- Static analysis fully confirms design review's claim. `styles.css:3683-3694`
+  declares `border`, `background`, and `box-shadow` on
+  `.agent-chat-history-popover` unconditionally, with no other selector
+  overriding them. The popover has a single render site
+  (`App.tsx:7511-7516`), gated only by `historyOpen`, using a fixed
+  (non-conditional) `className` with no inline `style` override. There is
+  no `z-index` conflict (all declared values are `1`, `4`, `20`, `30`, `35`,
+  or `1000`, and nothing paints over this popover's stacking context).
+  `git blame` shows the block unchanged since its introduction in
+  `414d8805` (260711 Phase 1). Color contrast between
+  `--ws-color-border-strong`/`--ws-color-panel-raised` and the surrounding
+  `--ws-color-panel` background was also checked and ruled out as a
+  near-invisible-contrast explanation.
+- One open finding, flagged honestly as a hypothesis, not a confirmed
+  defect: `.agent-chat-history-popover` uses `position: absolute` inside
+  ancestors with `overflow: auto`/`hidden` (`.agent-chat-pane`, and
+  dockview's bundled `.dv-groupview` CSS), with no protection against
+  ancestor-overflow clipping. The sibling popover
+  `.workbench-close-popover` (`styles.css:2020-2031`) deliberately avoids
+  this by using `position: fixed` with a JS-computed cursor-anchored
+  `top`/`left`. Whether `.agent-chat-history-popover` actually clips in
+  practice depends on live runtime layout (panel width/height, scroll
+  position) that cannot be determined from source alone, so this is
+  recorded as a plausible mechanism worth remembering, not a verified bug.
+  Per the plan's guidance, no `idea/` ticket is filed for this yet since it
+  has not been confirmed as an actual observed defect.
+- The phase's own required precondition — "before writing any code, open
+  the live UI and confirm whether the popover still looks unstyled..." —
+  was **not performed**. No browser automation tool is available in this
+  environment, the same recurring limitation already recorded in this
+  ticket's Phase 1 and Phase 2 Results and in the sibling ticket
+  `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`'s Phase 4
+  Result. This closure rests entirely on static source analysis (CSS/JSX
+  inspection, `git blame`, z-index audit, dockview bundled-CSS inspection),
+  which matches design review's independent suspicion but is not the live
+  confirmation the phase text explicitly asks for.
+- No test was added or changed: since no code changed, there is nothing new
+  to verify by test, and no test claims are made here.
+- Given the live-UI check genuinely was not done, this phase's no-op
+  conclusion is **not** a substitute for it. Consistent with how Phase 1
+  and Phase 2 of this ticket were left (both explicitly documented the
+  same manual-live-browser-confirmation gap as an accepted, non-blocking
+  limitation rather than reopening or holding up those phases), this
+  phase's closure follows the same precedent: the gap is accepted and
+  documented here rather than treated as a blocker on this phase itself.
+  The ticket stays in `ready/` (unchanged from before this phase) with the
+  live-UI check (Verification Plan steps 1-2 in the corresponding plan
+  file) recorded as outstanding follow-up for whenever a browser tool
+  becomes available, rather than as a precondition that must be satisfied
+  before this phase's Result can be recorded.
+
 ## Non-goals
 
 - The stub chat response being identical text across all turns is a known,
