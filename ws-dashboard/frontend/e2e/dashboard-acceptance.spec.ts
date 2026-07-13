@@ -2696,6 +2696,14 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // "steering…" (see `activitySessionStub.ts`'s per-harness table) and a
     // fire-and-forget `stubSteerActivitySession` call fires alongside the
     // local FIFO queue.
+    // Phase 2 (260713-fix usability-polish): shrink the viewport before
+    // queuing so the transcript's already-accumulated content (real bubble,
+    // tool bubble, thinking block, streaming assistant reply from the steps
+    // above) overflows a short pane, pushing the newly-queued pending bubble
+    // outside the initially-visible area. This exercises the net-new
+    // scroll-into-view effect (`lastPendingBubbleRef`/`pendingCountRef` in
+    // `App.tsx`) rather than merely asserting it landed in the DOM.
+    await page.setViewportSize({ width: 1440, height: 260 });
     await promptInput.fill("second phase-3 message");
     await sendButton.click();
     const pendingBubble = pane.locator('[data-testid="agent-chat-pending-bubble"]');
@@ -2705,6 +2713,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "steering…",
     );
     await expect(realUserBubble("second phase-3 message")).toHaveCount(0);
+    // The queued bubble is scrolled into view automatically (not merely
+    // present in the DOM off-screen) - the direct outcome-level assertion
+    // for the auto-scroll fix.
+    await expect(pendingBubble).toBeInViewport();
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // Once the first turn's stub stream naturally completes (`onComplete`),
     // the pending bubble's badge clears and a new bubble/streaming reply

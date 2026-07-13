@@ -7162,6 +7162,15 @@ function AgentChatPaneBody({
   const [turnInFlight, setTurnInFlight] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
   const pendingRef = useRef<PendingChatMessage[]>([]);
+  // Phase 2 (260713-fix usability-polish): net-new auto-scroll for the
+  // newest pending/queued bubble - there is no other scroll-management
+  // precedent in this transcript container to follow. `lastPendingBubbleRef`
+  // tracks the DOM node of only the most-recently-queued bubble;
+  // `pendingCountRef` tracks the previous `pendingMessages.length` so the
+  // scroll effect below can tell a queue-growth (new message queued) apart
+  // from a queue-shrink (dequeue/revert), which must not re-trigger a scroll.
+  const lastPendingBubbleRef = useRef<HTMLDivElement | null>(null);
+  const pendingCountRef = useRef(0);
   const turnSequenceRef = useRef(0);
   const pendingSequenceRef = useRef(0);
   const streamHandlesRef = useRef<Array<StubStreamingHandle | RealStreamingHandle>>([]);
@@ -7189,6 +7198,21 @@ function AgentChatPaneBody({
     setPromptHistory([]);
     setHistoryIndex(null);
   }, [activeActivityId]);
+
+  // Scroll the newest queued/pending bubble into view when it is added
+  // (Phase 2, 260713-fix usability-polish) - on a tall transcript the
+  // pending bubble can otherwise land below the fold with no visible
+  // confirmation that the message was queued. Only fires on queue growth
+  // (a new message just queued via `submitPrompt`'s mid-turn branch), not
+  // on queue shrink (dequeue via `onTurnComplete` or `revertPending`), so
+  // this stays a "new pending bubble appeared" signal rather than firing on
+  // every `pendingMessages` reference change.
+  useEffect(() => {
+    if (pendingMessages.length > pendingCountRef.current) {
+      lastPendingBubbleRef.current?.scrollIntoView({ block: "nearest" });
+    }
+    pendingCountRef.current = pendingMessages.length;
+  }, [pendingMessages]);
 
   // The concrete "turn-in-flight / batch-boundary" mechanism (Phase 3
   // Escalation 1): starts a real send (`actions.onSendMessage`, which
@@ -7408,13 +7432,14 @@ function AgentChatPaneBody({
             onForkFromBubble={(bubble) => actions.onForkFromBubble(pane, bubble)}
             onResumeFromBubble={(bubble) => actions.onResumeFromBubble(pane, bubble)}
           />
-          {pendingMessages.map((entry) => (
+          {pendingMessages.map((entry, index) => (
             <div
               className="agent-chat-bubble agent-chat-bubble-user agent-chat-bubble-pending"
               data-agent-chat-bubble-kind="user"
               data-agent-chat-bubble-align="right"
               data-testid="agent-chat-pending-bubble"
               key={entry.id}
+              ref={index === pendingMessages.length - 1 ? lastPendingBubbleRef : undefined}
             >
               <div className="agent-chat-bubble-body">{entry.text}</div>
               <div className="agent-chat-bubble-actions">
