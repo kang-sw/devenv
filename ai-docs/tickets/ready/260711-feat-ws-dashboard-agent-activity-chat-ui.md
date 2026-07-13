@@ -412,3 +412,47 @@ UI, following the existing Server Route pattern from `ws-web-dashboard`
 Verification boundary: server-scoped route tests showing local compatibility
 aliases still map to `server-local`; browser-level acceptance evidence for a
 linked remote server's Activity tab behaving identically to the local one.
+
+### Result
+
+Implemented per plan `ai-docs/.plans/2026-07/13-1256-chat-ui-server-scoped-phase4.md`
+on branch `impl/chat-ui-server` (commit `66c9c2cb`, base `d8facd22`).
+
+The survey found that Phases 1-3's implementers had already forward-built
+all of this phase's frontend `serverRoute` threading (pane identity, wire
+request shapes, stub propagation, `App.tsx` wiring reading the real
+`workbenchModel.root.resourcePath.serverId`, per-server pane filtering) —
+confirmed directly, not just claimed. This phase was therefore a pure
+verification/hardening pass: no source changes, only new test coverage.
+Added `serverRoute`-fallback-to-`LOCAL_DASHBOARD_SERVER_ROUTE` and
+distinct-route-identity assertions to `agentChatSessions.test.ts` (mirroring
+the existing `workRootActivity.test.ts` precedent) and propagation
+assertions to `activitySessionStub.test.ts`, plus a browser-acceptance
+`test.step` exercising the agentChat flow against a linked remote server,
+reusing the existing `linkedServerBrowserServers`/`linkedServerBrowserResources`
+fixtures. No daemon-side changes were made or needed, since no real
+`activity.session.*` daemon route exists yet (still `260620`'s scope).
+
+Review: partitioned fit/test, both clean. Fit independently confirmed the
+"no source changes needed" claim is genuine (zero non-test-file diff) and
+that the new tests/e2e step follow the cited precedent with no special-casing
+and no duplicated fixture setup. Test independently confirmed the new
+assertions are non-tautological via a live negative-control check (temporarily
+broke `agentChatPaneLogicalKey`'s serverRoute handling, confirmed the new
+test failed, then restored and reconfirmed green), and traced the "no bug
+found" claim against the actual source rather than trusting it. One Minor,
+non-blocking note: a fixed-seed non-empty-history-array assumption in
+`activitySessionStub.test.ts` is safe today but latent-fragile if the stub's
+seed data changes.
+
+Verification: all registered frontend route-test npm scripts pass; `npx tsc -b`
+clean; `npm run test:browser` passes 2/2, including the new linked-remote-server
+agentChat step.
+
+**Ticket 260711 is now fully complete**: all four phases (chat surface shell,
+streaming rendering, resume/fork/queuing, server-scoped integration) are
+implemented, reviewed, and recorded. One companion follow-up ticket was
+filed during Phase 3: `260713-feat-ws-dashboard-activity-session-fork-cursor`
+(idea/, flags a real `260620`-owned contract gap for the real fork backend).
+All work lives on branch `impl/chat-ui-server`, unmerged into
+`ws-dashboard-dev` pending explicit user approval.
