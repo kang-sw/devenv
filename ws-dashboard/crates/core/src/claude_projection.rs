@@ -117,6 +117,12 @@ pub struct ClaudeProjector {
     active_turn: bool,
     turn_status: Option<String>,
     next_content_seq: u64,
+    // CONTRACT: `result.modelUsage` can carry more than one model (e.g. a
+    // background helper model alongside the primary responding model, seen
+    // in a real capture); track the model name the *assistant* actually used
+    // this turn so `ingest_result` reads the right entry instead of an
+    // arbitrary (alphabetically-first) one. Daemon-private, never surfaced.
+    active_model: Option<String>,
 }
 
 impl ClaudeProjector {
@@ -212,6 +218,13 @@ impl ClaudeProjector {
     fn ingest_assistant(&mut self, value: &Value) -> ClaudeIngestOutcome {
         let turn_started = !self.active_turn;
         self.active_turn = true;
+        if let Some(model) = value
+            .get("message")
+            .and_then(|message| message.get("model"))
+            .and_then(Value::as_str)
+        {
+            self.active_model = Some(model.to_owned());
+        }
         let Some(content) = value
             .get("message")
             .and_then(|message| message.get("content"))
@@ -297,12 +310,21 @@ impl ClaudeProjector {
         let used_output = usage
             .and_then(|usage| usage.get("output_tokens"))
             .and_then(Value::as_u64);
-        let context_window = value
-            .get("modelUsage")
-            .and_then(Value::as_object)
-            .and_then(|models| models.values().next())
-            .and_then(|model_usage| model_usage.get("contextWindow"))
-            .and_then(Value::as_u64);
+        // CONTRACT: prefer the entry for the model that actually produced
+        // this turn's assistant content; `modelUsage` can carry additional
+        // background-helper models whose map key may sort first (Rust's
+        // `serde_json::Map` is a `BTreeMap` without the `preserve_order`
+        // feature), which would otherwise silently pick the wrong model's
+        // context window (a real capture surfaced this: a background haiku
+        // helper model recorded alongside the primary sonnet model).
+        let context_window = value.get("modelUsage").and_then(Value::as_object).and_then(|models| {
+            self.active_model
+                .as_deref()
+                .and_then(|model| models.get(model))
+                .or_else(|| models.values().next())
+                .and_then(|model_usage| model_usage.get("contextWindow"))
+                .and_then(Value::as_u64)
+        });
         self.usage = Some(ClaudeUsage {
             used_input_tokens: used_input,
             used_output_tokens: used_output,
@@ -517,25 +539,35 @@ mod tests {
     fn projects_tool_call_turn_with_thinking_and_correlated_tool_result() {
         let projector = project_fixture();
         let blocks = projector.transcript_blocks();
-        // Turn 2: thinking, tool_use (correlated with tool_result), assistant text.
+        // Real capture: a `thinking` block (with a real, non-empty
+        // `signature` the projector must never surface) and a `Bash pwd`
+        // tool_use correlated with its `tool_result`.
         let thinking = blocks
             .iter()
             .find(|block| block.render_kind == CLAUDE_RENDER_KIND_THINKING)
             .expect("thinking block present");
         assert_eq!(thinking.title.as_deref(), Some("Reasoning"));
-        assert!(thinking.text.as_deref().unwrap_or_default().contains("working directory"));
-        // Never leaks the thinking block's signature field.
+        // Never leaks the thinking block's signature field (real captured
+        // signature, not a synthetic marker).
         let serialized = serde_json::to_string(&blocks).expect("serialize blocks");
-        assert!(!serialized.contains("sig-secret-abc"));
+        assert!(!serialized.contains("EqUCCokBCA8YAipA9QieI27oSl2O6ONgC1WVLU6GBJfOeaPn85Y"));
 
         let tool_block = blocks
             .iter()
-            .find(|block| block.render_kind == CLAUDE_RENDER_KIND_TOOL && block.title.as_deref() == Some("Bash") && block.text.as_deref().unwrap_or_default().contains("pwd"))
+            .find(|block| {
+                block.render_kind == CLAUDE_RENDER_KIND_TOOL
+                    && block.title.as_deref() == Some("Bash")
+                    && block.text.as_deref().unwrap_or_default().contains("pwd")
+            })
             .expect("tool block present");
         assert!(tool_block.text.as_deref().unwrap().contains("status: completed"));
-        assert!(tool_block.text.as_deref().unwrap().contains("/home/user/project"));
+        assert!(tool_block
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("/tmp/claude-cli-adapter-capture/workdir"));
         // Correlation key (tool_use_id) never crosses into the output.
-        assert!(!serialized.contains("toolu_01"));
+        assert!(!serialized.contains("toolu_01UbL6NLnGbxxSosoEzMaG4a"));
     }
 
     #[test]
@@ -544,21 +576,33 @@ mod tests {
         let blocks = projector.transcript_blocks();
         let denied = blocks
             .iter()
-            .find(|block| block.text.as_deref().unwrap_or_default().contains("rm -rf"))
+            .find(|block| {
+                block
+                    .text
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("DENY_MARKER_TEST_BLOCK")
+            })
             .expect("denied tool block present");
         assert!(denied.text.as_deref().unwrap().contains("status: blocked"));
         assert!(projector.diagnostics().contains(&DIAG_PERMISSION_DENIED.to_owned()));
         let serialized = serde_json::to_string(&blocks).expect("serialize blocks");
-        assert!(!serialized.contains("toolu_02"));
+        assert!(!serialized.contains("toolu_01YE6wv1EEi9p38BgVimveyo"));
     }
 
     #[test]
     fn reads_usage_and_context_window_from_result_event() {
         let projector = project_fixture();
         let usage = projector.usage().expect("usage present");
-        assert_eq!(usage.used_input_tokens, Some(40));
-        assert_eq!(usage.used_output_tokens, Some(12));
-        assert_eq!(usage.context_window, Some(200_000));
+        // Real capture's final (third) `result` event: top-level `usage`
+        // gives the token counts, `modelUsage` carries two models this turn
+        // (the primary `claude-sonnet-5` responder plus a background
+        // `claude-haiku-4-5-...` helper) - the projector must pick the
+        // *active* (assistant-responding) model's context window, not an
+        // arbitrary map-ordered one.
+        assert_eq!(usage.used_input_tokens, Some(4));
+        assert_eq!(usage.used_output_tokens, Some(184));
+        assert_eq!(usage.context_window, Some(1_000_000));
     }
 
     #[test]
