@@ -1,0 +1,39 @@
+# Plan: 260713-bug-tickets-move-error-mutates-frontmatter — Phase 1: Surface a loud partial-mutation notice on blocked tickets.move
+
+## Relevant Ticket Contract
+- Keep the self-healing legacy-schema-migration write on a blocked/failed `tickets.move`; do NOT switch to validate-before-persist (would drop auto-migration for legacy single-field tickets).
+- The tool's returned result must surface an explicit, hard-to-miss partial-mutation notice whenever `TicketsMove` wrote frontmatter on a call that then blocked or failed, so a retrying agent caller cannot mistake a blocked move for a fully unchanged file.
+- Design-review-resolved implementation notes (authoritative, do not re-decide):
+  - `TicketsMove` currently discards the computed `sageReviewPostures` on error and returns a bare `TicketMutateResult{}` plus a Go error; fix requires (1) not discarding the partial result inside `TicketsMove` on error, and (2) special-casing the `tickets.move` error branch in `server.go` since the shared `toolTextResponse(req.ID, "", err)` generic-error path drops any payload.
+- Verification boundary: a targeted regression reproducing the 2026-07-13 scenario (blocked `to: "ready"` move on a legacy-schema ticket) asserts the notice appears in the tool result; `go test ./...` passes.
+- `TicketsClose`'s analogous write-then-possibly-fail shape stays explicitly out of scope for this ticket.
+
+## Out of Scope
+- `TicketsClose` write-then-possibly-fail generalization (explicitly deferred to a future ticket per the ticket's Implementation notes).
+- Switching to validate-before-persist (explicitly rejected in the ticket's Decision section).
+- Any other phase (this ticket has only Phase 1).
+
+## Codebase Findings
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate.go#L92-L143` — `TicketsMove`: on the `prepareSageReviewForUpwardMove` error path (line 117-119) it returns `TicketMutateResult{}, err`, discarding the `sageReviewPostures` value that function already computed and persisted. Needs a non-error-shaped carrier for the partial posture info (e.g. extend `TicketMutateResult` with a field, populated only on this branch).
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate.go#L321-L386` — `prepareSageReviewForUpwardMove` already returns `(sageReviewPostures, error)` together (line 362, 365, 375, 382 all return `result, err`); the persisted write happens at line 340-351 before any of these error returns. This function is already correctly shaped — the caller (`TicketsMove`) is what discards it.
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate.go#L405-L417` — `sageReviewPostureTip` formats a `sageReviewPostures` into a human string (`"sage review posture: design X, completeness Y."`); reusable to render the partial-mutation notice text instead of writing new formatting logic.
+- `agents-plugin-tool/internal/mcp/server.go#L1134-L1156` — `tickets.move` MCP handler: `if err != nil { return toolTextResponse(req.ID, "", err) }` at line 1153-1154 is the generic path that must be special-cased.
+- `agents-plugin-tool/internal/mcp/server.go#L2744-L2764` — `toolTextResponse`/`toolErrorTextResponse`: on error, `toolErrorTextResponse(id, err.Error())` sets `isError: true` and puts only `err.Error()` in the text content; there is no side channel for extra payload today, so the special case must build a combined text (`err.Error()` + a notice line) and call `toolErrorTextResponse` directly, or add a small local helper.
+- `agents-plugin-tool/internal/mcp/server.go#L2350-L2358` — `formatTicketMutate(verb, result)` is the success-path formatter (adds a `tip:` line); not reusable as-is for the error path since it assumes success framing (`"%s: %s\n  %s -> %s\n"`), but the `tip:`-line convention is worth mirroring for a `partial-mutation:` line so the notice reads consistently with existing tip formatting.
+- `agents-plugin-tool/internal/wsdoc/tickets_mutate_test.go#L346-L450` — `TestTicketsMoveUpwardToReadyBlocksUnresolvedSageReviewPosture`: table-driven blocked-promotion test; currently does `if _, err := TicketsMove(...)` discarding the result. This is the closest existing fixture pattern for the new regression test (legacy-schema ticket blocked at `to: "ready"`); it already asserts the frontmatter write happened (`after := readFileString(...)`) so the new test should extend this pattern to also assert the returned partial-mutation info/notice.
+- `agents-plugin-tool/internal/mcp/session_state_test.go#L2223-L2270` — `TestServeStdioTicketsMoveDefaultsToRequiredSageReview` shows the MCP-layer test harness pattern (`callToolWithKey`, string-contains assertions on the response body) usable for an MCP-layer regression asserting the notice text appears in a blocked-move response.
+- `ai-docs/spec/mcp-tools.md#L820-L839` (`{#260620-ticket-move-tool}`) — current `tickets.move` spec anchor describes tips and validation but has no partial-mutation-on-error language yet; ticket's own Spec Impact section defers the spec update to after the notice shape is settled during implementation, so this should be the last implementation step, not a precondition.
+
+## Implementation Plan
+1. In `agents-plugin-tool/internal/wsdoc/tickets_mutate.go`, change `TicketsMove` (L92-143) to carry the `sageReviewPostures` computed by `prepareSageReviewForUpwardMove` (L117-119) through to the error return instead of discarding it. Concrete shape: add a field to `TicketMutateResult` (e.g. `PartialPostures *sageReviewPostures`, populated only on the blocked-error branch) and return `TicketMutateResult{PartialPostures: &postures}, err` instead of `TicketMutateResult{}, err` at L118-119. Reuse `sageReviewPostureTip` (L405-417) to render the human-readable notice text from the postures rather than writing new formatting.
+2. In `agents-plugin-tool/internal/mcp/server.go`, special-case the `tickets.move` error branch (currently L1153-1154: `if err != nil { return toolTextResponse(req.ID, "", err) }`). When `err != nil` and the new partial-mutation field on `result` is populated, build a combined error text (e.g. `err.Error() + "\npartial-mutation: frontmatter was written before this call blocked; " + <rendered posture notice> + " a retry will not find an unchanged file."`) and call `toolErrorTextResponse` (L2756-2764) directly with that combined text, preserving `isError: true`. When the field is empty (no partial write occurred), keep the existing generic `toolTextResponse(req.ID, "", err)` path unchanged.
+3. Add a regression test in `agents-plugin-tool/internal/wsdoc/tickets_mutate_test.go` reproducing the 2026-07-13 scenario: a legacy-schema ticket (`sage-review: pending` or similar, matching the existing table-driven fixture style at L346-450) blocked on `to: "ready"`, asserting the returned `TicketMutateResult` carries the partial-mutation info (not just that the frontmatter file itself was written, which the existing test already checks).
+4. Add an MCP-layer regression test in `agents-plugin-tool/internal/mcp/` (new test function alongside `TestServeStdioTicketsMoveDefaultsToRequiredSageReview` in `session_state_test.go`, or a new test file) asserting the `tickets.move` tool response text contains the partial-mutation notice when a blocked move on a legacy-schema ticket occurs.
+5. Once the notice's exact field/text shape is settled, add a matching addition to `ai-docs/spec/mcp-tools.md` under `{#260620-ticket-move-tool}` (L820-839) documenting the partial-mutation notice behavior on blocked upward moves.
+
+## Verification Plan
+- `go test ./agents-plugin-tool/internal/wsdoc/... ./agents-plugin-tool/internal/mcp/...` (or `go test ./...` from `agents-plugin-tool/`) covering the new regression tests plus full existing suite.
+- Manually confirm the new/changed test fails against the pre-fix code path (discarded result) and passes after the fix, to prove the regression actually exercises the notice rather than a no-op assertion.
+
+## Escalations
+- None.
