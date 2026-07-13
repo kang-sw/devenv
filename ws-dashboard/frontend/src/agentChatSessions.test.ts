@@ -13,6 +13,7 @@ import {
   agentChatPaneLogicalKey,
   attachAgentChatSession,
   createEmptyAgentChatPane,
+  markAgentChatPaneError,
   markAgentChatPaneStarting,
   removeAgentChatPane,
   removeAgentChatPanesForWorkRoot,
@@ -80,6 +81,45 @@ assertEqual(
   startingPane.session,
   null,
   "marking a pane starting does not fabricate a session before the stub call resolves",
+);
+
+// --- 1b. Stub create/start rejection transitions the pane to error state ---
+// Mirrors App.tsx's `.catch` handlers on the stub
+// `activity.session.create`/`start` call (~line 4929 and ~4964): on
+// rejection the pane must stop being "starting" and must carry a non-empty
+// error message, without fabricating a session.
+
+const erroredPane = markAgentChatPaneError(
+  startingPane,
+  "agent chat session failed to start",
+);
+assertEqual(
+  erroredPane.starting,
+  false,
+  "a stub create/start rejection clears the in-flight starting flag",
+);
+assertEqual(
+  erroredPane.error,
+  "agent chat session failed to start",
+  "a stub create/start rejection records the rejection's error message on the pane",
+);
+assertEqual(
+  erroredPane.session,
+  null,
+  "a stub create/start rejection does not fabricate a session",
+);
+
+// A subsequent retry that starts again must clear any stale error.
+const retryingPane = markAgentChatPaneStarting(erroredPane);
+assertEqual(
+  retryingPane.error,
+  null,
+  "retrying after a failure clears the previous error before the next stub call resolves",
+);
+assertEqual(
+  retryingPane.starting,
+  true,
+  "retrying after a failure re-enters the in-flight starting state",
 );
 
 // --- 2. Resume-popup history stub is scoped to the current workRootId ------
