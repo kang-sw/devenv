@@ -1,6 +1,6 @@
 ---
 title: "Agent chat transcript never carries the user's own message, and misclassifies/splits real Codex+Claude replies"
-sage-review-design: required
+sage-review-design: blocked
 related:
   260711-feat-ws-dashboard-agent-activity-chat-ui: introduced the frontend TranscriptBlock role/turnId contract this ticket now fills in
   260713-feat-ws-dashboard-agent-chat-real-adapter-wiring: wired real Codex/Claude adapters without completing this contract
@@ -143,3 +143,13 @@ preferred if available; if not, the daemon-transcript-API-level
 verification (curl/HTTP against a real running session) used to diagnose
 this bug is an acceptable substitute, since it directly exercises the
 same wire shape the frontend consumes.
+
+## Blocked (2026-07-13)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Issue 1's root-cause premise is contradicted by an already-existing frontend optimistic echo: `beginSimulatedTurn` -> `sendAgentChatMessage` -> `appendUserTranscriptBlock` (`App.tsx:7238,5077`; `agentChatSessions.ts:181`) already appends a real `role:"user"`, right-aligned `TranscriptBlock` (cursor `user-sent-...`) for real harnesses before POSTing `/prompt`. The curl evidence only proves the *daemon* transcript lacks the block (expected under Codex suppression); it does not prove the *browser* shows nothing. This premise must be re-checked against current code before the phase is re-scoped. | critical | missing |
+| 2 | Removing Codex's `suppress_local_prompt` will double-render the user message, not merely risk it hypothetically: the optimistic block already exists (see #1), so once the daemon stops suppressing Codex's `userMessage` echo, `mergeStreamingTranscriptBlocks` (`agentChatStreamMerge.ts:21`) will show both the optimistic block (cursor `user-sent-...`) and the daemon's ordinally-cursored echo, since dedup is strict-cursor-based and the two cursors never match. Claude has no daemon-side echo at all, so the optimistic block is Claude's *only* source — meaning Codex and Claude need different source-of-truth handling, an asymmetry the ticket does not currently name or resolve. Needs an explicit source-of-truth decision (optimistic-only vs daemon-echo-only vs role+text dedup) before implementation. | critical | missing |
+| 3 | Source-file path/line references are inaccurate: `codex_app_server.rs` lives at `crates/daemon/src/codex_app_server.rs`, not `crates/core/...`, and `suppress_local_prompt` is called at two sites (initial-prompt path and `send_prompt` path, not one range) — both must be reconciled. | minor | autonomous |
