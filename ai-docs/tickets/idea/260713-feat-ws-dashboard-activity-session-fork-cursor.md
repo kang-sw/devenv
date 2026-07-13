@@ -48,7 +48,11 @@ stub's local parameter into the now-real request type).
 Phase 1 (commit `53d420fe`) added the frontend-type half of this field —
 `ActivitySessionForkRequest`/`ActivitySessionForkResponse` now carry an
 optional `cutCursor`, adopting the stub's `cutBlocks` shape as a single
-wire-shaped cursor value. The daemon-side fork handler this phase also
-requires does not exist yet; it is scoped into that same ticket's Phase 3
-(`CodexControlRequest::Fork` variant and route). This ticket stays open in
-`idea/` until Phase 3 lands and the daemon side can be verified end-to-end.
+wire-shaped cursor value. Phase 3 (commit `33bb209a`) landed the daemon-side
+fork handler: `CodexControlRequest::Fork` resolves `cutCursor` to a Codex
+turn id and forks from that point (or the whole thread when resolution
+fails). Both halves of this ticket's Phase 1 are now implemented and
+reviewed, but that same ticket's Phase 4 mandatory manual browser
+walkthrough has not yet run — this ticket stays open in `idea/` until that
+walkthrough confirms fork-from-here works end-to-end against a real Codex
+session, not just at the unit/route-test level.

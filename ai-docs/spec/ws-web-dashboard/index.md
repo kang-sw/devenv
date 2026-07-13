@@ -988,8 +988,7 @@ the active harness's capabilities allow it, steer and fork. OpenCode sessions
 remain stub-backed pending Phase 3 of `260620`. `ActivitySessionForkRequest`/
 `ActivitySessionForkResponse` gained an optional `cutCursor` field identifying
 a specific transcript cut point to fork from rather than only the session's
-current end; no daemon fork route exists yet to honor it (a fork call is
-expected to fail until a `CodexControlRequest::Fork` variant and route land).
+current end.
 Phase 2 of the same ticket replaces the initial one-shot send-then-fetch with
 incremental polling: the frontend re-fetches the transcript on a fixed
 interval, diffing each poll against the previously-seen block count so only
@@ -1000,6 +999,31 @@ SSE/websocket transport — the dashboard's existing `authenticate_websocket_upg
 seam stays reserved future work, and polling is an already-accepted transport
 pattern in this codebase (mirroring the `workRootActivity` `pollFallback`
 mode), not a stopgap unique to chat.
+
+Phase 3 of the same ticket lands the daemon-side Codex fork route the
+frontend already targeted: `CodexControlRequest` gains a `Fork { cutCursor }`
+variant (`{"action":"fork","cutCursor":...}` on the wire), dispatched by
+`codex_session_control` to a new `CodexAppServerProvider::fork` provider
+method. {#260713-ws-dashboard-agent-chat-codex-fork-route} Forking spawns a
+dedicated new Codex connection for the forked thread rather than sharing the
+source session's connection — the daemon has no per-thread notification
+demultiplexing, and the underlying `thread/fork` primitive loads the thread
+from disk by id, so the source connection need not stay alive. The new
+session is seeded with the forked thread's existing turns (via a pure
+projection of `thread/fork`'s inline response) so its transcript shows
+correct pre-fork history immediately, then continues ingesting live
+notifications normally. `cutCursor` is an ordinal transcript-block index on
+the wire; the daemon resolves it to the underlying provider turn id
+internally (never exposed on `TranscriptBlock`) before calling `thread/fork`.
+When resolution fails (a stale or out-of-range cursor), the fork proceeds as
+a full-thread fork and the response's `cutCursor` comes back `null` rather
+than echoing the request — this reflects what was actually applied, not what
+was requested, so callers must not assume a non-null request `cutCursor`
+implies a successful cut. Live Claude fork-from-here stays out of scope
+(Hack-tier per the capability tiering in
+`ai-docs/mental-model/ws-dashboard-agent-harness.md`); no `goal`/`rewind`
+`CodexControlRequest` variant exists yet either, despite
+`AgentClientCapabilities` already reporting `goal: true`.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
