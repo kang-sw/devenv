@@ -23,10 +23,20 @@ import type {
   ActivityHistoryListResponse,
   ActivitySessionCreateRequest,
   ActivitySessionCreateResponse,
+  ActivitySessionForkRequest,
+  ActivitySessionForkResponse,
+  ActivitySessionSendRequest,
+  ActivitySessionSendResponse,
+  ActivitySessionSteerRequest,
+  ActivitySessionSteerResponse,
   ActivitySessionStartRequest,
   ActivitySessionStartResponse,
 } from "./activitySessionApi.js";
-import type { AgentChatHarness, AgentChatSessionView } from "./agentChatSessions.js";
+import type {
+  AgentChatCapabilities,
+  AgentChatHarness,
+  AgentChatSessionView,
+} from "./agentChatSessions.js";
 import type {
   ActivityItem,
   ActivitySourceDisplay,
@@ -51,6 +61,50 @@ function stubSourceDisplay(harness: AgentChatHarness): ActivitySourceDisplay {
     tier: "stub",
     model: null,
   };
+}
+
+// --- Phase 3 per-harness capability table ---------------------------------
+// CONTRACT: mirrors the fixture-verified Cross-Harness Feature Matrix in
+// `ai-docs/mental-model/ws-dashboard-agent-harness.md` and the Rust
+// `AgentClientCapabilities` shape in
+// `ws-dashboard/crates/core/src/agent_client_provider.rs#L38-L47`. `rewind`
+// stays `false` for every harness, deliberately: no harness's rewind
+// primitive is a clean Passthrough/Overlay match for point-based "resume
+// from here" (Codex's `thread/rollback` is deprecated-for-removal and
+// coarse turn-count-based; Claude's only path is an unofficial Hack;
+// OpenCode is unverified) — this is the load-bearing gate keeping "resume
+// from here" disabled everywhere (see `agentChatResumeFromHere.tsx`).
+function stubCapabilitiesForHarness(harness: AgentChatHarness): AgentChatCapabilities {
+  switch (harness) {
+    case "codex":
+      return {
+        compact: true,
+        steer: true,
+        goal: true,
+        rewind: false,
+        fork: true,
+        skills: true,
+      };
+    case "claude":
+      return {
+        compact: false,
+        steer: false,
+        goal: false,
+        rewind: false,
+        fork: false,
+        skills: true,
+      };
+    case "opencode":
+    default:
+      return {
+        compact: false,
+        steer: false,
+        goal: false,
+        rewind: false,
+        fork: false,
+        skills: false,
+      };
+  }
 }
 
 function stubTranscriptBlock(
@@ -157,18 +211,49 @@ export type StubStreamingHandle = {
  * genuinely incremental rendering (component tests can also just feed
  * successive partial strings directly through the same block shape without
  * needing the timer).
+ *
+ * `onComplete` (Phase 3,
+ * `260711-feat-ws-dashboard-agent-activity-chat-ui`) fires exactly once,
+ * when the stream naturally exhausts `STUB_STREAM_LINES` — the concrete,
+ * minimal "next tool-call batch boundary" signal this phase's mid-turn
+ * queuing state machine dequeues on (see `App.tsx`'s
+ * `AgentChatPaneBody`). External cancellation via the returned `stop()`
+ * must not also fire `onComplete`: `stop()` only ever clears the interval
+ * from the outside, so the natural-completion branch inside `emit` (the
+ * only place `onComplete` is invoked) is never reached through it. This
+ * single callback deliberately collapses "batch boundary" and "turn
+ * completion" into one event, since the stub only ever simulates one
+ * linear, non-batched stream per turn — a real Codex adapter's actual
+ * mid-turn `turn/steer` batch points are a finer-grained future
+ * replacement this callback shape does not need to anticipate further.
+ *
+ * `turnId` (Phase 3) defaults to the Phase 2 canned demo's shared
+ * `STUB_STREAM_TURN_ID` so that call site's grouping behavior is unchanged.
+ * A Phase 3 user-triggered simulated turn must pass its own distinct
+ * `turnId` (not just a distinct `cursor`) — `groupTranscriptIntoBubbles`
+ * merges adjacent same-kind blocks that share a `turnId` into one bubble,
+ * so two concurrently-emitting streams sharing `STUB_STREAM_TURN_ID` would
+ * wrongly collapse into a single agent-turn bubble despite having distinct
+ * cursors.
  */
 export function stubBeginStreamingTurn(
   onUpdate: (block: TranscriptBlock) => void,
-  options: { intervalMs?: number; cursor?: string } = {},
+  options: {
+    intervalMs?: number;
+    cursor?: string;
+    turnId?: string;
+    onComplete?: () => void;
+  } = {},
 ): StubStreamingHandle {
   const cursor = options.cursor ?? "stream-1";
+  const turnId = options.turnId ?? STUB_STREAM_TURN_ID;
   const intervalMs = options.intervalMs ?? 200;
   let index = 0;
   let text = "";
   const emit = () => {
     if (index >= STUB_STREAM_LINES.length) {
       clearInterval(timer);
+      options.onComplete?.();
       return;
     }
     text = text.length > 0 ? `${text}\n${STUB_STREAM_LINES[index]}` : STUB_STREAM_LINES[index];
@@ -176,7 +261,7 @@ export function stubBeginStreamingTurn(
     onUpdate(
       stubTranscriptBlock("", text, new Date().toISOString(), cursor, {
         role: "agent",
-        turnId: STUB_STREAM_TURN_ID,
+        turnId,
       }),
     );
   };
@@ -241,6 +326,7 @@ export async function stubStartActivitySession(
       ),
       ...stubDemoBubbleBlocks(now),
     ]),
+    capabilities: stubCapabilitiesForHarness(request.harness),
   };
   return { activityId: request.activityId, session };
 }
@@ -300,10 +386,76 @@ export async function stubResumeAgentChatSession(
   };
 }
 
+// CONTRACT: matches by prefix, not exact equality — `ActivityItem.kind` is
+// an exact `"agent.<harness>"` string, but `stubForkActivitySession` (below)
+// also feeds this the fuller `agent.<harness>:stub-...` `activityId` shape
+// minted by `stubActivityId`, and both must resolve to the same harness.
 function agentChatHarnessFromSourceKind(kind: string): AgentChatHarness {
-  if (kind === "agent.opencode") return "opencode";
-  if (kind === "agent.claude") return "claude";
+  if (kind.startsWith("agent.opencode")) return "opencode";
+  if (kind.startsWith("agent.claude")) return "claude";
   return "codex";
+}
+
+// --- Phase 3 send/steer/fork stub functions --------------------------------
+// CONTRACT: `stubSendActivitySession`/`stubSteerActivitySession` match the
+// already-drafted, inert `ActivitySessionSendRequest`/`ActivitySessionSteerRequest`
+// wire shapes in `activitySessionApi.ts` byte-for-byte — no new wire type
+// drafting needed. Both are trivial `{ accepted: true }` stubs today; a real
+// adapter replaces each call site wholesale later, in particular Codex's
+// real `turn/steer` for `stubSteerActivitySession`.
+
+export async function stubSendActivitySession(
+  request: ActivitySessionSendRequest,
+): Promise<ActivitySessionSendResponse> {
+  void request;
+  return { accepted: true };
+}
+
+export async function stubSteerActivitySession(
+  request: ActivitySessionSteerRequest,
+): Promise<ActivitySessionSteerResponse> {
+  void request;
+  return { accepted: true };
+}
+
+/**
+ * "Fork from here" (shipped live, Phase 3). `request` uses the unchanged,
+ * `260620`-owned `ActivitySessionForkRequest` shape (`{ workRootId,
+ * activityId, serverRoute? }`). `cutBlocks` is a Phase-3-local, non-wire
+ * second parameter carrying the transcript slice to seed the new session
+ * with — plain call-site plumbing, not a change to
+ * `ActivitySessionForkRequest`'s fields (see
+ * `ai-docs/tickets/idea/260713-feat-ws-dashboard-activity-session-fork-cursor.md`
+ * for the real-adapter follow-up this stands in for). Allocates a new
+ * synthetic `activityId` and never mutates the original session.
+ */
+export async function stubForkActivitySession(
+  request: ActivitySessionForkRequest,
+  cutBlocks: readonly TranscriptBlock[],
+): Promise<ActivitySessionForkResponse & { readonly session: AgentChatSessionView }> {
+  const harness = agentChatHarnessFromSourceKind(request.activityId);
+  const activityId = stubActivityId(request.workRootId, harness);
+  const now = new Date().toISOString();
+  const session: AgentChatSessionView = {
+    activityId,
+    workRootId: request.workRootId,
+    serverRoute: request.serverRoute,
+    harness,
+    title: `${agentChatHarnessLabel[harness]} conversation (forked)`,
+    createdAtMs: Date.now(),
+    transcript: stubTranscript(request.workRootId, activityId, harness, [
+      ...cutBlocks,
+      stubTranscriptBlock(
+        "Forked from conversation",
+        `Forked from conversation ${request.activityId} (stub provider, synthetic transcript).`,
+        now,
+        `fork-origin-${activityId}`,
+        { role: "agent" },
+      ),
+    ]),
+    capabilities: stubCapabilitiesForHarness(harness),
+  };
+  return { activityId, session };
 }
 
 // --- Cross-harness history stub (stands in for 260624) --------------------

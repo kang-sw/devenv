@@ -17,7 +17,7 @@ import {
   LOCAL_DASHBOARD_SERVER_ROUTE,
   serverScopedIdentity,
 } from "./resourceModel.js";
-import type { ActivityTranscript } from "./workRootActivity.js";
+import type { ActivityTranscript, TranscriptBlock } from "./workRootActivity.js";
 
 export type AgentChatHarness = "codex" | "opencode" | "claude";
 
@@ -27,6 +27,25 @@ export const agentChatHarnesses: readonly AgentChatHarness[] = [
   "claude",
 ];
 
+// Phase 3 (`260711-feat-ws-dashboard-agent-activity-chat-ui`) capability
+// gating model. Field order/naming mirrors `AgentClientCapabilities` in
+// `ws-dashboard/crates/core/src/agent_client_provider.rs#L38-L47` exactly
+// (`serde(rename_all = "camelCase")`), so a real per-harness adapter's
+// reported capabilities can populate this shape without a reshape once
+// `260620` wires it through. Populated today by
+// `activitySessionStub.ts#stubCapabilitiesForHarness` — no adapter anywhere
+// backs `compact`/`steer`/`goal`/`rewind`/`fork` in a shipped route yet, so
+// every value here is a forward-declared, hand-tiered stub reading, not a
+// live capability probe.
+export type AgentChatCapabilities = {
+  readonly compact: boolean;
+  readonly steer: boolean;
+  readonly goal: boolean;
+  readonly rewind: boolean;
+  readonly fork: boolean;
+  readonly skills: boolean;
+};
+
 export type AgentChatSessionView = {
   readonly activityId: string;
   readonly workRootId: string;
@@ -35,6 +54,7 @@ export type AgentChatSessionView = {
   readonly title: string;
   readonly createdAtMs: number;
   readonly transcript: ActivityTranscript;
+  readonly capabilities: AgentChatCapabilities;
 };
 
 export type AgentChatPaneState = {
@@ -146,4 +166,39 @@ export function removeAgentChatPanesForWorkRoot(
     }
   }
   return next;
+}
+
+let userTranscriptBlockSequence = 0;
+
+/**
+ * Append a real, sent user message to a session's transcript as a fresh
+ * `TranscriptBlock` (Phase 3 prerequisite — the base send-input path). Pure:
+ * returns a new `AgentChatSessionView` rather than mutating `session`.
+ * Mirrors `activitySessionStub.ts`'s `stubTranscriptBlock` shape
+ * (`role: "user"`, `renderKind: "markdown"`), with a fresh, unique `cursor`
+ * so it never collides with an existing block or a streaming overlay entry.
+ */
+export function appendUserTranscriptBlock(
+  session: AgentChatSessionView,
+  text: string,
+): AgentChatSessionView {
+  userTranscriptBlockSequence += 1;
+  const block: TranscriptBlock = {
+    cursor: `user-sent-${Date.now().toString(36)}-${userTranscriptBlockSequence}`,
+    timestamp: new Date().toISOString(),
+    renderKind: "markdown",
+    title: null,
+    text,
+    data: null,
+    degraded: false,
+    role: "user",
+    turnId: undefined,
+  };
+  return {
+    ...session,
+    transcript: {
+      ...session.transcript,
+      blocks: [...session.transcript.blocks, block],
+    },
+  };
 }

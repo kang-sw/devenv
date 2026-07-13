@@ -2653,6 +2653,172 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- 260711 Phase 3: send input, mid-turn queuing, revert, history, ----
+  // --- fork/resume-from-here gating ---------------------------------------
+  await test.step("agent chat send input, mid-turn queuing, revert, and history traversal", async () => {
+    // CONTRACT: the pane opened/streamed in the Phase 1/2 steps above is a
+    // Codex session (`capabilities.fork: true`, `capabilities.steer: true`,
+    // `capabilities.rewind: false` per `activitySessionStub.ts`'s per-harness
+    // table) - let its Phase 2 canned demo stream settle first so it never
+    // interferes with the "last agent-turn bubble" queries below.
+    const pane = page.locator(
+      '.workbench-pane[data-surface-kind="agentChat"] .workbench-pane-body',
+    );
+    const transcript = pane.locator('[data-testid="agent-chat-transcript"]');
+    await page.waitForTimeout(700);
+
+    const promptInput = pane.locator('[data-testid="agent-chat-prompt-input"]');
+    const sendButton = pane.locator('[data-command-id="agentChat.prompt.send"]');
+    await expect(promptInput).toBeVisible();
+
+    // CONTRACT: a pending bubble intentionally reuses the real user bubble's
+    // `data-agent-chat-bubble-kind="user"` styling attribute (see
+    // `App.tsx`'s pending-bubble render), so every "is there a *real*
+    // transcript bubble for this text" assertion below must explicitly
+    // exclude `[data-testid="agent-chat-pending-bubble"]` to avoid matching
+    // the pending bubble itself.
+    const realUserBubble = (text: string) =>
+      transcript.locator(
+        '[data-agent-chat-bubble-kind="user"]:not([data-testid="agent-chat-pending-bubble"])',
+        { hasText: text },
+      );
+
+    // Sending while idle renders a real bubble and starts a streaming reply.
+    await promptInput.fill("first phase-3 message");
+    await sendButton.click();
+    await expect(realUserBubble("first phase-3 message")).toHaveCount(1);
+    const firstReplyBubble = transcript.locator('[data-agent-chat-bubble-kind="agentTurn"]').last();
+    await expect(firstReplyBubble).toBeVisible();
+
+    // Sending a second message while the first is still streaming renders it
+    // as a pending/queued bubble, not a real transcript bubble - this
+    // session's Codex capabilities report `steer: true`, so the badge reads
+    // "steering…" (see `activitySessionStub.ts`'s per-harness table) and a
+    // fire-and-forget `stubSteerActivitySession` call fires alongside the
+    // local FIFO queue.
+    await promptInput.fill("second phase-3 message");
+    await sendButton.click();
+    const pendingBubble = pane.locator('[data-testid="agent-chat-pending-bubble"]');
+    await expect(pendingBubble).toHaveCount(1);
+    await expect(pendingBubble).toContainText("second phase-3 message");
+    await expect(pendingBubble.locator('[data-testid="agent-chat-pending-badge"]')).toHaveText(
+      "steering…",
+    );
+    await expect(realUserBubble("second phase-3 message")).toHaveCount(0);
+
+    // Once the first turn's stub stream naturally completes (`onComplete`),
+    // the pending bubble's badge clears and a new bubble/streaming reply
+    // begins for it - the concrete "queued mid-turn submission landing in
+    // the next tool-call batch" acceptance evidence.
+    await expect(pendingBubble).toHaveCount(0, { timeout: 5000 });
+    await expect(realUserBubble("second phase-3 message")).toHaveCount(1);
+    const secondReplyBubble = transcript.locator('[data-agent-chat-bubble-kind="agentTurn"]').last();
+    await expect(secondReplyBubble).toBeVisible();
+    note(
+      "agent chat mid-turn queuing: a message sent while a turn was in flight rendered as a pending/steering bubble " +
+        "with no corresponding real transcript bubble, then cleared into a real bubble with its own streamed reply " +
+        "once the in-flight turn's stub stream naturally completed",
+    );
+
+    // Revert: clicking revert on a still-pending bubble removes it with no
+    // corresponding new bubble ever appearing for it, and pulls its text
+    // back into the editable input.
+    await promptInput.fill("third phase-3 message (should be reverted)");
+    await sendButton.click();
+    await expect(pendingBubble).toHaveCount(1);
+    await pendingBubble.locator('[data-command-id="agentChat.pending.revert"]').click();
+    await expect(pendingBubble).toHaveCount(0);
+    await expect(promptInput).toHaveValue("third phase-3 message (should be reverted)");
+    await promptInput.fill("");
+    // Give the in-flight turn (still delivering "second phase-3 message")
+    // time to complete naturally, then confirm the reverted text was truly
+    // never sent - no real bubble ever appears for it.
+    await page.waitForTimeout(2500);
+    await expect(realUserBubble("third phase-3 message")).toHaveCount(0);
+    note(
+      "agent chat revert: reverting a still-pending bubble removed it, restored its text into the editable input, " +
+        "and no corresponding bubble was ever sent for it",
+    );
+
+    // Prompt-box up/down history traversal cycles through previously *sent*
+    // message texts (the reverted-and-never-sent third message is correctly
+    // absent from history).
+    await promptInput.press("Home");
+    await promptInput.press("ArrowUp");
+    await expect(promptInput).toHaveValue("second phase-3 message");
+    await promptInput.press("Home");
+    await promptInput.press("ArrowUp");
+    await expect(promptInput).toHaveValue("first phase-3 message");
+    await promptInput.press("Home");
+    await promptInput.press("ArrowDown");
+    await expect(promptInput).toHaveValue("second phase-3 message");
+    await promptInput.press("Home");
+    await promptInput.press("ArrowDown");
+    await expect(promptInput).toHaveValue("");
+    note(
+      "agent chat prompt history: up/down arrow traversal cycled through previously sent message texts only, " +
+        "excluding the reverted-and-never-sent entry",
+    );
+
+    // "Fork from here" (shipped live, Codex `capabilities.fork: true`):
+    // clicking it opens a *new* tab/pane whose transcript is truncated to
+    // exactly the clicked bubble's cut point - it must contain the forked
+    // bubble's own text but not text sent afterward in the original pane.
+    const forkSourceBubble = realUserBubble("first phase-3 message");
+    await expect(
+      forkSourceBubble.locator('[data-command-id="agentChat.bubble.forkFromHere"]'),
+    ).toBeVisible();
+    // "Resume from here" never renders for this (or any) current harness -
+    // the load-bearing `capabilities.rewind: false` gate from Resolved
+    // Strategic Question 1 (no harness cleanly supports point-based rewind).
+    await expect(
+      forkSourceBubble.locator('[data-command-id="agentChat.bubble.resumeFromHere"]'),
+    ).toHaveCount(0);
+
+    const tabCountBeforeFork = await page.getByRole("tab").count();
+    await forkSourceBubble.locator('[data-command-id="agentChat.bubble.forkFromHere"]').click();
+    await expect(page.getByRole("tab")).toHaveCount(tabCountBeforeFork + 1);
+    const forkedPane = page
+      .locator('.workbench-pane[data-surface-kind="agentChat"] .workbench-pane-body')
+      .last();
+    const forkedTranscript = forkedPane.locator('[data-testid="agent-chat-transcript"]');
+    await expect(forkedTranscript).toContainText("first phase-3 message");
+    await expect(forkedTranscript).toContainText("Forked from conversation");
+    await expect(forkedTranscript).not.toContainText("second phase-3 message");
+    note(
+      'agent chat "fork from here": clicking it on the Codex session (capabilities.fork: true) opened a new tab ' +
+        "whose transcript was truncated to exactly that bubble's cut point (contained the forked bubble's own text " +
+        "and a synthetic fork marker, but none of the original pane's later messages)",
+    );
+
+    // Cross-harness confirmation (ticket verification boundary): open a
+    // second brand-new tab and start a Claude session -
+    // `capabilities.fork: false`/`capabilities.rewind: false` per the stub's
+    // per-harness table - and confirm neither "fork from here" nor "resume
+    // from here" render on its user bubble either, i.e. "resume from here"
+    // is verifiably disabled/hidden for every current harness, not just
+    // Codex.
+    await page.locator('[data-command-id="agentChat.create"]').click();
+    const claudePane = page
+      .locator('.workbench-pane[data-surface-kind="agentChat"] .workbench-pane-body')
+      .last();
+    await claudePane.locator('[data-agent-chat-tile="claude"]').click();
+    const claudeTranscript = claudePane.locator('[data-testid="agent-chat-transcript"]');
+    await expect(claudeTranscript).toBeVisible();
+    const claudeUserBubble = claudeTranscript.locator('[data-agent-chat-bubble-kind="user"]').first();
+    await expect(claudeUserBubble).toBeVisible();
+    await expect(
+      claudeUserBubble.locator('[data-command-id="agentChat.bubble.forkFromHere"]'),
+    ).toHaveCount(0);
+    await expect(
+      claudeUserBubble.locator('[data-command-id="agentChat.bubble.resumeFromHere"]'),
+    ).toHaveCount(0);
+    note(
+      '"resume from here" confirmed disabled/hidden on a Claude session too (capabilities.fork: false, ' +
+        "capabilities.rewind: false), not just the Codex session exercised above - neither affordance rendered",
+    );
+  });
+
   // --- ANSI color rendering -----------------------------------------------
   await test.step("ANSI color rendering", async () => {
     await runInTerminal(page, commandPlan.ansiGreen("GATE-GREEN"));

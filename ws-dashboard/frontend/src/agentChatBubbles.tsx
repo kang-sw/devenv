@@ -19,6 +19,11 @@
 
 import { useState, type ReactNode } from "react";
 import { renderMarkdownFragment } from "./documentViewer.js";
+import type { AgentChatCapabilities } from "./agentChatSessions.js";
+import {
+  ResumeFromHereButton,
+  isResumeFromHereEnabled,
+} from "./agentChatResumeFromHere.js";
 import {
   transcriptBlockView,
   type TranscriptBlock,
@@ -210,11 +215,47 @@ function BubbleShell({
   );
 }
 
-function UserBubble({ bubble }: { bubble: ChatBubble }) {
+// CONTRACT: `capabilities`/`onForkFromBubble`/`onResumeFromBubble` are
+// optional and additive — every other bubble kind (`AgentTurnBubble`,
+// `ToolUseBubble`) is untouched, since "fork from here"/"resume from here"
+// are per-bubble affordances scoped to user turns only (Phase 3,
+// `260711-feat-ws-dashboard-agent-activity-chat-ui`). "Fork from here"
+// renders only when `capabilities.fork` is true (hidden, not disabled, for
+// Unavailable-tier cells, per the ticket's Constraints). "Resume from here"
+// is rendered through the isolated `agentChatResumeFromHere.tsx` module,
+// gated on `isResumeFromHereEnabled` — which always returns `false` today
+// (see that module's header) — so this branch never actually renders for
+// any current harness.
+function UserBubble({
+  bubble,
+  capabilities,
+  onForkFromBubble,
+  onResumeFromBubble,
+}: {
+  bubble: ChatBubble;
+  capabilities?: AgentChatCapabilities;
+  onForkFromBubble?: (bubble: ChatBubble) => void;
+  onResumeFromBubble?: (bubble: ChatBubble) => void;
+}) {
   return (
     <BubbleShell bubble={bubble} className="agent-chat-bubble-user">
       <div className="agent-chat-bubble-body">{renderMarkdownFragment(bubble.text)}</div>
-      <CopyButton text={bubble.text} label="Copy message" />
+      <div className="agent-chat-bubble-actions">
+        <CopyButton text={bubble.text} label="Copy message" />
+        {capabilities?.fork ? (
+          <button
+            type="button"
+            className="agent-chat-bubble-fork"
+            data-command-id="agentChat.bubble.forkFromHere"
+            onClick={() => onForkFromBubble?.(bubble)}
+          >
+            Fork from here
+          </button>
+        ) : null}
+        {capabilities && isResumeFromHereEnabled(capabilities) ? (
+          <ResumeFromHereButton onResume={() => onResumeFromBubble?.(bubble)} />
+        ) : null}
+      </div>
     </BubbleShell>
   );
 }
@@ -259,9 +300,26 @@ function ToolUseBubble({ bubble }: { bubble: ChatBubble }) {
   );
 }
 
-export function ChatBubbleView({ bubble }: { bubble: ChatBubble }) {
+export function ChatBubbleView({
+  bubble,
+  capabilities,
+  onForkFromBubble,
+  onResumeFromBubble,
+}: {
+  bubble: ChatBubble;
+  capabilities?: AgentChatCapabilities;
+  onForkFromBubble?: (bubble: ChatBubble) => void;
+  onResumeFromBubble?: (bubble: ChatBubble) => void;
+}) {
   if (bubble.kind === "user") {
-    return <UserBubble bubble={bubble} />;
+    return (
+      <UserBubble
+        bubble={bubble}
+        capabilities={capabilities}
+        onForkFromBubble={onForkFromBubble}
+        onResumeFromBubble={onResumeFromBubble}
+      />
+    );
   }
   if (bubble.kind === "tool") {
     return <ToolUseBubble bubble={bubble} />;
@@ -272,15 +330,27 @@ export function ChatBubbleView({ bubble }: { bubble: ChatBubble }) {
 export function AgentChatTranscriptBubbles({
   blocks,
   sourceKind,
+  capabilities,
+  onForkFromBubble,
+  onResumeFromBubble,
 }: {
   blocks: readonly TranscriptBlock[];
   sourceKind: string;
+  capabilities?: AgentChatCapabilities;
+  onForkFromBubble?: (bubble: ChatBubble) => void;
+  onResumeFromBubble?: (bubble: ChatBubble) => void;
 }) {
   const bubbles = groupTranscriptIntoBubbles(blocks, sourceKind);
   return (
     <>
       {bubbles.map((bubble) => (
-        <ChatBubbleView bubble={bubble} key={bubble.id} />
+        <ChatBubbleView
+          bubble={bubble}
+          capabilities={capabilities}
+          onForkFromBubble={onForkFromBubble}
+          onResumeFromBubble={onResumeFromBubble}
+          key={bubble.id}
+        />
       ))}
     </>
   );

@@ -4,6 +4,7 @@ import type {
   Dispatch,
   FormEvent,
   Key,
+  KeyboardEvent as ReactKeyboardEvent,
   ReactNode,
   RefObject,
   SetStateAction,
@@ -211,6 +212,7 @@ import {
 } from "./terminals";
 import {
   agentChatHarnesses,
+  appendUserTranscriptBlock,
   attachAgentChatSession,
   createEmptyAgentChatPane,
   markAgentChatPaneError,
@@ -225,10 +227,13 @@ import {
   agentChatHarnessLabel,
   stubActivityHistoryList,
   stubBeginStreamingTurn,
+  stubForkActivitySession,
   stubResumeAgentChatSession,
   stubStartNewAgentChatSession,
+  stubSteerActivitySession,
+  type StubStreamingHandle,
 } from "./activitySessionStub";
-import { AgentChatTranscriptBubbles } from "./agentChatBubbles";
+import { AgentChatTranscriptBubbles, type ChatBubble } from "./agentChatBubbles";
 import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
@@ -4028,6 +4033,9 @@ function WorkbenchShell({
           onResumeHistoryItem: resumeAgentChatHistoryItem,
           onLoadHistory: (workRootId, serverRoute) =>
             stubActivityHistoryList({ workRootId, serverRoute }),
+          onSendMessage: sendAgentChatMessage,
+          onForkFromBubble: forkAgentChatFromBubble,
+          onResumeFromBubble: () => undefined,
           isActivePane: (pane) => focusedAgentChatPaneId === pane.paneId,
         },
         closedAgentPaneByRoot[root.id] ?? [],
@@ -4875,13 +4883,14 @@ function WorkbenchShell({
   // A tile click or history-entry pick (see `startAgentChatHarness` /
   // `resumeAgentChatHistoryItem` below) later calls the stub (or, once
   // `260620` lands, real) `activity.session.create`/`start` and attaches the
-  // resulting session to this same pane.
-  function createAgentChatPane() {
-    if (!workbenchModel) {
-      return;
-    }
-    const rootId = workbenchModel.root.id;
-    const serverRoute = workbenchModel.root.resourcePath.serverId;
+  // resulting session to this same pane. Factored out as
+  // `registerNewAgentChatPane` (Phase 3) so `forkAgentChatFromBubble` below
+  // can reuse the exact same pane-registration flow for "fork from here"'s
+  // new tab, rather than duplicating it.
+  function registerNewAgentChatPane(
+    rootId: string,
+    serverRoute: string | null | undefined,
+  ): AgentChatPaneState {
     const pane = createEmptyAgentChatPane(rootId, serverRoute);
     setAgentChatPanes((current) => ({
       ...current,
@@ -4901,6 +4910,16 @@ function WorkbenchShell({
       paneId: pane.paneId,
       sequence: agentChatOpenSequence.current++,
     });
+    return pane;
+  }
+
+  function createAgentChatPane() {
+    if (!workbenchModel) {
+      return;
+    }
+    const rootId = workbenchModel.root.id;
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    registerNewAgentChatPane(rootId, serverRoute);
   }
 
   function startAgentChatHarness(
@@ -4989,6 +5008,86 @@ function WorkbenchShell({
           }
         : current,
     );
+  }
+
+  // Phase 3 base send-input path
+  // (`260711-feat-ws-dashboard-agent-activity-chat-ui`): appends a real
+  // user-role `TranscriptBlock` to the pane's session. This is the "not
+  // in flight" / dequeue-delivery primitive `AgentChatPaneBody`'s local
+  // turn-in-flight/pending-queue state machine calls once it has decided a
+  // message is actually being sent now (as opposed to queued) - the
+  // in-flight/queuing decision itself lives in `AgentChatPaneBody`, not
+  // here, mirroring how `streamingBlocks` is already pane-body-local state.
+  function sendAgentChatMessage(pane: AgentChatPaneState, text: string) {
+    if (!pane.session) {
+      return;
+    }
+    applyAgentChatSession(
+      pane.logicalKey,
+      appendUserTranscriptBlock(pane.session, text),
+    );
+  }
+
+  // "Fork from here" (Phase 3, shipped live, backed by
+  // `stubForkActivitySession`'s cut-point parameter — see
+  // `ai-docs/tickets/idea/260713-feat-ws-dashboard-activity-session-fork-cursor.md`
+  // for the real-adapter follow-up this stub call stands in for). Mirrors
+  // `startAgentChatHarness`'s mark-pending/await/apply-or-error pattern, but
+  // opens a *new* pane/tab (via `registerNewAgentChatPane`) rather than
+  // reusing the clicked bubble's own pane - the original session is never
+  // mutated.
+  function forkAgentChatFromBubble(pane: AgentChatPaneState, bubble: ChatBubble) {
+    const session = pane.session;
+    if (!session) {
+      return;
+    }
+    const lastCutBlock = bubble.blocks[bubble.blocks.length - 1];
+    const cutIndex = lastCutBlock
+      ? session.transcript.blocks.findIndex(
+          (block) => block.cursor === lastCutBlock.cursor,
+        )
+      : -1;
+    const cutBlocks =
+      cutIndex >= 0
+        ? session.transcript.blocks.slice(0, cutIndex + 1)
+        : session.transcript.blocks;
+    const newPane = registerNewAgentChatPane(session.workRootId, session.serverRoute);
+    setAgentChatPanes((current) =>
+      current[newPane.logicalKey]
+        ? {
+            ...current,
+            [newPane.logicalKey]: markAgentChatPaneStarting(
+              current[newPane.logicalKey],
+            ),
+          }
+        : current,
+    );
+    void stubForkActivitySession(
+      {
+        workRootId: session.workRootId,
+        activityId: session.activityId,
+        serverRoute: session.serverRoute,
+      },
+      cutBlocks,
+    )
+      .then((result) => {
+        applyAgentChatSession(newPane.logicalKey, result.session);
+      })
+      .catch((error) => {
+        setAgentChatPanes((current) =>
+          current[newPane.logicalKey]
+            ? {
+                ...current,
+                [newPane.logicalKey]: markAgentChatPaneError(
+                  current[newPane.logicalKey],
+                  error instanceof Error
+                    ? error.message
+                    : "agent chat session failed to fork",
+                ),
+              }
+            : current,
+        );
+      });
   }
 
   function closeAgentChatPane(pane: AgentChatPaneState) {
@@ -6814,6 +6913,15 @@ type AgentChatPaneActions = {
     workRootId: string,
     serverRoute: string | null | undefined,
   ) => Promise<{ items: ActivityItem[] }>;
+  // Phase 3 (`260711-feat-ws-dashboard-agent-activity-chat-ui`): base send
+  // input, "fork from here" (shipped live), and the scaffold-only "resume
+  // from here" no-op (never invoked - `isResumeFromHereEnabled` always
+  // returns `false`, so `AgentChatPaneBody` never wires a real click
+  // through to it; kept here only so the action surface documents the
+  // isolation seam the ticket requires).
+  onSendMessage: (pane: AgentChatPaneState, text: string) => void;
+  onForkFromBubble: (pane: AgentChatPaneState, bubble: ChatBubble) => void;
+  onResumeFromBubble: (pane: AgentChatPaneState, bubble: ChatBubble) => void;
   isActivePane: (pane: AgentChatPaneState) => boolean;
 };
 
@@ -6840,12 +6948,39 @@ function agentChatWorkbenchPane(
     meta: session
       ? [session.harness, closeContractLabel("agentChat")]
       : ["empty", closeContractLabel("agentChat")],
+    // CONTRACT (Phase 3 fix): must change whenever the *canonical*
+    // transcript changes (a real send/fork/resume), not just when
+    // `activityId` changes - `shouldUpdateDockviewWorkbenchPanelParams`
+    // (`workbench/dockviewLayoutModel.ts`) skips pushing a fresh `body`
+    // element into Dockview unless `contentRevision` (or `meta`) differs,
+    // so a `session.activityId`-only key left a real user send invisible:
+    // `AgentChatPaneBody`'s local state (`turnInFlight`, `streamingBlocks`)
+    // kept working since it lives inside the already-mounted component
+    // instance, but the *prop* carrying the newly-appended transcript block
+    // never reached Dockview's still-stale `pane`. In-flight streaming
+    // overlay ticks intentionally do *not* bump this (they're local
+    // component state, not part of `session.transcript.blocks`), preserving
+    // the existing "avoid Dockview param churn on high-frequency updates"
+    // intent this field already documents for terminals.
     contentRevision: session
-      ? `agentChat:${pane.paneId}:${session.activityId}`
+      ? `agentChat:${pane.paneId}:${session.activityId}:${session.transcript.blocks.length}:${
+          session.transcript.blocks[session.transcript.blocks.length - 1]?.cursor ?? ""
+        }`
       : `agentChat:${pane.paneId}:empty`,
     body: <AgentChatPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
+
+// Phase 3 (`260711-feat-ws-dashboard-agent-activity-chat-ui`) mid-turn
+// queuing state: a message accepted while a turn is already in flight is
+// rendered as its own pending bubble with a badge, cleared once the FIFO
+// queue dequeues and actually sends it (see `AgentChatPaneBody`'s
+// `beginSimulatedTurn`/`onComplete`).
+type PendingChatMessage = {
+  readonly id: string;
+  readonly text: string;
+  readonly steering: boolean;
+};
 
 function AgentChatPaneBody({
   pane,
@@ -6859,6 +6994,20 @@ function AgentChatPaneBody({
   const [historyLoading, setHistoryLoading] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   useDismissableMenu(historyOpen, historyRef, () => setHistoryOpen(false));
+
+  // CONTRACT: `beginSimulatedTurn`'s `onComplete` callback (Phase 3) can
+  // fire long after the render that created it - e.g. `pane` reflects the
+  // moment "first message" was sent, but by the time that turn's stub
+  // stream completes several seconds later, `pane.session` has moved on.
+  // A queued dequeue's `beginSimulatedTurn(next.text)` re-invocation must
+  // send against the *current* session, not the stale one closed over at
+  // the original call site (Dockview's `contentRevision`-gated panel param
+  // push means `AgentChatPaneBody` does not necessarily re-render between
+  // every transcript change either - see `agentChatWorkbenchPane`'s
+  // `contentRevision` comment). `paneRef` is updated on every render and
+  // read instead of the closed-over `pane` inside every handler below.
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
 
   // Stub-side per-line streaming demo (`260711` Phase 2): once a session is
   // active, grow one synthetic agent-turn block over several ticks so the
@@ -6878,6 +7027,185 @@ function AgentChatPaneBody({
     return () => handle.stop();
   }, [activeActivityId]);
 
+  // Phase 3 mid-turn queuing / base send-input state. Local to this
+  // pane-body instance - `AgentChatPaneBody` is already re-mounted per pane
+  // (`key={pane.paneId}` at its call site in `agentChatWorkbenchPane`), so a
+  // plain per-instance `useState`/`useRef` gives the same per-pane isolation
+  // a `Record<string, ...>` keyed by `pane.paneId` would, mirroring how
+  // `streamingBlocks` above is already pane-body-local rather than lifted
+  // into `AgentChatPaneState`.
+  const [turnInFlight, setTurnInFlight] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
+  const pendingRef = useRef<PendingChatMessage[]>([]);
+  const turnSequenceRef = useRef(0);
+  const pendingSequenceRef = useRef(0);
+  const streamHandlesRef = useRef<StubStreamingHandle[]>([]);
+  const [promptValue, setPromptValue] = useState("");
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      for (const handle of streamHandlesRef.current) {
+        handle.stop();
+      }
+    };
+  }, []);
+
+  // A history-entry resume can swap in a different `activityId` under the
+  // same pane/tab; the mid-turn queue and prompt history are scoped to the
+  // conversation currently showing, not the tab, so they reset alongside
+  // the streaming-demo state above.
+  useEffect(() => {
+    setTurnInFlight(false);
+    pendingRef.current = [];
+    setPendingMessages([]);
+    setPromptValue("");
+    setPromptHistory([]);
+    setHistoryIndex(null);
+  }, [activeActivityId]);
+
+  // The concrete "turn-in-flight / batch-boundary" mechanism (Phase 3
+  // Escalation 1): starts a real send (`actions.onSendMessage`, which
+  // appends the real transcript block) plus a distinct-cursor/turnId stub
+  // stream, and on that stream's natural `onComplete` clears in-flight and
+  // dequeues+re-sends the next queued message (if any) - this is what
+  // visibly clears a pending badge and starts its own new streamed reply.
+  function beginSimulatedTurn(text: string) {
+    const currentPane = paneRef.current;
+    if (!currentPane.session) {
+      return;
+    }
+    actions.onSendMessage(currentPane, text);
+    setPromptHistory((current) => [...current, text]);
+    setTurnInFlight(true);
+    turnSequenceRef.current += 1;
+    const cursor = `user-turn-${turnSequenceRef.current}`;
+    const handle = stubBeginStreamingTurn(
+      (block) => {
+        setStreamingBlocks((current) => ({ ...current, [block.cursor]: block }));
+      },
+      {
+        cursor,
+        turnId: cursor,
+        onComplete: () => {
+          setTurnInFlight(false);
+          const queue = pendingRef.current;
+          if (queue.length > 0) {
+            const [next, ...rest] = queue;
+            pendingRef.current = rest;
+            setPendingMessages(rest);
+            beginSimulatedTurn(next.text);
+          }
+        },
+      },
+    );
+    streamHandlesRef.current.push(handle);
+  }
+
+  function revertPending(id: string) {
+    const entry = pendingRef.current.find((candidate) => candidate.id === id);
+    if (!entry) {
+      return;
+    }
+    pendingRef.current = pendingRef.current.filter((candidate) => candidate.id !== id);
+    setPendingMessages(pendingRef.current);
+    setPromptValue(entry.text);
+    setHistoryIndex(null);
+  }
+
+  function submitPrompt(rawText: string) {
+    const text = rawText.trim();
+    const currentPane = paneRef.current;
+    if (!text || !currentPane.session) {
+      return;
+    }
+    setPromptValue("");
+    setHistoryIndex(null);
+    if (!turnInFlight) {
+      beginSimulatedTurn(text);
+      return;
+    }
+    // Already mid-turn: queue locally (FIFO), rendered as a pending bubble
+    // until the in-flight turn's `onComplete` dequeues it. If the harness
+    // reports `steer: true` (Codex only, per the capability table), also
+    // fire the stub `turn/steer` call - a no-op `{ accepted: true }` today,
+    // fire-and-forget - as the exact call site a real Codex adapter
+    // replaces wholesale later. Actual delivery timing either way is still
+    // governed by the same local FIFO/`onComplete` above, since no real
+    // duplex exists yet.
+    pendingSequenceRef.current += 1;
+    const steering = currentPane.session.capabilities.steer;
+    const entry: PendingChatMessage = {
+      id: `pending-${Date.now().toString(36)}-${pendingSequenceRef.current}`,
+      text,
+      steering,
+    };
+    pendingRef.current = [...pendingRef.current, entry];
+    setPendingMessages(pendingRef.current);
+    if (steering) {
+      void stubSteerActivitySession({
+        workRootId: currentPane.session.workRootId,
+        activityId: currentPane.session.activityId,
+        text,
+        serverRoute: currentPane.session.serverRoute,
+      });
+    }
+  }
+
+  // Prompt-box up/down history traversal (Phase 3, no existing in-browser
+  // precedent - see the plan's Codebase Findings). Only intercepts the
+  // arrow key when the caret carries no selection and sits at the very
+  // start of the field (standard REPL convention), so normal in-text
+  // cursor movement is left alone. Landing on a value that still matches a
+  // live pending entry performs the same revert as the explicit revert
+  // button (pulls it back into the input and cancels its queued send).
+  function navigateHistory(direction: -1 | 1) {
+    if (promptHistory.length === 0) {
+      return;
+    }
+    let nextIndex: number;
+    if (direction === -1) {
+      nextIndex = historyIndex === null ? promptHistory.length - 1 : Math.max(0, historyIndex - 1);
+    } else {
+      if (historyIndex === null) {
+        return;
+      }
+      nextIndex = historyIndex + 1;
+      if (nextIndex >= promptHistory.length) {
+        setHistoryIndex(null);
+        setPromptValue("");
+        return;
+      }
+    }
+    setHistoryIndex(nextIndex);
+    const text = promptHistory[nextIndex]!;
+    const stillPending = pendingRef.current.find((entry) => entry.text === text);
+    if (stillPending) {
+      revertPending(stillPending.id);
+      return;
+    }
+    setPromptValue(text);
+  }
+
+  function handlePromptKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitPrompt(promptValue);
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      return;
+    }
+    const input = event.currentTarget;
+    const caretAtStart = input.selectionStart === 0 && input.selectionEnd === 0;
+    if (!caretAtStart) {
+      return;
+    }
+    event.preventDefault();
+    navigateHistory(event.key === "ArrowUp" ? -1 : 1);
+  }
+
   if (pane.session) {
     const { session } = pane;
     const transcriptBlocks = mergeStreamingTranscriptBlocks(
@@ -6896,7 +7224,58 @@ function AgentChatPaneBody({
           <AgentChatTranscriptBubbles
             blocks={transcriptBlocks}
             sourceKind={session.transcript.source.kind}
+            capabilities={session.capabilities}
+            onForkFromBubble={(bubble) => actions.onForkFromBubble(pane, bubble)}
+            onResumeFromBubble={(bubble) => actions.onResumeFromBubble(pane, bubble)}
           />
+          {pendingMessages.map((entry) => (
+            <div
+              className="agent-chat-bubble agent-chat-bubble-user agent-chat-bubble-pending"
+              data-agent-chat-bubble-kind="user"
+              data-agent-chat-bubble-align="right"
+              data-testid="agent-chat-pending-bubble"
+              key={entry.id}
+            >
+              <div className="agent-chat-bubble-body">{entry.text}</div>
+              <div className="agent-chat-bubble-actions">
+                <span className="agent-chat-pending-badge" data-testid="agent-chat-pending-badge">
+                  {entry.steering ? "steering…" : "queued for next turn"}
+                </span>
+                <button
+                  type="button"
+                  className="agent-chat-bubble-revert"
+                  data-command-id="agentChat.pending.revert"
+                  data-pending-id={entry.id}
+                  onClick={() => revertPending(entry.id)}
+                >
+                  되돌리기
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="agent-chat-prompt-box">
+          <input
+            className="agent-chat-prompt-input"
+            data-testid="agent-chat-prompt-input"
+            type="text"
+            placeholder="Send a message…"
+            value={promptValue}
+            onChange={(event) => {
+              setPromptValue(event.target.value);
+              setHistoryIndex(null);
+            }}
+            onKeyDown={handlePromptKeyDown}
+          />
+          <button
+            type="button"
+            className="agent-chat-prompt-send"
+            data-command-id="agentChat.prompt.send"
+            disabled={promptValue.trim().length === 0}
+            onClick={() => submitPrompt(promptValue)}
+          >
+            Send
+          </button>
         </div>
       </div>
     );
