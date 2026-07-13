@@ -466,50 +466,54 @@ assertEqual(
 );
 assertEqual(immediateCompleteEnv.clearedHandles.length, 1, "the interval is cleared after the single completing poll");
 
-// A poll that observes the same block count as the previous poll (still
-// live, nothing new yet) must not call `onUpdate` at all — the
-// `delta.length > 0` skip-empty-slice guard.
+// An empty-transcript first poll (lastSeenLength 0, blocks: []) must not call
+// `onUpdate` at all — this is the only case `blocksSincePolledLength` actually
+// produces an empty delta (`start = Math.max(0, 0 - 1) = 0`, `[].slice(0)` is
+// `[]`), so it is the real reachability condition of the `delta.length > 0`
+// skip-empty-slice guard. (A same-length *non-empty* re-poll, by contrast,
+// always re-includes the tail block per the two-poll test above and is
+// designed to call `onUpdate` again — it does not exercise this guard.)
+// The transcript is still `live: true`, so `onComplete` must not fire either.
 
 calls.length = 0;
-nextResponses = [pollPartialFixture, pollPartialFixture];
-const noGrowthEnv = makeManualPollEnv();
-const onUpdateCallsNoGrowth: TranscriptBlock[][] = [];
-const firstUpdateNoGrowth = createDeferred();
-let noGrowthUpdateCount = 0;
-let noGrowthCompleteCount = 0;
+const pollEmptyFixture = { ...pollPartialFixture, live: true, blocks: [] as TranscriptBlock[] };
+nextResponses = [pollEmptyFixture];
+const emptyFirstPollEnv = makeManualPollEnv();
+const onUpdateCallsEmptyFirstPoll: TranscriptBlock[][] = [];
+let emptyFirstPollUpdateCount = 0;
+let emptyFirstPollCompleteCount = 0;
 beginRealStreamingTurn(
   "root-a",
   "codex",
   "agent.codex:1",
   "server-local",
   (blocks) => {
-    noGrowthUpdateCount += 1;
-    onUpdateCallsNoGrowth.push([...blocks]);
-    if (noGrowthUpdateCount === 1) firstUpdateNoGrowth.resolve();
+    emptyFirstPollUpdateCount += 1;
+    onUpdateCallsEmptyFirstPoll.push([...blocks]);
   },
   () => {
-    noGrowthCompleteCount += 1;
+    emptyFirstPollCompleteCount += 1;
   },
   undefined,
-  noGrowthEnv.env,
+  emptyFirstPollEnv.env,
 );
-await firstUpdateNoGrowth.promise;
-assertEqual(onUpdateCallsNoGrowth.length, 1, "the first poll (lastSeenLength 0) still hands onUpdate the initial blocks");
-noGrowthEnv.tick();
-// The second poll returns the same block count as the first (still live,
-// nothing appended); since `onComplete` never fires for a still-live poll,
-// flush pending microtasks (the fetch's `.then` chain) instead of awaiting
-// a deferred.
-await Promise.resolve();
-await Promise.resolve();
-await Promise.resolve();
-assertEqual(calls.length, 2, "the manual tick issues a second transcript fetch");
+// `onComplete` never fires for a still-live poll, so there is no deferred to
+// await. A fixed count of `Promise.resolve()` flushes is fragile here (the
+// real fetch/`Response.json()` promise chain can take more microtask turns
+// than a small fixed count covers — see the prior false-positive finding
+// this test replaces) so drain past a macrotask boundary instead: a
+// `setTimeout` callback only runs after every currently-queued microtask
+// (including the entire fetch/`.then` chain) has settled, regardless of its
+// depth.
+await new Promise((resolve) => setTimeout(resolve, 50));
+assertEqual(calls.length, 1, "the immediate poll fires once before any interval tick");
 assertEqual(
-  onUpdateCallsNoGrowth.length,
-  1,
-  "a poll whose block count is unchanged from the prior poll (empty diff) does not call onUpdate a second time",
+  onUpdateCallsEmptyFirstPoll.length,
+  0,
+  "an empty-blocks first poll (delta.length === 0) does not call onUpdate at all",
 );
-assertEqual(noGrowthCompleteCount, 0, "the still-live no-growth poll does not fire onComplete");
+assertEqual(emptyFirstPollUpdateCount, 0, "onUpdate's invocation count stays zero for an empty-blocks first poll");
+assertEqual(emptyFirstPollCompleteCount, 0, "the still-live empty-blocks poll does not fire onComplete");
 
 // stop() called externally (e.g. simulating unmount) clears the interval so
 // no further polls are scheduled.
