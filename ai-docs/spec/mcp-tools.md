@@ -19,8 +19,10 @@ behavior, update code and tests rather than copying field lists into this spec.
 ## MCP Server Protocol Surface {#260505-mcp-server-protocol-surface}
 
 The `ws-mcp serve --stdio` process implements a stdio JSON-RPC MCP server. It
-responds to `initialize`, `tools/list`, and `tools/call`, advertises MCP
-protocol version `2025-03-26`, and declares tool capability.
+responds to `initialize`, `ping`, `tools/list`, and `tools/call`, advertises MCP
+protocol version `2025-03-26`, and declares tool capability. A `ping` request
+preserves its JSON-RPC id and returns an empty result object; it is a base-
+protocol method and is not advertised as a tool.
 
 Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a

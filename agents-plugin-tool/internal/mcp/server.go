@@ -220,6 +220,8 @@ func (s *Server) handle(ctx context.Context, req request) response {
 				"tools": map[string]any{},
 			},
 		}}
+	case "ping":
+		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}}
 	case "tools/list":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": s.filteredTools()}}
 	case "tools/call":

@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.33.9`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.9`).
+Active plugin package: `agents-plugin/` (`ws@0.33.10`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.10`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -209,11 +209,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
-- `260713-bug-mcp-ping-idle-disconnect` (ready, bug) - add protocol-compliant
-  MCP `ping` handling and run a native-Windows Claude Code idle A/B check
-  against the observed approximately 15-minute ws/wsflow process-tree
-  termination pattern; spec addressing via `## Spec Impact` (`mcp-tools.md`,
-  Contract-first: no). Sage design and completeness reviews completed.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
