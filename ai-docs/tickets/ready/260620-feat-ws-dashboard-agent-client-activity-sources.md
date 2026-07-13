@@ -1082,3 +1082,62 @@ Verification boundary: frontend route/model tests for source-neutral labels
 and identity keys, browser-level acceptance evidence for mixed source rows
 and transcript rendering, and server-scoped route tests showing local
 compatibility aliases still map to `server-local`.
+
+### Result
+
+Implemented, reviewed, and committed to `impl/activity-labeli` (commits
+`09e8fd5f`, `6ebc6db2`; range `2d1842dc..6ebc6db2`).
+
+**Survey finding (no escalation, high confidence):** the source-neutral
+`kind`/label vocabulary and `serverRoute` threading through Activity
+endpoints and stream keys already existed going into this phase — carried
+over from `260525`'s server-scoped-forwarding work plus Phase 1/2/4 of this
+ticket. No "named agent" wording leaks into rendered UI copy;
+`NamedAgentActivityView`/`agents` are intentionally-named compatibility
+types, not a labeling bug. This phase's actual remaining work was closing one
+concrete test-coverage gap, not new production code. Plan:
+`ai-docs/.plans/2026-07/13-0925-activity-labeling-phase5.md`.
+
+**Implementation (test-only, no production source changed):** added
+`server_scoped_activity_local_aliases_match_legacy_routes` to
+`ws-dashboard/crates/daemon/tests/routes.rs` — proves byte-for-byte
+equivalence between the legacy local-gateway activity/transcript routes and
+the `server-local`-scoped alias paths, using a genuinely mixed-source seeded
+feed (a named-agent-compat row plus a live Codex session seeded via
+`CodexProviderRegistry::insert_session_for_tests`, no real process spawned).
+Extended `ws-dashboard/frontend/src/workRootActivity.test.ts` with
+source-neutral ribbon-label assertions across all known and one
+unknown-future `kind` value, plus identity-key/route-distinctness assertions
+for `activityStreamKey`/`workRootActivityEndpoint`/
+`workRootActivityEventsEndpoint`/`workRootActivityTranscriptEndpoint` across
+distinct `serverRoute`s.
+
+**Review disposition (partitioned correctness/fit/test):** all three clean —
+correctness 1 minor, fit clean, test 3 minors. One minor (the same latent gap
+independently flagged by both correctness and test: the transcript
+equivalence assertions didn't independently assert the legacy side resolved
+to `200` before comparing, so the test could pass vacuously under a future
+regression that broke both routes identically) was fixed directly given the
+two-reviewer convergence and trivial one-line fix (commit `6ebc6db2`).
+Remaining minors recorded, not fixed: the frontend `/named[\s-]?agent/i`
+regex guard doesn't catch a raw camelCase `namedAgent` leak (low risk, since
+the labeling function routes `namedAgent` through the `agent.<backend>`
+branch first); some frontend assertions re-derive expected constants
+(tautology risk, judged non-blocking since the identity-key distinctness
+checks are independently non-tautological).
+
+**Explicitly not performed:** the ticket's "browser-level acceptance evidence
+for mixed source rows and transcript rendering" verification item. Since no
+production code changed in this phase (the gap was purely test coverage),
+there is no new browser-observable behavior to verify — both the test
+reviewer and this record treat the gap as genuine but non-blocking, not a
+silently skipped step.
+
+**Tests:** `cargo test -p ws-dashboard-core -p ws-dashboard-daemon` (core 31
+passed; daemon lib 69 passed/2 ignored; `--test routes` 154 passed;
+`--test server` 15 passed) and `npm run test:work-root-activity` (frontend,
+exit 0) — all green at final commit `6ebc6db2`.
+
+With Phase 5 complete (to its now-descoped extent) and Phase 3 blocked
+pending an OpenCode install, all currently actionable phases of this ticket
+are done.
