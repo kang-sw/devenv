@@ -90,6 +90,11 @@ assert(
   "merged tool bubble retains the tool-call block's text alongside the result",
 );
 
+// --- empty transcript -------------------------------------------------------
+
+const emptyBubbles = groupTranscriptIntoBubbles([], "agent.codex");
+assertEqual(emptyBubbles.length, 0, "an empty transcript groups into zero bubbles (no spurious flush-at-end bubble)");
+
 // --- streaming: same cursor, growing text, re-grouped each tick ------------
 
 function streamingBlocksAt(text: string): TranscriptBlock[] {
@@ -110,6 +115,25 @@ assertEqual(
   "Here is the streamed\n\n- point one\n- point two",
   "bubble text reflects the fully-grown chunk",
 );
+
+// A genuine multi-tick (3+) re-grouping sequence of the same growing,
+// single-cursor block: every re-grouping call must keep exactly one bubble
+// and a stable `id` (== the block's cursor), matching what actually happens
+// on every stub tick in production via `mergeStreamingTranscriptBlocks` +
+// re-render.
+const streamTicks = [
+  "Here",
+  "Here is",
+  "Here is the streamed",
+  "Here is the streamed\n\n- point one",
+  "Here is the streamed\n\n- point one\n- point two",
+];
+const tickBubbleGroups = streamTicks.map((text) => groupTranscriptIntoBubbles(streamingBlocksAt(text), "agent.codex"));
+for (const [index, tickBubbles] of tickBubbleGroups.entries()) {
+  assertEqual(tickBubbles.length, 1, `tick ${index}: bubble count stays at 1 across successive re-groupings`);
+  assertEqual(tickBubbles[0]?.id, "stream-1", `tick ${index}: bubble id stays stable across successive re-groupings`);
+  assertEqual(tickBubbles[0]?.text, streamTicks[index], `tick ${index}: bubble text reflects that tick's chunk`);
+}
 
 const partialHtml = renderToStaticMarkup(
   createElement(AgentChatTranscriptBubbles, {

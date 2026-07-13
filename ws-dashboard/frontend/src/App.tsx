@@ -53,6 +53,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
+import { mergeStreamingTranscriptBlocks } from "./agentChatStreamMerge";
 import {
   DocumentViewer,
   buildDocumentTranslationRequestPayload,
@@ -6844,17 +6845,6 @@ function agentChatWorkbenchPane(
       : `agentChat:${pane.paneId}:empty`,
     body: <AgentChatPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
-}
-
-function mergeStreamingTranscriptBlocks(
-  blocks: readonly TranscriptBlock[],
-  streaming: Record<string, TranscriptBlock>,
-): TranscriptBlock[] {
-  const merged = blocks.map((block) => streaming[block.cursor] ?? block);
-  const appended = Object.values(streaming).filter(
-    (block) => !blocks.some((existing) => existing.cursor === block.cursor),
-  );
-  return [...merged, ...appended];
 }
 
 function AgentChatPaneBody({

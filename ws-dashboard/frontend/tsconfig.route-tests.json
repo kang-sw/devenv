@@ -46,6 +46,8 @@
     "src/agentChatSessions.test.ts",
     "src/agentChatBubbles.tsx",
     "src/agentChatBubbles.test.ts",
+    "src/agentChatStreamMerge.ts",
+    "src/agentChatStreamMerge.test.ts",
     "src/terminals.ts",
     "src/terminals.test.ts",
     "src/terminalCommandPlan.ts",
