@@ -45,11 +45,27 @@ type RecordedCall = { url: string; method: string; body: unknown };
 const calls: RecordedCall[] = [];
 let nextResponses: unknown[] = [];
 
+// A queued response of this shape makes the mock return a non-ok HTTP
+// response instead of a 200, so error-path assertions (e.g.
+// `beginRealStreamingTurn`'s `onError` branch) can be exercised without a
+// live daemon.
+type MockErrorResponse = { readonly __httpError: number; readonly error: string };
+
+function isMockErrorResponse(value: unknown): value is MockErrorResponse {
+  return typeof value === "object" && value !== null && "__httpError" in value;
+}
+
 globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   calls.push({ url: String(url), method, body });
   const payload = nextResponses.shift();
+  if (isMockErrorResponse(payload)) {
+    return new Response(JSON.stringify({ error: payload.error }), {
+      status: payload.__httpError,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   return new Response(JSON.stringify(payload ?? {}), {
     status: 200,
     headers: { "Content-Type": "application/json" },
@@ -152,6 +168,15 @@ assertEqual(
 );
 assertEqual(resumedSession.title, historyItem.label, "resumed session title carries the history item's label");
 
+calls.length = 0;
+nextResponses = [{ ...transcriptFixture, activityId: "agent.codex:history-1" }];
+await resumeAgentChatSession(historyItem, "codex", "root-a", "server-remote-1");
+assertEqual(
+  calls[0]!.url,
+  "/api/dashboard/servers/server-remote-1/work-roots/root-a/activity/codex-sessions/agent.codex%3Ahistory-1/transcript",
+  "resume hits the server-scoped per-activity transcript route for a non-local serverRoute",
+);
+
 // --- activityHistoryList: GET both codex-sessions and claude-sessions ------
 
 calls.length = 0;
@@ -177,6 +202,29 @@ assert(
 assert(
   history.items.some((item) => item.kind === "agent.claude" && item.live === false),
   "an idle claude session summary maps to a non-live ActivityItem",
+);
+
+calls.length = 0;
+nextResponses = [
+  { sessions: [{ activityId: "agent.codex:1", label: "Codex session", status: "running", updatedAt: null }] },
+  { sessions: [{ activityId: "agent.claude:1", label: "Claude session", status: "idle", updatedAt: "2026-07-13T00:00:00Z" }] },
+];
+await activityHistoryList({ workRootId: "root-a", serverRoute: "server-remote-1" });
+assert(
+  calls.some(
+    (call) =>
+      call.url === "/api/dashboard/servers/server-remote-1/work-roots/root-a/activity/codex-sessions" &&
+      call.method === "GET",
+  ),
+  "activityHistoryList GETs the server-scoped codex-sessions collection for a non-local serverRoute",
+);
+assert(
+  calls.some(
+    (call) =>
+      call.url === "/api/dashboard/servers/server-remote-1/work-roots/root-a/activity/claude-sessions" &&
+      call.method === "GET",
+  ),
+  "activityHistoryList GETs the server-scoped claude-sessions collection for a non-local serverRoute",
 );
 
 // --- steerActivitySession: POST control with action=steer (Codex-only) ----
@@ -296,3 +344,55 @@ assertEqual(
   "/api/dashboard/work-roots/root-a/activity/codex-sessions/agent.codex%3A1/transcript",
   "beginRealStreamingTurn fetches the local codex transcript route",
 );
+
+calls.length = 0;
+nextResponses = [transcriptFixture];
+await new Promise<void>((resolve) => {
+  beginRealStreamingTurn(
+    "root-a",
+    "codex",
+    "agent.codex:1",
+    "server-remote-1",
+    () => undefined,
+    () => {
+      resolve();
+    },
+  );
+});
+assertEqual(
+  calls[0]!.url,
+  "/api/dashboard/servers/server-remote-1/work-roots/root-a/activity/codex-sessions/agent.codex%3A1/transcript",
+  "beginRealStreamingTurn fetches the server-scoped codex transcript route for a non-local serverRoute",
+);
+
+// --- beginRealStreamingTurn: transcript fetch failure -> onError ----------
+
+calls.length = 0;
+nextResponses = [{ __httpError: 500, error: "daemon unavailable" }];
+let capturedError: unknown;
+let completeCalledAfterError = false;
+await new Promise<void>((resolve) => {
+  beginRealStreamingTurn(
+    "root-a",
+    "codex",
+    "agent.codex:1",
+    "server-local",
+    () => {
+      throw new Error("onUpdate must not be called when the transcript fetch fails");
+    },
+    () => {
+      completeCalledAfterError = true;
+      resolve();
+    },
+    (error) => {
+      capturedError = error;
+    },
+  );
+});
+assert(capturedError instanceof Error, "beginRealStreamingTurn's onError receives the transcript fetch failure");
+assertEqual(
+  (capturedError as Error).message,
+  "daemon unavailable",
+  "onError receives the error message from the failed transcript response body",
+);
+assert(completeCalledAfterError, "onComplete still fires after onError, per the finally() chain");

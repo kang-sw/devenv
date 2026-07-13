@@ -5038,14 +5038,17 @@ function WorkbenchShell({
     workRootId: string,
     serverRoute?: string | null,
   ): Promise<{ items: ActivityItem[] }> {
-    const [real, stub] = await Promise.all([
-      realActivityHistoryList({ workRootId, serverRoute }),
+    const [realResult, stub] = await Promise.all([
+      realActivityHistoryList({ workRootId, serverRoute }).catch(() => null),
       stubActivityHistoryList({ workRootId, serverRoute }),
     ]);
     const stubOpencodeOnly = stub.items.filter(
       (item) => agentChatHarnessFromSourceKind(item.kind) === "opencode",
     );
-    return { items: [...real.items, ...stubOpencodeOnly] };
+    // A real list failure (remote/server-scoped route error, provider error,
+    // daemon down) must not take down the OpenCode stub-backed flow with it —
+    // degrade to stub-only entries rather than rejecting the whole history.
+    return { items: [...(realResult?.items ?? []), ...stubOpencodeOnly] };
   }
 
   function applyAgentChatSession(
@@ -5145,10 +5148,13 @@ function WorkbenchShell({
     // (`260713-feat-ws-dashboard-activity-session-fork-cursor` Phase 1), even
     // though no backend `CodexControlRequest::Fork` variant/route exists yet
     // (that's Phase 3) - so this always ends in the pane's error state today,
-    // by design. Claude/OpenCode fork stays on the stub unconditionally
-    // (Claude fork-from-here is Hack-tier and explicitly out of scope).
+    // by design. Gated to `codex` only (mirroring the steer branch above),
+    // since `realForkActivitySession` hardcodes the Codex `/control` URL -
+    // Claude/OpenCode fork stays on the stub unconditionally (Claude
+    // fork-from-here is Hack-tier and explicitly out of scope; the capability
+    // table also keeps the fork affordance hidden for Claude today).
     const realHarness = realAgentChatHarness(session.harness);
-    const forkCall: Promise<void> = realHarness
+    const forkCall: Promise<void> = realHarness === "codex"
       ? realForkActivitySession({
           workRootId: session.workRootId,
           activityId: session.activityId,
@@ -7177,7 +7183,7 @@ function AgentChatPaneBody({
   // stream, and on that stream's natural `onComplete` clears in-flight and
   // dequeues+re-sends the next queued message (if any) - this is what
   // visibly clears a pending badge and starts its own new streamed reply.
-  function beginSimulatedTurn(text: string) {
+  function beginSimulatedTurn(text: string, options?: { readonly alreadyDelivered?: boolean }) {
     const currentPane = paneRef.current;
     if (!currentPane.session) {
       return;
@@ -7186,7 +7192,14 @@ function AgentChatPaneBody({
     // real `/prompt` POST for Codex/Claude sessions
     // (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1) -
     // do not send it again here, only fetch the resulting transcript once.
-    actions.onSendMessage(currentPane, text);
+    // `options.alreadyDelivered` is set when this turn's text was already
+    // delivered to the real Codex process via `turn/steer` while it was
+    // queued (see `submitPrompt`'s `steering` branch): resending it here via
+    // `/prompt` would double-deliver the same text, so the send is skipped
+    // and only the resulting transcript is fetched.
+    if (!options?.alreadyDelivered) {
+      actions.onSendMessage(currentPane, text);
+    }
     setPromptHistory((current) => [...current, text]);
     setTurnInFlight(true);
     turnSequenceRef.current += 1;
@@ -7198,7 +7211,11 @@ function AgentChatPaneBody({
         const [next, ...rest] = queue;
         pendingRef.current = rest;
         setPendingMessages(rest);
-        beginSimulatedTurn(next.text);
+        // `next.steering` is only ever true for a Codex session (the only
+        // harness whose capability table enables `steer`), and only when the
+        // real `turn/steer` control call was actually fired in `submitPrompt`
+        // - so a dequeued steering entry must not be re-sent via `/prompt`.
+        beginSimulatedTurn(next.text, { alreadyDelivered: next.steering });
       }
     };
     const realHarness = realAgentChatHarness(currentPane.session.harness);
