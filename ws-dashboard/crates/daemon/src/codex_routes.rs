@@ -91,6 +91,23 @@ pub enum CodexControlRequest {
     Compact,
     Steer { text: String },
     Skills,
+    // `goal`/`rewind` deliberately unwired this phase: `capabilities()`
+    // reports `goal: true` but no adapter method/route backs it yet, and
+    // `rewind` stays scaffolded-disabled per the 260711 Phase 3 precedent
+    // (see plan `260713`... Phase 3 Out of Scope).
+    Fork {
+        // CONTRACT: `#[serde(rename_all = "camelCase")]` on the enum only
+        // renames the `action` tag values (`fork`), not fields nested inside
+        // a struct variant — verified via a local repro against this
+        // project's pinned serde 1.0.228 (serde's own docs are explicit that
+        // container `rename_all` on an enum governs variant names, not their
+        // fields; `rename_all_fields` is the container attribute for the
+        // latter). Without this per-field rename the wire's `cutCursor` key
+        // silently fails to populate `cut_cursor` (defaults to `None`)
+        // instead of erroring, since the field is optional.
+        #[serde(rename = "cutCursor", default)]
+        cut_cursor: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -197,6 +214,16 @@ pub async fn codex_session_control(
                     data: Some(data),
                 })
         }
+        CodexControlRequest::Fork { cut_cursor } => provider
+            .fork(&activity_id, cut_cursor.as_deref())
+            .await
+            .map(|(new_activity_id, resolved_cut_cursor)| CodexControlResponse {
+                applied: true,
+                data: Some(serde_json::json!({
+                    "activityId": new_activity_id,
+                    "cutCursor": resolved_cut_cursor,
+                })),
+            }),
     };
     match result {
         Ok(response) => Json(response).into_response(),

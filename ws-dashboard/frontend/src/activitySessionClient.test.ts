@@ -11,6 +11,7 @@ import {
   activityHistoryList,
   beginRealStreamingTurn,
   forkActivitySession,
+  hydrateForkedAgentChatSession,
   resumeAgentChatSession,
   sendAgentChatPrompt,
   startNewAgentChatSession,
@@ -257,7 +258,11 @@ assertEqual(
 // --- forkActivitySession: POST control with action=fork, cutCursor --------
 
 calls.length = 0;
-nextResponses = [{ applied: true }];
+// 260713 Phase 3: the daemon's real Fork handler returns a *new*
+// activityId in `data`, distinct from the source session's own
+// activityId — forkActivitySession must surface that, not echo the
+// request's activityId back.
+nextResponses = [{ applied: true, data: { activityId: "agent.codex:forked-1", cutCursor: "3" } }];
 const forkResult = await forkActivitySession({
   workRootId: "root-a",
   activityId: "agent.codex:1",
@@ -269,14 +274,62 @@ assertEqual(calls[0]!.method, "POST", "fork is a POST");
 assertEqual(
   calls[0]!.url,
   "/api/dashboard/work-roots/root-a/activity/codex-sessions/agent.codex%3A1/control",
-  "fork hits the same local codex control route as steer (no dedicated fork route exists until Phase 3)",
+  "fork hits the same codex control route the source session lives at (Fork is dispatched by action tag, not a dedicated route)",
 );
 assertBodyEqual(
   calls[0]!.body,
   { action: "fork", cutCursor: "3" },
-  "fork control body carries the future Fork action tag plus the requested cut-point cursor",
+  "fork control body carries the Fork action tag plus the requested cut-point cursor",
 );
-assertEqual(forkResult.cutCursor, "3", "forkActivitySession echoes the requested cutCursor back");
+assertEqual(
+  forkResult.activityId,
+  "agent.codex:forked-1",
+  "forkActivitySession surfaces the daemon's new activityId, not the source session's",
+);
+assertEqual(forkResult.cutCursor, "3", "forkActivitySession surfaces the daemon-echoed cutCursor");
+
+calls.length = 0;
+// 260713 Phase 3 correctness fix: when the daemon's cut-point resolution
+// fails (stale/out-of-range cursor), it now returns `data.cutCursor: null`
+// to signal an unfiltered full-thread fork actually happened. The client
+// must surface that `null` as-is, NOT fall back to echoing the request's
+// original (unresolved) `cutCursor` — doing so would silently re-introduce
+// the "claims a cut point was honored when it wasn't" bug this contract
+// fix exists to close.
+nextResponses = [{ applied: true, data: { activityId: "agent.codex:forked-2", cutCursor: null } }];
+const forkResultUnresolvedCursor = await forkActivitySession({
+  workRootId: "root-a",
+  activityId: "agent.codex:1",
+  cutCursor: "stale-cursor",
+  serverRoute: "server-local",
+});
+assertEqual(
+  forkResultUnresolvedCursor.cutCursor,
+  null,
+  "forkActivitySession trusts the daemon's null cutCursor rather than echoing an unresolved request cursor",
+);
+
+calls.length = 0;
+// Defensive fallback: a response missing `data` entirely (a shape the real
+// handler should never produce) must still degrade to echoing the request
+// rather than throwing or returning `undefined` fields.
+nextResponses = [{ applied: true }];
+const forkResultNoData = await forkActivitySession({
+  workRootId: "root-a",
+  activityId: "agent.codex:1",
+  cutCursor: "3",
+  serverRoute: "server-local",
+});
+assertEqual(
+  forkResultNoData.activityId,
+  "agent.codex:1",
+  "forkActivitySession falls back to the request's activityId when data is missing",
+);
+assertEqual(
+  forkResultNoData.cutCursor,
+  "3",
+  "forkActivitySession falls back to the request's cutCursor when data is missing",
+);
 
 calls.length = 0;
 nextResponses = [{ applied: true }];
@@ -295,6 +348,33 @@ assertBodyEqual(
   { action: "fork", cutCursor: null },
   "an omitted cutCursor defaults to null (fork the entire transcript), not undefined-dropped",
 );
+
+// --- hydrateForkedAgentChatSession: transcript-fetch-only session hydrate --
+// (App.tsx's `forkAgentChatFromBubble` calls this after `forkActivitySession`
+// resolves, to turn the bare `{activityId, cutCursor}` into a full
+// `AgentChatSessionView` — no App.tsx-level harness exists for a direct
+// end-to-end test of that call site, so this covers the building block it
+// depends on.)
+
+calls.length = 0;
+nextResponses = [transcriptFixture];
+const forkedSession = await hydrateForkedAgentChatSession(
+  "root-a",
+  "codex",
+  "agent.codex:forked-1",
+  "server-local",
+  "Codex conversation (forked)",
+);
+assertEqual(calls.length, 1, "hydrateForkedAgentChatSession issues exactly one transcript call, no create call");
+assertEqual(calls[0]!.method, "GET", "hydrate call is a GET");
+assertEqual(
+  calls[0]!.url,
+  "/api/dashboard/work-roots/root-a/activity/codex-sessions/agent.codex%3Aforked-1/transcript",
+  "hydrate fetches the transcript for the forked session's own activityId",
+);
+assertEqual(forkedSession.activityId, "agent.codex:forked-1", "hydrated session keeps the forked activityId");
+assertEqual(forkedSession.title, "Codex conversation (forked)", "hydrated session carries the caller-supplied title");
+assertEqual(forkedSession.transcript.blocks.length, 1, "hydrated session carries the fetched transcript blocks");
 
 // --- sendAgentChatPrompt: POST prompt with { text } ------------------------
 

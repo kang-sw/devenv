@@ -280,6 +280,64 @@ match arm(s) confirming the added variant(s) dispatch correctly; manual
 confirmation that fork-from-here against a real Codex session produces a
 new session with the correct transcript cut point.
 
+### Result (33bb209a) - 2026-07-13
+
+Landed the Codex fork daemon handler and connected the frontend
+follow-through Phase 1 deliberately deferred here.
+
+- `CodexProjector` (`codex_projection.rs`) gained internal turn-id tracking
+  (`turn_id_for_cursor`, populated from `turn/started`'s previously-discarded
+  `params.turn.id`) plus a pure `project_fork_turns` function and a
+  `CodexProjector::seeded` constructor, so a forked session's transcript
+  shows correct pre-fork history immediately and continues ingesting live
+  notifications right after. Turn ids stay internal-only, never copied into
+  the outward `TranscriptBlock` (the existing privacy contract is
+  unaffected).
+- `CodexAppServerProvider::fork` resolves `cutCursor` to a provider turn id,
+  spawns a **dedicated new connection** for the forked thread (mirrors
+  `create_session`'s spawn/register pattern; `thread/fork` loads by
+  `threadId` from disk so the source connection need not stay alive, and
+  this crate's one-connection-per-projector pump can't demux notifications
+  by thread), and registers a new `CodexSession` with a fresh `activity_id`.
+- `CodexControlRequest` gained a `Fork { cut_cursor: Option<String> }`
+  variant wired through `codex_session_control`'s match arm
+  (`codex_routes.rs`). Live Claude fork and `goal`/`rewind` variants remain
+  unwired, per this phase's explicit scope.
+- `forkActivitySession` (`activitySessionClient.ts`) now reads the real
+  `data.activityId`/`data.cutCursor` from the daemon response instead of
+  echoing the request; a new `hydrateForkedAgentChatSession` helper fetches
+  the forked session's transcript so `forkAgentChatFromBubble`'s Codex
+  branch applies the new pane instead of always throwing.
+- Fix cycle (review-cycle 1, correctness, Important, `33bb209a`): the
+  daemon's `fork()` originally echoed back the caller's raw `cutCursor`
+  even when turn-id resolution failed and the fork silently fell back to
+  the whole thread, misleadingly implying the requested cut was honored.
+  Fixed to return the actually-resolved turn id (`None` on resolution
+  failure) instead; a matching latent bug in the frontend's fallback logic
+  (which would have re-substituted the stale request cursor for a
+  legitimate `null`, undoing the backend fix at the client boundary) was
+  fixed in the same commit. Re-review confirmed clean; fit review was clean
+  on the first pass.
+- Deviations (both correctness fixes needed to satisfy the plan's own
+  contract, not scope creep): (1) a latent serde bug where
+  `#[serde(rename_all = "camelCase")]` on the enum doesn't rename fields
+  inside struct variants, requiring an explicit `#[serde(rename =
+  "cutCursor")]` on `Fork`'s field — verified via an isolated serde 1.0.228
+  repro; (2) `CodexProjector::seeded` as necessary glue not explicitly named
+  in the plan text, since `project_fork_turns`'s output needs a way to
+  pre-populate the projector's internal state.
+- Verification: `cargo test -p ws-dashboard-core codex_projection` (12
+  passed), `cargo test -p ws-dashboard-daemon` (all unit/route/server tests
+  passed), `npm run build`, `npm run test:agent-chat-client` — all green.
+  The full spawn-a-real-process-and-fork path and the manual
+  browser-walkthrough verification stay deferred to Phase 4, consistent
+  with `create_session`'s own pre-existing untested-spawn precedent and
+  this ticket's own Phase 4 framing.
+- `260713-feat-ws-dashboard-activity-session-fork-cursor` (idea ticket):
+  this phase lands the daemon-side fork handler that ticket's Phase 1
+  progress note said was still missing; that idea ticket can now be closed
+  once Phase 4's manual walkthrough confirms end-to-end fork behavior.
+
 ### Phase 4: End-to-end verification, including manual walkthrough
 
 Automated: a real (not fixture-only, unless a real binary is unavailable in
