@@ -5,7 +5,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
-sage-review-design: required
+sage-review-design: completed
 ---
 
 # Restore ws MCP liveness across Claude Code idle periods
