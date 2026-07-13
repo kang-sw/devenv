@@ -7373,6 +7373,17 @@ function AgentChatPaneBody({
     }
     event.preventDefault();
     navigateHistory(event.key === "ArrowUp" ? -1 : 1);
+    // navigateHistory only queues a setPromptValue (or revertPending, which
+    // also calls setPromptValue) React state update; the DOM value/selection
+    // has not landed yet when this handler returns, so setSelectionRange
+    // here would operate on stale content. Defer to the next paint via
+    // requestAnimationFrame so the reset applies after React commits the
+    // recalled text. Reset to column 0 (not select-all) so the very next
+    // ArrowUp/ArrowDown still satisfies the caretAtStart guard above,
+    // letting repeated presses keep walking through history.
+    requestAnimationFrame(() => {
+      input.setSelectionRange(0, 0);
+    });
   }
 
   if (pane.session) {

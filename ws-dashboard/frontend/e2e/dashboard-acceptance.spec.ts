@@ -2758,22 +2758,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     // Prompt-box up/down history traversal cycles through previously *sent*
     // message texts (the reverted-and-never-sent third message is correctly
-    // absent from history).
-    await promptInput.press("Home");
+    // absent from history). Consecutive same-direction and direction-switch
+    // presses require no intervening "Home" - the caret is reset to column 0
+    // after each recall, so repeated arrows keep walking through history.
     await promptInput.press("ArrowUp");
     await expect(promptInput).toHaveValue("second phase-3 message");
-    await promptInput.press("Home");
     await promptInput.press("ArrowUp");
     await expect(promptInput).toHaveValue("first phase-3 message");
-    await promptInput.press("Home");
     await promptInput.press("ArrowDown");
     await expect(promptInput).toHaveValue("second phase-3 message");
-    await promptInput.press("Home");
     await promptInput.press("ArrowDown");
     await expect(promptInput).toHaveValue("");
     note(
-      "agent chat prompt history: up/down arrow traversal cycled through previously sent message texts only, " +
-        "excluding the reverted-and-never-sent entry",
+      "agent chat prompt history: consecutive up/down arrow presses (no intervening caret reset needed) cycled " +
+        "through previously sent message texts only, excluding the reverted-and-never-sent entry",
     );
 
     // "Fork from here" (shipped live, Codex `capabilities.fork: true`):
