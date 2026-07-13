@@ -969,17 +969,29 @@ values.
 
 The Phase-1 frontend interaction-API draft
 (`ws-dashboard/frontend/src/activitySessionApi.ts`) records illustrative
-method-shape names — not a final route contract — for the common interactive
-subset (`activity.history.list`, `activity.session.start/create/send`,
-`activity.session.usage` read-only usage display) and the per-harness-gated
-methods (`activity.session.compact/steer/goal.set|get|clear/rewind/fork/skills`),
-which a caller must hide/disable unless the active harness's adapter reports
-the matching `AgentClientCapabilities` flag. No route is registered for these
-yet; Phase 2+ will register them under the same dual server-scoped/
-local-gateway pattern
-(`#remote-activity-git-workspace-operations`) the existing read routes
-already use, keeping the same `workRootId`/`activityId` identity model rather
-than introducing a new one.
+method-shape names for the common interactive subset (`activity.history.list`,
+`activity.session.start/create/send`, `activity.session.usage` read-only usage
+display) and the per-harness-gated methods
+(`activity.session.compact/steer/goal.set|get|clear/rewind/fork/skills`), which
+a caller must hide/disable unless the active harness's adapter reports the
+matching `AgentClientCapabilities` flag. These route under the same dual
+server-scoped/local-gateway pattern
+(`#remote-activity-git-workspace-operations`) the existing read routes already
+use, keeping the same `workRootId`/`activityId` identity model rather than
+introducing a new one.
+
+`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1 wires the
+frontend to these routes for Codex and Claude sessions: a real fetch client
+(`ws-dashboard/frontend/src/activitySessionClient.ts`) replaces the prior
+stub-only call sites for session create/resume/history/prompt-send and, where
+the active harness's capabilities allow it, steer and fork. OpenCode sessions
+remain stub-backed pending Phase 3 of `260620`. `ActivitySessionForkRequest`/
+`ActivitySessionForkResponse` gained an optional `cutCursor` field identifying
+a specific transcript cut point to fork from rather than only the session's
+current end; no daemon fork route exists yet to honor it (a fork call is
+expected to fail until a `CodexControlRequest::Fork` variant and route land).
+Turn-by-turn message delivery in this phase is a one-shot send-then-fetch, not
+continuous streaming; a later phase upgrades this to incremental polling.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 

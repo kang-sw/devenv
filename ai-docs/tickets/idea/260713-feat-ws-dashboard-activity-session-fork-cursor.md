@@ -43,3 +43,12 @@ as the reference shape for what the real field needs to express. When this
 lands, `260711`'s stub-only workaround parameter should be reconciled with
 the real field (either by adopting the same shape or by threading the
 stub's local parameter into the now-real request type).
+
+**Progress note (2026-07-13)**: `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`
+Phase 1 (commit `53d420fe`) added the frontend-type half of this field —
+`ActivitySessionForkRequest`/`ActivitySessionForkResponse` now carry an
+optional `cutCursor`, adopting the stub's `cutBlocks` shape as a single
+wire-shaped cursor value. The daemon-side fork handler this phase also
+requires does not exist yet; it is scoped into that same ticket's Phase 3
+(`CodexControlRequest::Fork` variant and route). This ticket stays open in
+`idea/` until Phase 3 lands and the daemon side can be verified end-to-end.
