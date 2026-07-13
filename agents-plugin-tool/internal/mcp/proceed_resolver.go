@@ -355,8 +355,6 @@ func proceedNextInstruction(next string) string {
 		return fmt.Sprintf(`Routing to next action: lead-write-ticket. Call %s/playbook.print(name: "lead-write-ticket"), then execute the returned playbook inline. After it returns, capture the Ticket path; if it is under ai-docs/tickets/ready/, rebuild route context and rerun %s/enter.proceed for that ticket. Otherwise stop and report the remaining readiness blocker. Verify the invoked stage result from stage output and committed artifacts when applicable. Stop on failure or user interruption.`, namespace, namespace)
 	case "lead-discuss":
 		return fmt.Sprintf("Routing to next action: lead-discuss. Continue through %s:lead-discuss with the blocker in Reason. Verify the invoked stage result from stage output when applicable. Stop on failure or user interruption.", namespace)
-	case "status-report":
-		return "Routing to next action: status-report. Stop. Report the status in Reason and any safe next request from this verdict; do not invoke another skill. Wait for the user."
 	case "stop":
 		return "Routing to next action: stop. Stop. Report the blocker in Reason and any safe next request from this verdict; do not invoke another skill. Wait for the user."
 	default:

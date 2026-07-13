@@ -2,6 +2,7 @@
 title: "Bug: enter.proceed status-report route is dead code"
 sage-review-completeness: completed
 sage-review-design: completed
+completed: 2026-07-13
 ---
 
 ## Finding
@@ -54,6 +55,17 @@ other call site changes. Verification: `go test ./...` in
 the repo turns up no remaining production or test references to the removed
 case (the `status_report` fact enum value on the `category` fact itself is
 unrelated caller input shape and is out of scope for this removal).
+
+### Result (42c0d486) - 2026-07-13
+
+Removed the dead `status-report` case from `proceedNextInstruction`
+(`proceed_resolver.go`) and its direct assertion in
+`session_state_test.go`. No other call sites referenced this value.
+`go build ./...`, `go vet ./...`, and `go test ./...` all pass across all
+11 packages. Repo-wide grep confirmed no remaining `status-report`
+references and left the two unrelated `status_report` (underscore)
+category-fact enum sites (`proceed_resolver.go:273`, `server.go:2991`)
+untouched. Single full-scope review: clean. No deviations from plan.
 
 ## Spec Impact
 
