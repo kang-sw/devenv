@@ -1,4 +1,4 @@
-import { mergeStreamingTranscriptBlocks } from "./agentChatStreamMerge.js";
+import { blocksSincePolledLength, mergeStreamingTranscriptBlocks } from "./agentChatStreamMerge.js";
 import type { TranscriptBlock } from "./workRootActivity.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -146,4 +146,120 @@ assertEqual(
   tick3[0]?.text,
   "Session started, still streaming more text now complete",
   "tick 3 reflects the overlay's fully-grown text",
+);
+
+// --- blocksSincePolledLength: diffing a full-refetch poll against the -------
+// previously-seen block count.
+
+const pollBlocks = [
+  block({ cursor: "0", text: "user prompt", role: "user" }),
+  block({ cursor: "1", text: "agent reply, still streaming", role: "agent" }),
+  block({ cursor: "2", text: "a brand new block", role: "agent" }),
+];
+
+// Initial poll (lastSeenLength 0, and the plan's documented <= 0 case)
+// returns everything: there is no previously-seen tail block to re-diff.
+assertEqual(
+  blocksSincePolledLength(pollBlocks, 0).length,
+  3,
+  "an initial poll (lastSeenLength 0) returns the full block array",
+);
+assertEqual(
+  blocksSincePolledLength(pollBlocks, -1).length,
+  3,
+  "a negative lastSeenLength is clamped to the full block array, same as 0",
+);
+
+// A subsequent poll re-includes the last previously-seen block (it may have
+// grown) plus any newly appended blocks after it.
+const diffAfterOne = blocksSincePolledLength(pollBlocks, 1);
+assertEqual(
+  diffAfterOne.length,
+  3,
+  "lastSeenLength 1 re-includes the previously-seen tail block (index 0) plus the two new blocks",
+);
+assertEqual(diffAfterOne[0]?.cursor, "0", "the re-included tail block is the previously-seen block at index 0");
+
+const diffAfterTwo = blocksSincePolledLength(pollBlocks, 2);
+assertEqual(
+  diffAfterTwo.length,
+  2,
+  "lastSeenLength 2 re-includes the tail block at index 1 plus the one new block at index 2",
+);
+assertEqual(diffAfterTwo[0]?.cursor, "1", "the re-included tail block is the previously-seen block at index 1");
+assertEqual(diffAfterTwo[1]?.cursor, "2", "the newly appended block at index 2 is included");
+
+// --- blocksSincePolledLength: multi-poll stability (idempotence) -----------
+// Repeated calls with a stable lastSeenLength against an unchanged tail
+// block yield the same diff every time.
+
+const stableBlocks = [
+  block({ cursor: "0", text: "user prompt", role: "user" }),
+  block({ cursor: "1", text: "agent reply complete", role: "agent" }),
+];
+const stableDiffA = blocksSincePolledLength(stableBlocks, stableBlocks.length);
+const stableDiffB = blocksSincePolledLength(stableBlocks, stableBlocks.length);
+const stableDiffC = blocksSincePolledLength(stableBlocks, stableBlocks.length);
+// Each call is checked against a hardcoded oracle (not just against each
+// other) so this cannot pass vacuously as a self-comparison of a pure
+// function against itself.
+for (const [label, diff] of [
+  ["poll 1", stableDiffA],
+  ["poll 2", stableDiffB],
+  ["poll 3", stableDiffC],
+] as const) {
+  assertEqual(diff.length, 1, `${label}: the stable diff contains only the unchanged tail block, no phantom growth`);
+  assertEqual(diff[0]?.cursor, "1", `${label}: the stable diff's sole block is the unchanged tail block at cursor 1`);
+  assertEqual(
+    diff[0]?.text,
+    "agent reply complete",
+    `${label}: the stable diff's sole block text matches the unchanged tail block verbatim`,
+  );
+}
+
+// --- blocksSincePolledLength: unmatched-append-ordering ---------------------
+// A poll that appends more than one new block at once still diffs correctly,
+// and merging the diff back through mergeStreamingTranscriptBlocks (keyed by
+// cursor) produces the same result as merging the full array would.
+
+const beforeMultiAppend = [
+  block({ cursor: "0", text: "user prompt", role: "user" }),
+  block({ cursor: "1", text: "agent reply, still streaming", role: "agent" }),
+];
+const afterMultiAppend = [
+  block({ cursor: "0", text: "user prompt", role: "user" }),
+  block({ cursor: "1", text: "agent reply, now complete", role: "agent" }),
+  block({ cursor: "2", text: "tool call block", role: "tool" }),
+  block({ cursor: "3", text: "second agent block appended in the same poll", role: "agent" }),
+];
+
+const multiAppendDiff = blocksSincePolledLength(afterMultiAppend, beforeMultiAppend.length);
+assertEqual(
+  multiAppendDiff.length,
+  3,
+  "a poll appending two new blocks at once diffs to the re-included tail block plus both new blocks",
+);
+assertEqual(multiAppendDiff[0]?.cursor, "1", "the diff re-includes the previously-seen tail block at cursor 1");
+assertEqual(multiAppendDiff[1]?.cursor, "2", "the diff includes the first newly appended block at cursor 2");
+assertEqual(multiAppendDiff[2]?.cursor, "3", "the diff includes the second newly appended block at cursor 3, in poll order");
+
+const streamingOverlay: Record<string, ReturnType<typeof block>> = {};
+for (const diffBlock of multiAppendDiff) {
+  streamingOverlay[diffBlock.cursor] = diffBlock;
+}
+const mergedFromDiff = mergeStreamingTranscriptBlocks(beforeMultiAppend, streamingOverlay);
+assertEqual(
+  mergedFromDiff.length,
+  4,
+  "merging the diffed slice through mergeStreamingTranscriptBlocks yields the full 4-block transcript",
+);
+assertEqual(
+  mergedFromDiff.map((b) => b.cursor).join(","),
+  "0,1,2,3",
+  "merging the diff produces blocks in the same cursor order as the full poll response",
+);
+assertEqual(
+  mergedFromDiff[1]?.text,
+  "agent reply, now complete",
+  "merging the diff updates the previously-streaming tail block's text in place",
 );

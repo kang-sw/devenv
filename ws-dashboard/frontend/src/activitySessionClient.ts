@@ -11,11 +11,19 @@
 // through this module (see `App.tsx` call sites).
 //
 // Mirrors `gitToolbar.ts`'s fetch-client idiom: a base-URL helper, a shared
-// `readJson<T>` helper, one exported async function per REST operation. No
-// polling/streaming loop yet — `beginRealStreamingTurn` does a single
-// transcript fetch, matching Phase 1's non-goal of real streaming/polling
-// delivery (that is Phase 2).
+// `readJson<T>` helper, one exported async function per REST operation.
+//
+// Phase 2 (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`, Phase 2
+// plan): `beginRealStreamingTurn` now polls the transcript endpoint on an
+// injectable interval (mirroring `gitToolbar.ts`'s
+// `GitRefreshSchedulerEnvironment` pattern) until the daemon reports
+// `live: false`, diffing each poll's full-refetch block array against the
+// previously-seen length via `blocksSincePolledLength`. This is deliberately
+// polling, not SSE/websocket — see the Phase 2 plan's Codebase Findings for
+// why the polling transport is an accepted pattern in this codebase, not a
+// stopgap.
 
+import { blocksSincePolledLength } from "./agentChatStreamMerge.js";
 import { localCompatibleDashboardApiRoute } from "./resourceModel.js";
 import {
   agentChatHarnessLabel,
@@ -341,19 +349,51 @@ export type RealStreamingHandle = {
 };
 
 /**
- * Minimal real counterpart to `stubBeginStreamingTurn`: fetches the
- * transcript exactly once and hands the resulting blocks to `onUpdate`, then
- * fires `onComplete`. No polling loop yet — Phase 2 upgrades this to
- * continuous diff-polling. `stop()` is a no-op today (nothing to cancel for
- * a single fetch) but is kept so call sites can treat both handles
- * uniformly.
+ * Injectable timer environment for `beginRealStreamingTurn`'s poll loop,
+ * mirroring `gitToolbar.ts`'s `GitRefreshSchedulerEnvironment` — passed in
+ * rather than calling `globalThis.setInterval`/`clearInterval` directly, so
+ * tests can supply a manual-tick fake instead of waiting on real intervals
+ * (see `activitySessionClient.test.ts`).
+ */
+export type RealStreamingPollEnvironment = {
+  setInterval: (listener: () => void, ms: number) => number;
+  clearInterval: (handle: number) => void;
+};
+
+const defaultRealStreamingPollEnvironment: RealStreamingPollEnvironment = {
+  setInterval: (listener, ms) => globalThis.setInterval(listener, ms) as unknown as number,
+  clearInterval: (handle) => globalThis.clearInterval(handle),
+};
+
+// No real incremental/delta transcript endpoint exists (see the Phase 2
+// plan's Codebase Findings on `workRootActivity.ts`'s `ActivityTranscript`
+// shape) — this is how often `beginRealStreamingTurn` re-fetches the full
+// transcript and diffs it via `blocksSincePolledLength`. Distinct from
+// `terminalOutputPollIntervalMs` (`App.tsx`), which polls a different feature
+// at a different cadence.
+export const realStreamingPollIntervalMs = 1500;
+
+/**
+ * Real counterpart to `stubBeginStreamingTurn`: polls the transcript
+ * endpoint on `realStreamingPollIntervalMs` until the daemon reports
+ * `live: false`, diffing each poll's full-refetch block array against the
+ * previously-seen length (`blocksSincePolledLength`) so `onUpdate` only ever
+ * receives the re-included in-progress tail block plus newly appended
+ * blocks, not the whole transcript every tick.
+ *
+ * `codex_activity_transcript`/`claude_activity_transcript`
+ * (`codex_app_server.rs:881-895`, `claude_cli.rs:882-896`) set
+ * `live: projector.is_turn_active()` on every transcript response — this is
+ * the only turn-completion signal available; there is no separate
+ * "finished" event or SSE/websocket push (that stays deferred future work,
+ * see the Phase 2 plan's Out of Scope).
  *
  * CONTRACT: this does not itself send the prompt — the caller
  * (`AgentChatPaneBody`'s `beginSimulatedTurn`) already triggers the real send
  * via `actions.onSendMessage` -> `sendAgentChatMessage` ->
  * `sendAgentChatPrompt` before starting the "stream," so re-sending here
  * would double-POST the same turn. This function only performs the
- * transcript fetch half of the turn.
+ * transcript poll half of the turn.
  */
 export function beginRealStreamingTurn(
   workRootId: string,
@@ -363,16 +403,52 @@ export function beginRealStreamingTurn(
   onUpdate: (blocks: readonly TranscriptBlock[]) => void,
   onComplete?: () => void,
   onError?: (error: unknown) => void,
+  env: RealStreamingPollEnvironment = defaultRealStreamingPollEnvironment,
 ): RealStreamingHandle {
-  void fetchRealTranscript(workRootId, harness, activityId, serverRoute)
-    .then((transcript) => {
-      onUpdate(transcript.blocks);
-    })
-    .catch((error) => {
-      onError?.(error);
-    })
-    .finally(() => {
-      onComplete?.();
-    });
-  return { stop: () => undefined };
+  let lastSeenLength = 0;
+  let intervalHandle: number | null = null;
+  let stopped = false;
+
+  const clearScheduledPoll = () => {
+    if (intervalHandle !== null) {
+      env.clearInterval(intervalHandle);
+      intervalHandle = null;
+    }
+  };
+
+  const stop = () => {
+    stopped = true;
+    clearScheduledPoll();
+  };
+
+  const poll = () => {
+    void fetchRealTranscript(workRootId, harness, activityId, serverRoute)
+      .then((transcript) => {
+        if (stopped) return;
+        const delta = blocksSincePolledLength(transcript.blocks, lastSeenLength);
+        lastSeenLength = transcript.blocks.length;
+        if (delta.length > 0) {
+          onUpdate(delta);
+        }
+        if (!transcript.live) {
+          stopped = true;
+          clearScheduledPoll();
+          onComplete?.();
+        }
+      })
+      .catch((error) => {
+        if (stopped) return;
+        stopped = true;
+        onError?.(error);
+        clearScheduledPoll();
+        onComplete?.();
+      });
+  };
+
+  // Fire one immediate poll at call time (don't wait a full interval for the
+  // first update), then schedule the interval for subsequent polls.
+  poll();
+  intervalHandle = env.setInterval(poll, realStreamingPollIntervalMs);
+
+  return { stop };
 }

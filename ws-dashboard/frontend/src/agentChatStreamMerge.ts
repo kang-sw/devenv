@@ -29,4 +29,34 @@ function mergeStreamingTranscriptBlocks(
   return [...merged, ...appended];
 }
 
-export { mergeStreamingTranscriptBlocks };
+/**
+ * Diff a full-refetch poll's block array against the previously-seen block
+ * count, returning the slice that a caller should hand to `onUpdate`.
+ *
+ * The daemon's transcript endpoint is full-refetch, not incremental (see
+ * `activitySessionClient.ts`'s `beginRealStreamingTurn` poll loop) — each
+ * poll returns every block from the start of the transcript, not just what
+ * changed since the last poll. This helper re-derives the "what's new"
+ * subset:
+ *
+ * - Blocks strictly before `lastSeenLength - 1` are dropped (already fully
+ *   seen and assumed immutable once a later block exists after them).
+ * - The block at index `lastSeenLength - 1` (the previously-seen tail block)
+ *   is re-included, because it may have grown/mutated text since it was last
+ *   the in-progress tail (e.g. a streaming agent block whose text is still
+ *   being appended to by the daemon between polls).
+ * - Any blocks at index `lastSeenLength` onward are newly appended since the
+ *   last poll.
+ *
+ * `lastSeenLength <= 0` (including the initial poll) returns the full array,
+ * since there is no previously-seen tail block to re-diff against.
+ */
+function blocksSincePolledLength(
+  blocks: readonly TranscriptBlock[],
+  lastSeenLength: number,
+): TranscriptBlock[] {
+  const start = Math.max(0, lastSeenLength - 1);
+  return blocks.slice(start);
+}
+
+export { blocksSincePolledLength, mergeStreamingTranscriptBlocks };

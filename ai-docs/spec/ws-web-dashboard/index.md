@@ -990,8 +990,16 @@ remain stub-backed pending Phase 3 of `260620`. `ActivitySessionForkRequest`/
 a specific transcript cut point to fork from rather than only the session's
 current end; no daemon fork route exists yet to honor it (a fork call is
 expected to fail until a `CodexControlRequest::Fork` variant and route land).
-Turn-by-turn message delivery in this phase is a one-shot send-then-fetch, not
-continuous streaming; a later phase upgrades this to incremental polling.
+Phase 2 of the same ticket replaces the initial one-shot send-then-fetch with
+incremental polling: the frontend re-fetches the transcript on a fixed
+interval, diffing each poll against the previously-seen block count so only
+new or still-in-progress tail content is handed to the UI rather than the
+whole transcript every tick, and stops once the daemon-reported transcript
+`live` flag goes `false`. This is deliberately a polling upgrade, not a new
+SSE/websocket transport — the dashboard's existing `authenticate_websocket_upgrade`
+seam stays reserved future work, and polling is an already-accepted transport
+pattern in this codebase (mirroring the `workRootActivity` `pollFallback`
+mode), not a stopgap unique to chat.
 
 ## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
