@@ -4,11 +4,18 @@
 // send/steer stubs, and `stubForkActivitySession`'s cut-point truncation).
 
 import {
+  stubActivityHistoryList,
   stubForkActivitySession,
+  stubResumeAgentChatSession,
   stubSendActivitySession,
   stubStartNewAgentChatSession,
   stubSteerActivitySession,
 } from "./activitySessionStub.js";
+import {
+  LOCAL_DASHBOARD_SERVER_ROUTE,
+  dashboardServerRoute,
+  isLocalDashboardServerRoute,
+} from "./resourceModel.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -97,4 +104,80 @@ assertEqual(
   forkResult.session.harness,
   "codex",
   "forking a codex session's cut carries the codex harness through to the new session",
+);
+
+// --- serverRoute propagation (Phase 4, 260711) ------------------------------
+// An explicit serverRoute must not be silently dropped or defaulted by any
+// stub call, and an omitted serverRoute must resolve to
+// LOCAL_DASHBOARD_SERVER_ROUTE via the real resourceModel.ts helpers (not a
+// hardcoded string), so the test tracks the actual fallback contract.
+
+const remoteCodexSession = await stubStartNewAgentChatSession(
+  "root-a",
+  "codex",
+  "server-remote-1",
+);
+assertEqual(
+  remoteCodexSession.serverRoute,
+  "server-remote-1",
+  "stubStartNewAgentChatSession propagates an explicit serverRoute onto the returned session, not silently dropped or defaulted",
+);
+
+const localCodexSession = await stubStartNewAgentChatSession("root-a", "codex");
+assert(
+  isLocalDashboardServerRoute(localCodexSession.serverRoute),
+  "stubStartNewAgentChatSession with serverRoute omitted resolves to LOCAL_DASHBOARD_SERVER_ROUTE via the real fallback helper",
+);
+assertEqual(
+  dashboardServerRoute(localCodexSession.serverRoute),
+  LOCAL_DASHBOARD_SERVER_ROUTE,
+  "the omitted-serverRoute session resolves to the canonical local route value via dashboardServerRoute",
+);
+
+const historyForRemoteResume = await stubActivityHistoryList({ workRootId: "root-a" });
+const historyEntryForResume = historyForRemoteResume.items[0]!;
+const remoteResumedSession = await stubResumeAgentChatSession(
+  historyEntryForResume,
+  "root-a",
+  "server-remote-1",
+);
+assertEqual(
+  remoteResumedSession.serverRoute,
+  "server-remote-1",
+  "stubResumeAgentChatSession propagates an explicit serverRoute onto the resumed session, not silently dropped or defaulted",
+);
+
+const localResumedSession = await stubResumeAgentChatSession(
+  historyEntryForResume,
+  "root-a",
+);
+assert(
+  isLocalDashboardServerRoute(localResumedSession.serverRoute),
+  "stubResumeAgentChatSession with serverRoute omitted resolves to LOCAL_DASHBOARD_SERVER_ROUTE via the real fallback helper",
+);
+
+const remoteForkResult = await stubForkActivitySession(
+  {
+    workRootId: codexSession.workRootId,
+    activityId: codexSession.activityId,
+    serverRoute: "server-remote-1",
+  },
+  cutBlocks,
+);
+assertEqual(
+  remoteForkResult.session.serverRoute,
+  "server-remote-1",
+  "stubForkActivitySession propagates an explicit serverRoute onto the forked session, not silently dropped or defaulted",
+);
+
+const localForkResult = await stubForkActivitySession(
+  {
+    workRootId: codexSession.workRootId,
+    activityId: codexSession.activityId,
+  },
+  cutBlocks,
+);
+assert(
+  isLocalDashboardServerRoute(localForkResult.session.serverRoute),
+  "stubForkActivitySession with serverRoute omitted resolves to LOCAL_DASHBOARD_SERVER_ROUTE via the real fallback helper",
 );

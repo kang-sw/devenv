@@ -30,6 +30,7 @@ import {
   stubResumeAgentChatSession,
   stubStartNewAgentChatSession,
 } from "./activitySessionStub.js";
+import { LOCAL_DASHBOARD_SERVER_ROUTE } from "./resourceModel.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -256,6 +257,75 @@ assert(
 assert(
   otherRootPane.logicalKey in afterRootClose,
   "closing a work root leaves other work roots' agent chat panes untouched",
+);
+
+// --- serverRoute threading (Phase 4, 260711) --------------------------------
+// Mirrors the precedent pattern at `workRootActivity.test.ts#L1365-L1422`:
+// (a) omitting `serverRoute` falls back to `LOCAL_DASHBOARD_SERVER_ROUTE`
+// consistently, and (b) distinct server routes produce distinct identity
+// keys for the same workRootId/tabId.
+
+assertEqual(
+  agentChatPaneLogicalKey("root-shared", "tab-x") ===
+    agentChatPaneLogicalKey("root-shared", "tab-x", LOCAL_DASHBOARD_SERVER_ROUTE),
+  true,
+  "omitting serverRoute in agentChatPaneLogicalKey falls back to LOCAL_DASHBOARD_SERVER_ROUTE consistently",
+);
+assertEqual(
+  agentChatPaneId("tab-x") === agentChatPaneId("tab-x", LOCAL_DASHBOARD_SERVER_ROUTE),
+  true,
+  "omitting serverRoute in agentChatPaneId falls back to LOCAL_DASHBOARD_SERVER_ROUTE consistently",
+);
+assertEqual(
+  createEmptyAgentChatPane("root-shared").serverRoute,
+  LOCAL_DASHBOARD_SERVER_ROUTE,
+  "omitting serverRoute in createEmptyAgentChatPane falls back to LOCAL_DASHBOARD_SERVER_ROUTE consistently",
+);
+
+const distinctServerRoutes = ["server-remote-1", "server-remote-2", LOCAL_DASHBOARD_SERVER_ROUTE];
+const distinctLogicalKeys = new Set(
+  distinctServerRoutes.map((serverRoute) =>
+    agentChatPaneLogicalKey("root-shared", "tab-shared", serverRoute),
+  ),
+);
+assertEqual(
+  distinctLogicalKeys.size,
+  distinctServerRoutes.length,
+  "agentChatPaneLogicalKey produces a distinct key per distinct serverRoute for the same workRootId/tabId",
+);
+const distinctPaneIds = new Set(
+  distinctServerRoutes.map((serverRoute) => agentChatPaneId("tab-shared", serverRoute)),
+);
+assertEqual(
+  distinctPaneIds.size,
+  distinctServerRoutes.length,
+  "agentChatPaneId produces a distinct id per distinct serverRoute for the same tabId",
+);
+
+// removeAgentChatPanesForWorkRoot must scope by (workRootId, serverRoute)
+// together — two panes sharing a workRootId but on different serverRoutes
+// must not cross-remove each other.
+const localPaneForShared = createEmptyAgentChatPane("root-cross-server");
+const remotePaneForShared = createEmptyAgentChatPane(
+  "root-cross-server",
+  "server-remote-1",
+);
+const crossServerPanes: Record<string, AgentChatPaneState> = {
+  [localPaneForShared.logicalKey]: localPaneForShared,
+  [remotePaneForShared.logicalKey]: remotePaneForShared,
+};
+const afterLocalRootClose = removeAgentChatPanesForWorkRoot(
+  crossServerPanes,
+  "root-cross-server",
+  LOCAL_DASHBOARD_SERVER_ROUTE,
+);
+assert(
+  !(localPaneForShared.logicalKey in afterLocalRootClose),
+  "closing a work root on the local serverRoute drops the matching local pane",
+);
+assert(
+  remotePaneForShared.logicalKey in afterLocalRootClose,
+  "closing a work root on the local serverRoute leaves the same workRootId's remote-serverRoute pane untouched",
 );
 
 // --- appendUserTranscriptBlock (Phase 3 base send-input primitive) --------

@@ -3408,6 +3408,47 @@ test("linked server root picker uses server-scoped local gateway routes", async 
     ]),
   );
 
+  // --- 260711 Phase 4: agent chat pane identity is server-route-scoped ----
+  await test.step("agent chat tab on a linked remote server behaves identically to the local case and is server-route-scoped", async () => {
+    // CONTRACT: `createAgentChatPane` (`App.tsx`) reads `serverRoute` from
+    // the real UI state (`workbenchModel.root.resourcePath.serverId`), now
+    // "server-remote" after the work root opened above, and threads it
+    // through `agentChatPaneId`/`agentChatPaneLogicalKey`
+    // (`agentChatSessions.ts`) into the rendered pane's
+    // `data-workbench-pane-id`. `activitySessionStub.ts` is in-memory only
+    // (no `fetch`), so this asserts server-scoping via that DOM identity
+    // rather than a network mock, while asserting the same rendered
+    // transcript/tile behavior as the local flow (`#L2534-L2589`).
+    await expectDockviewWorkbench(page);
+    await page.locator('[data-command-id="agentChat.create"]').click();
+    const agentChatTab = page
+      .getByRole("tab")
+      .filter({ hasText: "New agent chat" });
+    await expect(agentChatTab).toHaveCount(1);
+
+    const pane = page.locator(
+      '.workbench-pane[data-surface-kind="agentChat"]',
+    );
+    await expect(pane).toBeVisible();
+    const paneId = await pane.getAttribute("data-workbench-pane-id");
+    expect(paneId).toContain(encodeURIComponent("server-remote"));
+
+    const paneBody = pane.locator(".workbench-pane-body");
+    await expect(paneBody.locator('[data-testid="agent-chat-tiles"]')).toBeVisible();
+    await paneBody.locator('[data-agent-chat-tile="codex"]').click();
+    const transcript = paneBody.locator('[data-testid="agent-chat-transcript"]');
+    await expect(transcript).toBeVisible();
+    await expect(transcript).toContainText("stub provider");
+    await expect(
+      page.getByRole("tab").filter({ hasText: "Codex" }),
+    ).toHaveCount(1);
+    note(
+      `agent chat on a linked remote server: the new tab/pane rendered and the Codex tile click invoked the stub ` +
+        `session create/start path identically to the local flow, and the pane's identity (${paneId}) was scoped ` +
+        "to the remote Server Route rather than server-local",
+    );
+  });
+
   await page.unroute("**/api/dashboard/servers/server-remote/root-picker**");
   let releaseFirstPicker: ((value: void) => void) | null = null;
   let remoteStalePickerRequests = 0;
