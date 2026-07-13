@@ -7,10 +7,16 @@
 //   3. A tile click actually invokes the stub `activity.session.create`/
 //      `start` call path with the expected request shape, and the resulting
 //      pane reflects the synthetic session it returns.
+//   4. (Phase 3 review-fix-cycle addition) `appendUserTranscriptBlock` -
+//      the pure base send-input primitive - mints a unique, non-colliding
+//      cursor, returns a new session without mutating the input, and
+//      appends a correctly-shaped `role: "user"`/`renderKind: "markdown"`
+//      block carrying the exact sent text.
 
 import {
   agentChatPaneId,
   agentChatPaneLogicalKey,
+  appendUserTranscriptBlock,
   attachAgentChatSession,
   createEmptyAgentChatPane,
   markAgentChatPaneError,
@@ -250,4 +256,85 @@ assert(
 assert(
   otherRootPane.logicalKey in afterRootClose,
   "closing a work root leaves other work roots' agent chat panes untouched",
+);
+
+// --- appendUserTranscriptBlock (Phase 3 base send-input primitive) --------
+// Review-fix-cycle addition (260711 Phase 3, cycle 1): this pure function
+// previously had zero direct unit coverage - only indirect e2e coverage via
+// the "renders a real bubble" browser assertions. Exercises cursor
+// uniqueness, non-mutation of the input session, and block-shape
+// correctness directly against `codexSession` (the same stub session
+// fixture already built above).
+
+const blockCountBeforeAppend = codexSession.transcript.blocks.length;
+const afterFirstAppend = appendUserTranscriptBlock(
+  codexSession,
+  "hello from a real user send",
+);
+assertEqual(
+  codexSession.transcript.blocks.length,
+  blockCountBeforeAppend,
+  "appendUserTranscriptBlock does not mutate the input session's block array",
+);
+assertEqual(
+  afterFirstAppend.transcript.blocks.length,
+  blockCountBeforeAppend + 1,
+  "appendUserTranscriptBlock returns a new session with exactly one additional block",
+);
+assert(
+  afterFirstAppend !== codexSession,
+  "appendUserTranscriptBlock returns a distinct session object rather than the input reference",
+);
+assertEqual(
+  afterFirstAppend.activityId,
+  codexSession.activityId,
+  "appendUserTranscriptBlock preserves the session's other fields (activityId) unchanged",
+);
+
+const firstAppendedBlock =
+  afterFirstAppend.transcript.blocks[afterFirstAppend.transcript.blocks.length - 1]!;
+assertEqual(
+  firstAppendedBlock.role,
+  "user",
+  "the appended block is tagged with the user role",
+);
+assertEqual(
+  firstAppendedBlock.renderKind,
+  "markdown",
+  "the appended block renders as markdown, mirroring stubTranscriptBlock's shape",
+);
+assertEqual(
+  firstAppendedBlock.text,
+  "hello from a real user send",
+  "the appended block carries the exact sent text",
+);
+assert(
+  firstAppendedBlock.cursor.length > 0,
+  "the appended block carries a non-empty cursor",
+);
+assert(
+  !codexSession.transcript.blocks.some(
+    (block) => block.cursor === firstAppendedBlock.cursor,
+  ),
+  "the appended block's cursor does not collide with any pre-existing block's cursor",
+);
+
+// A second, independent call (mirroring two separate sends, e.g. a real
+// send followed by a later FIFO-dequeued send) mints a distinct cursor -
+// this is the exact uniqueness property the mid-turn queue's dequeue path
+// depends on to avoid overwriting/colliding streaming-overlay entries.
+const afterSecondAppend = appendUserTranscriptBlock(
+  codexSession,
+  "a second, independent send",
+);
+const secondAppendedBlock =
+  afterSecondAppend.transcript.blocks[afterSecondAppend.transcript.blocks.length - 1]!;
+assert(
+  secondAppendedBlock.cursor !== firstAppendedBlock.cursor,
+  "two separate calls to appendUserTranscriptBlock mint distinct cursors, never colliding with each other",
+);
+assertEqual(
+  secondAppendedBlock.text,
+  "a second, independent send",
+  "the second call's appended block carries its own text, independent of the first call",
 );

@@ -2714,10 +2714,26 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(realUserBubble("second phase-3 message")).toHaveCount(1);
     const secondReplyBubble = transcript.locator('[data-agent-chat-bubble-kind="agentTurn"]').last();
     await expect(secondReplyBubble).toBeVisible();
+    // Regression check for the `paneRef`/`pendingRef` stale-closure fix
+    // (`App.tsx`'s `beginSimulatedTurn`/`onComplete`, Phase 3 review-fix-cycle
+    // 1): dequeuing "second phase-3 message" re-invokes `beginSimulatedTurn`
+    // from *inside* the first turn's `onComplete` closure, which was created
+    // back when the pane's session did not yet carry "first phase-3
+    // message"'s real transcript block. If that recursive call read the
+    // closed-over `pane`/`pendingMessages` instead of `paneRef.current`/
+    // `pendingRef.current`, `sendAgentChatMessage` would append the dequeued
+    // text onto that *stale* pre-send session snapshot and
+    // `applyAgentChatSession` would overwrite the pane's current session
+    // with it - silently wiping out "first phase-3 message"'s already-sent
+    // block. Asserting it is still present here (not just immediately after
+    // its own send) is what actually falls over if `paneRef`/`pendingRef`
+    // were reverted back to the plain closed-over `pane`/`pendingMessages`.
+    await expect(realUserBubble("first phase-3 message")).toHaveCount(1);
     note(
       "agent chat mid-turn queuing: a message sent while a turn was in flight rendered as a pending/steering bubble " +
         "with no corresponding real transcript bubble, then cleared into a real bubble with its own streamed reply " +
-        "once the in-flight turn's stub stream naturally completed",
+        "once the in-flight turn's stub stream naturally completed, without clobbering the earlier real send " +
+        "(paneRef/pendingRef stale-closure regression check)",
     );
 
     // Revert: clicking revert on a still-pending bubble removes it with no
