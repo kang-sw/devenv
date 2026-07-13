@@ -176,6 +176,68 @@ resume-popup list rendering; browser-level acceptance evidence for the tile
 launch flow actually invoking `activity.session.create`/`start` and
 rendering the (stubbed or real) resulting session.
 
+### Result
+
+Implemented per plan `ai-docs/.plans/2026-07/13-0943-chat-ui-shell-phase1.md`
+on branch `impl/chat-ui-shell-p` (commits `414d8805`, fix-cycle `6827fdb0`,
+base `8d53d859`).
+
+Added a new multi-instance `agentChat` `SurfaceKind` (dockview "opened"
+policy, daemon-owned lifecycle per pane), modeled on the existing
+`persistentTerminal` precedent rather than either wrong precedent flagged at
+survey time (the singleton `agent` kind, and the read-only `workRootActivity`
+tab). A top-right "Open new agent tab" button always opens a new empty tab;
+an empty tab shows a resume popup backed by a local cross-harness history
+stub (`activitySessionStub.ts`, scoped to the work root) plus three
+per-harness start tiles (Codex/OpenCode/Claude). Clicking a tile invokes the
+local stub `activity.session.create`/`start` path and renders the returned
+synthetic transcript, satisfying the tile-launch semantics called out above
+end-to-end against the stub, ahead of `260620`'s real adapters and `260624`'s
+real history source (neither exists yet).
+
+While wiring the new surface kind into shared `App.tsx` state, the
+implementer found and fixed two pre-existing Dockview pane-activation races
+that this surface kind's dual nature (dynamically added post-load, sharing
+the "opened" group with read-only panes) newly exposed: pane-array ordering
+in `buildWorkbenchEditorGroups` (agentChat panes now appended last so
+existing pane indices don't shift), and the `activePaneByRoot` revalidation
+effect not recognizing agentChat panes as live (now included in the
+live-pane-id set and merged pane order). Both fixes were independently
+verified genuine and free of new races by the correctness reviewer. Also
+fixed a pane-local dismiss-outside-click bug on the resume popover (ref
+wrapped only the popover, not its toggle button, causing immediate
+self-dismiss).
+
+Review: partitioned correctness/fit/test. Fit and correctness came back
+clean (correctness: 2 Minor, non-blocking — resume popover doesn't surface
+entry size, transcript block keys rely on a currently-hardcoded `"0"` cursor,
+both deferred as Phase 2 forward concerns). Test partition raised one
+Important finding — `agentChatSessions.test.ts` had zero coverage of the
+failure/error path (`markAgentChatPaneError`, wired into both stub
+create/start rejection call sites in `App.tsx`). Fixed via a dedicated
+fix-cycle commit (`6827fdb0`) adding a non-vacuous failure-path test (verified
+by temporarily gutting the function and confirming the new test failed);
+re-review confirmed the finding resolved, no new issues. Remaining Minor
+findings from all three partitions (resume popover entry-size display,
+hardcoded cursor, a somewhat-tautological id-scoping test, no
+empty-history-list case, no test for an unrecognized history-item `kind`
+falling through to a silent `codex` default) were left as-is per lead
+disposition — optional, non-blocking, several explicitly forward-noted for
+Phase 2/3.
+
+Verification: all 13 registered frontend route-test npm scripts pass;
+`npm run test:browser` (Playwright + cargo daemon build) passes 2/2,
+including a new e2e step that drives the real tile-click-to-render path
+(click `agentChat.create` -> resume popover -> tile click -> asserts the
+rendered transcript pane actually reflects the stub's response, not a
+UI-only state flip). One intermittent, unrelated `test:browser` flake was
+investigated (isolated via `git stash` against the base commit) and
+confirmed pre-existing/environmental, not a regression from this change.
+
+Not yet started: Phase 2 (streaming conversation rendering), Phase 3
+(resume/fork, mid-turn submission queuing, the load-bearing "resume from
+here" isolation requirement), Phase 4 (server-scoped integration).
+
 ### Phase 2: Streaming conversation rendering
 
 Implement the messenger-style bubble layout, per-line streaming markdown
