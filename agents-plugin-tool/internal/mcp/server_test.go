@@ -870,7 +870,14 @@ func TestServeStdioPingPreservesIDsAndIsNotAdvertised(t *testing.T) {
 		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
-	for _, id := range []string{"17", "ping-string-id"} {
+	for _, test := range []struct {
+		lookupID string
+		rawID    string
+	}{
+		{lookupID: "17", rawID: `17`},
+		{lookupID: "ping-string-id", rawID: `"ping-string-id"`},
+	} {
+		id := test.lookupID
 		var envelope map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(byID[id]), &envelope); err != nil {
 			t.Fatalf("decode ping response for id %q: %v", id, err)
@@ -881,8 +888,8 @@ func TestServeStdioPingPreservesIDsAndIsNotAdvertised(t *testing.T) {
 		if string(envelope["jsonrpc"]) != `"2.0"` {
 			t.Fatalf("ping response for id %q has unexpected jsonrpc: %s", id, byID[id])
 		}
-		if rawIDForTest(t, envelope["id"]) != id {
-			t.Fatalf("ping response did not preserve id %q: %s", id, byID[id])
+		if string(envelope["id"]) != test.rawID {
+			t.Fatalf("ping response did not preserve raw id %s: %s", test.rawID, byID[id])
 		}
 		if string(envelope["result"]) != `{}` {
 			t.Fatalf("ping response for id %q did not return an empty object: %s", id, byID[id])
