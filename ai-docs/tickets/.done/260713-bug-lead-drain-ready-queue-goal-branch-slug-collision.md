@@ -1,5 +1,6 @@
 ---
 title: "lead-drain-ready-queue goal-staging branch slug collides across concurrent goal runs"
+completed: 2026-07-13
 ---
 
 # lead-drain-ready-queue goal-staging branch slug collides across concurrent goal runs
@@ -44,6 +45,18 @@ it. Read `agents-plugin/skills/lead-skill-authoring/SKILL.md` before editing
 this skill text, and check `ai-docs/ref/wsflow-mirroring.md` for whether
 `agents-plugin-wsflow/skills/lead-drain-ready-queue/SKILL.md` needs a mirrored
 update.
+
+### Result (8e694e4a) - 2026-07-13
+
+Hotfixed per direct user request: `lead-drain-ready-queue` now generates an
+arbitrary random word-word-word slug (e.g. `canny-hello-stride`) for the
+goal-staging branch instead of deriving it from goal text, in both
+`agents-plugin/skills/lead-drain-ready-queue/SKILL.md` and the curated
+`agents-plugin-wsflow` mirror. This removes the deterministic-collision
+property; it does not add auto-disambiguation (detecting and renaming around
+an existing `goal/<slug>` branch) or a worktree-scoped naming scheme — those
+remain open candidate directions if a random slug ever collides in practice
+(astronomically unlikely at this token space, so not pursued further now).
 
 ## Spec Impact
 
