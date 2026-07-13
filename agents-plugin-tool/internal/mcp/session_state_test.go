@@ -2322,6 +2322,47 @@ func TestServeStdioTicketsMoveExplicitOverrideWinsOverBuiltinDefault(t *testing.
 	}
 }
 
+// TestServeStdioTicketsMoveBlockedSurfacesPartialMutationNotice reproduces
+// the 2026-07-13 scenario from
+// 260713-bug-tickets-move-error-mutates-frontmatter at the MCP tool-response
+// layer: a legacy-schema ticket (single sage-review: field) blocked on
+// promotion to ready. TicketsMove self-heals (migrates) the frontmatter
+// before the block, so the tool response text must carry an explicit
+// partial-mutation notice alongside the error, not the bare error alone.
+func TestServeStdioTicketsMoveBlockedSurfacesPartialMutationNotice(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	stem := "260101-feat-sage-move-blocked-partial"
+	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"),
+		"---\ntitle: Sage\nsage-review: pending\n---\n\nBody.\n")
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 902604, root, nil))
+
+	moveResp := callToolWithKey(t, server, 1, key, "tickets.move", map[string]any{
+		"stem": stem,
+		"to":   "ready",
+	})
+	if !strings.Contains(moveResp, "sage-review-design") {
+		t.Fatalf("tickets.move blocked response missing the underlying error: %s", moveResp)
+	}
+	if !strings.Contains(moveResp, "partial-mutation:") {
+		t.Fatalf("tickets.move blocked response missing partial-mutation notice: %s", moveResp)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "ai-docs", "tickets", "todo", stem+".md"))
+	if err != nil {
+		t.Fatalf("read ticket after blocked move: %v", err)
+	}
+	if !strings.Contains(string(raw), "sage-review-design:") {
+		t.Fatalf("ticket missing self-healed sage-review-design field after blocked move:\n%s", string(raw))
+	}
+}
+
 func TestServeStdioTodoKeyNormalization(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

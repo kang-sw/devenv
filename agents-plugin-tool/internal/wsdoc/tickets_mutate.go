@@ -34,6 +34,15 @@ type TicketMutateResult struct {
 	OldPath string
 	NewPath string
 	Tip     string
+
+	// PartialMutationNotice is populated only on the TicketsMove error
+	// return path where prepareSageReviewForUpwardMove already persisted a
+	// self-healing frontmatter write (legacy sage-review migration or
+	// posture normalization) before the move itself blocked or failed. A
+	// caller that sees a non-empty error AND a non-empty
+	// PartialMutationNotice must not treat the file as unchanged: a retry
+	// will not find the pre-call frontmatter.
+	PartialMutationNotice string
 }
 
 // statusDirs maps a status token to its tickets-relative directory name.
@@ -114,8 +123,9 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	if isUpwardMove(curStatus, to) {
-		if _, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), stem, opts.SageReview, to); err != nil {
-			return TicketMutateResult{}, err
+		postures, err := prepareSageReviewForUpwardMove(filepath.Join(root, filepath.FromSlash(oldPath)), stem, opts.SageReview, to)
+		if err != nil {
+			return TicketMutateResult{PartialMutationNotice: sageReviewPostureTip(postures)}, err
 		}
 	}
 

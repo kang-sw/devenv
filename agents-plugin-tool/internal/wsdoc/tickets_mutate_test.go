@@ -485,6 +485,53 @@ func TestTicketsMoveUpwardToReadyFromIdeaBlocksUnresolvedSageReviewPosture(t *te
 	}
 }
 
+// TestTicketsMoveBlockedReturnsPartialMutationNotice reproduces the
+// 2026-07-13 scenario from 260713-bug-tickets-move-error-mutates-frontmatter:
+// a legacy-schema ticket (single sage-review: field) blocked on promotion to
+// ready. prepareSageReviewForUpwardMove self-heals the frontmatter (migrates
+// the legacy field into sage-review-design/sage-review-completeness) before
+// it returns the blocking error, so the returned TicketMutateResult must
+// surface a non-empty PartialMutationNotice alongside the error — a retrying
+// caller must not mistake this for an unchanged file.
+func TestTicketsMoveBlockedReturnsPartialMutationNotice(t *testing.T) {
+	root := t.TempDir()
+	stem := "260101-feat-sage-legacy-partial"
+	oldRel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+	oldAbs := filepath.Join(root, oldRel)
+	mustWrite(t, root, oldRel, "---\ntitle: Sage\nsage-review: pending\n---\n\nBody.\n")
+	runner := &mockGitRunner{}
+
+	result, err := TicketsMove(root, runner, TicketMoveOptions{
+		TicketStem: stem,
+		To:         "ready",
+		SageReview: "auto",
+	})
+	if err == nil {
+		t.Fatal("TicketsMove promoted unresolved legacy sage-review state")
+	}
+	if !strings.Contains(err.Error(), "sage-review-design: required; run sage review") {
+		t.Fatalf("error = %v, want design-required message", err)
+	}
+	if result.PartialMutationNotice == "" {
+		t.Fatalf("PartialMutationNotice = %q, want non-empty notice since frontmatter was self-healed before the block", result.PartialMutationNotice)
+	}
+	if !strings.Contains(result.PartialMutationNotice, "design required") {
+		t.Fatalf("PartialMutationNotice = %q, want it to mention the persisted design posture", result.PartialMutationNotice)
+	}
+
+	// Confirm the notice isn't a no-op: the frontmatter file itself was
+	// self-healed (migrated from the legacy single field) before the block.
+	after := readFileString(t, oldAbs)
+	for _, wantLine := range []string{"sage-review-design: required", "sage-review-completeness: required"} {
+		if !strings.Contains(after, wantLine) {
+			t.Fatalf("ticket missing %s after self-healing migration write:\n%s", wantLine, after)
+		}
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("git called on guard failure: %#v", runner.calls)
+	}
+}
+
 func TestTicketsMoveUpwardToReadyEpicOnlyChecksDesign(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-epic-checked"

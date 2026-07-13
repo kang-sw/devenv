@@ -836,6 +836,16 @@ confirmed `spec:`/`spec-remove:` frontmatter entry and no `## Spec Impact`
 section) additionally returns a soft, non-blocking tip noting that the ready
 gate is normally enforced by `lead-write-ticket`; the move still succeeds. The
 move stages atomically and never commits.
+
+The blocking sage-review validation above runs after a self-healing
+frontmatter write: a legacy single `sage-review:` field, or an unresolved
+posture on a required field, is migrated/stamped to the resolved two-field
+form before the block is evaluated. When that write happens on a call that
+then blocks or errors, the tool response is not a bare error — it appends an
+explicit `partial-mutation:` notice line stating that frontmatter was written
+before the call blocked and that a retry will not find an unchanged file, so
+a retrying caller cannot mistake a blocked move for a fully unresolved,
+unchanged ticket.
 {#260620-ticket-move-tool}
 
 `tickets.create` creates a dated ticket stub at a caller-specified initial state

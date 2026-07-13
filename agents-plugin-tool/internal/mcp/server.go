@@ -1151,6 +1151,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			SageReview: resolved.Value,
 		})
 		if err != nil {
+			if result.PartialMutationNotice != "" {
+				return toolErrorTextResponse(req.ID, err.Error()+
+					"\npartial-mutation: frontmatter was written before this call blocked; "+
+					result.PartialMutationNotice+
+					" a retry will not find an unchanged file.")
+			}
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
