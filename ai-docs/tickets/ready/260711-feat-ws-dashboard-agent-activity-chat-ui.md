@@ -333,6 +333,76 @@ Overlay match); browser-level acceptance evidence for a queued mid-turn
 submission landing in the next tool-call batch, and for the revert/undo
 flow removing a pending bubble without sending it.
 
+### Result
+
+Implemented per the research-grade plan
+`ai-docs/.plans/2026-07/13-1150-chat-ui-resume-fork-phase3.md` on branch
+`impl/chat-ui-resume` (commits `6745f9ee`, fix-cycle `34fb3d52`, base
+`a001fcdb`). Plan escalated to research at survey time (companion idea
+ticket `260713-feat-ws-dashboard-activity-session-fork-cursor` filed as a
+side effect, flagging a real gap in `260620`'s `ActivitySessionForkRequest`
+contract for the eventual real backend).
+
+Per the fixture-verified harness tiering in
+`ai-docs/mental-model/ws-dashboard-agent-harness.md` (no harness qualifies
+as a clean Passthrough/Overlay match for point-based rewind today — Codex's
+`thread/rollback` is deprecated-for-removal and coarse, Claude's only path
+is an unofficial Hack, OpenCode is unverified), "resume from here" ships as
+an isolated, scaffolded-but-disabled module (`agentChatResumeFromHere.tsx`)
+gated by a new `AgentChatCapabilities` model mirroring the Rust
+`AgentClientCapabilities` struct field-for-field; `isResumeFromHereEnabled`
+unconditionally returns `false` today (verified by the fit/correctness
+reviewers to be a deliberate one-flag/one-module disable, not dead code).
+"Fork from here" ships live, backed by a new stub-local, non-wire
+`cutBlocks` parameter on `stubForkActivitySession` (the shared
+`ActivitySessionForkRequest` type itself was left untouched, per
+`260620`'s ownership of that contract — see the companion idea ticket
+above).
+
+Also implemented: the base prompt/send input UI (Phase 1/2 built only
+read-only rendering), mid-turn submission queuing (immediately-rendered
+pending bubble with a queued/steering badge, FIFO-dequeued on the stub's new
+`onComplete` turn-completion callback), a revert control pulling a pending
+message back into the editable input and canceling its queued send, and
+up/down prompt-box history traversal (no prior codebase precedent; built
+from scratch).
+
+Review: partitioned correctness/fit/test. Fit came back clean (1 Minor:
+resume/fork CSS rules aren't visibly grouped under a comment tying them to
+the isolated module). Correctness came back clean on the critical scrutiny
+item (independently confirmed the resume-from-here gate is a genuine
+render-site-consulted one-flag disable, not bypassed/dead capability
+plumbing) and verified all three self-reported implementation-time bug
+fixes (a Dockview `contentRevision` under-keying bug, an e2e pending-vs-real
+bubble locator ambiguity, and a `paneRef` stale-closure bug in the FIFO
+dequeue); 1 Important finding (up-arrow can't recall a still-pending bubble)
+was judged plan-conformant on inspection — the ticket's actual cancel
+mechanism is the dedicated revert button, not up-arrow history — and closed
+with no code change. Test partition raised 2 Important findings: no
+regression test existed for the self-reported `paneRef` stale-closure fix,
+and the new `appendUserTranscriptBlock` had zero direct unit coverage.
+Fixed via fix-cycle commit `34fb3d52`: added direct unit tests for
+`appendUserTranscriptBlock`, and added an e2e regression assertion in the
+existing mid-turn-queuing step confirming the first message's bubble
+survives a FIFO dequeue-and-deliver cycle (the exact scenario the
+`paneRef`/`pendingRef` fix guards against). Re-review independently verified
+both fixes are genuine by reverting each and observing the predicted test
+failures, not just trusting the implementer's claim. The re-review also
+surfaced one non-blocking follow-up gap worth noting for later: a stale
+pre-swap turn's `onComplete` can still fire after a resume/history-item
+swap on the same pane (only unmount stops an in-flight `stubBeginStreamingTurn`
+handle, not the per-`activityId` reset effect) — distinct from the FIFO
+dequeue scenario the fix commit covers, deferred as a latent, not-yet-
+observed-in-practice edge case rather than reopening the fix cycle.
+
+Verification: all registered frontend route-test npm scripts pass
+(including new `test:agent-chat-capabilities`); `npx tsc -b` clean;
+`npm run test:browser` passes 2/2, including cross-harness (Codex + Claude)
+checks confirming "fork from here" renders while "resume from here" stays
+absent for both, plus the queuing/revert/history acceptance flows.
+
+Not yet started: Phase 4 (server-scoped integration).
+
 ### Phase 4: Server-scoped integration
 
 Thread `serverId` through Activity source selection and stream keys for this
