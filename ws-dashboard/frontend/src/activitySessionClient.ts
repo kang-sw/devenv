@@ -431,12 +431,14 @@ export function beginRealStreamingTurn(
           onUpdate(delta);
         }
         if (!transcript.live) {
+          stopped = true;
           clearScheduledPoll();
           onComplete?.();
         }
       })
       .catch((error) => {
         if (stopped) return;
+        stopped = true;
         onError?.(error);
         clearScheduledPoll();
         onComplete?.();

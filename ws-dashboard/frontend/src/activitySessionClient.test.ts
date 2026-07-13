@@ -466,6 +466,51 @@ assertEqual(
 );
 assertEqual(immediateCompleteEnv.clearedHandles.length, 1, "the interval is cleared after the single completing poll");
 
+// A poll that observes the same block count as the previous poll (still
+// live, nothing new yet) must not call `onUpdate` at all — the
+// `delta.length > 0` skip-empty-slice guard.
+
+calls.length = 0;
+nextResponses = [pollPartialFixture, pollPartialFixture];
+const noGrowthEnv = makeManualPollEnv();
+const onUpdateCallsNoGrowth: TranscriptBlock[][] = [];
+const firstUpdateNoGrowth = createDeferred();
+let noGrowthUpdateCount = 0;
+let noGrowthCompleteCount = 0;
+beginRealStreamingTurn(
+  "root-a",
+  "codex",
+  "agent.codex:1",
+  "server-local",
+  (blocks) => {
+    noGrowthUpdateCount += 1;
+    onUpdateCallsNoGrowth.push([...blocks]);
+    if (noGrowthUpdateCount === 1) firstUpdateNoGrowth.resolve();
+  },
+  () => {
+    noGrowthCompleteCount += 1;
+  },
+  undefined,
+  noGrowthEnv.env,
+);
+await firstUpdateNoGrowth.promise;
+assertEqual(onUpdateCallsNoGrowth.length, 1, "the first poll (lastSeenLength 0) still hands onUpdate the initial blocks");
+noGrowthEnv.tick();
+// The second poll returns the same block count as the first (still live,
+// nothing appended); since `onComplete` never fires for a still-live poll,
+// flush pending microtasks (the fetch's `.then` chain) instead of awaiting
+// a deferred.
+await Promise.resolve();
+await Promise.resolve();
+await Promise.resolve();
+assertEqual(calls.length, 2, "the manual tick issues a second transcript fetch");
+assertEqual(
+  onUpdateCallsNoGrowth.length,
+  1,
+  "a poll whose block count is unchanged from the prior poll (empty diff) does not call onUpdate a second time",
+);
+assertEqual(noGrowthCompleteCount, 0, "the still-live no-growth poll does not fire onComplete");
+
 // stop() called externally (e.g. simulating unmount) clears the interval so
 // no further polls are scheduled.
 
@@ -473,20 +518,42 @@ calls.length = 0;
 nextResponses = [pollPartialFixture, pollPartialFixture, pollPartialFixture];
 const stopEnv = makeManualPollEnv();
 const firstUpdateBeforeStop = createDeferred();
+let stopTestUpdateCount = 0;
+let stopTestCompleteCount = 0;
 const stopHandle = beginRealStreamingTurn(
   "root-a",
   "codex",
   "agent.codex:1",
   "server-local",
-  () => firstUpdateBeforeStop.resolve(),
-  () => undefined,
+  () => {
+    stopTestUpdateCount += 1;
+    firstUpdateBeforeStop.resolve();
+  },
+  () => {
+    stopTestCompleteCount += 1;
+  },
   undefined,
   stopEnv.env,
 );
 await firstUpdateBeforeStop.promise;
 assertEqual(calls.length, 1, "the immediate poll fires once before stop() is called");
+assertEqual(stopTestUpdateCount, 1, "the immediate poll calls onUpdate once before stop() is called");
 stopHandle.stop();
 assertEqual(stopEnv.clearedHandles.length, 1, "stop() clears the scheduled interval, matching the live:false completion path");
+// The fake env's `clearInterval` only records the call — it does not itself
+// prevent a manually driven `tick()` afterward (unlike a real timer) — so
+// drive one more tick to confirm the poll loop's own `stopped` guard (not
+// just the cleared interval handle) suppresses further onUpdate/onComplete.
+stopEnv.tick();
+await Promise.resolve();
+await Promise.resolve();
+await Promise.resolve();
+assertEqual(
+  stopTestUpdateCount,
+  1,
+  "a poll driven after stop() must not call onUpdate again (suppressed by the stopped guard)",
+);
+assertEqual(stopTestCompleteCount, 0, "a poll driven after stop() must not call onComplete (suppressed by the stopped guard)");
 
 // --- beginRealStreamingTurn: transcript fetch failure -> onError ----------
 // Error on the first (immediate) poll still calls onError, then onComplete,
@@ -521,3 +588,74 @@ assertEqual(
 );
 assert(!updateCalledAfterError, "onUpdate must not be called when the transcript fetch fails");
 assertEqual(errorEnv.clearedHandles.length, 1, "a poll error clears the interval so no further polls are attempted");
+
+// --- beginRealStreamingTurn: overlapping in-flight polls -------------------
+// Regression test for the race where the immediate poll and a subsequent
+// interval-driven poll are both in flight at once (e.g. a slow/loaded
+// daemon, a throttled/backgrounded tab, or timer coalescing after
+// sleep/resume). If the first-resolving poll observes `live:false` and
+// completes, a lagging second poll that resolves afterward must not fire
+// `onComplete` a second time (which would double-dequeue the FIFO queue at
+// the App.tsx call site). This test controls fetch resolution order
+// directly (queue-based `nextResponses` always resolves in call order via a
+// microtask, so it cannot express "second call resolves after the first
+// completes" on its own).
+
+{
+  const originalFetch = globalThis.fetch;
+  const overlapDeferred1 = createDeferred<Response>();
+  const overlapDeferred2 = createDeferred<Response>();
+  let overlapFetchCallCount = 0;
+  globalThis.fetch = (async () => {
+    overlapFetchCallCount += 1;
+    if (overlapFetchCallCount === 1) return overlapDeferred1.promise;
+    if (overlapFetchCallCount === 2) return overlapDeferred2.promise;
+    throw new Error(`unexpected overlapping-poll fetch call #${overlapFetchCallCount}`);
+  }) as typeof fetch;
+
+  const overlapEnv = makeManualPollEnv();
+  let overlapCompleteCount = 0;
+  const overlapFirstComplete = createDeferred();
+  beginRealStreamingTurn(
+    "root-a",
+    "codex",
+    "agent.codex:1",
+    "server-local",
+    () => undefined,
+    () => {
+      overlapCompleteCount += 1;
+      overlapFirstComplete.resolve();
+    },
+    undefined,
+    overlapEnv.env,
+  );
+
+  // The immediate poll (#1) is now in flight, unresolved. Manually tick the
+  // interval before it resolves — this launches poll #2 while #1 is still
+  // pending, i.e. two overlapping in-flight polls.
+  overlapEnv.tick();
+  assertEqual(overlapFetchCallCount, 2, "both the immediate poll and the ticked poll are in flight concurrently");
+
+  // Poll #1 resolves first, observes live:false, completes the turn.
+  overlapDeferred1.resolve(
+    new Response(JSON.stringify(pollFinalFixture), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  await overlapFirstComplete.promise;
+  assertEqual(overlapCompleteCount, 1, "onComplete fires once when the first-resolving poll observes live:false");
+
+  // Poll #2 (the lagging, overlapping poll) resolves afterward, also with
+  // live:false. Without the fix, this would fire onComplete a second time.
+  overlapDeferred2.resolve(
+    new Response(JSON.stringify(pollFinalFixture), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assertEqual(
+    overlapCompleteCount,
+    1,
+    "onComplete must not fire a second time when a lagging overlapping poll resolves after the turn already completed",
+  );
+
+  globalThis.fetch = originalFetch;
+}

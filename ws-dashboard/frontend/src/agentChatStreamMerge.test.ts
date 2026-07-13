@@ -200,17 +200,22 @@ const stableBlocks = [
 const stableDiffA = blocksSincePolledLength(stableBlocks, stableBlocks.length);
 const stableDiffB = blocksSincePolledLength(stableBlocks, stableBlocks.length);
 const stableDiffC = blocksSincePolledLength(stableBlocks, stableBlocks.length);
-assertEqual(
-  JSON.stringify(stableDiffA),
-  JSON.stringify(stableDiffB),
-  "repeated diffs against an unchanged tail block are idempotent (poll 1 vs poll 2)",
-);
-assertEqual(
-  JSON.stringify(stableDiffB),
-  JSON.stringify(stableDiffC),
-  "repeated diffs against an unchanged tail block are idempotent (poll 2 vs poll 3)",
-);
-assertEqual(stableDiffA.length, 1, "the stable diff contains only the unchanged tail block, no phantom growth");
+// Each call is checked against a hardcoded oracle (not just against each
+// other) so this cannot pass vacuously as a self-comparison of a pure
+// function against itself.
+for (const [label, diff] of [
+  ["poll 1", stableDiffA],
+  ["poll 2", stableDiffB],
+  ["poll 3", stableDiffC],
+] as const) {
+  assertEqual(diff.length, 1, `${label}: the stable diff contains only the unchanged tail block, no phantom growth`);
+  assertEqual(diff[0]?.cursor, "1", `${label}: the stable diff's sole block is the unchanged tail block at cursor 1`);
+  assertEqual(
+    diff[0]?.text,
+    "agent reply complete",
+    `${label}: the stable diff's sole block text matches the unchanged tail block verbatim`,
+  );
+}
 
 // --- blocksSincePolledLength: unmatched-append-ordering ---------------------
 // A poll that appends more than one new block at once still diffs correctly,
