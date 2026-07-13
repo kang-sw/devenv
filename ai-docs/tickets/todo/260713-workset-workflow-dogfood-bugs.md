@@ -15,7 +15,7 @@ they can be verified and drained one at a time instead of sitting idle.
 
 ## Tickets
 
-- `260630-bug-enter-proceed-status-report-dead-code` - **ready**; decision: remove (self-designed route added during the lead-proceed diet, never wired to a routing condition; no known real use case). Sage design + completeness review both passed.
+- `260630-bug-enter-proceed-status-report-dead-code` - **done**; removed the dead `status-report` `NEXT:` case and its test assertion, `go test ./...` clean, review clean. Closed to `.done/`.
 - `260713-bug-tickets-move-error-mutates-frontmatter` - **ready**; decision: keep the self-healing write, but surface a loud, explicit partial-mutation notice in the tool result (caller is typically an agent, not a human). Sage design + completeness review both passed.
 - `260710-bug-project-index-ticket-focus-stale-status` - todo, **blocked on design review**; `_index.md` Ticket Focus claims stale `ready` status for 12+ tickets already moved to `.done/`/`.dropped/`, confirmed still reproducing (`ready/` doesn't even exist). Mechanical reconciliation is decidable; recurrence-prevention mechanism (automated guard vs. documented manual procedure vs. other) is an open design question needing the user's direction before this can proceed.
 - `260710-bug-release-downstream-plugin-layout-untested` - todo; Phases 1-2 (repro + launcher fix) already landed; user decided to backlog Phase 3 (release-gated fresh-install acceptance) rather than resolve automate-vs-manual-gate now.
