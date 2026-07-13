@@ -7,6 +7,7 @@ related-mental-model:
   - plugin-runtime
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-13
 ---
 
 # Restore ws MCP liveness across Claude Code idle periods
@@ -82,3 +83,22 @@ without manual MCP restart. Record the Claude Code version, timestamps, process
 ids, and relevant MCP log tail. If the process is still terminated, close this
 phase only for protocol conformance and capture the remaining host-lifecycle
 failure as a separate evidence-backed follow-up.
+
+### Result (03c9c1d8) - 2026-07-13
+
+- Added base-protocol `ping` handling with exact raw request-id preservation and
+  an empty result object; `ping` remains absent from `tools/list` and runtime
+  inventories.
+- Added focused stdio coverage for numeric and string ids, exact response shape,
+  and non-advertisement. Correctness, fit, and test reviews were clean after the
+  raw-id assertion was strengthened.
+- Passed the focused MCP test, full Go suite, both plugin unittest suites, MCP
+  smoke, and `git diff --check`.
+- Native-Windows A/B passed on Claude Code 2.1.207 with an isolated strict MCP
+  config and runtime `0.33.9-dev`: after the first successful `runtime.info` at
+  12:47:44 KST, the original Claude/Python/ws-mcp PIDs
+  `21776`/`31816`/`53864` remained alive through 13:07:49, and the same
+  connection completed another `runtime.info` at 13:07:56 without restart.
+  The debug log recorded connection establishment at 12:47:42 and successful
+  tool completions at 12:47:44 and 13:07:56 with no intervening process-tree
+  termination.
