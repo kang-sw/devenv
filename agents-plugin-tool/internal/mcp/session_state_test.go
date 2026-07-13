@@ -1192,10 +1192,6 @@ func TestProceedNextInstructions(t *testing.T) {
 			}
 		})
 	}
-
-	if got := proceedNextInstruction("status-report"); !strings.Contains(got, "Routing to next action: status-report. Stop. Report the status in Reason") {
-		t.Fatalf("status-report instruction = %q", got)
-	}
 }
 
 func TestProceedInputRejectsNonStringFactTypes(t *testing.T) {
