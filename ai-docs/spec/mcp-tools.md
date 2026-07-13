@@ -250,9 +250,13 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   derived lead-implement checklist. `plan_depth` is `none` for direct edit and
   `survey` for reachable delegated preparation; delegated preparation creates a
   plan path, renders `plan-populator-survey` to write the light implementation
-  plan, and renders `plan-populator-research` on the same plan path only when
+  plan, and renders `plan-populator-research` on the same authority and plan
+  path only when
   the survey returns `[escalate-to-research]` for low confidence or strategic
-  uncertainty. The derived todos carry focused `instruction` prose from those
+  uncertainty. Planner instructions identify ticket or inline authority and
+  pass every declared render variable, using explicit empty values for the
+  inactive authority. The derived todos carry focused `instruction` prose from
+  those
   resolved verdict labels, so branch, prep, edit, review, doc, final-gate, and
   merge todos describe only the path reachable under the current verdict;
   branch-stop todos describe the blocker instead of telling the caller to
@@ -278,6 +282,38 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   convention, with `<stem>` hard-truncated to 15 characters (trailing `-`
   trimmed); legacy `implement/<scope-slug>` branches already in progress are
   still recognized as implementation branches for continue/rename purposes.
+  Automatic review allocation derives independent correctness, fit, and test
+  partitions from material risk, contracts/public symbols, cross-module/reuse
+  uncertainty, and new or unknown test surfaces. Public-interface surface and
+  existing-test surface alone add no partition. Zero or one automatic partition
+  resolves to `single`; `single` dispatches the delegate-grade generic
+  `reviewer` over the shared full-scope `code-reviewer` contract, while two or
+  more resolve to `partitioned`. Explicit review overrides remain authoritative.
+  Final-action todo guidance may reuse
+  passing full-suite evidence only while code, tests, dependencies, build
+  configuration, and generated inputs remain unchanged; documentation-only
+  commits run only affected checks. Documentation pre-pass guidance dispatches
+  mental-model work only for new non-obvious invariants, reusable domain rules,
+  or modification guidelines not already covered by the authoritative spec.
+  `policy.low_ceremony_if_safe` accepts `yes|no|unknown` and defaults to
+  `unknown`. It is a preference-only input: `yes` is necessary but not
+  sufficient for `Branch Action: current`, while missing, `no`, and `unknown`
+  retain the standard branch result. `current` is the no-merge result for an
+  inline target on a named non-implementation branch only when the policy is
+  `yes`, raw unoverridden facts satisfy the automatic direct-edit and automatic
+  lead-only predicates, review override is `auto`, and documentation is skipped
+  with a non-empty reason. Explicit direct-edit or lead-only overrides, unknown
+  or failed predicates, detached HEAD, or a missing/`(initial)` start commit,
+  ticket targets,
+  and existing implementation branches cannot authorize the result. When a
+  supplied `yes` is inapplicable, the resolver emits a concise warning and
+  preserves independently derived delegation, review, documentation, standard
+  branch, final-action, and merge behavior. A successful `current` result
+  carries no merge target, renders merge confirmation as `n/a`, and installs
+  route, prep, edit, lead-only-review, and completion todos. Completion requires
+  focused verification, one logical explicit-path commit with `## AI Context`,
+  retained branch and commit-range reporting, and no push; final-action and
+  merge todos are absent only for this result.
 - `proceed`: `enter.proceed` is the public mode-switch call for the
   routing-facts-complete boundary. It accepts `session_key`, a required
   `target` object, optional grouped `facts.ticket` / `facts.gates` /

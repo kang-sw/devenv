@@ -11,6 +11,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - mcp-runtime
+completed: 2026-07-11
 ---
 
 # Allow low-ceremony direct edits to stay on the current branch
@@ -91,3 +92,20 @@ playbook rule set.
 - Verify matching and near-miss resolver cases, todo ordering/omission, standard
   branch behavior preservation, rendered canonical/wsflow playbooks, manifests,
   and the wsflow package test suite.
+
+### Result (e0f68196) - 2026-07-11
+
+Implemented an override-resistant `Branch Action: current` verdict for the exact
+inline, named non-implementation branch, automatically-safe direct-edit,
+automatically-derived lead-only review, and documentation-skip conjunction. Its
+todo runbook keeps focused verification, one logical explicit-path `## AI
+Context` commit, lead review, retained-branch/commit-range reporting, and a hard
+no-push boundary while omitting final-action and merge work.
+
+All caller overrides, unknown or failed facts, detached or empty HEAD states,
+ticket targets, and existing `impl/*` or legacy `implement/*` branches preserve
+the standard isolation and merge path. Canonical and wsflow playbooks remain
+compact and mirrored. Resolver/session/playbook tests, full MCP/rsrc package
+tests, wsflow package tests, manifest checks, and partitioned correctness/fit/test
+review passed after four Important findings were fixed; one non-blocking helper
+deduplication suggestion remains as minor follow-up debt.

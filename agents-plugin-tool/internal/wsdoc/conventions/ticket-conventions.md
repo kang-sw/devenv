@@ -57,7 +57,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 
 - Phase plan text before the first `### Result` is frozen after that Result is written. Unimplemented phases remain editable.
 - `### Result (<short-hash>)` uses the commit that first made the completed phase reviewable on its current branch. If the phase was already merged before the ticket update, use the merge commit.
+- Result and Edition text record behavioral deltas, deviations, verification evidence, unresolved findings, and deferred follow-up findings without restating the phase plan or linked spec.
 - Later implementation passes for an already completed phase append `#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.
 - Existing Result and Edition entries are frozen once written; append a new Edition instead of editing prior result text.
 - All ticket content must be in English regardless of conversation language.
-

@@ -971,8 +971,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	// primary session-bootstrap tool) and ws.workflow_manual (lead-only fresh-start
 	// shortcut that mints a key inline when root is supplied alongside the sentinel).
 	rootParamAllowed := map[string]bool{
-		"ferrule":          true,
-		"workflow_manual":  true,
+		"ferrule":         true,
+		"workflow_manual": true,
 	}
 	for _, rawTool := range listedTools {
 		tool, _ := rawTool.(map[string]any)
@@ -1301,7 +1301,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"target_kind":"ticket","ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","inline_contract":"","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer

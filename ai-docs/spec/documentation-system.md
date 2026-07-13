@@ -96,6 +96,9 @@ reviewable on its current branch; already-merged phase updates may use the merge
 commit. Later implementation passes for the same completed phase append
 `#### Edition (<short-hash>) - YYYY-MM-DD` entries under that phase's Result
 area; existing Result and Edition entries remain frozen once written.
+Result and Edition prose records behavioral deltas, deviations, verification
+evidence, unresolved findings, and deferred follow-up findings without
+restating the frozen phase plan or linked spec.
 {#260513-ticket-result-editions} Ticket frontmatter can connect work to specs,
 removed specs, parent tickets, plans, skeletons, related mental models, and
 completion metadata. Workflow routing may implement unfinished phases one slice

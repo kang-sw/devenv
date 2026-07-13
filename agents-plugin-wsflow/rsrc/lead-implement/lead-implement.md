@@ -46,11 +46,14 @@ Review
 
 Policy rules:
 - Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.
-- `policy.branch.allow_rename` defaults to `yes`; set it to `no` only when the caller has explicitly asked to keep the current branch name.
+- `policy.branch.allow_rename` defaults to `yes`; set it to `no` only when the caller has explicitly asked to preserve the current branch name.
+- Map a clear request to streamline implementation to `policy.low_ceremony_if_safe=yes`; labels such as `hotfix`, `tweak`, or `small fix` alone do not count.
+- Low-ceremony preference affects branch selection only; it waives no other policy or gate.
+- Map an explicit documentation skip and its non-empty reason to `policy.docs`.
 
 `explicit_direct_edit_request`: set to `yes` when the human or caller explicitly instructed direct edit (no delegation); overrides all other scope facts to `direct-edit`. Set to `no` when they explicitly requested delegation. Leave `unknown` otherwise.
 
-**Fact-source rule**: Fill `facts.scope` fields from the ticket description before reading any source file. If a fact cannot be determined from the ticket alone, leave it `unknown`. Do not update `facts.scope` fields after reading source. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
+**Fact-source rule**: Freeze `facts.scope` before the `enter.implement` call. For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output. Unsupported facts stay `unknown`; do not revise frozen facts after the call. An `unknown` span, surface, new_public_symbol, new_type_contract, or test_surface yields `delegated` by default.
 
 ### 2. Execute Verdict
 
@@ -70,7 +73,7 @@ Policy rules:
 
 ### 5. Documentation
 
-- `{doc-pre-pass}`: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")`; dispatch `mental-model-updater` only when workflow behavior, reusable domain rules, or modification guidance changed.
+- `{doc-pre-pass}`: print and execute `{{.McpNamespace}}/playbook.print(name: "lead-update-spec")`.
 - `{doc-commit-gate}`: refresh `_index.md` only for new skills, agents, or major patterns.
 - Commit spec and mental-model changes separately when both changed.
 
@@ -112,21 +115,19 @@ Run after a confirmed merge to reduce branch accumulation.
 Path: `ai-docs/.plans/YYYY-MM/DD-hhmm-<stem-or-short-slug>.md`
 
 Required sections: `Relevant Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`, `Verification Plan`, and `Escalations`.
+For inline plans, `Relevant Ticket Contract` contains the accepted inline contract.
 
 ### Plan prompts
 
-**Survey:**
-```text
-Ticket path: <ticket-path>
-Selected phase: <selected-phase>
-Plan path: <plan-path>
-```
+Choose one authority row and leave the other authority fields empty:
 
-**Research route:**
+| Target kind | Planner authority inputs |
+|-------------|--------------------------|
+| `ticket` | `ticket_path`, `selected_phase`, empty `inline_contract`, `plan_path` |
+| `inline` | empty `ticket_path`/`selected_phase`, self-contained `inline_contract`, `plan_path` |
+
+The inline contract contains accepted scope, constraints, non-goals, and verification boundary. Research receives the same authority inputs and plan path, plus:
 ```text
-Ticket path: <ticket-path>
-Selected phase: <selected-phase>
-Plan path: <plan-path>
 Read the survey output at the same plan path, then refine or replace it.
 ```
 
@@ -143,58 +144,39 @@ expectations, commit-range guidance, and reporting requirements.
 
 | Partition | Reviewer name | Render playbook | Required check |
 |-----------|---------------|-----------------|----------------|
-| Correctness | `reviewer-correctness` | `code-review-correctness` | Ticket, plan, and correctness invariants |
-| Fit | `reviewer-fit` | `code-review-fit` | Ticket decisions, plan guardrails, and future-phase fit |
-| Test | `reviewer-test` | `code-review-test` | Ticket and plan verification coverage |
+| Full scope | `reviewer` | `reviewer` (includes `code-reviewer`) | Correctness, fit, and test against the supplied authority |
+| Correctness | `reviewer-correctness` | `code-review-correctness` | Supplied authority, plan, and correctness invariants |
+| Fit | `reviewer-fit` | `code-review-fit` | Supplied authority decisions, plan guardrails, and future-phase fit |
+| Test | `reviewer-test` | `code-review-test` | Supplied authority and plan verification coverage |
 
 ### Reviewer prompt frame
 
-**Delegated or escalated route with generated plan:**
+**Generated plan:** choose exactly one authority line.
 ```text
-Read First: <rendered reviewer-partition playbook path>
-Review partition: <Correctness|Fit|Test>
+Read First: <rendered reviewer playbook path>
+Review scope: <Full scope: correctness, fit, test|Correctness|Fit|Test>
 Diff range: <parent-of-first-commit>..<last-commit>
-Ticket path: <ticket-path>
+Authority: Ticket path <ticket-path>
+Authority: Inline contract <accepted scope, constraints, non-goals, verification boundary>
 Plan path: <plan-path>
-Findings path: <partition-output-path>
+Findings path: <review-output-path>
 
 Review focus:
-- <2-4 partition-specific risks>
+- <2-4 scope-specific risks>
 
 Required checks:
-- <required check from Reviewer table>
-- Review the ticket contract, plan contract, and diff together.
+- <required check from the Reviewer table>
+- Review the supplied authority, plan contract, and diff together.
 - Plan guardrails were not bypassed.
-- Binding ticket decisions were not omitted or violated.
+- Binding authority decisions were not omitted or violated.
 
 Instructions:
-- Ignore outside this partition unless directly broken by the diff.
+- For inline authority, do not read or require a ticket path.
+- For a partition, ignore outside it unless directly broken by the diff.
 - Write detailed findings to the findings path.
-- In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
 ```
 
-**Direct edit with no generated plan:**
-```text
-Read First: <rendered reviewer-partition playbook path>
-Review partition: <Correctness|Fit|Test>
-Diff range: <parent-of-first-commit>..<last-commit>
-Ticket path: <ticket-path>
-Findings path: <partition-output-path>
-
-Review focus:
-- <2-4 partition-specific risks>
-
-Required checks:
-- <required check from Reviewer table>
-- Review the ticket contract and diff together.
-- Binding ticket decisions were not omitted or violated.
-
-Instructions:
-- Do not require a plan artifact for direct-edit review.
-- Ignore outside this partition unless directly broken by the diff.
-- Write detailed findings to the findings path.
-- In the message response, return only: `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`.
-```
+**Direct edit with no generated plan:** use the same frame, omit `Plan path`, and require authority-plus-diff review without a plan artifact.
 
 ### Review relay dispatch
 

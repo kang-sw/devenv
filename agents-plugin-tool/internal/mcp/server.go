@@ -2912,6 +2912,7 @@ func tools() []map[string]any {
 						"type":        "object",
 						"description": "Small explicit caller policy set. Observable Git state is read by MCP.",
 						"properties": map[string]any{
+							"low_ceremony_if_safe": nullableEnumStringProperty("Whether the caller prefers reduced ceremony when all independent safety predicates allow it.", []string{"yes", "no", "unknown"}),
 							"branch": map[string]any{
 								"type": "object",
 								"properties": map[string]any{

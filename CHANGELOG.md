@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.33.9 - 2026-07-13
+
+### Changed
+- Add an explicit, safety-gated low-ceremony implementation path that may keep
+  a real current branch for a bounded inline direct edit while preserving
+  review, verification, documentation-skip rationale, commit, and no-push
+  requirements; labels such as `hotfix` or `tweak` do not activate it alone.
+- Make implementation ceremony proportional: bounded work may remain
+  ticketless, delegated planning accepts ticket or inline authority, automatic
+  review uses one full-scope reviewer unless multiple risk partitions are
+  warranted, and unchanged full-suite evidence remains reusable across
+  documentation-only closeout.
+- Reduce repeated lead, planner, reviewer, and MCP instruction text while
+  keeping the authoritative planner Prep contract and workflow diagnostics.
+
+### Fixed
+- Reject unborn Git state from current-branch completion, pass complete active
+  and inactive planner authority fields, and route generic single review
+  through the delegate-grade reviewer wrapper with its shared review contract.
+
 ## v0.33.8 - 2026-07-10
 
 ### Fixed

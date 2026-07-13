@@ -129,6 +129,30 @@ func TestDeriveImplementTodoInstructionsDirectEditLeadOnly(t *testing.T) {
 	}
 }
 
+func TestDeriveImplementTodoInstructionsCurrentBranchCompletion(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation: "direct-edit", BranchPlan: implementBranchPlan{Action: "current", CurrentBranch: "feature/demo"},
+		PlanDepth: "none", ReviewAlloc: "lead-only", DocMode: "skipped", DocReason: "docs unaffected",
+	})
+	if !eqKeys(keysOf(got), "route", "prep", "edit", "review", "complete") {
+		t.Fatalf("current-branch todo shape = %v", keysOf(got))
+	}
+	all := ""
+	for _, item := range got {
+		all += requireInstruction(t, item) + "\n"
+	}
+	for _, want := range []string{"Keep the current branch feature/demo", "focused verification", "exactly one logical explicit-path commit with ## AI Context", "lead-owned review", "retained branch, commit range", "docs unaffected", "no-merge completion", "Do not push"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("current-branch instructions missing %q:\n%s", want, all)
+		}
+	}
+	for _, forbidden := range []string{"final-action-gate", "After user approval", "merge target"} {
+		if strings.Contains(all, forbidden) {
+			t.Fatalf("current-branch instructions retained merge work %q:\n%s", forbidden, all)
+		}
+	}
+}
+
 func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
 	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
@@ -140,7 +164,7 @@ func TestDeriveImplementTodoInstructionsDelegatedSurvey(t *testing.T) {
 		NeedDoc:     true,
 	})
 	prep := requireInstruction(t, todoByKey(t, got, "prep"))
-	if prep != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with ticket_path, selected_phase, and plan_path, and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same plan path before implementer dispatch. Do not create a separate brief." {
+	if prep != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with "+plannerAuthorityInputs("ticket")+", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. Do not create a separate brief." {
 		t.Fatalf("prep instruction = %q", prep)
 	}
 	edit := requireInstruction(t, todoByKey(t, got, "edit"))
@@ -163,12 +187,12 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 		{
 			name:     "survey",
 			depth:    "survey",
-			wantTail: "render plan-populator-survey with ticket_path, selected_phase, and plan_path",
+			wantTail: `render plan-populator-survey with target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`,
 		},
 		{
 			name:     "research",
 			depth:    "research",
-			wantTail: "Render plan-populator-research with ticket_path, selected_phase, and an existing plan_path",
+			wantTail: `Render plan-populator-research with target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,6 +210,23 @@ func TestDeriveImplementTodoInstructionsPrepGuardrails(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeriveImplementTodoInstructionsInlinePlannerAuthority(t *testing.T) {
+	got := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		TargetKind:  "inline",
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "create", CurrentBranch: "feature/base", TargetBranch: "impl/demo", MergeTarget: "feature/base"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+	})
+	prep := requireInstruction(t, todoByKey(t, got, "prep"))
+	for _, want := range []string{`target_kind=inline`, `ticket_path=""`, `selected_phase=""`, "inline_contract", "same authority and plan path"} {
+		if !strings.Contains(prep, want) {
+			t.Fatalf("inline prep instruction missing %q: %q", want, prep)
+		}
 	}
 }
 
@@ -229,6 +270,16 @@ func TestDeriveImplementTodoInstructionsDocs(t *testing.T) {
 		instruction := requireInstruction(t, todoByKey(t, standard, key))
 		if !strings.Contains(instruction, want) {
 			t.Fatalf("%s instruction = %q, want containing %q", key, instruction, want)
+		}
+	}
+	docPrePass := requireInstruction(t, todoByKey(t, standard, "doc-pre-pass"))
+	if !strings.Contains(docPrePass, "new non-obvious invariant, reusable domain rule, or modification guideline") || !strings.Contains(docPrePass, "absent from the authoritative spec") {
+		t.Fatalf("doc-pre-pass instruction did not make mental-model dispatch conditional: %q", docPrePass)
+	}
+	finalAction := requireInstruction(t, todoByKey(t, standard, "final-action-gate"))
+	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation-only commits run affected checks", "Verify review disposition"} {
+		if !strings.Contains(finalAction, want) {
+			t.Fatalf("final-action-gate instruction missing reusable verification guidance %q: %q", want, finalAction)
 		}
 	}
 
@@ -276,6 +327,26 @@ func TestDeriveImplementTodoInstructionsMergeConfirmSkip(t *testing.T) {
 	}
 	if !strings.Contains(merge, "without asking for user approval") {
 		t.Fatalf("merge instruction with merge_confirm=skip missing auto-merge guidance: %q", merge)
+	}
+
+	skippedDocs := deriveImplementTodosFromVerdict(implementTodoVerdict{
+		Delegation:  "delegated",
+		BranchPlan:  implementBranchPlan{Action: "continue", CurrentBranch: "goal/drain-example", MergeConfirm: "skip"},
+		PlanDepth:   "survey",
+		ReviewAlloc: "single",
+		NeedReview:  true,
+		DocMode:     "skipped",
+		DocReason:   "documentation tracked in follow-up",
+		NeedDoc:     false,
+	})
+	skippedFinal := requireInstruction(t, todoByKey(t, skippedDocs, "final-action-gate"))
+	for _, want := range []string{"impl-playbook unchanged-input verification rule", "documentation tracked in follow-up", "without asking for approval"} {
+		if !strings.Contains(skippedFinal, want) {
+			t.Fatalf("skipped-doc merge_confirm=skip final action missing %q: %q", want, skippedFinal)
+		}
+	}
+	if strings.Contains(skippedFinal, "before asking for final action approval") {
+		t.Fatalf("skipped-doc merge_confirm=skip final action still asks for approval: %q", skippedFinal)
 	}
 
 	ask := deriveImplementTodosFromVerdict(implementTodoVerdict{
@@ -1196,6 +1267,7 @@ func TestEnterImplementSchemaRequiresTargetAndAdvertisesNullableFacts(t *testing
 	assertNullableSchema(t, scope["span"])
 	assertNullableSchema(t, scope["surface"])
 	policy := objectProperties(t, properties["policy"])
+	assertNullableSchema(t, policy["low_ceremony_if_safe"])
 	docs := objectProperties(t, policy["docs"])
 	assertNullableSchema(t, docs["mode"])
 }
@@ -1442,6 +1514,7 @@ func implementDirectSkipDocsArgs(format string) map[string]any {
 			},
 		},
 		"policy": map[string]any{
+			"low_ceremony_if_safe": "yes",
 			"branch": map[string]any{
 				"allow_rename": "no",
 			},
@@ -1693,9 +1766,9 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		"Plan Depth: survey",
 		"Review Allocation: partitioned: correctness, fit, test",
 		"Next: Create impl/enter-implement",
-		"path.generate(kind: \"plan\")",
-		"plan-populator-survey",
-		"[escalate-to-research]",
+		"installed delegated Prep and Edit todos",
+		"partitioned: correctness, fit, test review",
+		"standard documentation gates",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("enter.implement verdict missing %q:\n%s", want, text)
@@ -1733,14 +1806,14 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	if err := json.Unmarshal([]byte(readPrep), &prepPayload); err != nil {
 		t.Fatalf("prep todo read did not parse: %v\n%s", err, readPrep)
 	}
-	if prepPayload.Instruction == nil || *prepPayload.Instruction != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with ticket_path, selected_phase, and plan_path, and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same plan path before implementer dispatch. Do not create a separate brief." {
+	if prepPayload.Instruction == nil || *prepPayload.Instruction != implementPrepGuardrails+"Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with "+plannerAuthorityInputs("ticket")+", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. Do not create a separate brief." {
 		t.Fatalf("prep instruction = %#v", prepPayload.Instruction)
 	}
 	full := callToolWithKey(t, server, 5, key, "todo.list", map[string]any{"mode": "full"})
 	for _, want := range []string{
 		"- [ ] {prep} Prep (survey plan)\n      " + implementPrepGuardrails + "Call path.generate(kind: \"plan\"",
-		"render plan-populator-survey with ticket_path, selected_phase, and plan_path",
-		"render plan-populator-research with the same plan path",
+		`render plan-populator-survey with target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`,
+		"render plan-populator-research with the same authority and plan path",
 		"- [ ] {edit} Edit (delegated)\n      After the survey plan is ready",
 		"render implementer with PlanPath",
 	} {
@@ -1755,10 +1828,51 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 	}
 }
 
+func TestEnterImplementAllocatesSingleReviewForBoundedPublicExistingTestChange(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	args := implementReadyArgs("json")
+	scope := args["facts"].(map[string]any)["scope"].(map[string]any)
+	scope["new_type_contract"] = "no"
+	complexity := args["facts"].(map[string]any)["complexity"].(map[string]any)
+	complexity["reuse_points"] = "confirmed"
+	risk := args["facts"].(map[string]any)["risk"].(map[string]any)
+	risk["correctness"] = "low"
+	risk["fit"] = "low"
+	risk["test"] = "low"
+	risk["security_or_contract"] = "low"
+
+	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", args)
+	var result implementResult
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
+	}
+	if result.Verdict.ReviewAlloc != "single" || !result.Verdict.NeedReview {
+		t.Fatalf("bounded public/existing-test review = %q need=%v, want single true", result.Verdict.ReviewAlloc, result.Verdict.NeedReview)
+	}
+	review := readTodoInstruction(t, server, 3, key, "review")
+	for _, want := range []string{"Render `reviewer`", "one full-scope review", "Reviewer prompt frame", "generated findings path", "Relay only new non-clean Critical/Important findings"} {
+		if !strings.Contains(review, want) {
+			t.Fatalf("single-review todo instruction missing %q: %q", want, review)
+		}
+	}
+	if strings.Contains(review, "reviewers") {
+		t.Fatalf("single-review todo instruction = %q", review)
+	}
+}
+
 func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
+	mustWrite(t, root, "README.md", "initialized\n")
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "initial")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	server := NewServer(root, "test")
@@ -1772,6 +1886,9 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	if result.Verdict.Delegation != "direct-edit" || result.Verdict.ReviewAlloc != "lead-only" || result.Verdict.DocMode != "skipped" {
 		t.Fatalf("unexpected focused verdict: %+v", result.Verdict)
 	}
+	if result.Verdict.BranchPlan.Action != "current" || result.Verdict.BranchPlan.MergeTarget != "" {
+		t.Fatalf("focused verdict did not retain the current branch without merge work: %+v", result.Verdict.BranchPlan)
+	}
 
 	edit := readTodoInstruction(t, server, 3, key, "edit")
 	if !strings.Contains(edit, "Apply the source edits directly") || strings.Contains(edit, "delegated implementer") {
@@ -1781,15 +1898,173 @@ func TestEnterImplementFocusedTodosDirectLeadOnlySkippedDocs(t *testing.T) {
 	if !strings.Contains(review, "Perform lead-owned review only") || strings.Contains(review, "Reviewer prompt frame") {
 		t.Fatalf("lead-only review todo instruction not focused: %q", review)
 	}
-	final := readTodoInstruction(t, server, 5, key, "final-action-gate")
-	if !strings.Contains(final, "documentation not touched") {
-		t.Fatalf("skipped-doc reason missing from final action todo: %q", final)
+	complete := readTodoInstruction(t, server, 5, key, "complete")
+	for _, want := range []string{"retained branch", "commit range", "documentation not touched", "no-merge completion", "Do not push"} {
+		if !strings.Contains(complete, want) {
+			t.Fatalf("completion todo missing %q: %q", want, complete)
+		}
 	}
 	full := callToolWithKey(t, server, 6, key, "todo.list", map[string]any{"mode": "full"})
-	for _, forbidden := range []string{"{doc-pre-pass}", "{doc-commit-gate}", "{doc-closeout}", "Dispatch the delegated implementer"} {
+	for _, forbidden := range []string{"{doc-pre-pass}", "{doc-commit-gate}", "{doc-closeout}", "{final-action-gate}", "{merge}", "Dispatch the delegated implementer"} {
 		if strings.Contains(full, forbidden) {
 			t.Fatalf("focused direct/skipped-doc todo list contains forbidden %q:\n%s", forbidden, full)
 		}
+	}
+}
+
+func TestEnterImplementUnbornRepositoryFallsBackFromCurrentBranchCompletion(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+	jsonText := callToolWithKey(t, server, 2, key, "enter.implement", implementDirectSkipDocsArgs("json"))
+	var result implementResult
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
+	}
+	if result.Verdict.BranchPlan.Action != "create" || result.Verdict.BranchPlan.StartCommit != "(initial)" {
+		t.Fatalf("unborn repository branch plan = %+v, want standard create with observed marker", result.Verdict.BranchPlan)
+	}
+	if !containsString(result.Warnings, "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path") {
+		t.Fatalf("unborn fallback omitted rejected low-ceremony warning: %v", result.Warnings)
+	}
+	record, ok := server.sessions.readState(key)
+	if !ok {
+		t.Fatal("session record not found")
+	}
+	if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "final-action-gate", "merge") {
+		t.Fatalf("unborn fallback todo shape = %v", keysOf(record.Todos))
+	}
+}
+
+func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.T) {
+	cases := []struct {
+		name           string
+		branch         string
+		mutateArgs     func(map[string]any)
+		wantAction     string
+		wantWarning    bool
+		wantDelegation string
+		wantReview     string
+	}{
+		{
+			name: "low ceremony explicitly disabled",
+			mutateArgs: func(args map[string]any) {
+				args["policy"].(map[string]any)["low_ceremony_if_safe"] = "no"
+			},
+			wantAction: "create",
+		},
+		{
+			name: "low ceremony unknown",
+			mutateArgs: func(args map[string]any) {
+				args["policy"].(map[string]any)["low_ceremony_if_safe"] = "unknown"
+			},
+			wantAction: "create",
+		},
+		{
+			name: "low ceremony missing",
+			mutateArgs: func(args map[string]any) {
+				delete(args["policy"].(map[string]any), "low_ceremony_if_safe")
+			},
+			wantAction: "create",
+		},
+		{
+			name: "normalized unknown test surface",
+			mutateArgs: func(args map[string]any) {
+				args["facts"].(map[string]any)["scope"].(map[string]any)["test_surface"] = "unknown"
+			},
+			wantAction:  "create",
+			wantWarning: true,
+		},
+		{
+			name: "normalized failed risk",
+			mutateArgs: func(args map[string]any) {
+				args["facts"].(map[string]any)["risk"].(map[string]any)["correctness"] = "moderate"
+			},
+			wantAction:  "create",
+			wantWarning: true,
+		},
+		{
+			name: "rejected low ceremony preserves delegated review and docs",
+			mutateArgs: func(args map[string]any) {
+				scope := args["facts"].(map[string]any)["scope"].(map[string]any)
+				scope["span"] = "multi-file"
+				scope["surface"] = "cross-module"
+				scope["test_surface"] = "existing"
+				risk := args["facts"].(map[string]any)["risk"].(map[string]any)
+				risk["correctness"] = "moderate"
+				risk["fit"] = "moderate"
+				risk["test"] = "moderate"
+			},
+			wantAction:     "create",
+			wantWarning:    true,
+			wantDelegation: "delegated",
+			wantReview:     "partitioned: correctness, fit, test",
+		},
+		{
+			name:        "matching impl branch continues",
+			branch:      implementTargetBranchName("tiny-direct-edit"),
+			wantAction:  "continue",
+			wantWarning: true,
+		},
+		{
+			name:        "legacy implement branch renames",
+			branch:      "implement/tiny-direct-edit",
+			wantAction:  "rename",
+			wantWarning: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useLeadProfile(t)
+			root := t.TempDir()
+			initGit(t, root)
+			if tc.branch != "" {
+				runGit(t, root, "switch", "-c", tc.branch)
+			}
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			server := NewServer(root, "test")
+			key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
+
+			args := implementDirectSkipDocsArgs("json")
+			if tc.branch != "" {
+				args["policy"].(map[string]any)["branch"].(map[string]any)["merge_target"] = "master"
+				args["policy"].(map[string]any)["branch"].(map[string]any)["allow_rename"] = "yes"
+			}
+			if tc.mutateArgs != nil {
+				tc.mutateArgs(args)
+			}
+			jsonText := callToolWithKey(t, server, 2, key, "enter.implement", args)
+			var result implementResult
+			if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+				t.Fatalf("json verdict did not parse: %v\n%s", err, jsonText)
+			}
+			if result.Verdict.BranchPlan.Action != tc.wantAction {
+				t.Fatalf("branch action = %q, want %q; verdict=%+v", result.Verdict.BranchPlan.Action, tc.wantAction, result.Verdict)
+			}
+			warning := "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path"
+			if containsString(result.Warnings, warning) != tc.wantWarning || strings.Contains(result.Raw, warning) != tc.wantWarning || containsString(result.Agenda.Warnings, warning) != tc.wantWarning {
+				t.Fatalf("warning presence mismatch: warnings=%v raw=%q agenda=%v", result.Warnings, result.Raw, result.Agenda.Warnings)
+			}
+			if tc.wantDelegation != "" && (result.Verdict.Delegation != tc.wantDelegation || result.Verdict.ReviewAlloc != tc.wantReview || result.Verdict.DocMode != "skipped") {
+				t.Fatalf("rejected preference changed independent verdicts: %+v", result.Verdict)
+			}
+			record, ok := server.sessions.readState(key)
+			if !ok {
+				t.Fatal("session record not found")
+			}
+			if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "final-action-gate", "merge") {
+				t.Fatalf("standard near-miss todo shape = %v", keysOf(record.Todos))
+			}
+			finalAction := requireInstruction(t, todoByKey(t, record.Todos, "final-action-gate"))
+			merge := requireInstruction(t, todoByKey(t, record.Todos, "merge"))
+			if !strings.Contains(finalAction, "final action approval") || !strings.Contains(merge, "After user approval") {
+				t.Fatalf("standard merge instructions changed: final=%q merge=%q", finalAction, merge)
+			}
+		})
 	}
 }
 

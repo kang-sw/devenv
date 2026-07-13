@@ -376,6 +376,7 @@ func todoInstructionPreview(instruction string) string {
 // --- enter-mode todo derivation ----------------------------------------------
 
 type implementTodoVerdict struct {
+	TargetKind  string
 	Delegation  string
 	BranchPlan  implementBranchPlan
 	PlanDepth   string
@@ -386,11 +387,9 @@ type implementTodoVerdict struct {
 	NeedDoc     bool
 }
 
-// deriveImplementTodos builds the lead-implement checklist. Route, Prep, Edit,
-// Final action gate, and Merge are always present; Review is inserted after Edit
-// when needReview; the Doc steps are inserted after Review when needDoc. Order
-// mirrors the lead-implement pipeline (Route -> Prep -> Edit -> Review -> Doc ->
-// Final action gate -> Merge).
+// deriveImplementTodos builds the standard lead-implement checklist. The
+// verdict-aware path replaces final-action and merge with completion only for
+// the exact current-branch outcome.
 func deriveImplementTodos(needReview, needDoc bool) []todoItem {
 	return deriveImplementTodosFromVerdict(implementTodoVerdict{
 		Delegation:  "delegated",
@@ -417,10 +416,14 @@ func deriveImplementTodosFromVerdict(verdict implementTodoVerdict) []todoItem {
 			todoItem{Key: "doc-closeout", Title: "Doc closeout", Instruction: implementInstructionPtr(implementDocCloseoutInstruction(verdict))},
 		)
 	}
-	items = append(items,
-		todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
-		todoItem{Key: "merge", Title: "Merge", Instruction: implementInstructionPtr(implementMergeInstruction(verdict))},
-	)
+	if isCurrentBranchCompletion(verdict) {
+		items = append(items, todoItem{Key: "complete", Title: "Complete", Instruction: implementInstructionPtr(implementCompletionInstruction(verdict))})
+	} else {
+		items = append(items,
+			todoItem{Key: "final-action-gate", Title: "Final action gate", Instruction: implementInstructionPtr(implementFinalActionInstruction(verdict))},
+			todoItem{Key: "merge", Title: "Merge", Instruction: implementInstructionPtr(implementMergeInstruction(verdict))},
+		)
+	}
 	return withPendingStatus(items)
 }
 
@@ -509,6 +512,8 @@ func implementRouteInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Rename the current implementation branch to %s before source edits, preserving %s as the merge target. Mark route complete only after the branch action succeeds; do not call enter.implement again.", firstNonEmpty(plan.TargetBranch, "the target implementation branch"), firstNonEmpty(plan.MergeTarget, "the selected base branch"))
 	case "continue":
 		return fmt.Sprintf("Continue on %s for this implementation path before starting prep or edits. Keep the existing implementation branch context and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, plan.TargetBranch, "the current implementation branch"))
+	case "current":
+		return fmt.Sprintf("Keep the current branch %s for this explicit low-ceremony path. Omit implementation-branch creation and merge work, and do not call enter.implement again.", firstNonEmpty(plan.CurrentBranch, "the observed branch"))
 	default:
 		return "Confirm the implementation branch setup before source edits, then follow the selected implementation path."
 	}
@@ -523,9 +528,9 @@ func implementPrepInstruction(verdict implementTodoVerdict) string {
 	case "none", "":
 		return guardrails + "Confirm the direct-edit facts are still accurate, identify the focused verification command, and proceed without a separate brief, survey, or research plan."
 	case "survey":
-		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with ticket_path, selected_phase, and plan_path, and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same plan path before implementer dispatch. Do not create a separate brief."
+		return guardrails + "Call path.generate(kind: \"plan\", stems: [target stem or scope]) to create the plan path, render plan-populator-survey with " + plannerAuthorityInputs(verdict.TargetKind) + ", and dispatch it to write the light implementation plan. If survey returns [escalate-to-research] for low confidence or strategic uncertainty, render plan-populator-research with the same authority and plan path before implementer dispatch. Do not create a separate brief."
 	case "research":
-		return guardrails + "Render plan-populator-research with ticket_path, selected_phase, and an existing plan_path, then dispatch it to refine or replace the same implementation plan before implementer dispatch. Do not create a separate brief."
+		return guardrails + "Render plan-populator-research with " + plannerAuthorityInputs(verdict.TargetKind) + ", then dispatch it to refine or replace the same implementation plan before implementer dispatch. Do not create a separate brief."
 	default:
 		return guardrails + "Prepare the implementation context required by the selected verdict before edits."
 	}
@@ -537,6 +542,9 @@ func implementEditInstruction(verdict implementTodoVerdict) string {
 	}
 	switch strings.ToLower(strings.TrimSpace(verdict.Delegation)) {
 	case "direct-edit":
+		if isCurrentBranchCompletion(verdict) {
+			return "Apply the source edits directly in this lead context, run focused verification, create exactly one logical explicit-path commit with ## AI Context, and capture the resulting commit range. Do not push."
+		}
 		return "Apply the source edits directly in this lead context, run focused verification, commit the logical checkpoint, and capture the resulting commit range."
 	case "delegated":
 		switch strings.ToLower(strings.TrimSpace(verdict.PlanDepth)) {
@@ -563,7 +571,7 @@ func implementReviewInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Dispatch %s reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings.", formatReviewPartitions(verdict.ReviewAlloc))
 	}
 	if strings.EqualFold(strings.TrimSpace(verdict.ReviewAlloc), "single") {
-		return "Dispatch one reviewer with the Reviewer prompt frame and a generated review path. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
+		return "Render `reviewer` and dispatch one full-scope review with the Reviewer prompt frame and a generated findings path. Relay only new non-clean Critical/Important findings."
 	}
 	return "Dispatch the selected reviewers with the Reviewer prompt frame and generated review paths. Use Review relay and Re-review prompts only for genuinely new non-clean Critical/Important findings."
 }
@@ -572,7 +580,7 @@ func implementDocPrePassInstruction(verdict implementTodoVerdict) string {
 	if isBranchStop(verdict) {
 		return fmt.Sprintf("Do not start documentation work before implementation can run; resolve the branch blocker first: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
-	return "Run the standard documentation pre-pass: update specs first, then dispatch mental-model-updater with the implemented commit range."
+	return "Run the documentation pre-pass: update specs, then dispatch mental-model-updater only for a new non-obvious invariant, reusable domain rule, or modification guideline absent from the authoritative spec."
 }
 
 func implementDocCommitGateInstruction(verdict implementTodoVerdict) string {
@@ -594,16 +602,17 @@ func implementFinalActionInstruction(verdict implementTodoVerdict) string {
 		return fmt.Sprintf("Do not ask for final action approval while branch action is stop: %s.", firstNonEmpty(verdict.BranchPlan.Reason, "branch action is blocked"))
 	}
 	skipConfirm := strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.MergeConfirm), "skip")
+	verification := "Apply the impl-playbook unchanged-input verification rule; after documentation-only commits run affected checks. Verify review disposition"
 	if strings.EqualFold(strings.TrimSpace(verdict.DocMode), "skipped") {
 		if skipConfirm {
-			return fmt.Sprintf("Verify source, tests, review disposition, and skipped documentation policy, then proceed to merge without asking for approval (caller merge confirm is skip): %s.", firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
+			return fmt.Sprintf("%s and skipped documentation policy, then proceed to merge without asking for approval (caller merge confirm is skip): %s.", verification, firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
 		}
-		return fmt.Sprintf("Verify source, tests, review disposition, and skipped documentation policy before asking for final action approval: %s.", firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
+		return fmt.Sprintf("%s and skipped documentation policy before asking for final action approval: %s.", verification, firstNonEmpty(verdict.DocReason, "no documentation updates are reachable in this verdict"))
 	}
 	if skipConfirm {
-		return "Verify source, tests, review disposition, and standard documentation closeout, then proceed to merge without asking for approval (caller merge confirm is skip)."
+		return verification + " and standard documentation closeout, then proceed to merge without asking for approval (caller merge confirm is skip)."
 	}
-	return "Verify source, tests, review disposition, and standard documentation closeout before asking for final action approval."
+	return verification + " and standard documentation closeout before asking for final action approval."
 }
 
 func implementMergeInstruction(verdict implementTodoVerdict) string {
@@ -614,6 +623,14 @@ func implementMergeInstruction(verdict implementTodoVerdict) string {
 		return "Caller merge confirm is skip: perform the selected final action against the verdict merge target without asking for user approval, and preserve the workflow-owned merge record."
 	}
 	return "After user approval, perform the selected final action against the verdict merge target and preserve the workflow-owned merge record."
+}
+
+func implementCompletionInstruction(verdict implementTodoVerdict) string {
+	return fmt.Sprintf("Confirm focused verification passed, complete lead-owned review with the rationale for no external reviewers, and report the retained branch, commit range, skipped documentation reason, and no-merge completion. Do not push. Documentation skipped because: %s.", firstNonEmpty(verdict.DocReason, "no documentation reason was provided"))
+}
+
+func isCurrentBranchCompletion(verdict implementTodoVerdict) bool {
+	return strings.EqualFold(strings.TrimSpace(verdict.BranchPlan.Action), "current")
 }
 
 func isBranchStop(verdict implementTodoVerdict) bool {
@@ -1003,6 +1020,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
 		}
 		todos := deriveImplementTodosFromVerdict(implementTodoVerdict{
+			TargetKind:  result.Target.Kind,
 			Delegation:  result.Verdict.Delegation,
 			BranchPlan:  result.Verdict.BranchPlan,
 			PlanDepth:   result.Verdict.PlanDepth,
