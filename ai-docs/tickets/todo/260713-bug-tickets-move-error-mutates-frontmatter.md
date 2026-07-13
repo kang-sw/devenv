@@ -47,3 +47,30 @@ Implementation notes (design review, resolved autonomously):
 - Once the notice contract is designed, `ai-docs/spec/mcp-tools.md` (MCP
   result contracts) likely needs a matching update — anticipate a `spec:`
   entry at ready-promotion time rather than treating it as optional.
+
+## Phases
+
+### Phase 1: Surface a loud partial-mutation notice on blocked tickets.move
+
+In `agents-plugin-tool/internal/wsdoc/tickets_mutate.go`, stop discarding the
+computed `sageReviewPostures` when `TicketsMove` returns an error after
+`prepareSageReviewForUpwardMove` already wrote frontmatter; carry that
+partial-mutation info in the returned result. In
+`agents-plugin-tool/internal/mcp/server.go`, special-case the `tickets.move`
+error branch (it cannot reuse the shared generic `toolTextResponse(req.ID,
+"", err)` path as-is) to merge the partial-mutation notice into the response
+text/structure so a retrying caller (typically an agent) cannot mistake a
+blocked move for a fully unchanged file. `TicketsClose`'s analogous
+write-then-possibly-fail shape stays explicitly out of scope. Verification:
+a targeted regression reproducing the 2026-07-13 scenario (blocked `to:
+"ready"` move on a legacy-schema ticket) asserts the notice appears in the
+tool result; `go test ./...` passes.
+
+## Spec Impact
+
+`ai-docs/spec/mcp-tools.md` documents `tickets.move`'s result contract and
+needs a matching addition once the notice's exact field/text shape is
+settled during implementation. Deferred to doc closeout rather than
+contract-first, since the shape is explicitly open per the design review
+(see Implementation notes above) and this is failure-path text, not a new
+externally-relied-on schema.

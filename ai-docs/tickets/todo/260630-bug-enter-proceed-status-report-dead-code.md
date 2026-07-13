@@ -40,6 +40,27 @@ by `260627-feat-enter-proceed-deterministic-verdict-engine`'s original closed
 `NEXT` set, not an accidental leftover — this removal closes out that unused
 part of the contract, not merely deletes stray code.
 
+## Phases
+
+### Phase 1: Remove the dead status-report route
+
+Delete the `status-report` case from `proceedNextInstruction` in
+`agents-plugin-tool/internal/mcp/proceed_resolver.go`, and update or remove
+the direct assertion at
+`agents-plugin-tool/internal/mcp/session_state_test.go:1196-1197` that
+depends on it. No routing branch anywhere ever produces this value, so no
+other call site changes. Verification: `go test ./...` in
+`agents-plugin-tool/` passes; grep for `status-report`/`status_report` across
+the repo turns up no remaining production or test references to the removed
+case (the `status_report` fact enum value on the `category` fact itself is
+unrelated caller input shape and is out of scope for this removal).
+
+## Spec Impact
+
+No spec change. The `status-report` route was never reachable at runtime (no
+caller ever observed it), so removing it is not a caller-visible behavior
+change and no existing spec documents it as an observable contract.
+
 ## Related
 
 - `260630-epic-skill-playbook-diet` — diet session that surfaced this
