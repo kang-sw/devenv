@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.33.11 - 2026-07-13
+
+### Fixed
+- Remove the dead `status-report` `NEXT:` route from `enter.proceed`
+  (self-designed during the low-ceremony diet, never wired to a routing
+  condition).
+- Generate an arbitrary random word-word-word slug for goal-staging branches
+  in `lead-drain-ready-queue` instead of deriving it from goal text, since a
+  goal-text-derived slug can collide across independent concurrent goal runs
+  of the same command (Git branches are shared across worktrees of one
+  repository).
+- Surface a loud, explicit partial-mutation notice in `tickets.move`'s tool
+  result whenever its self-healing sage-review frontmatter write persists
+  before the move blocks or fails, so a retrying caller cannot mistake a
+  blocked move for an unchanged file.
+
 ## v0.33.10 - 2026-07-13
 
 ### Fixed
