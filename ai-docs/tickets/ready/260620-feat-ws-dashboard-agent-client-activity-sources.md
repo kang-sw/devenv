@@ -979,6 +979,91 @@ version state, a test proving spawn is refused with install guidance when
 route tests matching the same privacy and identity constraints as the Codex
 and OpenCode adapters.
 
+### Result
+
+Implemented, reviewed, and merged into `impl/claude-cli-adap` (commits
+`91b8b21a` plan, `20afe1cd` feat, `82f316ef`/`7a83efe5` fix cycle; final range
+`a25ec0e6..7a83efe5`).
+
+**Verification spike (research-tier, live against `claude` 2.1.207):** ran the
+real binary in `--input-format/--output-format stream-json` mode and resolved
+all three pre-implementation unknowns before writing code: (1)
+`control_request`/`control_response` is real but used only for `interrupt` —
+permission prompts do NOT surface this way in plain stream-json mode; (2)
+`--resume` works from the same cwd across both clean exit and a hard SIGKILL
+(the `.jsonl` transcript is appended incrementally, so a kill is
+non-destructive), but fails hard (`No conversation found`) if resumed from a
+different cwd, so the daemon pins resume to the original work-root cwd; (3)
+`PreToolUse` hooks configured via `--settings` do fire in headless mode and can
+deny a tool call (`permissionDecision:"deny"` surfaces as `tool_result
+is_error:true` plus `result.permission_denials[]`), validating the entire
+hook-based approval-relay design. Also confirmed `claude plugin list --json`
+returns a flat array (`id`, `enabled`) — a distinct shape from Codex's nested
+gate, requiring its own parser. Plan: `ai-docs/.plans/2026-07/11-1806-claude-cli-adapter-phase4.md`.
+
+**Implementation:** mirrors the Phase 2 Codex adapter's architecture with
+Claude-specific deltas — `ClaudeProjector` (pure, runtime-free NDJSON
+projector) in `ws-dashboard/crates/core/src/claude_projection.rs`; async
+transport/registry/plugin-gate/`AgentClientProvider` impl in
+`ws-dashboard/crates/daemon/src/claude_cli.rs` (turn-sequential
+write-then-drain-until-`result` correlation under a `send_lock`, rather than
+Codex's per-request-id oneshot correlation; cwd pinned per session for
+`--resume`; hand-rolled UUID v4 session ids via the vendored `rand` crate; a
+fixed deny-by-default `PreToolUse` hook injected via `--settings`, with the
+real interactive approval relay deferred to
+`260711-idea-dashboard-agent-facing-mcp-control-surface` per the plan); dual
+local + server-scoped `claude-sessions` HTTP routes in
+`ws-dashboard/crates/daemon/src/claude_routes.rs`; merge into the existing
+unified `ActivityFeed.items` (never `agents`) in `work_root_activity.rs`.
+Capabilities expose only `skills: true`; no `claude-sessions` control route or
+skills-Overlay in this phase (out of scope per the plan, verified against the
+diff by the fit reviewer).
+
+**Review disposition (partitioned correctness/fit/test, one fix cycle, all
+re-reviews accepted):**
+- Correctness: 3 Important findings, all fixed and re-review-accepted — (1)
+  the ws/wsflow plugin gate ran `claude plugin list --json` in the daemon's
+  cwd rather than the resolved work-root cwd, now gated with `.current_dir`
+  after cwd resolution; (2) the transcript GET route called `ensure_live`,
+  respawning a `claude --resume` child on a mere read, now reads only the
+  buffered projector transcript with no side effects; (3) the 120s per-turn
+  timeout abandoned the turn without interrupting the CLI, releasing
+  `send_lock` so a later prompt could interleave into a still-running turn —
+  now issues `interrupt()` before releasing, and a `result` with
+  `subtype:"error_during_execution"` now surfaces as `Err(TurnError)` instead
+  of a false `accepted:true`. Minor findings (activity-id collision on
+  same-millisecond creation, `"*"` hook-matcher assumption unverified,
+  idle-kill half of the lifecycle not implemented, is_live no-op) recorded,
+  not fixed — same disposition class as the equivalent Codex-adapter minors.
+- Fit: clean, 3 minors recorded (Claude-prefixed plugin-gate naming vs.
+  Codex's unprefixed precedent; import-order inconsistency; a few
+  `cargo fmt`-flagged spots in the new projector file) — none fixed, all
+  informational.
+- Test: 1 Important finding, fixed — the initial `claude-cli-turn.ndjson`
+  fixture was hand-fabricated (literal "secret" markers, toy sequential
+  tool_use ids, suspiciously round monotonic costs), unlike the genuine Codex
+  precedent fixture. Recaptured by actually spawning the real `claude` binary
+  in a scratch dir through a 3-turn session (text, thinking+tool-call,
+  hook-denied tool-call) and replacing the fixture with the real NDJSON
+  output; this recapture surfaced and fixed a genuine projector bug
+  (`serde_json::Map`'s unordered `modelUsage` map made the projector pick the
+  wrong model's `contextWindow` when a turn used two models — fixed by
+  tracking `message.model` from `assistant` events). Re-review confirmed the
+  fixture is now overwhelmingly more genuine (organic ids, non-round
+  costs/tokens, the dual-model bug as live evidence) but flagged one residual
+  discrepancy: the fixture's `session_id` value is a structurally-valid but
+  obviously hand-typed placeholder pattern, inconsistent with the fix
+  commit's "kept verbatim" claim — recorded as a maintained Minor
+  (documentation-accuracy only; the 5 fixture-driven tests are non-tautological
+  and all pass), not re-opened as blocking since every other captured field
+  (tool_use ids, thinking signature, costs/token usage, event
+  ordering/structure) is confirmed genuine and the bug it surfaced is real.
+
+**Tests:** `cargo test -p ws-dashboard-core` (31 passed, 9 `claude_projection`
+incl. all 5 fixture-driven), `cargo test -p ws-dashboard-daemon` (lib 69
+passed/2 ignored real-binary smokes, `--test routes` 153 passed, `--test cli`
+15 passed) — all green at final commit `7a83efe5`.
+
 ### Phase 5: Activity UI and server-scoped integration
 
 Lift the visible Activity UI from named-agent wording to source-neutral
