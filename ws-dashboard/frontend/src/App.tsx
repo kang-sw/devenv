@@ -10,6 +10,7 @@ import type {
 } from "react";
 import {
   Activity,
+  Bot,
   BriefcaseBusiness,
   CirclePower,
   Eye,
@@ -18,8 +19,10 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  History,
   KeyRound,
   Languages,
+  MessageSquarePlus,
   Plus,
   PlugZap,
   LayoutPanelTop,
@@ -89,6 +92,7 @@ import {
   buildRootPickerPinDirectoryCommand,
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
+  buildAgentChatCreateCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildWorkspaceMenuOpenCommand,
@@ -205,6 +209,24 @@ import {
   type TerminalSessionView,
 } from "./terminals";
 import {
+  agentChatHarnesses,
+  attachAgentChatSession,
+  createEmptyAgentChatPane,
+  markAgentChatPaneError,
+  markAgentChatPaneStarting,
+  removeAgentChatPane,
+  removeAgentChatPanesForWorkRoot,
+  type AgentChatHarness,
+  type AgentChatPaneState,
+  type AgentChatSessionView,
+} from "./agentChatSessions";
+import {
+  agentChatHarnessLabel,
+  stubActivityHistoryList,
+  stubResumeAgentChatSession,
+  stubStartNewAgentChatSession,
+} from "./activitySessionStub";
+import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
   dashboardServerRoute,
@@ -296,6 +318,7 @@ import {
   workRootActivityEventsEndpoint,
   type ActivityConsoleEvent,
   type ActivityConsoleStreamRequest,
+  type ActivityItem,
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
@@ -3384,6 +3407,24 @@ function WorkbenchShell({
   } | null>(null);
   const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] =
     useState<WorkbenchPaneOrder>({});
+  // Agent-chat tabs from `260711-feat-ws-dashboard-agent-activity-chat-ui`
+  // Phase 1 - a new multi-instance `"agentChat"` SurfaceKind, kept in its own
+  // state parallel to `terminalPanes`/`terminalPaneOrderByGroup` (not reused
+  // from the singleton `"agent"` pane or the read-only `"workRootActivity"`
+  // tab). A pane starts "empty" (`session: null`) the instant it is created
+  // and only gains a `session` once a tile or history entry is picked and the
+  // stub (or, later, real) `activity.session.create`/`start` call resolves.
+  const [agentChatPanes, setAgentChatPanes] = useState<
+    Record<string, AgentChatPaneState>
+  >({});
+  const [agentChatPaneOrderByGroup, setAgentChatPaneOrderByGroup] =
+    useState<WorkbenchPaneOrder>({});
+  const [focusedAgentChatPaneId, setFocusedAgentChatPaneId] = useState<
+    string | null
+  >(null);
+  const [activeAgentChatPaneRequest, setActiveAgentChatPaneRequest] =
+    useState<{ paneId: string; sequence: number } | null>(null);
+  const agentChatOpenSequence = useRef(0);
   const [pendingCloseRequest, setPendingCloseRequest] = useState<
     | (DockviewTabCloseRequest & {
         readonly anchor: { clientX: number; clientY: number };
@@ -3396,6 +3437,7 @@ function WorkbenchShell({
   >({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
+  const focusedAgentChatRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
   const restoredTerminalIntentRoots = useRef<Set<string>>(new Set());
   // Tracks which roots' `listTerminals` call has resolved (success or
@@ -3522,6 +3564,9 @@ function WorkbenchShell({
     for (const { rootKey, rootId, serverRoute } of closedRefs) {
       setTerminalPanes((current) =>
         removeTerminalPanesForWorkRoot(current, rootId, serverRoute),
+      );
+      setAgentChatPanes((current) =>
+        removeAgentChatPanesForWorkRoot(current, rootId, serverRoute),
       );
       setActivityPaneOpenByRoot((current) => {
         if (!(rootKey in current)) {
@@ -3652,9 +3697,34 @@ function WorkbenchShell({
           )
           .map((pane) => pane.paneId),
       );
+      // CONTRACT: agentChat panes must be included in this revalidation's
+      // live-pane-id set for the same reason terminal/readonly panes are -
+      // omitting them here (as originally written, before agentChat panes
+      // existed) makes this effect treat every agentChat pane id as "not
+      // live", so `revalidateWorkbenchLayoutForRoot` immediately reconciles
+      // a just-set agentChat active-pane entry back to whatever readonly/
+      // terminal pane was previously active in its shared group. This is the
+      // same class of bug this effect's own comment/CONTRACT above already
+      // documents for 260707-bug-dashboard-e2e-multi-root-locator-leakage
+      // Phase 2 (readonly/terminal pane order being invisible to this
+      // revalidation) - confirmed here by live instrumentation for
+      // 260711-feat-ws-dashboard-agent-activity-chat-ui Phase 1: a freshly
+      // created agent chat tab's `setActivePaneByGroupForSelected` write was
+      // correctly applied, then silently reverted by this effect re-running
+      // (it depends on `activePaneByRoot`) moments later.
+      const liveAgentChatPaneIds = new Set(
+        Object.values(agentChatPanes)
+          .filter(
+            (pane) =>
+              pane.workRootId === ref.rootId &&
+              (pane.serverRoute ?? "server-local") === ref.serverRoute,
+          )
+          .map((pane) => pane.paneId),
+      );
       const livePaneIds = new Set<string>([
         ...liveTerminalPaneIds,
         ...liveReadOnlyPaneIds,
+        ...liveAgentChatPaneIds,
       ]);
       const groupsForRoot =
         workbenchGroupsByRoot[rootKey] ?? initialWorkbenchGroups;
@@ -3676,7 +3746,7 @@ function WorkbenchShell({
       // merge itself is delegated to `mergeReadOnlyAndTerminalPaneOrder` (a
       // pure function extracted for unit testing, mirroring
       // `revalidateWorkbenchLayoutForRoot` below).
-      const mergedOrderForRoot: WorkbenchPaneOrder =
+      const mergedOrderBeforeAgentChat: WorkbenchPaneOrder =
         mergeReadOnlyAndTerminalPaneOrder(
           groupsForRoot,
           orderForRoot,
@@ -3685,6 +3755,26 @@ function WorkbenchShell({
           terminalPaneOrderByGroup,
           liveTerminalPaneIds,
         );
+      // CONTRACT: agentChat pane order lives in its own flat
+      // `agentChatPaneOrderByGroup` map, just like readonly/terminal panes -
+      // `mergeReadOnlyAndTerminalPaneOrder` predates the agentChat surface
+      // kind and only merges those two, so without this extra merge step a
+      // group whose live panes include an agentChat pane looks like it's
+      // missing that pane to `revalidateWorkbenchLayoutForRoot` below, which
+      // then reconciles its active-pane entry away from it (same class of
+      // bug as the readonly/terminal merge above; see the `liveAgentChatPaneIds`
+      // CONTRACT note near its declaration).
+      const mergedOrderForRoot: WorkbenchPaneOrder = Object.fromEntries(
+        groupsForRoot.map((group) => [
+          group.id,
+          [
+            ...(mergedOrderBeforeAgentChat[group.id] ?? []),
+            ...(agentChatPaneOrderByGroup[group.id] ?? []).filter((paneId) =>
+              liveAgentChatPaneIds.has(paneId),
+            ),
+          ],
+        ]),
+      );
       // CONTRACT: `prunedOrder` here only depends on group/order/live-id
       // inputs already closed over from this render, so it is safe to read
       // from this render's closure — every code path that makes a pane
@@ -3718,13 +3808,14 @@ function WorkbenchShell({
         livePaneIds,
         terminalsReadyRootKeys.has(rootKey),
       );
-      // Strip the readonly-file/terminal pane ids back out before persisting
-      // into `paneOrderByRoot`, which must stay agnostic to those (their
-      // order is separately owned by `readOnlyFilePaneOrderByGroup` /
-      // `terminalPaneOrderByGroup`).
+      // Strip the readonly-file/terminal/agentChat pane ids back out before
+      // persisting into `paneOrderByRoot`, which must stay agnostic to those
+      // (their order is separately owned by `readOnlyFilePaneOrderByGroup` /
+      // `terminalPaneOrderByGroup` / `agentChatPaneOrderByGroup`).
       const prunedOrderWithoutMerged = removePanesFromOrder(prunedOrder, [
         ...liveReadOnlyPaneIds,
         ...liveTerminalPaneIds,
+        ...liveAgentChatPaneIds,
       ]);
       if (
         JSON.stringify(prunedOrderWithoutMerged) !== JSON.stringify(orderForRoot)
@@ -3754,6 +3845,8 @@ function WorkbenchShell({
     readOnlyFilePanes,
     readOnlyFilePaneOrderByGroup,
     terminalPaneOrderByGroup,
+    agentChatPanes,
+    agentChatPaneOrderByGroup,
     openWorkRootKeys,
     openWorkRootRefs,
     paneOrderByRoot,
@@ -3922,6 +4015,16 @@ function WorkbenchShell({
                 entry,
               );
           },
+        },
+        Object.values(agentChatPanes),
+        agentChatPaneOrderByGroup,
+        {
+          onClose: closeAgentChatPane,
+          onStartHarness: startAgentChatHarness,
+          onResumeHistoryItem: resumeAgentChatHistoryItem,
+          onLoadHistory: (workRootId, serverRoute) =>
+            stubActivityHistoryList({ workRootId, serverRoute }),
+          isActivePane: (pane) => focusedAgentChatPaneId === pane.paneId,
         },
         closedAgentPaneByRoot[root.id] ?? [],
         isSelectedRoot ? activityPaneOpenByRoot[rootKey] ?? false : false,
@@ -4654,6 +4757,53 @@ function WorkbenchShell({
     );
   }, [activeTerminalPaneRequest, editorGroups]);
 
+  // A freshly created agent chat pane shares its target group ("opened" row
+  // policy, group 2) with read-only file panes/WorkRoot Activity - the same
+  // group persistentTerminal's dedicated group-1 pinned row never contends
+  // for. An effect-only round-trip (render pane -> effect flips active state
+  // -> next render syncs Dockview) loses the race against whichever pane was
+  // already active in that shared group, because the same-render
+  // `effectiveActivePaneByGroup` used below still reflects the old active
+  // pane on the render that first adds the new panel to Dockview. Mirror
+  // `pendingReadOnlyActivation`'s same-render `useMemo` instead, so a brand
+  // new agent chat tab is the group's active pane on the very render Dockview
+  // first sees it - not one render late.
+  const pendingAgentChatActivation = useMemo(() => {
+    if (
+      !activeAgentChatPaneRequest ||
+      focusedAgentChatRequest.current === activeAgentChatPaneRequest.sequence
+    ) {
+      return null;
+    }
+    const targetGroup = editorGroups.find((group) =>
+      group.panes.some(
+        (pane) => pane.id === activeAgentChatPaneRequest.paneId,
+      ),
+    );
+    if (!targetGroup) {
+      return null;
+    }
+    return {
+      groupId: targetGroup.id,
+      paneId: activeAgentChatPaneRequest.paneId,
+    };
+  }, [activeAgentChatPaneRequest, editorGroups]);
+
+  useEffect(() => {
+    if (!activeAgentChatPaneRequest || !pendingAgentChatActivation) {
+      return;
+    }
+    focusedAgentChatRequest.current = activeAgentChatPaneRequest.sequence;
+    setFocusedAgentChatPaneId(pendingAgentChatActivation.paneId);
+    setActivePaneByGroupForSelected((current) =>
+      selectWorkbenchPane(
+        current,
+        pendingAgentChatActivation.groupId,
+        pendingAgentChatActivation.paneId,
+      ),
+    );
+  }, [activeAgentChatPaneRequest, pendingAgentChatActivation]);
+
   function persistTerminalPanesForWorkRoot(
     workRootId: string,
     nextPanes: Record<string, TerminalPaneState>,
@@ -4713,6 +4863,136 @@ function WorkbenchShell({
         });
       })
       .catch(() => undefined);
+  }
+
+  // CONTRACT: mirrors `createTerminalPane`'s multi-instance registration
+  // pattern, but the pane itself is created synchronously and empty - the
+  // "open new agent tab" button never blocks on a harness/session picker.
+  // A tile click or history-entry pick (see `startAgentChatHarness` /
+  // `resumeAgentChatHistoryItem` below) later calls the stub (or, once
+  // `260620` lands, real) `activity.session.create`/`start` and attaches the
+  // resulting session to this same pane.
+  function createAgentChatPane() {
+    if (!workbenchModel) {
+      return;
+    }
+    const rootId = workbenchModel.root.id;
+    const serverRoute = workbenchModel.root.resourcePath.serverId;
+    const pane = createEmptyAgentChatPane(rootId, serverRoute);
+    setAgentChatPanes((current) => ({
+      ...current,
+      [pane.logicalKey]: pane,
+    }));
+    setAgentChatPaneOrderByGroup((current) =>
+      placeAgentChatPane(
+        current,
+        agentChatPanes,
+        pane,
+        workbenchGroups,
+        paneOrderByGroup,
+      ),
+    );
+    setFocusedAgentChatPaneId(pane.paneId);
+    setActiveAgentChatPaneRequest({
+      paneId: pane.paneId,
+      sequence: agentChatOpenSequence.current++,
+    });
+  }
+
+  function startAgentChatHarness(
+    pane: AgentChatPaneState,
+    harness: AgentChatHarness,
+  ) {
+    setAgentChatPanes((current) =>
+      current[pane.logicalKey]
+        ? {
+            ...current,
+            [pane.logicalKey]: markAgentChatPaneStarting(
+              current[pane.logicalKey],
+            ),
+          }
+        : current,
+    );
+    // Tile-launch semantics (fixture-review follow-up): the click actually
+    // invokes the create/start call path against whatever provider is wired
+    // in - the stub today, a real per-harness adapter once `260620` lands -
+    // it is never a UI-only state transition.
+    void stubStartNewAgentChatSession(pane.workRootId, harness, pane.serverRoute)
+      .then((session) => {
+        applyAgentChatSession(pane.logicalKey, session);
+      })
+      .catch((error) => {
+        setAgentChatPanes((current) =>
+          current[pane.logicalKey]
+            ? {
+                ...current,
+                [pane.logicalKey]: markAgentChatPaneError(
+                  current[pane.logicalKey],
+                  error instanceof Error
+                    ? error.message
+                    : "agent chat session failed to start",
+                ),
+              }
+            : current,
+        );
+      });
+  }
+
+  function resumeAgentChatHistoryItem(
+    pane: AgentChatPaneState,
+    item: ActivityItem,
+  ) {
+    setAgentChatPanes((current) =>
+      current[pane.logicalKey]
+        ? {
+            ...current,
+            [pane.logicalKey]: markAgentChatPaneStarting(
+              current[pane.logicalKey],
+            ),
+          }
+        : current,
+    );
+    void stubResumeAgentChatSession(item, pane.workRootId, pane.serverRoute)
+      .then((session) => {
+        applyAgentChatSession(pane.logicalKey, session);
+      })
+      .catch((error) => {
+        setAgentChatPanes((current) =>
+          current[pane.logicalKey]
+            ? {
+                ...current,
+                [pane.logicalKey]: markAgentChatPaneError(
+                  current[pane.logicalKey],
+                  error instanceof Error
+                    ? error.message
+                    : "agent chat session failed to resume",
+                ),
+              }
+            : current,
+        );
+      });
+  }
+
+  function applyAgentChatSession(
+    logicalKey: string,
+    session: AgentChatSessionView,
+  ) {
+    setAgentChatPanes((current) =>
+      current[logicalKey]
+        ? {
+            ...current,
+            [logicalKey]: attachAgentChatSession(current[logicalKey], session),
+          }
+        : current,
+    );
+  }
+
+  function closeAgentChatPane(pane: AgentChatPaneState) {
+    // Phase 1 sessions are stub/local-only (see `activitySessionStub.ts`) -
+    // there is no daemon-side resource to detach yet, unlike
+    // `closeTerminalPane`'s `closeTerminal(...)` call. A future real-adapter
+    // phase may need an equivalent close/detach call here.
+    setAgentChatPanes((current) => removeAgentChatPane(current, pane.logicalKey));
   }
 
   function updateTerminalSocketStatus(
@@ -4927,10 +5207,20 @@ function WorkbenchShell({
       closeAgentPane(pane.id, request.workRootId ?? selectedWorkRootId);
     } else if (pane.kind === "workRootActivity") {
       closeActivityPane(pane.id);
+    } else if (pane.kind === "agentChat") {
+      const agentChatPane = Object.values(agentChatPanes).find(
+        (candidate) => candidate.paneId === pane.id,
+      );
+      if (agentChatPane) {
+        closeAgentChatPane(agentChatPane);
+      }
     }
 
     if (closeDecision.terminateReservation) {
       setFocusedTerminalPaneId((current) =>
+        current === pane.id ? null : current,
+      );
+      setFocusedAgentChatPaneId((current) =>
         current === pane.id ? null : current,
       );
     }
@@ -5136,6 +5426,7 @@ function WorkbenchShell({
         onCommand={onCommand}
         onOpenActivity={openWorkRootActivityPane}
         onCreateTerminal={createTerminalPane}
+        onCreateAgentChat={createAgentChatPane}
       />
       {error ? (
         <InlineNotice tone="error" title="Refresh failed" detail={error} />
@@ -5145,14 +5436,21 @@ function WorkbenchShell({
       ) : null}
       {openWorkRootInstances.map(({ rootKey, editorGroups: rootGroups }) => {
         const isActiveRoot = rootKey === selectedWorkRootStateKey;
-        const effectiveActivePaneByGroup =
-          isActiveRoot && pendingReadOnlyActivation
-            ? selectWorkbenchPane(
-                activePaneByRoot[rootKey] ?? {},
-                pendingReadOnlyActivation.groupId,
-                pendingReadOnlyActivation.paneId,
-              )
-            : activePaneByRoot[rootKey] ?? {};
+        let effectiveActivePaneByGroup = activePaneByRoot[rootKey] ?? {};
+        if (isActiveRoot && pendingReadOnlyActivation) {
+          effectiveActivePaneByGroup = selectWorkbenchPane(
+            effectiveActivePaneByGroup,
+            pendingReadOnlyActivation.groupId,
+            pendingReadOnlyActivation.paneId,
+          );
+        }
+        if (isActiveRoot && pendingAgentChatActivation) {
+          effectiveActivePaneByGroup = selectWorkbenchPane(
+            effectiveActivePaneByGroup,
+            pendingAgentChatActivation.groupId,
+            pendingAgentChatActivation.paneId,
+          );
+        }
         return (
           <div
             key={rootKey}
@@ -5254,6 +5552,7 @@ function WorkbenchToolbar({
   onCommand,
   onOpenActivity,
   onCreateTerminal,
+  onCreateAgentChat,
 }: {
   server: ServerView;
   workspace: WorkspaceView;
@@ -5264,6 +5563,7 @@ function WorkbenchToolbar({
   onCommand: DashboardCommandDispatcher;
   onOpenActivity: () => void;
   onCreateTerminal: () => void;
+  onCreateAgentChat: () => void;
 }) {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const overflowRef = useRef<HTMLDivElement | null>(null);
@@ -5397,6 +5697,22 @@ function WorkbenchToolbar({
               buildTerminalCreateCommand(root.id, root.resourcePath.serverId),
               {
                 "terminal.create": onCreateTerminal,
+              },
+            );
+          }}
+        />
+        <ChromeIconButton
+          commandId="agentChat.create"
+          disabled={
+            root.activation !== "online" || root.availability !== "available"
+          }
+          icon={MessageSquarePlus}
+          label="Open new agent tab"
+          onClick={() => {
+            onCommand(
+              buildAgentChatCreateCommand(root.id, root.resourcePath.serverId),
+              {
+                "agentChat.create": onCreateAgentChat,
               },
             );
           }}
@@ -6292,6 +6608,9 @@ function buildWorkbenchEditorGroups(
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
+  agentChatPanes: AgentChatPaneState[],
+  agentChatPaneOrderByGroup: WorkbenchPaneOrder,
+  agentChatActions: AgentChatPaneActions,
   closedAgentPaneIds: readonly string[] = [],
   activityPaneOpen = false,
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
@@ -6322,6 +6641,13 @@ function buildWorkbenchEditorGroups(
     terminalPanes,
     terminalPaneOrderByGroup,
     terminalActions,
+    dashboardGroups,
+  );
+  const agentChatPanesByGroup = agentChatWorkbenchPanesByGroup(
+    root,
+    agentChatPanes,
+    agentChatPaneOrderByGroup,
+    agentChatActions,
     dashboardGroups,
   );
   const closedAgentPaneIdSet = new Set(closedAgentPaneIds);
@@ -6368,8 +6694,282 @@ function buildWorkbenchEditorGroups(
       ...(terminalPanesByGroup[group.id] ?? []),
       ...(activityPane && activityGroupId === group.id ? [activityPane] : []),
       ...(readOnlyPanesByGroup[group.id] ?? []),
+      // CONTRACT: agentChat panes must be spread in *after* the read-only
+      // file panes, not before. This array's index drives each pane's
+      // position within its Dockview group; a brand-new agentChat pane
+      // always sits at the *end* of this array (nothing else is inserted
+      // after it), so appending it here means every pre-existing pane in
+      // the group keeps its prior index. If agentChat panes were spliced in
+      // earlier (as they were originally), adding one shifts every
+      // already-open pane's index by one, forcing
+      // `syncDockviewWorkbench` to call `existingPanel.api.moveTo(...,
+      // { skipSetActive: true })` on those already-active panes -
+      // confirmed by instrumentation to reassert them as Dockview's active
+      // tab despite `skipSetActive`, which silently clobbers the new
+      // agentChat panel's `inactive: false` placement (see
+      // 260711-feat-ws-dashboard-agent-activity-chat-ui Phase 1). Keeping
+      // existing panes' indices stable avoids the moveTo call entirely.
+      ...(agentChatPanesByGroup[group.id] ?? []),
     ],
   }));
+}
+
+function placeAgentChatPane(
+  current: WorkbenchPaneOrder,
+  existingPanes: Record<string, AgentChatPaneState>,
+  pane: AgentChatPaneState,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
+): WorkbenchPaneOrder {
+  const placementState = agentChatPlacementState(
+    existingPanes,
+    groups,
+    workbenchPaneOrderByGroup,
+    current,
+  );
+  const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
+    surfaceKind: "agentChat",
+    logicalKey: surfaceLogicalKey("agentChat", pane.workRootId, pane.tabId),
+  });
+  if (decision.type !== "openNew") {
+    return current;
+  }
+  return {
+    ...current,
+    [decision.groupId]: [...(current[decision.groupId] ?? []), pane.paneId],
+  };
+}
+
+function agentChatPlacementState(
+  panesByLogicalKey: Record<string, AgentChatPaneState>,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
+  agentChatPaneOrderByGroup: WorkbenchPaneOrder,
+): WorkbenchPlacementState {
+  const firstGroupId = groups[0]?.id ?? "group-1";
+  return {
+    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
+    focusedGroupId: workbenchGroupId(firstGroupId),
+    attachments: Object.values(panesByLogicalKey).map((pane) => ({
+      attachmentId:
+        pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+      groupId: workbenchGroupId(
+        groupIdForPaneOrder(
+          pane.paneId,
+          workbenchPaneOrderByGroup,
+          agentChatPaneOrderByGroup,
+          firstGroupId,
+        ),
+      ),
+      surfaceKind: "agentChat",
+      logicalKey: surfaceLogicalKey("agentChat", pane.workRootId, pane.tabId),
+    })),
+  };
+}
+
+function agentChatWorkbenchPanesByGroup(
+  root: WorkRootView,
+  agentChatPanes: AgentChatPaneState[],
+  agentChatPaneOrderByGroup: WorkbenchPaneOrder,
+  actions: AgentChatPaneActions,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+): Record<string, WorkbenchPane[]> {
+  const panes = agentChatPanes
+    .filter(
+      (pane) =>
+        pane.workRootId === root.id &&
+        (pane.serverRoute ?? "server-local") === root.resourcePath.serverId,
+    )
+    .map((pane) => agentChatWorkbenchPane(pane, actions));
+  const paneById = new Map(panes.map((pane) => [pane.id, pane]));
+  const consumed = new Set<string>();
+  const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
+    groups.map((group) => [group.id, []]),
+  );
+  for (const groupId of groups.map((group) => group.id)) {
+    for (const paneId of agentChatPaneOrderByGroup[groupId] ?? []) {
+      const pane = paneById.get(paneId);
+      if (pane && !consumed.has(paneId)) {
+        byGroup[groupId].push(pane);
+        consumed.add(paneId);
+      }
+    }
+  }
+  for (const pane of panes) {
+    if (!consumed.has(pane.id))
+      (byGroup[groups[0]?.id ?? "group-1"] ??= []).push(pane);
+  }
+  return byGroup;
+}
+
+type AgentChatPaneActions = {
+  onClose: (pane: AgentChatPaneState) => void;
+  onStartHarness: (pane: AgentChatPaneState, harness: AgentChatHarness) => void;
+  onResumeHistoryItem: (pane: AgentChatPaneState, item: ActivityItem) => void;
+  onLoadHistory: (
+    workRootId: string,
+    serverRoute: string | null | undefined,
+  ) => Promise<{ items: ActivityItem[] }>;
+  isActivePane: (pane: AgentChatPaneState) => boolean;
+};
+
+function agentChatWorkbenchPane(
+  pane: AgentChatPaneState,
+  actions: AgentChatPaneActions,
+): WorkbenchPane {
+  const session = pane.session;
+  const state: ViewState = {
+    status: pane.starting ? "starting" : session ? "running" : "idle",
+    loading: pane.starting,
+    stale: false,
+    error: pane.error,
+  };
+  return {
+    id: pane.paneId,
+    kind: "agentChat",
+    category: "opened",
+    title: session
+      ? `${agentChatHarnessLabel[session.harness]}${session.title ? ` — ${session.title}` : ""}`
+      : "New agent chat",
+    detail: session ? session.activityId : "no conversation started yet",
+    state,
+    meta: session
+      ? [session.harness, closeContractLabel("agentChat")]
+      : ["empty", closeContractLabel("agentChat")],
+    contentRevision: session
+      ? `agentChat:${pane.paneId}:${session.activityId}`
+      : `agentChat:${pane.paneId}:empty`,
+    body: <AgentChatPaneBody key={pane.paneId} pane={pane} actions={actions} />,
+  };
+}
+
+function AgentChatPaneBody({
+  pane,
+  actions,
+}: {
+  pane: AgentChatPaneState;
+  actions: AgentChatPaneActions;
+}) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<ActivityItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(historyOpen, historyRef, () => setHistoryOpen(false));
+
+  if (pane.session) {
+    const { session } = pane;
+    return (
+      <div className="agent-chat-pane" data-agent-chat-pane-state="active">
+        <div className="agent-chat-pane-header">
+          <span className="agent-chat-pane-harness">
+            {agentChatHarnessLabel[session.harness]}
+          </span>
+          <span className="agent-chat-pane-title">{session.title}</span>
+        </div>
+        <div className="agent-chat-pane-transcript" data-testid="agent-chat-transcript">
+          {session.transcript.blocks.map((block) => (
+            <div className="agent-chat-transcript-block" key={block.cursor}>
+              {block.title ? (
+                <div className="agent-chat-transcript-block-title">
+                  {block.title}
+                </div>
+              ) : null}
+              <div className="agent-chat-transcript-block-text">
+                {block.text}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const openHistory = () => {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    void actions
+      .onLoadHistory(pane.workRootId, pane.serverRoute)
+      .then((response) => setHistoryItems(response.items))
+      .catch(() => setHistoryItems([]))
+      .finally(() => setHistoryLoading(false));
+  };
+
+  return (
+    <div className="agent-chat-pane" data-agent-chat-pane-state="empty">
+      <div className="agent-chat-pane-topbar" ref={historyRef}>
+        <button
+          className="agent-chat-resume-control"
+          data-command-id="agentChat.history.open"
+          type="button"
+          onClick={openHistory}
+        >
+          <History aria-hidden="true" size={15} strokeWidth={1.8} />
+          resume a past conversation
+        </button>
+        {historyOpen ? (
+          <div
+            className="agent-chat-history-popover"
+            data-testid="agent-chat-history-popover"
+            role="dialog"
+          >
+            {historyLoading ? (
+              <div className="agent-chat-history-empty">Loading…</div>
+            ) : historyItems.length === 0 ? (
+              <div className="agent-chat-history-empty">
+                No past conversations for this work root.
+              </div>
+            ) : (
+              <ul className="agent-chat-history-list">
+                {historyItems.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      className="agent-chat-history-item"
+                      data-history-item-id={item.id}
+                      type="button"
+                      onClick={() => {
+                        setHistoryOpen(false);
+                        actions.onResumeHistoryItem(pane, item);
+                      }}
+                    >
+                      <span className="agent-chat-history-item-harness">
+                        {item.source.harness ?? item.kind}
+                      </span>
+                      <span className="agent-chat-history-item-title">
+                        {item.label}
+                      </span>
+                      <span className="agent-chat-history-item-meta">
+                        {item.updatedAt ?? ""}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </div>
+      <div className="agent-chat-tiles" data-testid="agent-chat-tiles">
+        {agentChatHarnesses.map((harness) => (
+          <button
+            className="agent-chat-tile"
+            data-agent-chat-tile={harness}
+            disabled={pane.starting}
+            key={harness}
+            type="button"
+            onClick={() => actions.onStartHarness(pane, harness)}
+          >
+            <Bot aria-hidden="true" size={22} strokeWidth={1.6} />
+            <span>{agentChatHarnessLabel[harness]}</span>
+          </button>
+        ))}
+      </div>
+      {pane.error ? (
+        <div className="agent-chat-pane-error" role="alert">
+          {pane.error}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function placeTerminalSessions(

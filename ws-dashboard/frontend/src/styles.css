@@ -3645,3 +3645,158 @@ button.git-status-segment:disabled {
 .git-spinner {
   animation: git-spin 0.85s linear infinite;
 }
+
+/* Phase 1 shell for `260711-feat-ws-dashboard-agent-activity-chat-ui`'s
+   `"agentChat"` SurfaceKind — the empty-tab resume popup + start tiles, and
+   the minimal transcript placeholder for an already-started synthetic/real
+   session. Phase 2 owns the full messenger bubble layout. */
+.agent-chat-pane {
+  display: grid;
+  gap: var(--ws-space-07);
+  height: 100%;
+  padding: var(--ws-space-07);
+  overflow: auto;
+}
+
+.agent-chat-pane-topbar {
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.agent-chat-resume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ws-space-04);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-raised);
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-02);
+  padding: var(--ws-space-05) var(--ws-space-06);
+  cursor: pointer;
+}
+
+.agent-chat-resume-control:hover {
+  color: var(--ws-color-text-primary);
+}
+
+.agent-chat-history-popover {
+  position: absolute;
+  top: calc(100% + var(--ws-space-04));
+  left: 0;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 420px;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-raised);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  padding: var(--ws-space-06);
+}
+
+.agent-chat-history-empty {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-02);
+  padding: var(--ws-space-05);
+}
+
+.agent-chat-history-list {
+  list-style: none;
+  display: grid;
+  gap: var(--ws-space-04);
+  margin: 0;
+  padding: 0;
+}
+
+.agent-chat-history-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: var(--ws-space-05);
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-02);
+  padding: var(--ws-space-05);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-chat-history-item:hover,
+.agent-chat-history-item:focus-visible {
+  background: var(--ws-color-panel-hover, rgb(255 255 255 / 6%));
+}
+
+.agent-chat-history-item-harness {
+  color: var(--ws-color-text-secondary);
+  text-transform: uppercase;
+  font-size: var(--ws-font-size-01);
+}
+
+.agent-chat-history-item-meta {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+}
+
+.agent-chat-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ws-space-07);
+  margin-top: var(--ws-space-08, 32px);
+}
+
+.agent-chat-tile {
+  display: grid;
+  justify-items: center;
+  gap: var(--ws-space-05);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-raised);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-09, 40px) var(--ws-space-07);
+  font-size: var(--ws-font-size-03);
+  cursor: pointer;
+}
+
+.agent-chat-tile:hover:not(:disabled),
+.agent-chat-tile:focus-visible:not(:disabled) {
+  border-color: var(--ws-color-accent, var(--ws-color-border-strong));
+}
+
+.agent-chat-tile:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.agent-chat-pane-error {
+  color: var(--ws-color-error, #e05555);
+  font-size: var(--ws-font-size-02);
+}
+
+.agent-chat-pane-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ws-space-05);
+}
+
+.agent-chat-pane-harness {
+  text-transform: uppercase;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+}
+
+.agent-chat-pane-transcript {
+  display: grid;
+  gap: var(--ws-space-06);
+  overflow: auto;
+}
+
+.agent-chat-transcript-block {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  padding: var(--ws-space-06);
+}
+
+.agent-chat-transcript-block-title {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  margin-bottom: var(--ws-space-04);
+}

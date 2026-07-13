@@ -31,6 +31,7 @@ export type DashboardCommandId =
   | "fileExplorer.selectEntry"
   | "workbench.openActivity"
   | "terminal.create"
+  | "agentChat.create"
   | "resource.select"
   | "activity.selectItem"
   | "activity.transcript.loadMore"
@@ -92,6 +93,7 @@ export type DashboardCommandPayload =
   | { type: "fileExplorer.selectEntry"; workRootId: string; path: string }
   | { type: "workbench.openActivity"; workRootId: string }
   | { type: "terminal.create"; workRootId: string }
+  | { type: "agentChat.create"; workRootId: string }
   | { type: "activity.selectItem"; activityId: string }
   | { type: "activity.transcript.loadMore"; activityId: string }
   | { type: "activity.refresh"; workRootId: string }
@@ -453,6 +455,16 @@ export function buildTerminalCreateCommand(
   };
 }
 
+export function buildAgentChatCreateCommand(
+  workRootId: string,
+  serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
+): DashboardCommand {
+  return {
+    commandId: "agentChat.create",
+    payload: { type: "agentChat.create", serverRoute, workRootId },
+  };
+}
+
 export function buildActivitySelectItemCommand(
   activityId: string,
   serverRoute: string = LOCAL_DASHBOARD_SERVER_ROUTE,
@@ -631,6 +643,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Open WorkRoot Activity";
     case "terminal.create":
       return "Create terminal";
+    case "agentChat.create":
+      return "Open new agent tab";
     case "activity.selectItem":
       return "Select activity";
     case "activity.transcript.loadMore":

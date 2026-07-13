@@ -2530,6 +2530,64 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- 260711 Phase 1: agent chat tab shell + stub tile launch ------------
+  await test.step("open new agent tab and launch a stub harness session", async () => {
+    // CONTRACT: the top-right "open new agent tab" button always opens a new
+    // empty tab immediately (never a picker), the empty tab's "current
+    // conversation" control opens a resume popup listing stub cross-harness
+    // history scoped to this work root, and clicking a per-harness tile
+    // actually invokes the stub `activity.session.create`/`start` call path
+    // (not a UI-only state transition) - assert the resulting synthetic
+    // session/transcript renders.
+    await page.locator('[data-command-id="agentChat.create"]').click();
+    await expectDockviewWorkbench(page);
+    const agentChatTab = page
+      .getByRole("tab")
+      .filter({ hasText: "New agent chat" });
+    await expect(agentChatTab).toHaveCount(1);
+
+    const pane = page.locator(
+      '.workbench-pane[data-surface-kind="agentChat"] .workbench-pane-body',
+    );
+    await expect(pane).toBeVisible();
+    await expect(pane.locator('[data-testid="agent-chat-tiles"]')).toBeVisible();
+    const resumeControl = pane.locator(
+      '[data-command-id="agentChat.history.open"]',
+    );
+    await expect(resumeControl).toContainText("resume a past conversation");
+
+    // Resume popup: opens a cross-harness history list scoped to this work
+    // root, then dismisses without picking an entry (leaving the empty tab
+    // untouched for the tile-launch assertion below).
+    await resumeControl.click();
+    const historyPopover = pane.locator(
+      '[data-testid="agent-chat-history-popover"]',
+    );
+    await expect(historyPopover).toBeVisible();
+    await expect(
+      historyPopover.locator(".agent-chat-history-item"),
+    ).not.toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(historyPopover).toHaveCount(0);
+
+    // Tile launch: clicking a harness tile actually calls the stub
+    // activity.session.create/start and renders the resulting synthetic
+    // session/transcript - not a UI-only state flip.
+    await pane.locator('[data-agent-chat-tile="codex"]').click();
+    const transcript = pane.locator('[data-testid="agent-chat-transcript"]');
+    await expect(transcript).toBeVisible();
+    await expect(transcript).toContainText("stub provider");
+    await expect(pane.locator('[data-testid="agent-chat-tiles"]')).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByRole("tab").filter({ hasText: "Codex" }),
+    ).toHaveCount(1);
+    note(
+      "agent chat tab: open-new-tab button never blocked on a picker, resume popup rendered scoped stub history, and the Codex tile click invoked the stub session create/start path and rendered its synthetic transcript",
+    );
+  });
+
   // --- ANSI color rendering -----------------------------------------------
   await test.step("ANSI color rendering", async () => {
     await runInTerminal(page, commandPlan.ansiGreen("GATE-GREEN"));

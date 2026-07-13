@@ -87,6 +87,7 @@ assertDeepEqual(
   [
     "agent",
     "persistentTerminal",
+    "agentChat",
     "editor",
     "viewer",
     "diff",
@@ -122,6 +123,7 @@ assertEqual(
 );
 
 for (const kind of [
+  "agentChat",
   "editor",
   "viewer",
   "diff",
@@ -137,6 +139,25 @@ for (const kind of [
     `${kind} uses the opened row`,
   );
 }
+
+// CONTRACT: agentChat mirrors persistentTerminal's daemon-process lifecycle
+// (detach-on-close, confirm-before-close) despite using the "opened" row —
+// it is a multi-instance interactive session, not a reversible projection.
+assertEqual(
+  registry.agentChat.lifecycleOwner,
+  "daemonProcess",
+  "agentChat lifecycle owner",
+);
+assertEqual(
+  registry.agentChat.closePolicy,
+  "detachDaemonResource",
+  "agentChat close policy",
+);
+assertEqual(
+  registry.agentChat.closeConfirmationPolicy,
+  "confirmSessionClose",
+  "agentChat close confirmation policy",
+);
 
 // CONTRACT: Phase 3 must add behavior tests proving workRootActivity opens in
 // group 1 despite its opened row policy, duplicate logical keys focus the

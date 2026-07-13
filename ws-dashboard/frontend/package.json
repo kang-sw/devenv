@@ -15,6 +15,7 @@
     "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js && node ./node_modules/.tmp/route-tests/workbench/openRootLookup.test.js && node ./node_modules/.tmp/route-tests/workbench/layoutRestore.test.js",
     "test:work-root-files": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootFiles.test.js",
     "test:work-root-activity": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootActivity.test.js && node ./node_modules/.tmp/route-tests/activitySessionApi.test.js",
+    "test:agent-chat-tabs": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/agentChatSessions.test.js",
     "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminalCommandPlan.test.js && node ./node_modules/.tmp/route-tests/terminals.test.js && node ./node_modules/.tmp/route-tests/workbench/terminalVisualRestore.test.js && tsc -p tsconfig.e2e-tests.json && node ./node_modules/.tmp/e2e-tests/e2e/daemonHarness.test.js",
     "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test",
     "test:open-work-root": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/openWorkRoot.test.js",

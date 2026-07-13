@@ -1,6 +1,7 @@
 export type SurfaceKind =
   | "agent"
   | "persistentTerminal"
+  | "agentChat"
   | "editor"
   | "viewer"
   | "diff"
@@ -52,6 +53,23 @@ const defaultSurfaceRegistryEntries = {
     kind: "persistentTerminal",
     label: "Terminal",
     rowPolicy: "pinned",
+    lifecycleOwner: "daemonProcess",
+    closePolicy: "detachDaemonResource",
+    closeConfirmationPolicy: "confirmSessionClose",
+  },
+  // CONTRACT: agentChat is the per-click, multi-instance interactive Activity
+  // chat tab from `260711-feat-ws-dashboard-agent-activity-chat-ui` Phase 1 —
+  // distinct from the singleton `agent` kind bound to `mainInstance` and from
+  // the single read-only `workRootActivity` projection tab. Modeled on
+  // `persistentTerminal`'s multi-instance lifecycle (the only existing
+  // surface supporting several simultaneous independently-created/closed
+  // instances of the same kind), but uses the "opened" row policy (group 2
+  // placement) since chat tabs are ordinary closable tabs, not the pinned
+  // group-1 row terminal/agent occupy.
+  agentChat: {
+    kind: "agentChat",
+    label: "Agent Chat",
+    rowPolicy: "opened",
     lifecycleOwner: "daemonProcess",
     closePolicy: "detachDaemonResource",
     closeConfirmationPolicy: "confirmSessionClose",
