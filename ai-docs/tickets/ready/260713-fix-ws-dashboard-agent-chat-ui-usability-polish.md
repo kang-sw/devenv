@@ -100,6 +100,41 @@ push the pending bubble below the fold and confirm it scrolls into view;
 add a test asserting the pending bubble element's scroll-into-view call (or
 resulting visibility) fires when a message is queued mid-turn.
 
+### Result (1edd3bec) - 2026-07-13
+
+Implemented as net-new behavior, no existing precedent to mirror.
+
+- `AgentChatPaneBody` (`App.tsx`) gained `lastPendingBubbleRef` and
+  `pendingCountRef`, plus a `useEffect` on `[pendingMessages]` that calls
+  `scrollIntoView({ block: "nearest" })` on the newest pending bubble only
+  when `pendingMessages.length` increased versus the tracked count (a
+  genuine queue-growth event), staying silent on dequeue
+  (`onTurnComplete`)/revert (`revertPending`), which only shrink the array.
+  The ref is attached only to the last mapped pending-bubble element.
+  `submitPrompt`/`onTurnComplete`/`revertPending`/FIFO mechanics were not
+  touched, per the plan's guardrails.
+- Extended `dashboard-acceptance.spec.ts`'s mid-turn-queuing test step with
+  a viewport-shrink-then-`toBeInViewport()` assertion (Playwright's
+  outcome-level check) rather than monkey-patching `scrollIntoView` —
+  verifies the user-visible result, not the implementation mechanism.
+- Review: correctness clean; test clean with 1 informational minor (no
+  `try/finally` around the viewport shrink/restore — matches 4 pre-existing
+  instances of the same pattern elsewhere in the file, not a functional
+  defect in this codebase's single-monolithic-test execution model). No fix
+  cycle needed.
+- Verification: `npm run build` passed clean. The full e2e run hit the same
+  pre-existing, unrelated blocker documented in Phase 1's Result and filed
+  as `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` — the
+  test reviewer independently re-ran the suite and confirmed the identical
+  pre-existing failure point, then verified the new effect's correctness by
+  direct code trace (guard logic, ref-attachment timing, CSS scroll-chain
+  analysis) instead of a passing CI run.
+- Manual live-browser confirmation (nice-to-have per the ticket) was not
+  performed — no browser tool available to this agent.
+- No spec entry added: the underlying mid-turn message-queuing UI behavior
+  itself has no dedicated spec section yet; this phase is UI polish on an
+  already-shipped, currently-unspecced interaction.
+
 ### Phase 3: Add visible container styling to the resume-history popover
 
 The resume-session popover (listing cross-harness session history by
