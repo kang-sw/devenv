@@ -1,6 +1,6 @@
 ---
 title: "Bug: enter.proceed status-report route is dead code"
-sage-review-completeness: required
+sage-review-completeness: completed
 sage-review-design: completed
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "Prevent failed tickets.move promotion from mutating frontmatter"
 sage-review-design: completed
-sage-review-completeness: required
+sage-review-completeness: completed
 ---
 
 # Prevent failed tickets.move promotion from mutating frontmatter
