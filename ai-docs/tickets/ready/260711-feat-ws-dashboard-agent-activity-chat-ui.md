@@ -249,6 +249,60 @@ Verification boundary: frontend component tests for streaming markdown
 rendering and collapsible-block default state; browser-level acceptance
 evidence for a live streamed turn rendering incrementally.
 
+### Result
+
+Implemented per plan `ai-docs/.plans/2026-07/13-1118-chat-ui-streaming-phase2.md`
+on branch `impl/chat-ui-streami` (commits `8aa453b0`, fix-cycle `523bde3a`,
+base `f58c78c5`).
+
+Added messenger-style bubble layout (user right-aligned, agent/tool
+left-aligned), collapsible thinking blocks (default collapsed), per-turn/
+per-tool-use bubble separation via additive `TranscriptBlock.role`/`turnId`
+fields plus a new pure `groupTranscriptIntoBubbles` grouping helper, and a
+copy-button affordance on every bubble. Per the survey plan's reuse
+mandates, markdown rendering reuses `documentViewer.tsx`'s existing
+`unified`/`remark-parse`/`remark-gfm` pipeline (new `renderMarkdownFragment`)
+rather than a second parser, and tool-use summary/expand reuses
+`workRootActivity.ts`'s existing `transcriptBlockView`/`transcriptCompactSummary`
+heuristics verbatim. Since no real streaming backend exists yet, added
+stub-side chunked/growing-text emission (`activitySessionStub.ts`'s
+`stubBeginStreamingTurn`) wired through a new `mergeStreamingTranscriptBlocks`
+overlay function, so incremental rendering is demoable and testable without
+a live daemon. The additive `TranscriptBlock` schema change was confirmed
+non-breaking against every existing consumer by the fit reviewer.
+
+Review: partitioned correctness/fit/test. Fit and correctness came back
+clean on first pass (correctness noted 3 forward-looking Minors — turn-id
+grouping granularity, thinking-block interleaving fidelity, a
+`chatBlockRole` title-substring heuristic that could miscategorize once a
+real adapter lands — all latent against the not-yet-existing real adapter,
+none affecting current stub-backed behavior). Test partition raised 2
+Important findings: `mergeStreamingTranscriptBlocks` had zero unit coverage,
+and `groupTranscriptIntoBubbles`'s test suite was missing an empty-transcript
+case and a genuine multi-tick re-grouping stability sequence. Fixed via a
+dedicated fix-cycle commit (`523bde3a`): extracted `mergeStreamingTranscriptBlocks`
+out of `App.tsx` into a new pure, independently-testable module
+`agentChatStreamMerge.ts` (App.tsx's xterm/react-aria-components/lucide-react/
+CSS imports break the plain-tsc+node route-test harness), added unit tests
+covering cursor-overwrite collision and unmatched-append ordering, and added
+the missing empty-transcript and multi-tick stability cases. Re-review
+confirmed both Important findings resolved and separately confirmed the
+`App.tsx` extraction is a verified pure move (byte-identical body, no
+closure/type/import-cycle drift, unchanged call site) — no regression, no
+new findings.
+
+Verification: all registered frontend route-test npm scripts pass
+(including new `test:agent-chat-bubbles` and `test:agent-chat-stream-merge`);
+`npx tsc -b`/`npm run build` clean; `npm run test:browser` passes 2/2,
+including a new e2e step that polls the streaming bubble's text 8 times at
+180ms intervals and asserts at least one strictly-increasing length pair
+(genuine intermediate-state observation, not a before/after snapshot) plus
+final settled semantic markdown rendering.
+
+Not yet started: Phase 3 (resume/fork, mid-turn submission queuing, the
+load-bearing "resume from here" isolation requirement), Phase 4
+(server-scoped integration).
+
 ### Phase 3: Resume/fork and mid-turn submission queuing
 
 Wire the per-user-bubble "resume from here" (in-place rewind,
