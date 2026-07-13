@@ -217,11 +217,11 @@ pub async fn codex_session_control(
         CodexControlRequest::Fork { cut_cursor } => provider
             .fork(&activity_id, cut_cursor.as_deref())
             .await
-            .map(|(new_activity_id, echoed_cursor)| CodexControlResponse {
+            .map(|(new_activity_id, resolved_cut_cursor)| CodexControlResponse {
                 applied: true,
                 data: Some(serde_json::json!({
                     "activityId": new_activity_id,
-                    "cutCursor": echoed_cursor,
+                    "cutCursor": resolved_cut_cursor,
                 })),
             }),
     };

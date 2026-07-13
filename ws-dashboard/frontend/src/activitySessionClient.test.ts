@@ -289,6 +289,27 @@ assertEqual(
 assertEqual(forkResult.cutCursor, "3", "forkActivitySession surfaces the daemon-echoed cutCursor");
 
 calls.length = 0;
+// 260713 Phase 3 correctness fix: when the daemon's cut-point resolution
+// fails (stale/out-of-range cursor), it now returns `data.cutCursor: null`
+// to signal an unfiltered full-thread fork actually happened. The client
+// must surface that `null` as-is, NOT fall back to echoing the request's
+// original (unresolved) `cutCursor` — doing so would silently re-introduce
+// the "claims a cut point was honored when it wasn't" bug this contract
+// fix exists to close.
+nextResponses = [{ applied: true, data: { activityId: "agent.codex:forked-2", cutCursor: null } }];
+const forkResultUnresolvedCursor = await forkActivitySession({
+  workRootId: "root-a",
+  activityId: "agent.codex:1",
+  cutCursor: "stale-cursor",
+  serverRoute: "server-local",
+});
+assertEqual(
+  forkResultUnresolvedCursor.cutCursor,
+  null,
+  "forkActivitySession trusts the daemon's null cutCursor rather than echoing an unresolved request cursor",
+);
+
+calls.length = 0;
 // Defensive fallback: a response missing `data` entirely (a shape the real
 // handler should never produce) must still degrade to echoing the request
 // rather than throwing or returning `undefined` fields.

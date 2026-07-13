@@ -320,8 +320,20 @@ export async function forkActivitySession(
   const data = result.data as { activityId?: unknown; cutCursor?: unknown } | undefined;
   const activityId =
     typeof data?.activityId === "string" ? data.activityId : request.activityId;
+  // Only fall back to the request's own `cutCursor` when `data` itself is
+  // missing entirely (the malformed-response defensive case). When `data` is
+  // present, trust its `cutCursor` as-is — including a legitimate `null`,
+  // which the daemon now returns when the requested cut point failed to
+  // resolve to a known turn (full-thread fork). Falling back to the request's
+  // raw `cutCursor` in that case would silently re-introduce the "echoes the
+  // request instead of the actually-applied cut" bug this contract exists to
+  // fix (260713 Phase 3 review).
   const cutCursor =
-    typeof data?.cutCursor === "string" ? data.cutCursor : request.cutCursor ?? null;
+    data === undefined
+      ? request.cutCursor ?? null
+      : typeof data.cutCursor === "string"
+        ? data.cutCursor
+        : null;
   return { activityId, cutCursor };
 }
 

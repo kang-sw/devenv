@@ -1224,7 +1224,11 @@ impl CodexAppServerProvider {
     /// not need to be alive), and sharing one connection across two threads
     /// would require demultiplexing notifications by `threadId`, which this
     /// crate's one-connection-per-projector pump does not support. Returns
-    /// `(new_activity_id, echoed_cut_cursor)`.
+    /// `(new_activity_id, resolved_last_turn_id)`, where the second element is
+    /// the turn id actually passed to `thread/fork` (i.e. `None` when
+    /// `cut_cursor` failed to resolve to a known turn, signalling that the
+    /// fork is an unfiltered full-thread fork rather than echoing back the
+    /// caller's original, possibly-unresolvable `cut_cursor`).
     pub async fn fork(
         &self,
         activity_id: &str,
@@ -1281,7 +1285,7 @@ impl CodexAppServerProvider {
         });
         self.registry.insert(forked_session)?;
 
-        Ok((forked_activity_id, cut_cursor.map(str::to_owned)))
+        Ok((forked_activity_id, last_turn_id))
     }
 }
 
