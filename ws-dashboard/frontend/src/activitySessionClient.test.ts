@@ -16,7 +16,7 @@ import {
   startNewAgentChatSession,
   steerActivitySession,
 } from "./activitySessionClient.js";
-import type { ActivityItem } from "./workRootActivity.js";
+import type { ActivityItem, TranscriptBlock } from "./workRootActivity.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -319,80 +319,205 @@ assertEqual(
   "prompt send hits the server-scoped codex prompt route for a non-local serverRoute",
 );
 
-// --- beginRealStreamingTurn: single transcript fetch, no re-send -----------
+// --- beginRealStreamingTurn: poll loop (Phase 2) ---------------------------
+// Rewritten from Phase 1's one-shot fetch to a poll loop driven by an
+// injectable timer environment (mirroring `gitToolbar.ts`'s
+// `GitRefreshSchedulerEnvironment`), so these tests manually tick the poll
+// instead of waiting on real intervals.
+
+function createDeferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function makeManualPollEnv() {
+  let listener: (() => void) | null = null;
+  let nextHandle = 0;
+  const clearedHandles: number[] = [];
+  return {
+    env: {
+      setInterval: (fn: () => void) => {
+        listener = fn;
+        nextHandle += 1;
+        return nextHandle;
+      },
+      clearInterval: (handle: number) => {
+        clearedHandles.push(handle);
+      },
+    },
+    tick: () => {
+      if (!listener) throw new Error("interval listener was not registered");
+      listener();
+    },
+    clearedHandles,
+  };
+}
+
+const pollPartialFixture = {
+  ...transcriptFixture,
+  live: true,
+  blocks: [
+    { cursor: "0", timestamp: null, renderKind: "markdown", title: null, text: "user prompt", data: null, degraded: false },
+    {
+      cursor: "1",
+      timestamp: null,
+      renderKind: "markdown",
+      title: null,
+      text: "agent reply, still streaming",
+      data: null,
+      degraded: false,
+    },
+  ],
+};
+
+const pollFinalFixture = {
+  ...transcriptFixture,
+  live: false,
+  blocks: [
+    { cursor: "0", timestamp: null, renderKind: "markdown", title: null, text: "user prompt", data: null, degraded: false },
+    {
+      cursor: "1",
+      timestamp: null,
+      renderKind: "markdown",
+      title: null,
+      text: "agent reply, now complete",
+      data: null,
+      degraded: false,
+    },
+    { cursor: "2", timestamp: null, renderKind: "markdown", title: null, text: "tool result", data: null, degraded: false },
+  ],
+};
+
+// Two polls to completion: first poll is live (partial), manual tick drives
+// the second poll which observes live:false and stops the loop.
 
 calls.length = 0;
-nextResponses = [transcriptFixture];
-await new Promise<void>((resolve) => {
-  beginRealStreamingTurn(
-    "root-a",
-    "codex",
-    "agent.codex:1",
-    "server-local",
-    (blocks) => {
-      assertEqual(blocks.length, 1, "beginRealStreamingTurn hands the fetched transcript's blocks to onUpdate");
-    },
-    () => {
-      resolve();
-    },
-  );
-});
-assertEqual(calls.length, 1, "beginRealStreamingTurn issues exactly one transcript fetch, no prompt POST");
-assertEqual(calls[0]!.method, "GET", "beginRealStreamingTurn's single call is the transcript GET");
+nextResponses = [pollPartialFixture, pollFinalFixture];
+const twoPollEnv = makeManualPollEnv();
+const onUpdateCalls: TranscriptBlock[][] = [];
+const firstUpdate = createDeferred();
+const completeAfterTwoPolls = createDeferred();
+let updateCount = 0;
+beginRealStreamingTurn(
+  "root-a",
+  "codex",
+  "agent.codex:1",
+  "server-local",
+  (blocks) => {
+    updateCount += 1;
+    onUpdateCalls.push([...blocks]);
+    if (updateCount === 1) firstUpdate.resolve();
+  },
+  () => completeAfterTwoPolls.resolve(),
+  undefined,
+  twoPollEnv.env,
+);
+await firstUpdate.promise;
+assertEqual(calls.length, 1, "beginRealStreamingTurn fires one immediate poll at call time, before any interval tick");
+assertEqual(calls[0]!.method, "GET", "the immediate poll's call is the transcript GET");
 assertEqual(
   calls[0]!.url,
   "/api/dashboard/work-roots/root-a/activity/codex-sessions/agent.codex%3A1/transcript",
   "beginRealStreamingTurn fetches the local codex transcript route",
 );
+assertEqual(onUpdateCalls[0]!.length, 2, "the first poll (lastSeenLength 0) hands onUpdate the full initial block array");
+
+twoPollEnv.tick();
+await completeAfterTwoPolls.promise;
+assertEqual(calls.length, 2, "the manual interval tick issues a second transcript fetch");
+assertEqual(onUpdateCalls.length, 2, "the second poll calls onUpdate again");
+assertEqual(
+  onUpdateCalls[1]!.length,
+  2,
+  "the second poll (lastSeenLength 2) hands onUpdate only the re-included tail block plus the newly appended block, not the full 3-block array",
+);
+assertEqual(onUpdateCalls[1]![0]!.cursor, "1", "the re-included tail block is cursor 1 (its text grew since the last poll)");
+assertEqual(onUpdateCalls[1]![1]!.cursor, "2", "the newly appended block is cursor 2");
+assertEqual(updateCount, 2, "onComplete fires exactly once, after the live:false poll, not before");
+assertEqual(twoPollEnv.clearedHandles.length, 1, "the interval is cleared once the poll loop observes live:false");
+
+// A poll whose immediate first fetch already observes live:false stops
+// after just that one poll, no interval tick needed — also covers the
+// server-scoped URL shape for a non-local serverRoute.
 
 calls.length = 0;
-nextResponses = [transcriptFixture];
-await new Promise<void>((resolve) => {
-  beginRealStreamingTurn(
-    "root-a",
-    "codex",
-    "agent.codex:1",
-    "server-remote-1",
-    () => undefined,
-    () => {
-      resolve();
-    },
-  );
-});
+nextResponses = [pollFinalFixture];
+const immediateCompleteEnv = makeManualPollEnv();
+const immediateComplete = createDeferred();
+beginRealStreamingTurn(
+  "root-a",
+  "codex",
+  "agent.codex:1",
+  "server-remote-1",
+  () => undefined,
+  () => immediateComplete.resolve(),
+  undefined,
+  immediateCompleteEnv.env,
+);
+await immediateComplete.promise;
+assertEqual(calls.length, 1, "a poll that immediately observes live:false stops after just the initial poll");
 assertEqual(
   calls[0]!.url,
   "/api/dashboard/servers/server-remote-1/work-roots/root-a/activity/codex-sessions/agent.codex%3A1/transcript",
   "beginRealStreamingTurn fetches the server-scoped codex transcript route for a non-local serverRoute",
 );
+assertEqual(immediateCompleteEnv.clearedHandles.length, 1, "the interval is cleared after the single completing poll");
+
+// stop() called externally (e.g. simulating unmount) clears the interval so
+// no further polls are scheduled.
+
+calls.length = 0;
+nextResponses = [pollPartialFixture, pollPartialFixture, pollPartialFixture];
+const stopEnv = makeManualPollEnv();
+const firstUpdateBeforeStop = createDeferred();
+const stopHandle = beginRealStreamingTurn(
+  "root-a",
+  "codex",
+  "agent.codex:1",
+  "server-local",
+  () => firstUpdateBeforeStop.resolve(),
+  () => undefined,
+  undefined,
+  stopEnv.env,
+);
+await firstUpdateBeforeStop.promise;
+assertEqual(calls.length, 1, "the immediate poll fires once before stop() is called");
+stopHandle.stop();
+assertEqual(stopEnv.clearedHandles.length, 1, "stop() clears the scheduled interval, matching the live:false completion path");
 
 // --- beginRealStreamingTurn: transcript fetch failure -> onError ----------
+// Error on the first (immediate) poll still calls onError, then onComplete,
+// and clears the interval so no further polls are attempted.
 
 calls.length = 0;
 nextResponses = [{ __httpError: 500, error: "daemon unavailable" }];
 let capturedError: unknown;
-let completeCalledAfterError = false;
-await new Promise<void>((resolve) => {
-  beginRealStreamingTurn(
-    "root-a",
-    "codex",
-    "agent.codex:1",
-    "server-local",
-    () => {
-      throw new Error("onUpdate must not be called when the transcript fetch fails");
-    },
-    () => {
-      completeCalledAfterError = true;
-      resolve();
-    },
-    (error) => {
-      capturedError = error;
-    },
-  );
-});
+let updateCalledAfterError = false;
+const errorEnv = makeManualPollEnv();
+const completeAfterError = createDeferred();
+beginRealStreamingTurn(
+  "root-a",
+  "codex",
+  "agent.codex:1",
+  "server-local",
+  () => {
+    updateCalledAfterError = true;
+  },
+  () => completeAfterError.resolve(),
+  (error) => {
+    capturedError = error;
+  },
+  errorEnv.env,
+);
+await completeAfterError.promise;
 assert(capturedError instanceof Error, "beginRealStreamingTurn's onError receives the transcript fetch failure");
 assertEqual(
   (capturedError as Error).message,
   "daemon unavailable",
   "onError receives the error message from the failed transcript response body",
 );
-assert(completeCalledAfterError, "onComplete still fires after onError, per the finally() chain");
+assert(!updateCalledAfterError, "onUpdate must not be called when the transcript fetch fails");
+assertEqual(errorEnv.clearedHandles.length, 1, "a poll error clears the interval so no further polls are attempted");
