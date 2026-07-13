@@ -187,6 +187,76 @@ multi-poll stability, mirroring `agentChatStreamMerge.test.ts`'s existing
 coverage style; manual check that a real send against a stub-free session
 renders incrementally rather than only on full completion.
 
+### Result (40c343b2/0a57dec4/e082bbd2) - 2026-07-13
+
+Implemented on `impl/chat-adapter-wi` (commits `40c343b2` feat, `0a57dec4`
+fix cycle 1, `e082bbd2` fix cycle 2; range `efaec81d..e082bbd2`).
+
+Rewrote `activitySessionClient.ts`'s `beginRealStreamingTurn` from Phase 1's
+one-shot fetch into a real poll loop against the existing `transcript` GET
+endpoint: polls on a fixed interval, stops on the daemon-reported `live:
+false` signal (backed by `is_turn_active()` in both `codex_app_server.rs`
+and `claude_cli.rs`), and diffs each poll against the previously-seen block
+count via a new `blocksSincePolledLength` helper (colocated with
+`mergeStreamingTranscriptBlocks` in `agentChatStreamMerge.ts`) so only the
+re-included in-progress tail block plus newly appended blocks are handed to
+`onUpdate`, not the full transcript every tick. Timer scheduling is
+injectable (mirrors `gitToolbar.ts`'s `GitRefreshSchedulerEnvironment`
+pattern) so tests can manually tick polls instead of waiting on real
+intervals — required since this test suite has no fake-timer framework. No
+`App.tsx` change was needed: its call site already merges any block slice
+size by cursor. No new SSE/websocket endpoint was added; `auth.rs`'s
+`authenticate_websocket_upgrade` seam stays reserved future work per the
+ticket's explicit non-goal.
+
+Reviewed (partitioned correctness/fit/test), two fix cycles, all re-reviews
+clean:
+- First pass: fit clean. Correctness 1 Important — `onComplete`/`onError`
+  could fire twice under overlapping in-flight polls (a lagging poll
+  resolving after the first's terminal branch had already fired), causing
+  double FIFO dequeue/double turn start at the `App.tsx` call site; the
+  `stopped` flag was only set by external `stop()`, not by either terminal
+  branch. Test 1 Important — no coverage for the `delta.length > 0`
+  skip-empty-slice guard.
+- Fix cycle 1 (`0a57dec4`): set `stopped = true` in both the completion and
+  error terminal branches before invoking callbacks, so a lagging poll's own
+  terminal branch early-returns via the pre-existing `if (stopped) return;`
+  guard; added a regression test driving two genuinely overlapping in-flight
+  polls via a deferred-promise fetch stub (the file's queue-based mock can
+  only resolve in call order); added a "no-growth poll" test for the
+  `delta.length > 0` guard, plus two optional Minor test-quality fixes
+  (tautology-to-oracle replacement, post-`stop()` guard exercise).
+- Re-review surfaced a new Critical test finding: the "no-growth" test from
+  fix cycle 1 was itself a false positive — it asserted a same-length,
+  non-empty re-poll skips `onUpdate`, but `blocksSincePolledLength` always
+  re-includes the tail block by design (`start = Math.max(0, lastSeenLength
+  - 1)`), so that scenario actually still fires `onUpdate` with a 1-element
+  delta; the test only passed because it read its assertion after too few
+  microtask flushes, before the mocked fetch chain had actually settled a
+  second time.
+- Fix cycle 2 (`e082bbd2`): rescoped the test to the guard's real
+  reachability condition (an empty-`blocks` first poll, `lastSeenLength ===
+  0`), and replaced the fixed microtask-count flush with a macrotask
+  `setTimeout` drain. Verified load-bearing by a guard-removal sanity check
+  (temporarily disabling the `delta.length > 0` guard made the test fail as
+  expected; restoring it made the test pass again) — independently repeated
+  by the re-reviewer, not just claimed by the implementer.
+- Re-review: all three partitions accepted the fixes as correct and
+  complete; clean across correctness/fit/test.
+
+Tests: `npm run test:agent-chat-stream-merge`, `npm run test:agent-chat-client`,
+`npm run build`, `npm run test:agent-chat-tabs`, `npm run test:agent-chat-bubbles`
+— all green at final commit `e082bbd2`.
+
+Deviations: none structural. The exact poll interval (1500ms) was left to
+implementer judgment per the plan.
+
+Not executed (explicitly deferred, matching the ticket's own framing):
+the plan's manual "real daemon" verification step (send a message against a
+live Codex/Claude session, confirm incremental rendering) — no live daemon
+session was available in this sandbox; flagged for a human/manual check
+before Phase 4's end-to-end walkthrough.
+
 ### Phase 3: Missing capability control variants (scoped by harness tiering)
 
 Add the capability control variants needed for real MVP interactions
