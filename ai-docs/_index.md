@@ -451,16 +451,10 @@ dropped tickets live in hidden archive dirs and git history.
 - `260713-workset-workflow-dogfood-bugs` (todo, workset) - non-hierarchical
   board draining the idea-stage workflow/tooling dogfood bug backlog
   accumulated since the 260605 pivot. Two dropped as resolved by unrelated
-  prior work, one done (`260630`), one promoted to `ready` below, two
+  prior work, two done (`260630`, `260713-bug-tickets-move...`), two
   blocked pending further investigation/decision (`260627`,
   `260710-bug-project-index...`), two backlogged by user decision
   (`260703`, and `260627` shares that backlog reasoning).
-- `260713-bug-tickets-move-error-mutates-frontmatter` (ready, bug) - make
-  `tickets.move`'s blocked/failed-promotion self-healing frontmatter write
-  surface a loud, explicit partial-mutation notice in the MCP result
-  instead of silently leaving a stale posture behind; spec addressing
-  deferred to doc closeout (`mcp-tools.md`, notice shape not yet settled).
-  Sage review completed.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

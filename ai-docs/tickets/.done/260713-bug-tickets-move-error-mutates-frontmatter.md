@@ -2,6 +2,7 @@
 title: "Prevent failed tickets.move promotion from mutating frontmatter"
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-13
 ---
 
 # Prevent failed tickets.move promotion from mutating frontmatter
@@ -66,6 +67,35 @@ a targeted regression reproducing the 2026-07-13 scenario (blocked `to:
 "ready"` move on a legacy-schema ticket) asserts the notice appears in the
 tool result; `go test ./...` passes.
 
+### Result (35a52688) - 2026-07-13
+
+Implemented as designed: `TicketMutateResult` gained a `PartialMutationNotice`
+string field, populated in `TicketsMove`'s error branch whenever
+`prepareSageReviewForUpwardMove` already wrote frontmatter before the move
+blocked/failed (reusing the existing `sageReviewPostureTip` formatter).
+`server.go`'s `tickets.move` error branch special-cases this via
+`toolErrorTextResponse` instead of the shared generic-error path, so the
+notice survives into the MCP tool result text while preserving `isError:
+true`.
+
+Deviation: used a plain `string` field rather than the plan's illustrative
+`*sageReviewPostures` pointer, since `sageReviewPostures` is unexported in
+`wsdoc` — a pre-rendered string avoids leaking an internal type across the
+package boundary. Judged a legitimate implementation-detail choice by fit
+review, not a scope change.
+
+`TicketsClose`'s analogous write-then-possibly-fail shape stays explicitly
+out of scope, confirmed untouched by fit review.
+
+Verification: new regression tests at both the `wsdoc` and MCP layers
+reproduce the 2026-07-13 legacy-schema blocked-move scenario and assert the
+notice's presence; both fail against pre-fix code (non-vacuous) and pass
+after the fix. `go test ./...` passes across all packages. Correctness and
+fit reviews both returned clean.
+
+`ai-docs/spec/mcp-tools.md`'s `{#260620-ticket-move-tool}` anchor was updated
+in the same change to document the actual notice shape/text.
+
 ## Spec Impact
 
 `ai-docs/spec/mcp-tools.md` documents `tickets.move`'s result contract and
@@ -74,3 +104,6 @@ settled during implementation. Deferred to doc closeout rather than
 contract-first, since the shape is explicitly open per the design review
 (see Implementation notes above) and this is failure-path text, not a new
 externally-relied-on schema.
+
+Addressed: see Result above; `{#260620-ticket-move-tool}` now documents the
+notice.
