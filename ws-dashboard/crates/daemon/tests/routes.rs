@@ -14062,6 +14062,146 @@ async fn codex_session_prompt_and_transcript_round_trip_local() {
     }
 }
 
+/// Phase 4 (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`)
+/// coverage gap: `codex_session_prompt_and_transcript_round_trip_local` above
+/// only exercises a single prompt + a single transcript GET. This test drives
+/// the actual `live: true -> live: false` multi-poll sequence
+/// `beginRealStreamingTurn` (`activitySessionClient.ts`) depends on: prompt ->
+/// poll #1 (live, initial blocks) -> ingest more transcript content directly
+/// into the held session's projector (simulating the harness pushing further
+/// turn progress between polls) -> poll #2 (still live, more blocks) ->
+/// ingest a `turn/completed` -> poll #3 (`live: false`, final block count).
+/// `insert_session_for_tests` returns the live `Arc<CodexSession>` handle
+/// precisely so a test can reach into `session.projector` between polls
+/// without any new test infrastructure.
+#[tokio::test]
+async fn codex_session_send_receive_multi_poll_e2e() {
+    let registry = CodexProviderRegistry::default();
+    let connection = spawn_codex_reply_peer(serde_json::json!({ "turn": { "id": "turn-secret" } }));
+    // Seed the projector with a `turn/started` only (no item content yet) so
+    // it models the state right after the prompt was accepted and the
+    // harness began working — `is_turn_active()` is true, but no blocks
+    // exist yet. Real `turn/started` delivery happens over the connection's
+    // notification stream in production; the test drives the projector
+    // directly (as `insert_session_for_tests`'s own doc comment describes)
+    // since the scripted reply peer above only answers RPC requests, not
+    // notifications.
+    let mut projector = CodexProjector::new();
+    projector.ingest_line(r#"{"method":"turn/started","params":{"turn":{"id":"turn-secret"}}}"#);
+    let session = registry
+        .insert_session_for_tests(
+            "server-local",
+            "codex:multipoll",
+            WorkRootId::from("codex-wr"),
+            "thread-secret-id",
+            connection,
+            projector,
+        )
+        .expect("seed codex session");
+
+    let mut state = app_state();
+    state.codex_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    // POST prompt -> the scripted peer acknowledges turn/start.
+    let prompt_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:multipoll/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "text": "do a multi-poll thing" }).to_string(),
+                ))
+                .expect("prompt request"),
+        )
+        .await
+        .expect("prompt response");
+    assert_eq!(prompt_response.status(), StatusCode::OK);
+
+    // Poll #1: the seeded `turn/started` makes the session live; no item
+    // content has arrived yet.
+    let (status, body) = fetch_work_root_activity_path(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:multipoll/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("poll #1 transcript JSON");
+    assert_eq!(transcript["live"], true, "poll #1: turn/started was seeded, no terminal event ingested yet");
+    assert_eq!(
+        transcript["blocks"].as_array().expect("poll #1 blocks array").len(),
+        0,
+        "poll #1: no item content ingested yet"
+    );
+
+    // Between poll #1 and #2: the harness pushes mid-turn progress.
+    {
+        let projector_handle = session.projector();
+        let mut projector = projector_handle.lock().await;
+        projector.ingest_line(
+            r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"assistant-item-1","text":"working on it"}}}"#,
+        );
+    }
+
+    // Poll #2: still live, now has the mid-turn block.
+    let (status, body) = fetch_work_root_activity_path(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:multipoll/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("poll #2 transcript JSON");
+    assert_eq!(transcript["live"], true, "poll #2: turn/started was ingested but no terminal event yet");
+    let blocks = transcript["blocks"].as_array().expect("poll #2 blocks array");
+    assert_eq!(blocks.len(), 1, "poll #2: one mid-turn block ingested since poll #1");
+    assert!(body.contains("working on it"), "poll #2 missing mid-turn block text: {body}");
+
+    // Between poll #2 and #3: the harness pushes a second block then the
+    // terminal turn/completed event.
+    {
+        let projector_handle = session.projector();
+        let mut projector = projector_handle.lock().await;
+        projector.ingest_line(
+            r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"assistant-item-2","text":"done with it"}}}"#,
+        );
+        projector.ingest_line(
+            r#"{"method":"turn/completed","params":{"turn":{"id":"turn-secret","status":"completed"}}}"#,
+        );
+    }
+
+    // Poll #3: terminal event observed -> live:false, final block count.
+    let (status, body) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        "/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:multipoll/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("poll #3 transcript JSON");
+    assert_eq!(transcript["live"], false, "poll #3: turn/completed flips is_turn_active to false");
+    let blocks = transcript["blocks"].as_array().expect("poll #3 blocks array");
+    assert_eq!(blocks.len(), 2, "poll #3: both mid-turn blocks present, turn/completed adds no block itself");
+    assert!(body.contains("working on it"), "poll #3 missing first block text: {body}");
+    assert!(body.contains("done with it"), "poll #3 missing second block text: {body}");
+    for forbidden in [
+        "thread-secret-id",
+        "assistant-item-1",
+        "assistant-item-2",
+        "turn-secret",
+        "threadId",
+        "sessionId",
+    ] {
+        assert!(!body.contains(forbidden), "multi-poll transcript leaked {forbidden}: {body}");
+    }
+}
+
 #[tokio::test]
 async fn codex_session_control_skills_projects_without_raw_json() {
     let registry = CodexProviderRegistry::default();
@@ -14484,6 +14624,151 @@ async fn claude_session_prompt_and_transcript_round_trip_local() {
         "cwd",
     ] {
         assert!(!body.contains(forbidden), "transcript leaked {forbidden}: {body}");
+    }
+}
+
+/// Phase 4 (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`)
+/// coverage gap, Claude counterpart to
+/// `codex_session_send_receive_multi_poll_e2e`. Drives a real multi-poll
+/// `live: true -> live: false` transition through
+/// `claude_activity_transcript` by locking the held `Arc<ClaudeSession>`
+/// handle's projector between polls, using lines already captured and
+/// validated from a real spawned `claude` binary in
+/// `ws-dashboard/crates/core/tests/fixtures/claude-cli-turn.ndjson` (see
+/// `claude_projection.rs`'s test suite) rather than hand-writing new
+/// stream-json — per `ClaudeProjector::ingest_result`
+/// (`claude_projection.rs:299-301`), only a `result`-typed event flips
+/// `is_turn_active()` to `false`; an `assistant` event flips it to `true`.
+#[tokio::test]
+async fn claude_session_send_receive_multi_poll_e2e() {
+    // Real-capture fixture lines (see module doc comment above): index 0 is
+    // `system/init` (ignored, protocol-control), 1 is the first turn's
+    // `assistant` "HELLO" text, 3 is that turn's terminal `result`, 4 is a
+    // second turn's `system/init`, 5-6 are two `assistant` events (text, then
+    // a `tool_use`), 7 is the matching `user` `tool_result`.
+    let fixture_lines: Vec<&str> = include_str!("../../core/tests/fixtures/claude-cli-turn.ndjson")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert!(fixture_lines.len() >= 8, "claude-cli-turn.ndjson fixture shrank under the lines this test indexes");
+
+    let registry = ClaudeProviderRegistry::default();
+    // Seed the projector with the fixture's first `assistant` event so the
+    // session starts mid-turn (live, one block) right after the prompt was
+    // accepted — mirroring the Codex counterpart's `turn/started` pre-seed.
+    let mut projector = ClaudeProjector::new();
+    projector.ingest_line(fixture_lines[1]);
+    let connection = spawn_claude_reply_peer("ack");
+    let session = registry
+        .insert_session_for_tests(
+            "server-local",
+            "claude:multipoll",
+            WorkRootId::from("claude-wr"),
+            "019f5040-secret-session-id",
+            PathBuf::from("/tmp/claude-route-multipoll-cwd"),
+            connection,
+            projector,
+        )
+        .expect("seed claude session");
+
+    let mut state = app_state();
+    state.claude_sessions = registry.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    // POST prompt -> the scripted peer acknowledges with an assistant + result
+    // (irrelevant to the projector state driven directly below).
+    let prompt_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:multipoll/prompt")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "text": "do a multi-poll thing" }).to_string(),
+                ))
+                .expect("prompt request"),
+        )
+        .await
+        .expect("prompt response");
+    assert_eq!(prompt_response.status(), StatusCode::OK);
+
+    // Poll #1: the seeded `assistant` event makes the session live with one
+    // block, no terminal `result` observed yet.
+    let (status, body) = fetch_work_root_activity_path(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:multipoll/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("poll #1 transcript JSON");
+    assert_eq!(transcript["live"], true, "poll #1: assistant event seeded, no result event ingested yet");
+    assert_eq!(
+        transcript["blocks"].as_array().expect("poll #1 blocks array").len(),
+        1,
+        "poll #1: one assistant block ingested"
+    );
+    assert!(body.contains("HELLO"), "poll #1 missing seeded assistant text: {body}");
+
+    // Between poll #1 and #2: the harness pushes further mid-turn progress
+    // (a second assistant text block, then a tool_use block) from the
+    // fixture's second captured turn.
+    {
+        let projector_handle = session.projector();
+        let mut projector = projector_handle.lock().await;
+        projector.ingest_line(fixture_lines[5]);
+        projector.ingest_line(fixture_lines[6]);
+    }
+
+    // Poll #2: still live, now has the two additional mid-turn blocks.
+    let (status, body) = fetch_work_root_activity_path(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:multipoll/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("poll #2 transcript JSON");
+    assert_eq!(transcript["live"], true, "poll #2: no result event ingested yet");
+    let blocks = transcript["blocks"].as_array().expect("poll #2 blocks array");
+    assert_eq!(blocks.len(), 3, "poll #2: two mid-turn blocks ingested since poll #1 (text + tool_use)");
+
+    // Between poll #2 and #3: the harness delivers the matching tool_result
+    // (updates the existing tool block in place, adds no new block) then the
+    // terminal `result` event that flips `is_turn_active` to false.
+    {
+        let projector_handle = session.projector();
+        let mut projector = projector_handle.lock().await;
+        projector.ingest_line(fixture_lines[7]);
+        projector.ingest_line(fixture_lines[3]);
+    }
+
+    // Poll #3: terminal `result` observed -> live:false, final block count
+    // unchanged by the tool_result (it updates the existing tool block).
+    let (status, body) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        "/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude:multipoll/transcript",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let transcript: serde_json::Value = serde_json::from_str(&body).expect("poll #3 transcript JSON");
+    assert_eq!(transcript["live"], false, "poll #3: the fixture's result event flips is_turn_active to false");
+    let blocks = transcript["blocks"].as_array().expect("poll #3 blocks array");
+    assert_eq!(blocks.len(), 3, "poll #3: tool_result updates the existing tool block, adds no new one");
+    for forbidden in [
+        "019f5040-secret-session-id",
+        "claude-route-multipoll-cwd",
+        "sessionId",
+        "cwd",
+        "a1b2c3d4-1111-4222-8333-444455556666",
+        "toolu_01UbL6NLnGbxxSosoEzMaG4a",
+    ] {
+        assert!(!body.contains(forbidden), "multi-poll transcript leaked {forbidden}: {body}");
     }
 }
 
