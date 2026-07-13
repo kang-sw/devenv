@@ -448,6 +448,23 @@ dropped tickets live in hidden archive dirs and git history.
   session key: <key> during compaction` trailer after the todo-reinjection
   block (spec `260708-git-commit-session-key-tip` in `mcp-tools.md`;
   mental-model bullet in `git-workflow-tools.md`).
+- `260713-workset-workflow-dogfood-bugs` (todo, workset) - non-hierarchical
+  board draining the idea-stage workflow/tooling dogfood bug backlog
+  accumulated since the 260605 pivot. Two dropped as resolved by unrelated
+  prior work, two promoted to `ready` below, two blocked pending further
+  investigation/decision (`260627`, `260710-bug-project-index...`), two
+  backlogged by user decision (`260703`, and `260627` shares that backlog
+  reasoning).
+- `260630-bug-enter-proceed-status-report-dead-code` (ready, bug) - remove
+  the dead `status-report` `NEXT:` case from `proceedNextInstruction` and
+  its test assertion; unreachable code, no spec impact. Sage review
+  completed.
+- `260713-bug-tickets-move-error-mutates-frontmatter` (ready, bug) - make
+  `tickets.move`'s blocked/failed-promotion self-healing frontmatter write
+  surface a loud, explicit partial-mutation notice in the MCP result
+  instead of silently leaving a stale posture behind; spec addressing
+  deferred to doc closeout (`mcp-tools.md`, notice shape not yet settled).
+  Sage review completed.
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
