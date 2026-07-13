@@ -295,13 +295,15 @@ export async function steerActivitySession(
  * Real counterpart to `stubForkActivitySession`. Codex-only: Claude
  * fork-from-here is Hack-tier and explicitly out of scope
  * (`AgentChatCapabilities.fork` is `false` for Claude in every tiering
- * table). Wires the request against the future `/control` `Fork` action
+ * table). POSTs the `/control` `Fork` action
  * (`260713-feat-ws-dashboard-activity-session-fork-cursor`'s Phase 1 target)
- * even though no `CodexControlRequest::Fork` variant or fork route exists
- * yet (`codex_routes.rs:88-93`) — that lands in Phase 3. Until then this
- * call is expected to reject (the daemon rejects the unrecognized `"fork"`
- * action tag), which is consistent with Phase 1's verification bar being
- * "correct request shape," not "succeeds end-to-end."
+ * and, now that the daemon's `CodexControlRequest::Fork` handler exists
+ * (`codex_routes.rs`, `260713` Phase 3), reads the daemon's actual
+ * `data.activityId`/`data.cutCursor` out of the response rather than echoing
+ * the request back. Falls back to the request's own values only if the
+ * daemon response is missing `data` entirely (a shape the Phase-3 handler
+ * should never produce, but `readJson`'s `unknown`-typed `data` still needs a
+ * defensive default so a malformed response degrades instead of throwing).
  */
 export async function forkActivitySession(
   request: ActivitySessionForkRequest,
@@ -314,11 +316,35 @@ export async function forkActivitySession(
       body: JSON.stringify({ action: "fork", cutCursor: request.cutCursor ?? null }),
     },
   );
-  await readJson<RealControlResponse>(response, "codex fork failed");
-  // Phase 3 owns defining what a real Fork response actually returns (e.g. a
-  // new `activityId`); Phase 1 has nothing to project it into yet, so the
-  // original activityId/cutCursor are echoed back rather than invented.
-  return { activityId: request.activityId, cutCursor: request.cutCursor ?? null };
+  const result = await readJson<RealControlResponse>(response, "codex fork failed");
+  const data = result.data as { activityId?: unknown; cutCursor?: unknown } | undefined;
+  const activityId =
+    typeof data?.activityId === "string" ? data.activityId : request.activityId;
+  const cutCursor =
+    typeof data?.cutCursor === "string" ? data.cutCursor : request.cutCursor ?? null;
+  return { activityId, cutCursor };
+}
+
+/**
+ * Hydrate a full `AgentChatSessionView` directly from an already-created
+ * `activityId`, with no create call — the Codex-fork counterpart to
+ * `startNewAgentChatSession`/`resumeAgentChatSession`. Needed because
+ * `forkActivitySession`'s response is a bare `{activityId, cutCursor}` (the
+ * daemon's `Fork` control response never inlines a transcript, unlike
+ * `thread/fork`'s own provider-side response, which the daemon already
+ * consumed to seed the new session's projector) — `App.tsx`'s
+ * `forkAgentChatFromBubble` calls this immediately after a successful fork to
+ * turn that bare id into the same shape the pane-registration flow expects.
+ */
+export async function hydrateForkedAgentChatSession(
+  workRootId: string,
+  harness: RealAgentChatHarness,
+  activityId: string,
+  serverRoute: string | null | undefined,
+  title: string,
+): Promise<AgentChatSessionView> {
+  const transcript = await fetchRealTranscript(workRootId, harness, activityId, serverRoute);
+  return sessionViewFromTranscript(workRootId, harness, activityId, serverRoute, transcript, title);
 }
 
 /**

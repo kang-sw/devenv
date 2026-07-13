@@ -238,6 +238,7 @@ import {
   activityHistoryList as realActivityHistoryList,
   beginRealStreamingTurn,
   forkActivitySession as realForkActivitySession,
+  hydrateForkedAgentChatSession,
   resumeAgentChatSession as realResumeAgentChatSession,
   sendAgentChatPrompt,
   startNewAgentChatSession as realStartNewAgentChatSession,
@@ -5144,12 +5145,16 @@ function WorkbenchShell({
         : current,
     );
     // Real Codex fork (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`
-    // Phase 1) wires the request against the future `/control` `Fork` action
-    // (`260713-feat-ws-dashboard-activity-session-fork-cursor` Phase 1), even
-    // though no backend `CodexControlRequest::Fork` variant/route exists yet
-    // (that's Phase 3) - so this always ends in the pane's error state today,
-    // by design. Gated to `codex` only (mirroring the steer branch above),
-    // since `realForkActivitySession` hardcodes the Codex `/control` URL -
+    // Phase 1 wired the request; Phase 3 landed the daemon's
+    // `CodexControlRequest::Fork` handler, so this now hydrates the returned
+    // `activityId` into a full session and applies it onto `newPane`,
+    // mirroring the stub branch immediately below. `realForkActivitySession`'s
+    // response has no inline transcript (unlike the provider-side
+    // `thread/fork` response the daemon already consumed to seed the new
+    // session's projector), so `hydrateForkedAgentChatSession` does the
+    // `activityId` -> full transcript fetch the daemon route enables. Gated
+    // to `codex` only (mirroring the steer branch above), since
+    // `realForkActivitySession` hardcodes the Codex `/control` URL -
     // Claude/OpenCode fork stays on the stub unconditionally (Claude
     // fork-from-here is Hack-tier and explicitly out of scope; the capability
     // table also keeps the fork affordance hidden for Claude today).
@@ -5160,11 +5165,19 @@ function WorkbenchShell({
           activityId: session.activityId,
           serverRoute: session.serverRoute,
           cutCursor: lastCutBlock?.cursor ?? null,
-        }).then(() => {
-          throw new Error(
-            "Codex fork is wired to the real /control endpoint, but the backend Fork action lands in Phase 3 - not yet usable end-to-end",
-          );
         })
+          .then((result) =>
+            hydrateForkedAgentChatSession(
+              session.workRootId,
+              "codex",
+              result.activityId,
+              session.serverRoute,
+              `${session.title} (forked)`,
+            ),
+          )
+          .then((forkedSession) => {
+            applyAgentChatSession(newPane.logicalKey, forkedSession);
+          })
       : stubForkActivitySession(
           {
             workRootId: session.workRootId,
