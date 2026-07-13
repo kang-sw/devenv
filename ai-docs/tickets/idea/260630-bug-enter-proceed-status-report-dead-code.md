@@ -21,6 +21,14 @@ this value across all routing conditions.
 2. **Implement** — add a routing branch that produces `status-report` when
    the target is a status query rather than an implementation request.
 
+## Decision
+
+Remove. The `status-report` route was added during autonomous route design
+(no known real use case ever wired it up), and pure status queries are
+already served by `ws/tickets.status` and `lead-discuss`'s git-log-based
+session-continuity path. Delete the `status-report` `NEXT:` enum value and
+its `proceedNextInstruction` case; do not implement a routing branch for it.
+
 ## Related
 
 - `260630-epic-skill-playbook-diet` — diet session that surfaced this
