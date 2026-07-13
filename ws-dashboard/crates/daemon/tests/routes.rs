@@ -4013,6 +4013,11 @@ async fn server_scoped_activity_local_aliases_match_legacy_routes() {
     let alias_transcript =
         get_status_and_body(app.clone(), cookie.as_str(), &alias_transcript_uri).await;
     assert_eq!(
+        legacy_transcript.0,
+        StatusCode::OK,
+        "legacy transcript route must resolve, not just match the alias's status"
+    );
+    assert_eq!(
         alias_transcript.0, legacy_transcript.0,
         "status mismatch for named-agent transcript"
     );
