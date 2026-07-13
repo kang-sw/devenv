@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.33.12 - 2026-07-13
+
+### Fixed
+- Regenerate `agents-plugin/skills/manifest.json` after the
+  `lead-drain-ready-queue` slug hotfix left it stale, which failed
+  `TestSkillsManifestDriftIsVisible` in CI on the v0.33.11 tag. v0.33.11 was
+  abandoned (never had a published GitHub release) in favor of this release.
+
 ## v0.33.11 - 2026-07-13
 
 ### Fixed
