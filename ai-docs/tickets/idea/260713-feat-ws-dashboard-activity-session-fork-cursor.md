@@ -3,6 +3,7 @@ title: "ActivitySessionForkRequest needs a cursor/turn-cut-point field"
 related:
   260620-feat-ws-dashboard-agent-client-activity-sources: prerequisite
   260711-feat-ws-dashboard-agent-activity-chat-ui: prerequisite
+  260713-feat-ws-dashboard-agent-chat-real-adapter-wiring: related
 related-mental-model:
   - ws-dashboard-agent-harness
 ---
