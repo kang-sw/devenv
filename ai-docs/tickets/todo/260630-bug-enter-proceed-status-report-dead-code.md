@@ -1,5 +1,7 @@
 ---
 title: "Bug: enter.proceed status-report route is dead code"
+sage-review-completeness: required
+sage-review-design: completed
 ---
 
 ## Finding
@@ -28,6 +30,15 @@ Remove. The `status-report` route was added during autonomous route design
 already served by `ws/tickets.status` and `lead-discuss`'s git-log-based
 session-continuity path. Delete the `status-report` `NEXT:` enum value and
 its `proceedNextInstruction` case; do not implement a routing branch for it.
+
+Note for the implementer: `next` is a plain string, not a separate declared
+enum/const — the only two sites are the `proceedNextInstruction` switch case
+in `proceed_resolver.go` and the direct assertion in
+`agents-plugin-tool/internal/mcp/session_state_test.go:1196-1197`, which must
+be removed or updated alongside the case. The route was deliberately reserved
+by `260627-feat-enter-proceed-deterministic-verdict-engine`'s original closed
+`NEXT` set, not an accidental leftover — this removal closes out that unused
+part of the contract, not merely deletes stray code.
 
 ## Related
 

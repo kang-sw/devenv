@@ -1,5 +1,7 @@
 ---
 title: "Prevent failed tickets.move promotion from mutating frontmatter"
+sage-review-design: completed
+sage-review-completeness: required
 ---
 
 # Prevent failed tickets.move promotion from mutating frontmatter
@@ -30,3 +32,18 @@ partial-mutation notice whenever it wrote frontmatter on a call that then
 blocked or failed — the caller is normally an agent, not a human, so the
 notice needs to be loud in the structured/text result, not just in a doc
 comment, so a retry never assumes the file is unchanged.
+
+Implementation notes (design review, resolved autonomously):
+- `TicketsMove` currently discards the computed `sageReviewPostures` on error
+  and returns a bare result plus a Go error; the MCP layer's shared
+  `toolTextResponse(req.ID, "", err)` generic-error path then drops any
+  payload. Surfacing the notice requires (1) not discarding the partial
+  result inside `TicketsMove` on error, and (2) special-casing the
+  `tickets.move` error branch in `server.go` to merge that partial info into
+  the response — the shared generic error helper cannot carry it as-is.
+- `TicketsClose` has the same write-then-possibly-fail shape (frontmatter
+  date field written before `atomicGitMove` can still fail). Out of scope for
+  this ticket; a future ticket should generalize if this pattern recurs there.
+- Once the notice contract is designed, `ai-docs/spec/mcp-tools.md` (MCP
+  result contracts) likely needs a matching update — anticipate a `spec:`
+  entry at ready-promotion time rather than treating it as optional.
