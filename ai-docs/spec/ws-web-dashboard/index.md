@@ -854,13 +854,18 @@ updated activity before using alphabetical order as a tie-breaker.
 > the legacy `agents` compatibility projection. See
 > `#260620-ws-dashboard-agent-client-provider-contract` below for the
 > dashboard-owned `AgentClientProvider` contract module this split adapts to.
-> Current projection remains centered on ws named-agent / mercenary
-> compatibility state; no adapter is implemented yet (Phase 2 is Codex
-> app-server, Phase 3 is OpenCode ACP, Phase 4 is Claude CLI stream-json
-> duplex). Future adapters should normalize provider thread, turn, message,
-> tool, and status events into Activity Items and Transcript Blocks without
-> exposing provider session ids, ws session keys, cache paths, process ids, or
-> raw provider event ids as browser authority.
+> Updated 2026-07-13: Phase 2 (Codex app-server, `crates/daemon/src/codex_app_server.rs`)
+> and Phase 4 (Claude CLI stream-json duplex, `crates/daemon/src/claude_cli.rs`)
+> adapters are now implemented, each with their own `AgentClientProvider` impl,
+> a provider registry keyed by `(server_id, activity_id)`, a plugin-presence
+> spawn gate, dual local/server-scoped `*-sessions` routes, and a merge into
+> `ActivityFeed.items` (never the legacy `agents` projection). Phase 3
+> (OpenCode ACP) remains unimplemented, blocked pending an OpenCode install for
+> its own fixture-verification spike. Future adapters should normalize provider
+> thread, turn, message, tool, and status events into Activity Items and
+> Transcript Blocks without exposing provider session ids, ws session keys,
+> cache paths, process ids, or raw provider event ids as browser authority —
+> both implemented adapters were reviewed against exactly this boundary.
 
 Transcript backfill returns bounded normalized blocks rather than backend-native
 cache records, raw session JSON, stdout/stderr paths, or file contents. Each
@@ -932,10 +937,11 @@ request/response types and a non-runtime trait covering initialization/
 capabilities, session list/create/resume, prompt/send, assistant/user message
 and tool-activity events, permission/blocked states, interruption/
 cancellation, file-change summaries, transcript backfill, and provider
-metadata. As of `260620-feat-ws-dashboard-agent-client-activity-sources`
-Phase 1 this module has no implementation and no route wires to it; it exists
-so Phase 2 (Codex app-server), Phase 3 (OpenCode ACP), and Phase 4 (Claude CLI
-stream-json duplex) adapters conform to one reviewed shape instead of each
+metadata. Phase 1 of `260620-feat-ws-dashboard-agent-client-activity-sources`
+introduced this contract with no implementation; Phase 2 (Codex app-server)
+and Phase 4 (Claude CLI stream-json duplex) now implement it, and Phase 3
+(OpenCode ACP, blocked pending install) remains outstanding — the contract
+exists so all three adapters conform to one reviewed shape instead of each
 inventing its own. `AgentClientCapabilities` (`compact`, `steer`, `goal`,
 `rewind`, `fork`, `skills`) lets a concrete adapter report which per-harness
 capabilities it supports; see

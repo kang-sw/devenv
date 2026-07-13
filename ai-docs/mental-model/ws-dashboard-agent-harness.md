@@ -120,7 +120,13 @@ related:
   inert, non-runtime `AgentClientProvider` trait plus
   `AgentClientCapabilities` (`compact`, `steer`, `goal`, `rewind`, `fork`,
   `skills`) that a concrete Phase 2-4 adapter reports at `initialize` time so
-  a caller can hide/disable per-harness-gated controls. See
+  a caller can hide/disable per-harness-gated controls. Phase 2
+  (`crates/daemon/src/codex_app_server.rs`) and Phase 4
+  (`crates/daemon/src/claude_cli.rs`) implement this trait today; both report
+  only `skills: true` in `capabilities()` so far — no adapter yet backs
+  `compact`/`steer`/`goal`/`rewind`/`fork` in a shipped route. Phase 3
+  (OpenCode ACP) remains unimplemented, blocked pending an OpenCode install.
+  See
   `ai-docs/spec/ws-web-dashboard/index.md#260620-ws-dashboard-agent-client-provider-contract`
   for the read-model-facing half of this same contract (source-kind/
   render-kind vocabulary, `items`/`agents` split).
