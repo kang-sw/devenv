@@ -351,6 +351,55 @@ discovered through exactly this kind of manual pass catching what automated
 assertions missed, and the same discipline applies to verifying this
 ticket's own completion.
 
+### Result (e1726e80) - 2026-07-13 — automated half only, manual walkthrough outstanding
+
+Landed the automated half of this phase's verification bar. The manual
+walkthrough this phase's own text requires is **not done** — see below.
+
+- Added `codex_session_send_receive_multi_poll_e2e` and
+  `claude_session_send_receive_multi_poll_e2e`
+  (`crates/daemon/tests/routes.rs`), each driving a real
+  `live: true -> live: false` three-poll HTTP sequence through the
+  `Arc<CodexSession>`/`Arc<ClaudeSession>` handle `insert_session_for_tests`
+  returns, ingesting projector lines between polls (mirrors the existing
+  single-shot round-trip tests' scripted-peer pattern, per `260620` Phase
+  4's fixture precedent — no real subprocess spawn).
+- Added matching frontend wire-contract tests
+  (`activitySessionClient.test.ts`) driving `beginRealStreamingTurn` against
+  `fetch` responses shaped exactly like what the two daemon tests assert,
+  closing the loop between the real daemon response shape and the real
+  frontend polling code.
+- Test-only: no production source file touched, per the plan's explicit
+  scope (Phases 1-3 already complete; this phase is verification-only).
+- Review: correctness, fit, and test partitions all clean on the first
+  pass — no fix cycle needed.
+- Verification: `cargo test -p ws-dashboard-daemon --test routes` (158
+  passed), `cargo test -p ws-dashboard-core` (34 passed, unaffected),
+  `npm run test:agent-chat-client`, `npm run build` — all green.
+- Deviations: (1) the Codex test pre-seeds the projector with a bare
+  `turn/started` before session insertion, since `insert_session_for_tests`
+  needs a pre-built projector and the scripted reply peer only answers RPC
+  requests, not notifications — there is no other way to get poll #1 into a
+  live state without new test infra, which the plan explicitly ruled out;
+  (2) frontend delta-size assertions had to be derived from
+  `blocksSincePolledLength`'s actual formula rather than assumed 1:1
+  correspondence with newly-added blocks (an initial draft under-counted
+  the re-included tail block).
+- **Outstanding, genuine blocker (not resolved by this commit)**: this
+  phase's own text requires "a real browser walkthrough (real daemon, real
+  harness process, not the stub) of send/receive/fork-from-here" before the
+  ticket is done. The executing agent has no browser automation tool
+  available in this environment and cannot perform this walkthrough — per
+  the plan's Escalations, this was not faked, silently skipped, or
+  substituted with an automated proxy. `codex`/`claude` CLIs are confirmed
+  installed and authenticated in this sandbox, so a human owner could run
+  this walkthrough interactively from the same machine if convenient. This
+  ticket **stays in `ready/`**, not moved to `.done/`, until a human
+  completes that pass; the Constraints section's "not done until real
+  send/receive works end-to-end... designed but not connected is the
+  specific failure mode this ticket exists to correct" bar is explicitly
+  not yet met.
+
 ## Constraints
 
 - This ticket is not done until real send/receive works end-to-end for

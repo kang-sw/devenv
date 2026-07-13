@@ -743,3 +743,227 @@ assertEqual(errorEnv.clearedHandles.length, 1, "a poll error clears the interval
 
   globalThis.fetch = originalFetch;
 }
+
+// --- beginRealStreamingTurn: real daemon wire-contract (Phase 4) -----------
+// Phase 4 (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`)
+// coverage gap: the poll-loop tests above already prove
+// `beginRealStreamingTurn`'s diffing/completion logic in isolation against
+// hand-authored fixtures. These two tests instead drive it against response
+// bodies shaped *exactly* like what the real daemon route asserts in
+// `ws-dashboard/crates/daemon/tests/routes.rs`'s
+// `codex_session_send_receive_multi_poll_e2e` /
+// `claude_session_send_receive_multi_poll_e2e` (same field names/shape —
+// camelCase `ActivityTranscript`/`TranscriptBlock`, same live/block-count
+// sequence across three polls) — closing the wire-shape contract loop
+// between the real daemon and the real frontend polling code, per the
+// Phase 4 plan's Codebase Findings.
+
+// Codex: poll #1 live:true/0 blocks -> poll #2 live:true/1 block -> poll #3
+// live:false/2 blocks, mirroring the daemon test's three GETs exactly.
+
+{
+  const codexWirePoll1 = {
+    workRootId: "codex-wr",
+    activityId: "codex:multipoll",
+    status: "available",
+    sourceStatus: "ok",
+    live: true,
+    source: { kind: "agent.codex", label: "Codex session", backend: "codex", harness: "codex", tier: "core", model: null },
+    blocks: [] as TranscriptBlock[],
+    nextCursor: null,
+    hasMore: false,
+    diagnostics: [] as string[],
+  };
+  const codexWirePoll2 = {
+    ...codexWirePoll1,
+    live: true,
+    blocks: [
+      { cursor: "0", timestamp: null, renderKind: "markdown", title: "Assistant", text: "working on it", data: null, degraded: false },
+    ],
+  };
+  const codexWirePoll3 = {
+    ...codexWirePoll1,
+    live: false,
+    blocks: [
+      { cursor: "0", timestamp: null, renderKind: "markdown", title: "Assistant", text: "working on it", data: null, degraded: false },
+      { cursor: "1", timestamp: null, renderKind: "markdown", title: "Assistant", text: "done with it", data: null, degraded: false },
+    ],
+  };
+
+  calls.length = 0;
+  nextResponses = [codexWirePoll1, codexWirePoll2, codexWirePoll3];
+  const codexWireEnv = makeManualPollEnv();
+  const codexWireUpdates: TranscriptBlock[][] = [];
+  let codexWireCompleteCount = 0;
+  const codexWireComplete = createDeferred();
+  beginRealStreamingTurn(
+    "codex-wr",
+    "codex",
+    "codex:multipoll",
+    "server-local",
+    (blocks) => {
+      codexWireUpdates.push([...blocks]);
+    },
+    () => {
+      codexWireCompleteCount += 1;
+      codexWireComplete.resolve();
+    },
+    undefined,
+    codexWireEnv.env,
+  );
+  // Poll #1's empty-blocks response calls `onUpdate` zero times (see the
+  // empty-first-poll test above for why a fixed microtask count is fragile
+  // here) — drain past a macrotask boundary instead.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assertEqual(calls.length, 1, "codex wire-contract: the immediate poll fires once before any interval tick");
+  assertEqual(
+    codexWireUpdates.length,
+    0,
+    "codex wire-contract poll #1: an empty-blocks response (matching the daemon's live:true/0-block first poll) must not call onUpdate",
+  );
+
+  codexWireEnv.tick();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assertEqual(calls.length, 2, "codex wire-contract: the ticked poll issues the second transcript fetch");
+  assertEqual(codexWireUpdates.length, 1, "codex wire-contract poll #2: the new mid-turn block triggers onUpdate");
+  assertEqual(codexWireUpdates[0]!.length, 1, "codex wire-contract poll #2: onUpdate receives exactly the one new block");
+  assertEqual(codexWireUpdates[0]![0]!.text, "working on it", "codex wire-contract poll #2: onUpdate's block carries the daemon-projected text");
+  assertEqual(codexWireCompleteCount, 0, "codex wire-contract: onComplete must not fire while live:true");
+
+  codexWireEnv.tick();
+  await codexWireComplete.promise;
+  assertEqual(calls.length, 3, "codex wire-contract: the second ticked poll issues the third transcript fetch");
+  assertEqual(codexWireUpdates.length, 2, "codex wire-contract poll #3: the newly appended block triggers onUpdate again");
+  // `lastSeenLength` was 1 after poll #2, so `blocksSincePolledLength`'s
+  // `start = max(0, lastSeenLength - 1)` is 0 here — it re-includes the
+  // single previously-seen tail block plus the newly appended one.
+  assertEqual(
+    codexWireUpdates[1]!.length,
+    2,
+    "codex wire-contract poll #3: onUpdate receives the re-included tail block plus the one newly appended block",
+  );
+  assertEqual(codexWireUpdates[1]![0]!.text, "working on it", "codex wire-contract poll #3: the re-included tail block still carries its poll #2 text");
+  assertEqual(codexWireUpdates[1]![1]!.text, "done with it", "codex wire-contract poll #3: the newly appended block carries the daemon-projected text");
+  assertEqual(codexWireCompleteCount, 1, "codex wire-contract: onComplete fires exactly once, once the daemon reports live:false");
+  assertEqual(codexWireEnv.clearedHandles.length, 1, "codex wire-contract: the interval is cleared once live:false is observed");
+}
+
+// Claude: poll #1 live:true/1 block -> poll #2 live:true/3 blocks -> poll #3
+// live:false/3 blocks, mirroring the daemon test's three GETs exactly (the
+// tool_result between poll #2 and #3 updates an existing block in place, so
+// the block count is unchanged but the block text still shifts a status
+// suffix on — this test only asserts the delta the frontend actually
+// receives, matching `blocksSincePolledLength`'s tail-reinclusion behavior).
+
+{
+  const claudeWirePoll1 = {
+    workRootId: "claude-wr",
+    activityId: "claude:multipoll",
+    status: "available",
+    sourceStatus: "ok",
+    live: true,
+    source: { kind: "agent.claude", label: "Claude session", backend: "claude", harness: "claude", tier: "core", model: null },
+    blocks: [
+      { cursor: "0", timestamp: null, renderKind: "markdown", title: "Assistant", text: "HELLO", data: null, degraded: false },
+    ] as TranscriptBlock[],
+    nextCursor: null,
+    hasMore: false,
+    diagnostics: [] as string[],
+  };
+  const claudeWirePoll2 = {
+    ...claudeWirePoll1,
+    live: true,
+    blocks: [
+      claudeWirePoll1.blocks[0]!,
+      {
+        cursor: "1",
+        timestamp: null,
+        renderKind: "markdown",
+        title: "Assistant",
+        text: "pwd 명령을 실행해서 현재 작업 디렉터리를 확인하겠습니다.",
+        data: null,
+        degraded: false,
+      },
+      { cursor: "2", timestamp: null, renderKind: "tool", title: "Bash", text: "status: running", data: null, degraded: false },
+    ],
+  };
+  const claudeWirePoll3 = {
+    ...claudeWirePoll1,
+    live: false,
+    blocks: [
+      claudeWirePoll2.blocks[0]!,
+      claudeWirePoll2.blocks[1]!,
+      { cursor: "2", timestamp: null, renderKind: "tool", title: "Bash", text: "/tmp/claude-cli-adapter-capture/workdir\nstatus: completed", data: null, degraded: false },
+    ],
+  };
+
+  calls.length = 0;
+  nextResponses = [claudeWirePoll1, claudeWirePoll2, claudeWirePoll3];
+  const claudeWireEnv = makeManualPollEnv();
+  const claudeWireUpdates: TranscriptBlock[][] = [];
+  let claudeWireCompleteCount = 0;
+  const claudeWireFirstUpdate = createDeferred();
+  const claudeWireComplete = createDeferred();
+  beginRealStreamingTurn(
+    "claude-wr",
+    "claude",
+    "claude:multipoll",
+    "server-local",
+    (blocks) => {
+      claudeWireUpdates.push([...blocks]);
+      if (claudeWireUpdates.length === 1) claudeWireFirstUpdate.resolve();
+    },
+    () => {
+      claudeWireCompleteCount += 1;
+      claudeWireComplete.resolve();
+    },
+    undefined,
+    claudeWireEnv.env,
+  );
+  await claudeWireFirstUpdate.promise;
+  assertEqual(
+    calls[0]!.url,
+    "/api/dashboard/work-roots/claude-wr/activity/claude-sessions/claude%3Amultipoll/transcript",
+    "claude wire-contract: the immediate poll fetches the local claude transcript route",
+  );
+  assertEqual(claudeWireUpdates[0]!.length, 1, "claude wire-contract poll #1: onUpdate receives the one seeded block");
+  assertEqual(claudeWireUpdates[0]![0]!.text, "HELLO", "claude wire-contract poll #1: onUpdate's block carries the daemon-projected text");
+
+  claudeWireEnv.tick();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assertEqual(claudeWireUpdates.length, 2, "claude wire-contract poll #2: the two new mid-turn blocks trigger onUpdate");
+  // `lastSeenLength` was 1 (one seeded block) after poll #1, so `start = max(0,
+  // lastSeenLength - 1)` is 0 — it re-includes that one previously-seen block
+  // plus both newly appended mid-turn blocks (3 total).
+  assertEqual(
+    claudeWireUpdates[1]!.length,
+    3,
+    "claude wire-contract poll #2: onUpdate receives the re-included seeded block plus both new mid-turn blocks",
+  );
+  assertEqual(claudeWireUpdates[1]![0]!.text, "HELLO", "claude wire-contract poll #2: the re-included tail block still carries its poll #1 text");
+  assertEqual(
+    claudeWireUpdates[1]![2]!.renderKind,
+    "tool",
+    "claude wire-contract poll #2: the newly appended tool_use block is projected with render kind tool",
+  );
+  assertEqual(claudeWireCompleteCount, 0, "claude wire-contract: onComplete must not fire while live:true");
+
+  claudeWireEnv.tick();
+  await claudeWireComplete.promise;
+  assertEqual(
+    claudeWireUpdates.length,
+    3,
+    "claude wire-contract poll #3: same block count as poll #2 (tool_result updates in place) still re-includes the tail block, triggering onUpdate",
+  );
+  assertEqual(
+    claudeWireUpdates[2]!.length,
+    1,
+    "claude wire-contract poll #3: onUpdate receives only the re-included tail block (the updated tool block), not the full array",
+  );
+  assert(
+    claudeWireUpdates[2]![0]!.text!.includes("status: completed"),
+    "claude wire-contract poll #3: the re-included tail block carries the tool_result-updated status",
+  );
+  assertEqual(claudeWireCompleteCount, 1, "claude wire-contract: onComplete fires exactly once, once the daemon reports live:false");
+  assertEqual(claudeWireEnv.clearedHandles.length, 1, "claude wire-contract: the interval is cleared once live:false is observed");
+}
