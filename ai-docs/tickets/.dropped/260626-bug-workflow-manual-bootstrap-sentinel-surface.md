@@ -4,6 +4,7 @@ related:
   260625-feat-ws-session-state-machine: workflow-manual restoration and session-state tools share the same session-key cache
 related-mental-model:
   - mcp-runtime
+dropped: 2026-07-13
 ---
 
 # Workflow manual bootstrap sentinel surface mismatch
@@ -49,3 +50,8 @@ is not just a missing MCP connection. Investigate whether discovery is surfacing
 profile-hidden tools, whether the active profile should expose
 `ws.workflow_manual`, or whether the playbook should name a visible fallback
 when profile filtering hides the manual.
+
+
+## Resolution (2026-07-13)
+
+Superseded by the M3 mercenary-reshape work: `WS_MCP_TOOL_PROFILE` env-based profile gating was retired (commit e900a46e) and folded into the server-side keyed capability gate (commit 8cd57344), and `260625-feat-ws-session-state-machine` hardened `workflow_manual` itself (lead-only gating, fail-loud on unresolvable key). `ai-docs/spec/mcp-tools.md {#260505-tool-profile-gating}` now documents that `tools/list` advertises the full lead surface regardless of caller environment and a lead-held session key is not restricted by this gate — the exact failure mode this ticket described no longer has a code path to reproduce.
