@@ -44,6 +44,7 @@ use ws_dashboard_core::codex_projection::CodexProjector;
 use ws_dashboard_core::{ServerId, ServerKind, WorkRootId};
 use ws_dashboard_daemon::claude_cli::{ClaudeConnection, ClaudeProviderRegistry};
 use ws_dashboard_daemon::codex_app_server::{CodexConnection, CodexProviderRegistry};
+use ws_dashboard_daemon::codex_routes::CodexControlRequest;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::document_translation::{
@@ -14123,6 +14124,76 @@ async fn codex_session_control_skills_projects_without_raw_json() {
             !body_text.contains(forbidden),
             "skills control response leaked {forbidden}: {body_text}"
         );
+    }
+}
+
+/// `260713` Phase 3: the `Fork` control-request shape deserializes and
+/// dispatches to `provider.fork`. This mirrors
+/// `codex_session_control_skills_projects_without_raw_json`'s route-test
+/// pattern, but only exercises what is testable without a real process spawn
+/// (see plan Codebase Findings "Testability gap"): a missing/unknown source
+/// `activityId` must be rejected the same way other control arms reject it,
+/// with no panic or process spawn attempted. The full spawn-a-new-connection
+/// + live `thread/fork` round-trip has no existing test seam in this file
+/// (same gap `create_codex_session` already has) and stays a manual/Phase-4
+/// check per the plan.
+#[tokio::test]
+async fn codex_session_control_fork_rejects_unknown_source_session() {
+    let registry = CodexProviderRegistry::default();
+    let state = {
+        let mut state = app_state();
+        state.codex_sessions = registry;
+        state
+    };
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/codex-wr/activity/codex-sessions/codex:missing/control")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "action": "fork", "cutCursor": "3" }).to_string(),
+                ))
+                .expect("fork control request"),
+        )
+        .await
+        .expect("fork control response");
+    // Same "unknown Codex session" mapping the other control arms use
+    // (`provider_error_response`'s `codex.unknown_session` -> 404).
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .expect("fork control body bytes");
+    let body_text = String::from_utf8(body.to_vec()).expect("fork control body UTF-8");
+    let value: serde_json::Value = serde_json::from_str(&body_text).expect("fork control JSON");
+    assert_eq!(value["code"], "codex.unknown_session");
+}
+
+/// The `Fork` variant must deserialize the wire shape the frontend already
+/// sends (`{"action":"fork","cutCursor":...}`), including the `cutCursor:
+/// null` "fork the whole thread" case, without rejecting the request body
+/// before it ever reaches the provider.
+#[test]
+fn codex_control_request_fork_deserializes_wire_shape() {
+    let with_cursor: CodexControlRequest =
+        serde_json::from_value(serde_json::json!({ "action": "fork", "cutCursor": "7" }))
+            .expect("deserialize fork with cutCursor");
+    match with_cursor {
+        CodexControlRequest::Fork { cut_cursor } => assert_eq!(cut_cursor, Some("7".to_owned())),
+        other => panic!("expected Fork variant, got {other:?}"),
+    }
+
+    let without_cursor: CodexControlRequest =
+        serde_json::from_value(serde_json::json!({ "action": "fork", "cutCursor": null }))
+            .expect("deserialize fork with null cutCursor");
+    match without_cursor {
+        CodexControlRequest::Fork { cut_cursor } => assert_eq!(cut_cursor, None),
+        other => panic!("expected Fork variant, got {other:?}"),
     }
 }
 

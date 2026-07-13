@@ -104,11 +104,45 @@ pub struct CodexProjector {
     active_turn: bool,
     thread_status: Option<String>,
     turn_status: Option<String>,
+    // Internal-only turn-id tracking for fork-from-here cut-point resolution.
+    // Never copied into `TranscriptBlock` (see module CONTRACT); provider turn
+    // ids stay correlation-only. `current_turn_id` is the turn the projector
+    // is currently ingesting items under (set from `turn/started`);
+    // `order_turn_ids` is a parallel array to `order`, recording which turn
+    // each transcript-order item belongs to.
+    current_turn_id: Option<String>,
+    order_turn_ids: Vec<Option<String>>,
 }
 
 impl CodexProjector {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Build a projector pre-populated with already-projected transcript
+    /// blocks (typically `project_fork_turns`'s output), so a forked
+    /// session's projector starts non-empty and newly ingested live items
+    /// append right after the seeded history. Seeded blocks carry no
+    /// provider item id (there is none left to correlate against, since
+    /// `project_fork_turns` already discarded it) and no turn id (turn-id
+    /// resolution for a fork-of-a-fork is out of this phase's scope).
+    pub fn seeded(blocks: Vec<TranscriptBlock>) -> Self {
+        let mut projector = Self::default();
+        for (index, block) in blocks.into_iter().enumerate() {
+            let synthetic_id = format!("seed-{index}");
+            projector.order.push(synthetic_id.clone());
+            projector.order_turn_ids.push(None);
+            projector.blocks.insert(
+                synthetic_id,
+                BlockState {
+                    render_kind: block.render_kind,
+                    title: block.title,
+                    text: block.text.unwrap_or_default(),
+                    degraded: block.degraded,
+                },
+            );
+        }
+        projector
     }
 
     /// Register a prompt the browser just sent locally so its echoed
@@ -141,6 +175,16 @@ impl CodexProjector {
     /// Bounded, deduplicated diagnostics surfaced alongside the transcript.
     pub fn diagnostics(&self) -> &[String] {
         &self.diagnostics
+    }
+
+    /// Resolve a browser-facing ordinal `cursor` (as produced by
+    /// `transcript_blocks`) to the provider turn id that item belongs to, for
+    /// the fork-from-here `cutCursor` -> `lastTurnId` translation. Returns
+    /// `None` if the cursor does not parse, is out of range, or the item was
+    /// ingested before any `turn/started` was observed.
+    pub fn turn_id_for_cursor(&self, cursor: &str) -> Option<String> {
+        let index: usize = cursor.parse().ok()?;
+        self.order_turn_ids.get(index)?.clone()
     }
 
     /// Browser-facing ordered transcript. Cursors are ordinal positions, not
@@ -221,6 +265,11 @@ impl CodexProjector {
             "turn/started" => {
                 self.active_turn = true;
                 self.turn_status = Some("inProgress".to_owned());
+                self.current_turn_id = params
+                    .get("turn")
+                    .and_then(|turn| turn.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 CodexIngestOutcome::TurnStarted
             }
             "turn/completed" | "turn/failed" | "turn/aborted" | "turn/interrupted" => {
@@ -394,6 +443,7 @@ impl CodexProjector {
             return index;
         }
         self.order.push(item_id.to_owned());
+        self.order_turn_ids.push(self.current_turn_id.clone());
         self.blocks.insert(
             item_id.to_owned(),
             BlockState {
@@ -508,6 +558,111 @@ fn bound_text(text: &str, max: usize) -> String {
     let mut bounded = text[..end].to_owned();
     bounded.push('…');
     bounded
+}
+
+/// Map one already-assembled Codex `ThreadItem` (from `thread/fork`'s
+/// response `thread.turns[].items[]`, not the live `item/started`/
+/// `item/completed` delta stream) into a `(render_kind, title, text,
+/// degraded)` tuple, mirroring `ingest_item`'s per-type mapping. Unlike
+/// `ingest_item` this is a pure, stateless function: fork-seeded items are a
+/// one-shot snapshot, not live echoes, so there is no suppression/dedup state
+/// to consult.
+fn classify_thread_item(item: &Value) -> (&'static str, &'static str, String, bool) {
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
+    match item_type {
+        "userMessage" | "hookPrompt" => (
+            CODEX_RENDER_KIND_MARKDOWN,
+            "User",
+            extract_content_text(item),
+            false,
+        ),
+        "agentMessage" => {
+            let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+            (
+                CODEX_RENDER_KIND_MARKDOWN,
+                "Assistant",
+                bound_text(text, MAX_BLOCK_TEXT),
+                false,
+            )
+        }
+        "reasoning" => (
+            CODEX_RENDER_KIND_THINKING,
+            "Reasoning",
+            reasoning_text(item),
+            false,
+        ),
+        "commandExecution" => (
+            CODEX_RENDER_KIND_TOOL,
+            "Command",
+            command_summary(item),
+            false,
+        ),
+        "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => {
+            (CODEX_RENDER_KIND_TOOL, "Tool", tool_summary(item), false)
+        }
+        "fileChange" => (
+            CODEX_RENDER_KIND_FILE_CHANGE,
+            "File change",
+            file_change_summary(item),
+            false,
+        ),
+        "plan" => (
+            CODEX_RENDER_KIND_STATUS,
+            "Plan",
+            item.get("text").and_then(Value::as_str).unwrap_or("").to_owned(),
+            false,
+        ),
+        "contextCompaction" => (
+            CODEX_RENDER_KIND_STATUS,
+            "Context compaction",
+            item.get("text").and_then(Value::as_str).unwrap_or("").to_owned(),
+            false,
+        ),
+        other => {
+            let text = bound_text(
+                &format!("Unsupported Codex activity item type: {other}"),
+                MAX_DIAGNOSTIC_TEXT,
+            );
+            (CODEX_RENDER_KIND_STATUS, "Unsupported activity", text, true)
+        }
+    }
+}
+
+/// Pure projection of a `thread/fork` response's `thread` object into the same
+/// browser-facing `TranscriptBlock` shape/render-kinds `CodexProjector`
+/// produces from the live event stream, so a forked session's seeded
+/// transcript looks identical in the browser to one built up live. Mirrors
+/// `project_skills_list`'s "project a raw JSON-RPC response" pattern but
+/// produces `TranscriptBlock`s, so it stays colocated here rather than in
+/// `codex_app_server.rs`.
+pub fn project_fork_turns(thread: &Value) -> Vec<TranscriptBlock> {
+    let turns = thread
+        .get("turns")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut blocks = Vec::new();
+    for turn in turns {
+        let items = turn
+            .get("items")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        for item in items {
+            let (render_kind, title, text, degraded) = classify_thread_item(item);
+            let cursor = blocks.len().to_string();
+            blocks.push(TranscriptBlock {
+                cursor,
+                timestamp: None,
+                render_kind: render_kind.to_owned(),
+                title: Some(title.to_owned()),
+                text: (!text.is_empty()).then_some(text),
+                data: None,
+                degraded,
+            });
+        }
+    }
+    blocks
 }
 
 #[cfg(test)]
@@ -653,5 +808,107 @@ mod tests {
         );
         assert!(!projector.is_turn_active());
         assert_eq!(projector.turn_status(), Some("completed"));
+    }
+
+    #[test]
+    fn turn_id_for_cursor_maps_order_index_across_multiple_turns() {
+        let mut projector = CodexProjector::new();
+        // Item ingested before any turn/started has no turn id.
+        projector.ingest_line(
+            r#"{"method":"item/completed","params":{"item":{"type":"userMessage","id":"u0","text":"hi"}}}"#,
+        );
+        projector.ingest_line(r#"{"method":"turn/started","params":{"turn":{"id":"t1"}}}"#);
+        projector.ingest_line(
+            r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"a1","text":"first"}}}"#,
+        );
+        projector.ingest_line(
+            r#"{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed"}}}"#,
+        );
+        projector.ingest_line(r#"{"method":"turn/started","params":{"turn":{"id":"t2"}}}"#);
+        projector.ingest_line(
+            r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"a2","text":"second"}}}"#,
+        );
+
+        let blocks = projector.transcript_blocks();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(projector.turn_id_for_cursor(&blocks[0].cursor), None);
+        assert_eq!(
+            projector.turn_id_for_cursor(&blocks[1].cursor),
+            Some("t1".to_owned())
+        );
+        assert_eq!(
+            projector.turn_id_for_cursor(&blocks[2].cursor),
+            Some("t2".to_owned())
+        );
+        assert_eq!(projector.turn_id_for_cursor("not-a-number"), None);
+        assert_eq!(projector.turn_id_for_cursor("999"), None);
+    }
+
+    #[test]
+    fn project_fork_turns_maps_thread_fork_response_to_transcript_blocks() {
+        let thread = serde_json::json!({
+            "id": "thread-secret",
+            "turns": [
+                {
+                    "id": "t1",
+                    "items": [
+                        { "type": "userMessage", "id": "u1", "text": "hello" },
+                        { "type": "agentMessage", "id": "a1", "text": "HELLO" },
+                    ],
+                },
+                {
+                    "id": "t2",
+                    "items": [
+                        { "type": "unknownFutureItem", "id": "x1" },
+                    ],
+                },
+            ],
+        });
+        let blocks = project_fork_turns(&thread);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].cursor, "0");
+        assert_eq!(blocks[0].render_kind, CODEX_RENDER_KIND_MARKDOWN);
+        assert_eq!(blocks[0].title.as_deref(), Some("User"));
+        assert_eq!(blocks[0].text.as_deref(), Some("hello"));
+        assert_eq!(blocks[1].cursor, "1");
+        assert_eq!(blocks[1].title.as_deref(), Some("Assistant"));
+        assert_eq!(blocks[1].text.as_deref(), Some("HELLO"));
+        assert_eq!(blocks[2].cursor, "2");
+        assert_eq!(blocks[2].render_kind, CODEX_RENDER_KIND_STATUS);
+        assert!(blocks[2].degraded);
+        let text = blocks[2].text.as_deref().unwrap_or_default();
+        assert!(text.contains("unknownFutureItem"));
+
+        // No provider ids leak into the projected blocks.
+        let serialized = serde_json::to_string(&blocks).expect("serialize blocks");
+        assert!(!serialized.contains("thread-secret"));
+        assert!(!serialized.contains("\"t1\""));
+        assert!(!serialized.contains("\"u1\""));
+    }
+
+    #[test]
+    fn seeded_projector_replays_forked_blocks_then_continues_live() {
+        let thread = serde_json::json!({
+            "id": "thread-secret",
+            "turns": [{
+                "id": "t1",
+                "items": [{ "type": "agentMessage", "id": "a1", "text": "seeded" }],
+            }],
+        });
+        let mut projector = CodexProjector::seeded(project_fork_turns(&thread));
+        assert_eq!(projector.transcript_blocks().len(), 1);
+        assert_eq!(
+            projector.transcript_blocks()[0].text.as_deref(),
+            Some("seeded")
+        );
+
+        projector.ingest_line(
+            r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"live1","text":"continued"}}}"#,
+        );
+        let blocks = projector.transcript_blocks();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].cursor, "0");
+        assert_eq!(blocks[1].cursor, "1");
+        assert_eq!(blocks[1].text.as_deref(), Some("continued"));
     }
 }

@@ -40,7 +40,7 @@ use ws_dashboard_core::agent_client_provider::{
     AgentClientSessionListResult, AgentClientSessionResumeRequest,
     AgentClientTranscriptBackfillRequest, AgentClientTranscriptBackfillResult,
 };
-use ws_dashboard_core::codex_projection::CodexProjector;
+use ws_dashboard_core::codex_projection::{project_fork_turns, CodexProjector};
 use ws_dashboard_core::WorkRootId;
 
 /// Dashboard-owned provider discriminator (never the raw binary name).
@@ -1213,6 +1213,75 @@ impl CodexAppServerProvider {
             )
             .await?;
         Ok(())
+    }
+
+    /// Codex-native fork-from-here: `thread/fork` loaded against the source
+    /// session's `thread_id`, cut at the turn `cut_cursor` resolves to (or
+    /// the whole thread when `cut_cursor` is `None`). Registers a brand-new
+    /// `CodexSession` (own `activity_id`, own `thread_id`, own connection)
+    /// rather than reusing the source session's connection: `thread/fork`'s
+    /// schema loads the thread from disk by id (the source connection does
+    /// not need to be alive), and sharing one connection across two threads
+    /// would require demultiplexing notifications by `threadId`, which this
+    /// crate's one-connection-per-projector pump does not support. Returns
+    /// `(new_activity_id, echoed_cut_cursor)`.
+    pub async fn fork(
+        &self,
+        activity_id: &str,
+        cut_cursor: Option<&str>,
+    ) -> Result<(String, Option<String>), AgentClientProviderError> {
+        let session = self.session(activity_id)?;
+        let last_turn_id = match cut_cursor {
+            Some(cursor) => session.projector.lock().await.turn_id_for_cursor(cursor),
+            None => None,
+        };
+
+        // Same hard-spawn-precondition as any new process (mirrors
+        // `create_session`).
+        check_plugin_gate(&self.config.codex_bin).await?;
+        let cwd = self.resolver.resolve_cwd(&session.work_root_id)?;
+        let (connection, notifications) = self.spawn_connection(&cwd).await?;
+
+        let fork_result = connection
+            .request(
+                "thread/fork",
+                json!({
+                    "threadId": session.thread_id,
+                    "lastTurnId": last_turn_id,
+                }),
+            )
+            .await?;
+        let thread_value = fork_result.get("thread").cloned().unwrap_or(Value::Null);
+        let new_thread_id = thread_value
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AgentClientProviderError {
+                code: "codex.thread_fork".to_owned(),
+                message: "codex forked thread id missing".to_owned(),
+            })?
+            .to_owned();
+
+        // Seed the new projector from the forked thread's inline turns/items
+        // so the browser sees the correct cut-point history immediately,
+        // rather than an empty transcript for a thread that provider-side
+        // already has content.
+        let seeded_blocks = project_fork_turns(&thread_value);
+        let projector = Arc::new(AsyncMutex::new(CodexProjector::seeded(seeded_blocks)));
+        spawn_projector_pump(projector.clone(), notifications);
+
+        let forked_activity_id = new_activity_id();
+        let forked_session = Arc::new(CodexSession {
+            activity_id: forked_activity_id.clone(),
+            server_id: session.server_id.clone(),
+            work_root_id: session.work_root_id.clone(),
+            thread_id: new_thread_id,
+            connection,
+            projector,
+            created_at_ms: now_ms(),
+        });
+        self.registry.insert(forked_session)?;
+
+        Ok((forked_activity_id, cut_cursor.map(str::to_owned)))
     }
 }
 
