@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.33.10 - 2026-07-13
+
+### Fixed
+- Handle MCP base-protocol `ping` requests with an empty success result while
+  preserving raw JSON-RPC request IDs and keeping `ping` out of `tools/list`;
+  focused regression coverage and a native-Windows Claude Code 2.1.207 idle
+  A/B confirmed the original launcher/runtime processes and connection survive
+  beyond the prior approximately 15-minute termination window.
+
 ## v0.33.9 - 2026-07-13
 
 ### Changed
