@@ -2588,6 +2588,71 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- 260711 Phase 2: messenger bubbles + streaming rendering ------------
+  await test.step("agent chat bubbles render per-turn/tool separation and stream incrementally", async () => {
+    // CONTRACT: the same pane/transcript opened in the Phase 1 step above now
+    // renders as messenger-style bubbles (user right-aligned, agent/tool
+    // left-aligned), a collapsed-by-default thinking block, a collapsed
+    // tool-use bubble with click-to-expand detail, a copy-button affordance
+    // on every bubble kind, and - the browser-level acceptance evidence for
+    // "live streamed turn rendering incrementally" - a growing agent-turn
+    // bubble driven by the stub's chunked emission (`activitySessionStub.ts`
+    // `stubBeginStreamingTurn`), observed here via repeated text-length polls
+    // rather than a single before/after snapshot.
+    const pane = page.locator(
+      '.workbench-pane[data-surface-kind="agentChat"] .workbench-pane-body',
+    );
+    const transcript = pane.locator('[data-testid="agent-chat-transcript"]');
+    await expect(transcript).toBeVisible();
+
+    const userBubble = transcript.locator('[data-agent-chat-bubble-kind="user"]');
+    await expect(userBubble).toHaveCount(1);
+    await expect(userBubble).toHaveAttribute("data-agent-chat-bubble-align", "right");
+    await expect(userBubble.locator(".agent-chat-bubble-copy")).toBeVisible();
+
+    const toolBubble = transcript.locator('[data-agent-chat-bubble-kind="tool"]');
+    await expect(toolBubble).toHaveCount(1);
+    await expect(toolBubble).toHaveAttribute("data-agent-chat-bubble-align", "left");
+    const toolDetail = toolBubble.locator(".agent-chat-bubble-tool-detail");
+    await expect(toolDetail).toHaveCount(0);
+    await toolBubble.locator(".agent-chat-bubble-tool-toggle").click();
+    await expect(toolDetail).toBeVisible();
+
+    const thinkingBlock = transcript.locator(".agent-chat-thinking-block").first();
+    await expect(thinkingBlock).toBeVisible();
+    const thinkingDetail = thinkingBlock.locator(".agent-chat-thinking-detail");
+    await expect(thinkingDetail).toHaveCount(0);
+    await thinkingBlock.locator(".agent-chat-thinking-toggle").click();
+    await expect(thinkingDetail).toBeVisible();
+
+    await expect(
+      transcript.locator(".agent-chat-bubble-copy").first(),
+    ).toBeVisible();
+
+    // Streaming: poll the agent-turn bubble's rendered text length several
+    // times and assert it strictly grows, then settles once the stub's
+    // chunked emission finishes and renders the final markdown (a semantic
+    // list, not raw dashes).
+    const streamingBubble = transcript
+      .locator('[data-agent-chat-bubble-kind="agentTurn"]')
+      .last();
+    await expect(streamingBubble).toBeVisible();
+    const lengths: number[] = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const text = (await streamingBubble.innerText()).trim();
+      lengths.push(text.length);
+      await page.waitForTimeout(180);
+    }
+    const growingPairs = lengths.slice(1).filter((length, index) => length > lengths[index]).length;
+    expect(growingPairs).toBeGreaterThan(0);
+    await expect(streamingBubble.locator("li")).not.toHaveCount(0);
+    note(
+      `agent chat bubbles: messenger alignment (user right/agent+tool left), collapsed-by-default thinking and ` +
+        `tool-use bubbles with click-to-expand detail, copy-button affordance on every bubble kind, and a streamed ` +
+        `agent-turn bubble observed growing over ${lengths.length} polls (lengths ${lengths.join(",")}) before settling into final semantic markdown`,
+    );
+  });
+
   // --- ANSI color rendering -----------------------------------------------
   await test.step("ANSI color rendering", async () => {
     await runInTerminal(page, commandPlan.ansiGreen("GATE-GREEN"));

@@ -223,9 +223,11 @@ import {
 import {
   agentChatHarnessLabel,
   stubActivityHistoryList,
+  stubBeginStreamingTurn,
   stubResumeAgentChatSession,
   stubStartNewAgentChatSession,
 } from "./activitySessionStub";
+import { AgentChatTranscriptBubbles } from "./agentChatBubbles";
 import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
@@ -319,6 +321,7 @@ import {
   type ActivityConsoleEvent,
   type ActivityConsoleStreamRequest,
   type ActivityItem,
+  type TranscriptBlock,
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
@@ -6843,6 +6846,17 @@ function agentChatWorkbenchPane(
   };
 }
 
+function mergeStreamingTranscriptBlocks(
+  blocks: readonly TranscriptBlock[],
+  streaming: Record<string, TranscriptBlock>,
+): TranscriptBlock[] {
+  const merged = blocks.map((block) => streaming[block.cursor] ?? block);
+  const appended = Object.values(streaming).filter(
+    (block) => !blocks.some((existing) => existing.cursor === block.cursor),
+  );
+  return [...merged, ...appended];
+}
+
 function AgentChatPaneBody({
   pane,
   actions,
@@ -6856,8 +6870,30 @@ function AgentChatPaneBody({
   const historyRef = useRef<HTMLDivElement | null>(null);
   useDismissableMenu(historyOpen, historyRef, () => setHistoryOpen(false));
 
+  // Stub-side per-line streaming demo (`260711` Phase 2): once a session is
+  // active, grow one synthetic agent-turn block over several ticks so the
+  // bubble transcript renders incrementally, mirroring what a live streaming
+  // harness backend would eventually push. Purely additive to the session's
+  // own `transcript.blocks` - never mutates them.
+  const [streamingBlocks, setStreamingBlocks] = useState<Record<string, TranscriptBlock>>({});
+  const activeActivityId = pane.session?.activityId ?? null;
+  useEffect(() => {
+    if (!activeActivityId) {
+      return;
+    }
+    setStreamingBlocks({});
+    const handle = stubBeginStreamingTurn((block) => {
+      setStreamingBlocks((current) => ({ ...current, [block.cursor]: block }));
+    });
+    return () => handle.stop();
+  }, [activeActivityId]);
+
   if (pane.session) {
     const { session } = pane;
+    const transcriptBlocks = mergeStreamingTranscriptBlocks(
+      session.transcript.blocks,
+      streamingBlocks,
+    );
     return (
       <div className="agent-chat-pane" data-agent-chat-pane-state="active">
         <div className="agent-chat-pane-header">
@@ -6867,18 +6903,10 @@ function AgentChatPaneBody({
           <span className="agent-chat-pane-title">{session.title}</span>
         </div>
         <div className="agent-chat-pane-transcript" data-testid="agent-chat-transcript">
-          {session.transcript.blocks.map((block) => (
-            <div className="agent-chat-transcript-block" key={block.cursor}>
-              {block.title ? (
-                <div className="agent-chat-transcript-block-title">
-                  {block.title}
-                </div>
-              ) : null}
-              <div className="agent-chat-transcript-block-text">
-                {block.text}
-              </div>
-            </div>
-          ))}
+          <AgentChatTranscriptBubbles
+            blocks={transcriptBlocks}
+            sourceKind={session.transcript.source.kind}
+          />
         </div>
       </div>
     );

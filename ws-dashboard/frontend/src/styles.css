@@ -3790,13 +3790,113 @@ button.git-status-segment:disabled {
   overflow: auto;
 }
 
-.agent-chat-transcript-block {
+/* Phase 2 messenger bubble layout
+   (`260711-feat-ws-dashboard-agent-activity-chat-ui`): user bubbles
+   right-aligned, agent-turn/tool-use/thinking bubbles left-aligned. Each
+   bubble carries its own copy affordance; tool-use and thinking bubbles are
+   collapsed by default with a click-to-expand toggle. */
+.agent-chat-bubble {
+  position: relative;
+  display: grid;
+  gap: var(--ws-space-04);
+  max-width: 80%;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-raised);
   padding: var(--ws-space-06);
 }
 
-.agent-chat-transcript-block-title {
+.agent-chat-bubble[data-agent-chat-bubble-align="right"] {
+  justify-self: end;
+}
+
+.agent-chat-bubble[data-agent-chat-bubble-align="left"] {
+  justify-self: start;
+}
+
+.agent-chat-bubble-user {
+  background: var(--ws-color-accent-muted, var(--ws-color-panel-raised));
+}
+
+.agent-chat-bubble-tool {
+  border-style: dashed;
+}
+
+.agent-chat-bubble.is-degraded {
+  border-color: var(--ws-color-error, #e05555);
+}
+
+.agent-chat-bubble-body {
+  font-size: var(--ws-font-size-02);
+  line-height: 1.5;
+}
+
+.agent-chat-bubble-copy {
+  justify-self: start;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: transparent;
   color: var(--ws-color-text-secondary);
   font-size: var(--ws-font-size-01);
-  margin-bottom: var(--ws-space-04);
+  padding: var(--ws-space-03) var(--ws-space-05);
+  cursor: pointer;
+}
+
+.agent-chat-bubble-copy:hover,
+.agent-chat-bubble-copy:focus-visible {
+  color: var(--ws-color-text-primary);
+}
+
+.agent-chat-bubble-tool-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ws-space-05);
+}
+
+.agent-chat-bubble-tool-summary {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-02);
+}
+
+.agent-chat-bubble-tool-toggle {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: transparent;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  padding: var(--ws-space-03) var(--ws-space-05);
+  cursor: pointer;
+}
+
+.agent-chat-bubble-tool-detail {
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel, transparent);
+  padding: var(--ws-space-05);
+  font-size: var(--ws-font-size-01);
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.agent-chat-thinking-block {
+  border-left: 2px solid var(--ws-color-border-strong);
+  padding-left: var(--ws-space-05);
+}
+
+.agent-chat-thinking-toggle {
+  border: none;
+  background: transparent;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  font-style: italic;
+  padding: 0;
+  cursor: pointer;
+}
+
+.agent-chat-thinking-toggle:hover,
+.agent-chat-thinking-toggle:focus-visible {
+  color: var(--ws-color-text-primary);
+}
+
+.agent-chat-thinking-detail {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-font-size-01);
+  margin-top: var(--ws-space-04);
 }

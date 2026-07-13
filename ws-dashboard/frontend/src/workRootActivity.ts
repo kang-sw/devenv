@@ -84,6 +84,16 @@ export type TranscriptBlockRenderKind =
   | "thinking"
   | string;
 
+// CONTRACT: `role`/`turnId` are additive, optional fields (added Phase 2 of
+// `260711-feat-ws-dashboard-agent-activity-chat-ui`) for messenger bubble
+// grouping — same "open string union, additive, tolerant" style as the
+// `thinking` `renderKind` addition above. `role` distinguishes chat
+// participants for alignment (`"user"` right-aligned, everything else
+// left-aligned); `turnId` groups blocks belonging to the same agent turn or
+// tool invocation so `agentChatBubbles.ts`'s grouping helper can merge them
+// into one bubble. Both are optional/undefined-tolerant so `260620`'s real
+// daemon projection can populate them later without a reshape, and existing
+// callers that never set them keep working unchanged.
 export type TranscriptBlock = {
   cursor: string;
   timestamp: string | null;
@@ -92,6 +102,8 @@ export type TranscriptBlock = {
   text: string | null;
   data: unknown | null;
   degraded: boolean;
+  role?: "user" | "agent" | "tool" | string;
+  turnId?: string | null;
 };
 
 export type ActivityTranscript = {

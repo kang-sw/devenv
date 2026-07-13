@@ -582,6 +582,51 @@ function renderTranslatedMarkdown(markdown: string): ReactNode {
   return tree.children?.map((child, index) => renderNode(child, `translated-${index}`, footnotes));
 }
 
+/**
+ * Lightweight markdown render entry point for callers that need the same
+ * Obsidian-flavored `unified`/`remark-parse`/`remark-gfm` pipeline as
+ * `DocumentViewer` but without its block-selection rails or translation
+ * overlay toolbar — e.g. `agentChatBubbles.tsx`'s chat-bubble markdown
+ * rendering (`260711-feat-ws-dashboard-agent-activity-chat-ui` Phase 2).
+ * Reuses `deriveMarkdownDocumentModel`/`groupedMarkdownRenderUnits`/
+ * `renderBlockNode` rather than a second markdown implementation.
+ */
+export function renderMarkdownFragment(markdown: string): ReactNode {
+  const model = deriveMarkdownDocumentModel(markdown);
+  const renderUnits = groupedMarkdownRenderUnits(model.renderBlocks);
+  return renderUnits.map((unit) => {
+    if (unit.type === "list") {
+      const ListTag = unit.context.ordered ? "ol" : "ul";
+      return (
+        <ListTag
+          key={unit.context.groupKey}
+          className={`document-list document-list-${unit.context.ordered ? "ordered" : "unordered"}${unit.context.spread ? " is-spread" : ""}`}
+          start={unit.context.ordered && unit.context.start && unit.context.start !== 1 ? unit.context.start : undefined}
+        >
+          {unit.blocks.map((block) => (
+            <li
+              key={block.blockId}
+              className={`document-block document-block-${block.kind}`}
+              data-document-block-kind={block.kind}
+            >
+              {renderListItemContents(block.node, `block-${block.blockId}`, model.footnotes)}
+            </li>
+          ))}
+        </ListTag>
+      );
+    }
+    return (
+      <div
+        key={unit.block.blockId}
+        className={`document-block document-block-${unit.block.kind}`}
+        data-document-block-kind={unit.block.kind}
+      >
+        {renderBlockNode(unit.block, model.footnotes)}
+      </div>
+    );
+  });
+}
+
 function renderBlockNode(block: RenderBlock, footnotes: Record<string, string>): ReactNode {
   if (block.kind === "callout") {
     return (

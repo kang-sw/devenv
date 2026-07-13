@@ -58,15 +58,131 @@ function stubTranscriptBlock(
   text: string,
   timestamp: string,
   cursor: string,
+  extra: Partial<Pick<TranscriptBlock, "role" | "turnId" | "renderKind" | "data" | "degraded">> = {},
 ): TranscriptBlock {
   return {
     cursor,
     timestamp,
-    renderKind: "markdown",
+    renderKind: extra.renderKind ?? "markdown",
     title,
     text,
-    data: null,
-    degraded: false,
+    data: extra.data ?? null,
+    degraded: extra.degraded ?? false,
+    role: extra.role,
+    turnId: extra.turnId,
+  };
+}
+
+// --- Phase 2 streaming/bubble demo content --------------------------------
+// CONTRACT: this section is stub-scoped only (see file header) — it exists so
+// the messenger bubble layout, collapsible thinking blocks, tool-use bubble
+// grouping, and per-line streaming markdown rendering
+// (`260711-feat-ws-dashboard-agent-activity-chat-ui` Phase 2) are demoable
+// and testable end-to-end without a live daemon/harness backend. Nothing
+// here stands in for real `260620`/`260624` behavior beyond what Phase 1's
+// stub already claims.
+
+const STUB_STREAM_TURN_ID = "turn-stream-demo";
+const STUB_TOOL_TURN_ID = "turn-tool-demo";
+
+/**
+ * Static demo blocks appended after the "Session started" block: a user
+ * prompt (right-aligned bubble), a collapsible thinking segment, and a
+ * paired tool-call/tool-result (one grouped tool-use bubble via matching
+ * `turnId`) — giving every Phase 2 bubble kind at least one concrete example
+ * as soon as a stub session starts.
+ */
+function stubDemoBubbleBlocks(now: string): TranscriptBlock[] {
+  return [
+    stubTranscriptBlock(
+      "",
+      "Show me a streamed reply that includes a tool call.",
+      now,
+      "1",
+      { role: "user" },
+    ),
+    stubTranscriptBlock(
+      "",
+      "Plan: run a quick lookup, then stream the formatted answer back line by line.",
+      now,
+      "2",
+      { role: "agent", renderKind: "thinking", turnId: STUB_TOOL_TURN_ID },
+    ),
+    stubTranscriptBlock(
+      "Tool call",
+      "Called stub.lookup",
+      now,
+      "3",
+      {
+        role: "tool",
+        turnId: STUB_TOOL_TURN_ID,
+        data: { name: "stub.lookup", argumentsBytes: 42 },
+      },
+    ),
+    stubTranscriptBlock(
+      "Tool output",
+      "stub.lookup completed",
+      now,
+      "4",
+      {
+        role: "tool",
+        turnId: STUB_TOOL_TURN_ID,
+        data: { outcome: "ok", exitCode: 0, outputBytes: 128 },
+      },
+    ),
+  ];
+}
+
+const STUB_STREAM_LINES: readonly string[] = [
+  "Here is the streamed answer, rendered incrementally line by line:",
+  "",
+  "- point one lands first",
+  "- point two arrives a moment later",
+  "",
+  "```ts",
+  "const streamed = true;",
+  "```",
+  "",
+  "Markdown formatting stays correct at every intermediate length.",
+];
+
+export type StubStreamingHandle = {
+  stop: () => void;
+};
+
+/**
+ * Begin a stub-side incremental "streaming" agent turn: grows a single
+ * `TranscriptBlock`'s `text` by one more line every tick and invokes
+ * `onUpdate` with the updated block each time, so callers can observe
+ * genuinely incremental rendering (component tests can also just feed
+ * successive partial strings directly through the same block shape without
+ * needing the timer).
+ */
+export function stubBeginStreamingTurn(
+  onUpdate: (block: TranscriptBlock) => void,
+  options: { intervalMs?: number; cursor?: string } = {},
+): StubStreamingHandle {
+  const cursor = options.cursor ?? "stream-1";
+  const intervalMs = options.intervalMs ?? 200;
+  let index = 0;
+  let text = "";
+  const emit = () => {
+    if (index >= STUB_STREAM_LINES.length) {
+      clearInterval(timer);
+      return;
+    }
+    text = text.length > 0 ? `${text}\n${STUB_STREAM_LINES[index]}` : STUB_STREAM_LINES[index];
+    index += 1;
+    onUpdate(
+      stubTranscriptBlock("", text, new Date().toISOString(), cursor, {
+        role: "agent",
+        turnId: STUB_STREAM_TURN_ID,
+      }),
+    );
+  };
+  const timer = setInterval(emit, intervalMs);
+  return {
+    stop: () => clearInterval(timer),
   };
 }
 
@@ -121,7 +237,9 @@ export async function stubStartActivitySession(
         `New ${agentChatHarnessLabel[request.harness]} conversation started (stub provider — no real ${request.harness} adapter is wired in yet).`,
         now,
         "0",
+        { role: "agent" },
       ),
+      ...stubDemoBubbleBlocks(now),
     ]),
   };
   return { activityId: request.activityId, session };
