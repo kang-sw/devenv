@@ -853,6 +853,46 @@ func rawIDForTest(t *testing.T, raw json.RawMessage) string {
 	return string(raw)
 }
 
+func TestServeStdioPingPreservesIDsAndIsNotAdvertised(t *testing.T) {
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":17,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":"ping-string-id","method":"ping"}`,
+		`{"jsonrpc":"2.0","id":18,"method":"tools/list","params":{}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	for _, id := range []string{"17", "ping-string-id"} {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(byID[id]), &envelope); err != nil {
+			t.Fatalf("decode ping response for id %q: %v", id, err)
+		}
+		if len(envelope) != 3 {
+			t.Fatalf("ping response for id %q has unexpected fields: %s", id, byID[id])
+		}
+		if string(envelope["jsonrpc"]) != `"2.0"` {
+			t.Fatalf("ping response for id %q has unexpected jsonrpc: %s", id, byID[id])
+		}
+		if rawIDForTest(t, envelope["id"]) != id {
+			t.Fatalf("ping response did not preserve id %q: %s", id, byID[id])
+		}
+		if string(envelope["result"]) != `{}` {
+			t.Fatalf("ping response for id %q did not return an empty object: %s", id, byID[id])
+		}
+	}
+	if toolNameListed(t, byID["18"], "ping") {
+		t.Fatalf("tools/list advertised base-protocol ping as a tool: %s", byID["18"])
+	}
+}
+
 func toolIsError(t *testing.T, line string) bool {
 	t.Helper()
 	var resp struct {
