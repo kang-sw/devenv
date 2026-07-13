@@ -3884,6 +3884,148 @@ async fn server_scoped_activity_git_workspace_routes_are_owner_authenticated() {
     }
 }
 
+// CONTRACT: the `server-local` alias must be byte-for-byte equivalent to the
+// legacy bare route for the plain activity feed and transcript routes, for a
+// mixed-source feed (a named-agent-compat row plus a live Codex app-server
+// session merged in via `merge_activity_items`), matching the same
+// equivalence pattern already proven for terminal
+// (`server_scoped_terminal_local_aliases_match_legacy_lifecycle`) and
+// git/worktree (`server_scoped_git_and_worktree_local_aliases_match_legacy_routes`).
+#[tokio::test]
+async fn server_scoped_activity_local_aliases_match_legacy_routes() {
+    if skip_without_git("server_scoped_activity_local_aliases_match_legacy_routes") {
+        return;
+    }
+    let root = temp_fixture_path("server-scoped-activity-alias-parity");
+    let cache_home = temp_fixture_path("server-scoped-activity-alias-parity-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    // Named-agent-compat row (legacy `namedAgent` source kind), with a
+    // transcript available so the transcript route equivalence has content
+    // to compare too.
+    write_agent_metadata(
+        &agents_dir,
+        "reviewer",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "reviewer",
+            "backend": "codex",
+            "harness": "codex",
+            "tier": "core",
+            "model": "gpt-5.3-codex",
+            "effort": "medium",
+            "session_id": "session-abc",
+            "status": "idle",
+            "last_call_at": "2026-05-17T09:00:00Z",
+            "last_output_path": "/cache/agents/reviewer/output.md",
+            "pid": 4242,
+            "stdout_path": "/cache/agents/reviewer/current/stdout"
+        }),
+    );
+    write_agent_output(
+        &agents_dir,
+        "reviewer",
+        "# Review result\nalias parity fixture\n",
+    );
+
+    let codex_sessions = CodexProviderRegistry::default();
+    let mut state = app_state_with_activity_cache_home(cache_home.clone());
+    state.codex_sessions = codex_sessions.clone();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    // Live Codex app-server session row (`agent.codex` source kind, merged
+    // into the same unified feed by `work_root_activity`), for a
+    // mixed-source feed. Registered under the same `server-local` id and the
+    // just-opened `work_root_id` so both the plain and server-scoped routes
+    // resolve to it; `codex_sessions` shares the registry handle installed
+    // into `state` above, so this insert is visible to the running `app`.
+    let mut projector = CodexProjector::new();
+    projector.ingest_line(
+        r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"alias-parity-item","text":"alias parity codex transcript"}}}"#,
+    );
+    let connection = spawn_codex_reply_peer(serde_json::json!({ "turn": { "id": "turn-alias-parity" } }));
+    codex_sessions
+        .insert_session_for_tests(
+            "server-local",
+            "codex:alias-parity",
+            WorkRootId::from(work_root_id.clone()),
+            "thread-alias-parity",
+            connection,
+            projector,
+        )
+        .expect("seed live codex session for alias-parity fixture");
+
+    // The unscoped feed must already be mixed-source before comparing
+    // aliases, otherwise this test would not exercise what it claims to.
+    let (feed_status, feed_body) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &work_root_id).await;
+    assert_eq!(feed_status, StatusCode::OK);
+    let feed: serde_json::Value = serde_json::from_str(&feed_body).expect("mixed feed JSON");
+    let items = feed["items"].as_array().expect("mixed feed items array");
+    assert_eq!(items.len(), 2);
+    let source_kinds: std::collections::BTreeSet<&str> = items
+        .iter()
+        .map(|item| item["source"]["kind"].as_str().expect("source kind"))
+        .collect();
+    assert_eq!(
+        source_kinds,
+        std::collections::BTreeSet::from(["namedAgent", "agent.codex"]),
+        "fixture must produce a mixed-source feed"
+    );
+
+    let legacy_activity_uri = format!("/api/dashboard/work-roots/{work_root_id}/activity");
+    let alias_activity_uri =
+        format!("/api/dashboard/servers/server-local/work-roots/{work_root_id}/activity");
+    let legacy_activity =
+        get_status_and_body(app.clone(), cookie.as_str(), &legacy_activity_uri).await;
+    let alias_activity =
+        get_status_and_body(app.clone(), cookie.as_str(), &alias_activity_uri).await;
+    assert_eq!(
+        alias_activity.0, legacy_activity.0,
+        "status mismatch for activity feed"
+    );
+    assert_eq!(
+        normalize_volatile_json(&alias_activity.1),
+        normalize_volatile_json(&legacy_activity.1),
+        "body mismatch for activity feed"
+    );
+
+    // The plain `.../activity/items/{id}/transcript` route only resolves
+    // named-agent-style ids (see `activity_source_from_id`); the live Codex
+    // session's transcript is served by the dedicated
+    // `.../activity/codex-sessions/{id}/transcript` route instead, which is
+    // out of scope for this equivalence test (no server-scoped alias for
+    // that route needs proving here; it is already exercised by
+    // `server_scoped_codex_prompt_short_circuits_local_and_forwards_remote`).
+    let legacy_transcript_uri =
+        format!("/api/dashboard/work-roots/{work_root_id}/activity/items/agent:reviewer/transcript");
+    let alias_transcript_uri = format!(
+        "/api/dashboard/servers/server-local/work-roots/{work_root_id}/activity/items/agent:reviewer/transcript"
+    );
+    let legacy_transcript =
+        get_status_and_body(app.clone(), cookie.as_str(), &legacy_transcript_uri).await;
+    let alias_transcript =
+        get_status_and_body(app.clone(), cookie.as_str(), &alias_transcript_uri).await;
+    assert_eq!(
+        alias_transcript.0, legacy_transcript.0,
+        "status mismatch for named-agent transcript"
+    );
+    assert_eq!(
+        normalize_volatile_json(&alias_transcript.1),
+        normalize_volatile_json(&legacy_transcript.1),
+        "body mismatch for named-agent transcript"
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
 #[tokio::test]
 async fn server_scoped_terminal_routes_are_owner_authenticated() {
     let app = build_router(app_state());

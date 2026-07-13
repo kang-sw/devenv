@@ -32,6 +32,7 @@ import {
   type TranscriptBlock,
   type WorkRootActivityView,
 } from "./workRootActivity.js";
+import { LOCAL_DASHBOARD_SERVER_ROUTE } from "./resourceModel.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -1236,4 +1237,186 @@ assertEqual(
   workRootActivityEndpoint("root-local-abc"),
   "/api/dashboard/work-roots/root-local-abc/activity",
   "existing Activity route helpers stay unchanged for mixed-source rows",
+);
+
+// Phase 5 (260620-feat-ws-dashboard-agent-client-activity-sources): the
+// source-neutral labeling/identity-key groundwork. `activityRibbonSourceLabel`
+// must stay source-neutral (never a literal "named agent"/"Named Agent"
+// string) across a mixed-source list including an unknown future source
+// kind, and the stream-key/endpoint helpers must key identity off
+// `serverRoute` consistently, falling back to `LOCAL_DASHBOARD_SERVER_ROUTE`
+// when omitted.
+const mixedSourceRibbonItems: Array<[string, ActivityItem]> = [
+  [
+    "namedAgent",
+    activityItem({
+      id: "mixed-named-agent",
+      kind: "namedAgent",
+      source: {
+        kind: "namedAgent",
+        label: "Codex",
+        backend: "codex",
+        harness: "codex",
+        tier: "core",
+        model: null,
+      },
+    }),
+  ],
+  [
+    "exec",
+    activityItem({
+      id: "mixed-exec",
+      kind: "exec",
+      source: {
+        kind: "exec",
+        label: "exec",
+        backend: null,
+        harness: null,
+        tier: null,
+        model: null,
+      },
+    }),
+  ],
+  [
+    "agent.codex",
+    activityItem({
+      id: "mixed-agent-codex",
+      kind: "agent.codex",
+      source: {
+        kind: "agent.codex",
+        label: "codex",
+        backend: "codex",
+        harness: "codex",
+        tier: null,
+        model: "gpt-5.3-codex",
+      },
+    }),
+  ],
+  [
+    "agent.opencode",
+    activityItem({
+      id: "mixed-agent-opencode",
+      kind: "agent.opencode",
+      source: {
+        kind: "agent.opencode",
+        label: "opencode",
+        backend: "opencode",
+        harness: "opencode",
+        tier: null,
+        model: null,
+      },
+    }),
+  ],
+  [
+    "agent.claude",
+    activityItem({
+      id: "mixed-agent-claude",
+      kind: "agent.claude",
+      source: {
+        kind: "agent.claude",
+        label: "claude",
+        backend: "claude",
+        harness: "claude",
+        tier: null,
+        model: null,
+      },
+    }),
+  ],
+  [
+    "agent.foo (unknown future source kind)",
+    activityItem({
+      id: "mixed-agent-foo",
+      kind: "agent.foo",
+      source: {
+        kind: "agent.foo",
+        label: "foo",
+        backend: "foo",
+        harness: null,
+        tier: null,
+        model: null,
+      },
+    }),
+  ],
+];
+for (const [description, item] of mixedSourceRibbonItems) {
+  const label = activityRibbonSourceLabel(item);
+  assertEqual(
+    /named[\s-]?agent/i.test(label),
+    false,
+    `mixed-source ribbon label for ${description} must never render the literal "named agent" string (got ${label})`,
+  );
+}
+assertEqual(
+  activityRibbonSourceLabel(mixedSourceRibbonItems[3][1]),
+  "agent-opencode.opencode",
+  "agent.opencode ribbon source label stays source-neutral for an interactive provider kind",
+);
+assertEqual(
+  activityRibbonSourceLabel(mixedSourceRibbonItems[4][1]),
+  "agent-claude.claude",
+  "agent.claude ribbon source label stays source-neutral for an interactive provider kind",
+);
+assertEqual(
+  activityRibbonSourceLabel(mixedSourceRibbonItems[5][1]),
+  "agent-foo.foo",
+  "an unknown future agent.* source kind still renders a source-neutral ribbon label without special-casing",
+);
+
+assertEqual(
+  activityStreamKey("root-x", "activity-x") ===
+    activityStreamKey("root-x", "activity-x", LOCAL_DASHBOARD_SERVER_ROUTE),
+  true,
+  "omitting serverRoute in activityStreamKey falls back to LOCAL_DASHBOARD_SERVER_ROUTE consistently",
+);
+assertEqual(
+  workRootActivityEndpoint("root-x") ===
+    workRootActivityEndpoint("root-x", { serverRoute: LOCAL_DASHBOARD_SERVER_ROUTE }),
+  true,
+  "omitting serverRoute in workRootActivityEndpoint falls back to the local alias route consistently",
+);
+assertEqual(
+  workRootActivityEventsEndpoint("root-x") ===
+    workRootActivityEventsEndpoint("root-x", { serverRoute: LOCAL_DASHBOARD_SERVER_ROUTE }),
+  true,
+  "omitting serverRoute in workRootActivityEventsEndpoint falls back to the local alias route consistently",
+);
+assertEqual(
+  workRootActivityTranscriptEndpoint("root-x", "agent:reviewer") ===
+    workRootActivityTranscriptEndpoint("root-x", "agent:reviewer", {
+      serverRoute: LOCAL_DASHBOARD_SERVER_ROUTE,
+    }),
+  true,
+  "omitting serverRoute in workRootActivityTranscriptEndpoint falls back to the local alias route consistently",
+);
+
+const distinctServerRoutes = ["server-remote-1", "server-remote-2", LOCAL_DASHBOARD_SERVER_ROUTE];
+const distinctStreamKeys = new Set(
+  distinctServerRoutes.map((serverRoute) =>
+    activityStreamKey("root-shared", "activity-shared", serverRoute),
+  ),
+);
+assertEqual(
+  distinctStreamKeys.size,
+  distinctServerRoutes.length,
+  "activityStreamKey produces a distinct identity key per distinct serverRoute for the same workRootId/activityId",
+);
+const distinctEndpoints = new Set(
+  distinctServerRoutes.map((serverRoute) =>
+    workRootActivityEndpoint("root-shared", { serverRoute }),
+  ),
+);
+assertEqual(
+  distinctEndpoints.size,
+  distinctServerRoutes.length,
+  "workRootActivityEndpoint produces a distinct path per distinct serverRoute for the same workRootId",
+);
+const distinctTranscriptEndpoints = new Set(
+  distinctServerRoutes.map((serverRoute) =>
+    workRootActivityTranscriptEndpoint("root-shared", "activity-shared", { serverRoute }),
+  ),
+);
+assertEqual(
+  distinctTranscriptEndpoints.size,
+  distinctServerRoutes.length,
+  "workRootActivityTranscriptEndpoint produces a distinct path per distinct serverRoute for the same workRootId/activityId",
 );
