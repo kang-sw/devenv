@@ -45,6 +45,42 @@ common chat-input UX conventions.
 distinct, progressively-older history entries; manually confirm in a live
 browser that repeated ArrowUp keeps walking back.
 
+### Result (7171aa84) - 2026-07-13
+
+Fixed by resetting the caret to column 0 after history recall.
+
+- `handlePromptKeyDown` (`App.tsx`) now schedules
+  `input.setSelectionRange(0, 0)` via `requestAnimationFrame` right after
+  `navigateHistory(...)`, deferred because `setPromptValue`'s DOM commit
+  hasn't landed synchronously inside the handler. Column-0 (not select-all)
+  was chosen so the reset itself satisfies the existing `caretAtStart`
+  guard, letting the next ArrowUp/ArrowDown keep walking history. The guard
+  itself is untouched, per the ticket's explicit constraint.
+  `navigateHistory`/`revertPending` were not touched.
+- `dashboard-acceptance.spec.ts`'s history-traversal block previously pressed
+  `Home` before every single ArrowUp/ArrowDown — an active workaround that
+  was masking this exact bug. Removed those `Home` presses so the test now
+  exercises genuinely consecutive presses; review confirmed via manual
+  state-machine tracing that the test would fail without the fix (not
+  tautological).
+- Review: single full-scope pass, clean, no fix cycle needed.
+- Verification: `npm run build` passed clean. The full
+  `dashboard-acceptance.spec.ts` playwright run could not reach the modified
+  assertions in this environment — it fails earlier (line ~2578, transcript
+  stays hidden after the Codex tile click) regardless of this diff; the
+  reviewer independently reproduced the identical failure against both HEAD
+  and the pre-diff baseline commit, confirming it's pre-existing and
+  unrelated. Filed as its own ticket:
+  `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` (idea/).
+  Given the harness couldn't run to completion, the fix's correctness was
+  verified by direct code reading plus manual trace of the modified test's
+  expected state machine (documented in the review findings), not by a
+  passing CI run — this is a real environment limitation, not a defect in
+  this diff.
+- Manual live-browser confirmation (nice-to-have per the ticket) was not
+  performed — no browser tool available to this agent, same limitation
+  noted elsewhere in this workspace's sibling tickets.
+
 ### Phase 2: Auto-scroll the queued/pending message bubble into view
 
 When a user queues a message mid-turn (while the agent is still streaming),
