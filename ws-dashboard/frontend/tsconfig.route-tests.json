@@ -43,6 +43,8 @@
     "src/activitySessionApi.test.ts",
     "src/activitySessionStub.ts",
     "src/activitySessionStub.test.ts",
+    "src/activitySessionClient.ts",
+    "src/activitySessionClient.test.ts",
     "src/agentChatSessions.ts",
     "src/agentChatSessions.test.ts",
     "src/agentChatBubbles.tsx",

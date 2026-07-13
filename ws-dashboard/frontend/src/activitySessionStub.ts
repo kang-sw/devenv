@@ -74,7 +74,12 @@ function stubSourceDisplay(harness: AgentChatHarness): ActivitySourceDisplay {
 // coarse turn-count-based; Claude's only path is an unofficial Hack;
 // OpenCode is unverified) — this is the load-bearing gate keeping "resume
 // from here" disabled everywhere (see `agentChatResumeFromHere.tsx`).
-function stubCapabilitiesForHarness(harness: AgentChatHarness): AgentChatCapabilities {
+// Exported (not stub-scoped) since `260713-feat-ws-dashboard-agent-chat-real-
+// adapter-wiring` Phase 1's real client reuses this exact table: no daemon
+// route reports live `AgentClientCapabilities` yet for either harness, so the
+// real client falls back to the same forward-declared tiering rather than
+// duplicating it.
+export function stubCapabilitiesForHarness(harness: AgentChatHarness): AgentChatCapabilities {
   switch (harness) {
     case "codex":
       return {
@@ -390,7 +395,13 @@ export async function stubResumeAgentChatSession(
 // an exact `"agent.<harness>"` string, but `stubForkActivitySession` (below)
 // also feeds this the fuller `agent.<harness>:stub-...` `activityId` shape
 // minted by `stubActivityId`, and both must resolve to the same harness.
-function agentChatHarnessFromSourceKind(kind: string): AgentChatHarness {
+//
+// Exported (not stub-scoped) since `260713-feat-ws-dashboard-agent-chat-real-
+// adapter-wiring` Phase 1's App.tsx call sites reuse this exact mapping to
+// decide whether a history item routes to the real client (codex/claude) or
+// stays on the stub (opencode) — one source of truth for the mapping rather
+// than a second copy in App.tsx.
+export function agentChatHarnessFromSourceKind(kind: string): AgentChatHarness {
   if (kind.startsWith("agent.opencode")) return "opencode";
   if (kind.startsWith("agent.claude")) return "claude";
   return "codex";

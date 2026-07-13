@@ -224,6 +224,7 @@ import {
   type AgentChatSessionView,
 } from "./agentChatSessions";
 import {
+  agentChatHarnessFromSourceKind,
   agentChatHarnessLabel,
   stubActivityHistoryList,
   stubBeginStreamingTurn,
@@ -233,6 +234,17 @@ import {
   stubSteerActivitySession,
   type StubStreamingHandle,
 } from "./activitySessionStub";
+import {
+  activityHistoryList as realActivityHistoryList,
+  beginRealStreamingTurn,
+  forkActivitySession as realForkActivitySession,
+  resumeAgentChatSession as realResumeAgentChatSession,
+  sendAgentChatPrompt,
+  startNewAgentChatSession as realStartNewAgentChatSession,
+  steerActivitySession as realSteerActivitySession,
+  type RealAgentChatHarness,
+  type RealStreamingHandle,
+} from "./activitySessionClient";
 import { AgentChatTranscriptBubbles, type ChatBubble } from "./agentChatBubbles";
 import {
   compactWorkspaceWorkRoot,
@@ -398,6 +410,17 @@ const initialWorkbenchGroups = [
   { id: "group-1", label: "group 1" },
   { id: "group-2", label: "group 2" },
 ] as const;
+
+// `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1 harness
+// routing: only Codex/Claude have a real `activitySessionClient.ts` adapter
+// wired in; every other harness (OpenCode today) stays on
+// `activitySessionStub.ts` (see the plan's Codebase Findings — do not regress
+// stub-backed flows for unadapted harnesses).
+function realAgentChatHarness(
+  harness: AgentChatHarness,
+): RealAgentChatHarness | null {
+  return harness === "codex" || harness === "claude" ? harness : null;
+}
 
 export function App() {
   const [resources, setResources] = useState<DashboardResourcesView | null>(
@@ -4031,8 +4054,7 @@ function WorkbenchShell({
           onClose: closeAgentChatPane,
           onStartHarness: startAgentChatHarness,
           onResumeHistoryItem: resumeAgentChatHistoryItem,
-          onLoadHistory: (workRootId, serverRoute) =>
-            stubActivityHistoryList({ workRootId, serverRoute }),
+          onLoadHistory: loadAgentChatHistory,
           onSendMessage: sendAgentChatMessage,
           onForkFromBubble: forkAgentChatFromBubble,
           onResumeFromBubble: () => undefined,
@@ -4938,9 +4960,15 @@ function WorkbenchShell({
     );
     // Tile-launch semantics (fixture-review follow-up): the click actually
     // invokes the create/start call path against whatever provider is wired
-    // in - the stub today, a real per-harness adapter once `260620` lands -
-    // it is never a UI-only state transition.
-    void stubStartNewAgentChatSession(pane.workRootId, harness, pane.serverRoute)
+    // in - the real `activitySessionClient.ts` adapter for Codex/Claude
+    // (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1),
+    // the stub for any other harness (OpenCode) - it is never a UI-only
+    // state transition.
+    const realHarness = realAgentChatHarness(harness);
+    const startCall = realHarness
+      ? realStartNewAgentChatSession(pane.workRootId, realHarness, pane.serverRoute)
+      : stubStartNewAgentChatSession(pane.workRootId, harness, pane.serverRoute);
+    void startCall
       .then((session) => {
         applyAgentChatSession(pane.logicalKey, session);
       })
@@ -4975,7 +5003,12 @@ function WorkbenchShell({
           }
         : current,
     );
-    void stubResumeAgentChatSession(item, pane.workRootId, pane.serverRoute)
+    const itemHarness = agentChatHarnessFromSourceKind(item.kind);
+    const realHarness = realAgentChatHarness(itemHarness);
+    const resumeCall = realHarness
+      ? realResumeAgentChatSession(item, realHarness, pane.workRootId, pane.serverRoute)
+      : stubResumeAgentChatSession(item, pane.workRootId, pane.serverRoute);
+    void resumeCall
       .then((session) => {
         applyAgentChatSession(pane.logicalKey, session);
       })
@@ -4994,6 +5027,28 @@ function WorkbenchShell({
             : current,
         );
       });
+  }
+
+  // Real counterpart to `stubActivityHistoryList`'s history-picker call
+  // site: merges the real client's Codex+Claude session list with the
+  // stub's OpenCode-only entries, so an unadapted harness's stub-backed flow
+  // is never regressed (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`
+  // Phase 1 Codebase Findings).
+  async function loadAgentChatHistory(
+    workRootId: string,
+    serverRoute?: string | null,
+  ): Promise<{ items: ActivityItem[] }> {
+    const [realResult, stub] = await Promise.all([
+      realActivityHistoryList({ workRootId, serverRoute }).catch(() => null),
+      stubActivityHistoryList({ workRootId, serverRoute }),
+    ]);
+    const stubOpencodeOnly = stub.items.filter(
+      (item) => agentChatHarnessFromSourceKind(item.kind) === "opencode",
+    );
+    // A real list failure (remote/server-scoped route error, provider error,
+    // daemon down) must not take down the OpenCode stub-backed flow with it —
+    // degrade to stub-only entries rather than rejecting the whole history.
+    return { items: [...(realResult?.items ?? []), ...stubOpencodeOnly] };
   }
 
   function applyAgentChatSession(
@@ -5026,6 +5081,32 @@ function WorkbenchShell({
       pane.logicalKey,
       appendUserTranscriptBlock(pane.session, text),
     );
+    // Risk signal (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`
+    // Phase 1 Codebase Findings): there was no existing stub call site here
+    // at all - this is a new real-client call, not a swap. Fire-and-forget:
+    // the local optimistic echo above already updated the pane; a failed
+    // send surfaces as a pane error without blocking the UI.
+    const realHarness = realAgentChatHarness(pane.session.harness);
+    if (realHarness) {
+      const { workRootId, activityId, serverRoute } = pane.session;
+      void sendAgentChatPrompt(workRootId, realHarness, activityId, text, serverRoute).catch(
+        (error) => {
+          setAgentChatPanes((current) =>
+            current[pane.logicalKey]
+              ? {
+                  ...current,
+                  [pane.logicalKey]: markAgentChatPaneError(
+                    current[pane.logicalKey],
+                    error instanceof Error
+                      ? error.message
+                      : "agent chat prompt failed to send",
+                  ),
+                }
+              : current,
+          );
+        },
+      );
+    }
   }
 
   // "Fork from here" (Phase 3, shipped live, backed by
@@ -5062,17 +5143,39 @@ function WorkbenchShell({
           }
         : current,
     );
-    void stubForkActivitySession(
-      {
-        workRootId: session.workRootId,
-        activityId: session.activityId,
-        serverRoute: session.serverRoute,
-      },
-      cutBlocks,
-    )
-      .then((result) => {
-        applyAgentChatSession(newPane.logicalKey, result.session);
-      })
+    // Real Codex fork (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring`
+    // Phase 1) wires the request against the future `/control` `Fork` action
+    // (`260713-feat-ws-dashboard-activity-session-fork-cursor` Phase 1), even
+    // though no backend `CodexControlRequest::Fork` variant/route exists yet
+    // (that's Phase 3) - so this always ends in the pane's error state today,
+    // by design. Gated to `codex` only (mirroring the steer branch above),
+    // since `realForkActivitySession` hardcodes the Codex `/control` URL -
+    // Claude/OpenCode fork stays on the stub unconditionally (Claude
+    // fork-from-here is Hack-tier and explicitly out of scope; the capability
+    // table also keeps the fork affordance hidden for Claude today).
+    const realHarness = realAgentChatHarness(session.harness);
+    const forkCall: Promise<void> = realHarness === "codex"
+      ? realForkActivitySession({
+          workRootId: session.workRootId,
+          activityId: session.activityId,
+          serverRoute: session.serverRoute,
+          cutCursor: lastCutBlock?.cursor ?? null,
+        }).then(() => {
+          throw new Error(
+            "Codex fork is wired to the real /control endpoint, but the backend Fork action lands in Phase 3 - not yet usable end-to-end",
+          );
+        })
+      : stubForkActivitySession(
+          {
+            workRootId: session.workRootId,
+            activityId: session.activityId,
+            serverRoute: session.serverRoute,
+          },
+          cutBlocks,
+        ).then((result) => {
+          applyAgentChatSession(newPane.logicalKey, result.session);
+        });
+    void forkCall
       .catch((error) => {
         setAgentChatPanes((current) =>
           current[newPane.logicalKey]
@@ -7021,6 +7124,15 @@ function AgentChatPaneBody({
       return;
     }
     setStreamingBlocks({});
+    // Real harnesses (Codex/Claude) already hydrate their transcript via
+    // `startNewAgentChatSession`/`resumeAgentChatSession` before the session
+    // reaches this pane, so there is no canned "session started" demo
+    // monologue to play for them - only the stub-backed harnesses (OpenCode)
+    // get the Phase 2 demo intro.
+    const sessionHarness = pane.session?.harness;
+    if (sessionHarness && realAgentChatHarness(sessionHarness)) {
+      return;
+    }
     const handle = stubBeginStreamingTurn((block) => {
       setStreamingBlocks((current) => ({ ...current, [block.cursor]: block }));
     });
@@ -7039,7 +7151,7 @@ function AgentChatPaneBody({
   const pendingRef = useRef<PendingChatMessage[]>([]);
   const turnSequenceRef = useRef(0);
   const pendingSequenceRef = useRef(0);
-  const streamHandlesRef = useRef<StubStreamingHandle[]>([]);
+  const streamHandlesRef = useRef<Array<StubStreamingHandle | RealStreamingHandle>>([]);
   const [promptValue, setPromptValue] = useState("");
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
@@ -7071,34 +7183,68 @@ function AgentChatPaneBody({
   // stream, and on that stream's natural `onComplete` clears in-flight and
   // dequeues+re-sends the next queued message (if any) - this is what
   // visibly clears a pending badge and starts its own new streamed reply.
-  function beginSimulatedTurn(text: string) {
+  function beginSimulatedTurn(text: string, options?: { readonly alreadyDelivered?: boolean }) {
     const currentPane = paneRef.current;
     if (!currentPane.session) {
       return;
     }
-    actions.onSendMessage(currentPane, text);
+    // `actions.onSendMessage` (-> `sendAgentChatMessage`) already fires the
+    // real `/prompt` POST for Codex/Claude sessions
+    // (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1) -
+    // do not send it again here, only fetch the resulting transcript once.
+    // `options.alreadyDelivered` is set when this turn's text was already
+    // delivered to the real Codex process via `turn/steer` while it was
+    // queued (see `submitPrompt`'s `steering` branch): resending it here via
+    // `/prompt` would double-deliver the same text, so the send is skipped
+    // and only the resulting transcript is fetched.
+    if (!options?.alreadyDelivered) {
+      actions.onSendMessage(currentPane, text);
+    }
     setPromptHistory((current) => [...current, text]);
     setTurnInFlight(true);
     turnSequenceRef.current += 1;
     const cursor = `user-turn-${turnSequenceRef.current}`;
+    const onTurnComplete = () => {
+      setTurnInFlight(false);
+      const queue = pendingRef.current;
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        pendingRef.current = rest;
+        setPendingMessages(rest);
+        // `next.steering` is only ever true for a Codex session (the only
+        // harness whose capability table enables `steer`), and only when the
+        // real `turn/steer` control call was actually fired in `submitPrompt`
+        // - so a dequeued steering entry must not be re-sent via `/prompt`.
+        beginSimulatedTurn(next.text, { alreadyDelivered: next.steering });
+      }
+    };
+    const realHarness = realAgentChatHarness(currentPane.session.harness);
+    if (realHarness) {
+      const { workRootId, activityId, serverRoute } = currentPane.session;
+      const handle = beginRealStreamingTurn(
+        workRootId,
+        realHarness,
+        activityId,
+        serverRoute,
+        (blocks) => {
+          setStreamingBlocks((current) => {
+            const next = { ...current };
+            for (const block of blocks) {
+              next[block.cursor] = block;
+            }
+            return next;
+          });
+        },
+        onTurnComplete,
+      );
+      streamHandlesRef.current.push(handle);
+      return;
+    }
     const handle = stubBeginStreamingTurn(
       (block) => {
         setStreamingBlocks((current) => ({ ...current, [block.cursor]: block }));
       },
-      {
-        cursor,
-        turnId: cursor,
-        onComplete: () => {
-          setTurnInFlight(false);
-          const queue = pendingRef.current;
-          if (queue.length > 0) {
-            const [next, ...rest] = queue;
-            pendingRef.current = rest;
-            setPendingMessages(rest);
-            beginSimulatedTurn(next.text);
-          }
-        },
-      },
+      { cursor, turnId: cursor, onComplete: onTurnComplete },
     );
     streamHandlesRef.current.push(handle);
   }
@@ -7129,11 +7275,11 @@ function AgentChatPaneBody({
     // Already mid-turn: queue locally (FIFO), rendered as a pending bubble
     // until the in-flight turn's `onComplete` dequeues it. If the harness
     // reports `steer: true` (Codex only, per the capability table), also
-    // fire the stub `turn/steer` call - a no-op `{ accepted: true }` today,
-    // fire-and-forget - as the exact call site a real Codex adapter
-    // replaces wholesale later. Actual delivery timing either way is still
-    // governed by the same local FIFO/`onComplete` above, since no real
-    // duplex exists yet.
+    // fire the real `turn/steer` control call for Codex
+    // (`260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1) -
+    // or the stub no-op for any other (unadapted) harness - fire-and-forget.
+    // Actual delivery timing either way is still governed by the same local
+    // FIFO/`onComplete` above, since no real duplex exists yet.
     pendingSequenceRef.current += 1;
     const steering = currentPane.session.capabilities.steer;
     const entry: PendingChatMessage = {
@@ -7144,12 +7290,22 @@ function AgentChatPaneBody({
     pendingRef.current = [...pendingRef.current, entry];
     setPendingMessages(pendingRef.current);
     if (steering) {
-      void stubSteerActivitySession({
-        workRootId: currentPane.session.workRootId,
-        activityId: currentPane.session.activityId,
-        text,
-        serverRoute: currentPane.session.serverRoute,
-      });
+      const realHarness = realAgentChatHarness(currentPane.session.harness);
+      if (realHarness === "codex") {
+        void realSteerActivitySession(
+          currentPane.session.workRootId,
+          currentPane.session.activityId,
+          text,
+          currentPane.session.serverRoute,
+        );
+      } else {
+        void stubSteerActivitySession({
+          workRootId: currentPane.session.workRootId,
+          activityId: currentPane.session.activityId,
+          text,
+          serverRoute: currentPane.session.serverRoute,
+        });
+      }
     }
   }
 

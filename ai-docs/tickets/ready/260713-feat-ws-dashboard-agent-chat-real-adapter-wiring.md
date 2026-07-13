@@ -101,6 +101,70 @@ the real client) pass against the new client; a targeted test confirms each
 swapped call site issues the correct REST-nested request shape for a Codex
 and a Claude session.
 
+### Result (53d420fe/089feb8e) - 2026-07-13
+
+Implemented on `impl/chat-adapter-wi` (commits `53d420fe` feat, `089feb8e`
+fix cycle; range `758c9a50..089feb8e`).
+
+New `ws-dashboard/frontend/src/activitySessionClient.ts` mirrors
+`gitToolbar.ts`'s fetch-client idiom against the real Codex/Claude REST-nested
+routes, covering create/prompt/control/transcript for both local and
+`/servers/{serverRoute}/...`-scoped variants. All 7 actual `App.tsx` call
+sites (not 6 — several stub functions had more than one call site) plus a
+previously-missing prompt-send call site were routed to the real client for
+Codex/Claude sessions, with OpenCode left on the unmodified stub.
+`ActivitySessionForkRequest`/`Response` gained an optional `cutCursor` field
+per `260713-feat-ws-dashboard-activity-session-fork-cursor`'s guidance
+(adopting the stub's `cutBlocks` reference shape as a single wire-shaped
+cursor); this covers only the frontend-type half of that idea ticket's
+Phase 1 — the daemon-side fork handler it also requires does not exist yet
+and lands with this ticket's own Phase 3, so that idea ticket stays open
+until then. Real fork
+POSTs against the future `/control` Fork action and is expected to fail
+(422) until Phase 3 adds the `CodexControlRequest::Fork` variant — this
+matches Phase 1's stated verification bar of correct request shape, not
+end-to-end success.
+
+Reviewed (partitioned correctness/fit/test), one fix cycle, all re-reviews
+clean:
+- First pass: fit clean. Correctness 2 Important — `loadAgentChatHistory`'s
+  `Promise.all([real, stub])` let a real-route failure drop the OpenCode
+  stub-backed history entries too, regressing an unadapted harness's working
+  flow; and swapping the previously-inert stub steer to a real
+  `turn/steer` call while leaving the FIFO mid-turn resend unchanged caused
+  a steered Codex message to be delivered twice. Plus 1 Minor: real fork
+  routed any real harness (including Claude) to the hardcoded Codex
+  `/control` URL, though unreachable today since `capabilities.fork` is
+  `false` for Claude. Test 2 Important — missing server-scoped `serverRoute`
+  variant assertions for `resumeAgentChatSession`/`activityHistoryList`, and
+  no error-path coverage for `beginRealStreamingTurn`'s `onError` branch.
+- Fix cycle (`089feb8e`): isolated the real-list fetch failure with
+  `.catch(() => null)` so OpenCode history degrades to stub-only entries
+  instead of failing outright; added an `alreadyDelivered` option to
+  `beginSimulatedTurn` so a FIFO-dequeued, already-steered Codex message is
+  not re-sent via `/prompt`; gated the real fork path to
+  `realHarness === "codex"` only, matching the steer branch, and fixed the
+  adjacent comment; added the missing server-scoped test variants and
+  `beginRealStreamingTurn` error-path coverage.
+- Re-review: all three partitions accepted the fixes as correct and
+  complete; clean across correctness/fit/test.
+
+Tests: `npm run build` (tsc -b + vite build), `test:agent-chat-client`,
+`test:agent-chat-tabs`, `test:agent-chat-capabilities`,
+`test:agent-chat-bubbles`, `test:agent-chat-stream-merge`,
+`test:work-root-activity` — all green at final commit `089feb8e`.
+
+Deviation from plan: `beginRealStreamingTurn` does not itself send the
+prompt (its own docstring language implied it would) — the actual prompt
+POST fires once from `sendAgentChatMessage`, to avoid double-posting the
+same turn's prompt across both call paths; documented in-code.
+
+Deferred, not fixed (test Minor, disposition marked optional): `sendAgentChatPrompt`'s
+test varies harness and `serverRoute` together rather than holding one axis
+fixed, so no single assertion isolates e.g. "claude + server-scoped"
+specifically — each individual branch is still covered at least once across
+the two calls, non-blocking.
+
 ### Phase 2: Streaming delivery via polling (MVP), not SSE
 
 Implement a frontend polling loop against the existing polling-only

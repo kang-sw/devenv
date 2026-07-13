@@ -145,10 +145,22 @@ export type ActivitySessionForkRequest = {
   readonly workRootId: string;
   readonly activityId: string;
   readonly serverRoute?: string | null;
+  // Cut-point cursor (added
+  // `260713-feat-ws-dashboard-agent-chat-real-adapter-wiring` Phase 1, closing
+  // `260713-feat-ws-dashboard-activity-session-fork-cursor` Phase 1): the
+  // `cursor` of the last transcript block to keep in the forked session,
+  // adopting the stub's `cutBlocks: readonly TranscriptBlock[]` reference
+  // shape as a single wire-shaped identifier rather than an inline block
+  // list. `null`/omitted means "fork the entire transcript" (no cut).
+  readonly cutCursor?: string | null;
 };
 
 export type ActivitySessionForkResponse = {
   readonly activityId: string;
+  // Echoes the request's cut-point cursor back so a caller can confirm which
+  // cut point the fork was actually built against, once a real handler
+  // exists (Phase 3) — see `cutCursor` above.
+  readonly cutCursor?: string | null;
 };
 
 export type ActivitySessionSkillsRequest = {
