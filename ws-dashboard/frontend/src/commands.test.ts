@@ -628,3 +628,63 @@ assertEqual(
   "Pull Git ff-only",
   "safe pull label is stable",
 );
+
+const bareSelectCommand: DashboardCommand = {
+  commandId: "resource.select",
+  payload: { type: "select", entityId: "workRoot:local" },
+};
+assertEqual(
+  bareSelectCommand.payload.type === "select" &&
+    bareSelectCommand.payload.serverId,
+  undefined,
+  "select command payload omits serverId when caller does not supply one",
+);
+assertEqual(
+  dashboardCommandLabel(bareSelectCommand),
+  "Select",
+  "select command label is stable without serverId",
+);
+
+const serverScopedSelectCommand: DashboardCommand = {
+  commandId: "resource.select",
+  payload: {
+    type: "select",
+    entityId: "workRoot:remote",
+    serverId: "server-remote-b",
+  },
+};
+assertEqual(
+  serverScopedSelectCommand.payload.type === "select" &&
+    serverScopedSelectCommand.payload.serverId,
+  "server-remote-b",
+  "select command payload carries the row's owning server id when supplied",
+);
+assertEqual(
+  dashboardCommandLabel(serverScopedSelectCommand),
+  "Select",
+  "select command label is stable with serverId present",
+);
+
+let selectDispatchedEntityId: string | null = null;
+let selectDispatchedServerId: string | undefined;
+dispatchDashboardCommand(serverScopedSelectCommand, {
+  handlers: {
+    "resource.select": (command) => {
+      if (command.payload.type !== "select") {
+        throw new Error("select handler received wrong payload");
+      }
+      selectDispatchedEntityId = command.payload.entityId;
+      selectDispatchedServerId = command.payload.serverId;
+    },
+  },
+});
+assertEqual(
+  selectDispatchedEntityId,
+  "workRoot:remote",
+  "programmatic resource.select dispatch reaches executable handler with entityId",
+);
+assertEqual(
+  selectDispatchedServerId,
+  "server-remote-b",
+  "programmatic resource.select dispatch threads serverId through to the handler",
+);
