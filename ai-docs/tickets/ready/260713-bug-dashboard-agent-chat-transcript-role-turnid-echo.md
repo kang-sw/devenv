@@ -183,3 +183,42 @@ change, no source-of-truth ambiguity between Codex and Claude.
   live path's own user block already comes from the client-local
   optimistic echo) — confirm the replayed user message renders
   right-aligned and a multi-block real reply merges into one bubble.
+
+## Result
+
+Implemented on branch `impl/streaming-poll` (base `goal/drain-ready-queue`),
+commits `d2ae9848` (Phase 1) and `7724e718` (Phase 2).
+
+- **Phase 1**: `beginRealStreamingTurn` now only honors a `live: false` stop
+  condition once the loop has already seen `live: true`, or a non-immediate
+  (interval-scheduled) poll has run — the immediate poll can no longer
+  mistake "turn not yet marked active" for "turn produced nothing." Covered
+  by a rewritten `activitySessionClient.test.ts`.
+- **Phase 2**: `TranscriptBlock` gained additive `role`/`turn_id` fields.
+  Codex's projector derives both from its existing
+  `current_turn_id`/`order_turn_ids` tracking, independent of
+  `suppress_local_prompt` (left comments-only, per the resolved design
+  decision). Claude's projector emits only `agent`/`tool` roles and
+  synthesizes `turn_id` as a per-turn-boundary counter. ~21 mechanical
+  `role: None, turn_id: None` fills in the legacy `work_root_activity.rs`
+  JSONL history parser are inert (no semantic change).
+- Two pre-existing tests that asserted a raw provider turn id
+  (`"turn-secret"`) never leaks anywhere were narrowed to allow it
+  specifically in the new `turnId` field — an explicit, ticket-approved,
+  scoped exception to the "never copy provider ids" rule; all other
+  provider-id leakage guards (item ids, thread id, `threadId`/`sessionId`
+  field names) remain intact.
+- Spec anchor `#260714-transcript-block-role-turn-id` in
+  `ai-docs/spec/ws-web-dashboard/index.md` flipped from "Planned 🚧" to
+  implemented.
+
+Full-scope review (`goal/drain-ready-queue..HEAD`): **clean with 1 minor
+remaining** (rustfmt indentation drift in `work_root_activity.rs`, cosmetic,
+consistent with pre-existing repo-wide fmt drift; not a merge gate). No
+Critical or Important findings. Both flagged-attention items
+(`turn-secret` exception scope, `suppress_local_prompt` untouched) verified
+by the reviewer as authorized and correctly scoped.
+
+Verification: `npm run test:agent-chat-client` (frontend), `cargo test -p
+ws-dashboard-core` (35/35), `cargo test --workspace` (69+158+15 passed, 0
+failed), `cargo build --workspace` clean.
