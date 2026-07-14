@@ -99,8 +99,9 @@ longer part of the runtime contract; `playbook.render` covers its five legacy
 render-eligible stems by templating declared context keys and appending only
 undeclared extras in the legacy Render Context block in wsflow mode. The stored rsrc copy does not diverge from canonical; a byte-equality drift guard
 (regenerated with `WS_REGEN_WSFLOW_RSRC=1`, mirroring `WS_REGEN_MANIFEST`) keeps
-the copy in sync, and the launcher sets `WS_RSRC_ROOT` to the sibling tree when
-present. The rsrc subtree is the one generated-sameness exception to the
+the copy in sync, and the launcher sets `WS_RSRC_ROOT` and `WS_SKILLS_ROOT` to
+the plugin-root sibling trees when present. The rsrc subtree is the one
+generated-sameness exception to the
 otherwise-curated derivative (see `ai-docs/ref/wsflow-mirroring.md`).
 Distributed `agents-plugin-wsflow/skills/lead-*` files are also converged entry
 shims over that rsrc surface: each shim calls
@@ -131,6 +132,12 @@ The plugin launcher resolves the current operating system and architecture,
 selects a cache-local runtime binary path derived from `plugin_version` plus the
 `runtime.json` content hash, and ensures an executable compatible runtime is
 present before delegating to it.
+
+Before handoff, the launcher exports the staged plugin-root `rsrc/` and
+`skills/` trees through `WS_RSRC_ROOT` and `WS_SKILLS_ROOT` when those trees are
+present. Runtime binaries execute below `.runtime/<os>-<arch>/`, so plugin
+startup does not rely on executable-relative fallback paths that would resolve
+resource or skill trees below `.runtime/`.
 
 When launched from a plugin cache while the host is still materializing the
 package tree, the launcher waits briefly for `runtime.json` to appear before it

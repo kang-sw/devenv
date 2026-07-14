@@ -35,6 +35,10 @@ git status --porcelain ai-docs/
 
 Ticket-driven only:
 
+`Result` records the completed phase's behavioral delta; `Edition` records only
+its follow-up pass's delta. For either, include deviations, verification evidence,
+unresolved findings, and deferred follow-ups; do not restate unchanged plan or spec content.
+
 1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each newly completed phase.
    Use the result commit supplied by the caller.
 2. For follow-up implementation on an already completed phase, append

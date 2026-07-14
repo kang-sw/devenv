@@ -26,13 +26,17 @@ not push after this merge.
 Otherwise, a ticket path was returned. Before dispatching it, check for an
 active goal-staging context yourself (not the selection subagent): an
 active `/goal` Stop-hook reminder present in the current turn, and the
-current branch not already `goal/*`. When both hold, derive a short
-branch-safe slug from the goal text and create and check out the staging
-branch directly — `git checkout -b goal/<slug>` — before the handoff. When
-no such reminder is active, or the current branch is already
-`goal/<slug>`, skip this step and stay on the current branch; this
-preserves today's non-staging behavior exactly when no goal context is
-active.
+current branch not already `goal/*`. When both hold, generate an arbitrary
+random branch-safe slug (a short word-word-word token, e.g.
+`canny-hello-stride` — never derived from the goal text or command name)
+and create and check out the staging branch directly — `git checkout -b
+goal/<slug>` — before the handoff. A slug derived from the goal text
+collides across independent concurrent goal runs of the same command
+(git branches are shared across worktrees of one repository), so the slug
+must be randomly generated per run instead. When no such reminder is
+active, or the current branch is already `goal/<slug>`, skip this step and
+stay on the current branch; this preserves today's non-staging behavior
+exactly when no goal context is active.
 
 Hand off to `lead-proceed` with the returned path as an explicit target;
 never call it bare. When the current branch is `goal/<slug>`, include

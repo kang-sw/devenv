@@ -533,13 +533,34 @@ or sprint and are captured in tickets as append-only Result editions for already
 completed phases.
 
 `lead-implement` is a unified implementation spine with two edit modes.
-Direct-edit mode: the lead edits and verifies inline on the scoped
-implementation branch, suitable for single-file internal-only changes.
-Delegated mode: the lead reads the ticket and selected scope, generates a plan
-path, dispatches a planner to write or refine that single implementation plan,
-spawns an implementer agent with the plan, and captures the resulting commit
-range. The MCP verdict selects edit mode; branch isolation is independent of
-edit mode, and direct-edit is derived only for single-file internal-only work
+Direct-edit mode: the lead edits and verifies inline, suitable for single-file
+internal-only changes.
+Delegated mode: the lead selects ticket authority (ticket plus phase) or inline
+authority (a self-contained accepted contract), generates a plan path,
+dispatches a planner to write or refine that single implementation plan, spawns
+an implementer agent with the plan, and captures the resulting commit range.
+Ticket scope facts freeze from the ticket before source reading; inline scope
+facts may use the accepted request, loaded context, focused source inspection,
+and command output before `enter.implement`. The MCP verdict normally keeps
+branch isolation independent of edit mode. One exact low-ceremony exception retains the current named
+non-implementation branch for an inline target only when
+`policy.low_ceremony_if_safe=yes` and unoverridden facts independently satisfy
+automatic direct-edit and automatic lead-only review, documentation is
+explicitly skipped with a non-empty reason, and no review override applies.
+The policy expresses a preference for a streamlined implementation flow; it
+does not require callers to name branch mechanics and does not waive any
+eligibility predicate. The lead maps only clear reduced-ceremony requests to
+`yes`; urgency or size labels such as `hotfix`, `tweak`, or `small fix` alone
+are insufficient. Missing, `no`, or `unknown` policy, caller overrides, unknown
+facts, detached or unborn HEAD (no real start commit), ticket targets, and
+existing `impl/*` or legacy `implement/*` branches retain the standard isolated branch path. A rejected
+`yes` also emits a concise not-applicable warning without changing independently
+derived delegation, review, documentation, final-action, or merge behavior. A
+successful exception keeps focused verification, one logical explicit-path
+commit with `## AI Context`, lead-owned review, and a completion report naming
+the retained branch and commit range; it omits final-action and merge work and
+never pushes.
+Automatic direct-edit itself remains limited to single-file internal-only work
 with no public symbol, contract, new test-file, or explicit delegation signal.
 Initial implementer dispatch is file-first: the lead renders the `implementer`
 playbook with plan path, verification hint, result expectations, and
@@ -559,7 +580,9 @@ conditions, warnings, agenda values, and a concrete `Next:` instruction. The
 playbook follows that instruction instead of recomputing deterministic labels,
 then treats the replaced todo list as the authoritative executable runbook for
 post-verdict branch, prep, edit, review, documentation, final-action, and merge
-steps. The always-rendered playbook keeps fact gathering, verdict handoff,
+steps reachable for that verdict; the low-ceremony current-branch verdict ends
+with completion instead of final-action and merge. The always-rendered playbook
+keeps fact gathering, verdict handoff,
 ambiguous execution judgments, and delegate render handoffs, while verdict-specific
 direct/delegated, review-allocation, and documentation-skip instructions live in
 the focused todo instruction payloads. wsflow mirrors this checkpoint through
@@ -568,7 +591,16 @@ the shared product-mode playbook text. See
 
 Review is a single stage for both modes. MCP `review_alloc` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
-test) when partitioned. Each partition carries a default reviewer tier in the
+test) from independent risk signals. Correctness covers material
+correctness/security risk and new contracts or public symbols; fit covers
+material fit risk, cross-module work, or reuse uncertainty; test covers
+material test risk, new test files, or unknown test surface. Public-interface
+surface and existing-test surface do not create partitions by themselves. Zero
+or one automatic partition resolves to the delegate-grade generic `reviewer`,
+which applies the shared `code-reviewer` contract across correctness, fit, and
+test; two or more resolve to partitioned review. Explicit review overrides
+remain authoritative. Each
+partition carries a default reviewer tier in the
 first-class capability vocabulary (`#260612-first-class-tier-vocabulary`) —
 correctness `large`, fit and test `medium` — raised for unusually subtle risk.
 When a delegate playbook declares its own `tier:`, the `recommended-tier`
@@ -604,10 +636,13 @@ plus a short execute instruction to the implementation owner. Reviewer findings
 remain file inputs, not copied prompt prose.
 {#260619-stateless-implement-review-continuity}
 
-Plan population defaults to the survey planner for delegated mode. The
-plan-populator render contract is ticket-to-plan shaped: ticket path, selected
-phase, and plan path. `plan-populator-survey` clips the relevant ticket
-contract, explores source, writes a light implementation plan with `Relevant
+Plan population defaults to the survey planner for delegated mode. The same
+render contract carries `target_kind`, ticket path/selected phase, inline
+contract, and plan path; inactive authority fields are passed explicitly empty.
+Ticket mode reads the ticket and selected phase. Inline mode uses the supplied
+accepted scope, constraints, non-goals, and verification boundary and never
+reads a placeholder ticket path. `plan-populator-survey` clips the selected
+authority, explores source, writes a light implementation plan with `Relevant
 Ticket Contract`, `Out of Scope`, `Codebase Findings`, `Implementation Plan`,
 `Verification Plan`, and `Escalations`, then returns `[ok]` or
 `[escalate-to-research]` with confidence and rationale. If survey cannot safely
@@ -617,18 +652,18 @@ before spawning the implementer.
 
 `plan-populator-research` is reached from the survey escalation signal and makes
 planner judgments: it reads any existing survey output at the same plan path,
-chooses clean existing mechanisms when they fit the ticket phase, preserves
+chooses clean existing mechanisms when they fit the selected authority, preserves
 selected contract and verification guardrails in the plan, rejects temporary,
 fallback, mock-data, and duplicated-glue paths, and escalates when no clean plan
-can satisfy the ticket phase. A survey-to-research route replaces or refines the
-same plan artifact path with the research plan; it does not create a
+can satisfy it. A survey-to-research route reuses the same authority inputs and
+replaces or refines the same plan artifact path with the research plan; it does not create a
 research-suffixed plan filename or append research to a survey plan.
 
 Before spawning the implementer, `lead-implement` handles plan-populator exit
 signals. It stops and escalates when implementation would likely pursue a wrong
 contract, bypass existing project mechanisms, or rely on a shortcut path. Review
 remains an enforcement step: reviewers compare the implementation against the
-ticket, plan, and diff to catch implementation-time shortcut drift, but known
+selected authority, plan, and diff to catch implementation-time shortcut drift, but known
 plan-time risks are handled before source work begins.
 
 The implementation plan is the implementer's sole context source, but it is not
@@ -730,10 +765,14 @@ tickets stop with a Routing Verdict instead of falling through to implementation
 Inline targets are classified before routing. Non-actionable inline targets
 stop and route to `lead-discuss`. Actionable inline targets route to
 `lead-discuss` when user-blocking decisions remain, route through
-`lead-write-ticket` when durable workflow traceability, phases, acceptance
-criteria, or spec-visible behavior need capture before implementation, and may
-route directly to `lead-implement` when the target is narrow, routine, fully
-scoped, and commit `AI Context` is enough traceability.
+`lead-write-ticket` after discussion when accepted work spans multiple
+independently reviewable phases or needs pre-implementation traceability beyond
+its eventual implementation commit and relevant existing specs, and may route directly to `lead-implement`
+when the accepted work is one bounded reviewable slice recoverable from its
+eventual implementation commit plus any relevant existing spec, regardless of
+file count or public surface. The
+normal `lead-discuss -> lead-write-ticket -> ticket -> lead-proceed` persistence
+path and all existing ticket readiness routes are unchanged.
 
 Existing ticket routes use a lead-owned freshness check. Before implementation
 routing, `lead-proceed` compares active conversation decisions and the ticket

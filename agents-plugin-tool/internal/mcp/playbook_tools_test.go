@@ -85,9 +85,21 @@ func shippedImplementerRelayContext() map[string]string {
 
 func shippedPlanPopulatorContext() map[string]string {
 	return map[string]string{
-		"ticket_path":    "ai-docs/tickets/ready/260628-feat-demo.md",
-		"selected_phase": "Phase 2: Rework planner playbooks around ticket-to-plan",
-		"plan_path":      "ai-docs/.plans/2026-06/28-1200-demo.md",
+		"target_kind":     "ticket",
+		"ticket_path":     "ai-docs/tickets/ready/260628-feat-demo.md",
+		"selected_phase":  "Phase 2: Rework planner playbooks around ticket-to-plan",
+		"inline_contract": "",
+		"plan_path":       "ai-docs/.plans/2026-06/28-1200-demo.md",
+	}
+}
+
+func shippedInlinePlanPopulatorContext() map[string]string {
+	return map[string]string{
+		"target_kind":     "inline",
+		"ticket_path":     "",
+		"selected_phase":  "",
+		"inline_contract": "Change the bounded renderer path; preserve public behavior; verify focused planner and review tests.",
+		"plan_path":       "ai-docs/.plans/2026-06/28-1200-inline.md",
 	}
 }
 
@@ -1032,6 +1044,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	for _, want := range []string{
 		"## Render Context",
 		"- note: legacy extra context",
+		"- Target kind: `ticket`",
 		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
 		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
 		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
@@ -1071,6 +1084,7 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	for _, want := range []string{
 		"## Render Context",
 		"- note: legacy extra context",
+		"- Target kind: `ticket`",
 		"- Ticket path: `ai-docs/tickets/ready/260628-feat-demo.md`",
 		"- Selected phase: `Phase 2: Rework planner playbooks around ticket-to-plan`",
 		"- Plan path: `ai-docs/.plans/2026-06/28-1200-demo.md`",
@@ -1148,6 +1162,32 @@ func TestRenderPlaybookFullWsPlannerContext(t *testing.T) {
 		"[ok]` or `[escalate-to-lead]`",
 		"Include `None` when no blocker remains. Otherwise include the blocker,",
 	})
+
+	for _, name := range []string{"plan-populator-survey", "plan-populator-research"} {
+		path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, name, shippedInlinePlanPopulatorContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", false, "", nil)
+		if err != nil {
+			t.Fatalf("renderPlaybook %s with inline authority: %v", name, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s inline render: %v", name, err)
+		}
+		body := string(data)
+		for _, want := range []string{
+			"- Target kind: `inline`",
+			"- Inline contract: `Change the bounded renderer path; preserve public behavior; verify focused planner and review tests.`",
+			"for `inline`, use `Change the bounded renderer path; preserve public behavior; verify focused planner and review tests.` and do not read a ticket",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s inline render missing %q:\n%s", name, want, body)
+			}
+		}
+		for _, forbidden := range []string{"Read the ticket at ``"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s inline render requires fake ticket authority %q:\n%s", name, forbidden, body)
+			}
+		}
+	}
 
 	ctx := shippedPlanPopulatorContext()
 	ctx["brief_path"] = "ai-docs/.plans/legacy-brief.md"
@@ -1718,6 +1758,9 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	if !strings.Contains(body, "recoverability of intent") {
 		t.Errorf("body %q: expected doctrine text 'recoverability of intent'", body)
 	}
+	if !strings.Contains(body, `tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`) {
+		t.Errorf("body missing tickets.create public schema call:\n%s", body)
+	}
 	for _, want := range []string{
 		"If posture is `recommended`, ask the user",
 		"If posture is `required`, run design review without asking",
@@ -1769,6 +1812,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Gather `target`, `facts`, and explicit caller `policy` for `ws/enter.implement`",
+		"For tickets, use the ticket description only; for inline targets, use the accepted caller contract, loaded context, focused source inspection, and command output.",
 		"Treat the installed todo list as the ordered runbook",
 		"Stop for unresolved binding decisions before source edits.",
 		"If a plan artifact was created, commit it before Edit.",
@@ -1779,20 +1823,24 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"implementer-relay` gets **Review relay dispatch**",
 		"choose the worker tier from dispatch metadata, but do not include `recommended-tier` in worker-facing task text",
 		"Collect the normal completion report",
-		"Ticket path: <ticket-path>",
-		"Selected phase: <selected-phase>",
-		"Plan path: <plan-path>",
+		"| `ticket` | `ticket_path`, `selected_phase`, empty `inline_contract`, `plan_path` |",
+		"| `inline` | empty `ticket_path`/`selected_phase`, self-contained `inline_contract`, `plan_path` |",
+		"Full scope | `reviewer` | `reviewer` (includes `code-reviewer`)",
+		"Generated plan:",
+		"Authority: Ticket path <ticket-path>",
+		"Authority: Inline contract <accepted scope, constraints, non-goals, verification boundary>",
 		"Direct edit with no generated plan:",
 		"Reviewer prompt frame",
-		"Review the ticket contract, plan contract, and diff together.",
-		"Review the ticket contract and diff together.",
-		"Do not require a plan artifact for direct-edit review.",
+		"Review the supplied authority, plan contract, and diff together.",
+		"without a plan artifact",
 		"Review relay dispatch",
 		"Render `implementer-relay` with declared inputs",
 		"Rendered review relay prompt: <prompt-path>",
 		"Mercenary path:",
 		`ws/mercenary.result(name: "<name>", timeout_seconds: 600)`,
 		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
+		"Map a clear request to streamline implementation to `policy.low_ceremony_if_safe=yes`; labels such as `hotfix`, `tweak`, or `small fix` alone do not count.",
+		"Low-ceremony preference affects branch selection only; it waives no other policy or gate.",
 		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
 		"the branch does not match `impl/*`, including legacy `implement/*`",
 	} {
@@ -1811,6 +1859,7 @@ func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {
 		"lead-authored brief",
 		"contains the brief path",
 		"using the brief",
+		"dispatch `mental-model-updater` only when workflow behavior",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("lead-implement full ws render retained old brief contract %q:\n%s", forbidden, body)
@@ -1877,11 +1926,30 @@ func TestPlaybookPrintWsflowLeadImplementOmitsMercenaryCommands(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Set `policy.branch.merge_target` only when already on an implementation branch (`impl/*`, or legacy `implement/*`) or the user names it.",
+		"Map a clear request to streamline implementation to `policy.low_ceremony_if_safe=yes`; labels such as `hotfix`, `tweak`, or `small fix` alone do not count.",
+		"Low-ceremony preference affects branch selection only; it waives no other policy or gate.",
 		"If no skip condition holds and the branch name matches `impl/*`, delete without asking",
 		"the branch does not match `impl/*`, including legacy `implement/*`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("wsflow lead-implement render missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestShippedExecutorWrapupResultIncludesBehavioralDelta(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "executor-wrapup.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read executor-wrapup: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"`Result` records the completed phase's behavioral delta; `Edition` records only\nits follow-up pass's delta. For either, include deviations, verification evidence,\nunresolved findings, and deferred follow-ups; do not restate unchanged plan or spec content.",
+		"#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.\n   Use the result commit supplied by the caller.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("executor-wrapup missing Result/Edition delta contract %q:\n%s", want, body)
 		}
 	}
 }
@@ -1910,6 +1978,8 @@ func TestPlaybookPrintGoldenLeadProceed(t *testing.T) {
 		"scope_blocked=no-unfinished-phase",
 		"scope_blocked=container-ticket",
 		"scope_blocked=multiple-explicit-phases",
+		"Accepted work spans multiple independently reviewable phases or needs pre-implementation contract/verification traceability beyond its eventual implementation commit and any relevant existing spec",
+		"Accepted work is one bounded reviewable slice recoverable from its eventual implementation commit plus any relevant existing spec, regardless of file count or public surface",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body %q: expected lead-proceed handoff/verdict text %q", body, want)

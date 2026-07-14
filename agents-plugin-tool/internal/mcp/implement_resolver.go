@@ -57,9 +57,10 @@ type implementRiskFactsInput struct {
 }
 
 type implementPolicyInput struct {
-	Branch implementBranchPolicyInput `json:"branch,omitempty"`
-	Review implementReviewPolicyInput `json:"review,omitempty"`
-	Docs   implementDocsPolicyInput   `json:"docs,omitempty"`
+	LowCeremonyIfSafe factString                 `json:"low_ceremony_if_safe,omitempty"`
+	Branch            implementBranchPolicyInput `json:"branch,omitempty"`
+	Review            implementReviewPolicyInput `json:"review,omitempty"`
+	Docs              implementDocsPolicyInput   `json:"docs,omitempty"`
 }
 
 type implementBranchPolicyInput struct {
@@ -160,6 +161,7 @@ type normalizedImplementFacts struct {
 	FitRisk                   string
 	TestRisk                  string
 	SecurityOrContractRisk    string
+	LowCeremonyIfSafe         string
 	ReviewOverride            string
 	DocModePolicy             string
 	DocReason                 string
@@ -364,12 +366,15 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 		return implementPolicyInput{}, fmt.Errorf("policy must be an object")
 	}
 	var out implementPolicyInput
+	var err error
+	if out.LowCeremonyIfSafe, err = parseEnumFact(m, "low_ceremony_if_safe", []string{"yes", "no", "unknown"}); err != nil {
+		return out, fmt.Errorf("policy.%w", err)
+	}
 	if group, ok := m["branch"]; ok && group != nil {
 		gm, ok := group.(map[string]any)
 		if !ok {
 			return out, fmt.Errorf("policy.branch must be an object")
 		}
-		var err error
 		if out.Branch.MergeTarget, err = parseObjectString(gm, "merge_target"); err != nil {
 			return out, fmt.Errorf("policy.branch.%w", err)
 		}
@@ -437,17 +442,20 @@ func resolveImplement(input implementInput, obs implementBranchObservation) impl
 		ScopeLabel: input.Target.ScopeLabel,
 		ScopeSlug:  n.ScopeSlug,
 	}
-	branchPlan := deriveImplementBranchPlan(n, obs)
-	warnings = append(warnings, branchPlan.Warnings...)
-	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
-		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
-	}
 	delegation := deriveImplementDelegation(n)
 	planDepth := deriveImplementPlanDepth(n, delegation)
 	reviewAlloc := deriveImplementReviewAlloc(n, delegation)
 	docMode := deriveImplementDocMode(n)
+	branchPlan := deriveResolvedImplementBranchPlan(input.Target.Kind, n, obs)
+	warnings = append(warnings, branchPlan.Warnings...)
+	if n.LowCeremonyIfSafe == "yes" && branchPlan.Action != "current" {
+		warnings = append(warnings, "policy.low_ceremony_if_safe=yes not applicable; continuing with standard branch path")
+	}
+	if branchPlan.Action == "create" && n.MergeTargetPolicy != "" {
+		warnings = append(warnings, fmt.Sprintf("policy.branch.merge_target %q ignored (not on an implementation branch: impl/*, or legacy implement/*); derived from current branch %q", n.MergeTargetPolicy, branchPlan.MergeTarget))
+	}
 	needReview := reviewAlloc != "lead-only"
-	conditions := implementConditions(n)
+	conditions := implementConditions(n, branchPlan.Action)
 	reason := implementReason(n, delegation, planDepth, reviewAlloc)
 	verdict := implementVerdict{
 		Delegation:  delegation,
@@ -509,6 +517,7 @@ func normalizeImplementFacts(input implementInput) (normalizedImplementFacts, []
 		FitRisk:                   factOr(risk.Fit, "unknown"),
 		TestRisk:                  factOr(risk.Test, "unknown"),
 		SecurityOrContractRisk:    factOr(risk.SecurityOrContract, "unknown"),
+		LowCeremonyIfSafe:         factOr(policy.LowCeremonyIfSafe, "unknown"),
 		ReviewOverride:            factOr(policy.Review.Override, "auto"),
 		DocModePolicy:             factOr(policy.Docs.Mode, "standard"),
 		DocReason:                 strings.TrimSpace(policy.Docs.Reason.Value),
@@ -538,14 +547,64 @@ func deriveImplementDelegation(n normalizedImplementFacts) string {
 	if n.ExplicitDelegationRequest == "yes" {
 		return "delegated"
 	}
-	if n.Span == "single-file" &&
-		n.Surface == "internal" &&
-		n.NewPublicSymbol == "no" &&
-		n.NewTypeContract == "no" &&
-		n.TestSurface != "new-files" {
+	if automaticDirectEditEligible(n) {
 		return "direct-edit"
 	}
 	return "delegated"
+}
+
+func automaticDirectEditEligible(n normalizedImplementFacts) bool {
+	return n.Span == "single-file" &&
+		n.Surface == "internal" &&
+		n.NewPublicSymbol == "no" &&
+		n.NewTypeContract == "no" &&
+		n.TestSurface != "new-files"
+}
+
+func automaticLeadOnlyReviewEligible(n normalizedImplementFacts, delegation string) bool {
+	return delegation == "direct-edit" &&
+		n.CorrectnessRisk == "low" &&
+		n.FitRisk == "low" &&
+		n.TestRisk == "low" &&
+		n.SecurityOrContractRisk == "low"
+}
+
+func currentBranchImplementEligible(targetKind string, n normalizedImplementFacts, obs implementBranchObservation) bool {
+	return targetKind == "inline" &&
+		n.LowCeremonyIfSafe == "yes" &&
+		validObservedBranch(obs.CurrentBranch) &&
+		validObservedStartCommit(obs.StartCommit) &&
+		!strings.HasPrefix(obs.CurrentBranch, "impl/") &&
+		!strings.HasPrefix(obs.CurrentBranch, "implement/") &&
+		n.ExplicitDelegationRequest != "yes" &&
+		automaticDirectEditEligible(n) &&
+		n.TestSurface != "unknown" &&
+		n.ReviewOverride == "auto" &&
+		automaticLeadOnlyReviewEligible(n, "direct-edit") &&
+		n.DocModePolicy == "skip-with-reason" &&
+		n.DocReason != ""
+}
+
+func validObservedStartCommit(commit string) bool {
+	commit = strings.TrimSpace(commit)
+	return commit != "" && commit != "(initial)"
+}
+
+func validObservedBranch(branch string) bool {
+	branch = strings.TrimSpace(branch)
+	return branch != "" && branch != "(detached)"
+}
+
+func deriveResolvedImplementBranchPlan(targetKind string, n normalizedImplementFacts, obs implementBranchObservation) implementBranchPlan {
+	if !currentBranchImplementEligible(targetKind, n, obs) {
+		return deriveImplementBranchPlan(n, obs)
+	}
+	return implementBranchPlan{
+		Action:        "current",
+		CurrentBranch: obs.CurrentBranch,
+		StartCommit:   obs.StartCommit,
+		Reason:        "inline target independently qualifies for current-branch completion",
+	}
 }
 
 func deriveImplementPlanDepth(n normalizedImplementFacts, delegation string) string {
@@ -567,26 +626,32 @@ func deriveImplementReviewAlloc(n normalizedImplementFacts, delegation string) s
 			return n.ReviewOverride
 		}
 	}
-	if delegation == "direct-edit" && n.CorrectnessRisk == "low" && n.FitRisk == "low" && n.TestRisk == "low" && n.SecurityOrContractRisk == "low" {
+	if automaticLeadOnlyReviewEligible(n, delegation) {
 		return "lead-only"
 	}
-	if delegation == "direct-edit" && n.Surface == "internal" && n.SecurityOrContractRisk != "high" {
+	parts := implementReviewPartitions(n)
+	if len(parts) <= 1 {
 		return "single"
 	}
-	return partitionedReviewAlloc(n)
+	return "partitioned: " + strings.Join(parts, ", ")
 }
 
-func partitionedReviewAlloc(n normalizedImplementFacts) string {
+func implementReviewPartitions(n normalizedImplementFacts) []string {
 	parts := []string{}
 	if materialRisk(n.CorrectnessRisk) || materialRisk(n.SecurityOrContractRisk) || n.NewTypeContract == "yes" || n.NewPublicSymbol == "yes" {
 		parts = append(parts, "correctness")
 	}
-	if materialRisk(n.FitRisk) || n.Surface == "public-interface" || n.Surface == "cross-module" || n.ReusePoints == "unconfirmed" || n.ReusePoints == "unknown" {
+	if materialRisk(n.FitRisk) || n.Surface == "cross-module" || n.ReusePoints == "unconfirmed" || n.ReusePoints == "unknown" {
 		parts = append(parts, "fit")
 	}
-	if materialRisk(n.TestRisk) || n.TestSurface == "existing" || n.TestSurface == "new-files" || n.TestSurface == "unknown" {
+	if materialRisk(n.TestRisk) || n.TestSurface == "new-files" || n.TestSurface == "unknown" {
 		parts = append(parts, "test")
 	}
+	return parts
+}
+
+func partitionedReviewAlloc(n normalizedImplementFacts) string {
+	parts := implementReviewPartitions(n)
 	if len(parts) == 0 {
 		parts = append(parts, "correctness")
 	}
@@ -626,6 +691,11 @@ func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchOb
 		StartCommit:   obs.StartCommit,
 		MergeTarget:   n.MergeTargetPolicy,
 		MergeConfirm:  n.MergeConfirmPolicy,
+	}
+	if !validObservedBranch(obs.CurrentBranch) {
+		plan.Action = "stop"
+		plan.Reason = "current branch is unavailable or detached"
+		return plan
 	}
 	if !strings.HasPrefix(obs.CurrentBranch, "implement/") && !strings.HasPrefix(obs.CurrentBranch, "impl/") {
 		plan.Action = "create"
@@ -674,6 +744,8 @@ func implementNextInstruction(verdict implementVerdict) string {
 		return fmt.Sprintf("Rename the current branch to %s before source edits, then %s", verdict.BranchPlan.TargetBranch, nextAfterBranch)
 	case "continue":
 		return fmt.Sprintf("Continue on %s, then %s", verdict.BranchPlan.CurrentBranch, nextAfterBranch)
+	case "current":
+		return fmt.Sprintf("Keep the current branch %s, omit merge work, then %s", verdict.BranchPlan.CurrentBranch, nextAfterBranch)
 	default:
 		return "Stop before source edits. Report that the branch action is unrecognized."
 	}
@@ -683,10 +755,17 @@ func implementNextAfterBranch(verdict implementVerdict) string {
 	if verdict.Delegation == "direct-edit" {
 		return fmt.Sprintf("run prep guardrails, apply direct edits in the lead context, run %s review, and complete %s documentation gates.", verdict.ReviewAlloc, verdict.DocMode)
 	}
-	return fmt.Sprintf("call path.generate(kind: \"plan\"), render plan-populator-survey with ticket_path, selected_phase, and plan_path, dispatch it to write the light plan, render plan-populator-research on the same plan path only if survey returns [escalate-to-research] for low confidence or strategic uncertainty, then render implementer with PlanPath before %s review and %s documentation gates.", verdict.ReviewAlloc, verdict.DocMode)
+	return fmt.Sprintf("execute the installed delegated Prep and Edit todos, %s review, and %s documentation gates in order.", verdict.ReviewAlloc, verdict.DocMode)
 }
 
-func implementConditions(n normalizedImplementFacts) []string {
+func plannerAuthorityInputs(targetKind string) string {
+	if strings.EqualFold(strings.TrimSpace(targetKind), "inline") {
+		return `target_kind=inline, ticket_path="", selected_phase="", inline_contract, and plan_path`
+	}
+	return `target_kind=ticket, ticket_path, selected_phase, inline_contract="", and plan_path`
+}
+
+func implementConditions(n normalizedImplementFacts, branchAction string) []string {
 	conditions := []string{
 		"span=" + n.Span,
 		"surface=" + n.Surface,
@@ -703,9 +782,14 @@ func implementConditions(n normalizedImplementFacts) []string {
 		"fit-risk=" + n.FitRisk,
 		"test-risk=" + n.TestRisk,
 		"security-or-contract-risk=" + n.SecurityOrContractRisk,
+		"low-ceremony-if-safe=" + n.LowCeremonyIfSafe,
 		"review-override=" + n.ReviewOverride,
 		"doc-mode-policy=" + n.DocModePolicy,
-		"merge-confirm=" + n.MergeConfirmPolicy,
+	}
+	if branchAction == "current" {
+		conditions = append(conditions, "merge-confirm=n/a")
+	} else {
+		conditions = append(conditions, "merge-confirm="+n.MergeConfirmPolicy)
 	}
 	if n.DocModePolicy == "skip-with-reason" {
 		conditions = append(conditions, "doc-reason="+n.DocReason)
@@ -728,7 +812,7 @@ func renderImplementRaw(result implementResult) string {
 		fmt.Fprintf(&b, "Branch Action: %s %s\n", v.BranchPlan.Action, firstNonEmpty(v.BranchPlan.TargetBranch, v.BranchPlan.CurrentBranch))
 	}
 	fmt.Fprintf(&b, "Merge Target: %s\n", firstNonEmpty(v.BranchPlan.MergeTarget, "n/a"))
-	fmt.Fprintf(&b, "Merge Confirm: %s\n", firstNonEmpty(v.BranchPlan.MergeConfirm, "ask"))
+	fmt.Fprintf(&b, "Merge Confirm: %s\n", implementMergeConfirmText(v.BranchPlan))
 	fmt.Fprintf(&b, "Plan Depth: %s\n", v.PlanDepth)
 	fmt.Fprintf(&b, "Review Allocation: %s\n", v.ReviewAlloc)
 	fmt.Fprintf(&b, "Doc Mode: %s\n\n", v.DocMode)
@@ -753,7 +837,7 @@ func renderImplementRaw(result implementResult) string {
 	fmt.Fprintf(&b, "- branch_plan.action: %s\n", result.Agenda.BranchPlan.Action)
 	fmt.Fprintf(&b, "- branch_plan.target_branch: %s\n", firstNonEmpty(result.Agenda.BranchPlan.TargetBranch, "n/a"))
 	fmt.Fprintf(&b, "- merge_target: %s\n", firstNonEmpty(result.Agenda.BranchPlan.MergeTarget, "n/a"))
-	fmt.Fprintf(&b, "- merge_confirm: %s\n", firstNonEmpty(result.Agenda.BranchPlan.MergeConfirm, "ask"))
+	fmt.Fprintf(&b, "- merge_confirm: %s\n", implementMergeConfirmText(result.Agenda.BranchPlan))
 	fmt.Fprintf(&b, "- plan_depth: %s\n", result.Agenda.PlanDepth)
 	fmt.Fprintf(&b, "- review_alloc: %s\n", result.Agenda.ReviewAlloc)
 	fmt.Fprintf(&b, "- need_review: %t\n", result.Agenda.NeedReview)
@@ -762,6 +846,13 @@ func renderImplementRaw(result implementResult) string {
 		fmt.Fprintf(&b, "- doc_reason: %s\n", result.Agenda.DocReason)
 	}
 	return b.String()
+}
+
+func implementMergeConfirmText(plan implementBranchPlan) string {
+	if plan.Action == "current" {
+		return "n/a"
+	}
+	return firstNonEmpty(plan.MergeConfirm, "ask")
 }
 
 func implementResultJSON(result implementResult) (string, error) {

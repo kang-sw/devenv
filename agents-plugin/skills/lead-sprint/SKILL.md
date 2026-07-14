@@ -6,7 +6,7 @@ description: Use when the user wants an ongoing sprint session for discussion, e
 # Sprint
 
 Call in parallel:
-- `ws/playbook.print(name: "lead-sprint", session_key: <your key>)`
+- `ws/playbook.print(name: "lead-sprint", session_key: <your key, omit if fresh>)`
 - `ws/workflow_manual(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>)`
 
 After both return, execute the procedure returned by `ws/playbook.print`.

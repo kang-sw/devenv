@@ -853,6 +853,53 @@ func rawIDForTest(t *testing.T, raw json.RawMessage) string {
 	return string(raw)
 }
 
+func TestServeStdioPingPreservesIDsAndIsNotAdvertised(t *testing.T) {
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":17,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":"ping-string-id","method":"ping"}`,
+		`{"jsonrpc":"2.0","id":18,"method":"tools/list","params":{}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	for _, test := range []struct {
+		lookupID string
+		rawID    string
+	}{
+		{lookupID: "17", rawID: `17`},
+		{lookupID: "ping-string-id", rawID: `"ping-string-id"`},
+	} {
+		id := test.lookupID
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(byID[id]), &envelope); err != nil {
+			t.Fatalf("decode ping response for id %q: %v", id, err)
+		}
+		if len(envelope) != 3 {
+			t.Fatalf("ping response for id %q has unexpected fields: %s", id, byID[id])
+		}
+		if string(envelope["jsonrpc"]) != `"2.0"` {
+			t.Fatalf("ping response for id %q has unexpected jsonrpc: %s", id, byID[id])
+		}
+		if string(envelope["id"]) != test.rawID {
+			t.Fatalf("ping response did not preserve raw id %s: %s", test.rawID, byID[id])
+		}
+		if string(envelope["result"]) != `{}` {
+			t.Fatalf("ping response for id %q did not return an empty object: %s", id, byID[id])
+		}
+	}
+	if toolNameListed(t, byID["18"], "ping") {
+		t.Fatalf("tools/list advertised base-protocol ping as a tool: %s", byID["18"])
+	}
+}
+
 func toolIsError(t *testing.T, line string) bool {
 	t.Helper()
 	var resp struct {
@@ -971,8 +1018,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	// primary session-bootstrap tool) and ws.workflow_manual (lead-only fresh-start
 	// shortcut that mints a key inline when root is supplied alongside the sentinel).
 	rootParamAllowed := map[string]bool{
-		"ferrule":          true,
-		"workflow_manual":  true,
+		"ferrule":         true,
+		"workflow_manual": true,
 	}
 	for _, rawTool := range listedTools {
 		tool, _ := rawTool.(map[string]any)
@@ -1301,7 +1348,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"code-reviewer","context":{"reviewer_scope":"correctness only","note":"see ws/specs.find for details"}}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"playbook.render","arguments":{"name":"plan-populator-survey","context":{"target_kind":"ticket","ticket_path":"ai-docs/tickets/ready/260628-feat-demo.md","selected_phase":"Phase 2: Rework planner playbooks around ticket-to-plan","inline_contract":"","plan_path":"ai-docs/.plans/2026-06/28-1200-demo.md","note":"legacy extra context"}}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer

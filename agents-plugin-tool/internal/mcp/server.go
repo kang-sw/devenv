@@ -220,6 +220,8 @@ func (s *Server) handle(ctx context.Context, req request) response {
 				"tools": map[string]any{},
 			},
 		}}
+	case "ping":
+		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}}
 	case "tools/list":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": s.filteredTools()}}
 	case "tools/call":
@@ -1149,6 +1151,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			SageReview: resolved.Value,
 		})
 		if err != nil {
+			if result.PartialMutationNotice != "" {
+				return toolErrorTextResponse(req.ID, err.Error()+
+					"\npartial-mutation: frontmatter was written before this call blocked; "+
+					result.PartialMutationNotice+
+					" a retry will not find an unchanged file.")
+			}
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, formatTicketMutate("moved", result), nil)
@@ -2912,6 +2920,7 @@ func tools() []map[string]any {
 						"type":        "object",
 						"description": "Small explicit caller policy set. Observable Git state is read by MCP.",
 						"properties": map[string]any{
+							"low_ceremony_if_safe": nullableEnumStringProperty("Whether the caller prefers reduced ceremony when all independent safety predicates allow it.", []string{"yes", "no", "unknown"}),
 							"branch": map[string]any{
 								"type": "object",
 								"properties": map[string]any{

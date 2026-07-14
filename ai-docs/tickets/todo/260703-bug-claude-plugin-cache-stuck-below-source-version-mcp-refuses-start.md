@@ -2,6 +2,9 @@
 title: Claude plugin cache stuck two versions behind source; MCP refuses to start
 related:
   260627-bug-playbook-render-uses-stale-plugin-cache-during-source-dogfood: adjacent stale-cache class, but that case still started the MCP server
+  260703-chore-bootstrap-staleness-alarm: closed same-day precedent for detecting an installed artifact falling behind source, with reusable settled decisions (warn-not-fail, session-bootstrap-only injection, config-item gate, package-local comparison)
+sage-review-design: completed
+sage-review-completeness: required
 ---
 
 # Claude plugin cache stuck two versions behind source; MCP refuses to start
@@ -59,3 +62,19 @@ at all, so the whole skill is blocked, not just degraded.
   detects "source version > installed plugin_version" before a session
   starts relying on `ws/*` tools, so the failure surfaces as an actionable
   message instead of a silent MCP connect failure.
+
+Cross-reference (design review): the local-devenv-runtime forced-build
+compatibility mechanism referenced above (`runtime_fully_compatible()`,
+`agents-plugin/bin/ws-mcp-launcher.py`) is already documented as a contract in
+`ai-docs/spec/plugin-runtime.md` `{#260506-launcher-hot-path-compatibility-cache}`
+— any design proposed under Research Direction #2 must reconcile with that
+existing contract, not just the launcher source. The closed
+`260703-chore-bootstrap-staleness-alarm` ticket (linked above) already settled
+several adjacent design questions (injection point, config surface shape) for
+a near-identical detection problem; reuse those decisions before re-litigating
+them here.
+
+Deprioritized: the user backlogged this ticket during the workflow-dogfood-bugs
+workset drain — recent hotfixes have made this class of install clutter rare
+in practice, and the immediate 2026-07-03 symptom was worked around manually.
+Stays in `todo/` as accepted backlog; not pushed to `ready/` for now.

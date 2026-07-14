@@ -16,7 +16,10 @@ Target: user request
 
 ## On: invoke
 
-1. Call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` and `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
+1. If `workflow_manual` was already loaded this session and no compaction or
+   continuation occurred since, call only `{{.McpNamespace}}/git.status(session_key: <key>)`.
+   Otherwise call `{{.McpNamespace}}/workflow_manual(session_key: <key>)` and
+   `{{.McpNamespace}}/git.status(session_key: <key>)` in parallel.
 2. If the target references a ticket, read it. Apply judgments and resolve facts.
 3. Scope resolution before calling:
    - Unfinished phase = first phase with no `### Result` section; use it when the user names none.
@@ -48,10 +51,8 @@ Target: user request
 
 | Decision | When |
 |----------|------|
-| Yes | Inline target changes workflow semantics, public contracts, cross-skill routing, focus, branch, or documentation pipeline behavior |
-| Yes | Inline target needs phases, acceptance criteria, traceability, or durable discussion capture |
-| No | Inline target is narrow, routine, fully scoped, and commit `AI Context` is sufficient traceability |
-| No | Work is internal hygiene with no useful phase tracking and no unresolved user decision |
+| Yes | Accepted work spans multiple independently reviewable phases or needs pre-implementation contract/verification traceability beyond its eventual implementation commit and any relevant existing spec |
+| No | Accepted work is one bounded reviewable slice recoverable from its eventual implementation commit plus any relevant existing spec, regardless of file count or public surface |
 
 ## Doctrine
 

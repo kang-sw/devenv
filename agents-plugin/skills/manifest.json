@@ -5,9 +5,9 @@
     "lead-bootstrap/AGENTS.template.md": "548ee640ec1f049461f27ee3cdd72178a5ae846270c31ffe784e3dd40969276b",
     "lead-bootstrap/SKILL.md": "5371483943d06e44145acc1fed76063b3599ef0142551e9c638ea41e9205cb61",
     "lead-bootstrap/WORKFLOW.md": "fe6e263f98d16b33c41b325f3994b939380488ff83e8d52dcaecec6eab60c920",
-    "lead-discuss/SKILL.md": "ef7fe8bd42f7c9afd6a3b35af0ceeeabc0a65a747269f996baf5a8cd0ecefa95",
+    "lead-discuss/SKILL.md": "4e73bc8ca5ad23879524f6f87129e54c6e177694a91c0581d647cb83f9c036f9",
     "lead-discuss/agents/openai.yaml": "25bf5112c8b0d204f522e117248c26e683d6e4543bfd21a43a2d0e08eff15f69",
-    "lead-drain-ready-queue/SKILL.md": "f905d205666ce93831fb1a5cb966b2c4ef4c105c3831bb71a24b3fb387d14937",
+    "lead-drain-ready-queue/SKILL.md": "2249a0bae82586454aed4a48a414dd85953cb71691d77f4981967347957c1026",
     "lead-forge-mental-model/SKILL.md": "9789b9385f2232961abaa3e4959cf080a822c208d5c02318f8ce24a965e148af",
     "lead-forge-spec/SKILL.md": "f0d773f9dd44a56bd155d7c1af27a62f0b2b0fa4df829f63c9df2978d94f4889",
     "lead-prefer-subagent/SKILL.md": "52b39474490d55c5bc3527586027ac618b544daf7922a2c46cda64da299b2919",
@@ -18,7 +18,7 @@
     "lead-ship/SKILL.md": "c3d72ee850726df3250aacfbb83ba32de31ee5a606d708f1f40368f5aef6a551",
     "lead-skill-authoring/SKILL.md": "57c366839fd461e0637e90b8621a9ccbfa09d4887a7a5e80909d40f38390c714",
     "lead-skill-authoring/agents/openai.yaml": "2ee55f2b7d70a36dbbca4c484b9b0f66475e784fd79fdc2d07202321a23d6781",
-    "lead-sprint/SKILL.md": "b0c1ebd58d24b14c586055f93eec14de3cce59aa7f4b3d195dfc896a94a7b60f",
+    "lead-sprint/SKILL.md": "000d48332ecd5ac14e2cbe4885c863ce9c66898475efae895be5c9ef69cb6302",
     "lead-tune/SKILL.md": "b4d498c3b3711db2ce1337d52b7c98b2fdc276c76b418bed0b2c5b9d2bf29e09",
     "lead-verify-discussion/SKILL.md": "76ead1ec10f19b0021b5b0ffa883cabe9f4e623baf150415bffc6706a316ded5"
   }

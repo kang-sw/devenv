@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.33.5`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.5`).
+Active plugin package: `agents-plugin/` (`ws@0.33.12`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.33.12`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
 harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
@@ -157,6 +157,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260710-epic-ws-dashboard-terminal-ux-polishing` | todo | Coordinate dashboard-centric terminal/UX polish backlog split from the retired MVP epic |
 | `260622-research-ws-dashboard-ferrule-session-binding` | todo | Capture the dashboard ferrule/session-key binding model and migration impact |
 | `260624-feat-ws-dashboard-managed-cli-terminal` | todo | Add the first realignment child: terminal-first managed Codex/Claude/OpenCode CLI surface with shared PTY I/O and browser-side long-text composition |
+| `260714-bug-git-status-poll-index-lock-staleness` | ready | Stop the dashboard's 5s git-status poll from taking `.git/index.lock`, addressing a dogfood report of stale Windows-side lockfiles under WSL2 |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
@@ -215,6 +216,20 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
+- `260714-bug-git-status-poll-index-lock-staleness` (ready, bug) - dogfood
+  report of a stale Windows-side `.git/index.lock` under WSL2; confirmed the
+  dashboard daemon's 5s visible-WorkRoot git-status poll runs a lock-taking
+  `git status --porcelain` with no `--no-optional-locks`, and confirmed no
+  daemon code path kills/times-out a git subprocess (rules out self-inflicted
+  staleness from that angle). Root cause is a hypothesis, not confirmed by
+  live reproduction: a Windows-native tool colliding with this poll over the
+  WSL↔Windows interop mount (9p/drvfs), whose atomicity/cleanup semantics for
+  create-lock/rename/unlink may not match native POSIX, turning ordinary
+  lock contention into staleness. Fix direction: Phase 1 adds
+  `--no-optional-locks` to the poll's `git status` call only, removing the
+  daemon's own contribution to lock contention regardless of the exact
+  mechanism; mutating routes (switch/fetch/push/pull) are untouched. Sage
+  review (design + completeness) both completed. Implementation deferred.
 - `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo` (`ready`, bug,
   related to `260711`/`260713-feat-...-adapter-wiring`) - implementation-ready
   after a design-review block-and-revise cycle (2026-07-13/14): dual
@@ -514,6 +529,13 @@ dropped tickets live in hidden archive dirs and git history.
   session key: <key> during compaction` trailer after the todo-reinjection
   block (spec `260708-git-commit-session-key-tip` in `mcp-tools.md`;
   mental-model bullet in `git-workflow-tools.md`).
+- `260713-workset-workflow-dogfood-bugs` (todo, workset) - non-hierarchical
+  board draining the idea-stage workflow/tooling dogfood bug backlog
+  accumulated since the 260605 pivot. Two dropped as resolved by unrelated
+  prior work, two done (`260630`, `260713-bug-tickets-move...`), two
+  blocked pending further investigation/decision (`260627`,
+  `260710-bug-project-index...`), two backlogged by user decision
+  (`260703`, and `260627` shares that backlog reasoning).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

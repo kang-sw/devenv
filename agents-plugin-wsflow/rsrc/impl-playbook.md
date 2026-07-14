@@ -35,7 +35,12 @@ Never patch tests to match broken implementation or vice versa.
 
 ## §Verify
 
-Run the project's test suite(s) and build step (`ai-docs/_index.md` for commands). Skip if no test suite exists. Read the full output.
+Run the project's test suite(s) and build step (`ai-docs/_index.md` for commands).
+Reuse passing full-suite evidence only while its covered source inputs (code,
+tests, dependencies, build configuration, and generated inputs) are unchanged.
+Documentation-only commits require only project checks covering the edited docs;
+report when none exist. Skip if no test suite exists. Read the full output of
+every command actually run.
 
 **Warnings.** Resolve any warnings introduced by your change (in edited files or in downstream files affected by the change) before claiming pass — fix the cause, or suppress at source with a scoped annotation and a one-line comment explaining why. Pre-existing warnings in untouched, unaffected files are out of scope. Rationale: unresolved warnings re-emit on every incremental build and compound in the session context window.
 

@@ -362,6 +362,60 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.apply_rsrc_root_env(plugin_dir / "nope", env)
             self.assertNotIn("WS_RSRC_ROOT", env)
 
+    def test_apply_skills_root_env_points_runtime_at_staged_skills_tree(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            skills_root = plugin_dir / "skills"
+            skills_root.mkdir()
+
+            # The runtime binary lives under <plugin>/.runtime/<platform>/, so
+            # its executable-relative fallback would resolve to the nonexistent
+            # <plugin>/.runtime/skills tree without this launcher seam.
+            env = {}
+            launcher.apply_skills_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_SKILLS_ROOT"], str(skills_root))
+
+            # A caller-provided WS_SKILLS_ROOT is preserved.
+            env = {"WS_SKILLS_ROOT": "/custom/skills"}
+            launcher.apply_skills_root_env(plugin_dir, env)
+            self.assertEqual(env["WS_SKILLS_ROOT"], "/custom/skills")
+
+            # No skills tree staged: leave resolution to the runtime default.
+            env = {}
+            launcher.apply_skills_root_env(plugin_dir / "nope", env)
+            self.assertNotIn("WS_SKILLS_ROOT", env)
+
+    def test_main_exports_plugin_roots_before_exec(self):
+        launcher = load_launcher()
+        plugin_dir = LAUNCHER_PATH.parent.parent
+        captured = {}
+
+        def fake_execvpe(binary, args, env):
+            captured["binary"] = binary
+            captured["args"] = args
+            captured["env"] = dict(env)
+
+        launcher.host_os = lambda: "linux"
+        launcher.host_arch = lambda: "amd64"
+        launcher.bootstrap_runtime_forced = lambda: False
+        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
+        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
+        launcher.compatibility_stamp_current = lambda *args: True
+        launcher.set_breadcrumb_dir = lambda runtime_dir: None
+        launcher.clear_launch_breadcrumb = lambda: None
+        launcher.detect_project_root = lambda plugin_dir: None
+        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
+        launcher.note = lambda message: None
+
+        with mock.patch.object(launcher.os, "execvpe", fake_execvpe):
+            with mock.patch.dict(launcher.os.environ, {}, clear=True):
+                self.assertEqual(launcher.main(), 1)
+
+        self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
+        self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
+
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()
 

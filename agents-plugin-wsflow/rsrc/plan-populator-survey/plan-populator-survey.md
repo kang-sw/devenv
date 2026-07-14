@@ -5,13 +5,15 @@ role: delegate
 tier: medium
 variables:
   - RoleModel
+  - target_kind
   - ticket_path
   - selected_phase
+  - inline_contract
   - plan_path
 ---
 # Plan Populator — Survey Delegate
 
-You are turning a ticket phase into a light implementation plan.
+You are turning an accepted target into a light implementation plan.
 
 Alias model for this role: {{.RoleModel}}.
 
@@ -19,6 +21,8 @@ Alias model for this role: {{.RoleModel}}.
 
 - Ticket path: `{{.ticket_path}}`
 - Selected phase: `{{.selected_phase}}`
+- Target kind: `{{.target_kind}}`
+- Inline contract: `{{.inline_contract}}`
 - Plan path: `{{.plan_path}}`
 
 ## Purpose
@@ -29,14 +33,12 @@ strategy, contract, or reuse judgment, exit to research.
 
 ## Rules
 
-- The ticket and selected phase are the authority on intent. Clip relevant
-  contract text; do not invent or change policy decisions.
-- Treat unrelated ticket sections and future phases as out of scope unless the
-  selected phase explicitly depends on them.
+- Preserve the selected authority's intent; do not invent or change policy decisions.
+- Treat material outside the selected authority and future phases as out of scope unless the accepted target explicitly depends on them.
 - Write one plan file at the provided plan path.
 - Exit to research when confidence is low, strategy is unclear, contract facts
   conflict, or reuse judgment needs a deeper planner.
-- Every item must carry a file path. Prefer line ranges: `path/to/file.rs#L10-L45`.
+- Every codebase finding and implementation step names a file path when one is known; confirmed findings prefer line ranges.
 - Keep the plan compact and action-oriented; omit discoveries that would not
   affect implementation.
 - Do not modify source files or create commits.
@@ -46,14 +48,12 @@ strategy, contract, or reuse judgment, exit to research.
 
 ### 1. Understand
 
-1. Read the ticket at `{{.ticket_path}}`.
-2. Read `{{.selected_phase}}` and prior phase results only as needed to
-   understand the requested slice.
+1. Select authority from `{{.target_kind}}`: for `ticket`, read `{{.ticket_path}}` and `{{.selected_phase}}`; for `inline`, use `{{.inline_contract}}` and do not read a ticket.
+2. Read prior phase results only when ticket authority needs them to understand the requested slice.
 3. Clip the relevant contract: requirements, non-goals, verification boundary,
-   spec impact, and settled decisions that govern this phase.
+   spec impact, and settled decisions that govern the selected phase or inline target.
 4. Use `{{.McpNamespace}}/mental_models.find` for missing mental-model areas.
-5. Treat historical or adjacent artifacts as inputs only when the ticket or
-   selected phase explicitly references them.
+5. Treat historical or adjacent artifacts as inputs only when the selected authority explicitly references them.
 
 ### 2. Survey
 
@@ -77,17 +77,17 @@ For risk signals, report evidence and why it may matter.
 
 ### 3. Write
 
-Write one of these files to `{{.plan_path}}`.
+Write one of these plan variants to `{{.plan_path}}`. Ticket titles use `<ticket stem> — <selected phase>`; inline titles use `<short inline target slug>`.
 
 If survey is sufficient:
 
-    # Plan: <ticket stem> — <selected phase>
+    # Plan: <authority title>
 
     ## Relevant Ticket Contract
-    - <clipped selected-phase requirement, decision, non-goal, or verification boundary>
+    - <clipped authority requirement, decision, non-goal, or verification boundary>
 
     ## Out of Scope
-    - <ticket content, adjacent phase, or nearby concern intentionally excluded>
+    - <authority content, adjacent phase, or nearby concern intentionally excluded>
 
     ## Codebase Findings
     - `path/to/file.rs#L5-L15` — <component, interface, pattern, constraint, or risk signal>
@@ -103,13 +103,13 @@ If survey is sufficient:
 
 If research is needed:
 
-    # Plan: <ticket stem> — <selected phase>
+    # Plan: <authority title>
 
     ## Relevant Ticket Contract
-    - <clipped selected-phase requirement, decision, non-goal, or verification boundary>
+    - <clipped authority requirement, decision, non-goal, or verification boundary>
 
     ## Out of Scope
-    - <ticket content, adjacent phase, or nearby concern intentionally excluded>
+    - <authority content, adjacent phase, or nearby concern intentionally excluded>
 
     ## Codebase Findings
     - `path/to/file.rs#L40-L55` — <evidence that makes light planning unsafe>
@@ -125,7 +125,7 @@ If research is needed:
     - Reason: <why the survey cannot safely support implementation>
     - Research should decide: <specific strategy, contract, or mechanism question>
 
-Always include all six plan sections, even when a section contains only `None`.
+Always include all six plan headings. `Escalations` may contain `None`; an empty Implementation Plan or Verification Plan requires escalation.
 
 ### 4. Report
 
@@ -137,7 +137,7 @@ Return to the lead:
 - Count of meaningful codebase findings
 - Any risk signal that may require lead or research judgment before
   implementation starts
-- Any concerns about ticket scope vs. codebase reality
+- Any concerns about authority scope vs. codebase reality
 - Any spec or doc entry that produced a wrong assumption during the survey
 
 ## Doctrine

@@ -472,6 +472,19 @@ func TestRenderGoldenShippedDelegateChildKey(t *testing.T) {
 			if !strings.Contains(body, "Your ws session_key") {
 				t.Fatalf("shipped %s render missing credential block:\n%s", name, body)
 			}
+			if name == "reviewer" {
+				for _, want := range []string{
+					"delegate-grade wrapper for full-scope code review",
+					"Use only the authority named by the prompt frame",
+					"otherwise cover correctness, standards, contracts, security, tests, edge cases, and reuse",
+					"Always write the detailed report to the invocation's findings path",
+					"Return only `clean`, `clean with N minor remaining`, or `non-clean: M critical/important`",
+				} {
+					if !strings.Contains(body, want) {
+						t.Fatalf("shipped reviewer wrapper missing shared contract %q:\n%s", want, body)
+					}
+				}
+			}
 			key := extractSplicedKey(t, body)
 			entry, ok := s.sessions.lookup(key)
 			if !ok {
@@ -606,9 +619,9 @@ func TestRenderGoldenShippedReviewPartitionIncludesBase(t *testing.T) {
 				t.Errorf("%s missing partition-specific scope section:\n%s", name, body)
 			}
 			for _, want := range []string{
-				"When the prompt frame names ticket and plan paths, review against ticket, plan, and diff together.",
-				"When the prompt frame names only ticket and diff, review the direct-edit change without requiring a plan.",
-				"Read ticket and plan paths named by the prompt frame; if no plan path is named, continue with ticket and diff.",
+				"Use only the authority named by the prompt frame: ticket or accepted inline contract.",
+				"When a plan path is named, review authority, plan, and diff together; otherwise review the direct edit without requiring a plan.",
+				"Read the ticket or inline contract and any plan path named by the prompt frame; never require a ticket for inline authority.",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("%s missing reviewer base contract %q:\n%s", name, want, body)
