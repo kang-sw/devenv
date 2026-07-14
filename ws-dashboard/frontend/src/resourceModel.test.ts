@@ -5,6 +5,8 @@ import {
   mergeResourcesByServer,
   preferredSelection,
   reconcileSelectedId,
+  resolveActiveResources,
+  withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
   workspaceEndpoint,
   type DashboardResourcesView,
@@ -453,4 +455,60 @@ assertEqual(
   cacheAfterARefresh["server-remote-b"],
   serverBView,
   "refetching server A does not disturb server B's cached entry",
+);
+
+// withLastNonNullResourcesByServer / resolveActiveResources (260714
+// childroot-fix): a server that has never resolved still falls through to
+// null - the cache must not resurrect it ahead of its first real fetch.
+assertEqual(
+  resolveActiveResources({}, "server-remote-b", {}),
+  null,
+  "a server with no resourcesByServer entry and no cached fallback resolves to null",
+);
+
+// Once a server has resolved at least once, a later render where
+// `resourcesByServer` transiently has no entry for it (e.g. `selectedServerId`
+// advanced ahead of the matching resources landing) falls back to the last
+// non-null resources cached for that exact server id.
+const lastNonNullAfterA = withLastNonNullResourcesByServer({}, "server-local", liveView);
+assertEqual(
+  lastNonNullAfterA["server-local"],
+  liveView,
+  "caches the first non-null resources seen for a server",
+);
+assertEqual(
+  resolveActiveResources({}, "server-local", lastNonNullAfterA),
+  liveView,
+  "falls back to the cached resources when resourcesByServer has no entry for the selected server",
+);
+assertEqual(
+  resolveActiveResources({ "server-local": serverBView }, "server-local", lastNonNullAfterA),
+  serverBView,
+  "prefers a fresh resourcesByServer entry over the cached fallback",
+);
+
+// The cache is scoped per server id - a cached fallback for one server must
+// never leak into another server's transient gap.
+assertEqual(
+  resolveActiveResources({}, "server-remote-b", lastNonNullAfterA),
+  null,
+  "a cached fallback for one server does not resolve a different server's gap",
+);
+
+// A no-op update (same resources object, or a null fresh value) must not
+// allocate a new cache object, so it is safe to call unconditionally on
+// every render.
+const lastNonNullUnchanged = withLastNonNullResourcesByServer(
+  lastNonNullAfterA,
+  "server-local",
+  liveView,
+);
+assertTrue(
+  lastNonNullUnchanged === lastNonNullAfterA,
+  "re-caching the same resources object for the same server is a no-op",
+);
+assertTrue(
+  withLastNonNullResourcesByServer(lastNonNullAfterA, "server-remote-b", null) ===
+    lastNonNullAfterA,
+  "a null fresh value never overwrites or extends the cache",
 );

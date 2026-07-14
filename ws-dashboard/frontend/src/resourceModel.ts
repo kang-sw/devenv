@@ -208,6 +208,42 @@ export function mergeResourcesByServer(
   return { ...current, [resources.server.id]: resources };
 }
 
+// Keeps the last non-null resources seen per server id, so a transient gap
+// in `resourcesByServer` for the *currently selected* server (260714
+// childroot-fix: e.g. one render between `selectedServerId` advancing and
+// the matching entry landing in `resourcesByServer`) doesn't have to
+// collapse the active selection to null. Only ever records an entry once
+// that server has resolved at least once - a server that has never
+// resolved still has nothing to fall back to, so this cannot resurrect a
+// server ahead of its first real fetch or after `resourcesByServer` itself
+// never gained an entry for it.
+export function withLastNonNullResourcesByServer(
+  current: ResourcesByServer,
+  selectedServerId: string,
+  freshActiveResources: DashboardResourcesView | null,
+): ResourcesByServer {
+  if (!freshActiveResources || current[selectedServerId] === freshActiveResources) {
+    return current;
+  }
+  return { ...current, [selectedServerId]: freshActiveResources };
+}
+
+// Resolves the active server's resources, falling back to the last
+// non-null resources cached for that server (see
+// `withLastNonNullResourcesByServer`) when `resourcesByServer` itself has no
+// entry for it on this render.
+export function resolveActiveResources(
+  resourcesByServer: ResourcesByServer,
+  selectedServerId: string,
+  lastNonNullResourcesByServer: ResourcesByServer,
+): DashboardResourcesView | null {
+  return (
+    resourcesByServer[selectedServerId] ??
+    lastNonNullResourcesByServer[selectedServerId] ??
+    null
+  );
+}
+
 export type DashboardServersView = {
   servers: ServerConnectionView[];
 };
