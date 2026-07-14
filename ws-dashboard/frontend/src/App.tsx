@@ -123,14 +123,15 @@ import {
   surfaceLogicalKey,
   workbenchGroupId,
   DockviewWorkbenchLayout,
+  deriveWorkbenchView,
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
-  resolveEffectiveActiveRootKey,
   withOpenWorkRootKey,
   withOpenWorkRootRef,
   loadWorkbenchLayoutRestoreSnapshot,
   saveWorkbenchLayoutRestoreSnapshot,
   mergeWorkbenchLayoutRestoreEntries,
+  resolveRootLayout,
   revalidateWorkbenchLayoutForRoot,
   mergeReadOnlyAndTerminalPaneOrder,
   removePanesFromOrder,
@@ -258,11 +259,13 @@ import {
   flattenEntities,
   isLocalDashboardServerRoute,
   isValidServerRouteSegment,
+  isWorkspaceNavChildWorkRoot,
   LOCAL_DASHBOARD_SERVER_ROUTE,
   mergeResourcesByServer,
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
+  resolveWorkbenchSelection,
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
@@ -277,6 +280,7 @@ import {
   type ServerConnectionView,
   type ServerView,
   type ViewState,
+  type WorkbenchSelection,
   type WorkRootView,
   type WorkspaceView,
 } from "./resourceModel";
@@ -362,13 +366,6 @@ type WorkRootExplorerSnapshot = {
   expandedPaths: Set<string>;
   directories: Record<string, DirectoryLoadState>;
   selectedPath: string | null;
-};
-
-type WorkbenchSelection = {
-  workspace: WorkspaceView;
-  root: WorkRootView;
-  mainInstance: InstanceView | null;
-  selectedInstance: InstanceView | null;
 };
 
 type ServerModalState =
@@ -571,6 +568,23 @@ export function App() {
     selectedServerId,
     lastNonNullResourcesByServerRef.current,
   );
+  // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
+  // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
+  // where all six committed-state fields are simultaneously in scope, so the
+  // selected root is mounted by construction on the same render its selection
+  // resolves - `openWorkRootInstances` in `WorkbenchShell` maps over this
+  // union instead of the raw (lagging) `openWorkRootKeys`. `deriveWorkbenchView`
+  // recomputes `activeResources` internally (it is pure); the existing
+  // `activeResources`/`workbenchSelection` values above stay as their own
+  // consumers elsewhere in `App()` rely on them.
+  const { openInstanceKeys: openWorkRootInstanceKeys } = deriveWorkbenchView({
+    resourcesByServer,
+    lastNonNullResourcesByServer: lastNonNullResourcesByServerRef.current,
+    selectedServerId,
+    selectedId,
+    openWorkRootKeys,
+    openWorkRootRefs,
+  });
   const serverConnections = useMemo(
     () =>
       serversView?.servers ??
@@ -1169,14 +1183,16 @@ export function App() {
             return changed ? next : current;
           });
           // Correctness prerequisite (260714 Phase 2, post-childroot-fix
-          // 6726ded5): Off must clear ALL THREE persistent per-server
-          // caches, not just `resourcesByServer`, or the deallocated
-          // server's stale tree can resurface. (1) is this
-          // `resourcesByServer` entry; (2) is `lastNonNullResourcesByServerRef`
-          // below, since `resolveActiveResources` falls back to it; (3) is
-          // `lastActiveRootKeyRef`/`lastActiveRootServerIdRef`, which live
-          // inside `WorkbenchShell` and are reset from its own teardown
-          // effect instead (see the `closedRefs` loop there).
+          // 6726ded5): Off must clear BOTH persistent per-server caches, not
+          // just `resourcesByServer`, or the deallocated server's stale tree
+          // can resurface. (1) is this `resourcesByServer` entry; (2) is
+          // `lastNonNullResourcesByServerRef` below, since
+          // `resolveActiveResources` falls back to it. (The former third cache
+          // - `lastActiveRootKeyRef`/`lastActiveRootServerIdRef` inside
+          // `WorkbenchShell` - was removed by the 260714 active-root
+          // derivation refactor Phase 1: active root is now a pure function of
+          // the current selection, so there is no cross-render root ref to
+          // clear.)
           setResourcesByServer((current) =>
             removeResourcesByServer(current, serverId),
           );
@@ -1409,6 +1425,7 @@ export function App() {
             paneOrderByRoot={paneOrderByRoot}
             openWorkRootKeys={openWorkRootKeys}
             openWorkRootRefs={openWorkRootRefs}
+            openWorkRootInstanceKeys={openWorkRootInstanceKeys}
             workbenchLayoutRestoreRef={workbenchLayoutRestoreRef}
             terminalVisualRestoreRef={terminalVisualRestoreRef}
             onCommand={executeCommand}
@@ -3593,6 +3610,7 @@ function WorkbenchShell({
   paneOrderByRoot,
   openWorkRootKeys,
   openWorkRootRefs,
+  openWorkRootInstanceKeys,
   workbenchLayoutRestoreRef,
   terminalVisualRestoreRef,
   onWorkbenchGroupsByRootChange,
@@ -3622,6 +3640,11 @@ function WorkbenchShell({
   paneOrderByRoot: Record<string, WorkbenchPaneOrder>;
   openWorkRootKeys: string[];
   openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
+  // Render-time union of `openWorkRootKeys` with the freshly-resolved selected
+  // root's key (260714 Phase 1, D1) - `openWorkRootInstances` mounts from this
+  // instead of the raw (lagging) `openWorkRootKeys` so the selected root is
+  // mounted by construction on the render its selection resolves.
+  openWorkRootInstanceKeys: string[];
   workbenchLayoutRestoreRef: RefObject<WorkbenchLayoutRestoreSnapshot>;
   terminalVisualRestoreRef: RefObject<TerminalVisualRestoreSnapshot>;
   onWorkbenchGroupsByRootChange: Dispatch<
@@ -3762,24 +3785,6 @@ function WorkbenchShell({
         selection.root.id,
       )
     : null;
-  // 260714 childroot-fix safety net: remembers the last rootKey that
-  // genuinely matched a mounted `openWorkRootInstances` entry, plus the
-  // server route that root belonged to. If `selectedWorkRootStateKey`
-  // transiently matches none of them (the `activeResources` collapse this
-  // ticket fixes upstream, or any other future gap between `selection` and
-  // the mounted instances), the active-root render below falls back to this
-  // instead of hiding every instance at once - but ONLY when the remembered
-  // root's server route still matches the currently selected server. Without
-  // that guard, selecting a remote server that has never resolved (so
-  // `resources`/`selection` collapse to `null` and `loadResources` never
-  // fires) would re-pin the *previous* server's last-active root, leaking
-  // its keep-alive panes under the new server's header instead of showing
-  // the empty-state watermark. See `resolveEffectiveActiveRootKey` in
-  // `workbench/openRootLookup.ts` for the server-scoped decision, and the
-  // `isActiveRoot` computation near the `openWorkRootInstances.map(...)`
-  // return below for where it is applied.
-  const lastActiveRootKeyRef = useRef<string | null>(null);
-  const lastActiveRootServerIdRef = useRef<string | null>(null);
   const workbenchGroups = selectedWorkRootId
     ? (workbenchGroupsByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
       initialWorkbenchGroups)
@@ -3895,24 +3900,6 @@ function WorkbenchShell({
         delete next[rootId];
         return next;
       });
-    }
-    // Correctness prerequisite (260714 Phase 2, post-childroot-fix
-    // 6726ded5): this is the third persistent per-server cache Off must
-    // clear. `lastActiveRootKeyRef`/`lastActiveRootServerIdRef` are local to
-    // this component, so `App()`'s `server.off` handler cannot reach them
-    // directly - reset them here, inside this same closedRefs loop's
-    // effect, whenever the remembered root key just closed (whether via a
-    // single `workRoot.close` or a batched server Off). Otherwise
-    // `resolveEffectiveActiveRootKey` could keep re-pinning a rootKey that
-    // no longer belongs to any mounted `openWorkRootInstances` entry.
-    if (
-      lastActiveRootKeyRef.current !== null &&
-      closedRefs.some(
-        (closedRef) => closedRef.rootKey === lastActiveRootKeyRef.current,
-      )
-    ) {
-      lastActiveRootKeyRef.current = null;
-      lastActiveRootServerIdRef.current = null;
     }
   }, [openWorkRootKeys, openWorkRootRefs]);
 
@@ -4265,9 +4252,21 @@ function WorkbenchShell({
     rootKey: string,
   ): WorkbenchEditorGroupModel[] => {
     const isSelectedRoot = rootKey === selectedWorkRootStateKey;
-    const groupsForRoot =
-      workbenchGroupsByRoot[rootKey] ?? initialWorkbenchGroups;
-    const paneOrderForRoot = paneOrderByRoot[rootKey] ?? {};
+    // Render-time layout resolution (260714 Phase 1, D7): a root mounted this
+    // render by the D1 union has no live `workbenchGroupsByRoot`/`paneOrderByRoot`
+    // entry yet (the async seeding effects run one render later), so fall back
+    // to the persisted restore snapshot here to avoid a one-render flash to the
+    // default layout. `initialWorkbenchGroups` stays the caller's ultimate
+    // default, matching every other read site.
+    const rootLayout = resolveRootLayout(
+      rootKey,
+      workbenchGroupsByRoot,
+      paneOrderByRoot,
+      activePaneByRoot,
+      workbenchLayoutRestoreRef.current,
+    );
+    const groupsForRoot = rootLayout.groups ?? initialWorkbenchGroups;
+    const paneOrderForRoot = rootLayout.paneOrderByGroup;
     const selectedInstanceForRoot = isSelectedRoot
       ? (selection?.selectedInstance ?? mainInstance)
       : mainInstance;
@@ -4372,11 +4371,32 @@ function WorkbenchShell({
   const editorGroups = workbenchModel?.editorGroups ?? [];
   // Every open work root's own resolved root/mainInstance + editor groups,
   // used to mount one persistent `DockviewWorkbenchLayout` per root below.
-  // Roots that no longer resolve against `resourcesByServer[ref.serverRoute]`
-  // (e.g. transient resource-fetch gaps) are silently skipped for that
-  // render.
-  const openWorkRootInstances = openWorkRootKeys
+  //
+  // Maps over the render-time union `openWorkRootInstanceKeys` (D1) rather
+  // than the raw `openWorkRootKeys`, so the freshly-selected root is present
+  // by construction even on the render before the selection-seed effect adds
+  // it to `openWorkRootKeys`/`openWorkRootRefs`. The selected entry resolves
+  // its `{root, mainInstance}` from `selection` directly - the same
+  // fallback-bearing path as `resources`/`activeResources` (D2) - instead of
+  // the lagging `openWorkRootRefs` + raw `resourcesByServer` lookup, which is
+  // exactly the collapse this refactor removes. Every other (keep-alive)
+  // member keeps the raw `openWorkRootRefs` + `findOpenWorkRoot` resolution;
+  // roots that no longer resolve against `resourcesByServer[ref.serverRoute]`
+  // (e.g. transient resource-fetch gaps) are silently skipped for that render.
+  const openWorkRootInstances = openWorkRootInstanceKeys
     .map((rootKey) => {
+      if (selection && rootKey === selectedWorkRootStateKey) {
+        return {
+          rootKey,
+          root: selection.root,
+          mainInstance: selection.mainInstance,
+          editorGroups: buildEditorGroupsForRoot(
+            selection.root,
+            selection.mainInstance,
+            rootKey,
+          ),
+        };
+      }
       const ref = openWorkRootRefs[rootKey];
       if (!ref) {
         return null;
@@ -5956,36 +5976,30 @@ function WorkbenchShell({
       })()
     );
 
-  // Safety net for the 260714 childroot-fix collapse: if the selected root
-  // key doesn't match any currently mounted instance (a transient
-  // `selection`/`openWorkRootInstances` mismatch), keep the previously-active
-  // root visible instead of falling through to "none of them" - which would
-  // hide every mounted instance at once. Once `selectedWorkRootStateKey`
-  // genuinely matches a mounted instance again, adopt it (and its server
-  // route) as the new last-active pair. The fallback itself is server-scoped
-  // via `resolveEffectiveActiveRootKey` - see `lastActiveRootServerIdRef`'s
-  // declaration comment above for why (cross-server keep-alive leak guard).
-  const selectedRootIsMounted = openWorkRootInstances.some(
-    (instance) => instance.rootKey === selectedWorkRootStateKey,
-  );
-  if (selectedWorkRootStateKey && selectedRootIsMounted) {
-    lastActiveRootKeyRef.current = selectedWorkRootStateKey;
-    lastActiveRootServerIdRef.current = selectedWorkRootServerId;
-  }
-  const effectiveActiveRootKey = resolveEffectiveActiveRootKey({
-    selectedRootKey: selectedWorkRootStateKey,
-    selectedRootIsMounted,
-    lastActiveRootKey: lastActiveRootKeyRef.current,
-    lastActiveRootServerId: lastActiveRootServerIdRef.current,
-    selectedServerId,
-  });
+  // Active root is now a pure function of the current selection (260714
+  // Phase 1, D3): the selected root's state key, or `null` when nothing is
+  // selected. The old ref-backed safety net (`lastActiveRootKey*`) is gone -
+  // the render-time union (D1) guarantees the selected root is among
+  // `openWorkRootInstances` by construction, so the "selected but not yet
+  // mounted" gap it papered over can no longer occur.
+  const effectiveActiveRootKey = selectedWorkRootStateKey;
 
   return (
     <div className="workbench-shell">
       {activeHeader}
       {openWorkRootInstances.map(({ rootKey, editorGroups: rootGroups }) => {
         const isActiveRoot = rootKey === effectiveActiveRootKey;
-        let effectiveActivePaneByGroup = activePaneByRoot[rootKey] ?? {};
+        // Render-time active-pane resolution (260714 Phase 1, D7): mirror the
+        // groups/paneOrder fallback above so a root mounted this render by the
+        // D1 union shows its restored active pane instead of an empty map for
+        // one render (the `activePaneByRoot` seed effect runs a render later).
+        let effectiveActivePaneByGroup = resolveRootLayout(
+          rootKey,
+          workbenchGroupsByRoot,
+          paneOrderByRoot,
+          activePaneByRoot,
+          workbenchLayoutRestoreRef.current,
+        ).activePaneByGroup;
         if (isActiveRoot && pendingReadOnlyActivation) {
           effectiveActivePaneByGroup = selectWorkbenchPane(
             effectiveActivePaneByGroup,
@@ -9397,10 +9411,6 @@ function WorkspaceRows({
   );
 }
 
-function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
-  return root.kind === "gitLinkedWorktree";
-}
-
 function ResourceRow({
   id,
   title,
@@ -9758,79 +9768,6 @@ function normalizeServerRoute(serverRoute: string) {
   if (normalizedPath) {
     window.history.replaceState(null, "", normalizedPath);
   }
-}
-
-function resolveWorkbenchSelection(
-  resources: DashboardResourcesView | null,
-  selectedId: string | null,
-): WorkbenchSelection | null {
-  if (!resources) {
-    return null;
-  }
-
-  let fallback: WorkbenchSelection | null = null;
-
-  for (const workspace of resources.workspaces) {
-    const workspaceRoot =
-      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
-      workspace.workRoots[0] ??
-      null;
-    if (selectedId === workspace.id && workspaceRoot) {
-      const mainInstance = workspaceRoot.mainInstances[0] ?? null;
-      return {
-        workspace,
-        root: workspaceRoot,
-        mainInstance,
-        selectedInstance: mainInstance,
-      };
-    }
-
-    for (const root of workspace.workRoots) {
-      const mainInstance = root.mainInstances[0] ?? null;
-      const rootSelection = {
-        workspace,
-        root,
-        mainInstance,
-        selectedInstance: mainInstance,
-      };
-      fallback ??= rootSelection;
-
-      if (selectedId === root.id) {
-        return rootSelection;
-      }
-
-      for (const main of root.mainInstances) {
-        const selectedInstance = findInstanceById(main, selectedId);
-        if (selectedInstance) {
-          return { workspace, root, mainInstance: main, selectedInstance };
-        }
-      }
-    }
-  }
-
-  return fallback;
-}
-
-function findInstanceById(
-  instance: InstanceView,
-  selectedId: string | null,
-): InstanceView | null {
-  if (!selectedId) {
-    return null;
-  }
-
-  if (instance.id === selectedId) {
-    return instance;
-  }
-
-  for (const subInstance of instance.subInstances) {
-    const nested = findInstanceById(subInstance, selectedId);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return null;
 }
 
 function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {

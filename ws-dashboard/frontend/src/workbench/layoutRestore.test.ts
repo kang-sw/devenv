@@ -4,6 +4,7 @@ import {
   mergeWorkbenchLayoutRestoreEntries,
   pruneWorkbenchLayoutOrder,
   removePanesFromOrder,
+  resolveRootLayout,
   revalidateWorkbenchLayoutForRoot,
   saveWorkbenchLayoutRestoreSnapshot,
   workbenchLayoutRestoreRootKey,
@@ -665,4 +666,84 @@ assertDeepEqual(
       "mergedSnapshot also reflects the live entry, not the stale prior copy",
     );
   }
+}
+
+// `resolveRootLayout` - render-time layout resolver (260714 Phase 1, D7).
+// Test (e): a root mounted this render by the D1 union has no live state entry
+// yet (the async seeding effects run one render later), so the restore
+// snapshot must supply groups/paneOrder/activePane at render time. Precedence
+// is live-state -> restore-snapshot -> caller default.
+{
+  const restoreKey = "server-local/root-a";
+  const restored: WorkbenchLayoutRestoreEntry = entry({
+    groups: [{ id: "group-1", label: "Group 1" }],
+    paneOrderByGroup: { "group-1": ["pane-a", "pane-b"] },
+    activePaneByGroup: { "group-1": "pane-b" },
+  });
+  const snapshot: WorkbenchLayoutRestoreSnapshot = { [restoreKey]: restored };
+
+  // (e) All three live maps are still empty for this key on the mount render;
+  // resolveRootLayout falls back to the restore snapshot for every field.
+  const freshlyMounted = resolveRootLayout(restoreKey, {}, {}, {}, snapshot);
+  assertDeepEqual(
+    freshlyMounted.groups,
+    restored.groups,
+    "resolveRootLayout returns the restored groups when live state is empty",
+  );
+  assertDeepEqual(
+    freshlyMounted.paneOrderByGroup,
+    restored.paneOrderByGroup,
+    "resolveRootLayout returns the restored paneOrderByGroup when live state is empty",
+  );
+  assertDeepEqual(
+    freshlyMounted.activePaneByGroup,
+    restored.activePaneByGroup,
+    "resolveRootLayout returns the restored activePaneByGroup when live state is empty",
+  );
+
+  // Live state wins over the restore snapshot once it has an entry.
+  const liveGroups = [{ id: "group-9", label: "Group 9" }];
+  const livePaneOrder = { "group-9": ["pane-live"] };
+  const liveActivePane = { "group-9": "pane-live" };
+  const live = resolveRootLayout(
+    restoreKey,
+    { [restoreKey]: liveGroups },
+    { [restoreKey]: livePaneOrder },
+    { [restoreKey]: liveActivePane },
+    snapshot,
+  );
+  assertDeepEqual(
+    live.groups,
+    liveGroups,
+    "resolveRootLayout prefers live groups over the restore snapshot",
+  );
+  assertDeepEqual(
+    live.paneOrderByGroup,
+    livePaneOrder,
+    "resolveRootLayout prefers live paneOrder over the restore snapshot",
+  );
+  assertDeepEqual(
+    live.activePaneByGroup,
+    liveActivePane,
+    "resolveRootLayout prefers live activePane over the restore snapshot",
+  );
+
+  // No live entry and no restore entry: groups is null (caller applies its own
+  // ultimate default), the two maps degrade to empty objects.
+  const bare = resolveRootLayout("server-local/root-unknown", {}, {}, {}, {});
+  assertEqual(
+    bare.groups,
+    null,
+    "resolveRootLayout returns null groups when nothing live and nothing restored",
+  );
+  assertDeepEqual(
+    bare.paneOrderByGroup,
+    {},
+    "resolveRootLayout returns an empty paneOrderByGroup when nothing live and nothing restored",
+  );
+  assertDeepEqual(
+    bare.activePaneByGroup,
+    {},
+    "resolveRootLayout returns an empty activePaneByGroup when nothing live and nothing restored",
+  );
 }
