@@ -6,7 +6,7 @@ spec:
 related:
   260711-feat-ws-dashboard-agent-activity-chat-ui: introduced the frontend TranscriptBlock role/turnId contract this ticket now fills in
   260713-feat-ws-dashboard-agent-chat-real-adapter-wiring: wired real Codex/Claude adapters without completing this contract
-sage-review-completeness: required
+sage-review-completeness: completed
 ---
 
 # Agent chat replies never render due to a streaming-poll race, and fork/resumed transcripts misclassify/split the user's own message
