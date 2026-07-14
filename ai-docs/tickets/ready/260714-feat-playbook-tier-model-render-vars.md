@@ -41,7 +41,7 @@ Confirmed direction (chosen over the rejected alternatives below):
   uses), so values are per-harness and stay accurate as the tier→model mapping
   evolves. Current config defaults (`wsconfig/config.go:341-356`): claude
   `small→haiku`, `medium→sonnet`, `large→opus`, `xlarge→opus`; codex
-  `small→gpt-5.4-mini`, `medium/large/xlarge→gpt-5.5`. No model names are added
+  `small→gpt-5.6-luna`, `medium→gpt-5.6-terra`, `large/xlarge→gpt-5.6-sol`. No model names are added
   to `playbookTerminologyTable` — the `:23-24` contract is preserved.
 - **Naming**: use the canonical taxonomy names `Small/Medium/Large/XLarge`
   (matching `wsconfig` tier vocabulary and the existing `RoleModel`), not

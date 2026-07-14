@@ -1465,7 +1465,7 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	status := toolText(t, byID["2"])
-	if !strings.Contains(status, "harness: codex") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.5") {
+	if !strings.Contains(status, "harness: codex") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.6-terra") {
 		t.Fatalf("status missing codex alias resolution:\n%s", status)
 	}
 }

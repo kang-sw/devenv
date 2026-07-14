@@ -248,8 +248,8 @@ Shared skills use portable model aliases for routine delegate selection:
 
 Backend adapters map aliases to concrete models through defaults and user-local
 configuration in `~/.cache/ws@kang-sw-devenv/config.json`. The default Codex
-aliases are `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` →
-`gpt-5.5`; the default Claude aliases are `haiku`, `sonnet`, and `opus`.
+aliases are `light` → `gpt-5.6-luna`, `core` → `gpt-5.6-terra`, and `deep` →
+`gpt-5.6-sol`; the default Claude aliases are `haiku`, `sonnet`, and `opus`.
 `config.agents_tier` updates an explicit harness key, the detected MCP session
 harness key, or `default` when no harness is known. Concrete model names
 override alias mapping for one registration. When

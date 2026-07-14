@@ -106,7 +106,7 @@
   correctness risk — flagged as a minor efficiency note, not a blocker.
 - `agents-plugin-tool/internal/wsconfig/config.go:308-359` — tier defaults:
   claude `small→haiku, medium→sonnet, large→opus, xlarge→opus`; codex
-  `small→gpt-5.4-mini, medium/large/xlarge→gpt-5.5`. Confirms the four fixed
+  `small→gpt-5.6-luna, medium→gpt-5.6-terra, large/xlarge→gpt-5.6-sol`. Confirms the four fixed
   tiers used by the new vars are exactly `"small"`, `"medium"`, `"large"`,
   `"xlarge"` (lowercase, matching `normalizedTier` / `ModelAlias` vocabulary).
 - `agents-plugin-tool/internal/mcp/playbook_tools_test.go:181-193,401-423` —
@@ -207,8 +207,8 @@
      `"claude"` and `"codex"` harness contexts (reuse
      `TestPlaybookPrintGoldenLeadCheckBlockers`'s real-rsrc-tree pattern, line
      ~1635) asserting the Scoped Exploration sentence contains the correct
-     default config models (`haiku`/`gpt-5.4-mini` for small,
-     `sonnet`/`gpt-5.5` for medium) and no `{{.` placeholder remains.
+     default config models (`haiku`/`gpt-5.6-luna` for small,
+     `sonnet`/`gpt-5.6-terra` for medium) and no `{{.` placeholder remains.
    - Add a fallback test: force `ResolveAgentForHarnessConfig` into its error
      path (e.g. unresolvable tier/config error state, following how existing
      tests exercise `resolveRoleModelVar`'s `""`-on-error branch) and assert the
@@ -226,7 +226,7 @@
 - `cd agents-plugin-tool && go test ./internal/mcp/... -run 'TestPlaybookPrint.*Tier.*Model'` (or whatever name the new tests take)
 - `cd agents-plugin-tool && go test ./internal/wsrsrc/...` (manifest/mirror drift guards, after regenerating per step 6)
 - `cd agents-plugin-tool && go test ./internal/mcp/...` full package run to catch regressions in `buildPlaybookVars`/`substitutePlaybookVars` callers
-- Manual: render `lead-workflow-manual` via `printPlaybook`/`playbook.print` under both `"claude"` and `"codex"` harness contexts (or via the new golden test) and confirm the Scoped Exploration sentence shows `haiku`/`gpt-5.4-mini` (small) and `sonnet`/`gpt-5.5` (medium) with no empty slots, per the ticket's stated verification boundary.
+- Manual: render `lead-workflow-manual` via `printPlaybook`/`playbook.print` under both `"claude"` and `"codex"` harness contexts (or via the new golden test) and confirm the Scoped Exploration sentence shows `haiku`/`gpt-5.6-luna` (small) and `sonnet`/`gpt-5.6-terra` (medium) with no empty slots, per the ticket's stated verification boundary.
 
 ## Escalations
 
