@@ -2,6 +2,8 @@ import {
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
   resolveEffectiveActiveRootKey,
+  withOpenWorkRootKey,
+  withOpenWorkRootRef,
 } from "./openRootLookup.js";
 import type {
   DashboardResourcesView,
@@ -260,4 +262,59 @@ assertEqual(
   }),
   null,
   "no remembered last-active root resolves to null",
+);
+
+// `withOpenWorkRootKey`/`withOpenWorkRootRef` - the shared "ensure open"
+// helpers behind the 260714-select-mount-gap fix. Both the
+// `workbenchSelection` effect in `App.tsx` and the `resource.select` command
+// handler's server-switch fast path call these so a newly-selected work root
+// is mounted with identical key/ref shape and idempotent add-only-if-absent
+// semantics, no matter which of the two call sites mounts it first.
+
+const refX = { rootId: "root-x", serverRoute: "server-local" };
+const refY = { rootId: "root-y", serverRoute: "server-remote-1" };
+
+// Adding a key that is absent appends it without reordering existing keys.
+assertDeepEqual(
+  withOpenWorkRootKey(["key-a", "key-b"], "key-c"),
+  ["key-a", "key-b", "key-c"],
+  "withOpenWorkRootKey appends an absent key without reordering existing keys",
+);
+
+// Adding a key that is already present is a no-op: same reference returned,
+// no duplicate entry.
+const existingKeys = ["key-a", "key-b"];
+const sameKeysResult = withOpenWorkRootKey(existingKeys, "key-a");
+assertEqual(
+  sameKeysResult === existingKeys,
+  true,
+  "withOpenWorkRootKey returns the same array reference when the key is already present (idempotent, skips redundant setState)",
+);
+assertDeepEqual(
+  sameKeysResult,
+  ["key-a", "key-b"],
+  "withOpenWorkRootKey does not duplicate an already-present key",
+);
+
+// Seeding a ref for an absent key adds it with the exact `{rootId,
+// serverRoute}` shape.
+assertDeepEqual(
+  withOpenWorkRootRef({ "key-a": refX }, "key-b", refY),
+  { "key-a": refX, "key-b": refY },
+  "withOpenWorkRootRef seeds an absent key with the given ref, preserving existing entries",
+);
+
+// Seeding a ref for a key that already has one never clobbers it, even with
+// a different candidate ref for the same key.
+const existingRefs = { "key-a": refX };
+const sameRefResult = withOpenWorkRootRef(existingRefs, "key-a", refY);
+assertEqual(
+  sameRefResult === existingRefs,
+  true,
+  "withOpenWorkRootRef returns the same object reference when the key already has a ref (idempotent, skips redundant setState)",
+);
+assertDeepEqual(
+  sameRefResult,
+  { "key-a": refX },
+  "withOpenWorkRootRef does not clobber an already-open root's ref",
 );

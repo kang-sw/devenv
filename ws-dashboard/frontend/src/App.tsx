@@ -126,6 +126,8 @@ import {
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
   resolveEffectiveActiveRootKey,
+  withOpenWorkRootKey,
+  withOpenWorkRootRef,
   loadWorkbenchLayoutRestoreSnapshot,
   saveWorkbenchLayoutRestoreSnapshot,
   mergeWorkbenchLayoutRestoreEntries,
@@ -801,13 +803,9 @@ export function App() {
     );
     const rootId = workbenchSelection.root.id;
     const serverRoute = workbenchSelection.root.resourcePath.serverId;
-    setOpenWorkRootKeys((current) =>
-      current.includes(rootKey) ? current : [...current, rootKey],
-    );
+    setOpenWorkRootKeys((current) => withOpenWorkRootKey(current, rootKey));
     setOpenWorkRootRefs((current) =>
-      current[rootKey]
-        ? current
-        : { ...current, [rootKey]: { rootId, serverRoute } },
+      withOpenWorkRootRef(current, rootKey, { rootId, serverRoute }),
     );
     // Seed this root's layout from a persisted restore snapshot the first
     // time it is opened this session. Guarded on `workbenchGroupsByRoot`
@@ -988,6 +986,59 @@ export function App() {
           if (serverId && serverId !== selectedServerIdRef.current) {
             selectedServerIdRef.current = serverId;
             setSelectedServerId(serverId);
+            // 260714-select-mount-gap fix: `setSelectedId(entityId)` below
+            // lands in the SAME commit as the server switch above, so on
+            // the very next render `activeResources`/`workbenchSelection`
+            // already reflect the target server+entity (resolved straight
+            // off `resourcesByServer`, no effect needed). But
+            // `openWorkRootKeys`/`openWorkRootRefs` - the only state
+            // `openWorkRootInstances` mounts from - are otherwise only
+            // updated by the `workbenchSelection` effect above, which runs
+            // one render *after* this commit. That gap makes
+            // `selectedRootIsMounted` false for exactly one render, so
+            // `resolveEffectiveActiveRootKey` falls through to its
+            // server-scoped fallback guard with `lastActiveRootServerIdRef`
+            // still holding the PREVIOUS server - the guard fails, every
+            // mounted instance hides, and the workbench flashes to
+            // `dv-watermark` for a frame before the effect catches up.
+            //
+            // Resolve the target work root the same way that effect does
+            // and mount it synchronously here, in the same commit, via the
+            // identical `withOpenWorkRootKey`/`withOpenWorkRootRef` helpers
+            // so the two "ensure open" paths cannot drift apart. `entityId`
+            // is not always a work-root id (the workspace-row presentation
+            // in `WorkspaceRows` dispatches `entityId: workspace.id`), so
+            // resolve via `resolveWorkbenchSelection` and mount its
+            // `.root` rather than trusting `entityId` directly. A `null`
+            // result (target server not yet resolved in
+            // `resourcesByServer`) leaves this a no-op, same as today for
+            // that case - this fix only closes the gap for the traced
+            // regression (server whose tree is already cached).
+            const targetResources = resolveActiveResources(
+              resourcesByServer,
+              serverId,
+              lastNonNullResourcesByServerRef.current,
+            );
+            const targetSelection = resolveWorkbenchSelection(
+              targetResources,
+              entityId,
+            );
+            if (targetSelection) {
+              const rootKey = serverScopedIdentity(
+                targetSelection.root.resourcePath.serverId,
+                targetSelection.root.id,
+              );
+              const rootRef = {
+                rootId: targetSelection.root.id,
+                serverRoute: targetSelection.root.resourcePath.serverId,
+              };
+              setOpenWorkRootKeys((current) =>
+                withOpenWorkRootKey(current, rootKey),
+              );
+              setOpenWorkRootRefs((current) =>
+                withOpenWorkRootRef(current, rootKey, rootRef),
+              );
+            }
           }
           setSelectedId(entityId);
         };
@@ -1251,7 +1302,14 @@ export function App() {
         },
       });
     },
-    [activeResources, loadResources, loadServers, openWorkRootRefs, readOnlyFilePanes],
+    [
+      activeResources,
+      loadResources,
+      loadServers,
+      openWorkRootRefs,
+      readOnlyFilePanes,
+      resourcesByServer,
+    ],
   );
 
   const applyDocumentSaved = useCallback(

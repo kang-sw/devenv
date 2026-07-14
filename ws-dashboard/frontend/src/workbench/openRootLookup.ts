@@ -60,6 +60,45 @@ export function resolveClosedWorkRootRefs(
   return closedRefs;
 }
 
+// Pure "ensure open" step - the mount-side counterpart to
+// `resolveClosedWorkRootRefs` above. Given the current `openWorkRootKeys`
+// snapshot, adds `rootKey` if it is not already present (append, never
+// reorder or drop existing keys); a no-op returns the same array reference so
+// callers can skip a redundant `setState`.
+//
+// Shared by two call sites that must never drift apart (260714
+// select-mount-gap fix): the `workbenchSelection` effect in `App.tsx` (which
+// mounts a newly-selected root the render *after* selection changes) and the
+// `resource.select` command handler's server-switch fast path (which mounts
+// the selected root *synchronously in the same commit* as the server switch,
+// so the render that flips `selectedServerId`/`selectedId` together already
+// has the root mounted - see `resolveEffectiveActiveRootKey` above, whose
+// first branch requires `selectedRootIsMounted` to be true on that same
+// render or it falls through to the server-scoped guard with a stale
+// remembered server and hides every instance for one frame).
+export function withOpenWorkRootKey(
+  openWorkRootKeys: readonly string[],
+  rootKey: string,
+): string[] {
+  return openWorkRootKeys.includes(rootKey)
+    ? (openWorkRootKeys as string[])
+    : [...openWorkRootKeys, rootKey];
+}
+
+// Pure "ensure open" step for the `openWorkRootRefs` side: seeds
+// `{rootId, serverRoute}` for `rootKey` only if absent, never clobbering an
+// already-open root's ref. Paired with `withOpenWorkRootKey` above at both
+// shared call sites.
+export function withOpenWorkRootRef(
+  openWorkRootRefs: Readonly<Record<string, { rootId: string; serverRoute: string }>>,
+  rootKey: string,
+  ref: { rootId: string; serverRoute: string },
+): Record<string, { rootId: string; serverRoute: string }> {
+  return openWorkRootRefs[rootKey]
+    ? (openWorkRootRefs as Record<string, { rootId: string; serverRoute: string }>)
+    : { ...openWorkRootRefs, [rootKey]: ref };
+}
+
 // Pure decision behind the 260714 childroot-fix safety net in
 // `WorkbenchShell`: which mounted rootKey (if any) should render as "active"
 // this frame. When the current selection genuinely matches a mounted
