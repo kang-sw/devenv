@@ -322,6 +322,8 @@ mod tests {
                 text: Some("considering the diff".to_owned()),
                 data: None,
                 degraded: false,
+                role: None,
+                turn_id: None,
             }],
             next_cursor: Some("2".to_owned()),
             has_more: false,

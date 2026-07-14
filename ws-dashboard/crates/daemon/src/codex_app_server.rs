@@ -1068,6 +1068,10 @@ impl AgentClientProvider for CodexAppServerProvider {
 
         if let Some(prompt) = request.initial_prompt.filter(|prompt| !prompt.is_empty()) {
             {
+                // SETTLED (260713 Phase 2): do not remove this call. See
+                // `CodexProjector::suppress_local_prompt`'s doc comment --
+                // Phase 2's role/turn_id metadata is additive and independent
+                // of this suppression path.
                 let mut projector = projector.lock().await;
                 projector.suppress_local_prompt(prompt.clone());
             }
@@ -1107,6 +1111,10 @@ impl AgentClientProvider for CodexAppServerProvider {
     ) -> Result<AgentClientPromptSendResult, AgentClientProviderError> {
         let session = self.session(&request.activity_id)?;
         {
+            // SETTLED (260713 Phase 2): do not remove this call. See
+            // `CodexProjector::suppress_local_prompt`'s doc comment -- Phase
+            // 2's role/turn_id metadata is additive and independent of this
+            // suppression path.
             let mut projector = session.projector.lock().await;
             projector.suppress_local_prompt(request.text.clone());
         }

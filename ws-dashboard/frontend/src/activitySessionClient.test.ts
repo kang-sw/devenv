@@ -519,32 +519,65 @@ assertEqual(onUpdateCalls[1]![1]!.cursor, "2", "the newly appended block is curs
 assertEqual(updateCount, 2, "onComplete fires exactly once, after the live:false poll, not before");
 assertEqual(twoPollEnv.clearedHandles.length, 1, "the interval is cleared once the poll loop observes live:false");
 
-// A poll whose immediate first fetch already observes live:false stops
-// after just that one poll, no interval tick needed — also covers the
-// server-scoped URL shape for a non-local serverRoute.
+// A poll whose immediate first fetch observes live:false + 0 new blocks must
+// NOT stop the loop on its own: the daemon's `live` flag only flips true once
+// the projector ingests an async `turn/started` notification, which can lose
+// the race against the immediate poll (see beginRealStreamingTurn's inline
+// comment). Only a second poll — after we've either seen live:true or after
+// an interval tick has already run — may honor live:false as completion.
+// This also covers the server-scoped URL shape for a non-local serverRoute.
 
 calls.length = 0;
-nextResponses = [pollFinalFixture];
+nextResponses = [pollFinalFixture, pollFinalFixture];
 const immediateCompleteEnv = makeManualPollEnv();
 const immediateComplete = createDeferred();
+let immediateCompleteUpdateCount = 0;
+let immediateCompleteCompleteCount = 0;
 beginRealStreamingTurn(
   "root-a",
   "codex",
   "agent.codex:1",
   "server-remote-1",
-  () => undefined,
-  () => immediateComplete.resolve(),
+  () => {
+    immediateCompleteUpdateCount += 1;
+  },
+  () => {
+    immediateCompleteCompleteCount += 1;
+    immediateComplete.resolve();
+  },
   undefined,
   immediateCompleteEnv.env,
 );
-await immediateComplete.promise;
-assertEqual(calls.length, 1, "a poll that immediately observes live:false stops after just the initial poll");
+// Drain the immediate poll's fetch/.then chain past a macrotask boundary
+// before asserting it did NOT stop the loop (mirrors the empty-first-poll
+// drain technique used elsewhere in this file).
+await new Promise((resolve) => setTimeout(resolve, 50));
+assertEqual(calls.length, 1, "the immediate poll fires once before any interval tick");
 assertEqual(
   calls[0]!.url,
   "/api/dashboard/servers/server-remote-1/work-roots/root-a/activity/codex-sessions/agent.codex%3A1/transcript",
   "beginRealStreamingTurn fetches the server-scoped codex transcript route for a non-local serverRoute",
 );
-assertEqual(immediateCompleteEnv.clearedHandles.length, 1, "the interval is cleared after the single completing poll");
+assertEqual(
+  immediateCompleteCompleteCount,
+  0,
+  "an immediate poll observing live:false alone must not stop the loop (turn/started notification may not have landed yet)",
+);
+assertEqual(immediateCompleteEnv.clearedHandles.length, 0, "the interval must not be cleared by the immediate poll alone");
+
+immediateCompleteEnv.tick();
+await immediateComplete.promise;
+assertEqual(calls.length, 2, "a manually driven interval tick issues the second transcript fetch");
+assertEqual(
+  immediateCompleteCompleteCount,
+  1,
+  "onComplete fires once the second (interval-scheduled) poll observes live:false",
+);
+assertEqual(
+  immediateCompleteEnv.clearedHandles.length,
+  1,
+  "the interval is cleared once the second poll observes live:false",
+);
 
 // An empty-transcript first poll (lastSeenLength 0, blocks: []) must not call
 // `onUpdate` at all — this is the only case `blocksSincePolledLength` actually
@@ -684,6 +717,15 @@ assertEqual(errorEnv.clearedHandles.length, 1, "a poll error clears the interval
 // directly (queue-based `nextResponses` always resolves in call order via a
 // microtask, so it cannot express "second call resolves after the first
 // completes" on its own).
+//
+// NOTE: the interval-driven poll (#2, `isImmediate: false`) is the one that
+// resolves first here, not the immediate poll (#1) — per the Phase 1 fix,
+// an immediate poll alone must never honor `live:false` as completion (see
+// beginRealStreamingTurn's inline comment on `sawLiveTrue`), so it cannot be
+// the poll that legitimately completes the turn in this scenario. Poll #1
+// still resolves afterward with `live:false`, verifying the pre-existing
+// `stopped` guard (not the new `sawLiveTrue` logic) suppresses the would-be
+// second `onComplete`.
 
 {
   const originalFetch = globalThis.fetch;
@@ -720,16 +762,18 @@ assertEqual(errorEnv.clearedHandles.length, 1, "a poll error clears the interval
   overlapEnv.tick();
   assertEqual(overlapFetchCallCount, 2, "both the immediate poll and the ticked poll are in flight concurrently");
 
-  // Poll #1 resolves first, observes live:false, completes the turn.
-  overlapDeferred1.resolve(
+  // Poll #2 (interval-driven, `isImmediate: false`) resolves first, observes
+  // live:false, completes the turn — it may honor live:false unconditionally
+  // since it is not the racy immediate poll.
+  overlapDeferred2.resolve(
     new Response(JSON.stringify(pollFinalFixture), { status: 200, headers: { "Content-Type": "application/json" } }),
   );
   await overlapFirstComplete.promise;
-  assertEqual(overlapCompleteCount, 1, "onComplete fires once when the first-resolving poll observes live:false");
+  assertEqual(overlapCompleteCount, 1, "onComplete fires once when the interval-driven poll observes live:false");
 
-  // Poll #2 (the lagging, overlapping poll) resolves afterward, also with
+  // Poll #1 (the lagging immediate poll) resolves afterward, also with
   // live:false. Without the fix, this would fire onComplete a second time.
-  overlapDeferred2.resolve(
+  overlapDeferred1.resolve(
     new Response(JSON.stringify(pollFinalFixture), { status: 200, headers: { "Content-Type": "application/json" } }),
   );
   await Promise.resolve();

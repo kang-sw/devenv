@@ -101,6 +101,15 @@ struct BlockState {
     // rendered as a bounded suffix line; `None` for non-tool blocks.
     status: Option<&'static str>,
     degraded: bool,
+    // `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo` Phase 2:
+    // `role` is `"agent"` for text content blocks, `"tool"` for tool_use/
+    // tool_result, and unset for `thinking` -- never `"user"` (see module
+    // CONTRACT: Claude's stream-json protocol never echoes the client's own
+    // prompt). `turn_id` is a daemon-synthesized per-turn-boundary counter
+    // (Claude's protocol carries no per-turn id), captured at block-creation
+    // time from `ClaudeProjector::current_turn_id`.
+    role: Option<String>,
+    turn_id: Option<String>,
 }
 
 /// Stateful, runtime-free projector. Feed it classified stream-json lines in
@@ -123,6 +132,16 @@ pub struct ClaudeProjector {
     // this turn so `ingest_result` reads the right entry instead of an
     // arbitrary (alphabetically-first) one. Daemon-private, never surfaced.
     active_model: Option<String>,
+    // `260713` Phase 2: Claude's stream-json protocol carries no per-turn id
+    // (unlike Codex's `turn/started` `turn.id`), so `turn_id` is synthesized
+    // here as a monotonically increasing per-turn-boundary counter. Advanced
+    // exactly once per turn, at `ingest_assistant`'s existing `turn_started`
+    // transition (before `active_turn` flips true); persists across all of
+    // that turn's block creations, only advancing again at the next turn's
+    // start (`ingest_result`'s `active_turn = false` intentionally does not
+    // touch it).
+    current_turn_seq: u64,
+    current_turn_id: Option<String>,
 }
 
 impl ClaudeProjector {
@@ -174,6 +193,8 @@ impl ClaudeProjector {
                     text,
                     data: None,
                     degraded: block.degraded,
+                    role: block.role.clone(),
+                    turn_id: block.turn_id.clone(),
                 })
             })
             .collect()
@@ -217,6 +238,10 @@ impl ClaudeProjector {
 
     fn ingest_assistant(&mut self, value: &Value) -> ClaudeIngestOutcome {
         let turn_started = !self.active_turn;
+        if turn_started {
+            self.current_turn_seq += 1;
+            self.current_turn_id = Some(format!("claude-turn-{}", self.current_turn_seq));
+        }
         self.active_turn = true;
         if let Some(model) = value
             .get("message")
@@ -247,13 +272,13 @@ impl ClaudeProjector {
             let outcome = match block_type {
                 "text" => {
                     let text = block.get("text").and_then(Value::as_str).unwrap_or("");
-                    self.push_block(CLAUDE_RENDER_KIND_MARKDOWN, "Assistant", text, None, false)
+                    self.push_block(CLAUDE_RENDER_KIND_MARKDOWN, "Assistant", text, None, false, Some("agent"))
                 }
                 "thinking" => {
                     // CONTRACT: `signature` is transport-private and is never
                     // read or forwarded.
                     let text = block.get("thinking").and_then(Value::as_str).unwrap_or("");
-                    self.push_block(CLAUDE_RENDER_KIND_THINKING, "Reasoning", text, None, false)
+                    self.push_block(CLAUDE_RENDER_KIND_THINKING, "Reasoning", text, None, false, None)
                 }
                 "tool_use" => {
                     let Some(tool_use_id) = block.get("id").and_then(Value::as_str) else {
@@ -359,7 +384,7 @@ impl ClaudeProjector {
             &format!("Unsupported Claude event type: {event_type}"),
             MAX_DIAGNOSTIC_TEXT,
         );
-        self.push_block(CLAUDE_RENDER_KIND_STATUS, "Unsupported activity", &text, None, true);
+        self.push_block(CLAUDE_RENDER_KIND_STATUS, "Unsupported activity", &text, None, true, None);
         ClaudeIngestOutcome::Degraded
     }
 
@@ -377,7 +402,7 @@ impl ClaudeProjector {
             &format!("Unsupported Claude content block type: {block_type}"),
             MAX_DIAGNOSTIC_TEXT,
         );
-        self.push_block(CLAUDE_RENDER_KIND_STATUS, "Unsupported activity", &text, None, true);
+        self.push_block(CLAUDE_RENDER_KIND_STATUS, "Unsupported activity", &text, None, true, None);
         ClaudeIngestOutcome::Degraded
     }
 
@@ -391,6 +416,7 @@ impl ClaudeProjector {
         text: &str,
         status: Option<&'static str>,
         degraded: bool,
+        role: Option<&str>,
     ) -> ClaudeIngestOutcome {
         let key = format!("blk:{}", self.next_content_seq);
         self.next_content_seq += 1;
@@ -404,6 +430,8 @@ impl ClaudeProjector {
                 text: bound_text(text, MAX_BLOCK_TEXT),
                 status,
                 degraded,
+                role: role.map(str::to_owned),
+                turn_id: self.current_turn_id.clone(),
             },
         );
         ClaudeIngestOutcome::BlockUpserted { ordinal }
@@ -411,7 +439,9 @@ impl ClaudeProjector {
 
     /// Create (or, if somehow re-seen, keep) a tool block keyed by its
     /// `tool_use_id`, so a later `tool_result` in a `user` event can look it
-    /// up for correlation without leaking the id into any output.
+    /// up for correlation without leaking the id into any output. Role is
+    /// always `"tool"` -- `tool_use`/`tool_result` never map to `"user"`/
+    /// `"agent"`.
     fn upsert_tool_block(&mut self, tool_use_id: &str, name: &str, summary: &str) -> ClaudeIngestOutcome {
         let key = tool_key(tool_use_id);
         if let Some(index) = self.order.iter().position(|existing| existing == &key) {
@@ -427,6 +457,8 @@ impl ClaudeProjector {
                 text: bound_text(summary, MAX_DIAGNOSTIC_TEXT),
                 status: Some("running"),
                 degraded: false,
+                role: Some("tool".to_owned()),
+                turn_id: self.current_turn_id.clone(),
             },
         );
         ClaudeIngestOutcome::BlockUpserted { ordinal }
@@ -533,6 +565,11 @@ mod tests {
         assert_eq!(blocks[0].title.as_deref(), Some("Assistant"));
         assert_eq!(blocks[0].text.as_deref(), Some("HELLO"));
         assert_eq!(blocks[0].cursor, "0");
+        // `260713` Phase 2: text content blocks get role "agent" (Claude's
+        // protocol never echoes the client's own prompt, so "user" never
+        // appears), and a synthesized per-turn-boundary turn_id.
+        assert_eq!(blocks[0].role.as_deref(), Some("agent"));
+        assert_eq!(blocks[0].turn_id.as_deref(), Some("claude-turn-1"));
     }
 
     #[test]
@@ -547,6 +584,8 @@ mod tests {
             .find(|block| block.render_kind == CLAUDE_RENDER_KIND_THINKING)
             .expect("thinking block present");
         assert_eq!(thinking.title.as_deref(), Some("Reasoning"));
+        // `260713` Phase 2: thinking blocks leave role unset, like Codex's.
+        assert_eq!(thinking.role, None);
         // Never leaks the thinking block's signature field (real captured
         // signature, not a synthetic marker).
         let serialized = serde_json::to_string(&blocks).expect("serialize blocks");
@@ -566,8 +605,54 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("/tmp/claude-cli-adapter-capture/workdir"));
+        // `260713` Phase 2: tool_use/tool_result blocks get role "tool".
+        assert_eq!(tool_block.role.as_deref(), Some("tool"));
         // Correlation key (tool_use_id) never crosses into the output.
         assert!(!serialized.contains("toolu_01UbL6NLnGbxxSosoEzMaG4a"));
+    }
+
+    #[test]
+    fn turn_id_groups_multiple_blocks_from_the_same_turn_and_separates_others() {
+        let projector = project_fixture();
+        let blocks = projector.transcript_blocks();
+        // The real capture's second turn (line 5-9 of the fixture) produces
+        // three blocks: a leading assistant text, a Bash `pwd` tool call, and
+        // a trailing assistant text -- all three must share the same
+        // synthesized turn_id so they merge into one bubble browser-side,
+        // while the first turn's lone text block gets a distinct turn_id.
+        let turn1_ids: Vec<_> = blocks
+            .iter()
+            .filter(|block| block.text.as_deref() == Some("HELLO"))
+            .map(|block| block.turn_id.clone())
+            .collect();
+        assert_eq!(turn1_ids, vec![Some("claude-turn-1".to_owned())]);
+
+        let pwd_tool_turn_id = blocks
+            .iter()
+            .find(|block| {
+                block.render_kind == CLAUDE_RENDER_KIND_TOOL
+                    && block.text.as_deref().unwrap_or_default().contains("pwd")
+            })
+            .and_then(|block| block.turn_id.clone());
+        assert_eq!(pwd_tool_turn_id, Some("claude-turn-2".to_owned()));
+
+        // Every distinct turn_id observed is exactly {turn-1, turn-2, turn-3}
+        // (the fixture has three `result`-delimited turns), confirming the
+        // counter advances once per turn boundary, not once per block.
+        let mut distinct_turn_ids: Vec<_> = blocks
+            .iter()
+            .filter_map(|block| block.turn_id.clone())
+            .collect();
+        distinct_turn_ids.sort();
+        distinct_turn_ids.dedup();
+        assert_eq!(
+            distinct_turn_ids,
+            vec![
+                "claude-turn-1".to_owned(),
+                "claude-turn-2".to_owned(),
+                "claude-turn-3".to_owned(),
+            ]
+        );
     }
 
     #[test]
