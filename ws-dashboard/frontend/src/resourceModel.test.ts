@@ -2,12 +2,14 @@ import {
   compactWorkspaceWorkRoot,
   compactWorkspaceWorkRootTitle,
   flattenEntities,
+  mergeResourcesByServer,
   preferredSelection,
   reconcileSelectedId,
   workRootActivationEndpoint,
   workspaceEndpoint,
   type DashboardResourcesView,
   type InstanceView,
+  type ResourcesByServer,
   type ViewState,
   type WorkRootView,
 } from "./resourceModel.js";
@@ -392,4 +394,63 @@ assertEqual(
   compactWorkspaceWorkRoot(twoWorkspaceView.workspaces[1])?.id,
   "root-second",
   "each single-root workspace gets its own compact workRoot row",
+);
+
+// mergeResourcesByServer accumulates rather than replaces: the multi-server
+// keep-alive cache (260714 Phase 1) must retain every previously-fetched
+// server's entry when a different server's resources arrive.
+const serverBView: DashboardResourcesView = {
+  server: { id: "server-remote-b", label: "Remote B", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-remote-b",
+      label: "remote-b",
+      state: readyState,
+      compactable: true,
+      workRoots: [workRoot("root-remote-b", "workspace-remote-b", "remote-b")],
+      actions: [],
+    },
+  ],
+};
+
+const cacheWithA: ResourcesByServer = mergeResourcesByServer({}, liveView);
+assertEqual(
+  cacheWithA["server-local"],
+  liveView,
+  "merging server A's resources into an empty cache adds its entry",
+);
+
+const cacheWithAAndB = mergeResourcesByServer(cacheWithA, serverBView);
+assertEqual(
+  cacheWithAAndB["server-local"],
+  liveView,
+  "fetching server B's resources leaves server A's cached entry intact",
+);
+assertEqual(
+  cacheWithAAndB["server-remote-b"],
+  serverBView,
+  "fetching server B's resources adds server B's entry",
+);
+assertEqual(
+  Object.keys(cacheWithAAndB).length,
+  2,
+  "both servers' entries coexist in the accumulated cache",
+);
+
+// A later refetch of server A (e.g. a poll or explicit refresh) replaces only
+// that server's own entry, still without disturbing server B's.
+const refreshedServerAView: DashboardResourcesView = {
+  ...liveView,
+  workspaces: [],
+};
+const cacheAfterARefresh = mergeResourcesByServer(cacheWithAAndB, refreshedServerAView);
+assertEqual(
+  cacheAfterARefresh["server-local"],
+  refreshedServerAView,
+  "refetching server A replaces only its own entry",
+);
+assertEqual(
+  cacheAfterARefresh["server-remote-b"],
+  serverBView,
+  "refetching server A does not disturb server B's cached entry",
 );

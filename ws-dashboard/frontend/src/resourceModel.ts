@@ -184,6 +184,30 @@ export type DashboardResourcesView = {
   workspaces: WorkspaceView[];
 };
 
+// Per-server resources cache keyed by `server.id`, as accumulated across the
+// multi-server keep-alive session (260714 Phase 1): each On server's last
+// fetch stays in this map so a hidden server's already-mounted work-root
+// panes keep resolving against its own cached view while a different server
+// is being fetched/focused.
+export type ResourcesByServer = Record<string, DashboardResourcesView>;
+
+// Merge a freshly-fetched server's resources into the per-server cache.
+//
+// CONTRACT: accumulate, don't replace - only the fetched server's own entry
+// is added/overwritten; every other cached server's entry must survive
+// untouched. This is the crux mechanic that lets a focus switch keep hidden
+// servers' mounted work-root panes resolvable instead of unmounting them.
+// Extracted from the `applyResources` closure passed to
+// `createResourceRefreshCoordinator` (mirrors `resolveClosedWorkRootRefs` in
+// `workbench/openRootLookup.ts`) so this property is unit-testable without a
+// DOM/React harness.
+export function mergeResourcesByServer(
+  current: ResourcesByServer,
+  resources: DashboardResourcesView,
+): ResourcesByServer {
+  return { ...current, [resources.server.id]: resources };
+}
+
 export type DashboardServersView = {
   servers: ServerConnectionView[];
 };

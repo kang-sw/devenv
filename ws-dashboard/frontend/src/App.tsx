@@ -254,6 +254,7 @@ import {
   flattenEntities,
   isLocalDashboardServerRoute,
   isValidServerRouteSegment,
+  mergeResourcesByServer,
   reconcileSelectedId,
   serverScopedIdentity,
   workRootActivationEndpoint,
@@ -264,6 +265,7 @@ import {
   type InstanceView,
   type ResourceEntity,
   type ResourcePath,
+  type ResourcesByServer,
   type ServerConnectionView,
   type ServerView,
   type ViewState,
@@ -513,10 +515,9 @@ export function App() {
       fetchResources: () =>
         requestDashboardResources(selectedServerIdRef.current),
       applyResources: (resources) =>
-        setResourcesByServer((current) => ({
-          ...current,
-          [resources.server.id]: resources,
-        })),
+        setResourcesByServer((current) =>
+          mergeResourcesByServer(current, resources),
+        ),
       setLoading,
       setError,
     });
@@ -4120,8 +4121,9 @@ function WorkbenchShell({
   const editorGroups = workbenchModel?.editorGroups ?? [];
   // Every open work root's own resolved root/mainInstance + editor groups,
   // used to mount one persistent `DockviewWorkbenchLayout` per root below.
-  // Roots that no longer resolve against `resources` (e.g. transient
-  // resource-fetch gaps) are silently skipped for that render.
+  // Roots that no longer resolve against `resourcesByServer[ref.serverRoute]`
+  // (e.g. transient resource-fetch gaps) are silently skipped for that
+  // render.
   const openWorkRootInstances = openWorkRootKeys
     .map((rootKey) => {
       const ref = openWorkRootRefs[rootKey];
@@ -5625,14 +5627,6 @@ function WorkbenchShell({
     }));
   }
 
-  if (loading && !resources) {
-    return <StatusPane title="Loading" detail="workbench resources" />;
-  }
-
-  if (error && !resources) {
-    return <StatusPane title="Workbench unavailable" detail={error} />;
-  }
-
   // The header/toolbar/status-message region is scoped to the active
   // (selected) server only and is conditional on that server's resources
   // having resolved. It must stay decoupled from `openWorkRootInstances`
@@ -5641,8 +5635,26 @@ function WorkbenchShell({
   // nothing to show (e.g. mid-switch, or a connected server with no active
   // work root selected) — otherwise a focus switch would tear down every
   // other server's panes as a side effect of the active server being empty.
+  //
+  // CONTRACT: the three guards below (loading-with-no-cached-resources,
+  // error-with-no-cached-resources, no-resolved-workRoot) must never be
+  // full-subtree `return`s. A first-focus on a second On server sets
+  // `loading=true` synchronously while that server's `resourcesByServer`
+  // entry is still absent (never fetched yet), which trips the first guard
+  // on every render until the fetch resolves. If that guard `return`ed here,
+  // it would unmount the whole `workbench-shell` div - including every other
+  // On server's already-mounted hidden-root subtree below - turning a plain
+  // focus switch into a deallocate-and-recreate of unrelated panes (e.g. a
+  // live terminal in the first server). Folding all three into `activeHeader`
+  // keeps the function's return statement single and unconditional, so
+  // `openWorkRootInstances.map(...)` always renders regardless of the active
+  // server's own loading/error/resolution state.
   const activeHeader =
-    !resources || !workbenchModel ? (
+    loading && !resources ? (
+      <StatusPane title="Loading" detail="workbench resources" />
+    ) : error && !resources ? (
+      <StatusPane title="Workbench unavailable" detail={error} />
+    ) : !resources || !workbenchModel ? (
       <StatusPane
         title="No workRoot"
         detail="select a workRoot or main instance"
