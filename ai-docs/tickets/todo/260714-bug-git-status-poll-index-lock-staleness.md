@@ -2,7 +2,7 @@
 title: Dashboard git-status poll takes the real index lock every 5s, risking stale .git/index.lock under cross-mount access
 spec:
   - 260524-ws-dashboard-git-aware-workroot-toolbar
-sage-review-design: required
+sage-review-design: completed
 ---
 
 # Dashboard git-status poll takes the real index lock every 5s, risking stale .git/index.lock under cross-mount access
