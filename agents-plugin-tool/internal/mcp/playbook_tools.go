@@ -202,7 +202,8 @@ func isReservedNamespaceVar(name string) bool {
 // preserved while common namespace vars do not require frontmatter declarations.
 //
 // tier is the playbook's declared capability tier (from pb.Meta.Tier); it drives
-// RoleModel resolution. configOpts is forwarded to resolveRoleModelVar unchanged.
+// RoleModel resolution. configOpts is forwarded unchanged to both
+// resolveRoleModelVar (RoleModel) and resolveTierModelVars (the fixed-tier vars).
 // workflowLang is the resolved workflow.lang value; it drives WorkflowLang injection.
 func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options, workflowLang string) (map[string]string, error) {
 	declaredSet := make(map[string]bool, len(declared))
