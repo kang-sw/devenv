@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.33.14 - 2026-07-14
+
+### Added
+- Four render-resolved playbook template vars — `{{.SmallTierModel}}`,
+  `{{.MediumTierModel}}`, `{{.LargeTierModel}}`, `{{.XLargeTierModel}}` — that
+  expand to the configured model for each fixed tier under the active harness.
+  They are auto-injected via `wsrsrc.ImplicitVariableNames` (no frontmatter
+  declaration required) and resolve through the same config seam as
+  `{{.RoleModel}}`, falling back to `the <tier>-tier model` when unset. The
+  `lead-workflow-manual` Scoped Exploration guidance is the first consumer.
+
+### Changed
+- Remap the codex tier defaults to the gpt-5.6 family: `small` =
+  `gpt-5.6-luna` (effort `medium`), `medium` = `gpt-5.6-terra` (effort `high`),
+  `large` = `gpt-5.6-sol` (effort `high`), `xlarge` = `gpt-5.6-sol` (effort
+  `xhigh`). Claude tier defaults (haiku/sonnet/opus) are unchanged.
+
 ## v0.33.13 - 2026-07-14
 
 ### Changed
