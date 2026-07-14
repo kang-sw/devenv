@@ -152,6 +152,19 @@ existing callers keep consuming the single-server `DashboardResourcesView`
 shape while new callers can render a multi-server navigation shell from a
 server list plus the selected server resources.
 
+Focusing a different linked server preserves the previously-focused server's
+mounted workbench surfaces instead of tearing them down. Terminals, agent
+chats, and editors already opened under a server stay mounted and hidden - not
+destroyed - while a different server holds focus, the same hide-not-unmount
+behavior a work-root switch already applies within one server. Each open work
+root's mount state resolves against its own server's resource tree, so a
+non-focused server's open surfaces keep resolving and stay mounted instead of
+unmounting merely because a different server is now selected. The right-side
+workbench still renders exactly one work root at a time, and only the focused
+root polls for updates; a non-focused server's cached resource tree is not
+refreshed until that server is refocused.
+{#260714-ws-dashboard-cross-server-workbench-keepalive}
+
 Linked-server identity stays dashboard-owned and local-gateway scoped. `serverId`
 selects the target daemon for browser requests; it is not a ws MCP session key,
 provider session id, endpoint, or remote host path. Any future ws MCP binding for
