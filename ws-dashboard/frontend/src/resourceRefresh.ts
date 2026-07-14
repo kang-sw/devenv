@@ -58,6 +58,7 @@ export type ResourceRefreshResult =
 export type ResourceRefreshCoordinator = {
   refresh: (reason: ResourceRefreshReason) => Promise<ResourceRefreshResult>;
   applyExternalResources: (resources: DashboardResourcesView) => void;
+  invalidate: (serverId: string) => void;
   resume: () => void;
   dispose: () => void;
   isInFlight: () => boolean;
@@ -74,6 +75,12 @@ export function createResourceRefreshCoordinator({
   let issuedSequence = 0;
   let appliedSequence = 0;
   let pendingForegroundRefresh: ResourceRefreshReason | null = null;
+  // Server id whose in-flight fetch (issued at or before `invalidatedAtSequence`)
+  // must be dropped rather than applied. Set by `invalidate` when a server is
+  // turned Off while its resource fetch is already in flight; without this, the
+  // stale response would merge back the just-deallocated server entry.
+  let invalidatedServerId: string | null = null;
+  let invalidatedAtSequence = 0;
 
   const startRefresh = async (
     reason: ResourceRefreshReason,
@@ -100,6 +107,18 @@ export function createResourceRefreshCoordinator({
     try {
       const resources = await fetchResources();
       if (disposed || sequence < appliedSequence) {
+        return { status: "stale", reason };
+      }
+      // Drop a response for a server that was invalidated (Off'd) after this
+      // fetch was issued. Scoped to the invalidated server id and to fetches at
+      // or before the invalidation point, so a later re-add of the same server
+      // (a newer sequence) still applies, and responses for any other server
+      // are untouched.
+      if (
+        invalidatedServerId !== null &&
+        sequence <= invalidatedAtSequence &&
+        resources.server.id === invalidatedServerId
+      ) {
         return { status: "stale", reason };
       }
       appliedSequence = sequence;
@@ -138,6 +157,10 @@ export function createResourceRefreshCoordinator({
       appliedSequence = issuedSequence;
       applyResources(resources);
       setError(null);
+    },
+    invalidate: (serverId: string) => {
+      invalidatedServerId = serverId;
+      invalidatedAtSequence = issuedSequence;
     },
     resume: () => {
       disposed = false;

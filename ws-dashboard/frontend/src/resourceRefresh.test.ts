@@ -76,6 +76,11 @@ function view(id: string, availability: "available" | "missing" = "available"): 
   };
 }
 
+function viewForServer(serverId: string, id: string): DashboardResourcesView {
+  const base = view(id);
+  return { ...base, server: { ...base.server, id: serverId } };
+}
+
 let capturedUrl = "";
 let capturedAccept = "";
 await requestDashboardResources("server-local", (async (input, init) => {
@@ -211,6 +216,89 @@ assertEqual(capturedAccept, "application/json", "server refresh asks for JSON");
     workRootId(applied),
     "workRoot-last-known",
     "poll failure preserves the last known resource tree",
+  );
+}
+
+{
+  // 260714 Phase 2 Critical: an Off of the selected server while its resource
+  // fetch is in flight must not resurrect the deallocated entry. `invalidate`
+  // drops the stale response instead of applying (merging) it.
+  const pending = deferred<DashboardResourcesView>();
+  let applied: DashboardResourcesView | null = null;
+  const coordinator = createResourceRefreshCoordinator({
+    fetchResources: () => pending.promise,
+    applyResources: (resources) => {
+      applied = resources;
+    },
+  });
+
+  const poll = coordinator.refresh("poll");
+  coordinator.invalidate("server-remote");
+  pending.resolve(viewForServer("server-remote", "remote-stale"));
+  const result = await poll;
+  assertEqual(
+    result.status,
+    "stale",
+    "in-flight response for an invalidated server is dropped",
+  );
+  assertEqual(
+    applied,
+    null,
+    "invalidated Off'd server cannot re-merge its stale resource tree",
+  );
+}
+
+{
+  // Server-scoped invalidation must not drop an in-flight response for a
+  // different server (e.g. a still-selected server or an external open),
+  // guarding constraint (b)/(d): only the Off'd server id is rejected.
+  const pending = deferred<DashboardResourcesView>();
+  let applied: DashboardResourcesView | null = null;
+  const coordinator = createResourceRefreshCoordinator({
+    fetchResources: () => pending.promise,
+    applyResources: (resources) => {
+      applied = resources;
+    },
+  });
+
+  const poll = coordinator.refresh("poll");
+  coordinator.invalidate("server-remote");
+  pending.resolve(viewForServer("server-other", "other-live"));
+  const result = await poll;
+  assertEqual(
+    result.status,
+    "applied",
+    "invalidation is scoped: a different server's in-flight response still applies",
+  );
+  assertEqual(
+    workRootId(applied),
+    "workRoot-other-live",
+    "non-invalidated server keeps merging its resources",
+  );
+}
+
+{
+  // A re-added server (newer fetch sequence issued after the invalidation
+  // point) applies normally, so Off then On does not permanently mute it.
+  let applied: DashboardResourcesView | null = null;
+  const coordinator = createResourceRefreshCoordinator({
+    fetchResources: () => Promise.resolve(viewForServer("server-remote", "readded")),
+    applyResources: (resources) => {
+      applied = resources;
+    },
+  });
+
+  coordinator.invalidate("server-remote");
+  const result = await coordinator.refresh("explicit");
+  assertEqual(
+    result.status,
+    "applied",
+    "a fetch issued after invalidation applies (re-add is not muted)",
+  );
+  assertEqual(
+    workRootId(applied),
+    "workRoot-readded",
+    "re-added invalidated server merges its fresh resources",
   );
 }
 
