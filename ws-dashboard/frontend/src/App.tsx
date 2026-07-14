@@ -97,6 +97,7 @@ import {
   buildAgentChatCreateCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildServerOffCommand,
   buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
@@ -255,8 +256,10 @@ import {
   flattenEntities,
   isLocalDashboardServerRoute,
   isValidServerRouteSegment,
+  LOCAL_DASHBOARD_SERVER_ROUTE,
   mergeResourcesByServer,
   reconcileSelectedId,
+  removeResourcesByServer,
   resolveActiveResources,
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
@@ -1053,6 +1056,89 @@ export function App() {
             return next;
           });
         };
+      } else if (command.payload.type === "server.off") {
+        const { serverId } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          if (serverId === LOCAL_DASHBOARD_SERVER_ROUTE) {
+            // Defense in depth: the Off button is already `disabled` for
+            // this server; this guard keeps the handler itself a no-op if
+            // ever reached through another dispatch path.
+            return;
+          }
+          // Off batches the exact single-root `workRoot.close` teardown
+          // recipe above over every rootKey belonging to this server -
+          // unmounting each root's DockviewWorkbenchLayout instance (which
+          // fires the existing xterm dispose/socket-close cleanup), not a
+          // new teardown mechanism.
+          const keysToRemove = new Set(
+            Object.entries(openWorkRootRefs)
+              .filter(([, ref]) => ref.serverRoute === serverId)
+              .map(([rootKey]) => rootKey),
+          );
+          setOpenWorkRootKeys((current) =>
+            current.filter((key) => !keysToRemove.has(key)),
+          );
+          setOpenWorkRootRefs((current) => {
+            const next = { ...current };
+            let changed = false;
+            for (const key of keysToRemove) {
+              if (key in next) {
+                delete next[key];
+                changed = true;
+              }
+            }
+            return changed ? next : current;
+          });
+          setWorkbenchGroupsByRoot((current) => {
+            const next = { ...current };
+            let changed = false;
+            for (const key of keysToRemove) {
+              if (key in next) {
+                delete next[key];
+                changed = true;
+              }
+            }
+            return changed ? next : current;
+          });
+          setPaneOrderByRoot((current) => {
+            const next = { ...current };
+            let changed = false;
+            for (const key of keysToRemove) {
+              if (key in next) {
+                delete next[key];
+                changed = true;
+              }
+            }
+            return changed ? next : current;
+          });
+          // Correctness prerequisite (260714 Phase 2, post-childroot-fix
+          // 6726ded5): Off must clear ALL THREE persistent per-server
+          // caches, not just `resourcesByServer`, or the deallocated
+          // server's stale tree can resurface. (1) is this
+          // `resourcesByServer` entry; (2) is `lastNonNullResourcesByServerRef`
+          // below, since `resolveActiveResources` falls back to it; (3) is
+          // `lastActiveRootKeyRef`/`lastActiveRootServerIdRef`, which live
+          // inside `WorkbenchShell` and are reset from its own teardown
+          // effect instead (see the `closedRefs` loop there).
+          setResourcesByServer((current) =>
+            removeResourcesByServer(current, serverId),
+          );
+          lastNonNullResourcesByServerRef.current = removeResourcesByServer(
+            lastNonNullResourcesByServerRef.current,
+            serverId,
+          );
+          if (serverId === selectedServerIdRef.current) {
+            // Mirrors `handleServerSelected`'s refocus triplet: without
+            // this, the poll interval's `fetchResources` (always
+            // `selectedServerIdRef.current`) would refetch this server on
+            // its next tick and silently revive the entry just deleted
+            // above, violating "explicit Off is the only path that
+            // deallocates".
+            selectedServerIdRef.current = LOCAL_DASHBOARD_SERVER_ROUTE;
+            setSelectedServerId(LOCAL_DASHBOARD_SERVER_ROUTE);
+            setSelectedId(LOCAL_DASHBOARD_SERVER_ROUTE);
+          }
+        };
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId, serverRoute } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -1149,7 +1235,7 @@ export function App() {
         },
       });
     },
-    [activeResources, loadResources, loadServers, readOnlyFilePanes],
+    [activeResources, loadResources, loadServers, openWorkRootRefs, readOnlyFilePanes],
   );
 
   const applyDocumentSaved = useCallback(
@@ -1191,6 +1277,7 @@ export function App() {
         >
           <ResourceNavigation
             resources={activeResources}
+            resourcesByServer={resourcesByServer}
             servers={serverConnections}
             selectedServerId={selectedServerId}
             loading={loading}
@@ -2679,6 +2766,7 @@ function LinkedServerModal({
 
 function ResourceNavigation({
   resources,
+  resourcesByServer,
   servers,
   selectedServerId,
   loading,
@@ -2695,6 +2783,7 @@ function ResourceNavigation({
   onOpenFile,
 }: {
   resources: DashboardResourcesView | null;
+  resourcesByServer: ResourcesByServer;
   servers: ServerConnectionView[];
   selectedServerId: string;
   loading: boolean;
@@ -2767,7 +2856,12 @@ function ResourceNavigation({
             server={server}
             selected={server.id === selectedServerId}
             selectedId={selectedId}
-            resources={server.id === selectedServerId ? resources : null}
+            resources={resourcesByServer[server.id] ?? null}
+            isOn={
+              server.id === LOCAL_DASHBOARD_SERVER_ROUTE ||
+              server.id === selectedServerId ||
+              Boolean(resourcesByServer[server.id])
+            }
             openWorkRootKeys={openWorkRootKeys}
             onCommand={onCommand}
             onOpenWorkRoot={onOpenWorkRoot}
@@ -2799,6 +2893,7 @@ function ResourceNavigation({
 function ServerRows({
   server,
   selected,
+  isOn,
   selectedId,
   resources,
   openWorkRootKeys,
@@ -2810,6 +2905,7 @@ function ServerRows({
 }: {
   server: ServerConnectionView;
   selected: boolean;
+  isOn: boolean;
   selectedId: string | null;
   resources: DashboardResourcesView | null;
   openWorkRootKeys: ReadonlySet<string>;
@@ -2823,6 +2919,7 @@ function ServerRows({
   onSelectServer: (server: ServerConnectionView) => void;
 }) {
   const actions = server.actions.length > 0 ? server.actions : [];
+  const isLocalServer = server.id === LOCAL_DASHBOARD_SERVER_ROUTE;
   return (
     <div className="server-group">
       <div
@@ -2874,9 +2971,23 @@ function ServerRows({
               onCommand={onCommand}
             />
           ) : null}
+          <ChromeIconButton
+            className={`server-row-action server-row-power-button-${isOn ? "on" : "off"}`}
+            commandId="server.off"
+            disabled={isLocalServer}
+            icon={CirclePower}
+            label={
+              isLocalServer
+                ? "Local server stays on"
+                : isOn
+                  ? "Turn server off"
+                  : "Server is off"
+            }
+            onClick={() => onCommand(buildServerOffCommand(server.id))}
+          />
         </span>
       </div>
-      {selected && resources ? (
+      {isOn && resources ? (
         <div className="server-workspaces">
           {resources.workspaces.map((workspace) => (
             <WorkspaceRows
@@ -3710,6 +3821,24 @@ function WorkbenchShell({
         delete next[rootId];
         return next;
       });
+    }
+    // Correctness prerequisite (260714 Phase 2, post-childroot-fix
+    // 6726ded5): this is the third persistent per-server cache Off must
+    // clear. `lastActiveRootKeyRef`/`lastActiveRootServerIdRef` are local to
+    // this component, so `App()`'s `server.off` handler cannot reach them
+    // directly - reset them here, inside this same closedRefs loop's
+    // effect, whenever the remembered root key just closed (whether via a
+    // single `workRoot.close` or a batched server Off). Otherwise
+    // `resolveEffectiveActiveRootKey` could keep re-pinning a rootKey that
+    // no longer belongs to any mounted `openWorkRootInstances` entry.
+    if (
+      lastActiveRootKeyRef.current !== null &&
+      closedRefs.some(
+        (closedRef) => closedRef.rootKey === lastActiveRootKeyRef.current,
+      )
+    ) {
+      lastActiveRootKeyRef.current = null;
+      lastActiveRootServerIdRef.current = null;
     }
   }, [openWorkRootKeys, openWorkRootRefs]);
 

@@ -208,6 +208,22 @@ export function mergeResourcesByServer(
   return { ...current, [resources.server.id]: resources };
 }
 
+// Removes a single server's entry from the per-server cache (260714 Phase 2:
+// the "Off" deallocation gesture). Returns the same reference when the
+// server has no entry, matching `mergeResourcesByServer`'s no-surprises
+// style; every other cached server's entry is left untouched.
+export function removeResourcesByServer(
+  current: ResourcesByServer,
+  serverId: string,
+): ResourcesByServer {
+  if (!(serverId in current)) {
+    return current;
+  }
+  const next = { ...current };
+  delete next[serverId];
+  return next;
+}
+
 // Keeps the last non-null resources seen per server id, so a transient gap
 // in `resourcesByServer` for the *currently selected* server (260714
 // childroot-fix: e.g. one render between `selectedServerId` advancing and

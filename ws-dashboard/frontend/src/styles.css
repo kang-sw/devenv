@@ -2766,6 +2766,26 @@ button {
   min-height: 26px;
 }
 
+.server-row-power-button-on {
+  color: var(--ws-color-state-success);
+}
+
+.server-row-power-button-on:hover:not(:disabled),
+.server-row-power-button-on:focus-visible {
+  border-color: color-mix(in srgb, var(--ws-color-state-success) 70%, transparent);
+  color: var(--ws-color-state-success);
+}
+
+.server-row-power-button-off {
+  color: var(--ws-color-text-tertiary);
+}
+
+.server-row-power-button-off:hover:not(:disabled),
+.server-row-power-button-off:focus-visible {
+  border-color: color-mix(in srgb, var(--ws-color-state-error) 70%, transparent);
+  color: var(--ws-color-state-error);
+}
+
 .server-status-chip-connected {
   background: color-mix(in srgb, var(--ws-color-state-success) 18%, transparent);
   color: var(--ws-color-state-success);

@@ -18,6 +18,7 @@ export type DashboardCommandId =
   | "workRoot.open"
   | "workRoot.close"
   | "workRoot.activation.set"
+  | "server.off"
   | "rootPicker.open"
   | "rootPicker.close"
   | "rootPicker.navigate"
@@ -75,6 +76,7 @@ export type DashboardCommandPayload =
       workRootId: string;
       activation: "online" | "offline";
     }
+  | { type: "server.off"; serverId: string }
   | { type: "rootPicker.open" }
   | { type: "rootPicker.close" }
   | { type: "rootPicker.navigate" }
@@ -364,6 +366,13 @@ export function buildWorkRootCloseCommand(
   };
 }
 
+export function buildServerOffCommand(serverId: string): DashboardCommand {
+  return {
+    commandId: "server.off",
+    payload: { type: "server.off", serverId },
+  };
+}
+
 export function buildWorkRootActivationCommand(
   workRootId: string,
   activation: "online" | "offline",
@@ -617,6 +626,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return payload.activation === "online"
         ? "Bring workRoot online"
         : "Take workRoot offline";
+    case "server.off":
+      return "Turn server off";
     case "rootPicker.open":
       return "Open root picker";
     case "rootPicker.close":

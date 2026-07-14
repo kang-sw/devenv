@@ -5,6 +5,7 @@ import {
   mergeResourcesByServer,
   preferredSelection,
   reconcileSelectedId,
+  removeResourcesByServer,
   resolveActiveResources,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
@@ -511,4 +512,30 @@ assertTrue(
   withLastNonNullResourcesByServer(lastNonNullAfterA, "server-remote-b", null) ===
     lastNonNullAfterA,
   "a null fresh value never overwrites or extends the cache",
+);
+
+// removeResourcesByServer (260714 Phase 2: the Off deallocation gesture)
+// deletes only the target server's entry and leaves every other cached
+// server's entry untouched.
+const cacheAfterRemovingB = removeResourcesByServer(cacheWithAAndB, "server-remote-b");
+assertEqual(
+  cacheAfterRemovingB["server-local"],
+  liveView,
+  "removing server B's entry leaves server A's cached entry intact",
+);
+assertTrue(
+  !("server-remote-b" in cacheAfterRemovingB),
+  "removing server B's entry deletes it from the cache",
+);
+assertEqual(
+  Object.keys(cacheAfterRemovingB).length,
+  1,
+  "only the target server's entry is removed from the accumulated cache",
+);
+
+// Removing a server id that has no entry is a no-op that returns the same
+// reference, so it is safe to call unconditionally.
+assertTrue(
+  removeResourcesByServer(cacheWithAAndB, "server-never-cached") === cacheWithAAndB,
+  "removing an absent server id is a no-op that returns the same reference",
 );

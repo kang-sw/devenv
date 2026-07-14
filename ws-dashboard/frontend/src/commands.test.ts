@@ -30,6 +30,7 @@ import {
   buildRootPickerPinDirectoryCommand,
   buildRootPickerSelectDirectoryCommand,
   buildRootPickerUnpinDirectoryCommand,
+  buildServerOffCommand,
   buildTerminalCreateCommand,
   buildWorkspaceMenuOpenCommand,
   buildWorkbenchOpenActivityCommand,
@@ -513,6 +514,39 @@ assertEqual(
   workRootCloseCommand.payload.serverRoute,
   "server-local",
   "workRoot close command defaults to the local server route",
+);
+assertEqual(
+  dashboardCommandLabel(buildServerOffCommand("server-remote-b")),
+  "Turn server off",
+  "server off command label is stable",
+);
+const serverOffCommand = buildServerOffCommand("server-remote-b");
+assertEqual(
+  serverOffCommand.commandId,
+  "server.off",
+  "server off command carries the server.off command id",
+);
+assertEqual(
+  serverOffCommand.payload.type === "server.off" &&
+    serverOffCommand.payload.serverId,
+  "server-remote-b",
+  "server off command carries the target server id",
+);
+let serverOffDispatches = 0;
+dispatchDashboardCommand(serverOffCommand, {
+  handlers: {
+    "server.off": (command) => {
+      if (command.payload.type !== "server.off") {
+        throw new Error("server off handler received wrong payload");
+      }
+      serverOffDispatches += command.payload.serverId === "server-remote-b" ? 1 : 0;
+    },
+  },
+});
+assertEqual(
+  serverOffDispatches,
+  1,
+  "programmatic server.off dispatch reaches executable handler",
 );
 assertEqual(
   dashboardCommandLabel(buildWorkbenchOpenActivityCommand(workRootId)),
