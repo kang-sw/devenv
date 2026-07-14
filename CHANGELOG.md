@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.33.13 - 2026-07-14
+
+### Changed
+- Make the `impl/<stem>` 15-character branch-slug limit advisory instead of
+  enforced. `implementTargetBranchName` no longer hard-truncates the scope slug
+  to 15 characters; it only trims a trailing `-`, so the `<=15` guidance is now
+  a recommendation. The helper stays the single shared branch-name constructor,
+  so `enter.implement` observation and branch-plan derivation still agree and
+  the `impl/*` auto-delete gate is unaffected. Spec and mental-model wording
+  softened to match.
+
 ## v0.33.12 - 2026-07-13
 
 ### Fixed
