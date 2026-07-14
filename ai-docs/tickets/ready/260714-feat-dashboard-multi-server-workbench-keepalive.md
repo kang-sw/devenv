@@ -163,6 +163,65 @@ re-init; no visible regression to intra-server work-root switching. Verify via
 the headless-Playwright method in
 `ai-docs/ref/dashboard-headless-browser-verification.md`.
 
+### Result (32fc74ad) - 2026-07-14
+
+Implemented on branch `impl/server-keepaliv`: plan doc `9a1ce7e9`
+(`ai-docs/.plans/2026-07/14-1141-server-keepalive-cache.md`), implementation
+`987f5688`, remediation `32fc74ad`.
+
+Replaced `App()`'s single `resources: DashboardResourcesView | null` slot with
+`resourcesByServer: Record<serverId, DashboardResourcesView>`, merged per
+fetched payload's own `server.id`. `activeResources` stays a
+`resourcesByServer[selectedServerId]` lookup and remains the sole source for
+the active-root header/toolbar/workbench model, so the single-active
+workbench contract is unchanged. `WorkbenchShell` gained a `resourcesByServer`
+prop so `findOpenWorkRoot`'s call site resolves each open work root against
+its own server's cached tree (`resourcesByServer[ref.serverRoute]`) rather
+than only the selected server's tree; `findOpenWorkRoot` itself was left
+unmodified since it already filters by `ref.serverRoute` internally, so the
+fix is call-site-only. `WorkbenchShell` was restructured to a single
+unconditional `{activeHeader}{openWorkRootInstances.map(...)}` return shape —
+the loading/error/no-workRoot header states now vary only the `activeHeader`
+ternary branch, so the mounted-but-hidden `openWorkRootInstances` subtree for
+other On servers is never unmounted by any of those transitions, including a
+second server's first focus (synchronous `loading: true` before its resources
+have ever been fetched). The "accumulate, don't replace" merge used by
+`applyResources` was extracted into `mergeResourcesByServer`
+(`resourceModel.ts`) with a unit test asserting a second server's fetch leaves
+an already-cached server's entry intact (`resourceModel.test.ts`, runs under
+`test:resource-model`). Three additional bare single-slot `resources` reads
+were rebased onto `activeResources` (serverConnections fallback,
+`handleWorkRootOpened`'s `flattenEntities`, the selection-sync effect, and the
+`restoredReadOnlyPaneKeys` effect) since those stay scoped to the active
+server's behavior in Phase 1. Backend is unchanged — already per-`serverId`
+stateless per the ticket's root-cause investigation.
+
+Review: 3-partition review (correctness/fit/test) on `987f5688` found 1
+Critical issue (the mount-gating restructure was incomplete — the
+loading/error early-returns still fully unmounted the `workbench-shell` div,
+including other On servers' hidden panes, ahead of the already-restructured
+"no workRoot" guard) and 1 Important issue (the new
+accumulate-vs-replace merge reducer had no unit coverage), plus minor findings
+(a stale comment near the `findOpenWorkRoot` call site). All remediated in
+`32fc74ad`: folded all three guards into the `activeHeader` ternary, added the
+`mergeResourcesByServer` extraction plus test, fixed the stale comment.
+Focused re-review after remediation was clean.
+
+Verification: `npm run build`, `npm run test:resource-model`, and
+`npm run test:workbench` all pass. The ticket's headless-Playwright
+verification boundary (two servers On, a terminal started in each, focus
+switched back and forth, confirming both terminals survive and restore
+without re-init) is **deferred to live dogfooding** — not yet run.
+
+Spec Impact: `ai-docs/spec/ws-web-dashboard/index.md` — added
+`{#260714-ws-dashboard-cross-server-workbench-keepalive}` under the Linked
+Server Registry And Gateway Skeleton section, documenting that focusing a
+different linked server preserves the previously-focused server's mounted
+workbench surfaces instead of tearing them down.
+
+Phase 2 (left-nav per-server On/Off lifecycle UX) remains pending; this
+ticket stays open in `ready/` until Phase 2 lands.
+
 ### Phase 2: Left-nav per-server On/Off lifecycle UX
 
 Goal: expose keep-alive as a per-server On/Off control and make explicit Off the
