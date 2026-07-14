@@ -1127,6 +1127,16 @@ export function App() {
             lastNonNullResourcesByServerRef.current,
             serverId,
           );
+          // Cache clears above are insufficient on their own: a resource fetch
+          // for this server may already be in flight (the poll/explicit
+          // coordinator only ever fetches `selectedServerIdRef.current`, so an
+          // Off of the currently-selected server races a live request). Without
+          // this, that stale response resolves after the clears, passes the
+          // coordinator's `sequence < appliedSequence` guard (Off never bumped
+          // the sequence), and `mergeResourcesByServer` re-inserts the deleted
+          // entry - snapping the row back On. `invalidate` is server-scoped, so
+          // it cannot drop `applyExternalResources` merges for other servers.
+          resourceRefreshCoordinatorRef.current?.invalidate(serverId);
           if (serverId === selectedServerIdRef.current) {
             // Mirrors `handleServerSelected`'s refocus triplet: without
             // this, the poll interval's `fetchResources` (always
