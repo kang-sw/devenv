@@ -1545,6 +1545,8 @@ fn parse_codex_session_transcript(raw: &str) -> CodexSessionParse {
                     )),
                     data: None,
                     degraded: true,
+                role: None,
+                turn_id: None,
                 });
                 continue;
             }
@@ -1590,6 +1592,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: Some("Agent turn started".to_owned()),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "task_complete") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1599,6 +1603,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: Some("Agent turn completed".to_owned()),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "agent_message") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1612,6 +1618,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                 .map(bounded_native_text),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "user_message") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1621,6 +1629,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: codex_user_message_text(&envelope.payload),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("response_item", "message") => {
             let role = envelope
@@ -1641,6 +1651,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                 text: codex_message_content_text(envelope.payload.get("content")),
                 data: None,
                 degraded: false,
+            role: None,
+            turn_id: None,
             })
         }
         ("response_item", "function_call") => {
@@ -1665,6 +1677,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     "argumentsBytes": arguments_bytes,
                 })),
                 degraded: false,
+            role: None,
+            turn_id: None,
             })
         }
         ("response_item", "custom_tool_call") => {
@@ -1690,6 +1704,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     "inputBytes": input_bytes,
                 })),
                 degraded: false,
+            role: None,
+            turn_id: None,
             })
         }
         ("response_item", "function_call_output") => {
@@ -1706,6 +1722,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     "omittedMiddleLines": output.omitted_middle_lines,
                 })),
                 degraded: false,
+            role: None,
+            turn_id: None,
             })
         }
         ("response_item", "custom_tool_call_output") => {
@@ -1722,6 +1740,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     "omittedMiddleLines": output.omitted_middle_lines,
                 })),
                 degraded: false,
+            role: None,
+            turn_id: None,
             })
         }
         ("event_msg", "mcp_tool_call_end") => CodexSessionRecord::Block(tool_result_event_block(
@@ -1761,6 +1781,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                 text: Some("Patch apply completed".to_owned()),
                 data: Some(data),
                 degraded: false,
+            role: None,
+            turn_id: None,
             })
         }
         ("event_msg", "turn_aborted") => CodexSessionRecord::Block(TranscriptBlock {
@@ -1778,6 +1800,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     .unwrap_or_else(|| "unspecified".to_owned()),
             })),
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "thread_rolled_back") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1792,6 +1816,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     .and_then(|value| value.as_u64()),
             })),
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "context_compacted") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1801,6 +1827,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: Some("Conversation context compacted".to_owned()),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "thread_goal_updated") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1810,6 +1838,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: Some("Thread goal updated".to_owned()),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "collab_agent_spawn_end") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1826,6 +1856,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
                     .unwrap_or_else(|| "unknown".to_owned()),
             })),
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "collab_waiting_end") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1835,6 +1867,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: Some("Sub-agent wait completed".to_owned()),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         ("event_msg", "collab_close_end") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
@@ -1844,6 +1878,8 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             text: Some("Sub-agent close completed".to_owned()),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         }),
         _ => CodexSessionRecord::Unsupported(unsupported_codex_session_block(
             envelope,
@@ -1963,6 +1999,8 @@ fn tool_result_event_block(
         text: Some(text.to_owned()),
         data: Some(codex_event_result_data(envelope, exit_code)),
         degraded: false,
+    role: None,
+    turn_id: None,
     }
 }
 
@@ -2034,6 +2072,8 @@ fn unsupported_codex_session_block(
             "omissionReason": "unsupported codex native shape",
         })),
         degraded: true,
+    role: None,
+    turn_id: None,
     }
 }
 
@@ -2147,6 +2187,8 @@ fn transcript_blocks_from_output(raw: &str) -> Vec<TranscriptBlock> {
             text: Some(bounded(line)),
             data: None,
             degraded: false,
+        role: None,
+        turn_id: None,
         })
         .collect()
 }

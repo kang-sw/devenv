@@ -87,6 +87,13 @@ struct BlockState {
     title: Option<String>,
     text: String,
     degraded: bool,
+    // `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo` Phase 2:
+    // derived purely from which `upsert_block`/`ensure_block` call site
+    // handles the item (see `ingest_item`); never set from
+    // `suppress_local_prompt` state. Left unset for `reasoning`/`fileChange`/
+    // `plan`/`contextCompaction`/unsupported items per the ticket's role
+    // vocabulary.
+    role: Option<String>,
 }
 
 /// Stateful, runtime-free projector. Feed it classified server messages in
@@ -139,6 +146,12 @@ impl CodexProjector {
                     title: block.title,
                     text: block.text.unwrap_or_default(),
                     degraded: block.degraded,
+                    // `role` carries through a fork replay (a forked
+                    // user/agent/tool block keeps the role it had when
+                    // originally projected); `turn_id` does not (see
+                    // `order_turn_ids.push(None)` above -- fork-of-a-fork
+                    // turn-id resolution is out of this phase's scope).
+                    role: block.role,
                 },
             );
         }
@@ -148,6 +161,15 @@ impl CodexProjector {
     /// Register a prompt the browser just sent locally so its echoed
     /// `userMessage` item is not double-rendered. One registration suppresses
     /// one matching echo.
+    ///
+    /// SETTLED (`260713-bug-dashboard-agent-chat-transcript-role-turnid-echo`
+    /// Phase 2): do not remove or weaken this suppression. Phase 2's
+    /// role/turn_id additions are purely additive and independent of it --
+    /// fork/resume never calls `send_prompt`, so its seeded projector carries
+    /// no suppression state, making suppression irrelevant to that ticket.
+    /// Removing it to "complete" a future role/turn_id-adjacent ticket would
+    /// reintroduce a previously-identified double-render risk that already
+    /// blocked design review once.
     pub fn suppress_local_prompt(&mut self, text: impl Into<String>) {
         self.suppressed_prompts.push(text.into().trim().to_owned());
     }
@@ -203,6 +225,8 @@ impl CodexProjector {
                     text: (!block.text.is_empty()).then(|| block.text.clone()),
                     data: None,
                     degraded: block.degraded,
+                    role: block.role.clone(),
+                    turn_id: self.order_turn_ids.get(index)?.clone(),
                 })
             })
             .collect()
@@ -245,13 +269,13 @@ impl CodexProjector {
         match method {
             "item/started" | "item/completed" => self.ingest_item(params),
             "item/agentMessage/delta" => {
-                self.ingest_text_delta(params, CODEX_RENDER_KIND_MARKDOWN, "Assistant")
+                self.ingest_text_delta(params, CODEX_RENDER_KIND_MARKDOWN, "Assistant", Some("agent"))
             }
             "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
-                self.ingest_text_delta(params, CODEX_RENDER_KIND_THINKING, "Reasoning")
+                self.ingest_text_delta(params, CODEX_RENDER_KIND_THINKING, "Reasoning", None)
             }
             "item/commandExecution/outputDelta" => {
-                self.ingest_text_delta(params, CODEX_RENDER_KIND_TOOL, "Command")
+                self.ingest_text_delta(params, CODEX_RENDER_KIND_TOOL, "Command", Some("tool"))
             }
             "thread/tokenUsage/updated" => self.ingest_usage(params),
             "thread/status/changed" => {
@@ -303,6 +327,10 @@ impl CodexProjector {
                 let text = extract_content_text(item);
                 // The same userMessage item arrives as item/started then
                 // item/completed; suppress both once matched, keyed by item id.
+                // SETTLED: this suppression check stays untouched by Phase 2's
+                // role/turn_id work (see `suppress_local_prompt`'s doc comment
+                // -- fork/resume never calls `send_prompt`, so suppression is
+                // orthogonal to this ticket's additive metadata).
                 if self.suppressed_item_ids.iter().any(|id| id == item_id)
                     || self.take_suppressed_prompt(&text)
                 {
@@ -311,23 +339,23 @@ impl CodexProjector {
                     }
                     return CodexIngestOutcome::Ignored;
                 }
-                self.upsert_block(item_id, CODEX_RENDER_KIND_MARKDOWN, "User", &text, false)
+                self.upsert_block(item_id, CODEX_RENDER_KIND_MARKDOWN, "User", &text, false, Some("user"))
             }
             "agentMessage" => {
                 let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
-                self.upsert_block(item_id, CODEX_RENDER_KIND_MARKDOWN, "Assistant", text, false)
+                self.upsert_block(item_id, CODEX_RENDER_KIND_MARKDOWN, "Assistant", text, false, Some("agent"))
             }
             "reasoning" => {
                 let text = reasoning_text(item);
-                self.upsert_block(item_id, CODEX_RENDER_KIND_THINKING, "Reasoning", &text, false)
+                self.upsert_block(item_id, CODEX_RENDER_KIND_THINKING, "Reasoning", &text, false, None)
             }
             "commandExecution" => {
                 let summary = command_summary(item);
-                self.upsert_block(item_id, CODEX_RENDER_KIND_TOOL, "Command", &summary, false)
+                self.upsert_block(item_id, CODEX_RENDER_KIND_TOOL, "Command", &summary, false, Some("tool"))
             }
             "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => {
                 let summary = tool_summary(item);
-                self.upsert_block(item_id, CODEX_RENDER_KIND_TOOL, "Tool", &summary, false)
+                self.upsert_block(item_id, CODEX_RENDER_KIND_TOOL, "Tool", &summary, false, Some("tool"))
             }
             "fileChange" => {
                 // CONTRACT: never leak absolute host paths. Only a bounded,
@@ -339,6 +367,7 @@ impl CodexProjector {
                     "File change",
                     &summary,
                     false,
+                    None,
                 )
             }
             "plan" | "contextCompaction" => {
@@ -352,7 +381,7 @@ impl CodexProjector {
                 } else {
                     "Context compaction"
                 };
-                self.upsert_block(item_id, CODEX_RENDER_KIND_STATUS, title, &text, false)
+                self.upsert_block(item_id, CODEX_RENDER_KIND_STATUS, title, &text, false, None)
             }
             other => {
                 // Unknown item type: one bounded diagnostic status block per
@@ -371,6 +400,7 @@ impl CodexProjector {
                     "Unsupported activity",
                     &text,
                     true,
+                    None,
                 );
                 CodexIngestOutcome::Degraded
             }
@@ -382,12 +412,13 @@ impl CodexProjector {
         params: &Value,
         render_kind: &str,
         title: &str,
+        role: Option<&str>,
     ) -> CodexIngestOutcome {
         let Some(item_id) = params.get("itemId").and_then(Value::as_str) else {
             return CodexIngestOutcome::Ignored;
         };
         let delta = params.get("delta").and_then(Value::as_str).unwrap_or("");
-        let ordinal = self.ensure_block(item_id, render_kind, title);
+        let ordinal = self.ensure_block(item_id, render_kind, title, role);
         if let Some(block) = self.blocks.get_mut(item_id) {
             block.text.push_str(delta);
             block.text = bound_text(&block.text, MAX_BLOCK_TEXT);
@@ -423,8 +454,9 @@ impl CodexProjector {
         title: &str,
         text: &str,
         degraded: bool,
+        role: Option<&str>,
     ) -> CodexIngestOutcome {
-        let ordinal = self.ensure_block(item_id, render_kind, title);
+        let ordinal = self.ensure_block(item_id, render_kind, title, role);
         if let Some(block) = self.blocks.get_mut(item_id) {
             block.render_kind = render_kind.to_owned();
             block.title = Some(title.to_owned());
@@ -434,11 +466,18 @@ impl CodexProjector {
                 block.text = bound_text(text, MAX_BLOCK_TEXT);
             }
             block.degraded = block.degraded || degraded;
+            block.role = role.map(str::to_owned);
         }
         CodexIngestOutcome::BlockUpserted { ordinal }
     }
 
-    fn ensure_block(&mut self, item_id: &str, render_kind: &str, title: &str) -> usize {
+    fn ensure_block(
+        &mut self,
+        item_id: &str,
+        render_kind: &str,
+        title: &str,
+        role: Option<&str>,
+    ) -> usize {
         if let Some(index) = self.order.iter().position(|id| id == item_id) {
             return index;
         }
@@ -451,6 +490,7 @@ impl CodexProjector {
                 title: Some(title.to_owned()),
                 text: String::new(),
                 degraded: false,
+                role: role.map(str::to_owned),
             },
         );
         self.order.len() - 1
@@ -563,11 +603,11 @@ fn bound_text(text: &str, max: usize) -> String {
 /// Map one already-assembled Codex `ThreadItem` (from `thread/fork`'s
 /// response `thread.turns[].items[]`, not the live `item/started`/
 /// `item/completed` delta stream) into a `(render_kind, title, text,
-/// degraded)` tuple, mirroring `ingest_item`'s per-type mapping. Unlike
-/// `ingest_item` this is a pure, stateless function: fork-seeded items are a
-/// one-shot snapshot, not live echoes, so there is no suppression/dedup state
-/// to consult.
-fn classify_thread_item(item: &Value) -> (&'static str, &'static str, String, bool) {
+/// degraded, role)` tuple, mirroring `ingest_item`'s per-type mapping
+/// (including its `role` vocabulary). Unlike `ingest_item` this is a pure,
+/// stateless function: fork-seeded items are a one-shot snapshot, not live
+/// echoes, so there is no suppression/dedup state to consult.
+fn classify_thread_item(item: &Value) -> (&'static str, &'static str, String, bool, Option<&'static str>) {
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
     match item_type {
         "userMessage" | "hookPrompt" => (
@@ -575,6 +615,7 @@ fn classify_thread_item(item: &Value) -> (&'static str, &'static str, String, bo
             "User",
             extract_content_text(item),
             false,
+            Some("user"),
         ),
         "agentMessage" => {
             let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
@@ -583,6 +624,7 @@ fn classify_thread_item(item: &Value) -> (&'static str, &'static str, String, bo
                 "Assistant",
                 bound_text(text, MAX_BLOCK_TEXT),
                 false,
+                Some("agent"),
             )
         }
         "reasoning" => (
@@ -590,40 +632,45 @@ fn classify_thread_item(item: &Value) -> (&'static str, &'static str, String, bo
             "Reasoning",
             reasoning_text(item),
             false,
+            None,
         ),
         "commandExecution" => (
             CODEX_RENDER_KIND_TOOL,
             "Command",
             command_summary(item),
             false,
+            Some("tool"),
         ),
         "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => {
-            (CODEX_RENDER_KIND_TOOL, "Tool", tool_summary(item), false)
+            (CODEX_RENDER_KIND_TOOL, "Tool", tool_summary(item), false, Some("tool"))
         }
         "fileChange" => (
             CODEX_RENDER_KIND_FILE_CHANGE,
             "File change",
             file_change_summary(item),
             false,
+            None,
         ),
         "plan" => (
             CODEX_RENDER_KIND_STATUS,
             "Plan",
             item.get("text").and_then(Value::as_str).unwrap_or("").to_owned(),
             false,
+            None,
         ),
         "contextCompaction" => (
             CODEX_RENDER_KIND_STATUS,
             "Context compaction",
             item.get("text").and_then(Value::as_str).unwrap_or("").to_owned(),
             false,
+            None,
         ),
         other => {
             let text = bound_text(
                 &format!("Unsupported Codex activity item type: {other}"),
                 MAX_DIAGNOSTIC_TEXT,
             );
-            (CODEX_RENDER_KIND_STATUS, "Unsupported activity", text, true)
+            (CODEX_RENDER_KIND_STATUS, "Unsupported activity", text, true, None)
         }
     }
 }
@@ -643,13 +690,20 @@ pub fn project_fork_turns(thread: &Value) -> Vec<TranscriptBlock> {
         .unwrap_or(&[]);
     let mut blocks = Vec::new();
     for turn in turns {
+        // `turn_id` here is the provider's own turn id, used only as a
+        // browser-side bubble-merge-equality key (see `TranscriptBlock::
+        // turn_id`'s CONTRACT in `crate::activity`) -- distinct from this
+        // module's general "provider ids stay correlation-only, never copied
+        // into `TranscriptBlock`" rule, which governs `order_turn_ids`'s
+        // internal fork-cut-point use, not this ticket-approved wire field.
+        let turn_id = turn.get("id").and_then(Value::as_str).map(str::to_owned);
         let items = turn
             .get("items")
             .and_then(Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         for item in items {
-            let (render_kind, title, text, degraded) = classify_thread_item(item);
+            let (render_kind, title, text, degraded, role) = classify_thread_item(item);
             let cursor = blocks.len().to_string();
             blocks.push(TranscriptBlock {
                 cursor,
@@ -659,6 +713,8 @@ pub fn project_fork_turns(thread: &Value) -> Vec<TranscriptBlock> {
                 text: (!text.is_empty()).then_some(text),
                 data: None,
                 degraded,
+                role: role.map(str::to_owned),
+                turn_id: turn_id.clone(),
             });
         }
     }
@@ -697,6 +753,9 @@ mod tests {
         assert_eq!(blocks[0].cursor, "0");
         assert_eq!(blocks[1].cursor, "1");
         assert!(!projector.degraded());
+        // `260713` Phase 2: role assigned per item type.
+        assert_eq!(blocks[0].role.as_deref(), Some("user"));
+        assert_eq!(blocks[1].role.as_deref(), Some("agent"));
     }
 
     #[test]
@@ -749,6 +808,8 @@ mod tests {
         assert_eq!(blocks[0].render_kind, CODEX_RENDER_KIND_THINKING);
         assert_eq!(blocks[0].title.as_deref(), Some("Reasoning"));
         assert_eq!(blocks[0].text.as_deref(), Some("weighing options"));
+        // `260713` Phase 2: thinking/reasoning blocks leave role unset.
+        assert_eq!(blocks[0].role, None);
     }
 
     #[test]
@@ -842,6 +903,16 @@ mod tests {
         );
         assert_eq!(projector.turn_id_for_cursor("not-a-number"), None);
         assert_eq!(projector.turn_id_for_cursor("999"), None);
+
+        // `260713` Phase 2: the wire `turn_id` field (via `transcript_blocks`)
+        // mirrors `turn_id_for_cursor`'s internal correlation exactly, so
+        // multi-block same-turn items can merge into one bubble browser-side.
+        assert_eq!(blocks[0].turn_id, None);
+        assert_eq!(blocks[1].turn_id.as_deref(), Some("t1"));
+        assert_eq!(blocks[2].turn_id.as_deref(), Some("t2"));
+        assert_eq!(blocks[0].role.as_deref(), Some("user"));
+        assert_eq!(blocks[1].role.as_deref(), Some("agent"));
+        assert_eq!(blocks[2].role.as_deref(), Some("agent"));
     }
 
     #[test]
@@ -879,10 +950,24 @@ mod tests {
         let text = blocks[2].text.as_deref().unwrap_or_default();
         assert!(text.contains("unknownFutureItem"));
 
-        // No provider ids leak into the projected blocks.
+        // `260713` Phase 2: role assigned per item type; `turn_id` groups the
+        // two items from turn "t1" and separates the "t2" item, for
+        // browser-side bubble-merge equality. `turn_id` is explicitly a
+        // ticket-approved exception to the "provider ids never cross the
+        // boundary" rule below (see `project_fork_turns`'s inline comment) --
+        // it is the provider's own turn id, used only as an opaque merge key.
+        assert_eq!(blocks[0].role.as_deref(), Some("user"));
+        assert_eq!(blocks[1].role.as_deref(), Some("agent"));
+        assert_eq!(blocks[2].role, None);
+        assert_eq!(blocks[0].turn_id.as_deref(), Some("t1"));
+        assert_eq!(blocks[1].turn_id.as_deref(), Some("t1"));
+        assert_eq!(blocks[2].turn_id.as_deref(), Some("t2"));
+
+        // No provider *item*/*thread* ids leak into the projected blocks
+        // (only `turn_id` carries a provider-originated id, and only for its
+        // ticket-approved bubble-merge purpose).
         let serialized = serde_json::to_string(&blocks).expect("serialize blocks");
         assert!(!serialized.contains("thread-secret"));
-        assert!(!serialized.contains("\"t1\""));
         assert!(!serialized.contains("\"u1\""));
     }
 
@@ -901,6 +986,16 @@ mod tests {
             projector.transcript_blocks()[0].text.as_deref(),
             Some("seeded")
         );
+        // `260713` Phase 2: `role` carries through `seeded()` (a forked
+        // agent block keeps the role it had when originally projected).
+        assert_eq!(
+            projector.transcript_blocks()[0].role.as_deref(),
+            Some("agent")
+        );
+        // `turn_id` does NOT carry through `seeded()` -- fork-of-a-fork
+        // turn-id resolution is out of this phase's scope (see `seeded()`'s
+        // doc comment).
+        assert_eq!(projector.transcript_blocks()[0].turn_id, None);
 
         projector.ingest_line(
             r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"live1","text":"continued"}}}"#,
@@ -910,5 +1005,6 @@ mod tests {
         assert_eq!(blocks[0].cursor, "0");
         assert_eq!(blocks[1].cursor, "1");
         assert_eq!(blocks[1].text.as_deref(), Some("continued"));
+        assert_eq!(blocks[1].role.as_deref(), Some("agent"));
     }
 }

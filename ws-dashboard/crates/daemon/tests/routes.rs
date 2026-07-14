@@ -14190,11 +14190,20 @@ async fn codex_session_send_receive_multi_poll_e2e() {
     assert_eq!(blocks.len(), 2, "poll #3: both mid-turn blocks present, turn/completed adds no block itself");
     assert!(body.contains("working on it"), "poll #3 missing first block text: {body}");
     assert!(body.contains("done with it"), "poll #3 missing second block text: {body}");
+    // `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo` Phase 2:
+    // the new `turnId` wire field is a ticket-approved, explicit exception to
+    // the general "provider ids never cross the boundary" rule -- it exists
+    // specifically to carry a browser-side bubble-merge-equality key, and
+    // both blocks in this single turn legitimately share the provider's own
+    // turn id here. Item ids (`assistant-item-1`/`-2`), the thread id, and
+    // the raw `threadId`/`sessionId` field names remain forbidden -- only
+    // `turnId` is exempted.
+    assert_eq!(blocks[0]["turnId"], "turn-secret", "poll #3: turnId carries the provider turn id for bubble-merge grouping");
+    assert_eq!(blocks[1]["turnId"], "turn-secret", "poll #3: both blocks from the one turn share the same turnId");
     for forbidden in [
         "thread-secret-id",
         "assistant-item-1",
         "assistant-item-2",
-        "turn-secret",
         "threadId",
         "sessionId",
     ] {

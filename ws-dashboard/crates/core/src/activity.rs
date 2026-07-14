@@ -165,6 +165,16 @@ pub struct TranscriptBlock {
     pub text: Option<String>,
     pub data: Option<Value>,
     pub degraded: bool,
+    // CONTRACT (`260713-bug-dashboard-agent-chat-transcript-role-turnid-echo`
+    // Phase 2): additive, backward-compatible fields. `role` is an open
+    // string vocabulary (`"user"`, `"agent"`, `"tool"`, or unset for
+    // thinking/reasoning content); Claude's projector never emits `"user"`
+    // (its stream-json protocol never echoes the client's own prompt).
+    // `turn_id` is browser-side bubble-merge-equality-only (see
+    // `agentChatBubbles.tsx`'s `canMerge`) -- it carries no session/cache/
+    // process identity and must not be treated as such.
+    pub role: Option<String>,
+    pub turn_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -314,6 +324,8 @@ mod tests {
                 text: Some("bounded transcript text".to_owned()),
                 data: None,
                 degraded: false,
+                role: None,
+                turn_id: None,
             }],
             next_cursor: Some("2".to_owned()),
             has_more: true,
@@ -453,6 +465,8 @@ mod tests {
             text: Some("weighing two approaches".to_owned()),
             data: None,
             degraded: false,
+            role: None,
+            turn_id: None,
         };
         let block_value = serde_json::to_value(&block).expect("serialize thinking block");
         assert_eq!(block_value["renderKind"], "thinking");

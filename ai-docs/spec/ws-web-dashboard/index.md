@@ -967,7 +967,7 @@ ordinary `assistant` text blocks. All three fields stay plain strings, not
 closed enums; parsers and tests must keep tolerating unrecognized future
 values.
 
-> [!note] Planned 🚧 {#260714-transcript-block-role-turn-id}
+> [!note] {#260714-transcript-block-role-turn-id}
 > `TranscriptBlock` gains two additive, optional fields: `role` (a plain
 > string — `user`, `agent`, `tool`, or unset for blocks such as `thinking`
 > where `render_kind` already disambiguates) and `turnId` (an opaque string
@@ -978,7 +978,26 @@ values.
 > keeps provider session/cache/process identifiers off the wire; a
 > per-turn grouping key carries none of that. Both fields are absent on
 > blocks a source adapter does not yet populate; existing consumers must
-> keep tolerating their absence. Not implemented yet.
+> keep tolerating their absence.
+>
+> Implemented by `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo`
+> Phase 2. Codex's projector (`codex_projection.rs`) derives `role` per
+> item type (`user` for `userMessage`/`hookPrompt`, `agent` for
+> `agentMessage`, `tool` for command/MCP/dynamic/collab tool items, unset
+> for `reasoning`/`fileChange`/`plan`/`contextCompaction`/unsupported) and
+> `turn_id` from its existing `current_turn_id`/`order_turn_ids` tracking
+> (the provider's own turn id, reused verbatim as the grouping key — an
+> explicit, ticket-approved exception to the "never copy provider ids"
+> rule, scoped to this field only) — independent of `suppress_local_prompt`
+> (fork/resume never calls `send_prompt`, so suppression state never exists
+> for a seeded projector). `CodexProjector::seeded` (fork replay) carries
+> `role` through but intentionally resets `turn_id` to `None` (fork-of-a-
+> fork turn-id resolution stays out of scope). Claude's projector
+> (`claude_projection.rs`) only ever emits `role` `agent`/`tool` — never
+> `user`, since Claude's stream-json protocol never echoes the client's own
+> prompt — and synthesizes `turn_id` as a daemon-local per-turn-boundary
+> counter (`claude-turn-N`) at `ingest_assistant`'s existing `turn_started`
+> transition, since Claude's protocol carries no native per-turn id.
 
 The Phase-1 frontend interaction-API draft
 (`ws-dashboard/frontend/src/activitySessionApi.ts`) records illustrative
