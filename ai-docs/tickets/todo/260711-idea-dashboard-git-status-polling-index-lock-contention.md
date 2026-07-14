@@ -3,6 +3,7 @@ title: "Overlapping git status polling risks .git/index.lock contention, especia
 parent: 260525-feat-ws-dashboard-workroot-polishing-backlog
 related:
   260525-feat-ws-dashboard-workroot-polishing-backlog: Phase 2's "status polling load" candidate area this ticket makes concrete
+  260714-bug-git-status-poll-index-lock-staleness: implementation-ready ticket for this ticket's near-term fix decision (Phase 1 below); re-derived the same root cause independently via a fresh dogfood report before this ticket was found
 ---
 
 # Overlapping git status polling risks .git/index.lock contention, especially on Windows
@@ -81,6 +82,15 @@ resulting contention/stale-lock symptom more visibly than POSIX would.
 
 ## Decisions
 
+- **Delegation (2026-07-14):** the near-term fix decision below is
+  implemented as `260714-bug-git-status-poll-index-lock-staleness`
+  (`ready/`) — Phase 1 there is the direct, sage-reviewed implementation of
+  this ticket's near-term decision (found to independently re-derive the
+  same root cause from a fresh dogfood report before this ticket was
+  discovered; consolidated by cross-linking rather than duplicating the
+  implementation). Track and implement the near-term fix there, not here.
+  This ticket remains the record for the long-term direction below, which
+  is not yet scheduled.
 - **Near-term fix** (owner, 2026-07-11): apply `--no-optional-locks`
   (equivalently, `GIT_OPTIONAL_LOCKS=0` on the subprocess environment) to
   the specific polling invocations that touch the index while looking

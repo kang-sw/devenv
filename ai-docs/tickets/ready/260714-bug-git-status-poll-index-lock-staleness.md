@@ -2,6 +2,8 @@
 title: Dashboard git-status poll takes the real index lock every 5s, risking stale .git/index.lock under cross-mount access
 spec:
   - 260524-ws-dashboard-git-aware-workroot-toolbar
+related:
+  260711-idea-dashboard-git-status-polling-index-lock-contention: earlier ticket recording the same near-term decision (owner, 2026-07-11) this ticket implements, plus the accepted-but-unscheduled long-term notify-crate watch direction (see that ticket's Decisions) which is out of scope here
 sage-review-design: completed
 sage-review-completeness: completed
 ---
@@ -124,6 +126,16 @@ of stale locks persist after this ships, that indicates the second actor
 (external tool) is leaving the lock stale on its own, which is a distinct,
 separately scoped investigation (not fixable from this daemon's side beyond
 "don't add to the contention").
+
+Also out of scope here, already recorded as the accepted target architecture
+in `260711-idea-dashboard-git-status-polling-index-lock-contention` (owner,
+2026-07-11) but not yet scheduled: replacing fixed-interval polling with a
+`notify`-crate-based watch on `.git/index`/`.git/HEAD`/`.git/refs/**`,
+refreshing only on change. That direction does not supersede Phase 1 here —
+a watch-triggered refresh would still want `--no-optional-locks` on its own
+status call, and Windows `ReadDirectoryChangesW` watchers can surface
+spurious events during git's own lock-rename sequence, requiring
+debouncing regardless.
 
 ## Constraints
 
