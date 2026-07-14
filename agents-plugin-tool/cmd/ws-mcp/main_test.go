@@ -575,16 +575,16 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 4 {
 		t.Fatalf("default config show = %#v", before.Config)
 	}
-	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-5.4-mini" {
+	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-5.6-luna" {
 		t.Fatalf("default small tier = %#v", small)
 	}
-	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-5.5" {
+	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-5.6-terra" {
 		t.Fatalf("default medium tier = %#v", medium)
 	}
-	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-5.5" {
+	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-5.6-sol" {
 		t.Fatalf("default large tier = %#v", large)
 	}
-	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-5.5" {
+	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-5.6-sol" {
 		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 

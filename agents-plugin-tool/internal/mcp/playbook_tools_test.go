@@ -192,6 +192,21 @@ variables:
 Model: {{.RoleModel}}
 `
 
+	// tierModelPlaybookContent: no declared variables — the four fixed-tier
+	// model vars are unconditionally auto-injected (ImplicitVariableNames),
+	// so they render without a frontmatter `variables:` declaration.
+	tierModelPlaybookContent = `---
+kind: print
+delegates: false
+---
+# Tier Model Playbook
+
+Small: {{.SmallTierModel}}
+Medium: {{.MediumTierModel}}
+Large: {{.LargeTierModel}}
+XLarge: {{.XLargeTierModel}}
+`
+
 	// noVarsPlaybookContent: no variables, static content.
 	noVarsPlaybookContent = `---
 kind: print
@@ -459,6 +474,117 @@ func TestPlaybookPrintModelAliasVariesWithConfig(t *testing.T) {
 	}
 	if bodyA == bodyB {
 		t.Error("different configs produced identical output — model alias resolution not config-driven")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fixed-tier model vars — config-sourced resolution (no baked model names)
+// ---------------------------------------------------------------------------
+
+// TestPlaybookPrintTierModelVarsFromConfig verifies the four fixed-tier vars
+// resolve from config (not baked-in names) and are usable without a
+// frontmatter `variables:` declaration (ImplicitVariableNames auto-inject).
+func TestPlaybookPrintTierModelVarsFromConfig(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"tier-pb/tier-pb.md": tierModelPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	cacheHome := t.TempDir()
+	tierModels := map[string]string{
+		"small":  "test-small-model-1111",
+		"medium": "test-medium-model-2222",
+		"large":  "test-large-model-3333",
+		"xlarge": "test-xlarge-model-4444",
+	}
+	for tier, model := range tierModels {
+		if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cacheHome}, tier, "custom-backend", model, ""); err != nil {
+			t.Fatalf("SetAgentsTierForHarness(%s): %v", tier, err)
+		}
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "tier-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for tier, model := range tierModels {
+		if !strings.Contains(body, model) {
+			t.Errorf("body %q: expected config-sourced %s-tier model %q", body, tier, model)
+		}
+	}
+	if strings.Contains(body, "{{.") {
+		t.Errorf("body %q: unsubstituted placeholder remains", body)
+	}
+}
+
+// TestPlaybookPrintTierModelVarsFallbackOnResolverError verifies that when
+// ResolveAgentForHarnessConfig errors (here, via a malformed config.json),
+// each fixed-tier var falls back to a stable "the <tier>-tier model" label
+// instead of rendering empty — these vars sit mid-sentence in prose, so an
+// empty slot would read as a rendering bug.
+func TestPlaybookPrintTierModelVarsFallbackOnResolverError(t *testing.T) {
+	rsrcRoot := buildTestRsrcTree(t, map[string]string{
+		"tier-pb/tier-pb.md": tierModelPlaybookContent,
+	})
+	s := newTestServerWithHarness(t, "")
+
+	cacheHome := t.TempDir()
+	// A malformed config.json forces wsconfig.Load (and therefore
+	// ResolveAgentForHarnessConfig) into its error path.
+	if err := os.WriteFile(filepath.Join(cacheHome, "config.json"), []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("write malformed config.json: %v", err)
+	}
+
+	body, _, err := printPlaybook(s, rsrcRoot, "tier-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	if err != nil {
+		t.Fatalf("printPlaybook: %v", err)
+	}
+	for _, tier := range []string{"small", "medium", "large", "xlarge"} {
+		want := "the " + tier + "-tier model"
+		if !strings.Contains(body, want) {
+			t.Errorf("body %q: expected fallback label %q on resolver error", body, want)
+		}
+	}
+	if strings.Contains(body, "{{.") {
+		t.Errorf("body %q: unsubstituted placeholder remains", body)
+	}
+}
+
+// TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels renders
+// the real lead-workflow-manual under both claude and codex harness contexts
+// with an isolated (default) config and verifies the Scoped Exploration
+// sentence materializes the correct per-harness default small/medium models
+// with no {{. placeholder remaining — the ticket's stated verification
+// boundary. Default config: claude small=haiku medium=sonnet; codex
+// small=gpt-5.6-luna medium=gpt-5.6-terra (post 9bfe7aa3 tier-default remap).
+func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *testing.T) {
+	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
+
+	cases := []struct {
+		harness     string
+		smallModel  string
+		mediumModel string
+	}{
+		{"claude", "haiku", "sonnet"},
+		{"codex", "gpt-5.6-luna", "gpt-5.6-terra"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.harness, func(t *testing.T) {
+			s := newTestServerWithHarness(t, tc.harness)
+			body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook: %v", err)
+			}
+			exploreAgent := terminologyForHarness(tc.harness)["ExploreAgent"]
+			wantSentence := "dispatch\n" + exploreAgent + " as " + tc.smallModel +
+				" by default; escalate to\n" + tc.mediumModel
+			if !strings.Contains(body, wantSentence) {
+				t.Errorf("body %q: expected Scoped Exploration sentence to contain %q", body, wantSentence)
+			}
+			if strings.Contains(body, "{{.") {
+				t.Errorf("body %q: unsubstituted placeholder remains", body)
+			}
+		})
 	}
 }
 
@@ -906,7 +1032,7 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.5.",
+		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Verification instructions: go test ./internal/mcp -run TestRenderPlaybookShippedImplementerDeclaredContext",
 		"Binding result expectations: Report outcome, files changed, commits, verification, and blockers.",
@@ -961,7 +1087,7 @@ func TestRenderPlaybookShippedImplementerRelayDeclaredContext(t *testing.T) {
 	}
 	body := string(data)
 	for _, want := range []string{
-		"Alias model for this role: gpt-5.5.",
+		"Alias model for this role: gpt-5.6-terra.",
 		"Plan path: `ai-docs/.plans/plan.md`",
 		"Review cycle: 2",
 		"Current commit range: abc123..def456",
@@ -1619,7 +1745,10 @@ func TestTermsDifferThreeWay(t *testing.T) {
 }
 
 func TestReservedToolVarNamesContainsRequiredNames(t *testing.T) {
-	for _, name := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "RoleModel", "McpNamespace", "SkillNamespace"} {
+	for _, name := range []string{
+		"ExploreAgent", "SpawnIdiom", "ContinueIdiom", "RoleModel", "McpNamespace", "SkillNamespace",
+		"SmallTierModel", "MediumTierModel", "LargeTierModel", "XLargeTierModel",
+	} {
 		if !reservedToolVarNames[name] {
 			t.Errorf("reservedToolVarNames missing %q", name)
 		}

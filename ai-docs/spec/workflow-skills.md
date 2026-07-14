@@ -144,7 +144,7 @@ uses host-native exploration workers directly.
 
 Workflow guidance prefers `model` for both portable aliases and concrete
 overrides. Examples use `model: "core"` or `model: "deep"` for portable
-selection and concrete provider names such as `gpt-5.5` or
+selection and concrete provider names such as `gpt-5.6-terra` or
 `claude-sonnet-4.6` only when backend-specific routing is intentional. `tier`
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
