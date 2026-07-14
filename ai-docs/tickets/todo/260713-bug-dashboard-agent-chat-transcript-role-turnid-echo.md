@@ -1,9 +1,12 @@
 ---
 title: "Agent chat replies never render due to a streaming-poll race, and fork/resumed transcripts misclassify/split the user's own message"
 sage-review-design: completed
+spec:
+  260714-transcript-block-role-turn-id: TranscriptBlock role/turnId additive fields (Phase 2)
 related:
   260711-feat-ws-dashboard-agent-activity-chat-ui: introduced the frontend TranscriptBlock role/turnId contract this ticket now fills in
   260713-feat-ws-dashboard-agent-chat-real-adapter-wiring: wired real Codex/Claude adapters without completing this contract
+sage-review-completeness: required
 ---
 
 # Agent chat replies never render due to a streaming-poll race, and fork/resumed transcripts misclassify/split the user's own message

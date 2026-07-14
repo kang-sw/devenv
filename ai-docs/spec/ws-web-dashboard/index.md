@@ -967,6 +967,19 @@ ordinary `assistant` text blocks. All three fields stay plain strings, not
 closed enums; parsers and tests must keep tolerating unrecognized future
 values.
 
+> [!note] Planned 🚧 {#260714-transcript-block-role-turn-id}
+> `TranscriptBlock` gains two additive, optional fields: `role` (a plain
+> string — `user`, `agent`, `tool`, or unset for blocks such as `thinking`
+> where `render_kind` already disambiguates) and `turnId` (an opaque string
+> grouping every block emitted by one logical provider turn, used only for
+> browser-side bubble-merge equality checks). Exposing `turnId` does not
+> reverse the browser-privacy cursor contract in
+> `#260620-ws-dashboard-agent-client-provider-contract` — that contract
+> keeps provider session/cache/process identifiers off the wire; a
+> per-turn grouping key carries none of that. Both fields are absent on
+> blocks a source adapter does not yet populate; existing consumers must
+> keep tolerating their absence. Not implemented yet.
+
 The Phase-1 frontend interaction-API draft
 (`ws-dashboard/frontend/src/activitySessionApi.ts`) records illustrative
 method-shape names for the common interactive subset (`activity.history.list`,
