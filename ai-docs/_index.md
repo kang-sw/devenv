@@ -152,6 +152,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
+| `260714-bug-git-status-poll-index-lock-staleness` | ready | Stop the dashboard's 5s git-status poll from taking `.git/index.lock`, addressing a dogfood report of stale Windows-side lockfiles under WSL2 |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260627-feat-enter-proceed-deterministic-verdict-engine` | ready | Move deterministic `lead-proceed` route/verdict resolution into `ws.enter.proceed` while keeping the public MCP surface to one mode-switch call |
 | `260620-feat-ws-dashboard-agent-client-activity-sources` | todo | Normalize Codex app-server and OpenCode ACP activity through a dashboard agent-client provider contract |
@@ -209,6 +210,20 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260714-bug-git-status-poll-index-lock-staleness` (ready, bug) - dogfood
+  report of a stale Windows-side `.git/index.lock` under WSL2; confirmed the
+  dashboard daemon's 5s visible-WorkRoot git-status poll runs a lock-taking
+  `git status --porcelain` with no `--no-optional-locks`, and confirmed no
+  daemon code path kills/times-out a git subprocess (rules out self-inflicted
+  staleness from that angle). Root cause is a hypothesis, not confirmed by
+  live reproduction: a Windows-native tool colliding with this poll over the
+  WSL↔Windows interop mount (9p/drvfs), whose atomicity/cleanup semantics for
+  create-lock/rename/unlink may not match native POSIX, turning ordinary
+  lock contention into staleness. Fix direction: Phase 1 adds
+  `--no-optional-locks` to the poll's `git status` call only, removing the
+  daemon's own contribution to lock contention regardless of the exact
+  mechanism; mutating routes (switch/fetch/push/pull) are untouched. Sage
+  review (design + completeness) both completed.
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
