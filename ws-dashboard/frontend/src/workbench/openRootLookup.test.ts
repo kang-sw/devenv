@@ -1,6 +1,7 @@
 import {
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
+  resolveEffectiveActiveRootKey,
 } from "./openRootLookup.js";
 import type {
   DashboardResourcesView,
@@ -193,4 +194,70 @@ assertDeepEqual(
   resolveClosedWorkRootRefs(["key-a", "key-missing"], { "key-a": refA }, []),
   [{ rootKey: "key-a", rootId: refA.rootId, serverRoute: refA.serverRoute }],
   "a closed key with no previousRefs entry is skipped, other closed keys still resolve",
+);
+
+// `resolveEffectiveActiveRootKey` - the 260714 childroot-fix safety net's
+// decision, extracted for unit coverage: which mounted rootKey (if any)
+// should render active, given the current selection, whether it matched a
+// mounted instance, and the remembered last-active root/server pair.
+
+// A genuine match: the current selection matches a mounted instance, so it
+// wins outright regardless of what is remembered.
+assertEqual(
+  resolveEffectiveActiveRootKey({
+    selectedRootKey: "server-local/root-a",
+    selectedRootIsMounted: true,
+    lastActiveRootKey: "server-local/root-b",
+    lastActiveRootServerId: "server-local",
+    selectedServerId: "server-local",
+  }),
+  "server-local/root-a",
+  "a genuinely-mounted selection wins outright over the remembered fallback",
+);
+
+// Same-server transient collapse: the selection matches no mounted instance
+// right now, but the remembered last-active root belongs to the same server
+// that is currently selected - fall back to it (the remote-child
+// flash-then-hide bug this safety net exists to fix).
+assertEqual(
+  resolveEffectiveActiveRootKey({
+    selectedRootKey: "server-local/root-a",
+    selectedRootIsMounted: false,
+    lastActiveRootKey: "server-local/root-b",
+    lastActiveRootServerId: "server-local",
+    selectedServerId: "server-local",
+  }),
+  "server-local/root-b",
+  "a same-server transient selection collapse falls back to that server's last-active root",
+);
+
+// Cross-server switch to an unresolved server: the selection collapsed
+// (never fetched/resolved) and the remembered last-active root belongs to a
+// *different* server than the one currently selected - must NOT pin the
+// previous server's root; resolves to null (render falls through to the
+// empty-state watermark).
+assertEqual(
+  resolveEffectiveActiveRootKey({
+    selectedRootKey: null,
+    selectedRootIsMounted: false,
+    lastActiveRootKey: "server-remote-1/root-a",
+    lastActiveRootServerId: "server-remote-1",
+    selectedServerId: "server-remote-2",
+  }),
+  null,
+  "a cross-server switch to an unresolved server does not pin the previous server's root",
+);
+
+// No history yet (fresh session, nothing has ever genuinely matched): also
+// resolves to null rather than throwing.
+assertEqual(
+  resolveEffectiveActiveRootKey({
+    selectedRootKey: null,
+    selectedRootIsMounted: false,
+    lastActiveRootKey: null,
+    lastActiveRootServerId: null,
+    selectedServerId: "server-local",
+  }),
+  null,
+  "no remembered last-active root resolves to null",
 );

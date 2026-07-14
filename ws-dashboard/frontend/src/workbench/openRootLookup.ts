@@ -59,3 +59,29 @@ export function resolveClosedWorkRootRefs(
   }
   return closedRefs;
 }
+
+// Pure decision behind the 260714 childroot-fix safety net in
+// `WorkbenchShell`: which mounted rootKey (if any) should render as "active"
+// this frame. When the current selection genuinely matches a mounted
+// instance, that wins outright. Otherwise fall back to the last rootKey that
+// *did* genuinely match — but only when that remembered root belongs to the
+// currently selected server. Without the server-scope guard, selecting a
+// remote server that has never resolved (so `resources`/`selection` collapse
+// to `null` and nothing reloads) would re-pin the *previous* server's
+// last-active root, leaking its mounted (keep-alive) panes under the new
+// server's header instead of showing the empty-state watermark.
+export function resolveEffectiveActiveRootKey(params: {
+  selectedRootKey: string | null;
+  selectedRootIsMounted: boolean;
+  lastActiveRootKey: string | null;
+  lastActiveRootServerId: string | null;
+  selectedServerId: string;
+}): string | null {
+  if (params.selectedRootKey && params.selectedRootIsMounted) {
+    return params.selectedRootKey;
+  }
+  if (params.lastActiveRootServerId === params.selectedServerId) {
+    return params.lastActiveRootKey;
+  }
+  return null;
+}

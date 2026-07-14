@@ -171,6 +171,45 @@ plus the existing automated suites, not by an interactive repro-then-fix
 cycle. Live confirmation remains an open follow-up the next time the affected
 remote server is being monitored.
 
+#### Edition (670412eb) - 2026-07-14
+
+An opus correctness review of the Phase 1 safety net found a reachable
+cross-server content leak: `lastActiveRootKeyRef`'s fallback in
+`WorkbenchShell` was not scoped to the currently selected server and never
+reset on a server switch. Concrete traced scenario: on server A with root
+A1 active (`lastActiveRootKeyRef = A1`), the user selects a remote server B
+that has never resolved and is not `connected`, so `handleServerSelected`
+sets `selectedServerId=B` but skips `loadResources`. `activeResources`,
+`selection`, and `selectedWorkRootStateKey` all collapse to `null`, but the
+fallback still resolved to `lastActiveRootKeyRef.current = A1` (still
+mounted via keep-alive) - so server A's live terminals stayed visible under
+server B's header instead of the empty watermark.
+
+Fix: added `lastActiveRootServerIdRef`, tracking the server route that
+`lastActiveRootKeyRef`'s root belongs to, and gated the fallback so it only
+applies when that stored server route matches the currently selected server
+(`selectedServerId`, newly threaded down as a `WorkbenchShell` prop -
+`resources` alone cannot substitute, since it is `null` in exactly this
+scenario). Chose server-scoped gating over unconditionally clearing
+`lastActiveRootKeyRef` on every server switch: a blanket reset would also
+defeat this ticket's original purpose (a same-server transient
+selection/mount collapse must still fall back to that server's last-active
+root). The decision is extracted as a pure `resolveEffectiveActiveRootKey`
+helper in `workbench/openRootLookup.ts`.
+
+This corrects the Result claim above that "No seam exists for the
+`WorkbenchShell` render-loop safety net" - a seam now exists specifically
+for the fallback-selection decision (not the full render loop), with unit
+coverage in `workbench/openRootLookup.test.ts` for: a genuine mount match
+winning outright, a same-server transient collapse still falling back
+correctly, a cross-server switch to an unresolved server resolving to
+`null` instead of pinning the previous server's root, and the no-history
+case.
+
+Verification: `cd ws-dashboard/frontend && npm run build` (`tsc -b && vite
+build`), `npm run test:resource-model`, and `npm run test:workbench` (now
+including the new `resolveEffectiveActiveRootKey` cases) all pass.
+
 ## Spec Impact
 
 No spec stem addresses this defect specifically. This is a regression fix
