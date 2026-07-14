@@ -48,7 +48,7 @@ export type DashboardCommandId =
 
 export type DashboardCommandPayload =
   | { type: "refresh" }
-  | { type: "select"; entityId: string }
+  | { type: "select"; entityId: string; serverId?: string }
   | { type: "action"; label: string; entityId: string }
   | { type: "workspace.menu.open"; workspaceId: string }
   | { type: "workspace.remove"; workspaceId: string }

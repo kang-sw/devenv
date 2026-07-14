@@ -983,8 +983,14 @@ export function App() {
     (command: DashboardCommand, handlers: DashboardCommandHandlers = {}) => {
       const executableHandlers: DashboardCommandHandlers = { ...handlers };
       if (command.payload.type === "select") {
-        const { entityId } = command.payload;
-        executableHandlers[command.commandId] = () => setSelectedId(entityId);
+        const { entityId, serverId } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          if (serverId && serverId !== selectedServerIdRef.current) {
+            selectedServerIdRef.current = serverId;
+            setSelectedServerId(serverId);
+          }
+          setSelectedId(entityId);
+        };
       } else if (command.payload.type === "refresh") {
         executableHandlers[command.commandId] = () => {
           void loadServers();
@@ -9407,7 +9413,7 @@ function ResourceRow({
         onClick={() =>
           onCommand({
             commandId: "resource.select",
-            payload: { type: "select", entityId: id },
+            payload: { type: "select", entityId: id, serverId: actionServerId },
           })
         }
       >
