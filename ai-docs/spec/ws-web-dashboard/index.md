@@ -603,7 +603,11 @@ a merge or rebase conflict state.
 Status refresh stays host-light: the dashboard refreshes immediately on
 selected WorkRoot changes, visibility return, explicit fetch/push/pull,
 branch switch, and branch create, then polls conservatively only for the
-selected visible WorkRoot. All Git toolbar routes remain owner-authenticated,
+selected visible WorkRoot. That poll's `git status` call passes
+`--no-optional-locks`, so it never takes the repository's `.git/index.lock`
+(`260714-bug-git-status-poll-index-lock-staleness`); mutating routes
+(switch/fetch/push/pull) are unaffected and still take locks as needed. All
+Git toolbar routes remain owner-authenticated,
 address workRoots by opaque `workRootId`, keep Git work off async workers, and
 avoid exposing host paths in command logs or bounded browser-visible errors.
 
