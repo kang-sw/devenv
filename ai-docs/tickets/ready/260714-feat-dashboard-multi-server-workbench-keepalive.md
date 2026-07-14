@@ -252,3 +252,62 @@ alone never deallocates. Verify via the headless-Playwright method
 start a terminal in each, switch focus and confirm the first server's
 terminal/chat survives and restores without re-init, then Off the second and
 confirm only its surfaces are released.
+
+### Result (ad394f79) - 2026-07-14
+
+Implemented on branch `impl/keepalive-p2-onoff`: plan doc `21a82de8`, impl
+`ce6c7350`, Critical remediation `ad394f79` (full range `6726ded5..ad394f79`).
+
+Shipped the left-nav per-server On/Off lifecycle described in the phase plan.
+Turning a server On stays the existing server-label-click activation gesture
+(expand + focus), now reading each server's own `resourcesByServer` entry so an
+On-but-unfocused server keeps rendering expanded. Off is the one new gesture: a
+power-button control on the server row (disabled for `server-local`, which is
+always On) that batch-closes every open work root belonging to that server
+(reusing the existing `workRoot.close` teardown recipe) and deallocates the
+server's cached state, then refocuses selection to `server-local` when the
+Off'd server was the currently-selected one. Off clears three per-server
+caches, not just the resources tree, because two other fallbacks introduced by
+an earlier regression fix (merge `6726ded5`) can otherwise resurrect a
+deallocated server's stale state: `resourcesByServer` (the per-server resource
+tree cache), `lastNonNullResourcesByServerRef` (the active-resources fallback),
+and the open-work-root bookkeeping (`openWorkRootKeys` /
+`openWorkRootRefs` / `workbenchGroupsByRoot` / `paneOrderByRoot`) for that
+server. Re-On (re-focusing or re-adding the server) refetches a fresh resource
+tree through the normal fetch path; no cache is repopulated from stale data.
+The right workbench stays single-active and the git toolbar/activity console
+stay single-instance for the active root - unchanged, per the phase's
+constraints.
+
+Review: 3-partition review - A (deallocation & cross-server state, opus), B
+(On/Off UX rendering, opus), C (scope/tests/hygiene, sonnet). A found 1
+Critical: an in-flight resource fetch for the Off'd currently-selected server
+could resolve after the cache clears, pass the refresh coordinator's
+sequence guard (Off never bumped the fetch sequence), and get re-merged into
+`resourcesByServer` - snapping the row back On with a stale tree that never
+self-healed. Remediated in `ad394f79` by adding a server-scoped
+`invalidate(serverId)` to the resource-refresh coordinator, recording the
+Off'd server id and the issued-sequence at invalidation time; the apply path
+drops any resolved response whose `resources.server.id` matches at/before that
+sequence. The Off handler calls `invalidate` alongside the three cache clears.
+Added 3 coordinator-seam regression tests: the invalidated server's in-flight
+response is dropped, a different (non-Off'd) server's in-flight response still
+applies, and a fetch issued after invalidation (Off then re-add) applies
+normally rather than being permanently muted. Re-review after remediation was
+clean / SAFE TO MERGE. Partitions B and C were clean with no findings.
+
+Two accepted non-blocking minors, deferred rather than fixed: (1) the Off
+button stays clickable on an already-Off server (harmless no-op - clicking it
+again re-runs the same teardown against an already-empty state); (2) the
+inline `isOn` derivation used by `ResourceNavigation`/`ServerRows` is untested,
+accepted per the plan and because no component-render test infrastructure
+exists in this codebase yet.
+
+Verification: `npm run build`, `npm run test:resource-model`,
+`npm run test:commands`, and `npm run test:resource-refresh` all pass,
+including the 3 new coordinator regression tests. Live two/three-server Off +
+re-On dogfooding (headless-Playwright per
+`ai-docs/ref/dashboard-headless-browser-verification.md`) is **deferred to live
+dogfooding**, consistent with the Phase 1 deferral pattern.
+
+This was the ticket's final phase; both Phase 1 and Phase 2 are complete.

@@ -165,6 +165,23 @@ root polls for updates; a non-focused server's cached resource tree is not
 refreshed until that server is refocused.
 {#260714-ws-dashboard-cross-server-workbench-keepalive}
 
+The left nav exposes this keep-alive as a per-server On/Off control. A server
+is On by default once selected or previously opened; clicking a server's label
+turns it On (expands its workspaces and focuses it) - the same gesture that
+already selects a server, not a new one. Off is a separate, explicit button on
+the server row and is the only gesture that deallocates a server's workbench
+state: turning a server Off collapses its workspaces, closes every work root
+open under it, and discards its cached resource tree, so nothing about that
+server survives in memory afterward. A focus switch alone - selecting a
+different server without pressing Off - never deallocates anything. Turning a
+server back On (re-selecting or re-adding it) always fetches a fresh resource
+tree rather than reusing any prior state. `server-local` is always On and its
+Off control is disabled, since the local daemon's own workbench cannot be
+deallocated. Off targeting the currently-focused server refocuses selection to
+`server-local`. The right-side workbench remains single-active, and the git
+toolbar and activity console remain single-instance for the active root; Off
+does not change that.
+
 Linked-server identity stays dashboard-owned and local-gateway scoped. `serverId`
 selects the target daemon for browser requests; it is not a ws MCP session key,
 provider session id, endpoint, or remote host path. Any future ws MCP binding for
