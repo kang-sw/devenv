@@ -1,5 +1,6 @@
 ---
 title: Keep linked dashboard servers open in parallel - hide-not-unmount workbench on server switch
+completed: 2026-07-14
 related:
   260703-feat-dashboard-workroot-session-keepalive: precedent - established the intra-server hide-not-unmount (display:none, keep panes mounted) behavior this ticket generalizes to cross-server focus switches
   260707-bug-dashboard-terminal-clears-on-tab-switch: related-area - prior terminal-survival fix in the same pane keep-alive path
