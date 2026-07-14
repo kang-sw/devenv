@@ -56,3 +56,39 @@ actionable ticket, decide:
   covers one popover-styling phase adjacent to this.
 
 Not actionable until the above is settled with the ticket's owner.
+
+## Additional finding: a single turn visually splits into multiple bubbles when tool calls interleave (2026-07-14)
+
+Dogfooding after `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo`
+landed (which added `role`/`turnId`): sending one "hello" to a fresh Codex
+tab rendered as what looked like two separate replies (screenshot: a
+standalone "Show thinking" box, then a text bubble, then a second
+"Show thinking"-plus-"Command" box, then a second text bubble).
+
+Confirmed via a headless-Playwright repro
+(`ai-docs/ref/dashboard-headless-browser-verification.md` method) that this
+is not a duplicate request: exactly one `POST .../prompt {"text":"hello"}`
+fired, and the daemon's transcript shows all 4 blocks (thinking, agent text,
+tool command, agent text) sharing the same `turnId`. The daemon/turn-id work
+is correct; the split is purely a frontend grouping defect:
+
+- `agentChatBubbles.tsx`'s `canMerge` (~line 121-126) requires
+  `open.kind === kind` in addition to matching `turnId`. A turn shaped
+  `agent text -> tool call -> agent text` (an extremely common Codex
+  pattern) changes `kind` from `agentTurn` to `tool` and back, so the same
+  `turnId` never merges across the tool call — the single turn renders as
+  three-plus separate bubbles instead of one grouped turn.
+- Separately, the first `thinking` block of a turn (`~line 101-115`) is
+  pushed directly into `bubbles` as its own closed, textless bubble
+  whenever no bubble is already `open` — it never becomes the `open` bubble
+  itself, so it can never merge forward into the turn's own text/tool
+  blocks that follow, even with a matching `turnId`.
+
+This reads to a user as "the agent answered twice" rather than "one turn
+with a tool call in the middle," which is exactly the messiness this
+ticket's Background section is about — filing it here as a concrete,
+evidence-based instance of the "needs role-based/turn-based hierarchy"
+question above, rather than as its own bug ticket, since fixing it well is
+a grouping/collapse UX design decision (e.g. should a mid-turn tool call
+render nested inside one continuous turn bubble, or as a distinct
+collapsible sub-item within it?) and not just a one-line logic patch.
