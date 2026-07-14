@@ -256,7 +256,9 @@ import {
   isValidServerRouteSegment,
   mergeResourcesByServer,
   reconcileSelectedId,
+  resolveActiveResources,
   serverScopedIdentity,
+  withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
   workspaceEndpoint,
   type ActionHint,
@@ -538,7 +540,31 @@ export function App() {
     }
   }, []);
 
-  const activeResources = resourcesByServer[selectedServerId] ?? null;
+  // 260714 childroot-fix: `resourcesByServer` only ever accumulates (see
+  // `mergeResourcesByServer`'s contract), but `selectedServerId` can advance
+  // to a server key ahead of that key landing in `resourcesByServer` for one
+  // render (e.g. immediately after opening a work root, before the
+  // canonical re-fetch resolves). Falling straight through to `null` on that
+  // render collapses `resolveWorkbenchSelection` to null too, which zeroes
+  // `selectedWorkRootStateKey` in `WorkbenchShell` and hides every mounted
+  // `openWorkRootInstances` entry (they resolve independently, straight off
+  // `resourcesByServer`) even though nothing was actually torn down. Cache
+  // the last non-null resources seen per server id (`resolveActiveResources`
+  // / `withLastNonNullResourcesByServer` in `resourceModel.ts`) and fall back
+  // to it for exactly that gap; a server that has never resolved at all
+  // still falls through to `null` (no cache entry exists yet), so this never
+  // resurrects a server ahead of its first real fetch.
+  const lastNonNullResourcesByServerRef = useRef<ResourcesByServer>({});
+  lastNonNullResourcesByServerRef.current = withLastNonNullResourcesByServer(
+    lastNonNullResourcesByServerRef.current,
+    selectedServerId,
+    resourcesByServer[selectedServerId] ?? null,
+  );
+  const activeResources = resolveActiveResources(
+    resourcesByServer,
+    selectedServerId,
+    lastNonNullResourcesByServerRef.current,
+  );
   const serverConnections = useMemo(
     () =>
       serversView?.servers ??
@@ -3547,6 +3573,15 @@ function WorkbenchShell({
         selection.root.id,
       )
     : null;
+  // 260714 childroot-fix safety net: remembers the last rootKey that
+  // genuinely matched a mounted `openWorkRootInstances` entry. If
+  // `selectedWorkRootStateKey` transiently matches none of them (the
+  // `activeResources` collapse this ticket fixes upstream, or any other
+  // future gap between `selection` and the mounted instances), the
+  // active-root render below falls back to this instead of hiding every
+  // instance at once. See the `isActiveRoot` computation near the
+  // `openWorkRootInstances.map(...)` return below.
+  const lastActiveRootKeyRef = useRef<string | null>(null);
   const workbenchGroups = selectedWorkRootId
     ? (workbenchGroupsByRoot[selectedWorkRootStateKey ?? selectedWorkRootId] ??
       initialWorkbenchGroups)
@@ -5705,11 +5740,29 @@ function WorkbenchShell({
       })()
     );
 
+  // Safety net for the 260714 childroot-fix collapse: if the selected root
+  // key doesn't match any currently mounted instance (a transient
+  // `selection`/`openWorkRootInstances` mismatch), keep the previously-active
+  // root visible instead of falling through to "none of them" - which would
+  // hide every mounted instance at once. Once `selectedWorkRootStateKey`
+  // genuinely matches a mounted instance again, adopt it as the new
+  // last-active key.
+  const selectedRootIsMounted = openWorkRootInstances.some(
+    (instance) => instance.rootKey === selectedWorkRootStateKey,
+  );
+  if (selectedWorkRootStateKey && selectedRootIsMounted) {
+    lastActiveRootKeyRef.current = selectedWorkRootStateKey;
+  }
+  const effectiveActiveRootKey =
+    selectedWorkRootStateKey && selectedRootIsMounted
+      ? selectedWorkRootStateKey
+      : lastActiveRootKeyRef.current;
+
   return (
     <div className="workbench-shell">
       {activeHeader}
       {openWorkRootInstances.map(({ rootKey, editorGroups: rootGroups }) => {
-        const isActiveRoot = rootKey === selectedWorkRootStateKey;
+        const isActiveRoot = rootKey === effectiveActiveRootKey;
         let effectiveActivePaneByGroup = activePaneByRoot[rootKey] ?? {};
         if (isActiveRoot && pendingReadOnlyActivation) {
           effectiveActivePaneByGroup = selectWorkbenchPane(
