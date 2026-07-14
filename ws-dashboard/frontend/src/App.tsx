@@ -424,9 +424,14 @@ function realAgentChatHarness(
 }
 
 export function App() {
-  const [resources, setResources] = useState<DashboardResourcesView | null>(
-    null,
-  );
+  // Per-server cache of the last resolved resources tree, keyed by
+  // `server.id`. Replaces a single-slot `resources` state so that switching
+  // the active/selected server does not drop other On servers' resolved
+  // trees (needed so their mounted-but-hidden work-root panes keep
+  // resolving via `findOpenWorkRoot` after a focus switch away from them).
+  const [resourcesByServer, setResourcesByServer] = useState<
+    Record<string, DashboardResourcesView>
+  >({});
   const [serversView, setServersView] = useState<DashboardServersView | null>(
     null,
   );
@@ -507,7 +512,11 @@ export function App() {
     resourceRefreshCoordinatorRef.current = createResourceRefreshCoordinator({
       fetchResources: () =>
         requestDashboardResources(selectedServerIdRef.current),
-      applyResources: setResources,
+      applyResources: (resources) =>
+        setResourcesByServer((current) => ({
+          ...current,
+          [resources.server.id]: resources,
+        })),
       setLoading,
       setError,
     });
@@ -528,14 +537,15 @@ export function App() {
     }
   }, []);
 
+  const activeResources = resourcesByServer[selectedServerId] ?? null;
   const serverConnections = useMemo(
     () =>
       serversView?.servers ??
-      (resources ? [serverViewToConnection(resources.server)] : []),
-    [resources, serversView],
+      (activeResources
+        ? [serverViewToConnection(activeResources.server)]
+        : []),
+    [activeResources, serversView],
   );
-  const activeResources =
-    resources?.server.id === selectedServerId ? resources : null;
 
   useEffect(() => {
     selectedServerIdRef.current = selectedServerId;
@@ -565,7 +575,7 @@ export function App() {
       // Identify the just-opened workRoot: the workRoot present in the
       // aggregated open response but absent from the prior resource view.
       const priorWorkRootIds = new Set(
-        flattenEntities(resources)
+        flattenEntities(activeResources)
           .filter((entity) => entity.type === "workRoot")
           .map((entity) => entity.id),
       );
@@ -588,10 +598,11 @@ export function App() {
       void loadServers();
       void loadResources("open");
     },
-    [loadResources, loadServers, resources],
+    [loadResources, loadServers, activeResources],
   );
 
   useEffect(() => {
+    const resources = resourcesByServer[selectedServerIdRef.current];
     if (!resources) {
       return;
     }
@@ -601,7 +612,7 @@ export function App() {
       setSelectedServerId(resources.server.id);
     }
     normalizeServerRoute(resources.server.id);
-  }, [resources]);
+  }, [resourcesByServer]);
 
   const handleServerSelected = useCallback(
     (server: ServerConnectionView) => {
@@ -688,11 +699,11 @@ export function App() {
   }, [readOnlyFilePanes, readOnlyFilePaneOrderByGroup]);
 
   useEffect(() => {
-    if (!resources || restoredReadOnlyPaneKeys.current.size === 0) {
+    if (!activeResources || restoredReadOnlyPaneKeys.current.size === 0) {
       return;
     }
     const knownWorkRootIds = new Set(
-      resources.workspaces.flatMap((workspace) =>
+      activeResources.workspaces.flatMap((workspace) =>
         workspace.workRoots.map((root) =>
           serverScopedIdentity(root.resourcePath.serverId, root.id),
         ),
@@ -741,7 +752,7 @@ export function App() {
           });
         });
     }
-  }, [readOnlyFilePanes, resources]);
+  }, [readOnlyFilePanes, activeResources]);
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
@@ -1201,6 +1212,7 @@ export function App() {
             error={error}
             loading={loading}
             resources={activeResources}
+            resourcesByServer={resourcesByServer}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
             workbenchGroupsByRoot={workbenchGroupsByRoot}
@@ -3352,6 +3364,7 @@ function InlineNotice({
 
 function WorkbenchShell({
   resources,
+  resourcesByServer,
   selection,
   selectedEntity,
   commandLog,
@@ -3376,6 +3389,7 @@ function WorkbenchShell({
   onDocumentSaved,
 }: {
   resources: DashboardResourcesView | null;
+  resourcesByServer: Record<string, DashboardResourcesView>;
   selection: WorkbenchSelection | null;
   selectedEntity: ResourceEntity | null;
   commandLog: CommandEntry[];
@@ -4114,7 +4128,10 @@ function WorkbenchShell({
       if (!ref) {
         return null;
       }
-      const resolved = findOpenWorkRoot(resources, ref);
+      const resolved = findOpenWorkRoot(
+        resourcesByServer[ref.serverRoute] ?? null,
+        ref,
+      );
       if (!resolved) {
         return null;
       }
@@ -5616,43 +5633,61 @@ function WorkbenchShell({
     return <StatusPane title="Workbench unavailable" detail={error} />;
   }
 
-  if (!resources || !workbenchModel) {
-    return (
+  // The header/toolbar/status-message region is scoped to the active
+  // (selected) server only and is conditional on that server's resources
+  // having resolved. It must stay decoupled from `openWorkRootInstances`
+  // below: every other On server's mounted-but-hidden (`display:none`) work
+  // root panes need to keep rendering even when the active server alone has
+  // nothing to show (e.g. mid-switch, or a connected server with no active
+  // work root selected) — otherwise a focus switch would tear down every
+  // other server's panes as a side effect of the active server being empty.
+  const activeHeader =
+    !resources || !workbenchModel ? (
       <StatusPane
         title="No workRoot"
         detail="select a workRoot or main instance"
       />
+    ) : (
+      (() => {
+        const { workspace, root } = workbenchModel;
+        const activityBadge = workRootActivityBadge(
+          workRootActivityState.rootId === root.id &&
+            workRootActivityState.serverRoute === root.resourcePath.serverId
+            ? workRootActivityState.activity
+            : { phase: "loading" },
+        );
+        return (
+          <>
+            <WorkbenchToolbar
+              activity={activityBadge}
+              commandLog={commandLog}
+              root={root}
+              selectedEntity={selectedEntity}
+              server={resources.server}
+              workspace={workspace}
+              onCommand={onCommand}
+              onOpenActivity={openWorkRootActivityPane}
+              onCreateTerminal={createTerminalPane}
+              onCreateAgentChat={createAgentChatPane}
+            />
+            {error ? (
+              <InlineNotice
+                tone="error"
+                title="Refresh failed"
+                detail={error}
+              />
+            ) : null}
+            {loading ? (
+              <InlineNotice tone="info" title="Refreshing" detail="resources" />
+            ) : null}
+          </>
+        );
+      })()
     );
-  }
-
-  const { workspace, root } = workbenchModel;
-  const activityBadge = workRootActivityBadge(
-    workRootActivityState.rootId === root.id &&
-      workRootActivityState.serverRoute === root.resourcePath.serverId
-      ? workRootActivityState.activity
-      : { phase: "loading" },
-  );
 
   return (
     <div className="workbench-shell">
-      <WorkbenchToolbar
-        activity={activityBadge}
-        commandLog={commandLog}
-        root={root}
-        selectedEntity={selectedEntity}
-        server={resources.server}
-        workspace={workspace}
-        onCommand={onCommand}
-        onOpenActivity={openWorkRootActivityPane}
-        onCreateTerminal={createTerminalPane}
-        onCreateAgentChat={createAgentChatPane}
-      />
-      {error ? (
-        <InlineNotice tone="error" title="Refresh failed" detail={error} />
-      ) : null}
-      {loading ? (
-        <InlineNotice tone="info" title="Refreshing" detail="resources" />
-      ) : null}
+      {activeHeader}
       {openWorkRootInstances.map(({ rootKey, editorGroups: rootGroups }) => {
         const isActiveRoot = rootKey === selectedWorkRootStateKey;
         let effectiveActivePaneByGroup = activePaneByRoot[rootKey] ?? {};
