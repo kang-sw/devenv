@@ -446,6 +446,7 @@ export function beginRealStreamingTurn(
   let lastSeenLength = 0;
   let intervalHandle: number | null = null;
   let stopped = false;
+  let sawLiveTrue = false;
 
   const clearScheduledPoll = () => {
     if (intervalHandle !== null) {
@@ -459,7 +460,7 @@ export function beginRealStreamingTurn(
     clearScheduledPoll();
   };
 
-  const poll = () => {
+  const poll = (isImmediate: boolean) => {
     void fetchRealTranscript(workRootId, harness, activityId, serverRoute)
       .then((transcript) => {
         if (stopped) return;
@@ -468,7 +469,21 @@ export function beginRealStreamingTurn(
         if (delta.length > 0) {
           onUpdate(delta);
         }
-        if (!transcript.live) {
+        if (transcript.live) {
+          sawLiveTrue = true;
+        }
+        // The daemon's `live` flag flips true only once the projector
+        // ingests an async `turn/started` notification, which arrives on a
+        // separate stream from the `turn/start` RPC ack that the caller
+        // already awaited before starting this poll loop. This means the
+        // very first (immediate) poll can race ahead of that notification
+        // and observe `live: false` + 0 new blocks even though the turn has
+        // genuinely just started, not finished. Only honor a `live: false`
+        // stop decision on the immediate poll once we've actually observed
+        // `live: true` at least once; interval-scheduled polls have no such
+        // race (they run after the immediate poll already gave the
+        // notification time to land) and can stop immediately.
+        if (!transcript.live && (sawLiveTrue || !isImmediate)) {
           stopped = true;
           clearScheduledPoll();
           onComplete?.();
@@ -485,8 +500,8 @@ export function beginRealStreamingTurn(
 
   // Fire one immediate poll at call time (don't wait a full interval for the
   // first update), then schedule the interval for subsequent polls.
-  poll();
-  intervalHandle = env.setInterval(poll, realStreamingPollIntervalMs);
+  poll(true);
+  intervalHandle = env.setInterval(() => poll(false), realStreamingPollIntervalMs);
 
   return { stop };
 }
