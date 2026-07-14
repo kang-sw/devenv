@@ -36,6 +36,11 @@ When writing shared skill text, name only primitives that exist in the {{.McpNam
 If a workflow needs a surface that is still planned, state the required MCP
 contract instead of naming a Claude helper command or another host-specific
 fallback.
+`user` is relative: in a lead session it is the human; in a delegated worker
+session it is the lead that spawned the worker. In shared skill text, name `the
+lead` for worker-facing escalation targets and reserve `user` for the human
+decision at the top.
+
 Centralize primitive usage here. Other skills should name the primitive and
 include only local arguments that affect the current step.
 

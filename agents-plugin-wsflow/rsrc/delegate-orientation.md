@@ -13,6 +13,11 @@ Stay inside the assigned task. Report lead-owned lifecycle needs unless the brie
 explicitly assigns them: ticket moves, spec or mental-model updates, release
 steps, branch management, reviewer fanout, or agent orchestration.
 
+Your caller is the lead, not the human user. When a task looks like it needs
+user approval or a user decision, that gate belongs to the lead: report it and
+let the lead carry it to the user. Never wait for or assume human sign-off
+yourself.
+
 Treat `lead-*` skills as lead-owned orchestration entry points; do not invoke
 them unless the caller explicitly assigned lead-session work.
 
