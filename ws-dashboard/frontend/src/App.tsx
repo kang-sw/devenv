@@ -5517,11 +5517,19 @@ function WorkbenchShell({
       // `terminalWorkbenchPanesByGroup` snaps them back to their original
       // group on the next render.
       setTerminalPaneOrderByGroup((current) => {
+        // `result.paneOrderByGroup` lives in `WorkbenchPane.id` space
+        // (`pane.paneId`, see `terminalWorkbenchPane`), not the `logicalKey`
+        // space `terminalPanes` is keyed by - filtering `id in terminalPanes`
+        // here always misses, silently dropping every terminal pane from the
+        // mirror.
+        const livePaneIds = new Set(
+          Object.values(terminalPanes).map((pane) => pane.paneId),
+        );
         const next = { ...current };
         for (const [groupId, paneIds] of Object.entries(
           result.paneOrderByGroup,
         )) {
-          next[groupId] = paneIds.filter((id) => id in terminalPanes);
+          next[groupId] = paneIds.filter((id) => livePaneIds.has(id));
         }
         return next;
       });

@@ -41,6 +41,10 @@ it can proceed independently of `260622`.
   idea; checks whether `readOnlyFilePaneOrderByGroup` has the same
   drag-move snap-back bug that was just fixed for
   `terminalPaneOrderByGroup` (commit `bc566a78`).
+- `260714-bug-dashboard-terminal-pane-split-mirror-key-mismatch` - done;
+  the `bc566a78` mirror fix itself compared `paneId`-space ids against a
+  `logicalKey`-keyed map and always emptied the mirror, so the terminal
+  split snap-back symptom persisted after that fix landed; corrected.
 - `260517-bug-ws-dashboard-windows-terminal-control-keys` - todo; native
   Windows Ctrl-C/control-key interrupt gap in PTY-backed terminals.
 - `260523-research-ws-dashboard-persistable-ui-state-map` - idea; backlog
