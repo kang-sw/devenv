@@ -2,6 +2,7 @@
 kind: print
 variables:
   - WorkflowLang
+  - ExploreAgent
 ---
 # Workflow Manual
 
@@ -77,10 +78,13 @@ For lead-owned tuning of delegation posture or other workflow knobs, use the `{{
 
 ### Scoped Exploration (native Explore)
 
-For scoped fact-finding, surveys, and one-turn answers, spawn host-native
-exploration workers with an English prompt and require cited evidence, gaps, and
-follow-up needs. For parallel dispatch, spawn multiple in one turn; collect all
-before synthesizing.
+For scoped fact-finding, surveys, and one-turn answers, dispatch
+{{.ExploreAgent}} as {{.SmallTierModel}} by default; escalate to
+{{.MediumTierModel}} only when the exploration requires judgment. Specify the
+model explicitly on the spawn call — do not rely on the harness default. Use an
+English prompt and require cited evidence, gaps, and follow-up needs. For
+parallel dispatch, spawn multiple in one turn; collect all before
+synthesizing.
 
 <!-- ws:full-only:start -->
 ### Persistent agents

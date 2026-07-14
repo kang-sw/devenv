@@ -21,7 +21,9 @@ import (
 // to their harness-specific text.
 //
 // Model names are NOT in this table — they are always resolved from config at
-// render time via resolveRoleModelVar. Only non-model idioms belong here.
+// render time via resolveRoleModelVar (playbook's own declared tier) or
+// resolveTierModelVars (the four fixed-tier SmallTierModel/MediumTierModel/
+// LargeTierModel/XLargeTierModel vars). Only non-model idioms belong here.
 var playbookTerminologyTable = map[string]map[string]string{
 	"claude": {
 		"ExploreAgent":  "the Explore agent",
@@ -49,6 +51,11 @@ var playbookTerminologyTable = map[string]map[string]string{
 // (terminology, namespace, and model alias layers overwrite the caller context
 // layer), not by a guard that references this set. Tests use it to assert that the
 // documented reserved set is complete.
+//
+// SmallTierModel/MediumTierModel/LargeTierModel/XLargeTierModel are
+// config-resolved like RoleModel, not playbookTerminologyTable entries — they
+// arrive here via the wsrsrc.ImplicitVariableNames loop below (auto-inject
+// pattern), not an explicit set[...] = true line.
 var reservedToolVarNames = func() map[string]bool {
 	set := map[string]bool{}
 	for _, vars := range playbookTerminologyTable {
@@ -76,6 +83,21 @@ func terminologyForHarness(harness string) map[string]string {
 	return playbookTerminologyTable[""]
 }
 
+// resolveTierModel resolves a single tier string to a concrete per-harness
+// model via the shared config seam, returning "" on resolver error. This is
+// the one call site both resolveRoleModelVar (playbook's own declared tier)
+// and resolveTierModelVars (the four fixed-tier vars) route through, so
+// 260622-feat-playbook-render-tier-label can reuse it later for
+// recommended-tier's own tier→model resolution without a parallel
+// implementation.
+func resolveTierModel(harness, tier string, configOpts wsconfig.Options) string {
+	_, model, _, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, tier, "", "", harness)
+	if err != nil {
+		return ""
+	}
+	return model
+}
+
 // resolveRoleModelVar resolves the single RoleModel var from the playbook's
 // declared capability tier. The tier string ("small"/"medium"/"large"/"xlarge")
 // maps directly to a concrete per-harness model via config, so the playbook author
@@ -87,11 +109,52 @@ func terminologyForHarness(harness string) map[string]string {
 // configOpts is a call-site-overridable seam; MCP tool handlers pass
 // wsconfig.Options{} (empty, env-driven); tests pass Options{CacheHome: tmpDir}.
 func resolveRoleModelVar(harness, tier string, configOpts wsconfig.Options) map[string]string {
-	_, model, _, err := wsconfig.ResolveAgentForHarnessConfig(configOpts, tier, "", "", harness)
-	if err != nil {
-		model = ""
+	return map[string]string{"RoleModel": resolveTierModel(harness, tier, configOpts)}
+}
+
+// fixedTierVarNames maps each fixed capability tier (matches normalizedTier /
+// ModelAlias vocabulary) to its render var name, in canonical
+// Small/Medium/Large/XLarge taxonomy order (not Light/Core/Deep aliases).
+var fixedTierVarNames = []struct {
+	tier    string
+	varName string
+}{
+	{"small", "SmallTierModel"},
+	{"medium", "MediumTierModel"},
+	{"large", "LargeTierModel"},
+	{"xlarge", "XLargeTierModel"},
+}
+
+// resolveTierModelVars resolves the four fixed-tier model vars
+// (SmallTierModel/MediumTierModel/LargeTierModel/XLargeTierModel) — one
+// config-resolved model name per capability tier, available to any playbook
+// body unconditionally (see ImplicitVariableNames), not just the playbook's
+// own declared tier.
+//
+// Author doctrine: {{.RoleModel}} names *this delegate's own* declared-tier
+// model (varies per playbook); {{.*TierModel}} names *a specific tier's*
+// model in prose regardless of the current playbook's own tier. Prefer tier
+// language ("escalate to the medium tier") in guidance generally; use
+// {{.*TierModel}} only where naming a concrete model materially helps (e.g.
+// the lead must type a literal `model:` value on a spawn call). These vars
+// only make such an instruction concrete — they do not wire the model
+// themselves; the lead must still pass `model:` explicitly.
+//
+// Empty-value fallback: unlike RoleModel (which may render ""), these vars
+// sit mid-sentence in prose, so a resolver error/misconfig falls back to a
+// stable descriptive label ("the small-tier model") instead of an empty
+// string — an empty slot mid-sentence reads as a rendering bug, whereas the
+// label degrades gracefully.
+func resolveTierModelVars(harness string, configOpts wsconfig.Options) map[string]string {
+	vars := make(map[string]string, len(fixedTierVarNames))
+	for _, entry := range fixedTierVarNames {
+		model := resolveTierModel(harness, entry.tier, configOpts)
+		if model == "" {
+			model = "the " + entry.tier + "-tier model"
+		}
+		vars[entry.varName] = model
 	}
-	return map[string]string{"RoleModel": model}
+	return vars
 }
 
 // resolveWorkflowLangVar generates the WorkflowLang instruction text from the
@@ -128,6 +191,9 @@ func isReservedNamespaceVar(name string) bool {
 //  2. Tool-injected terminology vars overwrite caller context for reserved names.
 //  3. Tool-injected RoleModel var (tier-derived) overwrites caller context for reserved names.
 //  4. Tool-injected namespace vars overwrite caller context for reserved names.
+//  4b. Tool-injected fixed-tier model vars (SmallTierModel/MediumTierModel/
+//      LargeTierModel/XLargeTierModel) are available to all playbooks
+//      unconditionally, same as namespace vars — see resolveTierModelVars.
 //  5. Only keys present in declared, plus namespace reserved vars, are included
 //     in the result.
 //
@@ -176,6 +242,14 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 	// Layer 4: namespace vars are available to all playbooks and override caller
 	// context so display namespace cannot be spoofed through render context.
 	for k, v := range resolveNamespaceVars() {
+		merged[k] = v
+	}
+
+	// Layer 4b: fixed-tier model vars are available to all playbooks
+	// unconditionally, mirroring the namespace-var precedent exactly (no
+	// frontmatter declaration required; overrides caller context for these
+	// four reserved names).
+	for k, v := range resolveTierModelVars(harness, configOpts) {
 		merged[k] = v
 	}
 
