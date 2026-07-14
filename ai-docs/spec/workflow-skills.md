@@ -703,7 +703,7 @@ an active worktree, the merge target was ambiguous, or the branch has commits
 unreachable from the merge target. When none of those conditions hold, the
 branch's naming convention gates the remaining flow: a branch named
 `impl/<stem>` (the convention `lead-implement` uses for branches it creates,
-`<stem>` hard-truncated to 15 characters with a trailing `-` trimmed) is
+`<stem>` <=15 characters recommended, with any trailing `-` trimmed) is
 deleted without asking. A branch under any other name — including the legacy
 `implement/<scope-slug>` convention — keeps the ask-first flow: the user is
 asked before `git branch -d` runs, and the branch is retained if not

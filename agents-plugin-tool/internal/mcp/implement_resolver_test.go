@@ -619,20 +619,20 @@ func TestResolveImplementBranchPlanRules(t *testing.T) {
 			wantReason: "rename is allowed",
 		},
 		{
-			name:             "target branch name is truncated to 15 characters",
+			name:             "target branch name is not truncated when scope slug exceeds 15 characters",
 			facts:            normalizedImplementFacts{ScopeSlug: "a-very-long-scope-slug-name", MergeTargetPolicy: "feature/base", AllowRename: "no"},
 			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
 			wantAction:       "create",
 			wantReason:       "not an implementation branch",
-			wantTargetBranch: "impl/a-very-long-sco",
+			wantTargetBranch: "impl/a-very-long-scope-slug-name",
 		},
 		{
-			name:             "target branch truncation trims trailing dash",
-			facts:            normalizedImplementFacts{ScopeSlug: "abc-defghijklm-nop", MergeTargetPolicy: "feature/base", AllowRename: "no"},
+			name:             "target branch name trims a trailing dash regardless of length",
+			facts:            normalizedImplementFacts{ScopeSlug: "abc-defghijklm-nop-", MergeTargetPolicy: "feature/base", AllowRename: "no"},
 			obs:              implementBranchObservation{CurrentBranch: "feature/base", StartCommit: "abc123"},
 			wantAction:       "create",
 			wantReason:       "not an implementation branch",
-			wantTargetBranch: "impl/abc-defghijklm",
+			wantTargetBranch: "impl/abc-defghijklm-nop",
 		},
 	}
 	for _, tc := range cases {

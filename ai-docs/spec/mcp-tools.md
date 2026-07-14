@@ -281,7 +281,7 @@ derived list is discarded. Derivation logic lives in Go, so no skill-side
   derived from current branch "test/wsflow-smoke"`, so a caller unfamiliar with
   the applicability rule sees that the field was read and deliberately not
   applied. Fresh implementation branches are created under the `impl/<stem>`
-  convention, with `<stem>` hard-truncated to 15 characters (trailing `-`
+  convention, with `<stem>` <=15 characters recommended (trailing `-`
   trimmed); legacy `implement/<scope-slug>` branches already in progress are
   still recognized as implementation branches for continue/rename purposes.
   Automatic review allocation derives independent correctness, fit, and test
