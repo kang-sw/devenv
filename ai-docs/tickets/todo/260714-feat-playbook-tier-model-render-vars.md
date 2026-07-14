@@ -2,7 +2,7 @@
 title: "feat: generic tier→model render variables for playbook bodies"
 related:
   260622-feat-playbook-render-tier-label: shares the render-time tier→model alias resolution seam; keep the two resolutions using one mechanism
-sage-review-design: required
+sage-review-design: completed
 ---
 
 # feat: generic tier→model render variables for playbook bodies
@@ -66,9 +66,12 @@ Confirmed direction (chosen over the rejected alternatives below):
   `model:` on the `Agent()` spawn call. Guidance text that uses these vars must
   stay imperative about that.
 - Reserved var names must be registered in `reservedToolVarNames` and resolved
-  in `buildPlaybookVars`; decide auto-inject (like namespace/RoleModel) vs.
-  frontmatter-declared. Auto-inject is preferred for ergonomics but either is
-  acceptable if documented.
+  in `buildPlaybookVars`. Two distinct injection patterns exist — pick one and
+  document it: unconditional auto-inject (like namespace vars in Layer 4 — then
+  also add the four names to `wsrsrc.ImplicitVariableNames` so
+  `substitutePlaybookVars` tolerates undeclared placeholders), or
+  frontmatter-declared (like `RoleModel` in Layer 3 — injected only when the
+  playbook declares the var in `variables:`). Either is acceptable if documented.
 
 ## Prior Art
 
