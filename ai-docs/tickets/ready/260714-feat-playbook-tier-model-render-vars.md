@@ -3,6 +3,7 @@ title: "feat: generic tier→model render variables for playbook bodies"
 related:
   260622-feat-playbook-render-tier-label: shares the render-time tier→model alias resolution seam; keep the two resolutions using one mechanism
 sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # feat: generic tier→model render variables for playbook bodies

@@ -209,6 +209,16 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-bug-codex-local-marketplace-worktree-cache-regression` | idea | Investigate Codex local marketplace cache regression across sibling worktrees |
 
 ## Ticket Focus
+- `260714-feat-playbook-tier-model-render-vars` (ready, feat) - add generic
+  render-resolved `{{.SmallTierModel}}`/`{{.MediumTierModel}}`/`{{.LargeTierModel}}`/
+  `{{.XLargeTierModel}}` playbook body vars through the existing
+  `ResolveAgentForHarnessConfig` seam (no model names in
+  `playbookTerminologyTable`); Phase 1 also converts the Scoped Exploration
+  guidance in `lead-workflow-manual` to name a concrete per-harness default and
+  escalation model. Spec addressing via `## Spec Impact` (`plugin-runtime.md`
+  or `mcp-tools.md` render section, Contract-first: no). Shares the resolution
+  seam with `260622-feat-playbook-render-tier-label`. Sage review completed
+  (design + completeness).
 - `260702-bug-config-unset-asymmetry` (ready, bug) - redefine config `unset`
   as reset-to-builtin (not clear-to-empty) and add `session` scope to
   `config_prompt_unset`; spec addressing via `## Spec Impact`
