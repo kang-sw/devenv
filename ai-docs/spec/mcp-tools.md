@@ -650,7 +650,12 @@ and backend-affinity resolution are unchanged; only the key vocabulary changed.
 Delegate playbooks declare a single tier-derived model hint variable
 (`{{.RoleModel}}`) resolved from the playbook's own `tier:`, replacing the
 alias-named `{{.LightModel}}`/`{{.CoreModel}}`/`{{.DeepModel}}` set; the rendered
-native model hint is preserved.
+native model hint is preserved. Beyond that per-role hint, any playbook body may
+reference the four generic fixed-tier vars
+(`{{.SmallTierModel}}`/`{{.MediumTierModel}}`/`{{.LargeTierModel}}`/`{{.XLargeTierModel}}`)
+to name a specific tier's model in prose; these resolve through the same
+per-harness config seam and are injected as reserved implicit variables (see
+`#260609-playbook-harness-rendering`), not as terminology-table entries.
 {#260620-tier-vocabulary-collapse-direct-model-map}
 
 ### Layered Config Scope Model {#260619-layered-config-scope-model}
@@ -1133,10 +1138,16 @@ documented in `#260513-wsflow-agentless-runtime-mode`; `playbook.print` and
 `playbook.render` select those sections after harness rendering and before
 returning text or writing a prompt file. User-facing namespace notation in
 shared playbooks is authored with reserved implicit variables (`McpNamespace`
-for `ws/<tool>` notation and `SkillNamespace` for `ws:<skill>` notation). These
-vars are injected by the playbook tool layer, are available without frontmatter
-declarations, and override caller-supplied `context` keys. Literal MCP tool
-identifiers remain literal unless a dedicated semantic variable is introduced.
+for `ws/<tool>` notation and `SkillNamespace` for `ws:<skill>` notation). The
+same reserved-implicit-variable mechanism also carries the four generic
+tier-model vars (`SmallTierModel`, `MediumTierModel`, `LargeTierModel`,
+`XLargeTierModel`), which resolve at render time from config through the same
+per-harness `(backend, model, effort)` seam as `RoleModel` and fall back to a
+stable `the <tier>-tier model` label when resolution fails, so they never render
+empty mid-sentence. These vars are injected by the playbook tool layer, are
+available without frontmatter declarations, and override caller-supplied
+`context` keys. Literal MCP tool identifiers remain literal unless a dedicated
+semantic variable is introduced.
 
 A playbook may declare text dependencies in its frontmatter; the renderer
 auto-includes that text at print/render time, so a single `playbook.print(name)`

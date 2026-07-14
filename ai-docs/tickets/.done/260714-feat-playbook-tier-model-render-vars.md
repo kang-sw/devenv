@@ -4,6 +4,7 @@ related:
   260622-feat-playbook-render-tier-label: shares the render-time tier→model alias resolution seam; keep the two resolutions using one mechanism
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-14
 ---
 
 # feat: generic tier→model render variables for playbook bodies
@@ -111,6 +112,38 @@ Confirmed direction (chosen over the rejected alternatives below):
   contexts and confirm the Scoped Exploration sentence materializes the correct
   per-harness models with no empty slots.
 
+### Result (e44cfb97) - 2026-07-14
+
+Shipped the four vars via injection pattern (a): added them to
+`wsrsrc.ImplicitVariableNames` and merged them unconditionally in a new
+`buildPlaybookVars` Layer 5, so any playbook body may reference them without a
+frontmatter declaration and caller context cannot spoof them — mirroring the
+`McpNamespace`/`SkillNamespace` precedent. Resolution goes through a new
+`resolveTierModel` helper that `resolveRoleModelVar` now also calls, giving the
+single shared seam sibling ticket `260622` will reuse. Empty/error resolution
+falls back to the stable `the <tier>-tier model` label. Scoped Exploration in
+`lead-workflow-manual.md` converted to name `{{.ExploreAgent}}`/`{{.SmallTierModel}}`
+with `{{.MediumTierModel}}` escalation, keeping the explicit-`model:` imperative;
+rsrc manifest and wsflow mirror regenerated (byte-identical).
+
+- Deviation: the plan's "optional, confirm-first" Spec Impact step was performed
+  this phase — `ai-docs/spec/mcp-tools.md` now documents the four vars in both the
+  reserved-implicit-vars and RoleModel paragraphs (see Spec Impact below).
+- Deviation: `XLarge` var-name uses an explicit `{tier, varName}` table, not
+  mechanical capitalization (`ToUpper` would yield `Xlarge`).
+- Deferred: fit-review minor #2 (rename `isReservedNamespaceVar` →
+  `isImplicitReservedVar`) — pre-existing function, out of plan scope.
+- Verification: full `go test ./...` green (12 packages); per-harness golden test
+  confirms claude renders `haiku`/`sonnet` and codex renders
+  `gpt-5.6-luna`/`gpt-5.6-terra` for small/medium with no leftover placeholder.
+  Correctness review clean; fit review clean with 2 minor (one fixed, one
+  deferred as above).
+- Context: the same branch also remapped codex tier defaults to
+  `gpt-5.6-luna`/`gpt-5.6-terra`/`gpt-5.6-sol` (commit `9bfe7aa3`, separate user
+  directive) — the golden assertions above target those new defaults.
+
+Result commit range: `9bfe7aa3..d19f68dc`.
+
 ## Spec Impact
 
 - Target spec area: playbook render / template-variable contract (candidate:
@@ -119,3 +152,12 @@ Confirmed direction (chosen over the rejected alternatives below):
   vars available to playbook authors.
 - Contract-first spec: no (todo backlog; final var-injection shape may be
   refined during implementation — address spec on ready promotion).
+- Addressed (Phase 1, e44cfb97): `ai-docs/spec/mcp-tools.md` documents the four
+  reserved tier→model body vars, their shared per-harness config seam, and the
+  empty-value fallback, in both the RoleModel and reserved-implicit-vars
+  paragraphs.
+
+
+## Resolution (2026-07-14)
+
+Phase 1 shipped on branch impl/tier-model-rend (range 9bfe7aa3..d19f68dc): four reserved tier→model render vars + Scoped Exploration first-consumer conversion, spec-documented in mcp-tools.md. Single phase; ticket complete. Shared resolveTierModel seam left in place for sibling ticket 260622.
