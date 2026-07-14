@@ -191,10 +191,10 @@ func isReservedNamespaceVar(name string) bool {
 //  2. Tool-injected terminology vars overwrite caller context for reserved names.
 //  3. Tool-injected RoleModel var (tier-derived) overwrites caller context for reserved names.
 //  4. Tool-injected namespace vars overwrite caller context for reserved names.
-//  4b. Tool-injected fixed-tier model vars (SmallTierModel/MediumTierModel/
-//      LargeTierModel/XLargeTierModel) are available to all playbooks
-//      unconditionally, same as namespace vars — see resolveTierModelVars.
-//  5. Only keys present in declared, plus namespace reserved vars, are included
+//  5. Tool-injected fixed-tier model vars (SmallTierModel/MediumTierModel/
+//     LargeTierModel/XLargeTierModel) are available to all playbooks
+//     unconditionally, same as namespace vars — see resolveTierModelVars.
+//  6. Only keys present in declared, plus namespace reserved vars, are included
 //     in the result.
 //
 // Caller context keys that are neither declared nor namespace reserved return an
@@ -245,7 +245,7 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 		merged[k] = v
 	}
 
-	// Layer 4b: fixed-tier model vars are available to all playbooks
+	// Layer 5: fixed-tier model vars are available to all playbooks
 	// unconditionally, mirroring the namespace-var precedent exactly (no
 	// frontmatter declaration required; overrides caller context for these
 	// four reserved names).
@@ -253,7 +253,7 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 		merged[k] = v
 	}
 
-	// Layer 5: workflow.lang language-binding instruction — injected only when
+	// Layer 6: workflow.lang language-binding instruction — injected only when
 	// the playbook declares WorkflowLang and a language is configured.
 	if declaredSet["WorkflowLang"] {
 		merged["WorkflowLang"] = resolveWorkflowLangVar(workflowLang)
