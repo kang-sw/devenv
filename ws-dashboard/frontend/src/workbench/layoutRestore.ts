@@ -314,6 +314,45 @@ export function mergeWorkbenchLayoutRestoreEntries(
   return { mergedEntries, mergedSnapshot };
 }
 
+// CONTRACT: pure render-time layout resolver (260714 active-root derivation
+// refactor Phase 1, D7). Extracted from `WorkbenchShell`'s per-root layout
+// reads so a freshly-mounted root (mounted by the D1 render-time union on the
+// same render its selection resolves) shows its restored layout on that same
+// render, closing the one-render "flash to empty layout" the async seeding
+// effects (App.tsx groups/paneOrder + activePane seeds) would otherwise leave
+// open. Follows the "extracted from a `WorkbenchShell` effect for
+// unit-testability" precedent of the transforms above.
+//
+// Precedence per field is live-state -> restore-snapshot -> caller default:
+// the live per-root map wins whenever it has an entry for `rootKey`, else the
+// `restoreSnapshot[rootKey]` entry's corresponding field, else `null`/`{}` for
+// the caller to apply its own ultimate default (e.g. `?? initialWorkbenchGroups`
+// at the groups read site, which owns the module-local default and is not
+// duplicated here).
+export function resolveRootLayout(
+  rootKey: string,
+  workbenchGroupsByRoot: Record<
+    string,
+    ReadonlyArray<{ id: string; label: string }>
+  >,
+  paneOrderByRoot: Record<string, WorkbenchPaneOrder>,
+  activePaneByRoot: Record<string, WorkbenchActivePaneState>,
+  restoreSnapshot: WorkbenchLayoutRestoreSnapshot,
+): {
+  groups: ReadonlyArray<{ id: string; label: string }> | null;
+  paneOrderByGroup: WorkbenchPaneOrder;
+  activePaneByGroup: WorkbenchActivePaneState;
+} {
+  const restored = restoreSnapshot[rootKey];
+  return {
+    groups: workbenchGroupsByRoot[rootKey] ?? restored?.groups ?? null,
+    paneOrderByGroup:
+      paneOrderByRoot[rootKey] ?? restored?.paneOrderByGroup ?? {},
+    activePaneByGroup:
+      activePaneByRoot[rootKey] ?? restored?.activePaneByGroup ?? {},
+  };
+}
+
 function parseWorkbenchLayoutRestoreEntry(
   value: unknown,
 ): WorkbenchLayoutRestoreEntry | null {

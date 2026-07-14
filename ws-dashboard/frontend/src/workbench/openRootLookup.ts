@@ -1,7 +1,11 @@
-import type {
-  DashboardResourcesView,
-  InstanceView,
-  WorkRootView,
+import {
+  resolveActiveResources,
+  resolveWorkbenchSelection,
+  serverScopedIdentity,
+  type DashboardResourcesView,
+  type InstanceView,
+  type ResourcesByServer,
+  type WorkRootView,
 } from "../resourceModel.js";
 
 // Re-resolves a previously-opened work root against the current resources
@@ -66,16 +70,15 @@ export function resolveClosedWorkRootRefs(
 // reorder or drop existing keys); a no-op returns the same array reference so
 // callers can skip a redundant `setState`.
 //
-// Shared by two call sites that must never drift apart (260714
+// Shared by the state-seeding call sites that must never drift apart (260714
 // select-mount-gap fix): the `workbenchSelection` effect in `App.tsx` (which
 // mounts a newly-selected root the render *after* selection changes) and the
 // `resource.select` command handler's server-switch fast path (which mounts
-// the selected root *synchronously in the same commit* as the server switch,
-// so the render that flips `selectedServerId`/`selectedId` together already
-// has the root mounted - see `resolveEffectiveActiveRootKey` above, whose
-// first branch requires `selectedRootIsMounted` to be true on that same
-// render or it falls through to the server-scoped guard with a stale
-// remembered server and hides every instance for one frame).
+// the selected root *synchronously in the same commit* as the server switch).
+// Also the primitive `deriveWorkbenchView` (below) uses to fold the freshly-
+// resolved selected root into `openWorkRootKeys` at render time, so the
+// selected root is mounted by construction on the same render its selection
+// resolves rather than one render later.
 export function withOpenWorkRootKey(
   openWorkRootKeys: readonly string[],
   rootKey: string,
@@ -99,28 +102,63 @@ export function withOpenWorkRootRef(
     : { ...openWorkRootRefs, [rootKey]: ref };
 }
 
-// Pure decision behind the 260714 childroot-fix safety net in
-// `WorkbenchShell`: which mounted rootKey (if any) should render as "active"
-// this frame. When the current selection genuinely matches a mounted
-// instance, that wins outright. Otherwise fall back to the last rootKey that
-// *did* genuinely match — but only when that remembered root belongs to the
-// currently selected server. Without the server-scope guard, selecting a
-// remote server that has never resolved (so `resources`/`selection` collapse
-// to `null` and nothing reloads) would re-pin the *previous* server's
-// last-active root, leaking its mounted (keep-alive) panes under the new
-// server's header instead of showing the empty-state watermark.
-export function resolveEffectiveActiveRootKey(params: {
-  selectedRootKey: string | null;
-  selectedRootIsMounted: boolean;
-  lastActiveRootKey: string | null;
-  lastActiveRootServerId: string | null;
+// CONTRACT: the pure active-root derivation seam (260714 active-root
+// derivation refactor Phase 1, D6). Given the exact committed-state slice a
+// single render sees, derive everything the workbench active-root render
+// needs, with NO dependency on cross-render refs. This subsumes the old
+// `resolveEffectiveActiveRootKey` safety net (deleted with its
+// `lastActiveRootKey*` refs): the render-time union below mounts the selected
+// root by construction, so the transient "selected but not yet mounted" gap
+// the safety net existed to paper over can no longer occur.
+//
+// - `activeResources` resolves through the same fallback-bearing
+//   `resolveActiveResources` path as the live view (D2), so a one-render gap
+//   in `resourcesByServer` for the selected server does not collapse the
+//   selection.
+// - `selectedRootKey` is the freshly-resolved selection's root key, or `null`
+//   when no selection resolves.
+// - `openInstanceKeys` folds the selected root's key into the persisted
+//   `openWorkRootKeys` via `withOpenWorkRootKey` (append-if-absent,
+//   position-preserving; never filter-then-append, D1), so keep-alive members
+//   survive and never reorder.
+// - `effectiveActiveRootKey` is pure: the selected root's key, else `null`
+//   (D3).
+//
+// `openWorkRootRefs` is part of the committed-state slice (D6) for contract
+// completeness; the selected entry resolves via `selection` rather than that
+// lagging ref map, so it is not read here.
+export function deriveWorkbenchView(state: {
+  resourcesByServer: ResourcesByServer;
+  lastNonNullResourcesByServer: ResourcesByServer;
   selectedServerId: string;
-}): string | null {
-  if (params.selectedRootKey && params.selectedRootIsMounted) {
-    return params.selectedRootKey;
-  }
-  if (params.lastActiveRootServerId === params.selectedServerId) {
-    return params.lastActiveRootKey;
-  }
-  return null;
+  selectedId: string | null;
+  openWorkRootKeys: readonly string[];
+  openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
+}): {
+  activeResources: DashboardResourcesView | null;
+  selectedRootKey: string | null;
+  openInstanceKeys: string[];
+  effectiveActiveRootKey: string | null;
+} {
+  const activeResources = resolveActiveResources(
+    state.resourcesByServer,
+    state.selectedServerId,
+    state.lastNonNullResourcesByServer,
+  );
+  const selection = resolveWorkbenchSelection(activeResources, state.selectedId);
+  const selectedRootKey = selection
+    ? serverScopedIdentity(
+        selection.root.resourcePath.serverId,
+        selection.root.id,
+      )
+    : null;
+  const openInstanceKeys = selectedRootKey
+    ? withOpenWorkRootKey(state.openWorkRootKeys, selectedRootKey)
+    : [...state.openWorkRootKeys];
+  return {
+    activeResources,
+    selectedRootKey,
+    openInstanceKeys,
+    effectiveActiveRootKey: selectedRootKey,
+  };
 }

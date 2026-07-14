@@ -416,3 +416,97 @@ export function reconcileSelectedId(
 
   return preferredSelection(entities) ?? null;
 }
+
+// The workbench selection resolved against a resource tree: the workspace +
+// work root + main/selected instance that the current `selectedId` points at.
+// Relocated verbatim from `App.tsx` (260714 active-root derivation refactor
+// Phase 1) so `deriveWorkbenchView` in `workbench/openRootLookup.ts` can reuse
+// the same tree-walk without importing back from the React component module -
+// that back-import would create a circular module dependency. Pure, free of
+// React/DOM dependencies like the rest of this module.
+export type WorkbenchSelection = {
+  workspace: WorkspaceView;
+  root: WorkRootView;
+  mainInstance: InstanceView | null;
+  selectedInstance: InstanceView | null;
+};
+
+// A `gitLinkedWorktree` work root is presented as a child row under its
+// workspace in the left nav rather than as the workspace's default selection
+// target, so it is skipped when resolving a workspace row's default root.
+export function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
+  return root.kind === "gitLinkedWorktree";
+}
+
+export function resolveWorkbenchSelection(
+  resources: DashboardResourcesView | null,
+  selectedId: string | null,
+): WorkbenchSelection | null {
+  if (!resources) {
+    return null;
+  }
+
+  let fallback: WorkbenchSelection | null = null;
+
+  for (const workspace of resources.workspaces) {
+    const workspaceRoot =
+      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
+      workspace.workRoots[0] ??
+      null;
+    if (selectedId === workspace.id && workspaceRoot) {
+      const mainInstance = workspaceRoot.mainInstances[0] ?? null;
+      return {
+        workspace,
+        root: workspaceRoot,
+        mainInstance,
+        selectedInstance: mainInstance,
+      };
+    }
+
+    for (const root of workspace.workRoots) {
+      const mainInstance = root.mainInstances[0] ?? null;
+      const rootSelection = {
+        workspace,
+        root,
+        mainInstance,
+        selectedInstance: mainInstance,
+      };
+      fallback ??= rootSelection;
+
+      if (selectedId === root.id) {
+        return rootSelection;
+      }
+
+      for (const main of root.mainInstances) {
+        const selectedInstance = findInstanceById(main, selectedId);
+        if (selectedInstance) {
+          return { workspace, root, mainInstance: main, selectedInstance };
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
+export function findInstanceById(
+  instance: InstanceView,
+  selectedId: string | null,
+): InstanceView | null {
+  if (!selectedId) {
+    return null;
+  }
+
+  if (instance.id === selectedId) {
+    return instance;
+  }
+
+  for (const subInstance of instance.subInstances) {
+    const nested = findInstanceById(subInstance, selectedId);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}

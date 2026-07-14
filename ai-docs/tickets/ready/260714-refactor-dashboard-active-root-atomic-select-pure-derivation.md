@@ -278,6 +278,44 @@ observe (D6 LIMIT): actual Dockview remount-vs-reuse across renders and the D7
 restore paint-timing. No automated render harness exists - a known, accepted
 limitation carried from the four prior fixes.
 
+### Result (ddd353fe) - 2026-07-14
+
+Replaced the ref-backed active-root safety net with a pure render-time
+derivation. `deriveWorkbenchView` (workbench/openRootLookup.ts) resolves
+`activeResources` via the fallback-bearing `resolveActiveResources` (D2), folds
+the freshly-resolved selected root into `openWorkRootKeys` via
+`withOpenWorkRootKey` (append-if-absent, position-preserving, D1), and returns a
+pure `effectiveActiveRootKey` (selected key or null, D3). `WorkbenchShell` maps
+`openWorkRootInstances` over that union and resolves the selected entry from
+`selection` (not the lagging `openWorkRootRefs`); keep-alive members keep the
+raw `findOpenWorkRoot` path. `lastActiveRootKeyRef`/`lastActiveRootServerIdRef`
+(with their advance and close-time reset blocks) and `resolveEffectiveActiveRootKey`
+are deleted. `resolveRootLayout` (workbench/layoutRestore.ts, D7) gives a
+freshly-mounted restored root its restored layout on the same render
+(precedence state -> restore -> default). `WorkbenchSelection`,
+`resolveWorkbenchSelection`, `isWorkspaceNavChildWorkRoot`, and `findInstanceById`
+were relocated App.tsx -> resourceModel.ts (verbatim, no logic drift) to break
+the circular import. The render-time union and the ref-deletion landed in one
+commit per the load-bearing ordering constraint.
+
+All four failure modes are structurally prevented (partitioned review confirmed
+against the committed code, incl. mode #4 by construction since the seam reads
+committed `selectedServerId`/`selectedId`).
+
+Verification: `npm run build` clean; `test:workbench`, `test:resource-model`,
+`test:commands`, `test:open-work-root` all exit 0. New fixtures a-e added and
+wired into the explicit `test:workbench` script (confirmed executing).
+
+Review: partitioned correctness (opus) / fit (opus) / test (sonnet) - all clean,
+no Critical/Important. Minors accepted: stale comments inside the Phase-2-deferred
+sync-mount hack and a Phase-3-deferred comment (left in place per plan).
+
+Deferred: Phase 2 (atomic `selectRoot` + route all entry points + delete the
+sync-mount hack), Phase 3 (cleanup, optional `lastNonNullResourcesByServer` state
+promotion, doc/spec + mental-model invariant note). D6 LIMIT: live dogfooding
+remains the final gate for actual Dockview remount-vs-reuse and D7 restore
+paint-timing (outside the pure oracle's scope).
+
 ### Phase 2: Single atomic `selectRoot` action; route all entry points; shrink the selection effect
 
 - Add `selectRoot(serverId, entityId)` (a `useCallback` in `App()`) that sets
