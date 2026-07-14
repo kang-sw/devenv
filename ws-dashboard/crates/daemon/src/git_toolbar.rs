@@ -452,7 +452,15 @@ fn changes_for_path(root: &Path) -> GitChangeSummary {
                 .unwrap_or(0);
         }
     }
-    if let Some(status) = git_text(root, &["status", "--porcelain=v1", "--untracked-files=all"]) {
+    if let Some(status) = git_text(
+        root,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+    ) {
         let mut modified = BTreeSet::new();
         let mut untracked = BTreeSet::new();
         for line in status.lines() {
@@ -576,4 +584,43 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn init_fixture_repo() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ws-dashboard-git-toolbar-test-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir_all(&dir).expect("create fixture dir");
+        run_git(&dir, &["init", "-q"]).expect("git init");
+        run_git(&dir, &["config", "user.email", "test@example.com"]).expect("git config email");
+        run_git(&dir, &["config", "user.name", "Test"]).expect("git config name");
+        fs::write(dir.join("tracked.txt"), "one\n").expect("write tracked.txt");
+        run_git(&dir, &["add", "tracked.txt"]).expect("git add");
+        run_git(&dir, &["commit", "-q", "-m", "init"]).expect("git commit");
+        dir
+    }
+
+    #[test]
+    fn changes_for_path_reports_modified_and_untracked_without_index_lock() {
+        let dir = init_fixture_repo();
+        fs::write(dir.join("tracked.txt"), "one\ntwo\n").expect("modify tracked.txt");
+        fs::write(dir.join("new.txt"), "new\n").expect("write new.txt");
+
+        let summary = changes_for_path(&dir);
+        assert_eq!(summary.modified_files, 1);
+        assert_eq!(summary.untracked_files, 1);
+
+        // `--no-optional-locks` must keep the poll's `git status` call from
+        // ever creating `.git/index.lock`.
+        assert!(!dir.join(".git").join("index.lock").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -160,3 +160,36 @@ taking the repository's index lock, as a closeout doc update alongside the
 code change. Contract-first spec: no — this is a bug-fix behavioral
 clarification of already-documented polling behavior, not a new externally
 consumed contract; the HTTP response shape and polling cadence are unchanged.
+
+## Result
+
+Phase 1 implemented on branch `impl/git-status-no-o` (base
+`goal/drain-ready-queue`), direct-edit mode (lead-only review, no delegation
+— span=single-file, surface=internal, side-effect-risk=low).
+
+- `changes_for_path`'s `git status` call
+  (`ws-dashboard/crates/daemon/src/git_toolbar.rs:455-462`) now passes
+  `--no-optional-locks` as a leading git option, matching the ticket's exact
+  instruction. No other call on the poll path was touched; mutating routes
+  (`switch`/`fetch`/`push`/`pull`) are untouched per Constraints.
+- Added a fixture-repo unit test
+  (`git_toolbar::tests::changes_for_path_reports_modified_and_untracked_without_index_lock`)
+  confirming `GitChangeSummary` parsing (modified/untracked counts) is
+  unaffected by the flag and that no `.git/index.lock` remains after the
+  call. No new dev-dependency was added (no `tempfile` crate exists
+  anywhere in this workspace) — used `std::env::temp_dir()` plus a
+  pid+timestamp suffix instead.
+- Spec updated: `ai-docs/spec/ws-web-dashboard/index.md`'s
+  `260524-ws-dashboard-git-aware-workroot-toolbar` section now documents the
+  poll's lock-free `git status` call.
+- Lead-only self-review: diff is exactly one file, one behavioral line
+  change plus its test — matches Constraints (no response-shape or cadence
+  change, no mutating-route changes). No findings.
+- Verification: `cargo test -p ws-dashboard-daemon` (new test passes,
+  existing `git_toolbar_*` route tests unaffected), `cargo test --workspace`
+  (all passing), `cargo build --workspace` clean.
+
+Deferred (out of this ticket's scope, tracked separately): defensive
+stale-lock detection/cleanup, and the long-term `notify`-crate-based
+event-driven watch direction recorded in
+`260711-idea-dashboard-git-status-polling-index-lock-contention`.
