@@ -1,6 +1,6 @@
 ---
 title: Hidden doc-condition diagnostics — verification crawl, consumption counters, workflow health metrics
-sage-review-design: blocked
+sage-review-design: required
 related:
   260716-feat-mental-model-openup-injection: consumer — injection telemetry rides this substrate and its landing is gated on this ticket
 ---
@@ -67,18 +67,25 @@ format; seed with the claim-sampling method used in the 2026-07-16 audit.
 
 ### Phase 3: Workflow health metrics
 
-Computed view over git history: docs:code commit ratio trend (monthly), sage
-verdict distribution (pass/concern/block), drift findings count from Phase 2
-runs. Script or MCP-computed — implementation may choose; caller-visible
-output is a compact table. Verification: numbers reproduce the hand-computed
-2026-07-16 baseline (42.8% full-history / 55.3% recent-150 docs ratio) within
-rounding.
+Computed view over git history with three metrics:
 
-## Blocked (2026-07-16)
+- **docs:code commit ratio trend (monthly).** Classifier pinned to the
+  baseline method: a commit counts as docs iff its conventional-commit type
+  prefix is exactly `docs`; ratio = docs / total commits. This reproduces
+  the 2026-07-16 hand-computed baseline (42.8% full history, 55.3% over the
+  recent 150 commits). Other prefixes (`plan`, `chore`, ...) may be reported
+  as separate rows but never folded into the docs bucket.
+- **Sage block rate.** Share of sage-reviewed tickets whose lifecycle
+  recorded a block, sourced from `docs(sage)` commit subjects ("block ticket
+  on ..." vs "mark ... completed" / "skip ...") as the time series,
+  cross-checkable against current frontmatter postures for open tickets.
+  Known and accepted limitation: reviewer `concern` verdicts fold into
+  completed and are not separately countable — the confirmed metric is block
+  rate, not a per-verdict distribution (reviewer verdict vocabulary is
+  ephemeral output, never stored structurally).
+- **Drift findings count** from Phase 2 runs.
 
-### Design Reviewer — block
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | Phase 3 sage verdict distribution has no source matching its stated vocabulary | important | missing |
-| 2 | Phase 3 docs-vs-code classification method is unspecified | minor | autonomous |
+Script or MCP-computed — implementation may choose; caller-visible output is
+a compact table. Verification: docs-ratio numbers reproduce the baseline
+within rounding; block-rate numbers match a hand count of `docs(sage)`
+block/completed subjects over a sampled window.
