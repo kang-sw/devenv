@@ -716,6 +716,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn default_state_dir_is_state_file_parent() {
+        assert_eq!(
+            default_state_dir(),
+            default_state_file().and_then(|f| f.parent().map(Path::to_path_buf))
+        );
+    }
+
     fn temp_path(label: &str) -> PathBuf {
         let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let nanos = SystemTime::now()

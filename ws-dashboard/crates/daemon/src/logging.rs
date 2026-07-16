@@ -106,8 +106,15 @@ fn resolve_log_target(log_file_override: Option<PathBuf>) -> Option<(PathBuf, St
                 .unwrap_or_else(|| LOG_FILE_PREFIX.to_string());
             Some((dir, prefix))
         }
-        None => persistent_state::default_state_dir()
-            .map(|state_dir| (state_dir.join(LOG_DIR_NAME), LOG_FILE_PREFIX.to_string())),
+        None => match persistent_state::default_state_dir() {
+            Some(state_dir) => Some((state_dir.join(LOG_DIR_NAME), LOG_FILE_PREFIX.to_string())),
+            None => {
+                eprintln!(
+                    "ws-dashboard: no persistent state directory resolved, continuing stderr-only"
+                );
+                None
+            }
+        },
     }
 }
 
@@ -137,6 +144,88 @@ mod tests {
             .expect("system time after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("ws-dashboard-logging-{label}-{nanos}-{unique}"))
+    }
+
+    #[test]
+    fn resolve_log_target_default_composes_state_dir_logs_daemon_log() {
+        // Save/restore only the var this test drives; `WS_DASHBOARD_STATE_FILE`
+        // is `default_state_file`'s highest-priority source, so setting it
+        // deterministically pins the default path regardless of other env
+        // state (mirrors the save/restore pattern in
+        // `persistent_state::default_state_file_falls_back_to_local_app_data_on_windows`).
+        let saved_state_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
+
+        let state_dir = temp_path("resolve-default-state");
+        let state_file = state_dir.join("opened-workroots.json");
+        std::env::set_var("WS_DASHBOARD_STATE_FILE", &state_file);
+
+        let resolved = resolve_log_target(None);
+
+        match saved_state_file {
+            Some(value) => std::env::set_var("WS_DASHBOARD_STATE_FILE", value),
+            None => std::env::remove_var("WS_DASHBOARD_STATE_FILE"),
+        }
+
+        assert_eq!(
+            resolved,
+            Some((state_dir.join(LOG_DIR_NAME), LOG_FILE_PREFIX.to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_log_target_override_splits_nested_path_into_parent_and_filename() {
+        assert_eq!(
+            resolve_log_target(Some(PathBuf::from("nested/dir/daemon.log"))),
+            Some((PathBuf::from("nested/dir"), "daemon.log".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_log_target_override_bare_filename_falls_back_to_current_dir() {
+        assert_eq!(
+            resolve_log_target(Some(PathBuf::from("daemon.log"))),
+            Some((PathBuf::from("."), "daemon.log".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_log_target_override_trailing_slash_treats_last_segment_as_filename() {
+        // `Path` normalizes away a trailing separator, so the last path
+        // segment before it becomes `file_name()`, not a fallback prefix.
+        // Documented here so this behavior is intentional, not accidental.
+        assert_eq!(
+            resolve_log_target(Some(PathBuf::from("/var/log/ws-dashboard/"))),
+            Some((PathBuf::from("/var/log"), "ws-dashboard".to_string()))
+        );
+    }
+
+    #[test]
+    fn init_activates_file_sink_and_creates_dated_log_file_for_writable_override() {
+        let log_dir = temp_path("happy-path");
+        std::fs::create_dir_all(&log_dir).expect("create writable temp log dir");
+        let log_file_override = log_dir.join(LOG_FILE_PREFIX);
+
+        let result = init("info", Some(log_file_override));
+
+        let guard = result.expect("init must not error for a writable override");
+        assert!(
+            guard.is_some(),
+            "writable override must activate the file sink"
+        );
+
+        let entries: Vec<String> = std::fs::read_dir(&log_dir)
+            .expect("read temp log dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            entries
+                .iter()
+                .any(|name| name.starts_with(&format!("{LOG_FILE_PREFIX}."))),
+            "expected a dated {LOG_FILE_PREFIX}.<date> file in {log_dir:?}, found {entries:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&log_dir);
     }
 
     #[test]

@@ -195,6 +195,20 @@ mod tests {
     }
 
     #[test]
+    fn serve_log_file_flag_parses_to_accessor() {
+        let cli = Cli::parse_from(["ws-dashboard", "serve", "--log-file", "/tmp/x.log"]);
+
+        assert_eq!(cli.log_file(), Some(std::path::Path::new("/tmp/x.log")));
+    }
+
+    #[test]
+    fn serve_log_file_accessor_is_none_when_flag_absent() {
+        let cli = Cli::parse_from(["ws-dashboard", "serve"]);
+
+        assert_eq!(cli.log_file(), None);
+    }
+
+    #[test]
     fn remote_guide_flag_parses_without_subcommand() {
         let cli = Cli::parse_from(["ws-dashboard", "--remote-guide"]);
 
