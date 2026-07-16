@@ -2,6 +2,8 @@
 title: Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
 related:
   260716-feat-ws-dashboard-daemon-persistent-log-layer: "prerequisite — the persistent rolling-file log sink must land first so the instrumentation below is captured durably on a detached daemon"
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
@@ -332,3 +334,23 @@ and should specifically capture, per direction, whether the loop exited via
 `None` (clean EOF) or `Some(Err(_))` (and which `tungstenite::Error` variant)
 so the next reproduction can distinguish a legitimate half-close from a
 transport fault.
+
+## Phases
+
+### Phase 1: Diagnostic tracing instrumentation for the relay pump loop and connect path
+
+Add `tracing` instrumentation only (NO control-flow or teardown-semantics change) so a reproduction captured on the durable rolling-file log sink (260716, landed) reveals the real mid-session-drop cause:
+
+- In `terminal_websocket_relay` (servers.rs:1617-1655): at each loop-exit `else { break; }` (browser leg servers.rs:1624, upstream leg servers.rs:1638), emit a `tracing` event recording, per direction, whether the loop exited via `None` (clean EOF / stream end) or `Some(Err(e))`; for the error case log the full `tungstenite::Error` value (its Debug/Display and variant, not a boolean). Include a stable target/identifier for the terminal/session.
+- In `connect_remote_terminal_websocket` (servers.rs:1562-1588): in the blanket `_ => TerminalWebSocketForwardError::Unavailable` map_err arm (servers.rs:1582-1587), log the actual underlying error value via `tracing::warn` before it collapses to `Unavailable`, so a connect-time failure stops being an untraceable blanket 502.
+
+Acceptance:
+- `cargo build -p ws-dashboard-daemon` and `cargo test -p ws-dashboard-daemon` pass.
+- On an owner-rebuilt detached daemon, reproducing the linked-terminal drop leaves per-direction teardown-reason lines in `<state_dir>/logs/daemon.log.<date>`, distinguishing `None` (half-close) from `Some(Err(<variant>))` (transport fault).
+
+### Phase 2 (deferred — evidence-gated on Phase 1 reproduction): substantive relay-teardown fix + latent-defect closure
+
+Do NOT start until Phase 1 reproduction identifies the real teardown cause. Scope, per this ticket's findings:
+- Fix the pump loop so a single-direction read error/EOF does not silently tear down the whole bidirectional relay when the peer did not legitimately close (servers.rs:1621-1655), driven by the captured evidence.
+- Close latent defect (finding #2): `tokio-tungstenite` carries no TLS backend, so any `https://` linked server's terminal WS fails via `Error::Tls` collapsed into the same blanket 502 — add a TLS feature in the same pass.
+- Add relay test coverage (connect path + pump loop); currently zero.
