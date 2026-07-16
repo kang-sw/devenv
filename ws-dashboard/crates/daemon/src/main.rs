@@ -10,6 +10,10 @@ async fn main() -> anyhow::Result<()> {
         print!("{}", Cli::remote_deployment_guide());
         return Ok(());
     }
-    logging::init(cli.log_filter())?;
+    // CONTRACT: `_guard` (not `_`) keeps the file sink's `WorkerGuard` alive
+    // for the process lifetime — a bare `_` binding would drop it
+    // immediately and silently disable the non-blocking writer's flush.
+    let log_file = cli.log_file().map(std::path::Path::to_path_buf);
+    let _guard = logging::init(cli.log_filter(), log_file)?;
     server::run(cli.into_serve_config()?).await
 }

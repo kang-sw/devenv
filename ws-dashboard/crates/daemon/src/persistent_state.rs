@@ -502,6 +502,13 @@ fn default_state_file() -> Option<PathBuf> {
     None
 }
 
+/// Directory that holds the daemon's persistent state file, reusing
+/// `default_state_file`'s resolution order. Sibling data (e.g. rolling logs)
+/// should live under this directory rather than inventing a new base path.
+pub fn default_state_dir() -> Option<PathBuf> {
+    default_state_file()?.parent().map(Path::to_path_buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -46,6 +46,15 @@ pub struct ServeArgs {
     // loopback-only no-auth debug profile is the only bypass.
     #[arg(long)]
     pub static_dir: Option<std::path::PathBuf>,
+
+    // CONTRACT: Absent, the file log sink defaults to the daemon's
+    // persistent state directory; this override only changes where the
+    // rolling file sink writes, not whether it is enabled.
+    #[arg(
+        long,
+        help = "Override the daemon log file path (default: state dir logs/daemon.log)"
+    )]
+    pub log_file: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
@@ -62,6 +71,15 @@ pub enum BindMode {
 impl Cli {
     pub fn log_filter(&self) -> &str {
         &self.log_filter
+    }
+
+    // CONTRACT: Non-consuming — read before `into_serve_config` consumes
+    // `self.command`.
+    pub fn log_file(&self) -> Option<&std::path::Path> {
+        match self.command.as_ref() {
+            Some(Command::Serve(args)) => args.log_file.as_deref(),
+            _ => None,
+        }
     }
 
     pub fn wants_remote_guide(&self) -> bool {
@@ -163,6 +181,17 @@ mod tests {
 
         assert!(help.contains("--no-auth"));
         assert!(help.contains("loopback-only local debug serving"));
+    }
+
+    #[test]
+    fn serve_log_file_flag_is_discoverable_from_help() {
+        let mut command = ServeArgs::command();
+        let mut help = Vec::new();
+        command.write_long_help(&mut help).expect("write help");
+        let help = String::from_utf8(help).expect("utf8 help");
+
+        assert!(help.contains("--log-file"));
+        assert!(help.contains("state dir logs/daemon.log"));
     }
 
     #[test]
