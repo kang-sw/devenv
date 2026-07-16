@@ -8545,12 +8545,19 @@ function TerminalPaneBody({
     );
 
     socket.addEventListener("open", () => {
-      if (!disposed)
-        liveRef.current.actions.onSocketStatus(
-          liveRef.current.pane,
-          "connected",
-          null,
-        );
+      if (disposed) {
+        // Cleanup ran while this socket was still CONNECTING, so it was
+        // intentionally left open (see cleanup below) to avoid aborting the
+        // handshake. Now that it has finished connecting, close it here
+        // instead so it does not leak as an orphaned live connection.
+        socket.close();
+        return;
+      }
+      liveRef.current.actions.onSocketStatus(
+        liveRef.current.pane,
+        "connected",
+        null,
+      );
     });
     socket.addEventListener("message", (event) => {
       if (disposed || typeof event.data !== "string") return;
@@ -8596,7 +8603,16 @@ function TerminalPaneBody({
     return () => {
       disposed = true;
       if (socketRef.current === socket) socketRef.current = null;
-      socket.close();
+      // Do not abort a still-CONNECTING handshake: closing a WebSocket
+      // before it reaches OPEN throws "WebSocket is closed before the
+      // connection is established" and, for linked/remote-server terminals
+      // whose handshake crosses an extra browser -> gateway -> WSL hop, a
+      // transient paneVisible flip from the 100ms focusWatchdog can land
+      // mid-handshake and kill the socket before the daemon relay ever
+      // runs. Leave CONNECTING sockets alone here; the "open" listener
+      // above closes them itself once `disposed` is observed at open time.
+      // close() on OPEN/CLOSING/CLOSED remains a safe no-op/normal close.
+      if (socket.readyState !== WebSocket.CONNECTING) socket.close();
     };
   }, [terminalId, paneVisible]);
 
