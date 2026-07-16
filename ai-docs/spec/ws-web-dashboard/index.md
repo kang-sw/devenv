@@ -20,6 +20,19 @@ long-lived browser connections such as idle sockets, SSE streams, or WebSockets
 may receive a short drain window, but they must not keep the local development
 server alive indefinitely.
 
+The daemon writes its structured logs to two sinks by default: stderr
+(unchanged for foreground `dev.sh run` usage) and a durable rolling log file
+under `<state dir>/logs/daemon.log`, so a detached or backgrounded daemon
+keeps a diagnosable log history even when its stderr stream is discarded. The
+file sink rotates daily to `daemon.log.YYYY-MM-DD` and retains roughly the
+last 14 rotated files before pruning older ones. `ws-dashboard serve --log-file
+<path>` overrides the default file-sink location; the existing `--log-filter`
+flag (default `"info"`) continues to control verbosity for both sinks
+unchanged. If the log directory or file cannot be opened, the file sink
+degrades fail-soft: the daemon logs a warning to stderr and continues with
+stderr-only output rather than failing to start.
+{#260716-dashboard-daemon-persistent-log-file-sink}
+
 On startup, the daemon creates an in-memory high-entropy one-time pairing token
 with an explicit expiry policy and exposes the corresponding pairing URL to the
 local owner through startup output. The pairing route is the only

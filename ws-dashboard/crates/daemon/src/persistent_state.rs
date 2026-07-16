@@ -502,6 +502,24 @@ fn default_state_file() -> Option<PathBuf> {
     None
 }
 
+/// Directory that holds the daemon's persistent state file, reusing
+/// `default_state_file`'s resolution order. Sibling data (e.g. rolling logs)
+/// should live under this directory rather than inventing a new base path.
+pub fn default_state_dir() -> Option<PathBuf> {
+    default_state_file()?.parent().map(Path::to_path_buf)
+}
+
+/// Test-only mutex serializing access to the process-global env vars that
+/// `default_state_file` reads (`WS_DASHBOARD_STATE_FILE`,
+/// `WS_DASHBOARD_STATE_HOME`, `XDG_STATE_HOME`, `HOME`, `LOCALAPPDATA`).
+/// `cargo test` runs `#[test]` functions concurrently by default, and
+/// `std::env::set_var`/`remove_var` mutate process-wide state immediately;
+/// every test in this crate that saves/sets/asserts/restores any of these
+/// vars — including `logging::tests` — MUST hold this lock for its entire
+/// body to avoid racing another such test.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,6 +683,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn default_state_file_falls_back_to_local_app_data_on_windows() {
+        // Hold ENV_LOCK for the whole body: this test mutates the same
+        // process-global env vars `logging::tests` reads/mutates.
+        let _env_lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
         // Save every var `default_state_file` reads, so this test stays
         // self-contained regardless of run order or CI environment state.
         let saved_state_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
@@ -707,6 +729,35 @@ mod tests {
             Some(value) => std::env::set_var("LOCALAPPDATA", value),
             None => std::env::remove_var("LOCALAPPDATA"),
         }
+    }
+
+    #[test]
+    fn default_state_dir_is_state_file_parent() {
+        // Hold ENV_LOCK for the whole body: this test mutates the same
+        // process-global env var `logging::tests` and the sibling
+        // `default_state_file_falls_back_to_local_app_data_on_windows` test
+        // read/mutate.
+        let _env_lock = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // Save/restore only the var this test drives; `WS_DASHBOARD_STATE_FILE`
+        // is `default_state_file`'s highest-priority source, so setting it
+        // deterministically pins the resolved state file regardless of other
+        // env state (mirrors the save/restore pattern in
+        // `default_state_file_falls_back_to_local_app_data_on_windows`).
+        let saved_state_file = std::env::var_os("WS_DASHBOARD_STATE_FILE");
+
+        let state_dir = temp_path("default-state-dir");
+        let state_file = state_dir.join("opened-workroots.json");
+        std::env::set_var("WS_DASHBOARD_STATE_FILE", &state_file);
+
+        let resolved = default_state_dir();
+
+        match saved_state_file {
+            Some(value) => std::env::set_var("WS_DASHBOARD_STATE_FILE", value),
+            None => std::env::remove_var("WS_DASHBOARD_STATE_FILE"),
+        }
+
+        assert_eq!(resolved, Some(state_dir));
     }
 
     fn temp_path(label: &str) -> PathBuf {

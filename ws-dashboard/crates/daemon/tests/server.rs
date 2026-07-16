@@ -59,6 +59,7 @@ fn accidental_public_bind_requires_explicit_public_mode() {
         no_auth: false,
         port: 0,
         static_dir: None,
+        log_file: None,
     })
     .expect_err("local mode must reject public bind address");
 
@@ -73,6 +74,7 @@ fn explicit_public_bind_mode_accepts_public_host_with_owner_auth() {
         no_auth: false,
         port: 0,
         static_dir: None,
+        log_file: None,
     })
     .expect("public mode with owner auth");
 
@@ -224,6 +226,7 @@ async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
         no_auth: false,
         port: 0,
         static_dir: None,
+        log_file: None,
     })
     .expect_err("accidental public bind");
     assert!(accidental_public.to_string().contains("--bind-mode public"));
