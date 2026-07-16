@@ -1,6 +1,6 @@
 ---
 title: Hidden doc-condition diagnostics — verification crawl, consumption counters, workflow health metrics
-sage-review-design: required
+sage-review-design: completed
 related:
   260716-feat-mental-model-openup-injection: consumer — injection telemetry rides this substrate and its landing is gated on this ticket
 ---
@@ -82,7 +82,11 @@ Computed view over git history with three metrics:
   Known and accepted limitation: reviewer `concern` verdicts fold into
   completed and are not separately countable — the confirmed metric is block
   rate, not a per-verdict distribution (reviewer verdict vocabulary is
-  ephemeral output, never stored structurally).
+  ephemeral output, never stored structurally). Operationalization is
+  **raw subject counts** (block subjects / block+completed+skip subjects),
+  not per-ticket dedup — block subjects often carry no ticket stem, so
+  subject counting is the derivable form; a blocked-then-completed ticket
+  contributing two subjects is an accepted property of the metric.
 - **Drift findings count** from Phase 2 runs.
 
 Script or MCP-computed — implementation may choose; caller-visible output is
