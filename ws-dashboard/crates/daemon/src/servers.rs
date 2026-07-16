@@ -1621,11 +1621,40 @@ fn remote_terminal_websocket_url(
     Ok(url.to_string())
 }
 
+// Drop guard for `terminal_websocket_relay`: fires a diagnostic warn iff the
+// relay task is dropped/cancelled before it reaches the clean post-loop
+// teardown. Live dogfood repro showed the linked-terminal WS dropping
+// mid-session with NONE of the loop's own break-arm warns firing, meaning the
+// task was cancelled externally (e.g. its `on_upgrade` future dropped) while
+// both legs idle-await in `select!` -- the loop body never runs its `break`.
+// This guard is the only way to observe that path.
+struct RelayTaskGuard {
+    terminal_id: String,
+    clean: bool,
+}
+
+impl Drop for RelayTaskGuard {
+    fn drop(&mut self) {
+        if !self.clean {
+            tracing::warn!(
+                terminal_id = %self.terminal_id,
+                "terminal relay: task dropped before clean teardown (external cancellation — loop never broke)"
+            );
+        }
+    }
+}
+
 async fn terminal_websocket_relay(
     browser: WebSocket,
     upstream: UpstreamTerminalSocket,
     terminal_id: String,
 ) {
+    tracing::info!(terminal_id = %terminal_id, "terminal relay: task started");
+    let mut relay_guard = RelayTaskGuard {
+        terminal_id: terminal_id.clone(),
+        clean: false,
+    };
+
     let (mut browser_sender, mut browser_receiver) = browser.split();
     let (mut upstream_sender, mut upstream_receiver) = upstream.split();
 
@@ -1698,9 +1727,14 @@ async fn terminal_websocket_relay(
             }
         }
     }
+    tracing::info!(
+        terminal_id = %terminal_id,
+        "terminal relay: loop exited (clean teardown)"
+    );
 
     let _ = upstream_sender.send(TungsteniteMessage::Close(None)).await;
     let _ = browser_sender.send(Message::Close(None)).await;
+    relay_guard.clean = true;
 }
 
 fn axum_to_tungstenite_message(message: Message) -> TungsteniteMessage {
