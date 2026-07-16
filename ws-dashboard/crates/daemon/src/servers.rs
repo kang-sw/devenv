@@ -1498,7 +1498,7 @@ pub async fn server_scoped_terminal_websocket(
             endpoint, token, ..
         } => match connect_remote_terminal_websocket(&endpoint, &token, &terminal_id, &query).await {
             Ok(upstream) => upgrade
-                .on_upgrade(move |browser| terminal_websocket_relay(browser, upstream))
+                .on_upgrade(move |browser| terminal_websocket_relay(browser, upstream, terminal_id))
                 .into_response(),
             Err(TerminalWebSocketForwardError::Rejected(status)) => {
                 server_error(status, "linked server terminal websocket rejected")
@@ -1583,7 +1583,14 @@ async fn connect_remote_terminal_websocket(
             TungsteniteError::Http(response) => {
                 TerminalWebSocketForwardError::Rejected(response.status())
             }
-            _ => TerminalWebSocketForwardError::Unavailable,
+            other => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    %other,
+                    "linked terminal websocket connect failed"
+                );
+                TerminalWebSocketForwardError::Unavailable
+            }
         })
 }
 
@@ -1614,14 +1621,66 @@ fn remote_terminal_websocket_url(
     Ok(url.to_string())
 }
 
-async fn terminal_websocket_relay(browser: WebSocket, upstream: UpstreamTerminalSocket) {
+// Drop guard for `terminal_websocket_relay`: fires a diagnostic warn iff the
+// relay task is dropped/cancelled before it reaches the clean post-loop
+// teardown. Live dogfood repro showed the linked-terminal WS dropping
+// mid-session with NONE of the loop's own break-arm warns firing, meaning the
+// task was cancelled externally (e.g. its `on_upgrade` future dropped) while
+// both legs idle-await in `select!` -- the loop body never runs its `break`.
+// This guard is the only way to observe that path.
+struct RelayTaskGuard {
+    terminal_id: String,
+    clean: bool,
+}
+
+impl Drop for RelayTaskGuard {
+    fn drop(&mut self) {
+        if !self.clean {
+            tracing::warn!(
+                terminal_id = %self.terminal_id,
+                "terminal relay: task dropped before clean teardown (external cancellation — loop never broke)"
+            );
+        }
+    }
+}
+
+async fn terminal_websocket_relay(
+    browser: WebSocket,
+    upstream: UpstreamTerminalSocket,
+    terminal_id: String,
+) {
+    tracing::info!(terminal_id = %terminal_id, "terminal relay: task started");
+    let mut relay_guard = RelayTaskGuard {
+        terminal_id: terminal_id.clone(),
+        clean: false,
+    };
+
     let (mut browser_sender, mut browser_receiver) = browser.split();
     let (mut upstream_sender, mut upstream_receiver) = upstream.split();
 
     loop {
         tokio::select! {
             browser_message = browser_receiver.next() => {
-                let Some(Ok(message)) = browser_message else { break; };
+                let message = match browser_message {
+                    Some(Ok(message)) => message,
+                    Some(Err(error)) => {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            leg = "browser",
+                            %error,
+                            "linked terminal relay: browser leg read errored, tearing down relay"
+                        );
+                        break;
+                    }
+                    None => {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            leg = "browser",
+                            "linked terminal relay: browser leg ended, tearing down relay"
+                        );
+                        break;
+                    }
+                };
                 let is_close = matches!(message, Message::Close(_));
                 if upstream_sender
                     .send(axum_to_tungstenite_message(message))
@@ -1635,7 +1694,26 @@ async fn terminal_websocket_relay(browser: WebSocket, upstream: UpstreamTerminal
                 }
             }
             upstream_message = upstream_receiver.next() => {
-                let Some(Ok(message)) = upstream_message else { break; };
+                let message = match upstream_message {
+                    Some(Ok(message)) => message,
+                    Some(Err(error)) => {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            leg = "upstream",
+                            %error,
+                            "linked terminal relay: upstream leg read errored, tearing down relay"
+                        );
+                        break;
+                    }
+                    None => {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            leg = "upstream",
+                            "linked terminal relay: upstream leg ended, tearing down relay"
+                        );
+                        break;
+                    }
+                };
                 let Some(message) = tungstenite_to_axum_message(message) else {
                     continue;
                 };
@@ -1649,9 +1727,14 @@ async fn terminal_websocket_relay(browser: WebSocket, upstream: UpstreamTerminal
             }
         }
     }
+    tracing::info!(
+        terminal_id = %terminal_id,
+        "terminal relay: loop exited (clean teardown)"
+    );
 
     let _ = upstream_sender.send(TungsteniteMessage::Close(None)).await;
     let _ = browser_sender.send(Message::Close(None)).await;
+    relay_guard.clean = true;
 }
 
 fn axum_to_tungstenite_message(message: Message) -> TungsteniteMessage {

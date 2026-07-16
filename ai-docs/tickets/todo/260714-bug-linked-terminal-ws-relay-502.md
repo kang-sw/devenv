@@ -8,6 +8,14 @@ sage-review-completeness: required
 
 # Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
 
+> **Status (2026-07-16): WIP — not resolved.** The confirmed root cause is a
+> FRONTEND active-root / selection-derivation instability, NOT a backend relay
+> bug. See `## Confirmed root cause (2026-07-16)` below; it OVERTURNS the earlier
+> "mid-session relay pump drop" framing (the `## Reframed findings` section),
+> which is retained only as ruled-out investigation history. Diagnostic tracing
+> landed (Phase 1) and a partial hotfix has landed (`af058b73`); the substantive
+> two-pronged frontend/socket fix is deferred to Phase 2.
+
 ## Background
 
 - Dogfooding topology: Windows frontend daemon at localhost:4300 (linked WSL daemon 8787 as server `wsl-daemon`, endpoint http://127.0.0.1:8787, --no-auth). Opening a linked-server work-root now mounts a terminal tab (frontend derivation refactor 260714-refactor-dashboard-active-root... Phase 1 landed and works), but the terminal WebSocket then fails:
@@ -125,6 +133,13 @@ Windows->WSL relay leg. Ranked most-likely-cause first; each entry cites the
    equivalent clear-and-rebuild step).
 
 ## Reframed findings: mid-session relay drop (read-only, 2026-07-14)
+
+> **SUPERSEDED (2026-07-16).** This section's "backend relay pump drop"
+> conclusion was overturned by Phase 1 tracing. The relay is correctly invoked;
+> the client closes the socket. Retained only as ruled-out history — see
+> `## Confirmed root cause (2026-07-16)`. The pump-loop fragility and missing TLS
+> backend named below remain real latent defects, tracked in Phase 2's deferred
+> list, but they are NOT this bug's root cause.
 
 ### Corrected framing
 
@@ -335,6 +350,69 @@ and should specifically capture, per direction, whether the loop exited via
 so the next reproduction can distinguish a legitimate half-close from a
 transport fault.
 
+## Confirmed root cause (2026-07-16): frontend active-root / selection-derivation instability — NOT a backend relay drop
+
+Live dogfood tracing (Phase 1) is decisive and **overturns the prior "mid-session
+relay pump drop" framing**. The backend relay is correctly invoked and behaves
+correctly: its logs show clean `task started -> loop exited (clean teardown)`
+pairs. Those pairs are the *symptom*, not the cause — the daemon relay exits
+cleanly because **the client (browser) closes the socket**. The fault is entirely
+in the frontend's active-root / workbench-selection derivation, which flips the
+linked sub-worktree out of view on the poll cadence and tears its terminal socket
+down.
+
+### Causal chain (file:line anchors)
+
+1. `mergeResourcesByServer` (`ws-dashboard/frontend/src/resourceModel.ts:204-209`)
+   replaces the server's resource tree with a brand-new object on every 5s poll
+   (`resourceRefresh.ts` interval; poll call at `App.tsx:609-612`).
+2. When that poll's freshly-fetched tree for the LINKED server momentarily omits
+   the sub-worktree's (`gitLinkedWorktree` child) `workRoot` entry — while the
+   tree object itself is non-null, so the Phase-1 refactor's D2 slot-level
+   fallback (`resolveActiveResources`, `resourceModel.ts:236-261`) never engages
+   — `resolveWorkbenchSelection` (`resourceModel.ts:441-490`) cannot return null
+   (it returns null only when `resources` itself is null, `:445-447`) and
+   silently falls back to the first root walked (`fallback ??= rootSelection`,
+   `:474`, returned `:489`) = the primary/root worktree.
+3. `workbenchSelection` recomputes (`App.tsx:806-809`) -> `selectedWorkRootStateKey`
+   (`:3782-3787`) -> `effectiveActiveRootKey` (`:5985`) now points at the wrong
+   root.
+4. `isActiveRoot` for the sub-worktree instance becomes false (`App.tsx:5991`), so
+   its wrapper gets `style={{display:"none"}}` (`:6018-6023`).
+5. Within 100ms the `focusWatchdog` (`App.tsx:8439-8441`) reads
+   `container.offsetParent === null` for every pane under that wrapper and sets
+   `paneVisible=false`.
+6. The terminal socket effect (`App.tsx:8491-8617`, deps `[terminalId, paneVisible]`)
+   re-runs; its cleanup closes the by-now-OPEN socket unconditionally
+   (`App.tsx:8615`; only `CONNECTING` is guarded — that guard is the `af058b73`
+   hotfix).
+7. Next poll the child reappears, selection flips back, and a new socket opens for
+   the SAME terminalId — repeating on the ~5s poll cadence. This matches the
+   observed ~4s period, same-`term_id` reappearance, and the simultaneous
+   multi-pane (8-id) burst.
+
+**Why the root worktree is unaffected:** the primary root is the fallback's
+*destination*, so it is never the one evicted.
+
+### Regression origin
+
+The Phase-1 active-root refactor (`ddd353fe`, decision D3) DELETED the
+`lastActiveRootKeyRef` / `lastActiveRootServerIdRef` + `resolveEffectiveActiveRootKey`
+safety net on the theory that D1 (render-time union) + D2 (slot-level fallback)
+subsume it. But D2 only covers *the slot being absent*, not *the selected root
+momentarily absent from an otherwise-present tree* — which is exactly the
+child-worktree gap. Cross-references:
+`.done/260714-bug-dashboard-childroot-workbench-flash-hide.md` (names this
+local-vs-remote distinction verbatim) and
+`ready/260714-refactor-dashboard-active-root-atomic-select-pure-derivation.md`.
+
+### Partial mitigation already landed
+
+Hotfix `af058b73` (cleanup no longer aborts a CONNECTING socket) is PARTIAL: root
+work-root terminals are now stable, but sub-worktree terminals still churn (open
+-> clean-teardown loop ~every 4s) because the OPEN-socket guard (Phase 2 prong #2)
+and the selection stickiness (Phase 2 prong #1) are not yet done.
+
 ## Phases
 
 ### Phase 1: Diagnostic tracing instrumentation for the relay pump loop and connect path
@@ -348,9 +426,48 @@ Acceptance:
 - `cargo build -p ws-dashboard-daemon` and `cargo test -p ws-dashboard-daemon` pass.
 - On an owner-rebuilt detached daemon, reproducing the linked-terminal drop leaves per-direction teardown-reason lines in `<state_dir>/logs/daemon.log.<date>`, distinguishing `None` (half-close) from `Some(Err(<variant>))` (transport fault).
 
-### Phase 2 (deferred — evidence-gated on Phase 1 reproduction): substantive relay-teardown fix + latent-defect closure
+### Result (55ee8ff4) - 2026-07-16
 
-Do NOT start until Phase 1 reproduction identifies the real teardown cause. Scope, per this ticket's findings:
-- Fix the pump loop so a single-direction read error/EOF does not silently tear down the whole bidirectional relay when the peer did not legitimately close (servers.rs:1621-1655), driven by the captured evidence.
-- Close latent defect (finding #2): `tokio-tungstenite` carries no TLS backend, so any `https://` linked server's terminal WS fails via `Error::Tls` collapsed into the same blanket 502 — add a TLS feature in the same pass.
-- Add relay test coverage (connect path + pump loop); currently zero.
+Tracing landed (`55ee8ff4` relay teardown paths + `d6ff5d5d` task-lifecycle /
+external-cancellation events), captured on the durable rolling-file sink. The
+evidence **overturned this ticket's relay-drop hypothesis**: the relay logs show
+clean `task started -> loop exited (clean teardown)` pairs, proving the backend
+relay is correctly invoked and exits only because the browser closes the socket.
+Root cause is therefore frontend, not backend — see
+`## Confirmed root cause (2026-07-16)` above. The tracing is kept as diagnostic
+infrastructure (it is what proved the relay is invoked and the client closes the
+socket); the pump-loop teardown-semantics change originally anticipated here is
+demoted to a Phase 2 deferred latent defect, not this bug's fix.
+
+### Phase 2 (deferred — real fix; WIP handoff 2026-07-16): frontend selection-stickiness + OPEN-socket guard
+
+Do NOT implement yet. The confirmed root cause is frontend active-root /
+selection-derivation instability (see `## Confirmed root cause (2026-07-16)`), not
+a backend relay teardown. Two-pronged fix:
+
+1. **Re-provide the deleted protection**, scoped to "the currently-selected root
+   disappeared from an otherwise-present tree": in `resourceModel.ts`
+   (`resolveActiveResources` / `resolveWorkbenchSelection`, ~`:251-261`,
+   `:441-490`) and/or `ws-dashboard/frontend/src/workbench/openRootLookup.ts`
+   `deriveWorkbenchView` (~`:130-164`), keep the last-known selected root sticky
+   across a transient content-level omission (the gap D2's slot-level fallback
+   does not cover).
+2. **Independently harden `App.tsx:8615`** so a `paneVisible` flip does not
+   `socket.close()` an OPEN socket that has only just reached OPEN — mirror the
+   CONNECTING guard the `af058b73` hotfix added.
+
+Runner-up hypotheses to rule out during the fix:
+- (RU1) the keep-alive / background-instance path (`App.tsx:4400-4424`) resolves
+  via an *unprotected* raw lookup with no fallback cache, so a transient omission
+  fully unmounts/remounts that root's Dockview + panes.
+- (RU2) Phase 2 of the active-root refactor (atomic `selectRoot`, delete the
+  sync-mount hack at `App.tsx:~1017-1041`) is still unlanded — a documented loose
+  end in the same cluster; lower confidence for the repeating loop.
+
+Deferred latent defects (real, but NOT this bug's root cause — kept so they are
+not lost): the backend relay pump loop still tears the whole bidirectional session
+down on any single-direction read error/EOF, now traced but with no
+teardown-semantics fix (servers.rs:1621-1655); and `tokio-tungstenite` still
+carries no TLS backend, so any `https://` linked server's terminal WS would fail
+via `Error::Tls` collapsed into the same blanket 502. Add relay test coverage
+(currently zero) alongside whichever of these is addressed.
