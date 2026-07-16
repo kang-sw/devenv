@@ -1,5 +1,7 @@
 ---
 title: Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
+related:
+  260716-feat-ws-dashboard-daemon-persistent-log-layer: "prerequisite — the persistent rolling-file log sink must land first so the instrumentation below is captured durably on a detached daemon"
 ---
 
 # Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
@@ -22,6 +24,7 @@ title: Linked-server terminal WebSocket relay fails its first real WSL<->Windows
 - (A) No-rebuild disambiguation: open a direct WS to the WSL daemon's own terminal endpoint (ws://127.0.0.1:8787/api/dashboard/terminals/<id>/socket) and compare against the 4300-proxied path -> isolates Windows-relay vs WSL-endpoint fault.
 - (B) Add tracing::warn/error of the real error in `connect_remote_terminal_websocket`'s map_err arm (servers.rs:1582), rebuild the Windows binary, restart the Windows daemon, reproduce -> observe the actual transport error before a substantive fix. (Windows daemon restart requires owner confirmation.)
 - Regardless of the specific fix: this path needs (1) error diagnosability (stop collapsing to blanket 502), and (2) test coverage for the relay.
+- Prerequisite: the diagnosis instrumentation depends on `260716-feat-ws-dashboard-daemon-persistent-log-layer` landing first — a detached daemon currently discards stderr, so the per-direction teardown-reason and connect-path error logs added for this bug must be captured by a durable rolling-file sink to survive a reproduction run.
 
 ## Additional findings (read-only relay-path investigation, 2026-07-14)
 
