@@ -109,3 +109,36 @@ relay/connect-path `tracing` instrumentation (per-direction teardown reason,
 the `connect_remote_terminal_websocket` blanket-`Unavailable` map_err logging)
 belongs to the dependent bug ticket `260714-bug-linked-terminal-ws-relay-502`,
 which consumes this durable sink to capture the real cause.
+
+### Result (999be0dd) - 2026-07-16
+
+- Landed: `logging::init` rebuilt as a `tracing_subscriber::registry()` with
+  two fmt layers — the existing stderr layer (unchanged, foreground
+  `dev.sh run` still prints) plus a default-ON non-blocking daily-rolling
+  file layer via `tracing-appender` 0.2 (default `<state_dir>/logs/daemon.log`,
+  ~14-file retention). New `--log-file <path>` flag on `serve`; new
+  `persistent_state::default_state_dir()` helper; `main.rs` holds the returned
+  `WorkerGuard` for process lifetime; fail-soft to stderr-only (with warning)
+  when the log dir/file can't be opened. `--log-filter` default `"info"`
+  unchanged. New dep `tracing-appender` under `ws-dashboard/` only (no plugin
+  version bump).
+- Commits: implementation `2dba0901`, review-fix cycles `3bacdfee` (test
+  coverage + fail-soft warning) and `999be0dd` (ENV_LOCK test-isolation +
+  de-tautologized test); range `c9e11d70..999be0dd`. Docs: spec `557f37ab`
+  (anchor `{#260716-dashboard-daemon-persistent-log-file-sink}`), mental-model
+  `31d0a6e8`.
+- Verification: `cargo build -p ws-dashboard-daemon` +
+  `cargo test -p ws-dashboard-daemon` green (stable across 3 runs). New unit
+  tests: `resolve_log_target` both branches, `init` happy-path file creation,
+  `--log-file` clap parsing, `default_state_dir`, plus a crate-local
+  `ENV_LOCK` serializing env-var-mutating tests.
+- Review: correctness (opus) clean; test (sonnet) clean after 2 fix cycles;
+  1 accepted Minor (`try_init` global-subscriber forward-looking note).
+- DEFERRED (not done — requires owner action): live runtime acceptance was
+  NOT performed because it needs a daemon restart (owner-gated). Still to
+  verify by an owner-run step: that a detached daemon (no `tee`) actually
+  creates the file at the default path, accumulates events, rotates on date
+  change, and prunes to the retention bound.
+- Forward: the dependent bug ticket `260714-bug-linked-terminal-ws-relay-502`
+  can now add its relay/connect-path instrumentation on top of this durable
+  sink.
