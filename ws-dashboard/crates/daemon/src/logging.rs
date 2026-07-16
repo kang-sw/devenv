@@ -148,6 +148,15 @@ mod tests {
 
     #[test]
     fn resolve_log_target_default_composes_state_dir_logs_daemon_log() {
+        // Hold `persistent_state::ENV_LOCK` for the whole body: this test
+        // mutates the same process-global `WS_DASHBOARD_STATE_FILE` env var
+        // that `persistent_state::tests` reads/mutates, and `cargo test`
+        // runs test functions concurrently by default with no other
+        // synchronization between the two modules.
+        let _env_lock = persistent_state::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         // Save/restore only the var this test drives; `WS_DASHBOARD_STATE_FILE`
         // is `default_state_file`'s highest-priority source, so setting it
         // deterministically pins the default path regardless of other env
