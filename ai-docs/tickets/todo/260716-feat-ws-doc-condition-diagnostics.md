@@ -1,6 +1,6 @@
 ---
 title: Hidden doc-condition diagnostics — verification crawl, consumption counters, workflow health metrics
-sage-review-design: required
+sage-review-design: blocked
 related:
   260716-feat-mental-model-openup-injection: consumer — injection telemetry rides this substrate and its landing is gated on this ticket
 ---
@@ -73,3 +73,12 @@ runs. Script or MCP-computed — implementation may choose; caller-visible
 output is a compact table. Verification: numbers reproduce the hand-computed
 2026-07-16 baseline (42.8% full-history / 55.3% recent-150 docs ratio) within
 rounding.
+
+## Blocked (2026-07-16)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Phase 3 sage verdict distribution has no source matching its stated vocabulary | important | missing |
+| 2 | Phase 3 docs-vs-code classification method is unspecified | minor | autonomous |
