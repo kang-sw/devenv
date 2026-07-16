@@ -224,6 +224,7 @@ related:
 - Logging full request URIs or health payloads that include pairing tokens, session cookies, wsstate internals, paths, or Git roots.
 - Letting daemon harness startup/readiness failures print raw command arguments, forwarded endpoints, pairing URLs, hostnames, or static-dir paths; portability diagnostics should identify the failing layer without preserving private evidence.
 - Building startup URLs before binding the listener and accidentally exposing `:0` to the owner.
+- Binding `logging::init`'s returned `WorkerGuard` to `_` instead of a named local (`main.rs` uses `let _guard = ...`); a dropped guard silently stops the non-blocking file writer from flushing, so file logs go missing with no error. Preserve the guard's lifetime through the end of `server::run` when touching daemon startup or `logging::init`. {#260716-dashboard-daemon-persistent-log-file-sink}
 
 ## Technical Debt
 
