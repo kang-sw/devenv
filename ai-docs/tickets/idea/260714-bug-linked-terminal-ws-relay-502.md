@@ -118,3 +118,214 @@ Windows->WSL relay leg. Ranked most-likely-cause first; each entry cites the
    in `terminal.rs:436-460` and the plain-HTTP forwards in
    `request_remote_dashboard_operation`/`request_remote_sse` do not have an
    equivalent clear-and-rebuild step).
+
+## Reframed findings: mid-session relay drop (read-only, 2026-07-14)
+
+### Corrected framing
+
+New reproduction detail from dogfooding: terminal content **rendered briefly
+(live output streamed), then the WebSocket dropped immediately after**. This
+is decisive and overturns the prior round's top candidate.
+
+`connect_remote_terminal_websocket` (servers.rs:1562-1588) runs to completion
+exactly once, before `upgrade.on_upgrade(...)` (servers.rs:1500-1502) is ever
+called. Per the CONTRACT comment at servers.rs:1486-1490, no byte can reach
+the browser unless that connect already succeeded. Since the browser is
+confirmed to have received live output, the connect leg (and everything the
+prior "Additional findings" section reasoned about — the swallowed
+`tungstenite::Error` variants at servers.rs:1582-1587, the missing TLS
+feature, the handshake/`on_upgrade`-ordering/auth non-causes) is **provably
+not what is executing when the failure happens**. Those findings stay valid
+as latent defects (in particular #2, the missing TLS backend, is real and
+independent) but they diagnose a *different* failure mode — "never connects"
+— than the one actually observed — "connects, streams, then drops mid-session".
+The fault must be in `terminal_websocket_relay` (servers.rs:1617-1655) or in
+whatever governs the established session's lifetime on either leg.
+
+The browser console message `WebSocket is closed before the connection is
+established` is downgraded from primary evidence to a **secondary artifact**.
+That exact string is the browser's own diagnostic for calling `.close()` on a
+socket still in the `CONNECTING` state — and the frontend's terminal-socket
+effect cleanup does exactly that unconditionally on every teardown:
+`frontend/src/App.tsx:8596-8600` (`disposed = true; ...; socket.close();`,
+effect deps `[terminalId, paneVisible]`, `frontend/src/App.tsx:8601`). The
+socket's own `close` handler (`frontend/src/App.tsx:8587-8594`) sets status to
+`"fallback"` with no explicit reconnect-via-new-socket call visible in this
+effect, so the most consistent read is: first session drops (server-side, see
+below) -> some later re-render/cleanup cycle calls `.close()` on a
+freshly-opened-but-not-yet-`OPEN` retry socket -> browser logs that specific
+message. It is therefore a **downstream symptom of the same root drop**, not
+an independent connect-time fault.
+
+### Ranked candidate causes (pump-loop and session-lifetime code, in rank order)
+
+1. **[Top-ranked] Any single-direction read error or EOF silently tears down
+   the entire bidirectional relay, with zero tracing anywhere in this file —
+   servers.rs:1621-1655, decisive lines 1624 and 1638.**
+
+   ```rust
+   browser_message = browser_receiver.next() => {
+       let Some(Ok(message)) = browser_message else { break; };   // servers.rs:1624
+       ...
+   }
+   upstream_message = upstream_receiver.next() => {
+       let Some(Ok(message)) = upstream_message else { break; };  // servers.rs:1638
+       ...
+   }
+   ```
+
+   Either branch's `else { break; }` fires on **any** of: the stream ending
+   (`None`) or **any** `tungstenite::Error` variant surfacing from
+   `WebSocketStream::poll_next` (`tokio-tungstenite-0.29.0/src/lib.rs:291-315`
+   maps every non-`AlreadyClosed`/`ConnectionClosed` error straight through as
+   `Some(Err(e))`) — the same full `tungstenite::Error` enum already
+   enumerated in this ticket's prior round (`Io`, `Protocol`, `Capacity`,
+   `Utf8`, `AttackAttempt`, etc.). `break` exits the single shared `loop`, and
+   the two lines immediately after it (servers.rs:1653-1654) then send a
+   `Close` to **both** legs unconditionally — i.e. a hiccup on the upstream
+   leg's *read* side kills the browser's side too, with no distinction between
+   "the peer legitimately closed" and "the read glitched." `grep -n
+   "tracing::" ws-dashboard/crates/daemon/src/servers.rs` returns **zero**
+   matches in the entire 2569-line file, even though `tracing` is a workspace
+   dependency used elsewhere in the same crate (`git_worktree.rs`,
+   `persistent_state.rs`, `root_picker.rs`, `server.rs`) — so if this branch
+   fires today, it fires invisibly.
+
+   This exactly reproduces the reported shape: connect succeeds, bytes flow
+   (the burst that renders), then one read on the upstream leg (the
+   Windows-daemon-process -> WSL-daemon TCP hop, crossing the WSL2 NAT/vEthernet
+   boundary) errors or EOFs, and the whole session dies silently. The local
+   path has the structurally identical "abort on any error" shape
+   (`terminal.rs:722`, `let Some(Ok(message)) = maybe_message else { break; };`)
+   — so this is not a *different* code shape between the two paths, it is the
+   *same fragile shape*, but only the relay path has a plausible source of a
+   spurious read error (an extra cross-process, cross-network TCP hop with a
+   from-scratch `tokio_tungstenite::connect_async` client that has never
+   round-tripped over a real WSL<->Windows boundary before this dogfood
+   session, per the "root cause class (d)" note in this ticket's original
+   Findings section). This is why the *pump-loop* cause now outranks every
+   connect-time candidate from the prior round: it is the only mechanism in
+   the code that can explain data flowing first and the drop coming after,
+   and it shares the exact "swallowed-error, no tracing" texture that already
+   made the connect-time path undiagnosable — just one function down.
+
+2. **Ping/Pong keepalive mechanics: examined in depth, confirmed NOT the
+   asymmetry the initial hypothesis expected — reclassified from "top
+   candidate" to "confirmed structurally sound, with one residual latency
+   caveat."**
+   - Axum's `WebSocket` (used for the local path's single socket AND the
+     relay's browser-facing leg) is a direct pass-through wrapper over
+     `tokio_tungstenite::WebSocketStream` (`axum-0.8.9/src/extract/ws.rs:546-618`);
+     its own doc comment states plainly: "Ping messages will be automatically
+     responded to by the server... Pong messages will be automatically sent to
+     the client if a ping message is received" (`axum-0.8.9/src/extract/ws.rs:781-791`).
+     The relay's upstream leg uses that same `tokio_tungstenite::WebSocketStream`
+     type directly (servers.rs:1553-1554). Both legs are `.split()` (servers.rs:1618-1619;
+     mirrored in the local path at `terminal.rs:705`) via `futures_util`'s
+     `BiLock`-backed `SplitStream`/`SplitSink`, which share one underlying
+     connection object — identical mechanism on every leg in both paths, not
+     something the relay uniquely breaks.
+   - Tungstenite's `read()` (`tungstenite-0.29.0/src/protocol/mod.rs:449-479`)
+     flushes any auto-queued Pong reply at the **top of its own loop**, before
+     attempting to read the next frame (line 457: `if self.additional_send.is_some()
+     ... { self.flush(stream)? }`). Because the relay's `select!` calls
+     `upstream_receiver.next()` again on literally the next loop iteration,
+     the queued Pong for a received Ping is flushed on that very next poll —
+     sub-millisecond in practice, not "deferred indefinitely." This refutes the
+     literal form of the original hypothesis (manual frame-forwarding leaving
+     a Ping permanently unanswered).
+   - Residual, unconfirmed caveat: while one `select!` arm's body is
+     `.await`-ing (e.g. `browser_sender.send(...)` forwarding a large burst,
+     servers.rs:1643), the other arm (`upstream_receiver.next()`) is not
+     polled at all until that send resolves — so a queued Pong could sit
+     unflushed for the duration of one large forwarded message. This shape
+     exists equally in the local path's single loop (`terminal.rs:720-766`),
+     so it is not relay-specific either.
+   - Neither leg proactively sends keepalive Pings today: `grep -rn
+     "keep_alive|KeepAlive|ping_interval|WebSocketConfig"
+     ws-dashboard/crates/daemon/src/` returns no matches; axum's
+     `WebSocketUpgrade` defaults to no periodic ping unless `.keep_alive(...)`
+     is called (it isn't, anywhere in this codebase), and `connect_async`
+     (servers.rs:1579) passes no `WebSocketConfig`. So an "unanswered
+     application-level keepalive Ping -> idle-timeout close" mechanism has no
+     active trigger in this code as written. If the drop is timeout-driven at
+     all, a TCP/NAT-layer idle timeout on the WSL2 vEthernet/NAT boundary is a
+     more likely source than a WS-level ping/pong fault — that boundary is
+     outside what this code can confirm or rule out by itself.
+
+3. **Half-close / Close-frame handling is symmetric and matches the RFC
+   intent; not a distinguishing cause.** Both `select!` arms treat a `Message::Close`
+   the same way: forward it to the other leg, then break (servers.rs:1625,
+   1633-1635 for the browser->upstream direction; 1642, 1646-1648 for the
+   reverse). After the loop, both legs get an explicit best-effort `Close`
+   send (servers.rs:1653-1654), which is arguably *more* graceful than the
+   local path — `terminal.rs`'s `terminal_socket_task` never explicitly sends
+   `Message::Close` on normal PTY exit (`mark_exited`/`mark_error`,
+   `terminal.rs:682-696`, `666-680`); it just breaks the loop and lets the
+   dropped `WebSocket` end the TCP connection without a close handshake. So
+   the relay's Close-frame handling is not less correct than the local path —
+   ruled out as an explanation for a *relay-specific* drop; it is subsumed by
+   candidate #1 (a Close is one specific, well-handled instance of the
+   `else { break; }` in candidate #1 — the bug is in the *unhandled*, silent
+   instances: raw `None`/`Err`, not `Close`).
+
+4. **Frame-type fidelity: essentially complete, one narrow and
+   already-justified gap.** `axum_to_tungstenite_message`/
+   `tungstenite_to_axum_message` (servers.rs:1657-1686) round-trip
+   Text/Binary/Ping/Pong/Close faithfully in both directions with no
+   Binary-as-Text or similar mistranslation. The only dropped variant is
+   `TungsteniteMessage::Frame(_) => None` (servers.rs:1682-1684), which the
+   in-code comment attributes to tungstenite having no axum equivalent for
+   its raw `Frame` type — the same drop-don't-error stance axum itself takes
+   for the identical reason (`axum-0.8.9/src/extract/ws.rs:840-841`, citing
+   snapview/tungstenite-rs#268). Confirmed non-cause.
+
+5. **Backpressure/`WriteBufferFull` is not reachable under this code's
+   configuration.** `connect_async(request)` (servers.rs:1579) uses
+   `tokio_tungstenite`'s default `WebSocketConfig` (no config passed
+   anywhere in servers.rs or terminal.rs), and tungstenite's default
+   `max_write_buffer_size` is `usize::MAX`
+   (`tungstenite-0.29.0/src/protocol/mod.rs:99-100`), so
+   `Error::WriteBufferFull` cannot fire regardless of burst size; only
+   `WouldBlock` backpressure can occur, and tungstenite retries that
+   internally rather than surfacing an error
+   (`tokio-tungstenite-0.29.0/src/lib.rs:351-356`). Confirmed non-cause for a
+   hard failure (though it is a latent unbounded-memory-backlog risk under
+   sustained backpressure, unrelated to today's bug).
+
+6. **Initial-burst-to-live-streaming transition (`?after=0`) is not a
+   distinct code path anywhere in the relay.** `remote_terminal_websocket_url`
+   (servers.rs:1594-1615) only shapes the initial connect URL's `after` query
+   parameter; once connected, `terminal_websocket_relay` forwards every
+   upstream message identically regardless of whether it is backfill or live
+   output — there is no burst/live mode switch to harbor a transition bug.
+   The one place such a seam could exist is the upstream WSL daemon's own
+   `terminal_socket_task` (`terminal.rs:699-768`), and there both the
+   connect-time backfill (712-717) and every later backfill triggered by
+   `output_signal.changed()` (754-765) call the exact same
+   `send_output_backfill` function against the same cursor — no separate
+   "first burst" code path exists there either. Confirmed non-cause.
+
+### Re-rank: pump-loop vs. connect-time candidates
+
+**The pump-loop cause (ranked #1 above) now outranks every connect-time
+candidate from the prior "Additional findings" round.** The user-confirmed
+symptom — output rendered, then the socket dropped — is direct evidence that
+`connect_remote_terminal_websocket` (servers.rs:1562-1588) already returned
+`Ok(upstream)`, since no byte can reach the browser before that (CONTRACT at
+servers.rs:1486-1490). The connect-time error-swallowing findings (blanket
+`_ => TerminalWebSocketForwardError::Unavailable` at servers.rs:1582-1587, and
+the missing TLS backend) remain accurate, real gaps, but they describe a
+"never connects, blanket 502 before any upgrade" failure — a mode the current
+reproduction has already ruled out by observing live output. The corrected
+diagnosis is: the fault is in `terminal_websocket_relay`'s per-iteration
+`else { break; }` on `browser_receiver.next()`/`upstream_receiver.next()`
+(servers.rs:1624, 1638) combined with the complete absence of `tracing::` in
+`servers.rs`, which converts a to-be-expected first-ever cross-network read
+hiccup into an untraceable full-session teardown. The fix pass for this
+ticket should treat "add tracing + tests for the relay pump loop" as at least
+as urgent as the previously-queued connect-time tracing add (next-step B),
+and should specifically capture, per direction, whether the loop exited via
+`None` (clean EOF) or `Some(Err(_))` (and which `tungstenite::Error` variant)
+so the next reproduction can distinguish a legitimate half-close from a
+transport fault.
