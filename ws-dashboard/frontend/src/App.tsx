@@ -265,6 +265,7 @@ import {
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
+  resolveStickyWorkbenchSelection,
   resolveWorkbenchSelection,
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
@@ -274,6 +275,7 @@ import {
   type DashboardResourcesView,
   type DashboardServersView,
   type InstanceView,
+  type LastMatchedSelectionByServer,
   type ResourceEntity,
   type ResourcePath,
   type ResourcesByServer,
@@ -568,6 +570,45 @@ export function App() {
     selectedServerId,
     lastNonNullResourcesByServerRef.current,
   );
+  // 260714 Phase 2 Prong 1: server-scoped sticky-selection cache, modeled on
+  // the `lastNonNullResourcesByServerRef` D5 pattern directly above. Bridges
+  // a narrower gap than D5 - the resource tree itself is present
+  // (`activeResources` already resolved, possibly via D5's own fallback), but
+  // the previously-selected root's own entry is momentarily missing from it
+  // (e.g. a `gitLinkedWorktree` child dropped from one poll response), which
+  // otherwise collapses `resolveWorkbenchSelection` to its `fallback` (the
+  // first root walked) and flips the active selection away from the user's
+  // actual pane.
+  //
+  // Unlike `lastNonNullResourcesByServer` (whose reader, `resolveActiveResources`,
+  // never itself mutates the cache - only `withLastNonNullResourcesByServer`
+  // does, once, up front), `resolveStickyWorkbenchSelection` both reads AND
+  // advances the bridged/dropped miss-tracking state in the same call. Both
+  // `workbenchSelection` below and `deriveWorkbenchView`'s internal
+  // resolution must therefore be fed the exact SAME (this render's
+  // not-yet-advanced) cache snapshot, not one already advanced by the other -
+  // otherwise `deriveWorkbenchView`'s call would silently perform a SECOND
+  // consecutive-miss advance on top of the first (e.g. turning this render's
+  // legitimate "first miss, bridge it" into a spurious "second miss, treat as
+  // genuine removal"), which is exactly the "two derivations, two data paths"
+  // divergence class D2/D3 exist to prevent. `renderLastMatchedSelectionByServer`
+  // captures that shared not-yet-advanced snapshot; the ref is updated to the
+  // advanced value only for the NEXT render to read.
+  const lastMatchedSelectionByServerRef = useRef<LastMatchedSelectionByServer>(
+    {},
+  );
+  const renderLastMatchedSelectionByServer =
+    lastMatchedSelectionByServerRef.current;
+  const {
+    selection: stickyWorkbenchSelection,
+    nextLastMatchedSelectionByServer,
+  } = resolveStickyWorkbenchSelection(
+    activeResources,
+    selectedId,
+    selectedServerId,
+    renderLastMatchedSelectionByServer,
+  );
+  lastMatchedSelectionByServerRef.current = nextLastMatchedSelectionByServer;
   // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
   // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
   // where all six committed-state fields are simultaneously in scope, so the
@@ -576,7 +617,12 @@ export function App() {
   // union instead of the raw (lagging) `openWorkRootKeys`. `deriveWorkbenchView`
   // recomputes `activeResources` internally (it is pure); the existing
   // `activeResources`/`workbenchSelection` values above stay as their own
-  // consumers elsewhere in `App()` rely on them.
+  // consumers elsewhere in `App()` rely on them. Passes the SAME
+  // `renderLastMatchedSelectionByServer` snapshot read above (not the
+  // just-advanced ref value - see the comment on that snapshot) so this call's
+  // internal `resolveStickyWorkbenchSelection` is guaranteed to derive the
+  // identical `.selection` as `stickyWorkbenchSelection` above, by
+  // construction rather than by convention.
   const { openInstanceKeys: openWorkRootInstanceKeys } = deriveWorkbenchView({
     resourcesByServer,
     lastNonNullResourcesByServer: lastNonNullResourcesByServerRef.current,
@@ -584,6 +630,7 @@ export function App() {
     selectedId,
     openWorkRootKeys,
     openWorkRootRefs,
+    lastMatchedSelectionByServer: renderLastMatchedSelectionByServer,
   });
   const serverConnections = useMemo(
     () =>
@@ -803,10 +850,13 @@ export function App() {
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
-  const workbenchSelection = useMemo(
-    () => resolveWorkbenchSelection(activeResources, selectedId),
-    [activeResources, selectedId],
-  );
+  // 260714 Phase 2 Prong 1: consume the already-advanced sticky-selection
+  // value computed once near `activeResources` above, rather than
+  // recomputing `resolveWorkbenchSelection` fresh here - recomputing would
+  // both discard the stickiness and risk this value diverging from what
+  // `deriveWorkbenchView` derived from the same ref this render (see the
+  // comment at the ref's owning site).
+  const workbenchSelection = stickyWorkbenchSelection;
   useEffect(() => {
     if (!workbenchSelection) {
       return;
