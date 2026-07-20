@@ -523,6 +523,20 @@ export function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
   return root.kind === "gitLinkedWorktree";
 }
 
+// The root a workspace's own row represents when the workspace does not
+// compact to a single row: the primary/base root if present, otherwise the
+// first workRoot. Shared by workbench-selection resolution and the
+// "workspace"-presentation resource row's close affordance.
+export function workspaceBaseWorkRoot(
+  workspace: WorkspaceView,
+): WorkRootView | null {
+  return (
+    workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
+    workspace.workRoots[0] ??
+    null
+  );
+}
+
 // Result of walking the resource tree for `selectedId`: `matched` is true
 // only when `selectedId` was found exactly (workspace id, root id, or nested
 // instance id); a `selection` returned with `matched: false` fell through to
@@ -541,10 +555,7 @@ function resolveWorkbenchSelectionWithMatchInternal(
   let fallback: WorkbenchSelection | null = null;
 
   for (const workspace of resources.workspaces) {
-    const workspaceRoot =
-      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
-      workspace.workRoots[0] ??
-      null;
+    const workspaceRoot = workspaceBaseWorkRoot(workspace);
     if (selectedId === workspace.id && workspaceRoot) {
       const mainInstance = workspaceRoot.mainInstances[0] ?? null;
       return {

@@ -10,6 +10,7 @@ import {
   resolveStickyWorkbenchSelection,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
+  workspaceBaseWorkRoot,
   workspaceEndpoint,
   type DashboardResourcesView,
   type InstanceView,
@@ -308,6 +309,52 @@ assertEqual(
   compactWorkspaceWorkRoot(multiRootWorkspace.workspaces[0]),
   null,
   "multi-workRoot workspace remains expanded instead of compacting",
+);
+
+// workspaceBaseWorkRoot resolves the primary/base root among a workspace's
+// roots regardless of array position, so the "workspace"-presentation row
+// (base root + >=1 linked worktree) can target the right work root for its
+// close affordance instead of the workspace id.
+const primaryPlusWorktree = workRoot("root-primary", "workspace-git", "primary");
+primaryPlusWorktree.kind = "gitPrimaryRoot";
+const linkedWorktree = workRoot("root-worktree", "workspace-git", "worktree");
+linkedWorktree.kind = "gitLinkedWorktree";
+const gitWorkspacePrimaryFirst: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-git",
+      label: "git",
+      state: readyState,
+      compactable: false,
+      workRoots: [primaryPlusWorktree, linkedWorktree],
+      actions: [],
+    },
+  ],
+};
+assertEqual(
+  workspaceBaseWorkRoot(gitWorkspacePrimaryFirst.workspaces[0])?.id,
+  "root-primary",
+  "workspaceBaseWorkRoot resolves the primary root among primary + linked-worktree roots",
+);
+
+const gitWorkspaceWorktreeFirst: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-git-reversed",
+      label: "git-reversed",
+      state: readyState,
+      compactable: false,
+      workRoots: [linkedWorktree, primaryPlusWorktree],
+      actions: [],
+    },
+  ],
+};
+assertEqual(
+  workspaceBaseWorkRoot(gitWorkspaceWorktreeFirst.workspaces[0])?.id,
+  "root-primary",
+  "workspaceBaseWorkRoot finds the primary root regardless of array position",
 );
 
 const offlineUnavailableRoot = workRoot("root-offline", "workspace-offline", "offline");

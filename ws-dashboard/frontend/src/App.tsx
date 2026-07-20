@@ -272,6 +272,7 @@ import {
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
+  workspaceBaseWorkRoot,
   workspaceEndpoint,
   type ActionHint,
   type DashboardResourcesView,
@@ -9418,6 +9419,7 @@ function WorkspaceRows({
   onCommand: DashboardCommandDispatcher;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
+  const baseRoot = workspaceBaseWorkRoot(workspace);
   const childWorkRoots = workspace.workRoots.filter(
     isWorkspaceNavChildWorkRoot,
   );
@@ -9482,6 +9484,11 @@ function WorkspaceRows({
           (root) =>
             root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree",
         )}
+        closeWorkRootId={baseRoot?.id}
+        isOpenWorkRoot={
+          baseRoot != null &&
+          openWorkRootKeys.has(serverScopedIdentity(serverId, baseRoot.id))
+        }
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
@@ -9538,6 +9545,7 @@ function ResourceRow({
   activation,
   canAddWorktree = false,
   isOpenWorkRoot = false,
+  closeWorkRootId = id,
   debugMeta,
   onCommand,
 }: {
@@ -9555,6 +9563,7 @@ function ResourceRow({
   activation?: WorkRootView["activation"];
   canAddWorktree?: boolean;
   isOpenWorkRoot?: boolean;
+  closeWorkRootId?: string;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
 }) {
@@ -9562,7 +9571,9 @@ function ResourceRow({
     (action) => action.enabled && action.id === "workspace.remove",
   );
   const canCloseWorkRoot =
-    (presentation === "workRoot" || presentation === "compactWorkRoot") &&
+    (presentation === "workRoot" ||
+      presentation === "compactWorkRoot" ||
+      presentation === "workspace") &&
     isOpenWorkRoot &&
     !selected;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -9616,7 +9627,9 @@ function ResourceRow({
               icon={X}
               label={`Close ${title}`}
               onClick={() =>
-                onCommand(buildWorkRootCloseCommand(id, actionServerId))
+                onCommand(
+                  buildWorkRootCloseCommand(closeWorkRootId, actionServerId),
+                )
               }
             />
           ) : null}
