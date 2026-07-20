@@ -1468,6 +1468,7 @@ export function App() {
             loading={loading}
             resources={activeResources}
             resourcesByServer={resourcesByServer}
+            lastNonNullResourcesByServer={lastNonNullResourcesByServerRef.current}
             selectedServerId={selectedServerId}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
@@ -3646,6 +3647,7 @@ function InlineNotice({
 function WorkbenchShell({
   resources,
   resourcesByServer,
+  lastNonNullResourcesByServer,
   selectedServerId,
   selection,
   selectedEntity,
@@ -3673,6 +3675,11 @@ function WorkbenchShell({
 }: {
   resources: DashboardResourcesView | null;
   resourcesByServer: Record<string, DashboardResourcesView>;
+  // 260714 Phase 2 (RU1 fix): the same D5 last-non-null-per-server cache
+  // `App()` already owns for `activeResources` (`lastNonNullResourcesByServerRef`),
+  // threaded down so the keep-alive/background `openWorkRootInstances`
+  // resolution below can fall back to it too, not just the selected entry.
+  lastNonNullResourcesByServer: Record<string, DashboardResourcesView>;
   selectedServerId: string;
   selection: WorkbenchSelection | null;
   selectedEntity: ResourceEntity | null;
@@ -4451,8 +4458,18 @@ function WorkbenchShell({
       if (!ref) {
         return null;
       }
+      // 260714 Phase 2 (RU1 fix): fall back to the D5 last-non-null cache for
+      // this keep-alive/background member too, same as the selected entry
+      // already does via `activeResources`/`resolveActiveResources` above -
+      // otherwise a root that momentarily vanishes from
+      // `resourcesByServer[ref.serverRoute]` for one poll gets filtered out
+      // below and its Dockview instance drops out of `openWorkRootInstances`
+      // for that render (the same transient-omission mechanism as Prong 1,
+      // but for a background root instead of the selected one).
       const resolved = findOpenWorkRoot(
-        resourcesByServer[ref.serverRoute] ?? null,
+        resourcesByServer[ref.serverRoute] ??
+          lastNonNullResourcesByServer[ref.serverRoute] ??
+          null,
         ref,
       );
       if (!resolved) {
