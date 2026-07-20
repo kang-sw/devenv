@@ -129,6 +129,213 @@ content alone without also checking wall-clock ordering relative to the
 actual `/prompt` POST would have misattributed the orientation turn's reply
 as an answer to the user's message.
 
+## Cold-start build+run E2E workflow
+
+Probed 2026-07-20. The manual "Prerequisites" procedure above assumes a
+pre-built `frontend/dist` and a manually-launched no-auth daemon. There is
+also a scripted cold-start path that builds everything from scratch and runs
+the full Playwright acceptance suite, defined as `test:browser` in
+`ws-dashboard/frontend/package.json`:
+
+```bash
+cd ws-dashboard/frontend
+npm run test:browser
+# == npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test
+```
+
+This is a materially different flow from the ad hoc probe method above, not
+just a wrapper around it:
+
+- It rebuilds `frontend/dist` (`npm run build`) and the debug daemon binary
+  (`cargo build -p ws-dashboard-daemon`) fresh, then runs
+  `ws-dashboard/frontend/e2e/dashboard-acceptance.spec.ts` under Playwright's
+  own `webServer`-free fixture lifecycle (`e2e/daemonHarness.ts`'s
+  `startDaemon`), not a manually-launched
+  `cargo run -p ws-dashboard-daemon -- serve --no-auth ...` instance.
+- `daemonHarness.ts` spawns `target/debug/ws-dashboard[.exe]` itself, scrapes
+  the one-time owner-pairing URL from its stdout/stderr
+  (`owner pairing URL: <url>`), waits on `/healthz`, and the suite performs
+  **real owner pairing** through that scraped URL as its first `test.step` —
+  it does not run in `--no-auth` mode.
+- The suite sets `WS_DASHBOARD_E2E_AGENT_FIXTURE=1` on the spawned daemon's
+  env unless already set (`daemonHarness.ts` around line 233), which makes
+  `crates/daemon/src/discovery.rs` (`push()`, around line 211) synthesize a
+  fixture "main instance" per enabled work root for the resources/discovery
+  view. This is unrelated to the Codex/Claude session-launch stub discussed
+  below — it only affects what `discovery.rs` reports as already-running
+  instances, not which code path a freshly-launched chat session takes.
+- The whole file's top-level tests run under
+  `test.describe.configure({ mode: "serial" })`, so a failure partway through
+  the first test (e.g. the hidden-transcript bug below) aborts everything
+  after it in that test *and* skips the second top-level test entirely — a
+  failure here can hide unrelated, otherwise-passing coverage.
+- `test:browser`'s CONTRACT header comment
+  (`dashboard-acceptance.spec.ts` lines 21-25) states this file's coverage
+  scope is workbench tab polish evidence (hover-close affordances,
+  confirmation popovers, pinned/opened tab presentation, preview-to-pinned
+  file behavior) driven against the daemon-served production frontend — it
+  is a broad scripted acceptance gate, not a substitute for the ad hoc
+  live-bug-reproduction method documented above.
+
+Prefer the manual no-auth + ad hoc probe-script method above for one-off live
+bug reproduction (much faster iteration, no full rebuild each time); reserve
+`npm run test:browser` for full-suite acceptance runs or when the bug is
+specifically about the suite's own fixtures/steps.
+
+## Driving a real (non-stub) harness
+
+Probed 2026-07-20. Everything above (and the existing acceptance suite) can
+be driven either against a synthetic in-browser stub or against a real
+spawned `codex`/`claude` CLI process — the two look similar in the UI but
+exercise completely different code paths. This section documents how to
+deliberately reach the real one.
+
+- **Binaries must be on `PATH` and pre-authenticated.** The daemon does not
+  bundle or manage CLI auth; it shells out to whatever `codex`/`claude`
+  resolves to for the user running it. Check resolution before assuming
+  anything: `which codex`, `which claude` (or `command -v` inside a script
+  that might run under a shell function/alias). On the machine this was
+  probed on, `codex` resolved through a shell function to a brew-installed
+  `@openai/codex` npm shim
+  (`/home/linuxbrew/.linuxbrew/bin/codex -> .../lib/node_modules/@openai/codex/bin/codex.js`)
+  and `claude` resolved to `~/.local/bin/claude ->
+  ~/.local/share/claude/versions/<version>`. Exact resolution is
+  machine-specific and will differ elsewhere — always re-check, never assume
+  a path from this doc still holds.
+- **The daemon spawns them directly, with no test-mode substitution.**
+  `crates/daemon/src/codex_app_server.rs` and `crates/daemon/src/claude_cli.rs`
+  both call `Command::new(&self.config.codex_bin)` /
+  `Command::new(&self.config.claude_bin)` (around lines 772 and 753
+  respectively), and `codex_bin`/`claude_bin` default to the bare binary name
+  (`"codex"` / `"claude"`, resolved via `PATH`). No environment-variable or
+  build-flag override path exists in either file — there is no built-in
+  daemon-side mock/stub mode to defeat; if the binary resolves and is
+  authenticated, the daemon runs the real thing.
+- **The frontend's own harness routing matters more than which test file you
+  use.** `ws-dashboard/frontend/src/App.tsx`'s `realAgentChatHarness()`
+  (around line 430) routes exactly `"codex"` and `"claude"` tile picks
+  through the real fetch-based `activitySessionClient.ts` adapter
+  unconditionally; only `"opencode"` (no real adapter wired yet) stays on the
+  synthetic in-browser `activitySessionStub.ts` provider. So clicking the
+  Codex or Claude tile — whether by hand, via an ad hoc probe script, or via
+  the acceptance suite — always issues the real REST calls
+  (`POST .../activity/codex-sessions`, etc.) to the daemon, which in turn
+  spawns a real CLI process, provided that binary is reachable.
+- **Do not trust the acceptance spec file's own naming/assertions as proof of
+  stub isolation.** `dashboard-acceptance.spec.ts`'s
+  `"open new agent tab and launch a stub harness session"` step (around line
+  2534) still asserts the transcript contains the literal string
+  `"stub provider"` after clicking the Codex tile — that string only exists
+  in `activitySessionStub.ts`. This assertion predates the real-adapter
+  wiring described above and reads as a stale leftover from before Codex/Claude
+  had a real adapter, not a guarantee that the suite runs stub-isolated
+  today. Don't reason about real-vs-stub behavior from that spec file's
+  comments or test names.
+- **Recommended way to reach a real harness deliberately**: don't use
+  `dashboard-acceptance.spec.ts` at all (its fixture lifecycle and stale
+  stub-flavored assertions make outcomes there ambiguous). Instead:
+  1. Launch the daemon standalone exactly as in "Prerequisites" above
+     (`--no-auth`, an isolated `WS_DASHBOARD_STATE_HOME`, bound to
+     `127.0.0.1:<port>` — not `localhost`, which can resolve to a different
+     loopback interface and complicate cookie/origin assumptions).
+  2. Drive it with a plain ad hoc Playwright script per "Running a headless
+     probe script" / "Driving the real UI" above, clicking the Codex/Claude
+     tile using the confirmed selectors.
+  3. Cross-check via the transcript endpoint ("Cross-checking against the
+     daemon directly" above) and/or network interception (next section) to
+     confirm real, non-synthetic content — a real turn takes noticeably
+     longer and produces different transcript shapes than the stub's
+     near-instant canned text (see "Known pitfall this method caught" above
+     for a concrete example of a real Codex turn's actual timing/content).
+
+## Verifying past a hidden-but-functional element
+
+Probed 2026-07-20, while chasing
+`260713-bug-dashboard-acceptance-codex-tile-transcript-hidden`. That ticket
+documents a standing, separately-tracked defect: the
+`agent-chat-transcript` div (`[data-testid="agent-chat-transcript"]`,
+`App.tsx:7816`, styled by `.agent-chat-pane-transcript` in `styles.css`) can
+be computed-`hidden` — via an as-yet-untraced ancestor, likely a Dockview
+inactive-tab/pane visibility mechanism — even when the underlying session
+and its transcript data are completely healthy on the daemon side. The tab
+header updates correctly and the prompt input appears; only the transcript
+body area fails to become visible.
+
+This is a landmine for any verification script: `toBeVisible()` assertions
+and screenshots will both look "broken" in this state regardless of whether
+the actual thing you're investigating has anything to do with visibility.
+Do not conclude "the session/data is broken" from a hidden transcript alone.
+
+Instead, verify real data flow through channels that don't depend on CSS
+visibility:
+
+- Read DOM `textContent`/`innerHTML` directly — unlike `click()`,
+  Playwright's `textContent()`/`innerHTML()` locator methods do not
+  auto-wait for visibility, so they still return real content on a
+  computed-hidden element.
+- Intercept the underlying network traffic (`page.on('response', ...)` or
+  route interception) to confirm the daemon actually produced/streamed the
+  expected data, independent of whether the frontend chooses to display it.
+
+Reusable idiom combining both:
+
+```js
+// Track transcript API responses independent of the DOM's visual state.
+const transcriptResponses = [];
+page.on('response', async (res) => {
+  if (res.request().method() === 'GET' && res.url().includes('/transcript')) {
+    const body = await res.json().catch(() => null);
+    if (body) transcriptResponses.push(body);
+  }
+});
+
+// ... click the Codex/Claude tile, send a prompt, wait as needed ...
+
+// Do NOT gate on toBeVisible() here — the transcript div can be
+// computed-hidden per 260713-bug-dashboard-acceptance-codex-tile-transcript-hidden
+// even when the session is completely healthy. Read the DOM directly instead;
+// textContent()/innerHTML() work even while the element is hidden.
+const transcript = page.locator('[data-testid="agent-chat-transcript"]');
+const transcriptHtml = await transcript.innerHTML();
+console.log('[transcript DOM, may be CSS-hidden]', transcriptHtml.slice(0, 500));
+
+// Cross-check against the last polled transcript response.
+const last = transcriptResponses.at(-1);
+console.log('[transcript API]', 'live:', last?.live, 'blocks:', last?.blocks?.length);
+```
+
+If the DOM `innerHTML`/API `blocks` show real content but `toBeVisible()`
+still fails, the symptom is the known hidden-transcript bug (or a sibling of
+it), not a data/session problem — do not misattribute it as a backend or
+session-launch failure.
+
+## Screenshot capture
+
+Probed 2026-07-20. `page.screenshot(...)` at key steps is useful for
+after-the-fact visual review of a probe run, e.g.:
+
+```js
+await page.screenshot({
+  path: '/path/to/session/scratchpad/codex-tile-after-send.png',
+  fullPage: true,
+});
+```
+
+- Save under this session's own scratchpad directory, not `/tmp` directly
+  and never inside the repo tree — the existing acceptance suite keeps its
+  own screenshots (`.artifacts/`, Playwright's `test-results/`) gitignored
+  for the same reason (`ws-dashboard/frontend/e2e/.gitignore`,
+  `ws-dashboard/frontend/.gitignore`).
+- Treat screenshots as ephemeral, session-scoped debugging aids for the
+  current investigation only, not permanent artifacts — do not cite a
+  screenshot path in a ticket or writeup as something that will still exist
+  later; re-run the probe to regenerate one if needed (mirrors
+  `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden`'s own
+  caveat about its `test-failed-1.png`: "cite only", not moved/copied).
+- A screenshot alone is not sufficient evidence of a working (or broken)
+  feature — see "Verifying past a hidden-but-functional element" above for
+  why a passing/failing visual check can be misleading on its own.
+
 ## When to reuse vs. extend this doc
 
 Reuse this procedure as-is for any future dashboard chat/session live-UI

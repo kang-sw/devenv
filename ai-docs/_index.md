@@ -69,7 +69,7 @@ history.
 | `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
 | `ai-docs/ref/windows-dogfood.md` | Native-Windows source-build dogfood / Phase C cold-load acceptance procedure |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
-| `ai-docs/ref/dashboard-headless-browser-verification.md` | Headless-Playwright + no-auth-daemon procedure for live-UI dashboard bug verification without human reproduction |
+| `ai-docs/ref/dashboard-headless-browser-verification.md` | Headless-Playwright dashboard verification: no-auth-daemon ad hoc live-UI probing, `npm run test:browser` cold-start, driving a real (non-stub) Codex/Claude harness, and verifying past the hidden-transcript landmine |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
 | `ws/infra.read("impl-playbook")` | Implementation discipline |
 | `ws/infra.read("subagent-rules")` | Subagent dispatch rules |
