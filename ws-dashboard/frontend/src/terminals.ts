@@ -275,7 +275,12 @@ export async function resizeTerminal(
   if (!response.ok) {
     throw new Error(await terminalErrorMessage(response));
   }
-  return (await response.json()) as TerminalSessionView;
+  const session = (await response.json()) as TerminalSessionView;
+  return {
+    ...session,
+    serverRoute:
+      session.serverRoute ?? serverRoute ?? LOCAL_DASHBOARD_SERVER_ROUTE,
+  };
 }
 
 export async function closeTerminal(

@@ -38,6 +38,7 @@ import {
   workRootTerminalsEndpoint,
   type TerminalSessionView,
 } from "./terminals.js";
+import { LOCAL_DASHBOARD_SERVER_ROUTE } from "./resourceModel.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected)
@@ -763,6 +764,41 @@ await (async () => {
     "closeTerminal deletes the server-scoped url",
   );
   assertEqual(recorded().method, "DELETE", "closeTerminal uses DELETE");
+})().catch((error) => {
+  console.error(error);
+  throw error;
+});
+
+// Regression: resizeTerminal must stitch the caller's serverRoute onto the
+// returned session when the daemon response omits the serverRoute field, so a
+// resize never collapses a linked-terminal pane back onto the local route.
+await (async () => {
+  const sessionWithoutRoute: TerminalSessionView = {
+    terminalId: "term-resize",
+    workRootId: "root-resize",
+    title: "Resize",
+    status: "running",
+    columns: 80,
+    rows: 24,
+    createdAtMs: 1,
+    cwdHint: null,
+  };
+
+  installFetchMock(sessionWithoutRoute);
+  const resizedRemote = await resizeTerminal("term-resize", 100, 40, "wsl-daemon");
+  assertEqual(
+    resizedRemote.serverRoute,
+    "wsl-daemon",
+    "resizeTerminal stitches the caller's serverRoute when the response omits it",
+  );
+
+  installFetchMock(sessionWithoutRoute);
+  const resizedLocal = await resizeTerminal("term-resize", 100, 40, undefined);
+  assertEqual(
+    resizedLocal.serverRoute,
+    LOCAL_DASHBOARD_SERVER_ROUTE,
+    "resizeTerminal falls back to the local route when no route is provided",
+  );
 })().catch((error) => {
   console.error(error);
   throw error;

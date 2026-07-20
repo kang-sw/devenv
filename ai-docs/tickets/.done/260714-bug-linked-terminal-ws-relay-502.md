@@ -4,6 +4,7 @@ related:
   260716-feat-ws-dashboard-daemon-persistent-log-layer: "prerequisite — the persistent rolling-file log sink must land first so the instrumentation below is captured durably on a detached daemon"
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-20
 ---
 
 # Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
@@ -576,3 +577,56 @@ teardown-semantics fix (servers.rs:1621-1655); and `tokio-tungstenite` still
 carries no TLS backend, so any `https://` linked server's terminal WS would fail
 via `Error::Tls` collapsed into the same blanket 502. Add relay test coverage
 (currently zero) alongside whichever of these is addressed.
+
+### Result (6b900191) - 2026-07-20
+
+Phase 2 as planned (server-scoped D5-pattern selection stickiness in
+`resourceModel.ts`/`openRootLookup.ts` + the terminal socket-effect split in
+`App.tsx`) landed and passed partitioned review clean through `2f717bcf`, and is
+RETAINED as defense-in-depth for the transient single-poll omission class.
+However, the first live multi-server dogfood (Windows gateway `:4300` relaying
+the linked WSL daemon `wsl-daemon`) proved that planned fix is a **no-op for the
+actual reproduction**: instrumented repro showed the sticky cache never engaged
+(the relayed resource tree arrived stable and complete), `reconcile` removed
+nothing, and the close-cleanup path never fired. The 2026-07-16 "frontend
+active-root/selection-derivation instability" framing therefore does NOT explain
+the dogfooded symptom either — it, like the earlier backend-relay framings, was
+diagnosed without a live multi-server exercise.
+
+**Corrected root cause.** `resizeTerminal` (`frontend/src/terminals.ts`) returned
+the raw daemon response without re-stitching the client-side `serverRoute` (unlike
+`createTerminal`/`listTerminals`, which do). Because `forwardTerminalResize`
+replaces a pane's whole `session` with that response, a linked (non-local)
+terminal pane's `session.serverRoute` was clobbered to `undefined`. The workbench
+pane filter `(session.serverRoute ?? "server-local") === root.resourcePath.serverId`
+then fails for a non-local root (e.g. `wsl-daemon`), so each terminal pane drops
+out of the active root's editor groups one at a time as its xterm fit-resize
+fires — collapsing the workbench to an empty Dockview `dv-watermark`. Local roots
+are unaffected because the `"server-local"` fallback coincidentally matches.
+Remote-only; surfaced on the first dogfood of linked-server terminals.
+
+**Evidence.** Backend relay verified stable and correct via curl on both the
+gateway-relayed `/api/dashboard/servers/wsl-daemon/resources` and
+`.../work-roots/<id>/terminals` (5 running sessions delivered stably; WSL-daemon
+sessions confirmed still alive after the repro). Staged frontend console
+instrumentation showed a size-preserving `serverRoute` mutation originating from
+the `resize` `setTerminalPanes` site while `matchedTerminalPaneCount` fell
+5→2→1→0 with no pane-map removal and no status change — isolating the defect to
+the frontend session-replacement path, not backend delivery.
+
+**Fix.** Stitch `serverRoute` at the fetcher boundary in `resizeTerminal` (commit
+`6b900191`), mirroring the other two fetchers; an audit confirmed `resize` was the
+only vulnerable session-replacement path (the other five spread the existing
+session). Regression unit test added (`terminals.test.ts`). Validated in dogfood:
+linked terminals now persist, no watermark collapse. Frontend build and
+`test:terminals` pass.
+
+**RU1/RU2.** Not implicated in the actual reproduction (the collapse is the resize
+`serverRoute` clobber, not a keep-alive unmount or the unlanded atomic
+`selectRoot` refactor). RU2 remains out of scope per the plan.
+
+**Follow-up.** The broader latent-bug class — remote-only defects masked by the
+`?? "server-local"` fallback and by skipped client-side `serverRoute` stitching —
+is captured as idea ticket `260720-research-remote-serverroute-masking-audit`.
+The plan's deferred backend latent defects (relay pump-loop single-direction
+teardown; missing `tokio-tungstenite` TLS backend) remain untouched and unclaimed.

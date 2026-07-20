@@ -260,6 +260,91 @@ export function resolveActiveResources(
   );
 }
 
+// Server-scoped sticky-selection cache (260714 Phase 2 Prong 1), modeled
+// directly on the vetted D5 `withLastNonNullResourcesByServer`/
+// `resolveActiveResources` shape above. This bridges a narrower gap than D5:
+// D5 covers "the whole resource tree for this server is momentarily absent";
+// this covers "the tree is present, but the previously-selected root's own
+// entry is momentarily missing from it" (e.g. a `gitLinkedWorktree` child
+// dropped from one poll response). `bridged` tracks whether this entry has
+// already been used to paper over one miss, so a second consecutive miss for
+// the same `selectedId` is treated as a genuine removal rather than bridged
+// again indefinitely.
+export type LastMatchedSelectionByServer = Record<
+  string,
+  { selectedId: string; selection: WorkbenchSelection; bridged: boolean }
+>;
+
+// Resolves `selectedId` against `resources`, bridging a single transient
+// omission of the previously-matched selection using a server-scoped cache
+// (see `LastMatchedSelectionByServer` above). Pure - no `useRef`/`useState`;
+// callers own advancing the returned `nextLastMatchedSelectionByServer` into
+// whatever storage they use across calls (mirrors how `resolveActiveResources`
+// callers own advancing `lastNonNullResourcesByServer`).
+//
+// Deliberately does NOT engage when `resources` itself is `null` - that case
+// is already fully owned by D2 (slot-level fallback)/D5 (`resolveActiveResources`)
+// upstream of this function; bridging here would double up on stickiness
+// already applied to the tree itself.
+export function resolveStickyWorkbenchSelection(
+  resources: DashboardResourcesView | null,
+  selectedId: string | null,
+  selectedServerId: string,
+  lastMatchedSelectionByServer: LastMatchedSelectionByServer,
+): {
+  selection: WorkbenchSelection | null;
+  nextLastMatchedSelectionByServer: LastMatchedSelectionByServer;
+} {
+  if (!resources) {
+    return {
+      selection: null,
+      nextLastMatchedSelectionByServer: lastMatchedSelectionByServer,
+    };
+  }
+
+  const { selection, matched } = resolveWorkbenchSelectionWithMatch(
+    resources,
+    selectedId,
+  );
+
+  if (matched && selectedId && selection) {
+    return {
+      selection,
+      nextLastMatchedSelectionByServer: {
+        ...lastMatchedSelectionByServer,
+        [selectedServerId]: { selectedId, selection, bridged: false },
+      },
+    };
+  }
+
+  const cached = lastMatchedSelectionByServer[selectedServerId];
+  if (cached && selectedId && cached.selectedId === selectedId) {
+    if (!cached.bridged) {
+      // First consecutive miss for this selection: bridge over it with the
+      // last-matched selection, and mark the entry bridged so a second
+      // consecutive miss (below) is treated as a genuine removal.
+      return {
+        selection: cached.selection,
+        nextLastMatchedSelectionByServer: {
+          ...lastMatchedSelectionByServer,
+          [selectedServerId]: { ...cached, bridged: true },
+        },
+      };
+    }
+
+    // Second consecutive miss: genuine removal, not a transient omission.
+    // Drop the cache entry and fall through to the fresh (non-sticky)
+    // selection.
+    const next = { ...lastMatchedSelectionByServer };
+    delete next[selectedServerId];
+    return { selection, nextLastMatchedSelectionByServer: next };
+  }
+
+  // No cache entry for this server, or `selectedId` itself changed (a real
+  // user re-selection) - nothing to bridge, cache unchanged.
+  return { selection, nextLastMatchedSelectionByServer: lastMatchedSelectionByServer };
+}
+
 export type DashboardServersView = {
   servers: ServerConnectionView[];
 };
@@ -438,12 +523,19 @@ export function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
   return root.kind === "gitLinkedWorktree";
 }
 
-export function resolveWorkbenchSelection(
+// Result of walking the resource tree for `selectedId`: `matched` is true
+// only when `selectedId` was found exactly (workspace id, root id, or nested
+// instance id); a `selection` returned with `matched: false` fell through to
+// `fallback` (the first root walked). Callers that need to distinguish "hit"
+// from "fallback" (260714 Phase 2 Prong 1 sticky selection) use
+// `resolveWorkbenchSelectionWithMatch`; the plain `resolveWorkbenchSelection`
+// below stays a thin wrapper so its existing callers/behavior are unaffected.
+function resolveWorkbenchSelectionWithMatchInternal(
   resources: DashboardResourcesView | null,
   selectedId: string | null,
-): WorkbenchSelection | null {
+): { selection: WorkbenchSelection | null; matched: boolean } {
   if (!resources) {
-    return null;
+    return { selection: null, matched: false };
   }
 
   let fallback: WorkbenchSelection | null = null;
@@ -456,10 +548,13 @@ export function resolveWorkbenchSelection(
     if (selectedId === workspace.id && workspaceRoot) {
       const mainInstance = workspaceRoot.mainInstances[0] ?? null;
       return {
-        workspace,
-        root: workspaceRoot,
-        mainInstance,
-        selectedInstance: mainInstance,
+        selection: {
+          workspace,
+          root: workspaceRoot,
+          mainInstance,
+          selectedInstance: mainInstance,
+        },
+        matched: true,
       };
     }
 
@@ -474,19 +569,36 @@ export function resolveWorkbenchSelection(
       fallback ??= rootSelection;
 
       if (selectedId === root.id) {
-        return rootSelection;
+        return { selection: rootSelection, matched: true };
       }
 
       for (const main of root.mainInstances) {
         const selectedInstance = findInstanceById(main, selectedId);
         if (selectedInstance) {
-          return { workspace, root, mainInstance: main, selectedInstance };
+          return {
+            selection: { workspace, root, mainInstance: main, selectedInstance },
+            matched: true,
+          };
         }
       }
     }
   }
 
-  return fallback;
+  return { selection: fallback, matched: false };
+}
+
+export function resolveWorkbenchSelectionWithMatch(
+  resources: DashboardResourcesView | null,
+  selectedId: string | null,
+): { selection: WorkbenchSelection | null; matched: boolean } {
+  return resolveWorkbenchSelectionWithMatchInternal(resources, selectedId);
+}
+
+export function resolveWorkbenchSelection(
+  resources: DashboardResourcesView | null,
+  selectedId: string | null,
+): WorkbenchSelection | null {
+  return resolveWorkbenchSelectionWithMatchInternal(resources, selectedId).selection;
 }
 
 export function findInstanceById(

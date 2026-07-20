@@ -216,14 +216,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260714-bug-linked-terminal-ws-relay-502` (`ready`, bug) - confirmed root
-  cause is frontend active-root/selection-derivation instability (not the
-  backend relay); Phase 2 implementation target is the two-pronged fix
-  (selection stickiness in `resourceModel.ts`/`openRootLookup.ts` + an
-  OPEN-socket guard at `App.tsx:8615`); soft note: `related:` lists
-  `260716-feat-ws-dashboard-daemon-persistent-log-layer` as a prior-phase
-  tracing prerequisite, but the Phase 2 frontend fix itself does not strictly
-  depend on it.
 - `260714-bug-git-status-poll-index-lock-staleness` (ready, bug) - dogfood
   report of a stale Windows-side `.git/index.lock` under WSL2; confirmed the
   dashboard daemon's 5s visible-WorkRoot git-status poll runs a lock-taking
