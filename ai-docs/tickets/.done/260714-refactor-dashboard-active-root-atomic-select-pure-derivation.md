@@ -6,6 +6,7 @@ related:
   260714-bug-dashboard-select-server-switch-mount-gap-flash-hide: failure mode #3 (server-switch mount gap) - the synchronous-mount hack this design replaces structurally
   260714-bug-dashboard-worktree-label-click-requires-server-focus: failure mode #2 fix that introduced #3; its serverId-threading is subsumed by the atomic selectRoot entry point
   260714-feat-dashboard-multi-server-workbench-keepalive: origin of the cluster (cross-server hide-not-unmount); this refactor must preserve its keep-alive behavior
+completed: 2026-07-20
 ---
 
 # Refactor dashboard active-work-root selection into one atomic action + pure derivation
