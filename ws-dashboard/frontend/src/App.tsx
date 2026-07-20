@@ -8168,6 +8168,16 @@ function terminalWorkbenchPane(
   };
 }
 
+// Mounted per terminal pane and stays mounted (with its wrapper
+// `display:none`'d by Dockview) while the owning root is not the active
+// root - a mere selection/visibility flip does NOT unmount this component.
+// It IS unmounted when the terminal is genuinely removed from the
+// daemon-reported session list feeding `placeTerminalSessions`/
+// `terminalPanes`. This means React's own mount lifetime of
+// `TerminalPaneBody` already IS "logical terminal presence" (260714 Phase 2
+// Prong 2) - the socket-lifecycle effect below keys its teardown on that
+// mount lifetime (deps `[terminalId]`, not `paneVisible`) rather than
+// inventing a new boolean/flag for the same concept.
 function TerminalPaneBody({
   pane,
   actions,
@@ -8555,34 +8565,36 @@ function TerminalPaneBody({
     };
   }, []);
 
+  // Effect A - visibility bookkeeping only (260714 Phase 2 Prong 2). Deps
+  // `[paneVisible]` ONLY: this effect never creates or tears down the
+  // socket (see Effect B below) - a `paneVisible` flip (root deselected, or
+  // a different Dockview tab brought to front within the same root) must
+  // not touch the socket at all, since the terminal is still logically
+  // open the whole time (see the mount-lifetime note on `TerminalPaneBody`
+  // above). `onSocketStatus` is intentionally NOT called here on hide:
+  // per Prong 2 the socket stays connected while hidden, so its status
+  // should keep reading "connected", not a fabricated "disconnected" -
+  // `onVisibilityGated` alone is what the HTTP output-poll fallback needs
+  // to stay suppressed while hidden (see `shouldPollTerminalOutput` in
+  // `terminals.ts`, whose `socketStatus !== "connecting"/"connected"`
+  // clause already returns `false` once the socket stays connected, making
+  // `visibilityGated` a secondary/redundant-but-harmless guard for this
+  // case and still the primary one for a genuine post-error fallback).
   useEffect(() => {
     if (!paneVisible) {
-      liveRef.current.actions.onSocketStatus(
-        liveRef.current.pane,
-        "disconnected",
-        null,
-      );
-      // Mark this closure as "gated because hidden," not a real disconnect,
-      // so the HTTP output-poll fallback does not pick up an idle hidden pane
-      // (see `shouldPollTerminalOutput`) - only genuine socket errors/exits
-      // should fall back to polling.
       liveRef.current.actions.onVisibilityGated(liveRef.current.pane, true);
       return;
     }
     liveRef.current.actions.onVisibilityGated(liveRef.current.pane, false);
-    // Deterministic corrective refit: this runs on every effect setup where
-    // `paneVisible` is true (deps `[terminalId, paneVisible]`) - both a
-    // false -> true visibility transition (pane shown again after a
-    // tab/session/workRoot switch) and a `terminalId` change while the pane
-    // stays visible. Either way, the pane may have been measured
-    // short-but-visible for a frame while it was still transitioning (see
-    // fitNow's degenerate-container guard above), or measured while briefly
-    // hidden/detached (no ResizeObserver correction). Explicitly re-fit now
-    // rather than relying solely on the next incidental ResizeObserver
-    // callback, and forward the size only if it actually changed, reusing
-    // the existing fitNow/forwardSize closures. Harmless on the extra
-    // terminalId-change trigger: the refit is idempotent and forwardSize
-    // dedupes via `lastForwardedSizeRef`.
+    // Deterministic corrective refit on a false -> true visibility
+    // transition (pane shown again after a tab/session/workRoot switch):
+    // the pane may have been measured short-but-visible for a frame while
+    // still transitioning (see fitNow's degenerate-container guard above),
+    // or measured while briefly hidden/detached (no ResizeObserver
+    // correction). Explicitly re-fit now rather than relying solely on the
+    // next incidental ResizeObserver callback, and forward the size only if
+    // it actually changed, reusing the existing fitNow/forwardSize
+    // closures.
     const beforeFit = terminalRef.current
       ? { columns: terminalRef.current.cols, rows: terminalRef.current.rows }
       : null;
@@ -8595,6 +8607,28 @@ function TerminalPaneBody({
     ) {
       forwardSizeRef.current?.();
     }
+  }, [paneVisible]);
+
+  // Effect B - socket lifecycle only (260714 Phase 2 Prong 2). Deps
+  // `[terminalId]` ONLY, deliberately excluding `paneVisible`: the socket
+  // now connects once per `terminalId` (mount, or a genuine terminal-id
+  // change e.g. a reattach to a new daemon session) and is torn down only
+  // on a `terminalId` change or this component's own unmount - never on a
+  // mere visibility flip. `TerminalPaneBody` stays mounted (wrapper
+  // `display:none`'d) while its owning root is not the active root and is
+  // only unmounted when the terminal is genuinely removed from the
+  // daemon-reported session list, so React's own mount lifetime already IS
+  // "logical terminal presence" (see the type-level comment on
+  // `TerminalPaneBody` above) - keying teardown on that lifetime, instead
+  // of on `paneVisible`, is the whole fix: a hidden-but-still-open terminal
+  // (root deselected, or a different Dockview tab in front) no longer has
+  // its OPEN socket closed and immediately reopened on the next visibility
+  // flip. The only teardown path for an OPEN socket after this split is
+  // this cleanup running for a real `terminalId` change or a genuine
+  // unmount - no leaked-connection path is introduced, since unmount always
+  // runs this same cleanup, which already correctly closes any
+  // non-CONNECTING socket.
+  useEffect(() => {
     let disposed = false;
     const socket = new WebSocket(
       terminalWebSocketUrl(
@@ -8674,14 +8708,15 @@ function TerminalPaneBody({
       // before it reaches OPEN throws "WebSocket is closed before the
       // connection is established" and, for linked/remote-server terminals
       // whose handshake crosses an extra browser -> gateway -> WSL hop, a
-      // transient paneVisible flip from the 100ms focusWatchdog can land
-      // mid-handshake and kill the socket before the daemon relay ever
-      // runs. Leave CONNECTING sockets alone here; the "open" listener
-      // above closes them itself once `disposed` is observed at open time.
-      // close() on OPEN/CLOSING/CLOSED remains a safe no-op/normal close.
+      // transient unmount/remount race (or, before this Prong 2 split, a
+      // `paneVisible` flip) could land mid-handshake and kill the socket
+      // before the daemon relay ever runs. Leave CONNECTING sockets alone
+      // here; the "open" listener above closes them itself once `disposed`
+      // is observed at open time. close() on OPEN/CLOSING/CLOSED remains a
+      // safe no-op/normal close.
       if (socket.readyState !== WebSocket.CONNECTING) socket.close();
     };
-  }, [terminalId, paneVisible]);
+  }, [terminalId]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
   // sequences render as terminal behavior rather than raw text.
