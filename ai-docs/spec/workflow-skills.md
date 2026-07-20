@@ -403,7 +403,11 @@ implemented items that can be reused or merged to avoid duplication, synthesizes
 corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, checks for over-alignment signals such as weak premise handling or
 missing countercases, then steers the discussion toward the best-supported
-direction.
+direction. When the user specifically asks to verify a design's validity, it
+also dictates the concluded design in full — the hypothesis under review,
+rejected alternatives, and paths to already-read evidence files — to a fresh
+higher-tier subagent and folds that subagent's independent judgment into its
+recommendation.
 It intentionally remains compact and frequent-use; downstream authoring sweeps
 must not force full workflow-skill ceremony onto this checkpoint unless its
 actual output or end state is unclear.
@@ -474,7 +478,7 @@ checked out on `goal/<slug>`" is the entire signal.
 `lead-verify-design` is removed; its `SKILL.md` and rsrc playbook were deleted
 entirely (delete-don't-diet decision, `260630-epic-skill-playbook-diet`). Its
 premise-gated design-verification function is now covered by the ticket
-lifecycle's Sage Review Gate (`{#260624-sage-review-gate}`), which dispatches
+lifecycle's Sage Review Gate (`260624-sage-review-gate`), which dispatches
 `ticket-reviewer-design` automatically at `todo/`→`ready/` promotion, plus the
 conditional independent-judgment step added to `lead-verify-discussion`. Do
 not route new work through it.
