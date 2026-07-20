@@ -216,26 +216,14 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Focus
 
-- `260714-bug-linked-terminal-ws-relay-502` (`todo`, bug) - **WIP, not
-  resolved.** Diagnosis is now CONFIRMED and OVERTURNS the earlier "mid-session
-  relay pump drop" framing: the root cause is a FRONTEND active-root /
-  selection-derivation instability, not a backend relay bug. A 5s poll rebuilds
-  the linked server's resource tree (`mergeResourcesByServer`,
-  `resourceModel.ts:204-209`); when that tree momentarily omits the linked
-  sub-worktree's `workRoot` (tree still non-null, so the D2 slot-fallback never
-  engages), `resolveWorkbenchSelection` silently falls back to the primary root
-  (`resourceModel.ts:474/489`) -> `effectiveActiveRootKey` flips -> the
-  sub-worktree wrapper is `display:none` -> `focusWatchdog` sets
-  `paneVisible=false` -> the terminal socket effect cleanup closes the OPEN
-  socket (`App.tsx:8615`); next poll flips back and reopens the same terminalId,
-  ~4s loop. Regression origin: the active-root refactor Phase 1 (`ddd353fe`, D3)
-  deleted the `lastActiveRootKeyRef`/`resolveEffectiveActiveRootKey` safety net.
-  Diagnostic tracing landed (Phase 1, backend `servers.rs` relay lifecycle logs;
-  kept as infra) and hotfix `af058b73` is PARTIAL (root terminals stable,
-  sub-worktree terminals still churn). Real fix deferred to Phase 2 (two-pronged:
-  selection stickiness in `resourceModel.ts`/`openRootLookup.ts` + an OPEN-socket
-  guard at `App.tsx:8615`). Work is on branch `impl/relay-502-tracing`, merged up
-  as WIP so the diagnosis + partial fix are not lost; resume next week.
+- `260714-bug-linked-terminal-ws-relay-502` (`ready`, bug) - confirmed root
+  cause is frontend active-root/selection-derivation instability (not the
+  backend relay); Phase 2 implementation target is the two-pronged fix
+  (selection stickiness in `resourceModel.ts`/`openRootLookup.ts` + an
+  OPEN-socket guard at `App.tsx:8615`); soft note: `related:` lists
+  `260716-feat-ws-dashboard-daemon-persistent-log-layer` as a prior-phase
+  tracing prerequisite, but the Phase 2 frontend fix itself does not strictly
+  depend on it.
 - `260714-bug-git-status-poll-index-lock-staleness` (ready, bug) - dogfood
   report of a stale Windows-side `.git/index.lock` under WSL2; confirmed the
   dashboard daemon's 5s visible-WorkRoot git-status poll runs a lock-taking
