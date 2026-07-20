@@ -42,7 +42,6 @@ Included:
 - `lead-add-rule`
 - `lead-ship`
 - `lead-sprint`
-- `lead-verify-design`
 - `lead-verify-discussion`
 - `lead-forge-spec`
 - `lead-forge-mental-model`

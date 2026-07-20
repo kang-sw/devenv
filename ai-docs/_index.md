@@ -350,8 +350,8 @@ dropped tickets live in hidden archive dirs and git history.
   merged to the epic at `04452233`; P1-3 had already merged at `016c1425`.
   **Live follow-ups:** deferred config-surface slice
   (`config.agents_tier`→`config.model_alias`, `config.role_tier`), the
-  `(skill,role)→tier` override surface, the `lead-verify-design` inline-reviewer
-  model/tier path, and `ref/ws-agent-runtime.md` pre-M3 staleness cleanup.
+  `(skill,role)→tier` override surface, and `ref/ws-agent-runtime.md` pre-M3
+  staleness cleanup.
 - `260611-research-ws-per-role-delegation-tuning-config` (idea, research) - owns
   the tier-taxonomy model (two planes: first-class abstraction vs alias/concrete
   layer; native vs opt-in mercenary). First-class axis resolved 2026-06-11 =

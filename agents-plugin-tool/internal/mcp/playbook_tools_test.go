@@ -1907,25 +1907,6 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadVerifyDesign verifies lead-verify-design resolves
-// and is delegates:true (tip must appear).
-func TestPlaybookPrintGoldenLeadVerifyDesign(t *testing.T) {
-	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	s := newTestServerWithHarness(t, "claude")
-
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-verify-design", nil, wsconfig.Options{}, "", nil)
-	if err != nil {
-		t.Fatalf("printPlaybook: %v", err)
-	}
-	if !strings.Contains(body, "judgment isolation") {
-		t.Errorf("body %q: expected doctrine text 'judgment isolation'", body)
-	}
-	// delegates:true (design-reviewer agent) — tip must appear.
-	if !strings.Contains(body, "Continuity tip") {
-		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
-	}
-}
-
 // TestPlaybookPrintGoldenLeadImplement verifies lead-implement resolves
 // and is delegates:true (tip must appear).
 func TestPlaybookPrintGoldenLeadImplement(t *testing.T) {

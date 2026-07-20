@@ -37,7 +37,6 @@ lead-skill-authoring
 lead-sprint
 lead-tune
 lead-update-spec
-lead-verify-design
 lead-verify-discussion
 lead-workflow-manual
 lead-write-spec
@@ -56,7 +55,7 @@ The directly invocable surface is narrowed to 14 entry skills the user invokes a
 `lead-add-rule`, `lead-forge-mental-model`, `lead-forge-spec`,
 `lead-verify-discussion`, `lead-tune`, and `lead-drain-ready-queue`. The remaining
 procedures — `lead-implement`, `lead-write-ticket`, `lead-write-spec`,
-`lead-workflow-manual`, `lead-check-blockers`, `lead-verify-design`,
+`lead-workflow-manual`, `lead-check-blockers`,
 and `lead-update-spec` — are internal procedures served as `ws/playbook.print`
 content invoked by caller skills, not directly user-invoked entry points;
 `lead-write-ticket` and `lead-write-spec` are orchestration-only. The
@@ -187,7 +186,7 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
-`lead-sprint`, `lead-verify-design`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
+`lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill mirrors the episode-oriented sprint shell: it
@@ -472,16 +471,13 @@ no `merge_confirm` override, and no new persisted state — "currently
 checked out on `goal/<slug>`" is the entire signal.
 {#260707-drain-goal-branch-staging}
 
-`lead-verify-design` gives users a premise-gated design verification checkpoint
-for discussed designs. It first runs discussion verification so false or blocker
-premises do not seed the review, then writes a neutral temporary brief that
-separates evidence, constraints, preferences, unknowns, alternatives, and
-non-goals. A fresh deep reviewer receives only the brief and calibrated review
-instructions, then judges keep, revise, reject, or defer without forcing
-findings. The lead classifies findings, removes reviewer-overreach and out-of-scope
-items, reports design risks and simpler alternatives, and treats durable
-ticket/spec persistence as a soft recommendation gate unless explicitly
-requested or required by dogfood-capture rules.
+`lead-verify-design` is removed; its `SKILL.md` and rsrc playbook were deleted
+entirely (delete-don't-diet decision, `260630-epic-skill-playbook-diet`). Its
+premise-gated design-verification function is now covered by the ticket
+lifecycle's Sage Review Gate (`{#260624-sage-review-gate}`), which dispatches
+`ticket-reviewer-design` automatically at `todo/`→`ready/` promotion, plus the
+conditional independent-judgment step added to `lead-verify-discussion`. Do
+not route new work through it.
 {#260524-design-verification-skill}
 
 ### Check Blockers Checkpoint {#260513-check-blockers-skill}

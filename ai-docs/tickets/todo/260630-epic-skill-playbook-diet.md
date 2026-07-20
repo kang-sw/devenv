@@ -116,6 +116,12 @@ by reading the tool's actual generated output.
   grep). Actual deletion is a separate approval step, not covered by this
   ticket-scoping edit.
 
+  2026-07-20: Deletion executed — `lead-verify-design` removed from all live
+  source trees (rsrc bodies, wsflow shim, manifests), Go golden test and
+  wsflow inventory test updated, spec/mental-model/wsflow-mirroring/`_index.md`
+  references updated or mark-removed, per plan
+  `ai-docs/.plans/2026-07/20-1520-verify-design-diet.md`.
+
 ## Out of Scope
 
 - Changing MCP tool behavior or schemas unless serving a Lever B migration.
