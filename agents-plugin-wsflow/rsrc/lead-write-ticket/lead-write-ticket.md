@@ -46,7 +46,7 @@ Movement
 
 1. New ticket: call `{{.McpNamespace}}/tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`; fall back to manual file creation only when the tool is unavailable or errors.
 2. Existing ticket: apply the requested change — phase update, content update, or status move — directly to the loaded body.
-3. Fill the loaded skeleton with a clear problem/goal statement per **Apply Ticket Content**.
+3. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "content")`; install one todo via `todo.append` carrying the returned capture checklist; satisfy it while filling the skeleton and check it only on completion.
 4. Populate `related-mental-model` only with mental-model stems already consulted or explicitly allowed during this procedure (omit `.md`; omit the field when none applied).
 5. For actionable tickets, apply `judge: ticket-shape` for phase count and granularity.
 6. For epic/workset detail that belongs to a child or included ticket: stop this invocation; start a separate `lead-write-ticket` invocation scoped to that ticket.
@@ -55,7 +55,7 @@ Movement
 
 ### 4. Verify
 
-1. Run **Intent Review**.
+1. Call `{{.McpNamespace}}/tickets.checklist(type: "<category>", phase: "intent")`; install one todo via `todo.append` carrying the returned intent-review checklist; satisfy it against the written ticket, fix confirmed gaps in-place, and return unconfirmed gaps to the Open Decision Queue.
 2. If landing status is `ready/` (including a requested `todo/` → `ready/` promotion), run **Spec-address Check**.
 
 ### 5. Commit
@@ -80,11 +80,6 @@ Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` over native `git mv`; 
 3. Workset → `ready/` combined with other edits: do not move status; keep only the valid content edits.
 4. Deferred `todo/` → `ready/` promotion: move only after **Spec-address Check** passes.
 
-## On: Apply Ticket Content
-
-1. Capture every settled decision, contract, agreed API/type/event/UI sketch (literal, not prose-flattened), rejected alternative, constraint, forward-compatibility guardrail, and verification expectation; include suggested implementation strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
-2. Exclude anything unconfirmed — return it to the Open Decision Queue instead of writing it; exclude source-local edit notes unless they are settled constraints.
-
 ## On: Open Decision Queue
 
 1. If the user has not already approved persistence, ask whether to persist the discussion into tickets or specs; stop with no edits when they decline or do not answer.
@@ -94,16 +89,6 @@ Prefer `{{.McpNamespace}}/tickets.move` / `tickets.close` over native `git mv`; 
 5. Continue only when every queue item is confirmed, rejected, or explicitly deferred.
 6. Write confirmed items only; omit rejected, deferred, or unanswered items unless the user explicitly approves recording their status.
 7. Never write draft decisions for later correction.
-
-## On: Intent Review
-
-1. Re-read the written/edited ticket against the conversation and cross-ticket decision review, against the categories in **Apply Ticket Content**.
-2. Test: could a fresh implementer build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket? If yes, capture the missing settled decision.
-3. Check that API/type/event/UI sketches were preserved literally, not prose-flattened.
-4. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus "Next" line was written.
-5. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation. For `workset`, check that it did not create parent-child semantics, decomposition ownership, or implementation phases.
-6. Fix confirmed gaps in-place; return unconfirmed gaps to the Open Decision Queue instead of writing them.
-7. Present a brief correction summary, or confirm nothing was missed.
 
 ## On: Spec-address Check
 
@@ -336,7 +321,7 @@ Applies to a single edit target; **Cascade Edit** reuses this logic across multi
 1. Select targets via the same graph identification as **Cross-ticket decision review**, extended to `_index.md` active inventory when it lists edited tickets; select only targets whose role the propagated decision actually affects; read each before editing.
 2. Apply per-target decision recording per **Cross-ticket decision review**.
 3. Do not promote a target to `ready/` unless the user explicitly asked for ready promotion or routed through `{{.SkillNamespace}}:lead-proceed`; run **Spec-address Check** before commit for any target entering `ready/`.
-4. Run **Intent Review** across the edited set; commit one logical documentation unit when the edits are one decision propagation.
+4. Run **Verify** across the edited set; commit one logical documentation unit when the edits are one decision propagation.
 5. Report edited ticket paths; if exactly one actionable implementation ticket is the natural next target, emit `Next Ticket: <path>` before the final artifact line. Always emit the edited/current ticket path as the final `Ticket:` line.
 
 ## Judgments
