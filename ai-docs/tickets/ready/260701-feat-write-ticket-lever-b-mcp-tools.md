@@ -94,6 +94,32 @@ confirm both todos install, carry the full checklist text, and get checked only
 on phase completion; confirm the deleted prose leaves no dangling references in
 the playbook.
 
+### Result (95a753f0) - 2026-07-20
+
+Added `ws/tickets.checklist(type, phase)` as a pure static lookup
+(`wsdoc.TicketChecklist`), wired both call sites in `lead-write-ticket.md`
+(`### 3. Populate` step 3 → `phase:"content"`; `### 4. Verify` step 1 →
+`phase:"intent"`), each installing exactly one `todo.append` carrying the full
+phase checklist as `instruction`, and deleted the `## On: Apply Ticket Content`
+and `## On: Intent Review` prose. Doctrine and all Phase-2 Sage/Blocked content
+byte-untouched.
+
+Deviations from plan:
+- Tool made **not root-aware** (no `session_key`), following the structurally
+  identical `tickets.template` precedent rather than the initial "root-aware"
+  route framing — it is a static data lookup needing no repo access. Source
+  precedent won over the framing.
+- The `agents-plugin-wsflow/rsrc` byte-mirror + its manifest also had to be
+  regenerated (`TestWsflowRsrcMirrorUpToDate`); the plan only named the
+  canonical `agents-plugin/rsrc` manifest regen.
+- Review (partitioned correctness/fit/test) surfaced that the extracted intent
+  checklist still named the deleted `**Apply Ticket Content**` heading — a
+  dangling reference in every generated todo. Reworded to restate the categories
+  inline (fix commit `95a753f0`), plus test hardening so a dropped/truncated
+  item now fails and empty-input boundaries are asserted.
+
+Verification: `go build ./...` clean; `go test ./internal/wsdoc/... ./internal/mcp/... ./internal/wsrsrc/...` all `ok` (incl. the shipped-manifest + wsflow-mirror freshness guards). The unit tests assert every checklist item travels verbatim for all `(type, phase)` combinations. The ticket's "exercise `lead-write-ticket` end to end on a real ticket edit" step was **not run live** this session — coverage is the unit tests plus the reviewed call-site wiring; the live playbook exercise happens on the next real ticket write.
+
 ### Phase 2: Sage gate-resolve and record MCP tools
 
 The status-split Sage Review Gate (`On: Sage Review Gate` +
@@ -174,7 +200,11 @@ prose.
   partial-ship shapes (~430 lines Phase-1-only, ~230 lines Phase-2-only).
 - Both phases add new MCP tool contracts (`tickets.checklist`,
   `tickets.sage_gate`, `tickets.sage_record`) — externally consumed schemas.
-  Spec addressing (likely contract-first, given other skills or future playbook
-  edits could rely on these schemas) is deferred to promotion time; this ticket
-  stays in `todo/` and does not attempt the ready spec-address gate.
+  Spec addressing was resolved at ready-promotion (2026-07-20) via the
+  `## Spec Impact` section above (contract-first: no — the sole consumer is the
+  `lead-write-ticket` playbook and exact signatures firm up during
+  implementation; the spec documents the built contract at closeout). Phase 1's
+  closeout spec landed in `ai-docs/spec/mcp-tools.md`
+  (`{#260720-tickets-checklist-tool}`); Phase 2 will document `sage_gate`/`sage_record`
+  the same way.
 
