@@ -23,9 +23,10 @@ Topic: user request
 1. Re-objectify the discussion as claims, assumptions, and desired outcome.
 2. Check the highest-risk assumptions against project evidence and existing mechanisms.
 3. Spawn one or more host-native exploration workers directly with scoped task prompts when investigation is useful; collect results before synthesizing.
-4. Name any over-alignment risk in the current direction.
-5. Test the best countercase against the evidence.
-6. Recommend keep, revise, reject, or ask the user to choose.
+4. When the user specifically asks to verify a design's validity, dictate the concluded design in full to a fresh higher-tier subagent — the hypothesis under review, rejected alternatives, and paths to any evidence files already read — and request independent judgment.
+5. Name any over-alignment risk in the current direction.
+6. Test the best countercase against the evidence.
+7. Recommend keep, revise, reject, or ask the user to choose.
 
 ## Output
 
