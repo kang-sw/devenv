@@ -5,6 +5,7 @@ related:
   260713-feat-ws-dashboard-agent-chat-real-adapter-wiring: related
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-20
 ---
 
 # Agent chat UI usability polish from manual browser walkthrough
@@ -214,3 +215,8 @@ Closed as a no-op with respect to code: no CSS/JSX changes were made.
 - "Resume from here" rendering as fully absent (not a visible disabled
   button) is the deliberate capability-gated design from `260711` Phase 3;
   not a defect, no change needed here.
+
+
+## Resolution (2026-07-20)
+
+All 3 phases carry Result sections. Phase 1 (7171aa84) and Phase 2 (1edd3bec) are confirmed reachable from goal/drain-ready-queue, goal/ws-dashboard-tickets, ws-dashboard-dev, and remotes/origin/ws-dashboard-dev — fully merged and pushed. Phase 3 is a documented no-op closed on its own terms. The shared manual-live-browser-confirmation gap across all three phases is accepted and non-blocking per each phase's own Result wording.
