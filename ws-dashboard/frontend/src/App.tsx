@@ -5831,9 +5831,25 @@ function WorkbenchShell({
       },
     );
     if (workbenchModel) {
+      // CONTRACT (260720-bug-dashboard-terminal-split-nonhorizontal-snap-back):
+      // every reader of workbench group/pane-order state (`resolveRootLayout`
+      // via `buildEditorGroupsForRoot`, `App.tsx:~4388`) and every other
+      // writer (`openWorkRootActivityPane`, file-open placement) key by the
+      // server-scoped `serverScopedIdentity(serverId, rootId)`, not the bare
+      // root id. Keying these two writes by `workbenchModel.root.id` left a
+      // drag/drop-created dynamic group and its pane order in a slot no
+      // reader consults, so the derived group list never contained the new
+      // group and the moved pane fell back to `groups[0]` on the next
+      // render, which `syncDockviewWorkbench` then reconciled Dockview back
+      // to (the reported snap-back) - reproducible for any non-horizontal
+      // split of a multi-pane source group. Must match the scoped key.
+      const moveRootKey = serverScopedIdentity(
+        workbenchModel.root.resourcePath.serverId,
+        workbenchModel.root.id,
+      );
       onWorkbenchGroupsByRootChange((currentByRoot) => ({
         ...currentByRoot,
-        [workbenchModel.root.id]: result.groups.map((group, index) => ({
+        [moveRootKey]: result.groups.map((group, index) => ({
           id: group.id,
           label:
             group.label ??
@@ -5844,7 +5860,7 @@ function WorkbenchShell({
       }));
       onPaneOrderByRootChange((currentByRoot) => ({
         ...currentByRoot,
-        [workbenchModel.root.id]: result.paneOrderByGroup,
+        [moveRootKey]: result.paneOrderByGroup,
       }));
       // `terminalPaneOrderByGroup` is a separate registry from
       // `paneOrderByRoot` (see the CONTRACT note near its declaration), so a
