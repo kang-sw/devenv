@@ -1187,6 +1187,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		typeStr, _ := params.Arguments["type"].(string)
 		text, err := wsdoc.TicketTemplate(typeStr)
 		return toolTextResponse(req.ID, text, err)
+	case "tickets.checklist":
+		typeStr, _ := params.Arguments["type"].(string)
+		phaseStr, _ := params.Arguments["phase"].(string)
+		text, err := wsdoc.TicketChecklist(typeStr, phaseStr)
+		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -3626,6 +3631,18 @@ func tools() []map[string]any {
 					"type": stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
 				},
 				"required": []string{"type"},
+			},
+		},
+		{
+			"name":        "tickets.checklist",
+			"description": "Return a ticket-authoring phase's checklist item list as data, for installing into a single todo.append instruction. Use instead of following the phase's static prose section directly.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"type":  stringProperty("Ticket category: feat, bug, refactor, chore, research, workset, or epic."),
+					"phase": enumStringProperty("Ticket-authoring phase.", []string{"content", "intent"}),
+				},
+				"required": []string{"type", "phase"},
 			},
 		},
 		{

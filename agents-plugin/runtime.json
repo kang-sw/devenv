@@ -55,6 +55,7 @@
     "tickets.move": ">=0.33.15-dev <0.34.0",
     "tickets.create": ">=0.33.15-dev <0.34.0",
     "tickets.template": ">=0.33.15-dev <0.34.0",
+    "tickets.checklist": ">=0.33.15-dev <0.34.0",
     "path.generate": ">=0.33.15-dev <0.34.0",
     "workflow_manual": ">=0.33.15-dev <0.34.0",
     "workflow_state": ">=0.33.15-dev <0.34.0",
