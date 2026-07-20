@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -473,6 +473,118 @@ async function visibleWorkbenchGroupIds(page: Page): Promise<string[]> {
         ),
       ).sort(),
     );
+}
+
+async function terminalPaneIds(page: Page): Promise<string[]> {
+  return page
+    .locator('.dockview-workbench-tab[data-workbench-pane-id^="terminal:"]')
+    .evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getAttribute("data-workbench-pane-id") ?? ""),
+    );
+}
+
+// Creates a terminal and returns its pane id by diffing the live terminal
+// pane-id set before/after the click, instead of relying on tab DOM order
+// (`.first()`/`.last()`/`.nth()`), which is not chronological once terminal
+// tabs are split across more than one Dockview group (each group has its own
+// tab bar, so page-wide DOM order no longer matches creation order).
+async function createTerminalAndGetNewPaneId(page: Page): Promise<string> {
+  const before = new Set(await terminalPaneIds(page));
+  await page.locator('[data-command-id="terminal.create"]').click();
+  await expect
+    .poll(async () => (await terminalPaneIds(page)).length, {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(before.size);
+  const created = (await terminalPaneIds(page)).find((id) => !before.has(id));
+  expect(created).toBeTruthy();
+  return created!;
+}
+
+function terminalTabById(page: Page, paneId: string) {
+  return page
+    .locator(`.dockview-workbench-tab[data-workbench-pane-id="${paneId}"]`)
+    .first();
+}
+
+// Resolves the bounding box of the `.dv-groupview` ancestor of a tab, not the
+// outer `[data-workbench-layout-owner="dockview"]` container. Dockview's 20%
+// edge-activation threshold (`droptarget.js` DEFAULT_ACTIVATION_SIZE) is
+// evaluated against a *specific group's* rect; dropping at a boundary between
+// two side-by-side groups over the owner instead hits the sash and fires no
+// move (260720-bug-dashboard-terminal-split-nonhorizontal-snap-back,
+// Codebase Findings).
+async function groupViewBoundingBox(tab: Locator) {
+  const groupView = tab
+    .locator(
+      "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' dv-groupview ')]",
+    )
+    .first();
+  const box = await groupView.boundingBox();
+  expect(box).not.toBeNull();
+  return box!;
+}
+
+async function dragTabToGroupEdge(
+  page: Page,
+  tab: Locator,
+  targetGroupBox: { x: number; y: number; width: number; height: number },
+  fraction: { fx: number; fy: number },
+) {
+  const sourceBox = await tab.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  await page.mouse.move(
+    sourceBox!.x + sourceBox!.width / 2,
+    sourceBox!.y + sourceBox!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    targetGroupBox.x + targetGroupBox.width / 2,
+    targetGroupBox.y + targetGroupBox.height / 2,
+    { steps: 6 },
+  );
+  await page.mouse.move(
+    targetGroupBox.x + targetGroupBox.width * fraction.fx,
+    targetGroupBox.y + targetGroupBox.height * fraction.fy,
+    { steps: 12 },
+  );
+  await page.mouse.up();
+}
+
+// Terminal-pane analog of `expectDurableDockviewSplitDrop` above, generalized
+// to an arbitrary target group rect and edge fraction so it can exercise
+// vertical, 3-way, and inner-existing-group split gestures against a
+// **terminal** pane instead of only the readonly-pane rightward
+// outer-container drop
+// (260720-bug-dashboard-terminal-split-nonhorizontal-snap-back).
+async function expectDurableTerminalSplitDrop(
+  page: Page,
+  tab: Locator,
+  targetGroupBox: { x: number; y: number; width: number; height: number },
+  fraction: { fx: number; fy: number },
+): Promise<{ paneId: string; groupId: string }> {
+  const paneId = await tab.getAttribute("data-workbench-pane-id");
+  const originalGroupId = await tab.getAttribute("data-workbench-group-id");
+  expect(paneId).not.toBeNull();
+  expect(originalGroupId).not.toBeNull();
+
+  await dragTabToGroupEdge(page, tab, targetGroupBox, fraction);
+
+  const movedPane = page
+    .locator(`[data-workbench-pane-id="${paneId}"]`)
+    .first();
+  await expect
+    .poll(async () => movedPane.getAttribute("data-workbench-group-id"), {
+      timeout: 10_000,
+    })
+    .not.toBe(originalGroupId);
+  await settlePastPollCycle(page);
+  const movedTab = terminalTabById(page, paneId!);
+  const movedGroupId = await movedTab.getAttribute("data-workbench-group-id");
+  expect(movedGroupId).not.toBeNull();
+  expect(movedGroupId).not.toBe(originalGroupId);
+  await expect(movedTab).toBeVisible();
+  return { paneId: paneId!, groupId: movedGroupId! };
 }
 
 async function openWorkRootInBrowser(page: Page, rootPath: string) {
@@ -3223,6 +3335,120 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     expect(await terminalRows(page)).toBe(terminalClearFixTallRows);
     note(
       "terminal-clear fix: workRoot round-trip (open second root, switch back) left the terminal's rows/content intact",
+    );
+  });
+
+  // --- Terminal split durability across non-horizontal drop positions -----
+  // (260720-bug-dashboard-terminal-split-nonhorizontal-snap-back). The
+  // confirmed root cause: `movePane` persisted a drag/drop-created dynamic
+  // group and its pane order keyed by the bare `workbenchModel.root.id`,
+  // while every reader (and every other writer) resolves layout under the
+  // server-scoped `serverScopedIdentity(...)` key - so the derived group
+  // list never contained the freshly created group and the moved terminal
+  // fell back into `groups[0]`, and `syncDockviewWorkbench` reconciled
+  // Dockview back to match (the reported snap-back). This only reproduced
+  // for a **multi-pane source group** (the realistic way every ticket
+  // gesture creates a new group), so each drag below is seeded from a group
+  // that still holds >=1 other terminal pane at the moment of the drag.
+  await test.step("terminal split durability across non-horizontal drop positions (260720)", async () => {
+    await expect(terminalTabs(page)).toHaveCount(1);
+    const [firstPaneId] = await terminalPaneIds(page);
+    expect(firstPaneId).toBeTruthy();
+    const originGroupId = await terminalTabById(
+      page,
+      firstPaneId,
+    ).getAttribute("data-workbench-group-id");
+    expect(originGroupId).not.toBeNull();
+
+    // --- Vertical 2-way: seed a 2nd terminal into the origin group (now
+    // multi-pane), then split it to the origin group's own bottom edge.
+    const secondPaneId = await createTerminalAndGetNewPaneId(page);
+    await expectDockviewWorkbench(page);
+    const secondGroupIdBeforeMove = await terminalTabById(
+      page,
+      secondPaneId,
+    ).getAttribute("data-workbench-group-id");
+    expect(secondGroupIdBeforeMove).toBe(originGroupId);
+
+    const originBoxForVertical = await groupViewBoundingBox(
+      terminalTabById(page, secondPaneId),
+    );
+    const verticalMoved = await expectDurableTerminalSplitDrop(
+      page,
+      terminalTabById(page, secondPaneId),
+      originBoxForVertical,
+      { fx: 0.5, fy: 0.95 },
+    );
+    expect(
+      (await visibleWorkbenchGroupIds(page)).length,
+    ).toBeGreaterThanOrEqual(2);
+    note(
+      `terminal split: vertical bottom-edge drop moved terminal ${verticalMoved.paneId} ` +
+        `into group ${verticalMoved.groupId} (origin ${originGroupId}); it survived a poll settle`,
+    );
+
+    // --- 3-way: a fresh terminal always lands in `groups[0]`
+    // (`placeTerminalSessions`/`terminalPlacementState`, which fixes
+    // `focusedGroupId` to `groups[0]`, not "whichever tab was last
+    // clicked"), and the origin group stays `groups[0]` through the moves
+    // above - so the next terminal lands in the (still multi-pane, since T1
+    // remains) origin group again. Split it to a fresh (right) edge.
+    const thirdPaneId = await createTerminalAndGetNewPaneId(page);
+    const thirdGroupIdBeforeMove = await terminalTabById(
+      page,
+      thirdPaneId,
+    ).getAttribute("data-workbench-group-id");
+    expect(thirdGroupIdBeforeMove).toBe(originGroupId);
+
+    const originBoxForThreeWay = await groupViewBoundingBox(
+      terminalTabById(page, thirdPaneId),
+    );
+    const threeWayMoved = await expectDurableTerminalSplitDrop(
+      page,
+      terminalTabById(page, thirdPaneId),
+      originBoxForThreeWay,
+      { fx: 0.95, fy: 0.5 },
+    );
+    const groupIdsAfterThreeWay = await visibleWorkbenchGroupIds(page);
+    expect(new Set(groupIdsAfterThreeWay).size).toBeGreaterThanOrEqual(3);
+    note(
+      `terminal split: 3-way split left ${groupIdsAfterThreeWay.length} distinct groups ` +
+        `(${groupIdsAfterThreeWay.join(", ")}) standing after a poll settle`,
+    );
+
+    // --- Inner-group edge: a 4th terminal again lands in the (still
+    // multi-pane) origin group; drop it onto the *vertical split's* existing
+    // group - an already-populated inner group, not the outer
+    // `[data-workbench-layout-owner]` container. Target the vertical split's
+    // group on its right edge, not its top edge: the top edge directly abuts
+    // the sash it shares with the origin group from the vertical split
+    // above, and (like the outer-owner/sash pitfall noted in the ticket's
+    // root-cause research) a drop that close to an existing sash does not
+    // register as that group's own edge-split zone.
+    const fourthPaneId = await createTerminalAndGetNewPaneId(page);
+    const fourthGroupIdBeforeMove = await terminalTabById(
+      page,
+      fourthPaneId,
+    ).getAttribute("data-workbench-group-id");
+    expect(fourthGroupIdBeforeMove).toBe(originGroupId);
+
+    const innerTargetGroupBox = await groupViewBoundingBox(
+      terminalTabById(page, verticalMoved.paneId),
+    );
+    const innerMoved = await expectDurableTerminalSplitDrop(
+      page,
+      terminalTabById(page, fourthPaneId),
+      innerTargetGroupBox,
+      { fx: 0.95, fy: 0.5 },
+    );
+    expect(innerMoved.groupId).not.toBe(originGroupId);
+    expect(innerMoved.groupId).not.toBe(verticalMoved.groupId);
+    const groupIdsAfterInnerEdge = await visibleWorkbenchGroupIds(page);
+    expect(new Set(groupIdsAfterInnerEdge).size).toBeGreaterThanOrEqual(3);
+    note(
+      `terminal split: inner-group-edge drop onto the vertical split's own group ` +
+        `(${verticalMoved.groupId}) moved terminal ${innerMoved.paneId} into ` +
+        `${innerMoved.groupId}, resolved from that group's own .dv-groupview rect; it persisted`,
     );
   });
 
