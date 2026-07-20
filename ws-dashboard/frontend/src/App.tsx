@@ -124,6 +124,8 @@ import {
   workbenchGroupId,
   DockviewWorkbenchLayout,
   deriveWorkbenchView,
+  driveStickyWorkbenchSelection,
+  initialStickySelectionDriverState,
   findOpenWorkRoot,
   resolveClosedWorkRootRefs,
   withOpenWorkRootKey,
@@ -149,6 +151,7 @@ import {
   type WorkbenchLayoutRestoreSnapshot,
   type TerminalVisualRestoreEntry,
   type TerminalVisualRestoreSnapshot,
+  type StickySelectionDriverState,
 } from "./workbench";
 import {
   applyReadOnlyFilePaneContent,
@@ -265,7 +268,6 @@ import {
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
-  resolveStickyWorkbenchSelection,
   resolveWorkbenchSelection,
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
@@ -275,7 +277,6 @@ import {
   type DashboardResourcesView,
   type DashboardServersView,
   type InstanceView,
-  type LastMatchedSelectionByServer,
   type ResourceEntity,
   type ResourcePath,
   type ResourcesByServer,
@@ -582,33 +583,32 @@ export function App() {
   //
   // Unlike `lastNonNullResourcesByServer` (whose reader, `resolveActiveResources`,
   // never itself mutates the cache - only `withLastNonNullResourcesByServer`
-  // does, once, up front), `resolveStickyWorkbenchSelection` both reads AND
-  // advances the bridged/dropped miss-tracking state in the same call. Both
-  // `workbenchSelection` below and `deriveWorkbenchView`'s internal
-  // resolution must therefore be fed the exact SAME (this render's
-  // not-yet-advanced) cache snapshot, not one already advanced by the other -
-  // otherwise `deriveWorkbenchView`'s call would silently perform a SECOND
-  // consecutive-miss advance on top of the first (e.g. turning this render's
-  // legitimate "first miss, bridge it" into a spurious "second miss, treat as
-  // genuine removal"), which is exactly the "two derivations, two data paths"
-  // divergence class D2/D3 exist to prevent. `renderLastMatchedSelectionByServer`
-  // captures that shared not-yet-advanced snapshot; the ref is updated to the
-  // advanced value only for the NEXT render to read.
-  const lastMatchedSelectionByServerRef = useRef<LastMatchedSelectionByServer>(
-    {},
+  // does, once, up front), the underlying `resolveStickyWorkbenchSelection`
+  // both reads AND advances the bridged/dropped miss-tracking state in the
+  // same call - a NON-idempotent transition that must count in POLL cycles,
+  // not React render invocations. Calling it directly once per render would
+  // advance the bridge/drop transition once per render instead: React's
+  // StrictMode deterministically double-invokes this component body in
+  // development with the ref persisting across both invocations, so a single
+  // omitted poll would resolve as inv1-bridges/inv2-immediately-drops - zero
+  // bridging, the exact bug this fix targets. `driveStickyWorkbenchSelection`
+  // (`workbench/openRootLookup.ts`) is the idempotent driver: it only
+  // actually advances when `renderKey` (activeResources reference +
+  // selectedId + selectedServerId) differs from the last render it advanced
+  // for, so any number of repeat invocations over the SAME poll input (or an
+  // unrelated App-level re-render before the next poll lands) safely replay
+  // the already-committed selection instead of re-advancing. The single
+  // `stickyWorkbenchSelectionRef` bundles the cache with that render-key
+  // memo so both stay consistent across renders.
+  const stickyWorkbenchSelectionRef = useRef<StickySelectionDriverState>(
+    initialStickySelectionDriverState,
   );
-  const renderLastMatchedSelectionByServer =
-    lastMatchedSelectionByServerRef.current;
-  const {
-    selection: stickyWorkbenchSelection,
-    nextLastMatchedSelectionByServer,
-  } = resolveStickyWorkbenchSelection(
-    activeResources,
-    selectedId,
-    selectedServerId,
-    renderLastMatchedSelectionByServer,
-  );
-  lastMatchedSelectionByServerRef.current = nextLastMatchedSelectionByServer;
+  const { selection: stickyWorkbenchSelection, nextDriverState } =
+    driveStickyWorkbenchSelection(
+      { activeResources, selectedId, selectedServerId },
+      stickyWorkbenchSelectionRef.current,
+    );
+  stickyWorkbenchSelectionRef.current = nextDriverState;
   // Render-time active-root derivation (260714 Phase 1, D1/D2). Fold the
   // freshly-resolved selected root into the persisted `openWorkRootKeys` here,
   // where all six committed-state fields are simultaneously in scope, so the
@@ -618,11 +618,13 @@ export function App() {
   // recomputes `activeResources` internally (it is pure); the existing
   // `activeResources`/`workbenchSelection` values above stay as their own
   // consumers elsewhere in `App()` rely on them. Passes the SAME
-  // `renderLastMatchedSelectionByServer` snapshot read above (not the
-  // just-advanced ref value - see the comment on that snapshot) so this call's
-  // internal `resolveStickyWorkbenchSelection` is guaranteed to derive the
-  // identical `.selection` as `stickyWorkbenchSelection` above, by
-  // construction rather than by convention.
+  // `stickyWorkbenchSelection` resolved above (260714 Phase 2 Prong 1
+  // correctness fix) rather than a cache for `deriveWorkbenchView` to
+  // re-derive a selection from - `deriveWorkbenchView` has no ref to drive
+  // the idempotency check above, so it cannot safely re-invoke the
+  // non-idempotent resolver itself; passing the already-driven value in
+  // guarantees the two derivations are identical by construction and stay
+  // idempotent, rather than by convention.
   const { openInstanceKeys: openWorkRootInstanceKeys } = deriveWorkbenchView({
     resourcesByServer,
     lastNonNullResourcesByServer: lastNonNullResourcesByServerRef.current,
@@ -630,7 +632,7 @@ export function App() {
     selectedId,
     openWorkRootKeys,
     openWorkRootRefs,
-    lastMatchedSelectionByServer: renderLastMatchedSelectionByServer,
+    selection: stickyWorkbenchSelection,
   });
   const serverConnections = useMemo(
     () =>
