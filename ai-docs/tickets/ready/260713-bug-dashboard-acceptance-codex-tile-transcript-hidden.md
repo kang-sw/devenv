@@ -109,3 +109,13 @@ previously-failing Codex tile launch step) and `"linked server root picker
 uses server-scoped local gateway routes"` (run for the first time once the
 first test no longer aborts the serial suite early; its outcome is
 currently unverified, not just blocked).
+
+## Deferral (2026-07-20)
+
+Research escalated this to discussion (plan committed on the parked
+`impl/transcript-hidden-fix` branch). Blocked pending a user decision on
+e2e hermeticity: (A) keep the real-adapter wiring and rewrite the
+acceptance spec's stub-shaped assertions; (B) add a deterministic fixture
+and accept losing real-adapter browser coverage; (C) if a fixture is added,
+which layer (daemon Rust vs frontend) it lives at. The separable CSS
+min-height/collapse fix can land independently of that decision.

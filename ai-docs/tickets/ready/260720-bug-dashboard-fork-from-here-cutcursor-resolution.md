@@ -124,3 +124,12 @@ None yet identified — no existing spec stem documents fork-from-here's
 cursor contract at the behavioral level. Contract-first spec: no, this is a
 bug-fix; a spec update should follow once Phase 1's chosen reconciliation
 shape is implemented.
+
+## Deferral (2026-07-20)
+
+Routed through `ws:lead-discuss` this session. Blocked pending user approval
+of the recommended direction — (a) client-side cursor reconciliation
+(reconcile optimistic user-block cursors to server-confirmed transcript
+cursors on poll-merge); the daemon was confirmed to assign real resolvable
+cursors to user blocks too, so direction (a) is viable. Spec-ready but not
+implementation-ready until the user picks a direction.

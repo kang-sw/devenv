@@ -463,3 +463,10 @@ scripted-peer test double.
 - OpenCode wiring is out of scope until `260620` Phase 3 unblocks.
 - Any capability-tiering question already resolved by `260711` Phase 3 or
   the harness mental model should not be re-litigated here — apply it.
+
+## Deferral (2026-07-20)
+
+Blocked-by `260720-bug-dashboard-fork-from-here-cutcursor-resolution`
+(unresolved — awaiting user design-direction), already recorded in this
+ticket's `related:` frontmatter. Phases 1-3 landed; Phase 4's remaining
+fork-from-here confirmation is gated on that bug's fix.

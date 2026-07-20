@@ -1141,3 +1141,10 @@ exit 0) — all green at final commit `6ebc6db2`.
 With Phase 5 complete (to its now-descoped extent) and Phase 3 blocked
 pending an OpenCode install, all currently actionable phases of this ticket
 are done.
+
+## Deferral (2026-07-20)
+
+The remaining unfinished phase (OpenCode ACP adapter, Phase 3) is
+externally blocked — the OpenCode CLI is not installed in this
+environment, and installation was declined this session. Everything else
+in the ticket already shipped. Deferred until OpenCode is available.
