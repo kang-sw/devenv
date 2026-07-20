@@ -123,6 +123,7 @@ import {
   surfaceLogicalKey,
   workbenchGroupId,
   DockviewWorkbenchLayout,
+  applySelectRoot,
   deriveWorkbenchView,
   driveStickyWorkbenchSelection,
   initialStickySelectionDriverState,
@@ -268,7 +269,6 @@ import {
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
-  resolveWorkbenchSelection,
   serverScopedIdentity,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
@@ -647,6 +647,25 @@ export function App() {
     selectedServerIdRef.current = selectedServerId;
   }, [selectedServerId]);
 
+  // 260714 Phase 2, D4: the single atomic action every selection call site
+  // routes through. Commits the `selectedServerIdRef.current`/
+  // `setSelectedServerId`/`setSelectedId` triple in one function body (one
+  // React commit) via the pure `applySelectRoot` core in
+  // `workbench/openRootLookup.ts`. Deliberately does NOT hand-seed
+  // `openWorkRootKeys`/`openWorkRootRefs` - Phase 1's `deriveWorkbenchView`
+  // already folds the freshly-resolved selected root into the render-time
+  // union regardless of whether that state has caught up, so the old
+  // sync-mount hack this replaces is deleted, not moved here. Accepts a
+  // non-work-root `entityId` (server row, workspace row) without complaint;
+  // resolving a concrete root stays entirely in `resolveWorkbenchSelection`
+  // downstream. Empty dependency array: only stable setters/ref involved.
+  const selectRoot = useCallback((serverId: string, entityId: string | null) => {
+    const next = applySelectRoot({ serverId, entityId });
+    selectedServerIdRef.current = next.selectedServerId;
+    setSelectedServerId(next.selectedServerId);
+    setSelectedId(next.selectedId);
+  }, []);
+
   useEffect(() => {
     resourceRefreshCoordinatorRef.current?.resume();
     void loadServers();
@@ -684,17 +703,16 @@ export function App() {
 
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
-      // source of truth for refresh and re-entry.
-      selectedServerIdRef.current = openedView.server.id;
-      setSelectedServerId(openedView.server.id);
+      // source of truth for refresh and re-entry. `openedWorkRootId ??
+      // selectedId` preserves today's "no-op on selectedId when nothing new
+      // resolved" behavior via `selectRoot` - setting state to its existing
+      // value is inert.
+      selectRoot(openedView.server.id, openedWorkRootId ?? selectedId);
       resourceRefreshCoordinatorRef.current?.applyExternalResources(openedView);
-      if (openedWorkRootId) {
-        setSelectedId(openedWorkRootId);
-      }
       void loadServers();
       void loadResources("open");
     },
-    [loadResources, loadServers, activeResources],
+    [loadResources, loadServers, activeResources, selectRoot, selectedId],
   );
 
   useEffect(() => {
@@ -703,23 +721,27 @@ export function App() {
       return;
     }
 
-    if (resources.server.id !== selectedServerIdRef.current) {
-      selectedServerIdRef.current = resources.server.id;
-      setSelectedServerId(resources.server.id);
-    }
+    // 260714 Phase 2, D4: routed through `selectRoot` for a behavior-
+    // preserving generalization, not a silent scope expansion - the previous
+    // `if (resources.server.id !== selectedServerIdRef.current)` guard only
+    // gated the state-setting (it never touched `selectedId`), so passing
+    // the CURRENT `selectedId` back in as `entityId` reproduces a no-op on
+    // that field, and dropping the guard is harmless since `selectRoot`'s
+    // commit is itself idempotent when nothing changed.
+    // `normalizeServerRoute(resources.server.id)` stays unconditional, as
+    // today.
+    selectRoot(resources.server.id, selectedId);
     normalizeServerRoute(resources.server.id);
-  }, [resourcesByServer]);
+  }, [resourcesByServer, selectedId, selectRoot]);
 
   const handleServerSelected = useCallback(
     (server: ServerConnectionView) => {
-      selectedServerIdRef.current = server.id;
-      setSelectedServerId(server.id);
-      setSelectedId(server.id);
+      selectRoot(server.id, server.id);
       if (server.status === "connected") {
         void loadResources("explicit");
       }
     },
-    [loadResources],
+    [loadResources, selectRoot],
   );
 
   const applyServerConnection = useCallback(
@@ -735,15 +757,13 @@ export function App() {
           : [...servers, server];
         return { servers: nextServers };
       });
-      selectedServerIdRef.current = server.id;
-      setSelectedServerId(server.id);
-      setSelectedId(server.id);
+      selectRoot(server.id, server.id);
       void loadServers();
       if (server.status === "connected") {
         void loadResources("explicit");
       }
     },
-    [loadResources, loadServers, serverConnections],
+    [loadResources, loadServers, selectRoot, serverConnections],
   );
 
   const reconnectServer = useCallback(
@@ -1049,64 +1069,18 @@ export function App() {
       if (command.payload.type === "select") {
         const { entityId, serverId } = command.payload;
         executableHandlers[command.commandId] = () => {
-          if (serverId && serverId !== selectedServerIdRef.current) {
-            selectedServerIdRef.current = serverId;
-            setSelectedServerId(serverId);
-            // 260714-select-mount-gap fix: `setSelectedId(entityId)` below
-            // lands in the SAME commit as the server switch above, so on
-            // the very next render `activeResources`/`workbenchSelection`
-            // already reflect the target server+entity (resolved straight
-            // off `resourcesByServer`, no effect needed). But
-            // `openWorkRootKeys`/`openWorkRootRefs` - the only state
-            // `openWorkRootInstances` mounts from - are otherwise only
-            // updated by the `workbenchSelection` effect above, which runs
-            // one render *after* this commit. That gap makes
-            // `selectedRootIsMounted` false for exactly one render, so
-            // `resolveEffectiveActiveRootKey` falls through to its
-            // server-scoped fallback guard with `lastActiveRootServerIdRef`
-            // still holding the PREVIOUS server - the guard fails, every
-            // mounted instance hides, and the workbench flashes to
-            // `dv-watermark` for a frame before the effect catches up.
-            //
-            // Resolve the target work root the same way that effect does
-            // and mount it synchronously here, in the same commit, via the
-            // identical `withOpenWorkRootKey`/`withOpenWorkRootRef` helpers
-            // so the two "ensure open" paths cannot drift apart. `entityId`
-            // is not always a work-root id (the workspace-row presentation
-            // in `WorkspaceRows` dispatches `entityId: workspace.id`), so
-            // resolve via `resolveWorkbenchSelection` and mount its
-            // `.root` rather than trusting `entityId` directly. A `null`
-            // result (target server not yet resolved in
-            // `resourcesByServer`) leaves this a no-op, same as today for
-            // that case - this fix only closes the gap for the traced
-            // regression (server whose tree is already cached).
-            const targetResources = resolveActiveResources(
-              resourcesByServer,
-              serverId,
-              lastNonNullResourcesByServerRef.current,
-            );
-            const targetSelection = resolveWorkbenchSelection(
-              targetResources,
-              entityId,
-            );
-            if (targetSelection) {
-              const rootKey = serverScopedIdentity(
-                targetSelection.root.resourcePath.serverId,
-                targetSelection.root.id,
-              );
-              const rootRef = {
-                rootId: targetSelection.root.id,
-                serverRoute: targetSelection.root.resourcePath.serverId,
-              };
-              setOpenWorkRootKeys((current) =>
-                withOpenWorkRootKey(current, rootKey),
-              );
-              setOpenWorkRootRefs((current) =>
-                withOpenWorkRootRef(current, rootKey, rootRef),
-              );
-            }
-          }
-          setSelectedId(entityId);
+          // 260714 Phase 2, D4: the sync-mount hack this block used to be
+          // (manually resolving `targetSelection` and seeding
+          // `openWorkRootKeys`/`openWorkRootRefs` here to close the
+          // select-mount-gap) is deleted, not moved - Phase 1's
+          // `deriveWorkbenchView` already folds the freshly-resolved
+          // selected root into the render-time union regardless of whether
+          // that state has caught up, so manually seeding those refs here no
+          // longer changes what's mounted. `selectRoot` commits the triple
+          // atomically; no need to branch on `serverId !==
+          // selectedServerIdRef.current` since setting state to its current
+          // value is an inert no-op.
+          selectRoot(serverId ?? selectedServerIdRef.current, entityId);
         };
       } else if (command.payload.type === "refresh") {
         executableHandlers[command.commandId] = () => {
@@ -1268,10 +1242,12 @@ export function App() {
             // `selectedServerIdRef.current`) would refetch this server on
             // its next tick and silently revive the entry just deleted
             // above, violating "explicit Off is the only path that
-            // deallocates".
-            selectedServerIdRef.current = LOCAL_DASHBOARD_SERVER_ROUTE;
-            setSelectedServerId(LOCAL_DASHBOARD_SERVER_ROUTE);
-            setSelectedId(LOCAL_DASHBOARD_SERVER_ROUTE);
+            // deallocates". 260714 Phase 2, D4: routed through `selectRoot`
+            // as a same-behavior consolidation - not named by the ticket's
+            // enumerated call-site list, but the same duplicated triple
+            // shape D4 targets ("every current caller routes through it"),
+            // and identical resulting state.
+            selectRoot(LOCAL_DASHBOARD_SERVER_ROUTE, LOCAL_DASHBOARD_SERVER_ROUTE);
           }
         };
       } else if (command.payload.type === "workspace.remove") {
@@ -1376,7 +1352,7 @@ export function App() {
       loadServers,
       openWorkRootRefs,
       readOnlyFilePanes,
-      resourcesByServer,
+      selectRoot,
     ],
   );
 

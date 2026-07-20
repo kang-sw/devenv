@@ -104,6 +104,30 @@ export function withOpenWorkRootRef(
     : { ...openWorkRootRefs, [rootKey]: ref };
 }
 
+// Pure core of the `selectRoot(serverId, entityId)` atomic action (260714
+// Phase 2, D4). Every full-triple call site (`handleServerSelected`,
+// `applyServerConnection`, `handleWorkRootOpened`, the `resource.select`
+// command handler, the `resourcesByServer` normalize effect) used to set
+// `selectedServerIdRef.current`/`setSelectedServerId`/`setSelectedId` as three
+// separate statements; this collapses that shape into a single pure
+// construction the `App()`-level `selectRoot` callback applies in one commit.
+// `entityId` is NOT resolved or validated here - it accepts a non-work-root
+// id (server row, workspace row) just as readily as a work root id, since
+// resolving a concrete root stays entirely in `resolveWorkbenchSelection`
+// downstream. Callers that want a field to stay unchanged pass its current
+// value back in (setting state to its existing value is an inert no-op).
+// `entityId`/`selectedId` are typed `string | null` to match `selectedId`'s
+// own state type (`useState<string | null>`) - a caller preserving "no
+// selection yet" (e.g. `handleWorkRootOpened` falling back to the current
+// `selectedId` when no workRoot resolves) must be able to pass `null`
+// through unchanged.
+export function applySelectRoot(input: {
+  serverId: string;
+  entityId: string | null;
+}): { selectedServerId: string; selectedId: string | null } {
+  return { selectedServerId: input.serverId, selectedId: input.entityId };
+}
+
 // The exact inputs that produced a given `resolveStickyWorkbenchSelection`
 // result, compared by reference/value equality in `driveStickyWorkbenchSelection`
 // below to detect a redundant re-invocation over the SAME poll input (see
