@@ -1,7 +1,8 @@
 ---
 title: "Lever B: checklist-as-todo and sage gate/record MCP tools"
 parent: 260630-epic-skill-playbook-diet
-sage-review: completed
+sage-review-design: completed
+sage-review-completeness: completed
 ---
 
 # Lever B: checklist-as-todo and sage gate/record MCP tools
@@ -12,8 +13,8 @@ sage-review: completed
 static prose that the model self-attests against with no external check —
 skippable under attention pressure per the reader-model doctrine in
 `lead-skill-authoring`. Both blocks are followups from the epic's Lever-A diet
-pass on this skill (371 → 305 lines); this ticket scopes the Lever-B
-(MCP-ification) work that pass deferred.
+pass on this skill (371 → 277 lines across two passes); this ticket scopes the
+Lever-B (MCP-ification) work that pass deferred.
 
 ### 2026-07-20 re-scope: sage gate re-inflated, tool design changed
 
@@ -36,6 +37,22 @@ should reach once both phases land, with a per-block Diet Ledger and the new
 tool contracts — is at
 `ai-docs/.plans/2026-07/20-1610-write-ticket-diet-target.md`. It also records the
 partial-ship fallback shapes if only one phase lands.
+
+## Spec Impact
+
+- Target spec area: `ai-docs/spec/mcp-tools.md` (ws MCP tool contracts).
+- Caller-visible change: three new tools under the `tickets.*` namespace —
+  `tickets.checklist(type, phase)` (Phase 1), `tickets.sage_gate(stem, landing)`
+  and `tickets.sage_record(stem, stage, verdicts)` (Phase 2). Each returns
+  data/action the `lead-write-ticket` playbook follows verbatim; the sole caller
+  today is that playbook. Closeout also touches `workflow-skills.md` where the
+  `lead-write-ticket` procedure surface is described, to reflect the collapsed
+  handlers.
+- Contract-first spec: no. Sole consumer is one playbook and the exact
+  signatures (the `sage_gate` action enum, `mode`/`reviewers` fields, and
+  `sage_record`'s return shape) will firm up during implementation; the spec is
+  authored at closeout documenting the built contract. Matches the project's
+  established posture for additive `tickets.*`/`agenda_*` MCP tools.
 
 ## Phases
 
@@ -139,8 +156,14 @@ prose.
 
 ## Constraints
 
-- Do not change `lead-write-ticket.md` as part of scoping this ticket; a
-  separate, already-in-flight Lever-A diet edit is pending on that file.
+- Scoping this ticket must not edit `lead-write-ticket.md`; the **implementation
+  phases do** edit it. Each phase wires its new tool(s) into the playbook and
+  deletes the superseded prose in the same file — Phase 1 the
+  `On: Apply Ticket Content` / `On: Intent Review` capture/check prose, Phase 2
+  the ~235-line sage block and the three `Blocked Section Template`s. The
+  "in-flight Lever-A diet edit" this constraint originally guarded against has
+  since landed (the file is now 449 lines), so there is no longer a pending-edit
+  conflict to avoid; "done" for each phase includes the corresponding deletion.
 - Preserve the doctrine text verbatim — neither phase touches it.
 - The three `Blocked Section Template`s are relocated (not rewritten) into
   `tickets.sage_record`, which owns Blocked-section rendering. The tool's
