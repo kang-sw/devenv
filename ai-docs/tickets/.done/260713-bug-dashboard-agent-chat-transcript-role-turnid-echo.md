@@ -7,6 +7,7 @@ related:
   260711-feat-ws-dashboard-agent-activity-chat-ui: introduced the frontend TranscriptBlock role/turnId contract this ticket now fills in
   260713-feat-ws-dashboard-agent-chat-real-adapter-wiring: wired real Codex/Claude adapters without completing this contract
 sage-review-completeness: completed
+completed: 2026-07-20
 ---
 
 # Agent chat replies never render due to a streaming-poll race, and fork/resumed transcripts misclassify/split the user's own message
@@ -222,3 +223,8 @@ by the reviewer as authorized and correctly scoped.
 Verification: `npm run test:agent-chat-client` (frontend), `cargo test -p
 ws-dashboard-core` (35/35), `cargo test --workspace` (69+158+15 passed, 0
 failed), `cargo build --workspace` clean.
+
+
+## Resolution (2026-07-20)
+
+Both phases confirmed merged and pushed: commits d2ae9848 (Phase 1) and 7724e718 (Phase 2), originally on now-deleted branch impl/streaming-poll, are reachable from goal/drain-ready-queue, goal/ws-dashboard-tickets, ws-dashboard-dev, and remotes/origin/ws-dashboard-dev. The existing ## Result section is accurate; this closure is purely mechanical (ticket was simply never moved out of ready/).

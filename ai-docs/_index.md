@@ -229,20 +229,6 @@ dropped tickets live in hidden archive dirs and git history.
   daemon's own contribution to lock contention regardless of the exact
   mechanism; mutating routes (switch/fetch/push/pull) are untouched. Sage
   review (design + completeness) both completed. Implementation deferred.
-- `260713-bug-dashboard-agent-chat-transcript-role-turnid-echo` (`ready`, bug,
-  related to `260711`/`260713-feat-...-adapter-wiring`) - implementation-ready
-  after a design-review block-and-revise cycle (2026-07-13/14): dual
-  static-trace + live-dynamic-repro subagent investigation confirmed the
-  actual "no response" root cause is a client poll race in
-  `beginRealStreamingTurn` (immediate poll can read the daemon's `live`
-  flag before the async `turn/started` notification lands, misreading
-  "not started yet" as "already finished"), not the originally-suspected
-  missing optimistic echo (which already exists and works). Phase 1 fixes
-  the race; Phase 2 (scoped down from the blocked draft - no longer removes
-  `suppress_local_prompt`) adds `role`/`turnId` to `TranscriptBlock` for
-  fork/resume rendering only. Spec-addressed via
-  `#260714-transcript-block-role-turn-id` in
-  `ai-docs/spec/ws-web-dashboard/index.md`.
 - `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`idea`, chore) -
   test plan for `260525`'s live remote-dogfood gap. Phase 1 partially
   executed 2026-07-07: SSH connectivity probe blocked by this session's own
