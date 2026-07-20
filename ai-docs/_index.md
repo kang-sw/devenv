@@ -455,16 +455,6 @@ dropped tickets live in hidden archive dirs and git history.
   blocked pending further investigation/decision (`260627`,
   `260710-bug-project-index...`), two backlogged by user decision
   (`260703`, and `260627` shares that backlog reasoning).
-- `260701-feat-write-ticket-lever-b-mcp-tools` (ready, feat, child of 260630) -
-  Lever-B MCP-ification of `lead-write-ticket`: `tickets.checklist` (Phase 1)
-  and `tickets.sage_gate`/`tickets.sage_record` (Phase 2), collapsing the
-  checklist prose and the re-inflated ~235-line sage state machine (targets
-  ~449 → ~160 lines). Both phases edit `lead-write-ticket.md` to wire the tools
-  and delete the superseded prose. Golden-reference target body at
-  `ai-docs/.plans/2026-07/20-1610-write-ticket-diet-target.md`. Spec addressing
-  via `## Spec Impact` (`mcp-tools.md`, Contract-first: no). Sage review
-  completed (completeness re-run against the 2026-07-20 rescope: concern→pass,
-  two autonomous fixes applied).
 ## Session Notes
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role

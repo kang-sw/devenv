@@ -3,6 +3,7 @@ title: "Lever B: checklist-as-todo and sage gate/record MCP tools"
 parent: 260630-epic-skill-playbook-diet
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-20
 ---
 
 # Lever B: checklist-as-todo and sage gate/record MCP tools
@@ -179,6 +180,49 @@ aggregation paths (`block`, `concern` with/without `resolution: missing`,
 `pass`) against the new tools; confirm frontmatter, Blocked-section text, and
 commit output match today's behavior exactly before deleting the corresponding
 prose.
+
+### Result (aa3a3d15) - 2026-07-20
+
+Added `ws/tickets.sage_gate(stem, landing[, answer])` and
+`ws/tickets.sage_record(stem, stage, verdicts)` as root-aware MCP tools
+(`wsdoc.SageGate`/`SageRecord` in new `tickets_sage.go`), relocating the entire
+sage-review state machine and the three Blocked Section Templates out of
+`lead-write-ticket.md` prose into Go. Wired both into the MCP server (schema,
+dispatch, `toolSchemaRequiresSessionKey`, `runtime.json` ×2), collapsed the
+~235-line sage block to the two-step call site plus one `On: Reviewer Spawn`
+block, and deleted the four `On:` sage sections and the `## Templates` block.
+Manifest and wsflow byte-mirror regenerated.
+
+Deviations from plan:
+- `SageGate` drops the plan's step-1 `runner GitRunner` param. The commit
+  boundary is applied uniformly with `SageRecord`: wsdoc computes the
+  frontmatter write plus commit inputs and the MCP dispatch performs the actual
+  `wsgit.Commit`, preserving the `wsdoc`↛`wsgit` dependency-direction invariant
+  (`tickets_mutate.go:11-14`) and keeping commit output byte-identical to
+  `git.commit`.
+- Combined-mode ask/decline (underspecified by both the ticket and the golden
+  reference) resolved so each still-pending `recommended` stage is asked
+  separately, design-first; one answer never resolves another stage (a declined
+  design no longer silently skips completeness).
+- Empty/missing verdict for an expected reviewer is now an error rather than
+  silently recording a passing `completed` posture (latent bug surfaced by the
+  test review).
+
+Verification: `go build`/`go vet` clean; non-cached
+`go test ./internal/wsdoc/... ./internal/mcp/... ./internal/wsrsrc/...` all `ok`
+(incl. shipped-manifest and wsflow-mirror freshness guards). Blocked templates
+asserted byte-identical (incl. the U+2014 em dash); Doctrine byte-identical;
+dangling-ref grep clean; wsflow playbook mirror byte-identical. Partitioned
+review: fit clean; correctness 2 minor (answer-leak fixed; anomalous-state
+degradation kept and pinned with a test + intentional-divergence comment); test
+3 important all fixed. A golden playbook test (`TestPlaybookPrintGoldenLeadWriteTicket`)
+was Go-test-cache-masked after the rsrc edit and was corrected in the fix commit
+`aa3a3d15`. Closeout spec `{#260720-sage-gate-record-tools}` and mental-model
+recipe `{#260720-wsdoc-commit-boundary}` landed. The ticket's live end-to-end
+sage-review exercise across all posture values was **not run live** this
+session — coverage is the wsdoc + MCP-dispatch unit tests plus the reviewed
+call-site wiring; the live playbook exercise happens on the next real ticket
+write (same posture as Phase 1).
 
 ## Constraints
 
