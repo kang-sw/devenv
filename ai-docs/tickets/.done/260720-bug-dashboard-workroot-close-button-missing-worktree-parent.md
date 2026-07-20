@@ -4,6 +4,7 @@ related:
   260714-bug-dashboard-workroot-close-button-hidden-when-selected: sibling case - that ticket covers the X disappearing on the *selected* workRoot/compactWorkRoot row (`!selected` gate); this ticket covers a base root with worktrees never getting a close X at all, in any selection state, because its row never reaches "workRoot"/"compactWorkRoot" presentation in the first place
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-07-20
 ---
 
 # Close ("X") button never renders on a base work root's label when it has associated worktrees
@@ -103,3 +104,57 @@ configuration.
 - Verify manually and/or with a render-level test: a workspace with 2+
   `workRoots` (base + at least one linked worktree) shows an X on the base
   row when that root is open, in both selected and non-selected states.
+
+### Result (commit `2717ac1b`) - 2026-07-20
+
+Confirmed root cause: `WorkspaceRows` (`App.tsx` ~9407-9524) renders a base
+work root that has one or more linked worktrees as a `presentation="workspace"`
+row (the base `gitPrimaryRoot` entry is filtered out of `childWorkRoots` and
+represented only by this row). `ResourceRow`'s `canCloseWorkRoot` gate only
+accepted `presentation === "workRoot" || presentation === "compactWorkRoot"`,
+so it was unconditionally `false` for the workspace row regardless of
+`selected` - matching the ticket's trace exactly.
+
+Fix (commit `2717ac1b`): extended `canCloseWorkRoot`'s presentation check to
+also accept `"workspace"`; extracted a pure helper
+`workspaceBaseWorkRoot(workspace)` in `resourceModel.ts` (deduplicating an
+identical pre-existing inline lookup in
+`resolveWorkbenchSelectionWithMatchInternal`); threaded `isOpenWorkRoot` and a
+new `closeWorkRootId` prop (default `= id`) through `WorkspaceRows` into
+`ResourceRow`, so the base-root workspace row's close button dispatches
+`workRoot.close` for the resolved base-root id instead of `workspace.id`. `id`
+itself was left untouched as the row's selection identity per the plan's
+constraint (selection semantics were out of scope). `hasWorkspaceRemove` and
+the "..." overflow menu are unchanged and remain a distinct affordance from
+the new X.
+
+Verification: `npm run build` clean; `npm run test:resource-model` clean,
+including the new `workspaceBaseWorkRoot` unit test (covering both root
+orderings) - reviewer independently confirmed the test is non-tautological by
+reverting the helper to a naive lookup and observing the reversed-order
+assertion fail; `npm run test:workbench` clean, no regression.
+
+**Verification boundary** (recorded honestly): this frontend has no
+render/DOM test harness (no jsdom/RTL/vitest), so the ticket's DOM acceptance
+criterion - the X button actually appearing on the base row with linked
+worktrees, in selected and non-selected states - is verified only at the
+build + pure-logic-unit + code-review level. Live DOM confirmation is
+deferred to manual dogfood. The full Playwright e2e suite was not used
+(blocked by unrelated pre-existing ticket `260713`).
+
+Review: partitioned fit=clean, test=clean with 1 accepted informational
+minor - the inline `canCloseWorkRoot` boolean gate plus the
+`isOpenWorkRoot`/`closeWorkRootId` wiring in `App.tsx` have no extracted
+pure-logic test seam. This is a pre-existing coverage boundary (shared by
+every other presentation's close-gate wiring), not introduced by this fix;
+recorded, no action taken.
+
+## Spec Impact
+
+None. This restores the expected close affordance on a base work-root row
+that has linked worktrees; it does not add or change any caller-visible
+behavioral contract. `ai-docs/spec/ws-web-dashboard/index.md` does not
+describe left-nav close-button ("X") presence/gating at the contract level
+for any presentation (only the unrelated workbench-tab hover-close
+affordance, `index.md:807`) - there is nothing to correct or extend.
+Verified, no spec edit needed.
