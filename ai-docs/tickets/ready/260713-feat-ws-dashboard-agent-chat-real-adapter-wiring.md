@@ -5,6 +5,7 @@ related:
   260711-feat-ws-dashboard-agent-activity-chat-ui: prerequisite
   260713-fix-ws-dashboard-agent-chat-ui-usability-polish: related
   260713-feat-ws-dashboard-activity-session-fork-cursor: prerequisite
+  260720-bug-dashboard-fork-from-here-cutcursor-resolution: blocked-by
 related-mental-model:
   - ws-dashboard-agent-harness
 sage-review-design: completed
@@ -399,6 +400,56 @@ walkthrough this phase's own text requires is **not done** — see below.
   send/receive works end-to-end... designed but not connected is the
   specific failure mode this ticket exists to correct" bar is explicitly
   not yet met.
+
+#### Edition (manual-pass) - 2026-07-20
+
+The manual walkthrough this phase required was finally performed today
+against real (non-stub, non-fixture) processes: a real daemon, a real
+`codex` CLI process, and a real `claude` CLI process — not the stub, not a
+scripted-peer test double.
+
+- **Real send/receive: CONFIRMED working end-to-end for both harnesses.**
+  Verified via direct network/daemon inspection (not just visual/UI
+  observation): real `activityId`s were returned on session create for both
+  Codex and Claude; the transcript poll showed genuine `live: true ->
+  live: false` transitions matching each harness's actual turn completion,
+  not a synthetic ticker; and the returned transcript blocks were verbatim
+  model replies carrying real `turnId`s from the underlying process, not
+  stub/fixture text. This closes the "real send/receive" half of this
+  phase's verification bar for both Codex and Claude.
+- **Fork-from-here: CONFIRMED BROKEN for real live sessions.** Repro: 2 real
+  turns in a Codex agent-chat session, then "Fork from here" on the first
+  user message bubble. Request sent:
+  `{"action":"fork","cutCursor":"user-sent-mrsxjeyh-1"}` — a client-side
+  optimistic-bubble id, not a real transcript cursor (real cursors are
+  plain sequential strings like `"0"`/`"1"`/`"2"`/`"3"`). Response:
+  `{"applied":true,"data":{"activityId":"codex:...","cutCursor":null}}` —
+  `cutCursor: null` shows the daemon's cursor resolution silently failed
+  instead of erroring. Confirmed via a direct `curl` against the forked
+  session's own `/transcript` that all 4 blocks (both turns' Q+A) are
+  present — the fork did not truncate at all; it silently forked the whole
+  original thread. Filed as a new bug ticket,
+  `260720-bug-dashboard-fork-from-here-cutcursor-resolution` (`todo/`,
+  now in this ticket's `related:` frontmatter as `blocked-by`), which also
+  traces the client-side mechanism (an optimistic user-bubble cursor that
+  is never reconciled with the daemon-confirmed real cursor once the poll
+  resolves it) in more depth than a bare lead — see that ticket's
+  Investigation section for exact line citations. Fixing it is out of scope
+  for that ticket and for this Edition: it is design-level client/server
+  cursor-reconciliation work, not a one-line patch.
+- **Consequently, this ticket still cannot move to `.done/`.** Phase 4's
+  verification bar covers send/receive **and** fork-from-here; the former is
+  now genuinely met, the latter is not. This ticket stays in `ready/` until
+  `260720-bug-dashboard-fork-from-here-cutcursor-resolution` is fixed and a
+  fork-from-here repro against a real live session is re-run clean.
+- Note for future readers: the separately-tracked, unrelated
+  `260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` (CSS/DOM
+  visibility bug hiding the transcript element in the Playwright e2e
+  environment) did not interfere with any of the verification above — all
+  claims here were confirmed via direct network/daemon API inspection
+  (request/response bodies, transcript polling state), not via visual
+  on-screen checks, so that bug's environment-level rendering issue is
+  orthogonal to this walkthrough's findings.
 
 ## Constraints
 
