@@ -4,6 +4,7 @@ parent: 260710-epic-ws-dashboard-terminal-ux-polishing
 related:
   260714-bug-dashboard-terminal-pane-split-mirror-key-mismatch: closed sibling fix for the "move into another existing group" terminal snap-back; this ticket's repro is the same registry-split mechanism but for topologies (3-way, vertical, free-form) that fix was never proven against
   260711-idea-dashboard-readonly-file-pane-order-split-registry-bug: parallel open investigation into the same registry-split shape for read-only file panes (still unresolved)
+completed: 2026-07-20
 ---
 
 # Terminal pane split reverts at drop for 3-way, vertical, and other non-horizontal Dockview arrangements
@@ -121,6 +122,67 @@ right-edge gesture in `expectDurableDockviewSplitDrop`, so this topology
 gets real end-to-end coverage going forward instead of relying on the one
 direction currently exercised.
 
+### Result (commits `1a6a734b`, `d8e71b51`) - 2026-07-20
+
+Confirmed root cause (runtime-instrumented, not speculative): `movePane`
+(`App.tsx`) persisted the drag/drop-created dynamic group and pane order
+under the bare `workbenchModel.root.id`, while every reader
+(`resolveRootLayout` via `buildEditorGroupsForRoot`) and every other writer
+(`openWorkRootActivityPane`, file-open placement, restore-seed, cleanup)
+keyed by `serverScopedIdentity(root.resourcePath.serverId, root.id)`. Because
+the moved terminal's true dynamic group was written under the wrong key, it
+never appeared in the group list `terminalWorkbenchPanesByGroup` iterates
+(`App.tsx:8075`); the moved pane fell into that loop's `groups[0]` fallback
+(`App.tsx:8084-8087`), and `syncDockviewWorkbench` then reconciled Dockview's
+panel back to match the fallback - the visible snap-back. This reproduced
+only for a drag out of a *multi-pane* source group (all three ticket
+scenarios); dragging a group's sole pane hits a separate, unrelated
+Dockview native-group-id-reuse behavior, documented in the plan as
+"mechanism 2" and confirmed not to cause the reported symptom.
+
+Fix: `movePane`'s two writes (`onWorkbenchGroupsByRootChange`,
+`onPaneOrderByRootChange`) now key by `serverScopedIdentity(...)` instead of
+the bare root id (commit `d8e71b51`), matching every other writer/reader.
+`setTerminalPaneOrderByGroup`'s mirror write was left untouched - it is
+correctly keyed by plain `groupId`, not `rootKey`. A terminal-pane
+non-horizontal e2e regression step (vertical 2-way, 3-way, and
+existing-inner-group-edge splits) was added to
+`dashboard-acceptance.spec.ts` ahead of the fix, TDD-style (commit
+`1a6a734b`).
+
+Validation: the full `dashboard-acceptance.spec.ts` suite is blocked before
+reaching the new step by the pre-existing, unrelated
+`260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` defect,
+confirmed present identically on the pre-change base commit (not a
+regression from this work). Validation therefore used an isolated, deleted
+probe spec reusing `e2e/daemonHarness.ts#startDaemon`: pre-fix FAIL (3-way
+drop reverts to the origin group), post-fix PASS (vertical/3-way/inner-edge
+all persist through settle). `npm run build`, `cargo build -p
+ws-dashboard-daemon`, and `npm run test:workbench` all passed.
+
+Review: partitioned correctness/fit/test review (opus) came back clean on
+all three axes, with 2 accepted non-blocking minors: (a) the inner-edge case
+uses a `>=3` group-count threshold where `>=4` would be marginally sharper,
+but the pairwise `not.toBe` group-id checks already make the weaker
+threshold safe; (b) one `not.toBe` assertion in the new step redundantly
+duplicates a check `expectDurableTerminalSplitDrop` already performs
+internally. Both accepted as-is, no follow-up needed.
+
+Coverage-activation dependency (cross-ticket, not a gap in this fix): the
+new e2e regression guard will not execute in the real
+`dashboard-acceptance` suite / CI until
+`260713-bug-dashboard-acceptance-codex-tile-transcript-hidden` is fixed,
+since that defect aborts the suite before reaching the new step today. The
+guard is committed and proven correct via the isolated probe above; it is
+inert in CI only until 260713 is separately resolved.
+
+Per lead decision: readonly-pane e2e coverage was intentionally NOT added
+in this ticket, and `260711` (read-only file pane registry-split analog) is
+NOT moved or closed here. The `movePane` fix is at the shared call site
+used by terminal/readonly/agentChat panes alike and is expected to also
+resolve the readonly analog, but confirming and closing that is left to
+`260711` as a separate follow-up.
+
 ## Spec Impact
 
 None yet identified. This is a gap in already-intended behavior — per the
@@ -129,3 +191,10 @@ split-drop preview should always become durable dashboard arrangement
 state regardless of topology. No existing spec stem covers pane
 drag-move/split-registry behavior at the contract level (already noted in
 `260714`). Contract-first spec: no.
+
+**Post-fix verification**: `ai-docs/spec/ws-web-dashboard/index.md:796-798`
+already states "Dockview-created split drops become durable dashboard
+workbench groups instead of snapping back" as the intended contract — this
+fix corrects an internal persistence-key bug that violated that
+already-documented behavior for non-horizontal topologies; it introduces no
+new caller-visible contract. Verified, no spec edit needed.
