@@ -1,8 +1,10 @@
 import { deriveWorkbenchView } from "./openRootLookup.js";
 import {
+  resolveStickyWorkbenchSelection,
   serverScopedIdentity,
   type DashboardResourcesView,
   type InstanceView,
+  type LastMatchedSelectionByServer,
   type ResourcesByServer,
   type ViewState,
   type WorkRootView,
@@ -127,6 +129,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     selectedId: "root-a",
     openWorkRootKeys: [],
     openWorkRootRefs: {},
+    lastMatchedSelectionByServer: {},
   });
   assertEqual(
     view.effectiveActiveRootKey,
@@ -155,6 +158,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootAKey]: { rootId: "root-a", serverRoute: "server-local" },
     },
+    lastMatchedSelectionByServer: {},
   });
   assertEqual(
     view.effectiveActiveRootKey,
@@ -185,6 +189,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootAKey]: { rootId: "root-a", serverRoute: "server-local" },
     },
+    lastMatchedSelectionByServer: {},
   });
   assertEqual(
     view.effectiveActiveRootKey,
@@ -211,6 +216,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
     },
+    lastMatchedSelectionByServer: {},
   });
   assertDeepEqual(
     view.openInstanceKeys,
@@ -232,6 +238,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
       [rootAKey]: { rootId: "root-a", serverRoute: "server-local" },
     },
+    lastMatchedSelectionByServer: {},
   });
   assertDeepEqual(
     view.openInstanceKeys,
@@ -252,6 +259,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     selectedId: "root-b",
     openWorkRootKeys: [],
     openWorkRootRefs: {},
+    lastMatchedSelectionByServer: {},
   });
   const stateNPlus1 = deriveWorkbenchView({
     resourcesByServer: { "server-local": localResources },
@@ -262,6 +270,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
     },
+    lastMatchedSelectionByServer: {},
   });
   assertDeepEqual(
     stateN.openInstanceKeys,
@@ -277,6 +286,104 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     isPrefix(stateN.openInstanceKeys, stateNPlus1.openInstanceKeys),
     true,
     "(d) render N's openInstanceKeys is a position-preserving prefix of render N+1's across a selection change",
+  );
+}
+
+// (e) 260714 Phase 2 Prong 1 wiring: `deriveWorkbenchView` must resolve its
+// active root through the same sticky resolver as `workbenchSelection` in
+// `App.tsx`, not a plain `resolveWorkbenchSelection`, so a transient
+// single-poll omission of the previously-selected root's own entry (root-b
+// standing in for the reported bug's `gitLinkedWorktree` child) does not
+// collapse `effectiveActiveRootKey` to the natural fallback (root-a).
+//
+// Mirrors the corrected `App.tsx` wiring exactly (see the comment on
+// `renderLastMatchedSelectionByServer` at the ref's owning site): each
+// render's `deriveWorkbenchView` call is fed the SAME not-yet-advanced cache
+// snapshot that this render's own `resolveStickyWorkbenchSelection` call
+// reads (not the value already advanced by that call) - otherwise
+// `deriveWorkbenchView`'s internal call would silently perform a second,
+// spurious miss-advance on top of the first within the same render.
+{
+  const resourcesWithBoth = resources("server-local", [
+    workRoot("root-a", "workspace-a", "server-local"),
+    workRoot("root-b", "workspace-a", "server-local"),
+  ]);
+  const resourcesMissingB = resources("server-local", [
+    workRoot("root-a", "workspace-a", "server-local"),
+  ]);
+
+  // Render N: both roots present, root-b freshly selected. Cache carried
+  // into this render is empty (first selection).
+  const cacheBeforeRenderN: LastMatchedSelectionByServer = {};
+  const stateRenderN = deriveWorkbenchView({
+    resourcesByServer: { "server-local": resourcesWithBoth },
+    lastNonNullResourcesByServer: {},
+    selectedServerId: "server-local",
+    selectedId: "root-b",
+    openWorkRootKeys: [],
+    openWorkRootRefs: {},
+    lastMatchedSelectionByServer: cacheBeforeRenderN,
+  });
+  assertEqual(
+    stateRenderN.effectiveActiveRootKey,
+    rootBKey,
+    "(e) render N resolves the freshly-selected root-b normally",
+  );
+  // The cache carried into render N+1 is what the ref-owning site would have
+  // advanced to after render N's own (separate, outer) resolver call.
+  const cacheBeforeRenderNPlus1 = resolveStickyWorkbenchSelection(
+    resourcesWithBoth,
+    "root-b",
+    "server-local",
+    cacheBeforeRenderN,
+  ).nextLastMatchedSelectionByServer;
+
+  // Render N+1: root-b's own entry is momentarily missing from an
+  // otherwise-present tree (root-a still there). Without Prong 1 this would
+  // collapse to the fallback (root-a); with it, the sticky cache bridges the
+  // one-poll omission and `effectiveActiveRootKey` stays pinned to root-b.
+  const stateRenderNPlus1 = deriveWorkbenchView({
+    resourcesByServer: { "server-local": resourcesMissingB },
+    lastNonNullResourcesByServer: {},
+    selectedServerId: "server-local",
+    selectedId: "root-b",
+    openWorkRootKeys: stateRenderN.openInstanceKeys,
+    openWorkRootRefs: {
+      [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
+    },
+    lastMatchedSelectionByServer: cacheBeforeRenderNPlus1,
+  });
+  assertEqual(
+    stateRenderNPlus1.effectiveActiveRootKey,
+    rootBKey,
+    "(e) a transient single-poll omission of the selected root's own entry does not collapse the active root to the natural fallback",
+  );
+  const cacheBeforeRenderNPlus2 = resolveStickyWorkbenchSelection(
+    resourcesMissingB,
+    "root-b",
+    "server-local",
+    cacheBeforeRenderNPlus1,
+  ).nextLastMatchedSelectionByServer;
+
+  // Render N+2: the omission repeats a second consecutive time for the same
+  // selection - a genuine removal, not a transient blip. The sticky cache
+  // must expire, and the active root is now allowed to fall through to the
+  // natural fallback (root-a).
+  const stateRenderNPlus2 = deriveWorkbenchView({
+    resourcesByServer: { "server-local": resourcesMissingB },
+    lastNonNullResourcesByServer: {},
+    selectedServerId: "server-local",
+    selectedId: "root-b",
+    openWorkRootKeys: stateRenderNPlus1.openInstanceKeys,
+    openWorkRootRefs: {
+      [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
+    },
+    lastMatchedSelectionByServer: cacheBeforeRenderNPlus2,
+  });
+  assertEqual(
+    stateRenderNPlus2.effectiveActiveRootKey,
+    rootAKey,
+    "(e) a second consecutive omission is treated as a genuine removal and the active root is allowed to fall through to the natural fallback",
   );
 }
 
