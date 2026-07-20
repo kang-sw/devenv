@@ -339,6 +339,59 @@ Verification boundary: same suites as Phase 1, plus manual confirmation that
 label-click / picker-open / linked-server-open all select in one gesture with
 no watermark flash.
 
+### Result (90dace48) - 2026-07-20
+
+Added the pure `applySelectRoot({serverId, entityId}) -> {selectedServerId,
+selectedId}` core (workbench/openRootLookup.ts) and an `App()`-level
+`selectRoot(serverId, entityId)` `useCallback` (empty deps) that applies it in
+one commit. Routed `handleServerSelected`, `applyServerConnection`,
+`handleWorkRootOpened`, the `resource.select` command handler, and the
+`resourcesByServer` normalize effect through it. Deleted the
+`resource.select` handler's synchronous-mount hack (the manual
+`resolveActiveResources`/`resolveWorkbenchSelection`/`withOpenWorkRootKey`/
+`withOpenWorkRootRef` seeding added to close the Phase-1-era select-mount
+gap) since Phase 1's `deriveWorkbenchView` already folds the freshly-resolved
+selected root into the render-time union regardless of whether
+`openWorkRootKeys`/`openWorkRootRefs` state has caught up - the hack was
+redundant, not relocated. Dropped the now-unused `resolveWorkbenchSelection`
+import and `resourcesByServer` from `executeCommand`'s dependency array. The
+`[workbenchSelection]` effect was left untouched - Phase 1 had already
+demoted it to keep-alive persistence + layout-restore seeding.
+
+Ticket-additive minor beyond the enumerated call-site list: the `server.off`
+handler's own refocus triplet (`App.tsx`, guarded by `serverId ===
+selectedServerIdRef.current`) is the same duplicated shape D4 targets
+("every current caller routes through it") but was not named by this phase's
+bullet list. Routed it through `selectRoot(LOCAL_DASHBOARD_SERVER_ROUTE,
+LOCAL_DASHBOARD_SERVER_ROUTE)` as a same-behavior consolidation (identical
+resulting state either way) rather than leaving it as a known omission.
+
+`applySelectRoot`/`selectRoot`'s `entityId` (and its return's `selectedId`)
+are typed `string | null`, not `string`, to match `selectedId`'s own
+`useState<string | null>` type - `handleWorkRootOpened`'s `openedWorkRootId
+?? selectedId` fallback and the normalize effect's `selectedId` passthrough
+both need to preserve a `null` `selectedId` unchanged, which a string-only
+signature rejects at the type level.
+
+Tests: added `applySelectRoot` pure-reducer cases to
+`openRootLookup.test.ts` - atomic advance for a work-root-shaped `entityId`,
+and unchanged-shape commit for two non-work-root `entityId` cases (server
+row, workspace row) - confirming `selectRoot` never resolves or validates
+the id itself. No `package.json` script edit needed; the file was already
+wired into `test:workbench`.
+
+Verification: `npm run build` clean; `test:workbench`, `test:resource-model`,
+`test:commands`, `test:open-work-root` all exit 0. Manual dogfooding
+(label-click / picker-open / linked-server-open against a running daemon,
+confirming no `dv-watermark` flash) was NOT exercised in the implementation
+environment - D6 LIMIT states this property is not automatable and no
+render/DOM harness exists; it remains the final gate before this phase is
+considered fully closed.
+
+Deferred: Phase 3 (dead-code sweep beyond this phase's direct edits, optional
+`lastNonNullResourcesByServer` state promotion, spec/mental-model doc touch),
+and the live-dogfooding gate above.
+
 ### Phase 3: Cleanup + optional state promotion + doc/spec touch
 
 - Remove now-dead code: the duplicated mount logic, any unused branch of
