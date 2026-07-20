@@ -1,9 +1,10 @@
 import {
   resolveActiveResources,
-  resolveWorkbenchSelection,
+  resolveStickyWorkbenchSelection,
   serverScopedIdentity,
   type DashboardResourcesView,
   type InstanceView,
+  type LastMatchedSelectionByServer,
   type ResourcesByServer,
   type WorkRootView,
 } from "../resourceModel.js";
@@ -134,6 +135,7 @@ export function deriveWorkbenchView(state: {
   selectedId: string | null;
   openWorkRootKeys: readonly string[];
   openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
+  lastMatchedSelectionByServer: LastMatchedSelectionByServer;
 }): {
   activeResources: DashboardResourcesView | null;
   selectedRootKey: string | null;
@@ -145,7 +147,17 @@ export function deriveWorkbenchView(state: {
     state.selectedServerId,
     state.lastNonNullResourcesByServer,
   );
-  const selection = resolveWorkbenchSelection(activeResources, state.selectedId);
+  // Read-only: this function stays pure/non-advancing over
+  // `lastMatchedSelectionByServer`, same as it already treats
+  // `lastNonNullResourcesByServer` as an already-advanced input rather than
+  // advancing it itself (260714 Phase 2 Prong 1 - the sticky cache is owned
+  // and advanced once at the `App.tsx` call site).
+  const { selection } = resolveStickyWorkbenchSelection(
+    activeResources,
+    state.selectedId,
+    state.selectedServerId,
+    state.lastMatchedSelectionByServer,
+  );
   const selectedRootKey = selection
     ? serverScopedIdentity(
         selection.root.resourcePath.serverId,
