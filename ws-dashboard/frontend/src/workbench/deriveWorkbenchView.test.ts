@@ -1,21 +1,28 @@
-import { deriveWorkbenchView } from "./openRootLookup.js";
 import {
-  resolveStickyWorkbenchSelection,
+  deriveWorkbenchView,
+  driveStickyWorkbenchSelection,
+  initialStickySelectionDriverState,
+  type StickySelectionDriverState,
+} from "./openRootLookup.js";
+import {
+  resolveActiveResources,
+  resolveWorkbenchSelection,
   serverScopedIdentity,
   type DashboardResourcesView,
   type InstanceView,
-  type LastMatchedSelectionByServer,
   type ResourcesByServer,
   type ViewState,
+  type WorkbenchSelection,
   type WorkRootView,
 } from "../resourceModel.js";
 
 // Pure-logic coverage for `deriveWorkbenchView` (260714 active-root
-// derivation refactor Phase 1, D1/D2/D3). Oracle is tsc + node only - no
-// jsdom/RTL/Playwright (D6). Each case feeds the exact single-render committed
-// -state slice a real render would see and asserts the derived
-// `openInstanceKeys`/`effectiveActiveRootKey` do not collapse on the
-// intervening render.
+// derivation refactor Phase 1, D1/D2/D3) and `driveStickyWorkbenchSelection`
+// (260714 Phase 2 Prong 1 + its correctness-review idempotency fix). Oracle
+// is tsc + node only - no jsdom/RTL/Playwright (D6). Each case feeds the
+// exact single-render committed-state slice a real render would see and
+// asserts the derived `openInstanceKeys`/`effectiveActiveRootKey` do not
+// collapse on the intervening render.
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -106,6 +113,25 @@ function isPrefix<T>(prefix: readonly T[], full: readonly T[]): boolean {
   return prefix.every((value, index) => value === full[index]);
 }
 
+// Test-only stand-in for the non-sticky selection `deriveWorkbenchView`
+// takes as an input since the correctness fix (260714 Phase 2 Prong 1):
+// mirrors exactly what a caller with no transient-omission concern (cases
+// (a)-(d) below) would compute and pass in - `resolveActiveResources` then a
+// plain `resolveWorkbenchSelection`, no sticky cache involved.
+function plainSelectionFor(
+  resourcesByServer: ResourcesByServer,
+  lastNonNullResourcesByServer: ResourcesByServer,
+  selectedServerId: string,
+  selectedId: string | null,
+): WorkbenchSelection | null {
+  const activeResources = resolveActiveResources(
+    resourcesByServer,
+    selectedServerId,
+    lastNonNullResourcesByServer,
+  );
+  return resolveWorkbenchSelection(activeResources, selectedId);
+}
+
 const localResources = resources("server-local", [
   workRoot("root-a", "workspace-a", "server-local", [
     instance("instance-main-a", "workspace-a", "root-a", "server-local"),
@@ -129,7 +155,12 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     selectedId: "root-a",
     openWorkRootKeys: [],
     openWorkRootRefs: {},
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor(
+      { "server-local": localResources },
+      {},
+      "server-local",
+      "root-a",
+    ),
   });
   assertEqual(
     view.effectiveActiveRootKey,
@@ -158,7 +189,12 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootAKey]: { rootId: "root-a", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor(
+      {},
+      { "server-local": localResources },
+      "server-local",
+      "instance-main-a",
+    ),
   });
   assertEqual(
     view.effectiveActiveRootKey,
@@ -189,7 +225,7 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootAKey]: { rootId: "root-a", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor({}, {}, "server-remote-2", "root-x"),
   });
   assertEqual(
     view.effectiveActiveRootKey,
@@ -216,7 +252,12 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor(
+      { "server-local": localResources },
+      {},
+      "server-local",
+      "root-a",
+    ),
   });
   assertDeepEqual(
     view.openInstanceKeys,
@@ -238,7 +279,12 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
       [rootAKey]: { rootId: "root-a", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor(
+      { "server-local": localResources },
+      {},
+      "server-local",
+      "root-b",
+    ),
   });
   assertDeepEqual(
     view.openInstanceKeys,
@@ -259,7 +305,12 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     selectedId: "root-b",
     openWorkRootKeys: [],
     openWorkRootRefs: {},
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor(
+      { "server-local": localResources },
+      {},
+      "server-local",
+      "root-b",
+    ),
   });
   const stateNPlus1 = deriveWorkbenchView({
     resourcesByServer: { "server-local": localResources },
@@ -270,7 +321,12 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: {},
+    selection: plainSelectionFor(
+      { "server-local": localResources },
+      {},
+      "server-local",
+      "root-a",
+    ),
   });
   assertDeepEqual(
     stateN.openInstanceKeys,
@@ -289,61 +345,91 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
   );
 }
 
-// (e) 260714 Phase 2 Prong 1 wiring: `deriveWorkbenchView` must resolve its
-// active root through the same sticky resolver as `workbenchSelection` in
-// `App.tsx`, not a plain `resolveWorkbenchSelection`, so a transient
-// single-poll omission of the previously-selected root's own entry (root-b
-// standing in for the reported bug's `gitLinkedWorktree` child) does not
-// collapse `effectiveActiveRootKey` to the natural fallback (root-a).
-//
-// Mirrors the corrected `App.tsx` wiring exactly (see the comment on
-// `renderLastMatchedSelectionByServer` at the ref's owning site): each
-// render's `deriveWorkbenchView` call is fed the SAME not-yet-advanced cache
-// snapshot that this render's own `resolveStickyWorkbenchSelection` call
-// reads (not the value already advanced by that call) - otherwise
-// `deriveWorkbenchView`'s internal call would silently perform a second,
-// spurious miss-advance on top of the first within the same render.
-{
-  const resourcesWithBoth = resources("server-local", [
+// Fixtures for the sticky-selection wiring/idempotency cases below: a
+// workspace with two work roots - root-b stands in for the reported bug's
+// `gitLinkedWorktree` child, whose entry can momentarily vanish from an
+// otherwise-present resource tree. Each "poll" is modeled as a FRESH object
+// (a new `resources(...)` call), matching how `mergeResourcesByServer`
+// allocates a new `DashboardResourcesView` per real poll response; re-using
+// the SAME object reference across two `driveStickyWorkbenchSelection` calls
+// models two render invocations over the SAME poll (e.g. StrictMode's
+// deterministic double-invoke, or an unrelated App-level re-render before
+// the next poll lands).
+function resourcesWithBothRoots(): DashboardResourcesView {
+  return resources("server-local", [
     workRoot("root-a", "workspace-a", "server-local"),
     workRoot("root-b", "workspace-a", "server-local"),
   ]);
-  const resourcesMissingB = resources("server-local", [
+}
+function resourcesMissingRootB(): DashboardResourcesView {
+  return resources("server-local", [
     workRoot("root-a", "workspace-a", "server-local"),
   ]);
+}
 
-  // Render N: both roots present, root-b freshly selected. Cache carried
-  // into this render is empty (first selection).
-  const cacheBeforeRenderN: LastMatchedSelectionByServer = {};
+// (e) 260714 Phase 2 Prong 1 wiring: `deriveWorkbenchView` must be fed the
+// already-driven sticky selection (via `driveStickyWorkbenchSelection`), not
+// re-derive it from a cache itself, so a transient single-poll omission of
+// the previously-selected root's own entry does not collapse
+// `effectiveActiveRootKey` to the natural fallback (root-a). One
+// `driveStickyWorkbenchSelection` call per poll here (the "happy path" of
+// exactly one render per poll); case (f) below is the same scenario but
+// exercises >=2 render invocations per poll.
+{
+  let driverState: StickySelectionDriverState = initialStickySelectionDriverState;
+
+  // Poll 1: both roots present, root-b freshly selected.
+  const poll1 = resourcesWithBothRoots();
+  const activeResourcesPoll1 = resolveActiveResources(
+    { "server-local": poll1 },
+    "server-local",
+    {},
+  );
+  const driven1 = driveStickyWorkbenchSelection(
+    {
+      activeResources: activeResourcesPoll1,
+      selectedId: "root-b",
+      selectedServerId: "server-local",
+    },
+    driverState,
+  );
+  driverState = driven1.nextDriverState;
   const stateRenderN = deriveWorkbenchView({
-    resourcesByServer: { "server-local": resourcesWithBoth },
+    resourcesByServer: { "server-local": poll1 },
     lastNonNullResourcesByServer: {},
     selectedServerId: "server-local",
     selectedId: "root-b",
     openWorkRootKeys: [],
     openWorkRootRefs: {},
-    lastMatchedSelectionByServer: cacheBeforeRenderN,
+    selection: driven1.selection,
   });
   assertEqual(
     stateRenderN.effectiveActiveRootKey,
     rootBKey,
     "(e) render N resolves the freshly-selected root-b normally",
   );
-  // The cache carried into render N+1 is what the ref-owning site would have
-  // advanced to after render N's own (separate, outer) resolver call.
-  const cacheBeforeRenderNPlus1 = resolveStickyWorkbenchSelection(
-    resourcesWithBoth,
-    "root-b",
-    "server-local",
-    cacheBeforeRenderN,
-  ).nextLastMatchedSelectionByServer;
 
-  // Render N+1: root-b's own entry is momentarily missing from an
-  // otherwise-present tree (root-a still there). Without Prong 1 this would
-  // collapse to the fallback (root-a); with it, the sticky cache bridges the
-  // one-poll omission and `effectiveActiveRootKey` stays pinned to root-b.
+  // Poll 2: root-b's own entry is momentarily missing from an otherwise-
+  // present tree (root-a still there). Without Prong 1 this would collapse
+  // to the fallback (root-a); with it, the sticky cache bridges the one-poll
+  // omission and `effectiveActiveRootKey` stays pinned to root-b.
+  const poll2 = resourcesMissingRootB();
+  const activeResourcesPoll2 = resolveActiveResources(
+    { "server-local": poll2 },
+    "server-local",
+    {},
+  );
+  const driven2 = driveStickyWorkbenchSelection(
+    {
+      activeResources: activeResourcesPoll2,
+      selectedId: "root-b",
+      selectedServerId: "server-local",
+    },
+    driverState,
+  );
+  driverState = driven2.nextDriverState;
   const stateRenderNPlus1 = deriveWorkbenchView({
-    resourcesByServer: { "server-local": resourcesMissingB },
+    resourcesByServer: { "server-local": poll2 },
     lastNonNullResourcesByServer: {},
     selectedServerId: "server-local",
     selectedId: "root-b",
@@ -351,26 +437,34 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: cacheBeforeRenderNPlus1,
+    selection: driven2.selection,
   });
   assertEqual(
     stateRenderNPlus1.effectiveActiveRootKey,
     rootBKey,
     "(e) a transient single-poll omission of the selected root's own entry does not collapse the active root to the natural fallback",
   );
-  const cacheBeforeRenderNPlus2 = resolveStickyWorkbenchSelection(
-    resourcesMissingB,
-    "root-b",
-    "server-local",
-    cacheBeforeRenderNPlus1,
-  ).nextLastMatchedSelectionByServer;
 
-  // Render N+2: the omission repeats a second consecutive time for the same
-  // selection - a genuine removal, not a transient blip. The sticky cache
-  // must expire, and the active root is now allowed to fall through to the
-  // natural fallback (root-a).
+  // Poll 3: the omission repeats on a genuinely NEW poll (a fresh object,
+  // still missing root-b) - a real removal, not a transient blip. The
+  // sticky cache must expire, and the active root is now allowed to fall
+  // through to the natural fallback (root-a).
+  const poll3 = resourcesMissingRootB();
+  const activeResourcesPoll3 = resolveActiveResources(
+    { "server-local": poll3 },
+    "server-local",
+    {},
+  );
+  const driven3 = driveStickyWorkbenchSelection(
+    {
+      activeResources: activeResourcesPoll3,
+      selectedId: "root-b",
+      selectedServerId: "server-local",
+    },
+    driverState,
+  );
   const stateRenderNPlus2 = deriveWorkbenchView({
-    resourcesByServer: { "server-local": resourcesMissingB },
+    resourcesByServer: { "server-local": poll3 },
     lastNonNullResourcesByServer: {},
     selectedServerId: "server-local",
     selectedId: "root-b",
@@ -378,12 +472,152 @@ const rootBKey = serverScopedIdentity("server-local", "root-b");
     openWorkRootRefs: {
       [rootBKey]: { rootId: "root-b", serverRoute: "server-local" },
     },
-    lastMatchedSelectionByServer: cacheBeforeRenderNPlus2,
+    selection: driven3.selection,
   });
   assertEqual(
     stateRenderNPlus2.effectiveActiveRootKey,
     rootAKey,
-    "(e) a second consecutive omission is treated as a genuine removal and the active root is allowed to fall through to the natural fallback",
+    "(e) a second consecutive omitting POLL is treated as a genuine removal and the active root is allowed to fall through to the natural fallback",
+  );
+}
+
+// (f) 260714 Phase 2 Prong 1 correctness-review regression: the miss-counter
+// must advance at most once per distinct POLL, not once per render
+// invocation. This is the axis the pre-fix implementation got wrong (caught
+// by correctness review, not by the per-call tests above or in
+// resourceModel.test.ts, since those advance exactly once per call/assertion
+// and never re-invoke over the identical input). Simulates >=2 render
+// invocations over the SAME poll input - standing in for React StrictMode's
+// deterministic double-invoke in development, or any unrelated App-level
+// re-render firing before the next poll response lands in production - and
+// asserts the bridge SURVIVES every repeat invocation, only expiring once a
+// GENUINELY NEW poll still omits the root.
+{
+  let driverState: StickySelectionDriverState = initialStickySelectionDriverState;
+
+  // Poll 1 (both roots present, root-b selected) - two render invocations
+  // over the exact same poll object (simulates StrictMode's double-invoke of
+  // the component body holding the driver ref). Both invocations see the
+  // matched case, so this pair mostly documents that the matched branch is
+  // already idempotent (it was never the buggy branch).
+  const poll1 = resourcesWithBothRoots();
+  const activeResourcesPoll1 = resolveActiveResources(
+    { "server-local": poll1 },
+    "server-local",
+    {},
+  );
+  const renderKeyPoll1 = {
+    activeResources: activeResourcesPoll1,
+    selectedId: "root-b",
+    selectedServerId: "server-local",
+  };
+  const poll1Invocation1 = driveStickyWorkbenchSelection(
+    renderKeyPoll1,
+    driverState,
+  );
+  driverState = poll1Invocation1.nextDriverState;
+  const poll1Invocation2 = driveStickyWorkbenchSelection(
+    renderKeyPoll1,
+    driverState,
+  );
+  driverState = poll1Invocation2.nextDriverState;
+  assertEqual(
+    poll1Invocation2.selection?.root.id,
+    "root-b",
+    "(f) poll 1, invocation 2 (repeat render, same poll): still resolves the freshly-matched root-b",
+  );
+
+  // Poll 2 (root-b's own entry omitted) - TWO render invocations over the
+  // exact same (identical object reference) omitting poll, modeling
+  // StrictMode's double-invoke landing on the very poll that introduces the
+  // omission. Pre-fix, invocation 1 would bridge (bridged: true) and
+  // invocation 2 would immediately read that already-bridged cache and treat
+  // it as a second consecutive miss - dropping to the fallback (root-a)
+  // within the SAME poll, i.e. zero bridging. Post-fix, invocation 2 must
+  // reuse invocation 1's memoized result untouched.
+  const poll2 = resourcesMissingRootB();
+  const activeResourcesPoll2 = resolveActiveResources(
+    { "server-local": poll2 },
+    "server-local",
+    {},
+  );
+  const renderKeyPoll2 = {
+    activeResources: activeResourcesPoll2,
+    selectedId: "root-b",
+    selectedServerId: "server-local",
+  };
+  const poll2Invocation1 = driveStickyWorkbenchSelection(
+    renderKeyPoll2,
+    driverState,
+  );
+  assertEqual(
+    poll2Invocation1.selection?.root.id,
+    "root-b",
+    "(f) poll 2, invocation 1: the first omitting poll bridges to root-b",
+  );
+  const poll2Invocation2 = driveStickyWorkbenchSelection(
+    renderKeyPoll2,
+    poll2Invocation1.nextDriverState,
+  );
+  assertEqual(
+    poll2Invocation2.selection?.root.id,
+    "root-b",
+    "(f) poll 2, invocation 2 (repeat render, SAME omitting poll): the bridge survives - this is the regression the correctness review caught",
+  );
+  // A third, fourth, ... repeat invocation over the same poll must also stay
+  // pinned - the memoized result never degrades on its own from repeats.
+  const poll2Invocation3 = driveStickyWorkbenchSelection(
+    renderKeyPoll2,
+    poll2Invocation2.nextDriverState,
+  );
+  assertEqual(
+    poll2Invocation3.selection?.root.id,
+    "root-b",
+    "(f) poll 2, invocation 3 (yet another repeat render, SAME omitting poll): still bridged",
+  );
+  driverState = poll2Invocation3.nextDriverState;
+
+  // deriveWorkbenchView, fed the driven selection from the repeat-invocation
+  // path above, must agree - no divergence introduced by the idempotency
+  // guard.
+  const stateAfterPoll2Repeats = deriveWorkbenchView({
+    resourcesByServer: { "server-local": poll2 },
+    lastNonNullResourcesByServer: {},
+    selectedServerId: "server-local",
+    selectedId: "root-b",
+    openWorkRootKeys: [],
+    openWorkRootRefs: {},
+    selection: poll2Invocation3.selection,
+  });
+  assertEqual(
+    stateAfterPoll2Repeats.effectiveActiveRootKey,
+    rootBKey,
+    "(f) deriveWorkbenchView agrees with the driven selection after repeat invocations over the same omitting poll",
+  );
+
+  // Poll 3: a GENUINELY NEW poll (fresh object reference), still omitting
+  // root-b - a real second consecutive miss across actual polls. The bridge
+  // must now expire and fall through to the natural fallback (root-a). One
+  // invocation is enough here since the point is the cross-POLL transition,
+  // not another repeat-invocation check.
+  const poll3 = resourcesMissingRootB();
+  const activeResourcesPoll3 = resolveActiveResources(
+    { "server-local": poll3 },
+    "server-local",
+    {},
+  );
+  const poll3Invocation1 = driveStickyWorkbenchSelection(
+    {
+      activeResources: activeResourcesPoll3,
+      selectedId: "root-b",
+      selectedServerId: "server-local",
+    },
+    driverState,
+  );
+  assertEqual(
+    poll3Invocation1.selection?.root.id,
+    "root-a",
+    "(f) poll 3 (a genuinely new poll still omitting root-b) is the real second consecutive miss and falls through to the fallback",
   );
 }
 

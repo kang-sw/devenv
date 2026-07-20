@@ -681,3 +681,26 @@ assertTrue(
     stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
   "a null resources tree passes the cache through unchanged rather than bridging or dropping it",
 );
+
+// `selectedId === null` boundary (initial-load case, before anything has
+// ever been selected): the fresh lookup never matches (no `selectedId` to
+// find), so this always falls into the "otherwise" branch regardless of what
+// the cache holds for this server - the natural fallback (the first root
+// walked) passes through untouched and the cache is left exactly as-is, even
+// if a stale bridged entry exists from a PRIOR (now-irrelevant) selection.
+const stickyOnNullSelectedId = resolveStickyWorkbenchSelection(
+  stickyWorkspaceWithBoth,
+  null,
+  "server-local",
+  stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+);
+assertEqual(
+  stickyOnNullSelectedId.selection?.root.id,
+  "root-a",
+  "a null selectedId resolves to the natural fallback, ignoring any cached entry",
+);
+assertTrue(
+  stickyOnNullSelectedId.nextLastMatchedSelectionByServer ===
+    stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+  "a null selectedId leaves the cache reference untouched",
+);
