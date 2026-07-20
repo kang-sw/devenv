@@ -6,6 +6,7 @@ related:
   260711-idea-dashboard-git-status-polling-index-lock-contention: earlier ticket recording the same near-term decision (owner, 2026-07-11) this ticket implements, plus the accepted-but-unscheduled long-term notify-crate watch direction (see that ticket's Decisions) which is out of scope here
 sage-review-design: completed
 sage-review-completeness: completed
+completed: 2026-07-20
 ---
 
 # Dashboard git-status poll takes the real index lock every 5s, risking stale .git/index.lock under cross-mount access
@@ -193,3 +194,9 @@ Deferred (out of this ticket's scope, tracked separately): defensive
 stale-lock detection/cleanup, and the long-term `notify`-crate-based
 event-driven watch direction recorded in
 `260711-idea-dashboard-git-status-polling-index-lock-contention`.
+
+Closeout note: the described change landed as commit `18e97569`
+(`fix(dashboard): stop git-status poll from taking .git/index.lock`),
+confirmed fully merged and pushed — reachable from `goal/drain-ready-queue`,
+`goal/ws-dashboard-tickets`, `ws-dashboard-dev`, and
+`remotes/origin/ws-dashboard-dev`.
