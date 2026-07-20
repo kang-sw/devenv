@@ -163,7 +163,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260525-feat-ws-dashboard-document-polishing-backlog` | todo | Track non-critical document viewer/editor polish after the MVP document substrate |
 | `260525-feat-ws-dashboard-workroot-polishing-backlog` | todo | Track non-critical WorkRoot lifecycle and Git toolbar polish after the MVP management substrate |
 | `260703-feat-dashboard-workroot-session-keepalive` | ready | Keep terminal panes alive across work-root switches, visibility-gate their sockets, fix reconnect cursor/gap accuracy, and persist/restore dockview layout plus terminal visual state across reload |
-| `260525-feat-ws-dashboard-server-scoped-operation-forwarding` | idea | Make all daemon-scoped dashboard operations server-aware and transparent across linked servers |
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
@@ -244,23 +243,6 @@ dropped tickets live in hidden archive dirs and git history.
   fork/resume rendering only. Spec-addressed via
   `#260714-transcript-block-role-turn-id` in
   `ai-docs/spec/ws-web-dashboard/index.md`.
-- `260525-feat-ws-dashboard-server-scoped-operation-forwarding` (`idea`, feat,
-  child of `260622`) - **all 7 phases complete** (Phase 1 `c72013f5` through
-  Phase 7 `a71162ab`, each closed out with a `### Result` section and a clean
-  partitioned correctness/fit/test review). All daemon-scoped operation
-  routes are now server-aware through the local gateway under the **Server
-  Route** / `serverRoute` naming, with `server-local` compatibility aliases
-  preserved and dot-free linked-server route segments (dot reserved for a
-  future multi-hop separator). Spec addressed incrementally into
-  `ai-docs/spec/ws-web-dashboard/index.md` across the phases (contract-first:
-  yes). Live remote-Windows dogfood of the reversed-topology direct-endpoint
-  leg is now confirmed end to end (2026-07-10, via
-  `260707-chore-dashboard-linked-server-tunnel-dogfood-plan`'s Phase 2 - full
-  forwarded-operation set including the WS terminal relay). Demoted to
-  `idea` (2026-07-10) and re-parented from the retired `260514` to `260622`:
-  the remaining SSH-tunnel leg and thin-Playwright e2e execution are not
-  urgent verification gaps. Closing the ticket status remains a user
-  judgment call, not an automatic consequence of all phases landing.
 - `260707-chore-dashboard-linked-server-tunnel-dogfood-plan` (`idea`, chore) -
   test plan for `260525`'s live remote-dogfood gap. Phase 1 partially
   executed 2026-07-07: SSH connectivity probe blocked by this session's own

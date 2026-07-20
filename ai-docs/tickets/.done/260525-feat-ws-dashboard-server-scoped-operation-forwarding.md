@@ -9,6 +9,7 @@ related:
 related-mental-model:
   - ws-web-dashboard
 sage-review: completed
+completed: 2026-07-20
 ---
 
 # ws dashboard server-scoped operation forwarding
@@ -1003,3 +1004,27 @@ this phase and still has zero execution evidence in any session.
 
 Teardown: both daemon processes stopped, both scratch state directories
 removed, and the disposable `D:\scratch-reversed-rewalk` worktree removed.
+
+## Closeout - 2026-07-20
+
+All 7 phases are implemented, reviewed (clean partitioned
+correctness/fit/test), spec-addressed into
+`ai-docs/spec/ws-web-dashboard/index.md`, and merged to `ws-dashboard-dev`
+(Phase 1 `c72013f5` through Phase 7 `a71162ab`; per-phase source branches
+`implement/phase-1-*` through `implement/phase-7-close-reopen-restore-reuse`
+all merged and their local branches deleted). The ticket-wide completeness
+check recorded in the Phase 7 Result confirmed every route in `## API
+Inventory`'s "Must become server-aware" list is registered. The reversed-
+topology live-Windows-dogfood gap called out in the Phase 7 Result was
+subsequently closed by the 2026-07-07 and 2026-07-10 verification notes
+above, which walked the full forwarded-operation set (resources,
+root-picker, open-work-root, files, Git, terminal HTTP lifecycle, and
+terminal WebSocket relay) end to end against a real WSL<->Windows boundary.
+
+Residual items are tracked as their own tickets rather than blocking this
+ticket's closure: the SSH-tunnel dogfood leg and thin Playwright e2e
+execution remain open under
+`260707-chore-dashboard-linked-server-tunnel-dogfood-plan`; two informational
+-only naming/dedup minors noted in Phase 4/5 Results were left as-is by
+explicit reviewer judgment. No outstanding phase, review finding, or spec gap
+remains against this ticket's own scope. Moved to `.done/`.
