@@ -8,6 +8,7 @@ related-mental-model:
   - ws-dashboard-agent-harness
   - ws-web-dashboard
 sage-review: completed
+completed: 2026-07-20
 ---
 
 # ws dashboard agent activity chat UI
@@ -454,5 +455,17 @@ streaming rendering, resume/fork/queuing, server-scoped integration) are
 implemented, reviewed, and recorded. One companion follow-up ticket was
 filed during Phase 3: `260713-feat-ws-dashboard-activity-session-fork-cursor`
 (idea/, flags a real `260620`-owned contract gap for the real fork backend).
-All work lives on branch `impl/chat-ui-server`, unmerged into
-`ws-dashboard-dev` pending explicit user approval.
+All phase-result commits (`414d8805`, `6827fdb0`, `8aa453b0`, `523bde3a`,
+`6745f9ee`, `34fb3d52`, `66c9c2cb`) are confirmed merged into `ws-dashboard-dev`
+and present on `origin/ws-dashboard-dev`.
+
+## Closeout - 2026-07-20
+
+All 4 phases (chat surface shell and tab entry points; streaming conversation
+rendering; resume/fork and mid-turn submission queuing; server-scoped
+integration) are implemented, reviewed, and committed. Verified merged into
+the mainline `ws-dashboard-dev` branch (and present on
+`origin/ws-dashboard-dev`) via the phase-result commits cited above. Ticket
+closed with no outstanding phases. The one companion follow-up ticket filed
+during Phase 3, `260713-feat-ws-dashboard-activity-session-fork-cursor`
+(idea/), is tracked separately and is not a blocker for this closure.
