@@ -65,11 +65,19 @@ Movement
 
 ### 6. Sage Review Gate
 
-1. Run **Sage Review Gate**.
+1. Call `{{.McpNamespace}}/tickets.sage_gate(stem, landing)` and follow the returned action: `skip` (done), `stop_blocked` (report and stop), `ask` (relay the returned question, then call again with the answer), `run` (spawn the returned reviewer(s) via **Reviewer Spawn**). Posture, legacy-field migration, config fallback, and category×stage selection are tool-owned.
+2. After producing each requested verdict, call `{{.McpNamespace}}/tickets.sage_record(stem, stage, verdicts)`; it aggregates, writes frontmatter, renders any Blocked section, and commits. Follow its returned confirmation.
 
 ### 7. Handoff
 
 1. Run **Output Handoff**.
+
+## On: Reviewer Spawn
+
+For each reviewer named by `tickets.sage_gate`:
+1. Call `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")` or `"ticket-reviewer-completeness")`; it returns a file path. Do not read the rendered file in the lead context.
+2. Spawn a native subagent with prompt: `Read <rendered-path> as your system prompt. Ticket path: <ticket-path>`.
+3. Parse `verdict:` (`pass`, `concern`, or `block`) from the result; return it to `tickets.sage_record`.
 
 ## On: Move
 
@@ -112,199 +120,6 @@ Applies per `judge: spec-address-gate` (a requested `todo/` → `ready/` promoti
 For `epic` or `workset`, state that the path is a board artifact, not an implementation target.
 
 Always emit the current ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`. Preserve this line exactly — callers such as `{{.SkillNamespace}}:lead-proceed` capture the path from prefix-stage output.
-
-## On: Sage Review Gate
-
-Sage review is two sequential, non-looping stage gates keyed to ticket
-lifecycle: design-sketch review at `todo/` landing, completeness review at
-`ready/` promotion. Category requirement (mirrors
-`{{.McpNamespace}}/tickets.move`'s Go-side category detection — keep this
-table in sync with that mechanism; do not let the two drift):
-
-| Category | Design stage | Completeness stage |
-|---|---|---|
-| `feat`/`bug`/`refactor`/`chore` (default) | required | required |
-| `epic` | required | never |
-| `research`/`workset` | exempt | exempt |
-
-Legacy field note: if a ticket has only the old `sage-review:` field (no
-`sage-review-design:`/`sage-review-completeness:`), read it as authoritative
-for both new fields before applying any rule below: legacy `completed` → both
-`completed`; legacy `skipped` → both `skipped`; legacy `blocked` → both
-`blocked`; any other legacy value (`recommended`/`required`/missing/`pending`)
-→ treat as absent for both and resolve fresh per **Design Review Stage** /
-**Completeness Review Stage**.
-
-1. If landing status is `idea/`, skip this gate entirely.
-2. Determine the ticket's category from its stem and look up its stage
-   requirement in the table above.
-3. `todo/` landing:
-   a. If the category is exempt from the design stage (`research`/`workset`),
-      skip this gate entirely.
-   b. Otherwise, run **Design Review Stage** in standalone mode. Its own
-      verdict is this landing's final result; no cross-stage aggregation
-      applies.
-4. `ready/` landing (including a requested `todo/` → `ready/` promotion):
-   a. If the category is exempt from both stages (`research`/`workset`), skip
-      this gate entirely.
-   b. Read the effective `sage-review-design` posture (applying the legacy
-      migration mapping above when the new field is absent).
-   c. If the category requires only the design stage (`epic`): if the design
-      posture is not terminal (`completed`/`skipped`), run **Design Review
-      Stage** in standalone mode; otherwise skip this gate. No completeness
-      stage runs for `epic` in either case.
-   d. Otherwise (category requires both stages) and design posture is
-      already terminal: run **Completeness Review Stage** in standalone
-      mode. Its own verdict is this landing's final result.
-   e. Otherwise (category requires both stages and design posture is not yet
-      terminal): this is the never-skippable design invariant firing for a
-      ticket that reached `ready/` without a prior `todo/` design pass (a
-      direct `idea/`→`ready/` promotion, or a ticket authored directly at
-      `ready/`). Run **Design Review Stage** in combined mode to get a design
-      verdict, then run **Completeness Review Stage** in combined mode to get
-      a completeness verdict, then apply **Ready-promotion Aggregation**
-      across the two verdicts to produce this landing's final result.
-
-## On: Design Review Stage
-
-Takes a `mode` of `standalone` or `combined` from the caller (**On: Sage
-Review Gate**).
-
-1. Inspect the ticket frontmatter's effective `sage-review-design` posture
-   (apply the legacy migration mapping from **On: Sage Review Gate** when the
-   new field is absent).
-2. If posture is `skipped`, skip this stage (report no-op verdict `pass`
-   when running in `combined` mode).
-3. If posture is `completed`, skip this stage; the ticket already has a
-   completed design review (report no-op verdict `pass` when running in
-   `combined` mode).
-4. If posture is `blocked`, stop and report that the blocked design review
-   must be addressed before promotion.
-5. If posture is `recommended`, ask the user "Run design review for this
-   ticket?".
-   - If user declines: add `sage-review-design: skipped` to ticket
-     frontmatter, commit with
-     `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "chore(sage): skip design review", ai_context: ["user declined design review in ask mode"])`,
-     then skip the rest of this stage (report no-op verdict `pass` when
-     running in `combined` mode).
-6. If posture is `required`, run design review without asking.
-7. If posture is missing or `pending`, treat it as legacy unresolved state:
-   call `{{.McpNamespace}}/config.show()`, resolve `sage_review` as `skipped`
-   for `off`/empty/unset, `recommended` for `ask`, or `required` for `auto`,
-   write that posture to `sage-review-design:`, then continue from the
-   matching posture rule above.
-8. To run: `playbook.render` returns a file path. Include that path in the
-   subagent's kickoff prompt; the subagent reads the file as its system
-   prompt. Do not read the rendered file in the lead context. Call
-   `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-design")`; spawn
-   native subagent with prompt: `Read <rendered-path> as your system prompt.
-   Ticket path: <ticket-path>`. Capture the design verdict result.
-9. Parse `verdict:` from the result (`pass`, `concern`, or `block`,
-   exhaustive set).
-10. If `mode` is `combined`, stop here and return the verdict and issues to
-    the caller for **Ready-promotion Aggregation**; do not write frontmatter
-    or commit in this stage.
-11. If `mode` is `standalone` and the verdict is `block`:
-    a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the
-       ticket body using **Blocked Section Template — Design Only**. Replace
-       an existing `## Blocked` section from a prior cycle.
-    b. Edit the ticket file directly to add or update `sage-review-design: blocked`
-       in the frontmatter block; do not use a dedicated tool call.
-    c. Commit with
-       `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on design review", ai_context: ["design review blocked"])`.
-12. If `mode` is `standalone` and the verdict is `pass` or `concern` resolved
-    to pass:
-    a. Edit the ticket file directly to add or update `sage-review-design: completed`
-       in the frontmatter block; do not use a dedicated tool call.
-    b. Commit with
-       `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark design review completed", ai_context: ["design review passed"])`.
-
-## On: Completeness Review Stage
-
-Takes a `mode` of `standalone` or `combined` from the caller (**On: Sage
-Review Gate**).
-
-1. Inspect the ticket frontmatter's effective `sage-review-completeness`
-   posture (apply the legacy migration mapping from **On: Sage Review Gate**
-   when the new field is absent).
-2. If posture is `skipped`, skip this stage (report no-op verdict `pass`
-   when running in `combined` mode).
-3. If posture is `completed`, skip this stage; the ticket already has a
-   completed completeness review (report no-op verdict `pass` when running
-   in `combined` mode).
-4. If posture is `blocked`, stop and report that the blocked completeness
-   review must be addressed before promotion.
-5. If posture is `recommended`, ask the user "Run completeness review for
-   this ticket?".
-   - If user declines: add `sage-review-completeness: skipped` to ticket
-     frontmatter, commit with
-     `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "chore(sage): skip completeness review", ai_context: ["user declined completeness review in ask mode"])`,
-     then skip the rest of this stage (report no-op verdict `pass` when
-     running in `combined` mode).
-6. If posture is `required`, run completeness review without asking.
-7. If posture is missing or `pending`, treat it as legacy unresolved state:
-   call `{{.McpNamespace}}/config.show()`, resolve `sage_review` as `skipped`
-   for `off`/empty/unset, `recommended` for `ask`, or `required` for `auto`,
-   write that posture to `sage-review-completeness:`, then continue from the
-   matching posture rule above.
-8. To run: call
-   `{{.McpNamespace}}/playbook.render(name: "ticket-reviewer-completeness")`;
-   spawn native subagent with prompt: `Read <rendered-path> as your system
-   prompt. Ticket path: <ticket-path>`. Capture the completeness verdict
-   result.
-9. Parse `verdict:` from the result (`pass`, `concern`, or `block`,
-   exhaustive set).
-10. If `mode` is `combined`, stop here and return the verdict and issues to
-    the caller for **Ready-promotion Aggregation**; do not write frontmatter
-    or commit in this stage.
-11. If `mode` is `standalone` and the verdict is `block`:
-    a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the
-       ticket body using **Blocked Section Template — Completeness Only**.
-       Replace an existing `## Blocked` section from a prior cycle.
-    b. Edit the ticket file directly to add or update `sage-review-completeness: blocked`
-       in the frontmatter block; do not use a dedicated tool call.
-    c. Commit with
-       `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on completeness review", ai_context: ["completeness review blocked"])`.
-12. If `mode` is `standalone` and the verdict is `pass` or `concern` resolved
-    to pass:
-    a. Edit the ticket file directly to add or update `sage-review-completeness: completed`
-       in the frontmatter block; do not use a dedicated tool call.
-    b. Commit with
-       `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark completeness review completed", ai_context: ["completeness review passed"])`.
-
-## On: Ready-promotion Aggregation
-
-Applies only to the combined-mode case from **On: Sage Review Gate** step 4e,
-where both **Design Review Stage** and **Completeness Review Stage** ran in
-the same `ready/`-landing invocation because the ticket reached `ready/`
-without a prior terminal design posture. This mirrors the pre-split gate's
-single-pass behavior for exactly this entry path, writing both fields
-together from one combined outcome rather than two independent per-stage
-writes.
-
-1. Design `block` → final verdict is `block` regardless of completeness.
-2. Design not-block and completeness `block` → final verdict is `block`.
-3. Design `concern` and completeness `pass|concern` → default to `pass`; if
-   ANY issue in either reviewer result has `resolution: missing`, elevate to
-   `concern`. On `concern`, proceed to the pass-resolution step (do not block
-   by default); lead may escalate to `block` if the missing decision is
-   judged critical.
-4. All `pass` → final verdict is `pass`.
-5. If final verdict is `block`:
-   a. Append a new `## Blocked (YYYY-MM-DD)` section at the end of the ticket
-      body using **Blocked Section Template — Design and Completeness**. If
-      a `## Blocked` section already exists from a prior cycle, replace it.
-   b. Edit the ticket file directly to add or update both
-      `sage-review-design: blocked` and `sage-review-completeness: blocked`
-      in the frontmatter block; do not use a dedicated tool call.
-   c. Commit with
-      `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): block ticket on sage review", ai_context: ["sage review blocked: design and/or completeness issues"])`.
-6. If final verdict is `pass` or `concern` resolved to pass:
-   a. Edit the ticket file directly to add or update both
-      `sage-review-design: completed` and `sage-review-completeness: completed`
-      in the frontmatter block; do not use a dedicated tool call.
-   b. Commit with
-      `{{.McpNamespace}}/git.commit(paths: ["<ticket-path>"], title: "docs(sage): mark sage review completed", ai_context: ["sage review passed"])`.
 
 ## On: Cross-ticket decision review
 
@@ -378,50 +193,6 @@ Trigger: a phase implements caller-visible behavior with no confirmed stem, `spe
 Action: stop the authoring flow.
 Report: name the uncovered phase and blocker.
 Blocker: missing spec traceability for caller-visible behavior.
-
-## Templates
-
-### Blocked Section Template — Design Only
-
-```markdown
-## Blocked (YYYY-MM-DD)
-
-### Design Reviewer — <verdict>
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | <title> | <severity> | <resolution> |
-```
-
-### Blocked Section Template — Completeness Only
-
-```markdown
-## Blocked (YYYY-MM-DD)
-
-### Completeness Reviewer — <verdict>
-
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | <title> | <severity> |
-```
-
-### Blocked Section Template — Design and Completeness
-
-```markdown
-## Blocked (YYYY-MM-DD)
-
-### Design Reviewer — <verdict>
-
-| # | Title | Severity | Resolution |
-|---|-------|----------|------------|
-| 1 | <title> | <severity> | <resolution> |
-
-### Completeness Reviewer — <verdict>
-
-| # | Title | Severity |
-|---|-------|----------|
-| 1 | <title> | <severity> |
-```
 
 ## Doctrine
 
