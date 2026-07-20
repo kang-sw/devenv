@@ -882,6 +882,20 @@ into a new ticket body. An unknown or empty `type` is rejected with an error
 listing valid types. Capability range: `>=0.30.6-dev <0.31.0`.
 {#260624-tickets-template-tool}
 
+`tickets.checklist` returns the verification checklist for one `lead-write-ticket`
+phase as data, so the playbook can install it as a single todo instead of
+carrying the item list as static prose. `type` and `phase` are both required:
+`type` accepts the same set as `tickets.template`
+(`feat`/`bug`/`refactor`/`chore`/`research`/`workset`/`epic`), and `phase` is
+`content` (the ticket-content capture checklist) or `intent` (the intent-review
+checklist). The returned markdown is the full multi-item text for that phase,
+numbered and ready to paste verbatim into one todo `instruction`; the `intent`
+phase emits one extra category-scoped item for `epic` and `workset` and
+renumbers the trailing items accordingly. Like `tickets.template` it is a pure
+lookup — no `session_key`/root, no gate. An unknown or empty `type`, or a `phase`
+other than `content`/`intent`, is rejected with an error listing valid values.
+{#260720-tickets-checklist-tool}
+
 The Sage Review Gate is split into two sequential, non-looping stage gates
 keyed to ticket lifecycle, both running after `lead-write-ticket` commits a
 ticket: a design-sketch review at `todo/` landing (tolerant of missing detail;
