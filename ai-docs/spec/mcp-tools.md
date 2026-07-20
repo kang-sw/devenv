@@ -963,6 +963,28 @@ stamping. The migration write persists both new fields on that first touch
 in place.
 {#260624-sage-review-gate}
 
+`tickets.sage_gate` and `tickets.sage_record` are the two root-aware tools the
+`lead-write-ticket` playbook calls to run the gate above; both require
+`session_key`. `tickets.sage_gate(stem, landing[, answer])` resolves the gate
+decision for a ticket and returns `{ action, ask_prompt?, reviewers?, mode? }`
+where `action` is one of `skip`, `stop_blocked`, `ask`, or `run`. It owns
+posture resolution, the legacy single-field `sage-review:` migration, the
+`sage_review` config fallback, the category×stage matrix, and
+standalone-versus-combined mode selection. For `ask` it returns the exact
+question to relay; the caller re-invokes with `answer` (`yes`/`no`), and each
+still-pending `recommended` stage is asked separately (design first) so one
+answer never resolves another stage. A declined `ask` and a config-fallback
+resolution each persist the resolved posture and commit. The tool never spawns
+reviewers — for `run` it names the reviewer(s) to dispatch and leaves spawning
+to the lead. `tickets.sage_record(stem, stage, verdicts)` aggregates the
+supplied stage verdicts into the final posture, writes the frontmatter field(s),
+renders any `## Blocked` section from a Go-owned template whose output is
+byte-identical to the prior playbook templates, commits with the canonical
+title, and returns the applied posture plus the commit reference. A `stage`
+whose expected reviewer verdict is absent from `verdicts` is rejected with an
+error rather than recording a passing posture for a review that did not run.
+Capability range: `>=0.33.15-dev <0.34.0`. {#260720-sage-gate-record-tools}
+
 ## Mental-Model Discovery Tools {#260505-mental-model-discovery-tools}
 
 `mental_models.list` returns available mental-model documents with domain,
