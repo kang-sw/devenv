@@ -1,10 +1,12 @@
 import {
   resolveActiveResources,
-  resolveWorkbenchSelection,
+  resolveStickyWorkbenchSelection,
   serverScopedIdentity,
   type DashboardResourcesView,
   type InstanceView,
+  type LastMatchedSelectionByServer,
   type ResourcesByServer,
+  type WorkbenchSelection,
   type WorkRootView,
 } from "../resourceModel.js";
 
@@ -102,6 +104,100 @@ export function withOpenWorkRootRef(
     : { ...openWorkRootRefs, [rootKey]: ref };
 }
 
+// The exact inputs that produced a given `resolveStickyWorkbenchSelection`
+// result, compared by reference/value equality in `driveStickyWorkbenchSelection`
+// below to detect a redundant re-invocation over the SAME poll input (see
+// that function's doc comment). `activeResources` is compared by object
+// reference deliberately: `mergeResourcesByServer` (resourceModel.ts)
+// allocates a fresh `DashboardResourcesView` object per poll response, so an
+// unchanged reference reliably means "no new poll landed since the last
+// invocation", not merely "structurally equal".
+export type StickySelectionRenderKey = {
+  activeResources: DashboardResourcesView | null;
+  selectedId: string | null;
+  selectedServerId: string;
+};
+
+// Carries the sticky cache PLUS the last render key/selection it was
+// computed from, across renders (owned by a single ref at the `App.tsx` call
+// site - see `driveStickyWorkbenchSelection`'s doc comment for why this must
+// be one bundle rather than a bare `LastMatchedSelectionByServer`).
+export type StickySelectionDriverState = {
+  lastMatchedSelectionByServer: LastMatchedSelectionByServer;
+  lastRenderKey: StickySelectionRenderKey | null;
+  lastSelection: WorkbenchSelection | null;
+};
+
+export const initialStickySelectionDriverState: StickySelectionDriverState = {
+  lastMatchedSelectionByServer: {},
+  lastRenderKey: null,
+  lastSelection: null,
+};
+
+// 260714 Phase 2 Prong 1 correctness fix. `resolveStickyWorkbenchSelection`
+// is a NON-idempotent read-and-advance state machine over
+// `LastMatchedSelectionByServer`: a first miss bridges (`bridged: false ->
+// true`), a second consecutive miss with the SAME inputs drops the entry and
+// falls through to the fallback. That transition is meant to count in POLL
+// cycles (bridge for one omitted poll, expire on a second), but React can
+// invoke the component body that owns the driving ref more than once for the
+// exact same poll input - deterministically under StrictMode's double-invoke
+// in development (the ref persists across both invocations), and in
+// production whenever an unrelated App-level state change triggers a
+// re-render before the next poll response lands. Calling
+// `resolveStickyWorkbenchSelection` directly once per render invocation
+// therefore advances the bridge/drop transition once per RENDER rather than
+// once per POLL, collapsing the intended one-poll bridge to zero protection
+// under StrictMode (inv1 bridges, inv2 immediately sees the already-bridged
+// cache and treats it as a second miss) - unlike the D5 pattern
+// (`withLastNonNullResourcesByServer`/`resolveActiveResources`) this is
+// modeled on, which is exactly idempotent under repeat renders because
+// re-storing the same last-good value any number of times yields the same
+// cache.
+//
+// This driver restores that idempotency: it only calls
+// `resolveStickyWorkbenchSelection` (and only commits its
+// `nextLastMatchedSelectionByServer`) when `renderKey` differs from the key
+// the driver state was last advanced with. A repeat invocation with the
+// identical `renderKey` (same `activeResources` object reference, same
+// `selectedId`, same `selectedServerId`) returns the previously memoized
+// `selection` untouched - safe to call any number of times per poll,
+// including from a genuinely new render triggered by an unrelated state
+// change, as long as none of the three key fields changed.
+export function driveStickyWorkbenchSelection(
+  renderKey: StickySelectionRenderKey,
+  driverState: StickySelectionDriverState,
+): {
+  selection: WorkbenchSelection | null;
+  nextDriverState: StickySelectionDriverState;
+} {
+  const { lastRenderKey } = driverState;
+  if (
+    lastRenderKey &&
+    lastRenderKey.activeResources === renderKey.activeResources &&
+    lastRenderKey.selectedId === renderKey.selectedId &&
+    lastRenderKey.selectedServerId === renderKey.selectedServerId
+  ) {
+    return { selection: driverState.lastSelection, nextDriverState: driverState };
+  }
+
+  const { selection, nextLastMatchedSelectionByServer } =
+    resolveStickyWorkbenchSelection(
+      renderKey.activeResources,
+      renderKey.selectedId,
+      renderKey.selectedServerId,
+      driverState.lastMatchedSelectionByServer,
+    );
+  return {
+    selection,
+    nextDriverState: {
+      lastMatchedSelectionByServer: nextLastMatchedSelectionByServer,
+      lastRenderKey: renderKey,
+      lastSelection: selection,
+    },
+  };
+}
+
 // CONTRACT: the pure active-root derivation seam (260714 active-root
 // derivation refactor Phase 1, D6). Given the exact committed-state slice a
 // single render sees, derive everything the workbench active-root render
@@ -115,8 +211,18 @@ export function withOpenWorkRootRef(
 //   `resolveActiveResources` path as the live view (D2), so a one-render gap
 //   in `resourcesByServer` for the selected server does not collapse the
 //   selection.
-// - `selectedRootKey` is the freshly-resolved selection's root key, or `null`
-//   when no selection resolves.
+// - `selection` is NOT recomputed here (260714 Phase 2 Prong 1 correctness
+//   fix): unlike `activeResources`/`resolveActiveResources`, resolving the
+//   sticky selection is a non-idempotent operation across repeat render
+//   invocations (see `driveStickyWorkbenchSelection`'s doc comment) and so
+//   must be driven exactly once per render at the single ref-owning call
+//   site (`App.tsx`) and passed in here as an already-resolved value, rather
+//   than re-derived from a cache that this function has no safe way to
+//   avoid re-advancing. This is the one exception to the "no cross-render
+//   refs" contract line above: the exception is pushed entirely onto the
+//   caller, which is the only place a ref can safely live.
+// - `selectedRootKey` is `selection`'s root key, or `null` when no selection
+//   resolves.
 // - `openInstanceKeys` folds the selected root's key into the persisted
 //   `openWorkRootKeys` via `withOpenWorkRootKey` (append-if-absent,
 //   position-preserving; never filter-then-append, D1), so keep-alive members
@@ -134,6 +240,7 @@ export function deriveWorkbenchView(state: {
   selectedId: string | null;
   openWorkRootKeys: readonly string[];
   openWorkRootRefs: Record<string, { rootId: string; serverRoute: string }>;
+  selection: WorkbenchSelection | null;
 }): {
   activeResources: DashboardResourcesView | null;
   selectedRootKey: string | null;
@@ -145,7 +252,7 @@ export function deriveWorkbenchView(state: {
     state.selectedServerId,
     state.lastNonNullResourcesByServer,
   );
-  const selection = resolveWorkbenchSelection(activeResources, state.selectedId);
+  const selection = state.selection;
   const selectedRootKey = selection
     ? serverScopedIdentity(
         selection.root.resourcePath.serverId,

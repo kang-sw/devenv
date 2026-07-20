@@ -7,11 +7,13 @@ import {
   reconcileSelectedId,
   removeResourcesByServer,
   resolveActiveResources,
+  resolveStickyWorkbenchSelection,
   withLastNonNullResourcesByServer,
   workRootActivationEndpoint,
   workspaceEndpoint,
   type DashboardResourcesView,
   type InstanceView,
+  type LastMatchedSelectionByServer,
   type ResourcesByServer,
   type ViewState,
   type WorkRootView,
@@ -538,4 +540,167 @@ assertEqual(
 assertTrue(
   removeResourcesByServer(cacheWithAAndB, "server-never-cached") === cacheWithAAndB,
   "removing an absent server id is a no-op that returns the same reference",
+);
+
+// resolveStickyWorkbenchSelection (260714 Phase 2 Prong 1): the server-scoped
+// D5 pattern applied to selection. A workspace with two work roots - the
+// second (`root-b`) stands in for the reported bug's `gitLinkedWorktree`
+// child, whose entry can momentarily vanish from an otherwise-present
+// resource tree.
+const stickyWorkspaceWithBoth: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-sticky",
+      label: "sticky",
+      state: readyState,
+      compactable: false,
+      workRoots: [
+        workRoot("root-a", "workspace-sticky", "root-a"),
+        workRoot("root-b", "workspace-sticky", "root-b"),
+      ],
+      actions: [],
+    },
+  ],
+};
+// The one-poll omission: `root-b`'s own entry is missing from the tree, but
+// the tree itself (and `root-a`) are still present - the D2/D5 slot-level
+// fallback does not engage, since `resources` itself is non-null.
+const stickyWorkspaceMissingB: DashboardResourcesView = {
+  ...stickyWorkspaceWithBoth,
+  workspaces: [
+    {
+      ...stickyWorkspaceWithBoth.workspaces[0],
+      workRoots: [workRoot("root-a", "workspace-sticky", "root-a")],
+    },
+  ],
+};
+
+const emptyStickyCache: LastMatchedSelectionByServer = {};
+
+// A fresh exact match seeds the cache with `bridged: false` and returns the
+// freshly-resolved selection unchanged.
+const stickyAfterMatch = resolveStickyWorkbenchSelection(
+  stickyWorkspaceWithBoth,
+  "root-b",
+  "server-local",
+  emptyStickyCache,
+);
+assertEqual(
+  stickyAfterMatch.selection?.root.id,
+  "root-b",
+  "an exact match resolves to the matched root, not the fallback",
+);
+assertEqual(
+  stickyAfterMatch.nextLastMatchedSelectionByServer["server-local"]?.bridged,
+  false,
+  "a fresh exact match seeds the cache entry as not-yet-bridged",
+);
+
+// First consecutive miss: `root-b` is momentarily absent from the tree.
+// The cached selection bridges over it (still `root-b`, not the fallback
+// `root-a`), and the cache entry advances to `bridged: true`.
+const stickyAfterFirstMiss = resolveStickyWorkbenchSelection(
+  stickyWorkspaceMissingB,
+  "root-b",
+  "server-local",
+  stickyAfterMatch.nextLastMatchedSelectionByServer,
+);
+assertEqual(
+  stickyAfterFirstMiss.selection?.root.id,
+  "root-b",
+  "a first consecutive miss bridges to the previously-matched selection, not the natural fallback",
+);
+assertEqual(
+  stickyAfterFirstMiss.nextLastMatchedSelectionByServer["server-local"]?.bridged,
+  true,
+  "a bridged miss advances the cache entry so a second consecutive miss is not bridged again",
+);
+
+// Second consecutive miss for the same `selectedId`: treated as a genuine
+// removal, not a transient omission. Falls through to the natural fallback
+// (`root-a`, the first root walked) and drops the cache entry.
+const stickyAfterSecondMiss = resolveStickyWorkbenchSelection(
+  stickyWorkspaceMissingB,
+  "root-b",
+  "server-local",
+  stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+);
+assertEqual(
+  stickyAfterSecondMiss.selection?.root.id,
+  "root-a",
+  "a second consecutive miss is treated as a genuine removal and falls through to the natural fallback",
+);
+assertTrue(
+  !("server-local" in stickyAfterSecondMiss.nextLastMatchedSelectionByServer),
+  "a genuine removal drops the now-stale cache entry",
+);
+
+// A real user re-selection to an id absent from the tree (so the fresh
+// lookup itself does not match, falling through to the natural fallback)
+// while a bridged cache entry exists for a DIFFERENT, unrelated `selectedId`
+// does not consult that stale entry - the fresh (fallback) selection passes
+// through untouched, and the cache is left as-is (nothing to advance for a
+// selection the cache never saw). Note this "otherwise" branch is reached
+// only when the fresh lookup itself does NOT match (see the matched-branch
+// case above, which always reseeds the cache for the matched `selectedId`
+// regardless of what was cached before).
+const stickyOnRealReselect = resolveStickyWorkbenchSelection(
+  stickyWorkspaceWithBoth,
+  "root-nonexistent",
+  "server-local",
+  stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+);
+assertEqual(
+  stickyOnRealReselect.selection?.root.id,
+  "root-a",
+  "a re-selection to an absent id falls through to the natural fallback and ignores a stale cache entry for a different selectedId",
+);
+assertTrue(
+  stickyOnRealReselect.nextLastMatchedSelectionByServer ===
+    stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+  "a re-selection the cache never saw leaves the unrelated cache entry's reference untouched",
+);
+
+// `resources === null` is already fully owned by D2/D5 upstream of this
+// function - the sticky cache must not engage on that case at all (only
+// bridges "tree present, entry missing", never "tree itself absent").
+const stickyOnNullResources = resolveStickyWorkbenchSelection(
+  null,
+  "root-b",
+  "server-local",
+  stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+);
+assertEqual(
+  stickyOnNullResources.selection,
+  null,
+  "a null resources tree resolves to a null selection, untouched by the sticky cache",
+);
+assertTrue(
+  stickyOnNullResources.nextLastMatchedSelectionByServer ===
+    stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+  "a null resources tree passes the cache through unchanged rather than bridging or dropping it",
+);
+
+// `selectedId === null` boundary (initial-load case, before anything has
+// ever been selected): the fresh lookup never matches (no `selectedId` to
+// find), so this always falls into the "otherwise" branch regardless of what
+// the cache holds for this server - the natural fallback (the first root
+// walked) passes through untouched and the cache is left exactly as-is, even
+// if a stale bridged entry exists from a PRIOR (now-irrelevant) selection.
+const stickyOnNullSelectedId = resolveStickyWorkbenchSelection(
+  stickyWorkspaceWithBoth,
+  null,
+  "server-local",
+  stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+);
+assertEqual(
+  stickyOnNullSelectedId.selection?.root.id,
+  "root-a",
+  "a null selectedId resolves to the natural fallback, ignoring any cached entry",
+);
+assertTrue(
+  stickyOnNullSelectedId.nextLastMatchedSelectionByServer ===
+    stickyAfterFirstMiss.nextLastMatchedSelectionByServer,
+  "a null selectedId leaves the cache reference untouched",
 );

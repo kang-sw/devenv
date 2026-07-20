@@ -2,8 +2,9 @@
 title: Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
 related:
   260716-feat-ws-dashboard-daemon-persistent-log-layer: "prerequisite — the persistent rolling-file log sink must land first so the instrumentation below is captured durably on a detached daemon"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+completed: 2026-07-20
 ---
 
 # Linked-server terminal WebSocket relay fails its first real WSL<->Windows exercise with an undiagnosable blanket 502
@@ -413,6 +414,15 @@ work-root terminals are now stable, but sub-worktree terminals still churn (open
 -> clean-teardown loop ~every 4s) because the OPEN-socket guard (Phase 2 prong #2)
 and the selection stickiness (Phase 2 prong #1) are not yet done.
 
+## Spec Impact
+
+No `ai-docs/spec` workflow-system spec applies: this fix is downstream
+`ws-dashboard` application behavior (frontend selection stickiness in
+`resourceModel.ts`/`openRootLookup.ts` and the WebSocket cleanup guard in
+`App.tsx`), outside the spec system's scope per AGENTS.md Architecture Rule 1
+(specs describe the ws workflow system itself). Behavior recovery is fully
+specified in this ticket's Phase 2 plan below.
+
 ## Phases
 
 ### Phase 1: Diagnostic tracing instrumentation for the relay pump loop and connect path
@@ -439,11 +449,16 @@ infrastructure (it is what proved the relay is invoked and the client closes the
 socket); the pump-loop teardown-semantics change originally anticipated here is
 demoted to a Phase 2 deferred latent defect, not this bug's fix.
 
-### Phase 2 (deferred — real fix; WIP handoff 2026-07-16): frontend selection-stickiness + OPEN-socket guard
+### Phase 2 (sage-review gate passed 2026-07-20 — implementation-ready): frontend selection-stickiness + OPEN-socket guard
 
-Do NOT implement yet. The confirmed root cause is frontend active-root /
-selection-derivation instability (see `## Confirmed root cause (2026-07-16)`), not
-a backend relay teardown. Two-pronged fix:
+> The 2026-07-16 WIP handoff note ("Do NOT implement yet") is LIFTED as of
+> 2026-07-20: the design and completeness sage reviews for this ticket both
+> closed with all issues resolved autonomously (see the constraint
+> subsections below). Phase 2 is now implementation-ready.
+
+The confirmed root cause is frontend active-root / selection-derivation
+instability (see `## Confirmed root cause (2026-07-16)`), not a backend relay
+teardown. Two-pronged fix:
 
 1. **Re-provide the deleted protection**, scoped to "the currently-selected root
    disappeared from an otherwise-present tree": in `resourceModel.ts`
@@ -456,6 +471,64 @@ a backend relay teardown. Two-pronged fix:
    `socket.close()` an OPEN socket that has only just reached OPEN — mirror the
    CONNECTING guard the `af058b73` hotfix added.
 
+#### Prong 1 design constraint (sage-review resolution)
+
+The stickiness MUST be modeled on the already-vetted **server-scoped D5
+pattern** — `withLastNonNullResourcesByServer` / `resolveActiveResources`
+(`resourceModel.ts:236-261`) — which is server-keyed, bridges exactly one
+transient poll gap, and by construction cannot pin content under the wrong
+server's header.
+
+Do NOT reintroduce the unscoped `lastActiveRootKeyRef` /
+`lastActiveRootServerIdRef` cross-render ref memory. The sibling ready ticket
+`260714-refactor-dashboard-active-root-atomic-select-pure-derivation`
+(decision D3) deliberately DELETED that shape — it was the render-time mutable
+memory that only advanced when the root already happened to be mounted, so it
+was stale in exactly the gap it existed to cover, and that class of ad-hoc
+"sticky last-known" patch is what produced 4 regressions in one cycle (see
+that ticket's `### The four failure modes`). This ticket's fix must reconcile
+with D3 rather than re-derive the deleted shape under a new name: build the
+sub-worktree stickiness as a server-scoped last-good cache (D5's shape,
+applied to the selected-root key rather than the resources view), not as
+unscoped cross-render selection memory.
+
+The stickiness must distinguish a transient single-poll omission (bridge it)
+from a genuine worktree removal/close (let selection actually change). The
+distinguishing signal: the server's resource tree itself is still non-null and
+still present in `resourcesByServer` (i.e. the poll succeeded and D2's
+slot-level fallback does NOT engage) but the previously-selected root's entry
+is absent from that tree on this one poll. A genuine removal/close is
+distinguished from a transient omission by persisting across more than one
+poll cycle (or by an explicit close/removal action) — the sticky cache must
+expire once the omission repeats past a single poll, not hold indefinitely.
+
+#### Prong 2 mechanism constraint (sage-review resolution)
+
+"Mirror the CONNECTING guard" is insufficient as a spec: an OPEN socket has no
+natural later completion event the way a CONNECTING socket has an open/error
+event, so a naive OPEN guard (e.g. "never close if OPEN") risks leaking
+connections on a genuine hide/unmount (tab closed, worktree removed, server
+disconnected). The concrete teardown condition must be defined:
+
+- Prefer keying socket teardown on **logical terminal presence** — whether the
+  terminal is still present in the resource tree / still logically open —
+  rather than on transient `paneVisible`. A `paneVisible=false` flip alone
+  (pane hidden behind another Dockview tab, or the watchdog's
+  `offsetParent === null` check firing during layout churn) must NOT tear down
+  an OPEN socket for a terminal that is still logically open; only the
+  terminal's actual removal from the resource tree / explicit close should.
+- If a post-open grace window is used instead (e.g. "ignore a `paneVisible`
+  drop within N ms of reaching OPEN"), the threshold must be stated explicitly
+  and must be long enough to bridge one poll cycle's worth of selection churn
+  (see the ~5s poll cadence and ~4s observed churn period in the causal
+  chain above) — a value shorter than one poll interval does not defend
+  against the actual observed failure mode.
+- Prong 2 is defense-in-depth: once prong 1 removes the spurious selection
+  flip, `paneVisible` should no longer flip for a still-open sub-worktree, so
+  prong 2 should stop firing in the steady state. It exists to protect against
+  any residual or other flip source (e.g. RU1 below, or an unrelated future
+  regression), not as the primary fix.
+
 Runner-up hypotheses to rule out during the fix:
 - (RU1) the keep-alive / background-instance path (`App.tsx:4400-4424`) resolves
   via an *unprotected* raw lookup with no fallback cache, so a transient omission
@@ -464,6 +537,39 @@ Runner-up hypotheses to rule out during the fix:
   sync-mount hack at `App.tsx:~1017-1041`) is still unlanded — a documented loose
   end in the same cluster; lower confidence for the repeating loop.
 
+#### RU1/RU2 completion boundary (sage-review resolution)
+
+- **RU1** (`App.tsx:4400-4424`): "ruled out" means confirming, during
+  implementation, whether this raw-lookup path shares the same fallback
+  protection as prong 1 (or is otherwise outside the repeating-loop path). If
+  it turns out to be a live second unmount/remount source, fold a matching fix
+  into this phase; otherwise document it in the Result as not-implicated —
+  do not leave it unexamined.
+- **RU2** (unlanded atomic `selectRoot` refactor, sibling ticket
+  `260714-refactor-dashboard-active-root-atomic-select-pure-derivation`) is a
+  separate refactor and is NOT required for this fix. Documenting it as
+  out-of-scope for Phase 2 is sufficient — it does not need to land alongside
+  this phase.
+- Resolving RU1/RU2 beyond the documented check above is optional for Phase 2
+  completion; the phase is complete once the two-pronged fix lands and the
+  Acceptance/Verification boundary below is met, regardless of RU1/RU2
+  disposition.
+
+#### Phase 2 Acceptance / Verification boundary
+
+- Dogfood reproduction: open a linked WSL sub-worktree terminal from the
+  Windows frontend and confirm NO open/teardown churn (no ~4s socket
+  recreation loop, no 8-pane bursts) over a sustained window (e.g. >= 5 min)
+  in the daemon logs.
+- Frontend build/typecheck passes.
+- Named regression coverage: a unit test for `resolveWorkbenchSelection`
+  (and/or `deriveWorkbenchView`) covering stickiness under a transient
+  single-poll omission of the selected root; a test for the `App.tsx`
+  OPEN-socket cleanup guard. Relay/terminal automated coverage is currently
+  ~zero, so at minimum the selection-model logic (pure) must get a unit test
+  even if the socket-guard behavior can only be covered by a lighter-weight
+  check.
+
 Deferred latent defects (real, but NOT this bug's root cause — kept so they are
 not lost): the backend relay pump loop still tears the whole bidirectional session
 down on any single-direction read error/EOF, now traced but with no
@@ -471,3 +577,56 @@ teardown-semantics fix (servers.rs:1621-1655); and `tokio-tungstenite` still
 carries no TLS backend, so any `https://` linked server's terminal WS would fail
 via `Error::Tls` collapsed into the same blanket 502. Add relay test coverage
 (currently zero) alongside whichever of these is addressed.
+
+### Result (6b900191) - 2026-07-20
+
+Phase 2 as planned (server-scoped D5-pattern selection stickiness in
+`resourceModel.ts`/`openRootLookup.ts` + the terminal socket-effect split in
+`App.tsx`) landed and passed partitioned review clean through `2f717bcf`, and is
+RETAINED as defense-in-depth for the transient single-poll omission class.
+However, the first live multi-server dogfood (Windows gateway `:4300` relaying
+the linked WSL daemon `wsl-daemon`) proved that planned fix is a **no-op for the
+actual reproduction**: instrumented repro showed the sticky cache never engaged
+(the relayed resource tree arrived stable and complete), `reconcile` removed
+nothing, and the close-cleanup path never fired. The 2026-07-16 "frontend
+active-root/selection-derivation instability" framing therefore does NOT explain
+the dogfooded symptom either — it, like the earlier backend-relay framings, was
+diagnosed without a live multi-server exercise.
+
+**Corrected root cause.** `resizeTerminal` (`frontend/src/terminals.ts`) returned
+the raw daemon response without re-stitching the client-side `serverRoute` (unlike
+`createTerminal`/`listTerminals`, which do). Because `forwardTerminalResize`
+replaces a pane's whole `session` with that response, a linked (non-local)
+terminal pane's `session.serverRoute` was clobbered to `undefined`. The workbench
+pane filter `(session.serverRoute ?? "server-local") === root.resourcePath.serverId`
+then fails for a non-local root (e.g. `wsl-daemon`), so each terminal pane drops
+out of the active root's editor groups one at a time as its xterm fit-resize
+fires — collapsing the workbench to an empty Dockview `dv-watermark`. Local roots
+are unaffected because the `"server-local"` fallback coincidentally matches.
+Remote-only; surfaced on the first dogfood of linked-server terminals.
+
+**Evidence.** Backend relay verified stable and correct via curl on both the
+gateway-relayed `/api/dashboard/servers/wsl-daemon/resources` and
+`.../work-roots/<id>/terminals` (5 running sessions delivered stably; WSL-daemon
+sessions confirmed still alive after the repro). Staged frontend console
+instrumentation showed a size-preserving `serverRoute` mutation originating from
+the `resize` `setTerminalPanes` site while `matchedTerminalPaneCount` fell
+5→2→1→0 with no pane-map removal and no status change — isolating the defect to
+the frontend session-replacement path, not backend delivery.
+
+**Fix.** Stitch `serverRoute` at the fetcher boundary in `resizeTerminal` (commit
+`6b900191`), mirroring the other two fetchers; an audit confirmed `resize` was the
+only vulnerable session-replacement path (the other five spread the existing
+session). Regression unit test added (`terminals.test.ts`). Validated in dogfood:
+linked terminals now persist, no watermark collapse. Frontend build and
+`test:terminals` pass.
+
+**RU1/RU2.** Not implicated in the actual reproduction (the collapse is the resize
+`serverRoute` clobber, not a keep-alive unmount or the unlanded atomic
+`selectRoot` refactor). RU2 remains out of scope per the plan.
+
+**Follow-up.** The broader latent-bug class — remote-only defects masked by the
+`?? "server-local"` fallback and by skipped client-side `serverRoute` stitching —
+is captured as idea ticket `260720-research-remote-serverroute-masking-audit`.
+The plan's deferred backend latent defects (relay pump-loop single-direction
+teardown; missing `tokio-tungstenite` TLS backend) remain untouched and unclaimed.
