@@ -1890,15 +1890,30 @@ func TestPlaybookPrintGoldenLeadWriteTicket(t *testing.T) {
 	if !strings.Contains(body, `tickets.create(session_key: <lead key>, stem: "<category>-<name>", initial_state: "<initial-status>")`) {
 		t.Errorf("body missing tickets.create public schema call:\n%s", body)
 	}
+	// 260701 Phase 2: the sage-review state-machine prose was relocated into the
+	// tickets.sage_gate / tickets.sage_record MCP tools; the playbook now carries
+	// only the two-step call site and the parameterized Reviewer Spawn block.
 	for _, want := range []string{
-		"If posture is `recommended`, ask the user",
-		"If posture is `required`, run design review without asking",
-		"add `sage-review-design: skipped`",
-		"add or update `sage-review-design: completed`",
-		"add or update `sage-review-design: blocked`",
+		"tickets.sage_gate(stem, landing)",
+		"tickets.sage_record(stem, stage, verdicts)",
+		"## On: Reviewer Spawn",
+		"For each reviewer named by `tickets.sage_gate`",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("body missing sage review gate language %q:\n%s", want, body)
+			t.Errorf("body missing sage review gate call-site language %q:\n%s", want, body)
+		}
+	}
+	// The relocated state-machine prose and Blocked templates must be gone.
+	for _, forbidden := range []string{
+		"If posture is `recommended`, ask the user",
+		"If posture is `required`, run design review without asking",
+		"add or update `sage-review-design: completed`",
+		"Blocked Section Template",
+		"## On: Design Review Stage",
+		"## On: Ready-promotion Aggregation",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("body still contains relocated sage prose %q:\n%s", forbidden, body)
 		}
 	}
 	// delegates:false — no tip.

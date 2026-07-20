@@ -157,16 +157,26 @@ func SageGate(root string, opts SageGateOptions, resolvedSageReviewConfig string
 	return sageGateCombined(ticketAbs, ticketRel, design, completeness, resolvedSageReviewConfig, answer)
 }
 
-// resolveStage ports the shared per-stage posture branches (Design/Completeness
-// Review Stage steps 1-7): config-fallback resolve+persist for missing/pending,
-// terminal no-op, blocked stop, recommended ask/accept/decline, required run.
-func resolveStage(ticketAbs, ticketRel, reviewer, field, posture, resolvedConfig, answer string) (stageOutcome, error) {
+// resolveConcretePosture returns the effective posture for a stage, applying the
+// missing/pending config.show fallback and persisting the resolved value.
+func resolveConcretePosture(ticketAbs, field, posture, resolvedConfig string) (string, error) {
 	p := strings.TrimSpace(posture)
 	if p == "" || p == "pending" {
 		p = ResolvedSageReviewPosture(resolvedConfig)
 		if err := writeFrontmatterField(ticketAbs, map[string]string{field: p}); err != nil {
-			return stageOutcome{}, err
+			return "", err
 		}
+	}
+	return p, nil
+}
+
+// resolveStage ports the shared per-stage posture branches (Design/Completeness
+// Review Stage steps 1-7): config-fallback resolve+persist for missing/pending,
+// terminal no-op, blocked stop, recommended ask/accept/decline, required run.
+func resolveStage(ticketAbs, ticketRel, reviewer, field, posture, resolvedConfig, answer string) (stageOutcome, error) {
+	p, err := resolveConcretePosture(ticketAbs, field, posture, resolvedConfig)
+	if err != nil {
+		return stageOutcome{}, err
 	}
 	switch p {
 	case "skipped", "completed":
@@ -222,56 +232,106 @@ func gateResultFromStage(out stageOutcome, reviewer, mode string) SageGateResult
 }
 
 // sageGateCombined resolves the ready/ both-stage combined case (design not yet
-// terminal). Design is resolved first (the design-first invariant); its answer
-// consumes the pending ask. Completeness follows once design is set to run.
+// terminal). Each recommended stage gets its own ask, design first: the supplied
+// Answer resolves only the first still-pending stage, and a re-entry call
+// resolves the next. An accepted design recommendation is persisted as
+// `required` so the re-entry that asks completeness does not re-ask design; that
+// transient marker is overwritten to completed/blocked by sage_record.
 //
 // The ask/decline round-trip in combined mode is underspecified by the source
-// prose; this resolves it coherently by treating each stage's ask as a
-// separate, design-first question so the single Answer parameter always applies
-// to the first still-pending stage, with re-entry handling the next one.
+// prose; this resolution keeps each stage's decision independent (the deleted
+// prose asked each stage separately) so a design answer never silently resolves
+// the completeness stage.
 func sageGateCombined(ticketAbs, ticketRel, design, completeness, resolvedConfig, answer string) (SageGateResult, error) {
-	dOut, err := resolveStage(ticketAbs, ticketRel, "design", "sage-review-design", design, resolvedConfig, answer)
+	dp, err := resolveConcretePosture(ticketAbs, "sage-review-design", design, resolvedConfig)
 	if err != nil {
 		return SageGateResult{}, err
 	}
-	switch dOut.action {
-	case "stop_blocked":
+	if dp == "blocked" {
 		return SageGateResult{Action: "stop_blocked"}, nil
-	case "ask":
-		return SageGateResult{Action: "ask", AskPrompt: dOut.askPrompt}, nil
-	case "skip":
-		// Design became terminal (no-op or declined): fall through to the
-		// completeness stage standalone, carrying any design-decline commit.
-		res, err := sageGateStandalone(ticketAbs, ticketRel, "completeness", "sage-review-completeness", completeness, resolvedConfig, answer)
-		if err != nil {
-			return SageGateResult{}, err
+	}
+	if dp == "completed" || dp == "skipped" {
+		// Design resolved to terminal via the config fallback: completeness
+		// stands alone and the supplied answer belongs to it.
+		return sageGateStandalone(ticketAbs, ticketRel, "completeness", "sage-review-completeness", completeness, resolvedConfig, answer)
+	}
+
+	// Design is non-terminal (recommended | required). Resolve its ask first so a
+	// recommended completeness is never resolved by design's answer.
+	var designDecline stageOutcome
+	if dp == "recommended" {
+		switch answer {
+		case "":
+			return SageGateResult{Action: "ask", AskPrompt: "Run design review for this ticket?"}, nil
+		case "no":
+			if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "skipped"}); err != nil {
+				return SageGateResult{}, err
+			}
+			designDecline = stageOutcome{
+				commitTitle: "chore(sage): skip design review",
+				commitPaths: []string{ticketRel},
+				aiContext:   []string{"user declined design review in ask mode"},
+			}
+			// Design declined -> terminal. Completeness stands alone with its own
+			// fresh ask (the answer was consumed by design, so pass "").
+			res, err := sageGateStandalone(ticketAbs, ticketRel, "completeness", "sage-review-completeness", completeness, resolvedConfig, "")
+			if err != nil {
+				return SageGateResult{}, err
+			}
+			return mergeGateCommit(res, designDecline), nil
+		default: // yes
+			if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-design": "required"}); err != nil {
+				return SageGateResult{}, err
+			}
+			dp = "required"
+			answer = "" // consumed by design; completeness asks separately
 		}
-		return mergeGateCommit(res, dOut), nil
 	}
-	// dOut.action == "run": design runs. Resolve completeness alongside it.
-	cOut, err := resolveStage(ticketAbs, ticketRel, "completeness", "sage-review-completeness", completeness, resolvedConfig, answer)
+
+	// dp == "required": design will run. The (possibly reset) answer now belongs
+	// to the completeness stage.
+	cp, err := resolveConcretePosture(ticketAbs, "sage-review-completeness", completeness, resolvedConfig)
 	if err != nil {
 		return SageGateResult{}, err
 	}
-	switch cOut.action {
-	case "stop_blocked":
+	switch cp {
+	case "blocked":
 		return SageGateResult{Action: "stop_blocked"}, nil
-	case "ask":
-		// Design must run but completeness still needs a decision. Ask
-		// completeness first; design's run is deferred to the re-entry call.
-		return SageGateResult{Action: "ask", AskPrompt: cOut.askPrompt}, nil
-	case "skip":
-		// Only design runs; completeness is terminal or declined.
-		res := SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone"}
-		return mergeGateCommit(res, cOut), nil
-	default: // both run
+	case "completed", "skipped":
+		// Intentional divergence from the pre-diff prose: when design is
+		// non-terminal but completeness is already terminal, only design runs
+		// (standalone) rather than always-combined. This state cannot arise under
+		// the never-skippable-design invariant in normal flow; the standalone
+		// path is the more correct outcome for the anomaly.
+		return SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone"}, nil
+	case "recommended":
+		switch answer {
+		case "":
+			return SageGateResult{Action: "ask", AskPrompt: "Run completeness review for this ticket?"}, nil
+		case "no":
+			if err := writeFrontmatterField(ticketAbs, map[string]string{"sage-review-completeness": "skipped"}); err != nil {
+				return SageGateResult{}, err
+			}
+			res := SageGateResult{Action: "run", Reviewers: []string{"design"}, Mode: "standalone"}
+			return mergeGateCommit(res, stageOutcome{
+				commitTitle: "chore(sage): skip completeness review",
+				commitPaths: []string{ticketRel},
+				aiContext:   []string{"user declined completeness review in ask mode"},
+			}), nil
+		default: // yes
+			return SageGateResult{Action: "run", Reviewers: []string{"design", "completeness"}, Mode: "combined"}, nil
+		}
+	default: // required
 		return SageGateResult{Action: "run", Reviewers: []string{"design", "completeness"}, Mode: "combined"}, nil
 	}
 }
 
 // mergeGateCommit folds a declined-stage commit (from `extra`) into a gate
-// result. If both already carry commit metadata (both stages declined via one
-// answer), the two are combined into a single skip commit.
+// result. The single-commit path is the reachable one: after FIX 1 each stage's
+// decline consumes its own answer round-trip, so SageGate never produces two
+// decline commits in one call. The dual-commit branch is a defensive guard (both
+// stages carrying commit metadata) kept for callers that combine independently
+// declined outcomes; it is exercised directly by unit test.
 func mergeGateCommit(res SageGateResult, extra stageOutcome) SageGateResult {
 	if extra.commitTitle == "" {
 		return res
@@ -322,7 +382,17 @@ func SageRecord(root string, opts SageRecordOptions) (SageRecordResult, error) {
 
 // sageRecordSingle handles the standalone design or completeness stage.
 func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading string, withResolution bool, verdicts []SageVerdict) (SageRecordResult, error) {
-	v, _ := findVerdict(verdicts, reviewer)
+	v, ok := findVerdict(verdicts, reviewer)
+	if !ok {
+		// A single verdict for a single-stage record needs no reviewer tag; any
+		// other absence is an error rather than a silent "pass" that would mark a
+		// review completed that never ran.
+		if len(verdicts) == 1 {
+			v = verdicts[0]
+		} else {
+			return SageRecordResult{}, fmt.Errorf("no %s reviewer verdict supplied", reviewer)
+		}
+	}
 	verdict := normalizeVerdict(v.Verdict)
 	res := SageRecordResult{Verdict: verdict, Posture: map[string]string{}, CommitPaths: []string{ticketRel}}
 
@@ -356,8 +426,11 @@ func sageRecordSingle(ticketAbs, ticketRel, today, reviewer, field, heading stri
 // sageRecordCombined handles the combined ready-promotion aggregation across
 // both reviewer verdicts (Ready-promotion Aggregation prose).
 func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdict) (SageRecordResult, error) {
-	d, _ := findVerdict(verdicts, "design")
-	c, _ := findVerdict(verdicts, "completeness")
+	d, dok := findVerdict(verdicts, "design")
+	c, cok := findVerdict(verdicts, "completeness")
+	if !dok || !cok {
+		return SageRecordResult{}, fmt.Errorf("combined stage requires both design and completeness reviewer verdicts")
+	}
 	dv := normalizeVerdict(d.Verdict)
 	cv := normalizeVerdict(c.Verdict)
 
@@ -405,15 +478,14 @@ func sageRecordCombined(ticketAbs, ticketRel, today string, verdicts []SageVerdi
 	return res, nil
 }
 
+// findVerdict returns the verdict tagged for the named reviewer. Matching is by
+// reviewer name only (no positional fallback) so a mistagged or absent verdict
+// is never silently substituted for another stage's.
 func findVerdict(verdicts []SageVerdict, reviewer string) (SageVerdict, bool) {
 	for _, v := range verdicts {
 		if strings.Contains(strings.ToLower(strings.TrimSpace(v.Reviewer)), reviewer) {
 			return v, true
 		}
-	}
-	// Fallback: when reviewer is not tagged, a single verdict is the target.
-	if len(verdicts) == 1 {
-		return verdicts[0], true
 	}
 	return SageVerdict{}, false
 }

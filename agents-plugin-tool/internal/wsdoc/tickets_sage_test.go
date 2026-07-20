@@ -449,6 +449,237 @@ func TestSageRecordBlockedSectionReplacedOnSecondCycle(t *testing.T) {
 	}
 }
 
+// TestSageGateCombinedSeparateAsks pins FIX 1: in combined mode each recommended
+// stage gets its own ask (design first) and the supplied answer never leaks from
+// one stage to the other.
+func TestSageGateCombinedSeparateAsks(t *testing.T) {
+	newTicket := func(t *testing.T) (string, string) {
+		root := t.TempDir()
+		stem := "260101-feat-comb"
+		path := writeSageTicket(t, root, stem, map[string]string{
+			"sage-review-design":       "recommended",
+			"sage-review-completeness": "recommended",
+		})
+		return root, path
+	}
+
+	// Both recommended, no answer -> ask design first.
+	t.Run("design-ask-first", func(t *testing.T) {
+		root, _ := newTicket(t)
+		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb", Landing: "ready"}, "ask")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "ask" || res.AskPrompt != "Run design review for this ticket?" {
+			t.Fatalf("first ask = %+v, want ask design", res)
+		}
+	})
+
+	// Design declined: design persisted skipped + skip-design commit, and
+	// completeness is ASKED (not silently skipped) — the answer must not leak.
+	t.Run("design-decline-then-completeness-ask", func(t *testing.T) {
+		root, path := newTicket(t)
+		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb", Landing: "ready", Answer: "no"}, "ask")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "ask" || res.AskPrompt != "Run completeness review for this ticket?" {
+			t.Fatalf("after design decline = %+v, want completeness ask", res)
+		}
+		if res.CommitTitle != "chore(sage): skip design review" {
+			t.Fatalf("design decline commit title = %q", res.CommitTitle)
+		}
+		body := readFileString(t, path)
+		if !strings.Contains(body, "sage-review-design: skipped") {
+			t.Fatalf("design not persisted skipped:\n%s", body)
+		}
+		// The leak guard: completeness must still be recommended, NOT skipped.
+		if strings.Contains(body, "sage-review-completeness: skipped") {
+			t.Fatalf("design's 'no' leaked into completeness:\n%s", body)
+		}
+		if !strings.Contains(body, "sage-review-completeness: recommended") {
+			t.Fatalf("completeness posture unexpectedly changed:\n%s", body)
+		}
+	})
+
+	// Design accepted: persisted required, then completeness is asked.
+	t.Run("design-accept-then-completeness-ask", func(t *testing.T) {
+		root, path := newTicket(t)
+		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb", Landing: "ready", Answer: "yes"}, "ask")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "ask" || res.AskPrompt != "Run completeness review for this ticket?" {
+			t.Fatalf("after design accept = %+v, want completeness ask", res)
+		}
+		if res.CommitTitle != "" {
+			t.Fatalf("accept should not commit, got %q", res.CommitTitle)
+		}
+		if !strings.Contains(readFileString(t, path), "sage-review-design: required") {
+			t.Fatalf("design accept not persisted as required:\n%s", readFileString(t, path))
+		}
+	})
+
+	// Design already required, completeness recommended, no answer -> ask
+	// completeness (design's run deferred; completeness asked separately).
+	t.Run("completeness-ask-after-design-runs", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, "260101-feat-comb2", map[string]string{
+			"sage-review-design":       "required",
+			"sage-review-completeness": "recommended",
+		})
+		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb2", Landing: "ready"}, "ask")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "ask" || res.AskPrompt != "Run completeness review for this ticket?" {
+			t.Fatalf("= %+v, want completeness ask", res)
+		}
+	})
+
+	// Completeness accepted after design runs -> both run combined.
+	t.Run("completeness-accept-both-run", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, "260101-feat-comb3", map[string]string{
+			"sage-review-design":       "required",
+			"sage-review-completeness": "recommended",
+		})
+		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb3", Landing: "ready", Answer: "yes"}, "ask")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "run" || res.Mode != "combined" || len(res.Reviewers) != 2 {
+			t.Fatalf("= %+v, want run combined [design completeness]", res)
+		}
+	})
+
+	// Completeness declined after design runs -> design runs standalone,
+	// completeness skip committed.
+	t.Run("completeness-decline-design-only", func(t *testing.T) {
+		root := t.TempDir()
+		writeSageTicket(t, root, "260101-feat-comb4", map[string]string{
+			"sage-review-design":       "required",
+			"sage-review-completeness": "recommended",
+		})
+		res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-comb4", Landing: "ready", Answer: "no"}, "ask")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "run" || res.Mode != "standalone" || len(res.Reviewers) != 1 || res.Reviewers[0] != "design" {
+			t.Fatalf("= %+v, want run standalone [design]", res)
+		}
+		if res.CommitTitle != "chore(sage): skip completeness review" {
+			t.Fatalf("completeness decline commit = %q", res.CommitTitle)
+		}
+	})
+}
+
+// TestSageGateCombinedDegradesToDesignStandalone pins FIX 5: a combined-eligible
+// ticket (design non-terminal) whose completeness is already terminal degrades
+// to a design-only standalone run. This is an intentional divergence from the
+// pre-diff prose for that anomalous state.
+func TestSageGateCombinedDegradesToDesignStandalone(t *testing.T) {
+	root := t.TempDir()
+	writeSageTicket(t, root, "260101-feat-degr", map[string]string{
+		"sage-review-design":       "required",
+		"sage-review-completeness": "completed",
+	})
+	res, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-degr", Landing: "ready"}, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != "run" || res.Mode != "standalone" || len(res.Reviewers) != 1 || res.Reviewers[0] != "design" {
+		t.Fatalf("degraded = %+v, want run standalone [design]", res)
+	}
+}
+
+// TestMergeGateCommitDualDecline pins the defensive dual-decline merge branch of
+// mergeGateCommit (FIX 2) directly, since SageGate no longer reaches it.
+func TestMergeGateCommitDualDecline(t *testing.T) {
+	res := SageGateResult{
+		Action:      "run",
+		Reviewers:   []string{"design"},
+		Mode:        "standalone",
+		CommitTitle: "chore(sage): skip completeness review",
+		CommitPaths: []string{"ai-docs/tickets/todo/x.md"},
+		AIContext:   []string{"user declined completeness review in ask mode"},
+	}
+	extra := stageOutcome{
+		commitTitle: "chore(sage): skip design review",
+		commitPaths: []string{"ai-docs/tickets/todo/x.md"},
+		aiContext:   []string{"user declined design review in ask mode"},
+	}
+	merged := mergeGateCommit(res, extra)
+	if merged.CommitTitle != "chore(sage): skip sage review" {
+		t.Fatalf("dual-merge title = %q", merged.CommitTitle)
+	}
+	if len(merged.AIContext) != 2 ||
+		merged.AIContext[0] != "user declined design review in ask mode" ||
+		merged.AIContext[1] != "user declined completeness review in ask mode" {
+		t.Fatalf("dual-merge ai_context = %v", merged.AIContext)
+	}
+	if len(merged.CommitPaths) != 1 || merged.CommitPaths[0] != "ai-docs/tickets/todo/x.md" {
+		t.Fatalf("dual-merge paths = %v", merged.CommitPaths)
+	}
+
+	// Single-commit path: extra folded into an otherwise commit-free result.
+	single := mergeGateCommit(SageGateResult{Action: "ask", AskPrompt: "q"}, extra)
+	if single.CommitTitle != "chore(sage): skip design review" || len(single.AIContext) != 1 {
+		t.Fatalf("single-merge = %+v", single)
+	}
+}
+
+// TestSageMissingTicketErrors pins FIX 3(a): a well-formed but nonexistent stem
+// hits the findTicketPath not-found branch for both tools.
+func TestSageMissingTicketErrors(t *testing.T) {
+	root := t.TempDir()
+	writeSageTicket(t, root, "260101-feat-present", nil)
+	if _, err := SageGate(root, SageGateOptions{TicketStem: "260101-feat-ghost", Landing: "todo"}, "auto"); err == nil {
+		t.Error("SageGate: expected not-found error for nonexistent stem")
+	}
+	if _, err := SageRecord(root, SageRecordOptions{
+		TicketStem: "260101-feat-ghost", Stage: "design",
+		Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "pass"}},
+	}); err == nil {
+		t.Error("SageRecord: expected not-found error for nonexistent stem")
+	}
+}
+
+// TestSageRecordValidationAndEmptyVerdicts pins FIX 3(b)+(c): SageRecord's own
+// stem-format validation, and the requirement that a missing reviewer verdict is
+// an error rather than a silent completed write.
+func TestSageRecordValidationAndEmptyVerdicts(t *testing.T) {
+	root := t.TempDir()
+	path := writeSageTicket(t, root, "260101-feat-ev", map[string]string{
+		"sage-review-design":       "required",
+		"sage-review-completeness": "required",
+	})
+
+	// (b) bad stem format.
+	if _, err := SageRecord(root, SageRecordOptions{TicketStem: "not-a-stem", Stage: "design"}); err == nil {
+		t.Error("SageRecord: expected stem-format error")
+	}
+
+	// (c) empty verdicts must error for every stage, never silently write completed.
+	for _, stage := range []string{"design", "completeness", "combined"} {
+		if _, err := SageRecord(root, SageRecordOptions{TicketStem: "260101-feat-ev", Stage: stage, Today: "2026-07-20"}); err == nil {
+			t.Errorf("SageRecord stage=%s with empty verdicts: expected error", stage)
+		}
+	}
+	// Nothing should have been written to disk by the erroring calls.
+	if strings.Contains(readFileString(t, path), "completed") {
+		t.Fatalf("empty-verdict error path must not write completed:\n%s", readFileString(t, path))
+	}
+
+	// combined with only one reviewer tagged must also error (no positional leak).
+	if _, err := SageRecord(root, SageRecordOptions{
+		TicketStem: "260101-feat-ev", Stage: "combined", Today: "2026-07-20",
+		Verdicts: []SageVerdict{{Reviewer: "design", Verdict: "pass"}},
+	}); err == nil {
+		t.Error("SageRecord combined with only design verdict: expected error")
+	}
+}
+
 func TestSageGateInvalidInputs(t *testing.T) {
 	root := t.TempDir()
 	writeSageTicket(t, root, "260101-feat-x", nil)
